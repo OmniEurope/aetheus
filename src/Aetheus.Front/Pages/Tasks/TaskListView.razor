@@ -1,0 +1,52 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Reusable task list: search + status filter + server-side paginated grid (localized status badge,
+   offline badge, logs viewer) + live SignalR refresh. Hosted by the global /tasks page (no scope)
+   and by the per-server tasks section (ServerId set), so both share the exact same feature set. *@
+@using Aetheus.Front.Helpers
+
+<div class="task-list-toolbar">
+    <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+    <RadzenTextBox Placeholder="@L["SearchTasks"]" @bind-Value="_search" Change="@ResetAndReload"
+        class="task-list-search" />
+    <RadzenDropDown TValue="TaskExecutionStatus?" Data="@_statusOptions" TextProperty="Text" ValueProperty="Value"
+        Placeholder="@L["AllStatuses"]" AllowClear="true" @bind-Value="_statusFilter" Change="@(_ => ResetAndReload())" />
+    @if (_statusFilter.HasValue || !string.IsNullOrEmpty(_search))
+    {
+        <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small"
+            Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    }
+    <div class="flex-spacer"></div>
+    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+    <RadzenButton Icon="refresh" Size="ButtonSize.Small"
+        Click="@ResetAndReload" aria-label="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+</div>
+
+<AetheusDataGrid @ref="_grid" Data="@_tasks" TItem="ServerTaskDto"
+    Count="@_totalCount" PageSize="25" IsLoading="@_loading" LoadData="@OnLoadData" FullHeight="true">
+    <Columns>
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Id" Title="#" Width="80px" />
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Name" Title="@L["Name"]" MinWidth="10rem" />
+        @if (ServerId is null)
+        {
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="ServerName" Title="@L["Server"]" Width="150px" />
+        }
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Executor" Title="@L["Executor"]" Width="100px" />
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="140px">
+            <Template Context="task">
+                <RadzenBadge BadgeStyle="@GetTaskBadge(task.Status)" Text="@L.Localize(task.Status)" />
+                @if (IsStalledOnOfflineAgent(task))
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Warning" Icon="cloud_off" Text="@L["TaskAgentOffline"]"
+                        title="@L["TaskAgentOfflineHint"]" class="rz-ml-1" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" />
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="ExitCode" Title="@L["Exit"]" Width="80px" />
+        <RadzenDataGridColumn TItem="ServerTaskDto" Title="@L["TaskLogsColumn"]" Width="80px" Sortable="false">
+            <Template Context="task">
+                <RadzenButton Icon="receipt_long" Title="@L["Logs"]" Size="ButtonSize.Small" Click="@(() => ViewLogs(task.Id))" aria-label="@L["ViewLogs"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

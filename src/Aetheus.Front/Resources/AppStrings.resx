@@ -1,0 +1,1930 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <data name="Dashboard" xml:space="preserve"><value>Dashboard</value></data>
+  <data name="CapBuild" xml:space="preserve"><value>Build pipeline</value></data>
+  <data name="CapDeploy" xml:space="preserve"><value>Deployment pipeline</value></data>
+  <data name="CapManage" xml:space="preserve"><value>Management pipeline</value></data>
+  <data name="CapUnknown" xml:space="preserve"><value>Capabilities unknown (agent has not reported yet)</value></data>
+  <data name="CapabilityDiagnosticsHint" xml:space="preserve"><value>Why a capability is off:</value></data>
+  <data name="DisabledRunnersTitle" xml:space="preserve"><value>Pipeline runners disabled</value></data>
+  <data name="DisabledRunnersBody" xml:space="preserve"><value>{0} server(s) have pipeline runner disabled - pipelines cannot dispatch steps to them:</value></data>
+  <data name="PreflightResolved" xml:space="preserve"><value>Runners matched</value></data>
+  <data name="Agents" xml:space="preserve"><value>Agents</value></data>
+  <data name="Pipelines" xml:space="preserve"><value>Pipelines</value></data>
+  <data name="Tasks" xml:space="preserve"><value>Tasks</value></data>
+  <data name="Logs" xml:space="preserve"><value>Logs</value></data>
+  <data name="Settings" xml:space="preserve"><value>Settings</value></data>
+  <data name="Login" xml:space="preserve"><value>Login</value></data>
+  <data name="Logout" xml:space="preserve"><value>Logout</value></data>
+  <data name="Username" xml:space="preserve"><value>Username</value></data>
+  <data name="About" xml:space="preserve"><value>About</value></data>
+  <data name="AboutAetheus" xml:space="preserve"><value>About Aetheus</value></data>
+  <data name="Password" xml:space="preserve"><value>Password</value></data>
+  <data name="ShowPassword" xml:space="preserve"><value>Show password</value></data>
+  <data name="HidePassword" xml:space="preserve"><value>Hide password</value></data>
+  <data name="Search" xml:space="preserve"><value>Search...</value></data>
+  <data name="Save" xml:space="preserve"><value>Save</value></data>
+  <data name="Delete" xml:space="preserve"><value>Delete</value></data>
+  <data name="DeleteServer" xml:space="preserve"><value>Delete server</value></data>
+  <data name="DeleteServerConfirm" xml:space="preserve"><value>Are you sure you want to delete the server '{0}'? This action cannot be undone.</value></data>
+  <data name="ServerDeleted" xml:space="preserve"><value>Server deleted</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Create" xml:space="preserve"><value>Create</value></data>
+  <data name="Online" xml:space="preserve"><value>Online</value></data>
+  <data name="Offline" xml:space="preserve"><value>Offline</value></data>
+  <data name="TotalAgents" xml:space="preserve"><value>Total Agents</value></data>
+  <data name="PendingTasks" xml:space="preserve"><value>Pending Tasks</value></data>
+  <data name="RunningPipelines" xml:space="preserve"><value>Running Pipelines</value></data>
+  <data name="NewPipeline" xml:space="preserve"><value>New Pipeline</value></data>
+  <data name="RecentRuns" xml:space="preserve"><value>Recent Pipeline Runs</value></data>
+  <data name="NoRecentRuns" xml:space="preserve"><value>No recent runs</value></data>
+  <data name="NoRunningPipelines" xml:space="preserve"><value>No running pipelines</value></data>
+  <data name="NoRunningPipelinesHint" xml:space="preserve"><value>Active and queued runs will appear here.</value></data>
+  <data name="PipelinesWithChildren" xml:space="preserve"><value>Pipelines with children</value></data>
+  <data name="PipelinesWithoutChildren" xml:space="preserve"><value>Pipelines without children</value></data>
+  <data name="ChildPipelines" xml:space="preserve"><value>Child pipelines in execution order</value></data>
+  <data name="ParentPipelines" xml:space="preserve"><value>Parent pipelines in alphabetical order</value></data>
+  <data name="GenerateToken" xml:space="preserve"><value>Generate Token</value></data>
+  <data name="Secrets" xml:space="preserve"><value>Secrets</value></data>
+  <data name="RegistrationTokens" xml:space="preserve"><value>Registration Tokens</value></data>
+  <data name="Projects" xml:space="preserve"><value>Projects</value></data>
+  <data name="ProjectSections" xml:space="preserve"><value>Sections</value></data>
+  <data name="NewProject" xml:space="preserve"><value>New Project</value></data>
+  <data name="EditProject" xml:space="preserve"><value>Edit Project</value></data>
+  <data name="Repository" xml:space="preserve"><value>Repository</value></data>
+  <data name="Information" xml:space="preserve"><value>Information</value></data>
+  <data name="Verbose" xml:space="preserve"><value>Verbose</value></data>
+  <data name="Debug" xml:space="preserve"><value>Debug</value></data>
+  <data name="Warning" xml:space="preserve"><value>Warning</value></data>
+  <data name="Fatal" xml:space="preserve"><value>Fatal</value></data>
+  <data name="NoRepository" xml:space="preserve"><value>No repository linked</value></data>
+  <data name="DefaultBranch" xml:space="preserve"><value>Default Branch</value></data>
+  <data name="ExternalRepo" xml:space="preserve"><value>External Repository</value></data>
+  <data name="ExternalRepoDisabled" xml:space="preserve"><value>External repositories are disabled (Features:ExternalRepos is off).</value></data>
+  <data name="ExternalRepoCloneHint" xml:space="preserve"><value>Once attached, the project clones from the internal mirror over smart-HTTP: pipelines must supply GIT_USERNAME / GIT_PASSWORD (not injected automatically). The external credential is used only by the backend to refresh the mirror.</value></data>
+  <data name="ExternalRepoAttached" xml:space="preserve"><value>External repository attached</value></data>
+  <data name="ExternalRepoSyncQueued" xml:space="preserve"><value>Mirror sync started</value></data>
+  <data name="DetachExternalRepoConfirm" xml:space="preserve"><value>Detach the external repository from this project?</value></data>
+  <data name="NoExternalRepo" xml:space="preserve"><value>No external repository</value></data>
+  <data name="NoExternalRepoDescription" xml:space="preserve"><value>No external repository is attached to this project.</value></data>
+  <data name="LastFetched" xml:space="preserve"><value>Last fetched</value></data>
+  <data name="PackageFeeds" xml:space="preserve"><value>Package Feeds</value></data>
+  <data name="UpstreamUrl" xml:space="preserve"><value>Upstream URL</value></data>
+  <data name="Packages" xml:space="preserve"><value>Packages</value></data>
+  <data name="ManagePackages" xml:space="preserve"><value>Packages</value></data>
+  <data name="PackageName" xml:space="preserve"><value>Package name</value></data>
+  <data name="LatestVersion" xml:space="preserve"><value>Latest version</value></data>
+  <data name="NotSyncedYet" xml:space="preserve"><value>Not synced yet</value></data>
+  <data name="NoTrackedPackages" xml:space="preserve"><value>No packages tracked. Add one above, then sync.</value></data>
+  <data name="NoPackageFeeds" xml:space="preserve"><value>No package feeds</value></data>
+  <data name="NoPackageFeedsDescription" xml:space="preserve"><value>Create a feed pointing at a NuGet, npm, or PyPI registry, then track packages to watch their latest versions.</value></data>
+  <data name="DeletePackageFeedConfirm" xml:space="preserve"><value>Delete the feed "{0}"?</value></data>
+  <data name="RemovePackageFromFeedConfirm" xml:space="preserve"><value>Remove package "{0}" from feed "{1}"?</value></data>
+  <data name="PackageFeedUpstreamHint" xml:space="preserve"><value>Registry base URL. NuGet/npm/PyPI resolve latest versions automatically; other types are tracked but not auto-resolved yet.</value></data>
+  <data name="PackageFeedSyncSummary" xml:space="preserve"><value>Synced {0}, failed {1}, unsupported {2}</value></data>
+  <data name="SyncNow" xml:space="preserve"><value>Sync now</value></data>
+  <data name="Detach" xml:space="preserve"><value>Detach</value></data>
+  <data name="Attach" xml:space="preserve"><value>Attach</value></data>
+  <data name="Provider" xml:space="preserve"><value>Provider</value></data>
+  <data name="BaseUrl" xml:space="preserve"><value>Base URL (self-hosted)</value></data>
+  <data name="OwnerOrGroup" xml:space="preserve"><value>Owner / Group</value></data>
+  <data name="RepositoryName" xml:space="preserve"><value>Repository</value></data>
+  <data name="AuthType" xml:space="preserve"><value>Authentication</value></data>
+  <data name="PrivateKey" xml:space="preserve"><value>Private key (PEM)</value></data>
+  <data name="Passphrase" xml:space="preserve"><value>Passphrase</value></data>
+  <data name="KnownHosts" xml:space="preserve"><value>Known hosts</value></data>
+  <data name="FetchIntervalMinutes" xml:space="preserve"><value>Fetch interval (min)</value></data>
+  <data name="AutoSync" xml:space="preserve"><value>Auto-sync</value></data>
+  <data name="WriteEnabled" xml:space="preserve"><value>Push-back enabled</value></data>
+  <data name="Enum_GitMirrorStatus_NotInitialized" xml:space="preserve"><value>Not initialized</value></data>
+  <data name="Enum_GitMirrorStatus_Syncing" xml:space="preserve"><value>Syncing</value></data>
+  <data name="Enum_GitMirrorStatus_Ready" xml:space="preserve"><value>Ready</value></data>
+  <data name="Enum_GitMirrorStatus_Error" xml:space="preserve"><value>Error</value></data>
+  <data name="Active" xml:space="preserve"><value>Active</value></data>
+  <data name="Archived" xml:space="preserve"><value>Archived</value></data>
+  <data name="DeleteProjectConfirm" xml:space="preserve"><value>Are you sure you want to delete this project?</value></data>
+  <data name="Docker" xml:space="preserve"><value>Docker</value></data>
+  <data name="Containers" xml:space="preserve"><value>Containers</value></data>
+  <data name="DockerActionSent" xml:space="preserve"><value>{0} command sent for {1}</value></data>
+  <data name="DockerActionFailed" xml:space="preserve"><value>Failed to send {0} command.</value></data>
+  <data name="DockerAutoRefresh" xml:space="preserve"><value>Auto-refresh</value></data>
+  <data name="DockerLogs" xml:space="preserve"><value>Logs</value></data>
+  <data name="DockerImages" xml:space="preserve"><value>Images</value></data>
+  <data name="DockerPull" xml:space="preserve"><value>Pull</value></data>
+  <data name="DockerPullQueued" xml:space="preserve"><value>Pull task queued for {0}</value></data>
+  <data name="DockerPullFailed" xml:space="preserve"><value>Failed to queue pull task.</value></data>
+  <data name="DockerRemoveImageQueued" xml:space="preserve"><value>Remove task queued for {0}</value></data>
+  <data name="DockerRemoveImageFailed" xml:space="preserve"><value>Failed to queue image removal.</value></data>
+  <data name="DockerRemoveImageConfirm" xml:space="preserve"><value>Remove Docker image {0}? This operation cannot be undone.</value></data>
+  <data name="DockerCompose" xml:space="preserve"><value>Compose</value></data>
+  <data name="DockerComposeQueued" xml:space="preserve"><value>{0} queued for {1}</value></data>
+  <data name="DockerComposeFailed" xml:space="preserve"><value>Failed to queue {0} for {1}.</value></data>
+  <data name="DockerNetworks" xml:space="preserve"><value>Networks</value></data>
+  <data name="DockerVolumes" xml:space="preserve"><value>Volumes</value></data>
+  <data name="RemoveContainer" xml:space="preserve"><value>Remove Container</value></data>
+  <data name="RemoveContainerConfirm" xml:space="preserve"><value>Are you sure you want to remove container '{0}'?</value></data>
+  <data name="Confirm" xml:space="preserve"><value>Confirm</value></data>
+  <data name="ConfirmDelete" xml:space="preserve"><value>Confirm deletion</value></data>
+  <data name="OK" xml:space="preserve"><value>OK</value></data>
+  <data name="CPU" xml:space="preserve"><value>CPU</value></data>
+  <data name="Driver" xml:space="preserve"><value>Driver</value></data>
+  <data name="Scope" xml:space="preserve"><value>Scope</value></data>
+  <data name="Mountpoint" xml:space="preserve"><value>Mountpoint</value></data>
+  <data name="Tag" xml:space="preserve"><value>Tag</value></data>
+  <data name="Stack" xml:space="preserve"><value>Stack</value></data>
+  <data name="Config" xml:space="preserve"><value>Config</value></data>
+  <data name="Image" xml:space="preserve"><value>Image</value></data>
+  <data name="Ports" xml:space="preserve"><value>Ports</value></data>
+  <data name="Actions" xml:space="preserve"><value>Actions</value></data>
+  <data name="Name" xml:space="preserve"><value>Name</value></data>
+  <data name="Status" xml:space="preserve"><value>Status</value></data>
+  <data name="DockerPrune" xml:space="preserve"><value>Prune</value></data>
+  <data name="DockerPruneAll" xml:space="preserve"><value>Prune All</value></data>
+  <data name="DockerPruneContainers" xml:space="preserve"><value>Containers only</value></data>
+  <data name="DockerPruneImages" xml:space="preserve"><value>Images only</value></data>
+  <data name="DockerPruneVolumes" xml:space="preserve"><value>Volumes only</value></data>
+  <data name="DockerPruneQueued" xml:space="preserve"><value>Prune task queued.</value></data>
+  <data name="DockerPruneFailed" xml:space="preserve"><value>Failed to queue prune.</value></data>
+  <data name="ResourceLimits" xml:space="preserve"><value>Resource Limits</value></data>
+  <data name="CpuLimit" xml:space="preserve"><value>CPU Limit (cores, 0 = unlimited)</value></data>
+  <data name="MemoryLimit" xml:space="preserve"><value>Memory Limit (MB, 0 = unlimited)</value></data>
+  <data name="Apply" xml:space="preserve"><value>Apply</value></data>
+  <data name="TemplateParameters" xml:space="preserve"><value>Template parameters</value></data>
+  <data name="ResourceLimitsQueued" xml:space="preserve"><value>Resource limits update queued.</value></data>
+  <data name="ResourceLimitsFailed" xml:space="preserve"><value>Failed to update resource limits.</value></data>
+  <data name="FilterContainers" xml:space="preserve"><value>Filter containers...</value></data>
+  <data name="FilterImages" xml:space="preserve"><value>Filter images...</value></data>
+  <data name="FilterStacks" xml:space="preserve"><value>Filter stacks...</value></data>
+  <data name="FilterNetworks" xml:space="preserve"><value>Filter networks...</value></data>
+  <data name="FilterVolumes" xml:space="preserve"><value>Filter volumes...</value></data>
+  <data name="Memory" xml:space="preserve"><value>Memory</value></data>
+  <data name="DockerInspect" xml:space="preserve"><value>Inspect</value></data>
+  <data name="DockerInspectFailed" xml:space="preserve"><value>Failed to queue inspect.</value></data>
+  <data name="DockerShell" xml:space="preserve"><value>Shell</value></data>
+  <data name="DockerExecFailed" xml:space="preserve"><value>Failed to send command.</value></data>
+  <data name="DockerComposeEditor" xml:space="preserve"><value>Compose Editor</value></data>
+  <data name="DockerComposeDeploy" xml:space="preserve"><value>Deploy</value></data>
+  <data name="DockerComposeDeployQueued" xml:space="preserve"><value>Deploy queued for {0}</value></data>
+  <data name="DockerComposeDeployFailed" xml:space="preserve"><value>Failed to deploy compose file.</value></data>
+  <data name="DockerComposeFileFailed" xml:space="preserve"><value>Failed to request compose file.</value></data>
+  <data name="DockerPruneDialog" xml:space="preserve"><value>Prune Docker Resources</value></data>
+  <data name="DockerPruneSelectAll" xml:space="preserve"><value>Select All</value></data>
+  <data name="DockerPruneStoppedContainers" xml:space="preserve"><value>Stopped Containers</value></data>
+  <data name="DockerPruneUnusedImages" xml:space="preserve"><value>Unused Images</value></data>
+  <data name="DockerPruneUnusedVolumes" xml:space="preserve"><value>Unused Volumes</value></data>
+  <data name="TaskCompleted" xml:space="preserve"><value>Task</value></data>
+  <data name="EnterCommand" xml:space="preserve"><value>Enter command...</value></data>
+  <data name="WaitingForResult" xml:space="preserve"><value>Task queued. Waiting for result...</value></data>
+  <data name="DockerEnvVars" xml:space="preserve"><value>Env Vars</value></data>
+  <data name="DockerEnvVarsFailed" xml:space="preserve"><value>Failed to queue env vars request.</value></data>
+  <data name="DockerFileBrowser" xml:space="preserve"><value>File Browser</value></data>
+  <data name="DockerBrowseFailed" xml:space="preserve"><value>Failed to browse container.</value></data>
+  <data name="DockerBuild" xml:space="preserve"><value>Build</value></data>
+  <data name="DockerBuildQueued" xml:space="preserve"><value>Build queued for {0}</value></data>
+  <data name="DockerBuildFailed" xml:space="preserve"><value>Failed to queue build.</value></data>
+  <data name="DockerBuildImage" xml:space="preserve"><value>Build Image</value></data>
+  <data name="CopiedToClipboard" xml:space="preserve"><value>Copied to clipboard.</value></data>
+  <data name="PruneSummary" xml:space="preserve"><value>{0} of 3 selected</value></data>
+  <data name="RunPipeline" xml:space="preserve"><value>Run</value></data>
+  <data name="DeletePipeline" xml:space="preserve"><value>Delete</value></data>
+  <data name="DeletePipelineConfirm" xml:space="preserve"><value>Are you sure you want to delete this pipeline?</value></data>
+  <data name="PipelineSaved" xml:space="preserve"><value>Pipeline updated.</value></data>
+  <data name="PipelineTriggered" xml:space="preserve"><value>Pipeline triggered.</value></data>
+  <data name="PipelineRunFailed" xml:space="preserve"><value>Pipeline run failed.</value></data>
+  <data name="PipelineRunForbidden" xml:space="preserve"><value>Not authorized: you need admin rights on the pipeline's target server(s).</value></data>
+  <data name="PipelineRunFailedNoReason" xml:space="preserve"><value>The run could not be started. Check that the target server/agent is online and the pipeline configuration is valid.</value></data>
+  <data name="BlockingWarningsCount" xml:space="preserve"><value>Errors ({0})</value></data>
+  <data name="RunBlockedTitle" xml:space="preserve"><value>Run could not start</value></data>
+  <data name="ConfigureTarget" xml:space="preserve"><value>Configure</value></data>
+  <data name="Rerun" xml:space="preserve"><value>Re-run</value></data>
+  <data name="ExpandAll" xml:space="preserve"><value>Expand all</value></data>
+  <data name="ExpandChildItem" xml:space="preserve"><value>Expand child item</value></data>
+  <data name="CollapseAll" xml:space="preserve"><value>Collapse all</value></data>
+  <data name="RerunFailedSteps" xml:space="preserve"><value>Retry failed</value></data>
+  <data name="ConfigFailureHint" xml:space="preserve"><value>Configuration failure - no matching agent or blocked dependency</value></data>
+  <data name="ExecutionFailureHint" xml:space="preserve"><value>Execution failure - a step ran and failed</value></data>
+  <data name="RunAnyway" xml:space="preserve"><value>Run anyway</value></data>
+  <data name="PreflightNoAgentTitle" xml:space="preserve"><value>No online agent</value></data>
+  <data name="PreflightNoAgentBody" xml:space="preserve"><value>No online agent matches: {0}. These stages will fail. Run anyway?</value></data>
+  <data name="PreflightSessionExpired" xml:space="preserve"><value>Your session has expired. Sign in again, then retry the run.</value></data>
+  <data name="PreflightForbidden" xml:space="preserve"><value>You do not have permission to run this pipeline.</value></data>
+  <data name="PreflightServerError" xml:space="preserve"><value>The server could not complete the preflight check. Try again shortly.</value></data>
+  <data name="NoRunsYet" xml:space="preserve"><value>No runs yet. Click "Run" to trigger the first execution.</value></data>
+  <data name="NoPipelinesFound" xml:space="preserve"><value>No pipelines.</value></data>
+  <data name="Duration" xml:space="preserve"><value>Duration</value></data>
+  <data name="Trigger" xml:space="preserve"><value>Trigger</value></data>
+  <data name="AllTriggers" xml:space="preserve"><value>All Triggers</value></data>
+  <data name="Runs" xml:space="preserve"><value>Runs</value></data>
+  <data name="Edit" xml:space="preserve"><value>Edit</value></data>
+  <data name="RunNotFound" xml:space="preserve"><value>Run not found.</value></data>
+  <data name="NoRuns" xml:space="preserve"><value>No runs</value></data>
+  <data name="ClearFilters" xml:space="preserve"><value>Clear filters</value></data>
+  <data name="Description" xml:space="preserve"><value>Description</value></data>
+  <data name="Project" xml:space="preserve"><value>Project</value></data>
+  <data name="NoProject" xml:space="preserve"><value>No project</value></data>
+  <data name="SaveSettings" xml:space="preserve"><value>Save Settings</value></data>
+  <data name="YamlDefinition" xml:space="preserve"><value>YAML Definition</value></data>
+  <data name="ValidateYaml" xml:space="preserve"><value>Validate</value></data>
+  <data name="FormatYaml" xml:space="preserve"><value>Format</value></data>
+  <data name="ShowDiff" xml:space="preserve"><value>Show Diff</value></data>
+  <data name="HideDiff" xml:space="preserve"><value>Hide Diff</value></data>
+  <data name="Valid" xml:space="preserve"><value>Valid</value></data>
+  <data name="Invalid" xml:space="preserve"><value>Invalid</value></data>
+  <data name="InvalidYamlDefinition" xml:space="preserve"><value>Invalid YAML pipeline definition</value></data>
+  <data name="Servers" xml:space="preserve"><value>Servers</value></data>
+  <data name="TotalServers" xml:space="preserve"><value>Total Servers</value></data>
+  <data name="Hostname" xml:space="preserve"><value>Hostname</value></data>
+  <data name="OS" xml:space="preserve"><value>OS</value></data>
+  <data name="Tags" xml:space="preserve"><value>Tags</value></data>
+  <data name="Board" xml:space="preserve"><value>Board</value></data>
+  <data name="Assignee" xml:space="preserve"><value>Assignee</value></data>
+  <data name="Priority" xml:space="preserve"><value>Priority</value></data>
+  <data name="TagsHint" xml:space="preserve"><value>Comma-separated tags.</value></data>
+  <data name="DeleteWorkItemConfirm" xml:space="preserve"><value>Delete the work item "{0}"?</value></data>
+  <data name="Enum_WorkItemStatus_New" xml:space="preserve"><value>New</value></data>
+  <data name="Enum_WorkItemStatus_Active" xml:space="preserve"><value>Active</value></data>
+  <data name="Enum_WorkItemStatus_Resolved" xml:space="preserve"><value>Resolved</value></data>
+  <data name="Enum_WorkItemStatus_Closed" xml:space="preserve"><value>Closed</value></data>
+  <data name="Enum_WorkItemStatus_Removed" xml:space="preserve"><value>Removed</value></data>
+  <data name="Enum_WorkItemType_Epic" xml:space="preserve"><value>Epic</value></data>
+  <data name="Enum_WorkItemType_Feature" xml:space="preserve"><value>Feature</value></data>
+  <data name="Enum_WorkItemType_UserStory" xml:space="preserve"><value>User Story</value></data>
+  <data name="Enum_WorkItemType_Task" xml:space="preserve"><value>Task</value></data>
+  <data name="Enum_WorkItemType_Bug" xml:space="preserve"><value>Bug</value></data>
+  <data name="Disk" xml:space="preserve"><value>Disk</value></data>
+  <data name="RecentTasks" xml:space="preserve"><value>Recent Tasks</value></data>
+  <data name="NoRecentTasks" xml:space="preserve"><value>No recent tasks for this server.</value></data>
+  <data name="ServerId" xml:space="preserve"><value>Server ID</value></data>
+  <data name="LastHeartbeat" xml:space="preserve"><value>Last Heartbeat</value></data>
+  <data name="ServerOfflineNeverReported" xml:space="preserve"><value>Offline - the agent has never reported. Check it is installed, enrolled and running.</value></data>
+  <data name="ServerOfflineNoHeartbeat" xml:space="preserve"><value>Offline - no heartbeat for {0}. The agent appears down or unable to reach the server.</value></data>
+  <data name="Type" xml:space="preserve"><value>Type</value></data>
+  <data name="Total" xml:space="preserve"><value>{0} total</value></data>
+  <data name="NeverExpires" xml:space="preserve"><value>Never expires</value></data>
+  <data name="Expired" xml:space="preserve"><value>Expired</value></data>
+  <data name="ExpiresInDays" xml:space="preserve"><value>Expires in {0} d</value></data>
+  <data name="ExpiresInHours" xml:space="preserve"><value>Expires in {0} h</value></data>
+  <data name="ExpiresInMinutes" xml:space="preserve"><value>Expires in {0} min</value></data>
+  <data name="Refresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="Readme" xml:space="preserve"><value>README</value></data>
+  <data name="SearchServers" xml:space="preserve"><value>Search name, hostname, tag...</value></data>
+  <data name="AllTypes" xml:space="preserve"><value>All Types</value></data>
+  <data name="AllStatuses" xml:space="preserve"><value>All Statuses</value></data>
+  <data name="SearchPipelines" xml:space="preserve"><value>Search pipelines...</value></data>
+  <data name="Pipeline" xml:space="preserve"><value>Pipeline</value></data>
+  <data name="RecentRunsColumn" xml:space="preserve"><value>Recent Runs</value></data>
+  <data name="LastStatus" xml:space="preserve"><value>Last Status</value></data>
+  <data name="LastRun" xml:space="preserve"><value>Last Run</value></data>
+  <data name="LastGitUpdate" xml:space="preserve"><value>Last git update</value></data>
+  <data name="Started" xml:space="preserve"><value>Started</value></data>
+  <data name="Completed" xml:space="preserve"><value>Completed</value></data>
+  <data name="Steps" xml:space="preserve"><value>Steps</value></data>
+  <data name="General" xml:space="preserve"><value>General</value></data>
+  <data name="Add" xml:space="preserve"><value>Add</value></data>
+  <data name="Key" xml:space="preserve"><value>Key</value></data>
+  <data name="Value" xml:space="preserve"><value>Value</value></data>
+  <data name="Updated" xml:space="preserve"><value>Updated</value></data>
+  <data name="Token" xml:space="preserve"><value>Token</value></data>
+  <data name="Used" xml:space="preserve"><value>Used</value></data>
+  <data name="Available" xml:space="preserve"><value>Available</value></data>
+  <data name="Expires" xml:space="preserve"><value>Expires</value></data>
+  <data name="InvalidCredentials" xml:space="preserve"><value>Invalid username or password.</value></data>
+  <data name="LoggingIn" xml:space="preserve"><value>Logging in...</value></data>
+  <data name="ForgotPassword" xml:space="preserve"><value>Forgot password?</value></data>
+  <data name="ForgotPasswordHint" xml:space="preserve"><value>There is no self-service reset. Ask an administrator to reset your password from the Users page.</value></data>
+  <data name="Server" xml:space="preserve"><value>Server</value></data>
+  <data name="Executor" xml:space="preserve"><value>Executor</value></data>
+  <data name="Exit" xml:space="preserve"><value>Exit</value></data>
+  <data name="Created" xml:space="preserve"><value>Created</value></data>
+  <data name="LiveLogs" xml:space="preserve"><value>Live Logs</value></data>
+  <data name="Watch" xml:space="preserve"><value>Watch</value></data>
+  <data name="Connected" xml:space="preserve"><value>Connected</value></data>
+  <data name="ConnectedToBackend" xml:space="preserve"><value>Connected to backend</value></data>
+  <data name="NotConnectedToBackend" xml:space="preserve"><value>Not connected to backend</value></data>
+  <data name="Clear" xml:space="preserve"><value>Clear</value></data>
+  <data name="NotFound" xml:space="preserve"><value>Not Found</value></data>
+  <data name="NotFoundMessage" xml:space="preserve"><value>Sorry, the content you are looking for does not exist.</value></data>
+  <data name="Aetheus" xml:space="preserve"><value>Aetheus</value></data>
+  <data name="ToggleTheme" xml:space="preserve"><value>Toggle theme</value></data>
+  <data name="ToggleSidebar" xml:space="preserve"><value>Toggle sidebar</value></data>
+  <data name="ErrorOccurred" xml:space="preserve"><value>An error occurred</value></data>
+  <data name="ErrorMessage" xml:space="preserve"><value>Something went wrong. Please try again.</value></data>
+  <data name="Recover" xml:space="preserve"><value>Recover</value></data>
+  <data name="RepositoryUrl" xml:space="preserve"><value>Repository URL</value></data>
+  <data name="TagsCommaSeparated" xml:space="preserve"><value>Tags (comma-separated)</value></data>
+  <data name="ProjectCreated" xml:space="preserve"><value>Project created.</value></data>
+  <data name="OpenNewProjectConfirm" xml:space="preserve"><value>Open the new project "{0}" now?</value></data>
+  <data name="OpenProject" xml:space="preserve"><value>Open</value></data>
+  <data name="StayHere" xml:space="preserve"><value>Stay here</value></data>
+  <data name="ProjectUpdated" xml:space="preserve"><value>Project updated.</value></data>
+  <data name="PipelineCreated" xml:space="preserve"><value>Pipeline created.</value></data>
+  <data name="Saved" xml:space="preserve"><value>Saved</value></data>
+  <data name="SettingSaved" xml:space="preserve"><value>Setting '{0}' updated.</value></data>
+  <data name="SecretAdded" xml:space="preserve"><value>Secret added.</value></data>
+  <data name="SecretDeleted" xml:space="preserve"><value>Secret deleted.</value></data>
+  <data name="DeleteSecretConfirm" xml:space="preserve"><value>Are you sure you want to delete this secret?</value></data>
+  <data name="DeleteSecret" xml:space="preserve"><value>Delete Secret</value></data>
+  <data name="TokenGenerated" xml:space="preserve"><value>Registration token generated.</value></data>
+  <data name="Generated" xml:space="preserve"><value>Generated</value></data>
+  <data name="Copied" xml:space="preserve"><value>Copied</value></data>
+  <data name="Modified" xml:space="preserve"><value>Modified</value></data>
+  <data name="Renamed" xml:space="preserve"><value>Renamed</value></data>
+  <data name="GitStatusUnknown" xml:space="preserve"><value>Unknown status ({0})</value></data>
+  <data name="InstallCommandCopied" xml:space="preserve"><value>Install command copied.</value></data>
+  <data name="GridLoadFailed" xml:space="preserve"><value>Failed to load data. The server may be unreachable.</value></data>
+  <data name="UpstreamLineage" xml:space="preserve"><value>Cascade lineage</value></data>
+  <data name="ParentPipeline" xml:space="preserve"><value>Parent pipeline</value></data>
+  <data name="RunTriggeredByUpstream" xml:space="preserve"><value>Triggered by {0}</value></data>
+  <data name="UpstreamChainDepth" xml:space="preserve"><value>chain · depth {0}</value></data>
+  <data name="UpstreamChainDepthHint" xml:space="preserve"><value>Number of upstream pipelines in this cascade chain.</value></data>
+  <data name="Retention:LogDays" xml:space="preserve"><value>System log retention (days)</value></data>
+  <data name="ConnectionLost" xml:space="preserve"><value>Connection lost</value></data>
+  <data name="ConnectionLostDescription" xml:space="preserve"><value>The connection to the server was lost. Trying to reconnect automatically.</value></data>
+  <data name="ReconnectIn" xml:space="preserve"><value>Reconnecting in {0} s</value></data>
+  <data name="ManualReconnect" xml:space="preserve"><value>Reconnect now</value></data>
+  <data name="SessionExpired" xml:space="preserve"><value>Session expired</value></data>
+  <data name="SessionExpiredDetail" xml:space="preserve"><value>Please sign in again.</value></data>
+  <data name="CopyFailed" xml:space="preserve"><value>Copy failed</value></data>
+  <data name="ClipboardUnavailable" xml:space="preserve"><value>Clipboard is unavailable in this context.</value></data>
+  <data name="CorrelationId" xml:space="preserve"><value>Correlation ID</value></data>
+  <data name="CopyCorrelationId" xml:space="preserve"><value>Copy correlation ID</value></data>
+  <data name="CopyMessage" xml:space="preserve"><value>Copy message</value></data>
+  <data name="ViewMessage" xml:space="preserve"><value>View message</value></data>
+  <data name="MessageCopied" xml:space="preserve"><value>Message copied to clipboard.</value></data>
+  <data name="TokenCopied" xml:space="preserve"><value>Token copied to clipboard.</value></data>
+  <data name="ShowToken" xml:space="preserve"><value>Show token</value></data>
+  <data name="HideToken" xml:space="preserve"><value>Hide token</value></data>
+  <data name="Added" xml:space="preserve"><value>Added</value></data>
+  <data name="Deleted" xml:space="preserve"><value>Deleted</value></data>
+  <data name="Running" xml:space="preserve"><value>Running</value></data>
+  <data name="TaskLogs" xml:space="preserve"><value>Logs - Task #{0}</value></data>
+  <data name="UsernameRequired" xml:space="preserve"><value>Username is required.</value></data>
+  <data name="PasswordRequired" xml:space="preserve"><value>Password is required.</value></data>
+  <data name="NameRequired" xml:space="preserve"><value>Name is required.</value></data>
+  <data name="NameMaxLength" xml:space="preserve"><value>Name must be 100 characters or fewer.</value></data>
+  <data name="TriggerType" xml:space="preserve"><value>Trigger Type</value></data>
+  <data name="DefinedInYaml" xml:space="preserve"><value>Defined in YAML</value></data>
+  <data name="VariableLibraries" xml:space="preserve"><value>Libraries</value></data>
+  <data name="VariableLibrary" xml:space="preserve"><value>Library</value></data>
+  <data name="NewVariableLibrary" xml:space="preserve"><value>New Library</value></data>
+  <data name="SearchVariableLibraries" xml:space="preserve"><value>Search libraries...</value></data>
+  <data name="NoVariableLibrariesFound" xml:space="preserve"><value>No libraries.</value></data>
+  <data name="VariableLibraryCreated" xml:space="preserve"><value>Library created.</value></data>
+  <data name="VariableLibrarySaved" xml:space="preserve"><value>Library updated.</value></data>
+  <data name="DeleteVariableLibraryConfirm" xml:space="preserve"><value>Are you sure you want to delete this library?</value></data>
+  <data name="Entries" xml:space="preserve"><value>Entries</value></data>
+  <data name="EntriesCount" xml:space="preserve"><value>{0} entries</value></data>
+  <data name="EntryAdded" xml:space="preserve"><value>Entry added.</value></data>
+  <data name="EntryUpdated" xml:space="preserve"><value>Entry updated.</value></data>
+  <data name="EntryDeleted" xml:space="preserve"><value>Entry deleted.</value></data>
+  <data name="DeleteEntryConfirm" xml:space="preserve"><value>Are you sure you want to delete this entry?</value></data>
+  <data name="History" xml:space="preserve"><value>History</value></data>
+  <data name="VersionHistory" xml:space="preserve"><value>Version History - {0}</value></data>
+  <data name="Date" xml:space="preserve"><value>Date</value></data>
+  <data name="Vaults" xml:space="preserve"><value>Vaults</value></data>
+  <data name="Vault" xml:space="preserve"><value>Vault</value></data>
+  <data name="NewVault" xml:space="preserve"><value>New Vault</value></data>
+  <data name="SearchVaults" xml:space="preserve"><value>Search vaults...</value></data>
+  <data name="NoVaultsFound" xml:space="preserve"><value>No vaults.</value></data>
+  <data name="VaultCreated" xml:space="preserve"><value>Vault created.</value></data>
+  <data name="VaultSaved" xml:space="preserve"><value>Vault updated.</value></data>
+  <data name="DeleteVaultConfirm" xml:space="preserve"><value>Are you sure you want to delete this vault?</value></data>
+  <data name="Environments" xml:space="preserve"><value>Environments</value></data>
+  <data name="Environment" xml:space="preserve"><value>Environment</value></data>
+  <data name="NewEnvironment" xml:space="preserve"><value>New</value></data>
+  <data name="SearchEnvironments" xml:space="preserve"><value>Search environments...</value></data>
+  <data name="NoEnvironmentsFound" xml:space="preserve"><value>No environments.</value></data>
+  <data name="EnvironmentCreated" xml:space="preserve"><value>Environment created.</value></data>
+  <data name="EnvironmentSaved" xml:space="preserve"><value>Environment updated.</value></data>
+  <data name="DeleteEnvironmentConfirm" xml:space="preserve"><value>Are you sure you want to delete this environment?</value></data>
+  <data name="ServersCount" xml:space="preserve"><value>{0} servers</value></data>
+  <data name="SelectServers" xml:space="preserve"><value>Select servers</value></data>
+  <data name="RequireApproval" xml:space="preserve"><value>Require approval</value></data>
+  <data name="ApprovalTimeoutMinutes" xml:space="preserve"><value>Approval timeout (minutes)</value></data>
+  <data name="ApprovalInstructions" xml:space="preserve"><value>Approval instructions</value></data>
+  <data name="Approval" xml:space="preserve"><value>Approval</value></data>
+  <data name="SecretsCount" xml:space="preserve"><value>{0} secrets</value></data>
+  <data name="SecretUpdated" xml:space="preserve"><value>Secret updated.</value></data>
+  <data name="SecretRotated" xml:space="preserve"><value>Secret rotated.</value></data>
+  <data name="RotateSecretConfirm" xml:space="preserve"><value>Rotate the value of secret '{0}'? A new version will be recorded.</value></data>
+  <data name="RotateSecretValue" xml:space="preserve"><value>Rotate Secret - {0}</value></data>
+  <data name="UpdateSecretValue" xml:space="preserve"><value>Update Secret - {0}</value></data>
+  <data name="NewValue" xml:space="preserve"><value>New Value</value></data>
+  <data name="Releases" xml:space="preserve"><value>Releases</value></data>
+  <data name="Artifacts" xml:space="preserve"><value>Artifacts</value></data>
+  <data name="NoArtifactsFound" xml:space="preserve"><value>No artifacts found</value></data>
+  <data name="Version" xml:space="preserve"><value>Version</value></data>
+  <data name="Branch" xml:space="preserve"><value>Branch</value></data>
+  <data name="Detected" xml:space="preserve"><value>Detected</value></data>
+  <data name="Building" xml:space="preserve"><value>Building</value></data>
+  <data name="Published" xml:space="preserve"><value>Published</value></data>
+  <data name="ReleaseDate" xml:space="preserve"><value>Release date</value></data>
+  <data name="LinkedReleases" xml:space="preserve"><value>Linked releases</value></data>
+  <data name="LinkedArtifact" xml:space="preserve"><value>Linked artifact</value></data>
+  <data name="NoLinkedReleases" xml:space="preserve"><value>No linked releases.</value></data>
+  <data name="NoReleasesFound" xml:space="preserve"><value>No releases.</value></data>
+  <data name="AllProjects" xml:space="preserve"><value>All Projects</value></data>
+  <data name="SyncReleases" xml:space="preserve"><value>Sync Releases</value></data>
+  <data name="Synced" xml:space="preserve"><value>Synced</value></data>
+  <data name="ReleasesSynced" xml:space="preserve"><value>{0} releases synced.</value></data>
+  <data name="TriggerBuild" xml:space="preserve"><value>Trigger Build</value></data>
+  <data name="BuildTriggered" xml:space="preserve"><value>Build triggered.</value></data>
+  <data name="ViewRun" xml:space="preserve"><value>View Run</value></data>
+  <data name="SelectPipeline" xml:space="preserve"><value>Select Pipeline</value></data>
+  <data name="Users" xml:space="preserve"><value>Users</value></data>
+  <data name="User" xml:space="preserve"><value>User</value></data>
+  <data name="NewUser" xml:space="preserve"><value>New User</value></data>
+  <data name="SearchUsers" xml:space="preserve"><value>Search users...</value></data>
+  <data name="Email" xml:space="preserve"><value>Email</value></data>
+  <data name="Roles" xml:space="preserve"><value>Roles</value></data>
+  <data name="Yes" xml:space="preserve"><value>Yes</value></data>
+  <data name="No" xml:space="preserve"><value>No</value></data>
+  <data name="UserCreated" xml:space="preserve"><value>User created.</value></data>
+  <data name="UserSaved" xml:space="preserve"><value>User saved.</value></data>
+  <data name="DeleteUser" xml:space="preserve"><value>Delete User</value></data>
+  <data name="DeleteUserConfirm" xml:space="preserve"><value>Are you sure you want to delete this user?</value></data>
+  <data name="ChangePassword" xml:space="preserve"><value>Change Password</value></data>
+  <data name="NewPassword" xml:space="preserve"><value>New Password</value></data>
+  <data name="PasswordChanged" xml:space="preserve"><value>Password changed.</value></data>
+  <data name="CurrentPassword" xml:space="preserve"><value>Current Password</value></data>
+  <data name="ConfirmPassword" xml:space="preserve"><value>Confirm Password</value></data>
+  <data name="PasswordMismatch" xml:space="preserve"><value>The new password and confirmation do not match.</value></data>
+  <data name="PasswordChangeFailed" xml:space="preserve"><value>Password change failed. Check your current password.</value></data>
+  <data name="PasswordMinLength" xml:space="preserve"><value>Password must be at least 12 characters.</value></data>
+  <data name="UsernameTooLong" xml:space="preserve"><value>Username must be 50 characters or fewer.</value></data>
+  <data name="RolesUpdated" xml:space="preserve"><value>Roles updated.</value></data>
+  <data name="GeneratePassword" xml:space="preserve"><value>Generate password</value></data>
+  <data name="PasswordGenerated" xml:space="preserve"><value>A password has been generated. Copy it before saving.</value></data>
+  <data name="MustChangePassword" xml:space="preserve"><value>Require password change at next login</value></data>
+  <data name="ChangePasswordRequiredTitle" xml:space="preserve"><value>Password change required</value></data>
+  <data name="ChangePasswordRequiredMessage" xml:space="preserve"><value>For security reasons, you must choose a new password before continuing.</value></data>
+  <data name="ViewDetails" xml:space="preserve"><value>View details</value></data>
+  <data name="CopyDetails" xml:space="preserve"><value>Copy details</value></data>
+  <data name="CopyKeyReference" xml:space="preserve"><value>Copy Key Reference</value></data>
+  <data name="DryRun" xml:space="preserve"><value>Dry Run</value></data>
+  <data name="DryRunResult" xml:space="preserve"><value>Dry Run Result</value></data>
+  <data name="EntriesExported" xml:space="preserve"><value>{0} entries exported.</value></data>
+  <data name="EntriesImported" xml:space="preserve"><value>{0} entries imported.</value></data>
+  <data name="Error" xml:space="preserve"><value>Error</value></data>
+  <data name="Export" xml:space="preserve"><value>Export</value></data>
+  <data name="Exported" xml:space="preserve"><value>Exported</value></data>
+  <data name="ExportKeys" xml:space="preserve"><value>Export Keys</value></data>
+  <data name="Import" xml:space="preserve"><value>Import</value></data>
+  <data name="Imported" xml:space="preserve"><value>Imported</value></data>
+  <data name="ImportEntries" xml:space="preserve"><value>Import Entries</value></data>
+  <data name="ImportSecrets" xml:space="preserve"><value>Import Secrets</value></data>
+  <data name="InvalidJsonFormat" xml:space="preserve"><value>Invalid JSON format.</value></data>
+  <data name="KeyReferenceCopied" xml:space="preserve"><value>$({0}) copied to clipboard.</value></data>
+  <data name="KeysExported" xml:space="preserve"><value>{0} keys exported.</value></data>
+  <data name="OriginalCommand" xml:space="preserve"><value>Original Command</value></data>
+  <data name="PasteJsonBelow" xml:space="preserve"><value>Paste JSON content below:</value></data>
+  <data name="ResolvedCommand" xml:space="preserve"><value>Resolved Command</value></data>
+  <data name="ResolvedVariables" xml:space="preserve"><value>Resolved Variables</value></data>
+  <data name="Run" xml:space="preserve"><value>Run</value></data>
+  <data name="RunId" xml:space="preserve"><value>Run ID</value></data>
+  <data name="RunParameters" xml:space="preserve"><value>Run parameters</value></data>
+  <data name="RunParametersCount" xml:space="preserve"><value>{0} parameter(s)</value></data>
+  <data name="Parameter" xml:space="preserve"><value>Parameter</value></data>
+  <data name="RunParameterRequired" xml:space="preserve"><value>Parameter "{0}" is required.</value></data>
+  <data name="SecretsImported" xml:space="preserve"><value>{0} secrets imported.</value></data>
+  <data name="SelectTemplate" xml:space="preserve"><value>Select a template...</value></data>
+  <data name="Step" xml:space="preserve"><value>Step</value></data>
+  <data name="Template" xml:space="preserve"><value>Template</value></data>
+  <data name="VarsCount" xml:space="preserve"><value>Variables ({0})</value></data>
+  <data name="Versions" xml:space="preserve"><value>Versions</value></data>
+  <data name="WarningsCount" xml:space="preserve"><value>Warnings ({0})</value></data>
+  <data name="NoNewReleasesFound" xml:space="preserve"><value>No new releases found.</value></data>
+  <data name="Rollback" xml:space="preserve"><value>Rollback</value></data>
+  <data name="RollbackConfirm" xml:space="preserve"><value>Are you sure you want to rollback this release?</value></data>
+  <data name="RollbackReleaseSummary" xml:space="preserve"><value>Rollback from {0} to {1}. The current deployment is {2} old.</value></data>
+  <data name="RollbackPipeline" xml:space="preserve"><value>Rollback deployment pipeline</value></data>
+  <data name="RollbackQueued" xml:space="preserve"><value>Rollback requested</value></data>
+  <data name="RollbackUnavailable" xml:space="preserve"><value>Rollback is unavailable for this release.</value></data>
+  <data name="RestoreDatabaseFromVerifiedBackup" xml:space="preserve"><value>Restore database from a verified backup</value></data>
+  <data name="SelectVerifiedBackup" xml:space="preserve"><value>Select a verified backup</value></data>
+  <data name="DatabaseRestoreWarning" xml:space="preserve"><value>This overwrites the live database with the selected backup. Data written after that backup will be lost.</value></data>
+  <data name="RolledBack" xml:space="preserve"><value>Rolled back</value></data>
+  <data name="Promote" xml:space="preserve"><value>Promote</value></data>
+  <data name="PromoteConfirm" xml:space="preserve"><value>Are you sure you want to promote this release?</value></data>
+  <data name="Promoted" xml:space="preserve"><value>Promoted</value></data>
+  <data name="ShowMasked" xml:space="preserve"><value>Show Masked</value></data>
+  <data name="ShowUnmasked" xml:space="preserve"><value>Show Unmasked</value></data>
+  <data name="AuditLogs" xml:space="preserve"><value>Audit Logs</value></data>
+  <data name="AuditEntryDetail" xml:space="preserve"><value>Audit entry</value></data>
+  <data name="NotificationRules" xml:space="preserve"><value>Notification Rules</value></data>
+  <data name="NotificationChannels" xml:space="preserve"><value>Notification Channels</value></data>
+  <data name="NotificationChannel" xml:space="preserve"><value>Channel</value></data>
+  <data name="Rules" xml:space="preserve"><value>Rules</value></data>
+  <data name="EventType" xml:space="preserve"><value>Event Type</value></data>
+  <data name="ChannelConfiguration" xml:space="preserve"><value>Configuration (JSON)</value></data>
+  <data name="NotificationChannelConfigHint" xml:space="preserve"><value>JSON. Slack/Teams: {"webhookUrl":"..."}. Webhook: {"url":"...","secret":"..."}.</value></data>
+  <data name="NotificationEventTypeHint" xml:space="preserve"><value>The exact event key that triggers this rule, e.g. alert.triggered or SecretExpiring.</value></data>
+  <data name="NotificationFilter" xml:space="preserve"><value>Filter (JSON, optional)</value></data>
+  <data name="NotificationFilterHint" xml:space="preserve"><value>Optional JSON to narrow which events match.</value></data>
+  <data name="NoNotificationChannels" xml:space="preserve"><value>No channels</value></data>
+  <data name="NoNotificationChannelsDescription" xml:space="preserve"><value>Add a Slack, Teams, or webhook channel that rules can target.</value></data>
+  <data name="NoNotificationRules" xml:space="preserve"><value>No rules</value></data>
+  <data name="NoNotificationRulesDescription" xml:space="preserve"><value>Map an event type to a channel so notifications are delivered when it fires.</value></data>
+  <data name="DeleteNotificationChannelConfirm" xml:space="preserve"><value>Delete the channel "{0}"?</value></data>
+  <data name="DeleteNotificationRuleConfirm" xml:space="preserve"><value>Delete the rule for "{0}"?</value></data>
+  <data name="NotificationChannelNotFound" xml:space="preserve"><value>Channel not found (it may have been deleted).</value></data>
+  <data name="Enum_NotificationTestStatus_Sent" xml:space="preserve"><value>Sent</value></data>
+  <data name="Enum_NotificationTestStatus_NotConfigured" xml:space="preserve"><value>Not configured</value></data>
+  <data name="Enum_NotificationTestStatus_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Actor" xml:space="preserve"><value>Actor</value></data>
+  <data name="Target" xml:space="preserve"><value>Target</value></data>
+  <data name="AuditVerifyChain" xml:space="preserve"><value>Verify chain</value></data>
+  <data name="AuditVerifying" xml:space="preserve"><value>Verifying...</value></data>
+  <data name="AuditIntegrityUnavailable" xml:space="preserve"><value>Integrity check unavailable</value></data>
+  <data name="AuditChainIntact" xml:space="preserve"><value>Chain intact</value></data>
+  <data name="AuditChainIntactCount" xml:space="preserve"><value>Chain intact ({0} entries)</value></data>
+  <data name="AuditVerifiedThrough" xml:space="preserve"><value>Verified through this entry ({0} entries)</value></data>
+  <data name="AuditChainBroken" xml:space="preserve"><value>Integrity break</value></data>
+  <data name="AuditBreakAt" xml:space="preserve"><value>Break detected at entry #{0}</value></data>
+  <data name="EntityType" xml:space="preserve"><value>Entity Type</value></data>
+  <data name="ExpiresAt" xml:space="preserve"><value>Expires At</value></data>
+  <data name="Visual" xml:space="preserve"><value>Visual</value></data>
+  <data name="AddStage" xml:space="preserve"><value>Add Stage</value></data>
+  <data name="AddStep" xml:space="preserve"><value>Add Step</value></data>
+  <data name="EditStage" xml:space="preserve"><value>Edit Stage</value></data>
+  <data name="EditStep" xml:space="preserve"><value>Edit Step</value></data>
+  <data name="DeleteStage" xml:space="preserve"><value>Delete Stage</value></data>
+  <data name="DeleteStageConfirm" xml:space="preserve"><value>Are you sure you want to delete this stage? DependsOn references will be cleaned up.</value></data>
+  <data name="StageName" xml:space="preserve"><value>Stage Name</value></data>
+  <data name="DependsOn" xml:space="preserve"><value>Depends On</value></data>
+  <data name="SelectDependencies" xml:space="preserve"><value>Select dependencies</value></data>
+  <data name="SelectAgent" xml:space="preserve"><value>Select agent</value></data>
+  <data name="StepName" xml:space="preserve"><value>Step Name</value></data>
+  <data name="ShellCommand" xml:space="preserve"><value>Shell Command</value></data>
+  <data name="TimeoutSeconds" xml:space="preserve"><value>Timeout (seconds)</value></data>
+  <data name="AutoLayout" xml:space="preserve"><value>Auto Layout</value></data>
+  <data name="Undo" xml:space="preserve"><value>Undo</value></data>
+  <data name="Redo" xml:space="preserve"><value>Redo</value></data>
+  <data name="InvalidYamlCannotVisualize" xml:space="preserve"><value>Invalid YAML - cannot display the visual editor. Fix the YAML in the Edit tab.</value></data>
+  <data name="PipelineVariables" xml:space="preserve"><value>Pipeline Variables</value></data>
+  <data name="StageVariables" xml:space="preserve"><value>Stage Variables</value></data>
+  <data name="PipelineSettings" xml:space="preserve"><value>Pipeline Settings</value></data>
+  <data name="SelectLibraries" xml:space="preserve"><value>Select libraries</value></data>
+  <data name="SelectVaults" xml:space="preserve"><value>Select vaults</value></data>
+  <data name="EmptyPipeline" xml:space="preserve"><value>No stages yet. Add your first stage to get started.</value></data>
+  <data name="ValidationMissingAgent" xml:space="preserve"><value>No agent specified</value></data>
+  <data name="ValidationNoSteps" xml:space="preserve"><value>Stage has no steps</value></data>
+  <data name="ValidationUnknownDependency" xml:space="preserve"><value>Unknown dependency: {0}</value></data>
+  <data name="ValidationCircularDependency" xml:space="preserve"><value>Circular dependency detected</value></data>
+  <data name="StageTemplate" xml:space="preserve"><value>Insert template...</value></data>
+  <data name="PipelineTemplates" xml:space="preserve"><value>Pipeline Templates</value></data>
+  <data name="NewTemplate" xml:space="preserve"><value>New Template</value></data>
+  <data name="EditTemplate" xml:space="preserve"><value>Edit Template</value></data>
+  <data name="ChangelogEntry" xml:space="preserve"><value>Changelog Entry</value></data>
+  <data name="DescribeChanges" xml:space="preserve"><value>Describe your changes...</value></data>
+  <data name="Changelog" xml:space="preserve"><value>Changelog</value></data>
+  <data name="DuplicateStage" xml:space="preserve"><value>Duplicate</value></data>
+  <data name="Enum_ServerStatus_Online" xml:space="preserve"><value>Online</value></data>
+  <data name="Enum_ServerStatus_Offline" xml:space="preserve"><value>Offline</value></data>
+  <data name="Enum_ServerStatus_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Enum_ServerType_Normal" xml:space="preserve"><value>Normal</value></data>
+  <data name="Enum_ServerType_Build" xml:space="preserve"><value>Build</value></data>
+  <data name="Enum_ServerType_Docker" xml:space="preserve"><value>Docker</value></data>
+  <data name="Enum_PipelineStatus_Pending" xml:space="preserve"><value>Pending</value></data>
+  <data name="Enum_PipelineStatus_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="Enum_PipelineStatus_Success" xml:space="preserve"><value>Success</value></data>
+  <data name="Enum_PipelineStatus_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Enum_PipelineStatus_Cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="Enum_PipelineTriggerType_Manual" xml:space="preserve"><value>Manual</value></data>
+  <data name="Enum_PipelineTriggerType_Webhook" xml:space="preserve"><value>Webhook</value></data>
+  <data name="Enum_PipelineTriggerType_Schedule" xml:space="preserve"><value>Schedule</value></data>
+  <data name="Enum_TaskExecutionStatus_Pending" xml:space="preserve"><value>Pending</value></data>
+  <data name="Enum_TaskExecutionStatus_Assigned" xml:space="preserve"><value>Assigned</value></data>
+  <data name="Enum_TaskExecutionStatus_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="Enum_TaskExecutionStatus_Success" xml:space="preserve"><value>Success</value></data>
+  <data name="Enum_TaskExecutionStatus_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Enum_TaskExecutionStatus_Timeout" xml:space="preserve"><value>Timeout</value></data>
+  <data name="Enum_TaskExecutionStatus_Cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="Enum_ChangeType_Created" xml:space="preserve"><value>Created</value></data>
+  <data name="Enum_ChangeType_Updated" xml:space="preserve"><value>Updated</value></data>
+  <data name="Enum_ChangeType_Deleted" xml:space="preserve"><value>Deleted</value></data>
+  <data name="Enum_ChangeType_Rotated" xml:space="preserve"><value>Rotated</value></data>
+  <data name="Enum_ArtifactRetentionPolicy_Build" xml:space="preserve"><value>Build</value></data>
+  <data name="Enum_ArtifactRetentionPolicy_Deployed" xml:space="preserve"><value>Deployed</value></data>
+  <data name="Enum_ArtifactRetentionPolicy_Released" xml:space="preserve"><value>Released</value></data>
+  <data name="Enum_DashboardWidgetType_ServerCount" xml:space="preserve"><value>Server Count</value></data>
+  <data name="Enum_DashboardWidgetType_PipelineActivity" xml:space="preserve"><value>Pipeline Activity</value></data>
+  <data name="Enum_DashboardWidgetType_RecentRuns" xml:space="preserve"><value>Recent Runs</value></data>
+  <data name="Enum_DashboardWidgetType_ServerList" xml:space="preserve"><value>Server List</value></data>
+  <data name="Enum_DashboardWidgetType_TaskSummary" xml:space="preserve"><value>Task Summary</value></data>
+  <data name="Enum_DashboardWidgetType_BuildSuccess" xml:space="preserve"><value>Build Success</value></data>
+  <data name="Enum_DashboardWidgetType_Custom" xml:space="preserve"><value>Custom</value></data>
+  <data name="Enum_EnvironmentType_Development" xml:space="preserve"><value>Development</value></data>
+  <data name="Enum_EnvironmentType_Staging" xml:space="preserve"><value>Staging</value></data>
+  <data name="Enum_EnvironmentType_Production" xml:space="preserve"><value>Production</value></data>
+  <data name="Enum_EnvironmentType_Testing" xml:space="preserve"><value>Testing</value></data>
+  <data name="Enum_AlertSeverity_Info" xml:space="preserve"><value>Info</value></data>
+  <data name="Enum_AlertSeverity_Warning" xml:space="preserve"><value>Warning</value></data>
+  <data name="Enum_AlertSeverity_Critical" xml:space="preserve"><value>Critical</value></data>
+  <data name="Enum_MetricType_Cpu" xml:space="preserve"><value>CPU</value></data>
+  <data name="Enum_MetricType_Memory" xml:space="preserve"><value>Memory</value></data>
+  <data name="Enum_MetricType_Disk" xml:space="preserve"><value>Disk</value></data>
+  <data name="Enum_MetricType_DiskFree" xml:space="preserve"><value>Free disk space (GiB)</value></data>
+  <data name="Enum_MetricType_BuildCache" xml:space="preserve"><value>Build cache (GiB)</value></data>
+  <data name="WaitingForPreviousStage" xml:space="preserve"><value>Waiting for previous stage to complete...</value></data>
+  <data name="WaitingForAgent" xml:space="preserve"><value>Waiting for an available agent...</value></data>
+  <data name="WaitingForApproval" xml:space="preserve"><value>Waiting for approval...</value></data>
+  <data name="WaitingForExecution" xml:space="preserve"><value>Waiting for execution to start...</value></data>
+  <data name="ReleaseDetails" xml:space="preserve"><value>Release Details</value></data>
+  <data name="Artifact" xml:space="preserve"><value>Artifact</value></data>
+  <data name="PipelineRun" xml:space="preserve"><value>Pipeline Run</value></data>
+  <data name="NoRecords" xml:space="preserve"><value>No records.</value></data>
+  <data name="NoLogs" xml:space="preserve"><value>No output logs available.</value></data>
+  <data name="NoOutputLogs" xml:space="preserve"><value>This step ran but produced no log output.</value></data>
+  <data name="LogsNotRetained" xml:space="preserve"><value>Logs for this step were not retained.</value></data>
+  <data name="LogsNeverProduced" xml:space="preserve"><value>This step never ran, so it produced no logs.</value></data>
+  <data name="SelectStepToViewLogs" xml:space="preserve"><value>Select a step to view its logs</value></data>
+  <data name="OpenChildRun" xml:space="preserve"><value>Open this run</value></data>
+  <data name="PeekPipelineDefinition" xml:space="preserve"><value>View pipeline definition</value></data>
+  <data name="OpenPipeline" xml:space="preserve"><value>Open pipeline</value></data>
+  <data name="PipelineNotFound" xml:space="preserve"><value>Pipeline not found</value></data>
+  <data name="ReadOnly" xml:space="preserve"><value>Read-only</value></data>
+  <data name="WrapLines" xml:space="preserve"><value>Wrap</value></data>
+  <data name="WrapLinesHint" xml:space="preserve"><value>Wrap long lines</value></data>
+  <data name="ChildRunNotFound" xml:space="preserve"><value>Triggered run not found</value></data>
+  <data name="Manageable" xml:space="preserve"><value>Manageable</value></data>
+  <data name="System" xml:space="preserve"><value>System</value></data>
+  <data name="NoServicesToDisplay" xml:space="preserve"><value>No services to display.</value></data>
+  <data name="TaskLogsColumn" xml:space="preserve"><value>Logs</value></data>
+  <data name="TaskLogsTitle" xml:space="preserve"><value>Logs - Task #{0}</value></data>
+  <data name="RunPipelineAction" xml:space="preserve"><value>Run pipeline</value></data>
+  <data name="ViewLogs" xml:space="preserve"><value>View logs</value></data>
+  <data name="CloseLogs" xml:space="preserve"><value>Close logs</value></data>
+  <data name="Overview" xml:space="preserve"><value>Overview</value></data>
+  <data name="Services" xml:space="preserve"><value>Services</value></data>
+  <data name="Configuration" xml:space="preserve"><value>Configuration</value></data>
+  <data name="Properties" xml:space="preserve"><value>Properties</value></data>
+  <data name="Essentials" xml:space="preserve"><value>Essentials</value></data>
+  <data name="IpAddress" xml:space="preserve"><value>IP Address</value></data>
+  <data name="AgentVersion" xml:space="preserve"><value>Agent Version</value></data>
+  <data name="LastUpdated" xml:space="preserve"><value>Last updated: {0}</value></data>
+  <data name="LastUpdate" xml:space="preserve"><value>Last update</value></data>
+  <data name="AgentInstalledAtNullHint" xml:space="preserve"><value>Marker not yet written (agent predates installer change)</value></data>
+  <data name="HiddenColumnsHint" xml:space="preserve"><value>Some columns are hidden at this screen width</value></data>
+  <data name="InheritedFrom" xml:space="preserve"><value>Inherited from {0}: {1}</value></data>
+  <data name="OwnerType" xml:space="preserve"><value>Scope</value></data>
+  <data name="Global" xml:space="preserve"><value>Global</value></data>
+  <data name="SelectEnvironment" xml:space="preserve"><value>Select an environment</value></data>
+  <data name="Stale" xml:space="preserve"><value>Stale</value></data>
+  <data name="ChooseColumns" xml:space="preserve"><value>Choose columns</value></data>
+  <data name="PipelineRunner" xml:space="preserve"><value>Pipeline runner</value></data>
+  <data name="PipelineToolchain" xml:space="preserve"><value>Toolchain</value></data>
+  <data name="PipelineToolchainHint" xml:space="preserve"><value>Capability: whether the pipeline toolchain (.NET SDK, git) is detected on the agent. Distinct from the admin authorization toggle below.</value></data>
+  <data name="ToolchainInstalled" xml:space="preserve"><value>Installed</value></data>
+  <data name="ToolchainMissing" xml:space="preserve"><value>Not detected</value></data>
+  <data name="ToolchainUnknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="PipelineRunnerEnabledHint" xml:space="preserve"><value>This server can execute pipeline steps. Stage tags/pool/environment must still match for a pipeline to target it.</value></data>
+  <data name="ContainerIsolation" xml:space="preserve"><value>Container isolation</value></data>
+  <data name="DockerAvailableHint" xml:space="preserve"><value>Docker is available - stages can request container isolation on this runner.</value></data>
+  <data name="DockerUnavailableHint" xml:space="preserve"><value>No Docker detected - stages requesting container isolation are blocked on this runner.</value></data>
+  <data name="DockerReady" xml:space="preserve"><value>Docker ready</value></data>
+  <data name="DockerMissing" xml:space="preserve"><value>No Docker</value></data>
+  <data name="ContainersOnly" xml:space="preserve"><value>Containers only</value></data>
+  <data name="ContainersOptional" xml:space="preserve"><value>Containers optional</value></data>
+  <data name="Enforce" xml:space="preserve"><value>Enforce</value></data>
+  <data name="Relax" xml:space="preserve"><value>Relax</value></data>
+  <data name="ContainerIsolationEnforceConfirmTitle" xml:space="preserve"><value>Enforce container isolation?</value></data>
+  <data name="ContainerIsolationEnforceConfirmBody" xml:space="preserve"><value>Every non-container pipeline step on '{0}' will be blocked from now on. Continue?</value></data>
+  <data name="ContainerIsolationEnforcedToast" xml:space="preserve"><value>Container isolation is now enforced on this runner.</value></data>
+  <data name="ContainerIsolationRelaxedToast" xml:space="preserve"><value>Container isolation requirement removed.</value></data>
+  <data name="PipelineRunnerDisabledHint" xml:space="preserve"><value>Disabled - pipelines cannot dispatch steps to this server, even if its tags/pool match. Enable to allow execution.</value></data>
+  <data name="PipelineRunnerEnableConfirmTitle" xml:space="preserve"><value>Enable pipeline runner?</value></data>
+  <data name="PipelineRunnerEnableConfirmBody" xml:space="preserve"><value>Enabling the pipeline runner on '{0}' exposes this server to arbitrary shell execution defined by any pipeline whose tags/pool resolve here. Continue?</value></data>
+  <data name="PipelineRunnerEnabledToast" xml:space="preserve"><value>Pipeline runner enabled.</value></data>
+  <data name="PipelineRunnerDisabledToast" xml:space="preserve"><value>Pipeline runner disabled.</value></data>
+  <data name="AgentUpdateInProgress" xml:space="preserve"><value>Agent update in progress</value></data>
+  <data name="AgentUpdateFailed" xml:space="preserve"><value>Agent update failed</value></data>
+  <data name="AgentUpdateTimeoutHint" xml:space="preserve"><value>No progress received - the agent may be offline or unreachable.</value></data>
+  <data name="AgentUpdateRestartingHint" xml:space="preserve"><value>Waiting for the agent to come back online…</value></data>
+  <data name="AgentUpdateDoneHint" xml:space="preserve"><value>Agent restarted on v{0}.</value></data>
+  <data name="AgentUpdated" xml:space="preserve"><value>Agent updated</value></data>
+  <data name="AgentUpdatePhase_Queued" xml:space="preserve"><value>Queued</value></data>
+  <data name="AgentUpdatePhase_PickedUp" xml:space="preserve"><value>Picked up</value></data>
+  <data name="AgentUpdatePhase_Downloading" xml:space="preserve"><value>Downloading</value></data>
+  <data name="AgentUpdatePhase_Downloaded" xml:space="preserve"><value>Downloaded</value></data>
+  <data name="AgentUpdatePhase_Extracting" xml:space="preserve"><value>Extracting</value></data>
+  <data name="AgentUpdatePhase_LaunchingUpdater" xml:space="preserve"><value>Launching updater</value></data>
+  <data name="AgentUpdatePhase_AgentOffline" xml:space="preserve"><value>Restarting</value></data>
+  <data name="AgentUpdatePhase_Done" xml:space="preserve"><value>Done</value></data>
+  <data name="AgentUpdatePhase_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="TaskTrackerTitle" xml:space="preserve"><value>In-flight tasks</value></data>
+  <data name="TaskTrackerEmpty" xml:space="preserve"><value>No tasks running.</value></data>
+  <data name="TaskTrackerSeeAll" xml:space="preserve"><value>See all tasks →</value></data>
+  <data name="TaskTrackerTooltip" xml:space="preserve"><value>{0} in-flight task(s)</value></data>
+  <data name="TaskStatus_Pending" xml:space="preserve"><value>Pending</value></data>
+  <data name="TaskStatus_Assigned" xml:space="preserve"><value>Assigned</value></data>
+  <data name="TaskStatus_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="TaskStatus_Success" xml:space="preserve"><value>Success</value></data>
+  <data name="TaskStatus_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="TaskStatus_Cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="DkimSelector" xml:space="preserve"><value>DKIM Selector</value></data>
+  <data name="MxRecord" xml:space="preserve"><value>MX Record</value></data>
+  <data name="StepsCount" xml:space="preserve"><value>{0} steps</value></data>
+  <data name="EditServer" xml:space="preserve"><value>Edit Server</value></data>
+  <data name="ServiceRunning" xml:space="preserve"><value>running</value></data>
+  <data name="SearchTasks" xml:space="preserve"><value>Search tasks...</value></data>
+  <data name="AllExecutors" xml:space="preserve"><value>All executors</value></data>
+  <data name="ServerDetail" xml:space="preserve"><value>Server Detail</value></data>
+  <data name="GoBack" xml:space="preserve"><value>Go back</value></data>
+  <data name="UnhandledError" xml:space="preserve"><value>An unhandled error has occurred.</value></data>
+  <data name="ReloadPage" xml:space="preserve"><value>Reload</value></data>
+  <data name="ServerUpdated" xml:space="preserve"><value>Server updated successfully.</value></data>
+  <data name="ServerUpdateFailed" xml:space="preserve"><value>Failed to update server.</value></data>
+  <data name="ImageNamePlaceholder" xml:space="preserve"><value>Image name (e.g. nginx:latest)</value></data>
+  <data name="BuildTagPlaceholder" xml:space="preserve"><value>myapp:latest</value></data>
+  <data name="DockerfilePlaceholder" xml:space="preserve"><value># Paste your Dockerfile here...</value></data>
+  <data name="CopyToClipboard" xml:space="preserve"><value>Copy to clipboard</value></data>
+  <data name="CopyLogs" xml:space="preserve"><value>Copy logs</value></data>
+  <data name="ExecutedCommand" xml:space="preserve"><value>Executed command</value></data>
+  <data name="Output" xml:space="preserve"><value>Output</value></data>
+  <data name="OutputHidden" xml:space="preserve"><value>Output hidden</value></data>
+  <data name="ShowCommand" xml:space="preserve"><value>Show command</value></data>
+  <data name="HideCommand" xml:space="preserve"><value>Hide command</value></data>
+  <data name="ShowOutput" xml:space="preserve"><value>Show output</value></data>
+  <data name="HideOutput" xml:space="preserve"><value>Hide output</value></data>
+  <data name="Container" xml:space="preserve"><value>Container</value></data>
+  <data name="Definition" xml:space="preserve"><value>Definition</value></data>
+  <data name="StageDurations" xml:space="preserve"><value>Stage durations</value></data>
+  <data name="Parallel" xml:space="preserve"><value>Parallel</value></data>
+  <data name="VarSourceSystem" xml:space="preserve"><value>System</value></data>
+  <data name="VarSourceLibrary" xml:space="preserve"><value>Library</value></data>
+  <data name="VarSourceResolved" xml:space="preserve"><value>Resolved</value></data>
+  <data name="GitManaged" xml:space="preserve"><value>git</value></data>
+  <data name="GitManagedHint" xml:space="preserve"><value>Definition managed by git</value></data>
+  <data name="WizardTokenPromptedHint" xml:space="preserve"><value>The token will be prompted during installation (masked input).</value></data>
+  <data name="WizardDevHostVariantLabel" xml:space="preserve"><value>Dev only - runnable from the local VPS-sim (host.docker.internal)</value></data>
+  <data name="ShowMore" xml:space="preserve"><value>Show more</value></data>
+  <data name="ShowLess" xml:space="preserve"><value>Show less</value></data>
+  <data name="ImportPipelineFromYaml" xml:space="preserve"><value>Import a pipeline from a YAML file</value></data>
+  <data name="GitGraph" xml:space="preserve"><value>Git graph</value></data>
+  <data name="CommitsCount" xml:space="preserve"><value>{0} commits</value></data>
+  <data name="GitGraphEmptyTitle" xml:space="preserve"><value>No git graph yet</value></data>
+  <data name="GitGraphEmptyHint" xml:space="preserve"><value>Commits, releases and artifacts appear here once pipelines run for this project.</value></data>
+  <data name="ProjectCiSettings" xml:space="preserve"><value>CI/CD settings</value></data>
+  <data name="FailedSteps" xml:space="preserve"><value>Failed steps</value></data>
+  <data name="RunFailedTitle" xml:space="preserve"><value>Run failed</value></data>
+  <data name="RunFailedStepsLabel" xml:space="preserve"><value>Failed step(s): {0}</value></data>
+  <data name="FailedStepWithExit" xml:space="preserve"><value>{0} (exit {1})</value></data>
+  <data name="ApiReference" xml:space="preserve"><value>API reference</value></data>
+  <data name="EndpointsCount" xml:space="preserve"><value>{0} endpoints</value></data>
+  <data name="ApiReferenceEmptyTitle" xml:space="preserve"><value>API reference unavailable</value></data>
+  <data name="ApiReferenceEmptyHint" xml:space="preserve"><value>The OpenAPI specification could not be loaded.</value></data>
+  <data name="ApiReferenceAdminOnly" xml:space="preserve"><value>The API Reference is restricted to administrators.</value></data>
+  <data name="ApiReferenceGeneralTag" xml:space="preserve"><value>General</value></data>
+  <data name="InsecureTlsBadge" xml:space="preserve"><value>TLS unverified (dev)</value></data>
+  <data name="InsecureTlsHint" xml:space="preserve"><value>The agent runs with TLS validation disabled (AllowInsecureCerts) - dev only.</value></data>
+  <data name="DeploymentTargetBadge" xml:space="preserve"><value>Deployment</value></data>
+  <data name="DeploymentTargetHint" xml:space="preserve"><value>This agent is a cross-agent deployment target: pipelines can deploy build artifacts here.</value></data>
+  <data name="DeploymentTarget" xml:space="preserve"><value>Deployment target</value></data>
+  <data name="DeploymentTargetUnavailable" xml:space="preserve"><value>Not a target</value></data>
+  <data name="ExitCodeLabel" xml:space="preserve"><value>exit {0}</value></data>
+  <data name="ArtifactRetentionDays" xml:space="preserve"><value>Old-build retention (days)</value></data>
+  <data name="ArtifactLatestRetentionDays" xml:space="preserve"><value>Latest/deployed retention (days)</value></data>
+  <data name="ReleaseNumberingPattern" xml:space="preserve"><value>Release numbering pattern</value></data>
+  <data name="LogsCopied" xml:space="preserve"><value>Logs copied</value></data>
+  <data name="EditCompose" xml:space="preserve"><value>Edit Compose</value></data>
+  <data name="RequestingCompose" xml:space="preserve"><value>Requesting compose config...</value></data>
+  <data name="WaitingResult" xml:space="preserve"><value>Task queued. Waiting for result...</value></data>
+  <data name="ExportYaml" xml:space="preserve"><value>Export YAML</value></data>
+  <data name="ImportYaml" xml:space="preserve"><value>Import YAML</value></data>
+  <data name="Copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="CurrentConfiguration" xml:space="preserve"><value>Current Configuration</value></data>
+  <data name="ImportYamlConfiguration" xml:space="preserve"><value>Import YAML Configuration</value></data>
+  <data name="ConfigurationValid" xml:space="preserve"><value>Configuration is valid.</value></data>
+  <data name="TasksPlanned" xml:space="preserve"><value>Preview - {0} task(s) planned</value></data>
+  <data name="ConfigExported" xml:space="preserve"><value>Configuration exported successfully.</value></data>
+  <data name="ConfigExportFailed" xml:space="preserve"><value>Failed to export configuration.</value></data>
+  <data name="ConfigCopied" xml:space="preserve"><value>Copied to clipboard.</value></data>
+  <data name="ConfigPreviewFailed" xml:space="preserve"><value>Failed to generate preview.</value></data>
+  <data name="ConfigDeploySuccess" xml:space="preserve"><value>{0} task(s) created for deployment.</value></data>
+  <data name="ConfigDeployFailed" xml:space="preserve"><value>Failed to deploy configuration.</value></data>
+  <data name="Deploy" xml:space="preserve"><value>Deploy</value></data>
+  <data name="Preview" xml:space="preserve"><value>Preview</value></data>
+  <data name="NetworkError" xml:space="preserve"><value>A network error occurred. Please try again.</value></data>
+  <data name="Required" xml:space="preserve"><value>This field is required.</value></data>
+  <data name="MaxLength" xml:space="preserve"><value>This field must be {1} characters or fewer.</value></data>
+  <data name="SearchProjects" xml:space="preserve"><value>Search name, description...</value></data>
+  <data name="FilterByStatus" xml:space="preserve"><value>Filter by status</value></data>
+  <data name="NoProjectsFound" xml:space="preserve"><value>No projects.</value></data>
+  <data name="PipelineCount" xml:space="preserve"><value>{0} pipeline(s)</value></data>
+  <data name="CopyToken" xml:space="preserve"><value>Copy token</value></data>
+  <data name="MainNavigation" xml:space="preserve"><value>Main navigation</value></data>
+  <data name="SaveFailed" xml:space="preserve"><value>Save failed. Please try again.</value></data>
+  <data name="DeleteFailed" xml:space="preserve"><value>Delete failed. Please try again.</value></data>
+  <data name="ValidationError" xml:space="preserve"><value>Validation Error</value></data>
+  <data name="SecretFieldsRequired" xml:space="preserve"><value>Both key and value are required.</value></data>
+  <data name="Timestamp" xml:space="preserve"><value>Timestamp</value></data>
+  <data name="Details" xml:space="preserve"><value>Details</value></data>
+  <data name="Checksum" xml:space="preserve"><value>Checksum (SHA-256)</value></data>
+  <data name="ChecksumUnavailable" xml:space="preserve"><value>Not available (metadata-only artifact)</value></data>
+  <data name="Action" xml:space="preserve"><value>Action</value></data>
+  <data name="Category" xml:space="preserve"><value>Category</value></data>
+  <data name="TaskId" xml:space="preserve"><value>Task ID</value></data>
+  <data name="BackToHome" xml:space="preserve"><value>Back to Home</value></data>
+  <data name="SiteName" xml:space="preserve"><value>Site Name</value></data>
+  <data name="MetricsRetentionDays" xml:space="preserve"><value>Metrics Retention (days)</value></data>
+  <data name="AuditAction_Created" xml:space="preserve"><value>Created</value></data>
+  <data name="AuditAction_Updated" xml:space="preserve"><value>Updated</value></data>
+  <data name="AuditAction_Deleted" xml:space="preserve"><value>Deleted</value></data>
+  <data name="Enum_ReleaseStatus_Detected" xml:space="preserve"><value>Detected</value></data>
+  <data name="Enum_ReleaseStatus_Building" xml:space="preserve"><value>Building</value></data>
+  <data name="Enum_ReleaseStatus_Published" xml:space="preserve"><value>Published</value></data>
+  <data name="Enum_ReleaseStatus_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Enum_ReleaseStatus_RolledBack" xml:space="preserve"><value>Rolled Back</value></data>
+  <data name="Enum_ReleaseStatus_Promoted" xml:space="preserve"><value>Promoted</value></data>
+  <data name="SkipToContent" xml:space="preserve"><value>Skip to content</value></data>
+  <data name="SearchAuditLogs" xml:space="preserve"><value>Search audit logs...</value></data>
+  <data name="FilterByAction" xml:space="preserve"><value>Filter by action</value></data>
+  <data name="FilterByEntity" xml:space="preserve"><value>Filter by entity</value></data>
+  <data name="AllActions" xml:space="preserve"><value>All actions</value></data>
+  <data name="AllEntities" xml:space="preserve"><value>All entities</value></data>
+  <data name="Language" xml:space="preserve"><value>Language</value></data>
+  <data name="DateFrom" xml:space="preserve"><value>From</value></data>
+  <data name="DateTo" xml:space="preserve"><value>To</value></data>
+  <data name="RememberMe" xml:space="preserve"><value>Remember me</value></data>
+  <data name="TotpCode" xml:space="preserve"><value>Authenticator code</value></data>
+  <data name="TotpCodePlaceholder" xml:space="preserve"><value>123456</value></data>
+  <data name="TotpRecoveryHint" xml:space="preserve"><value>Lost your authenticator? Use a recovery code instead.</value></data>
+  <data name="TotpSetup" xml:space="preserve"><value>Two-factor authentication</value></data>
+  <data name="TotpEnable" xml:space="preserve"><value>Enable 2FA</value></data>
+  <data name="TotpDisable" xml:space="preserve"><value>Disable 2FA</value></data>
+  <data name="TotpEnabled" xml:space="preserve"><value>2FA is enabled</value></data>
+  <data name="TotpDisabled" xml:space="preserve"><value>2FA is disabled</value></data>
+  <data name="TotpManualKey" xml:space="preserve"><value>Or enter this key manually</value></data>
+  <data name="TotpVerifyCode" xml:space="preserve"><value>Enter the code from your authenticator to verify</value></data>
+  <data name="TotpRecoveryCodes" xml:space="preserve"><value>Recovery codes</value></data>
+  <data name="TotpRecoveryCodesHint" xml:space="preserve"><value>Save these codes in a safe place. Each can only be used once.</value></data>
+  <data name="Security" xml:space="preserve"><value>Security</value></data>
+  <data name="TwoFactorAuth" xml:space="preserve"><value>Two-Factor Authentication</value></data>
+  <data name="TotpNotEnabled" xml:space="preserve"><value>2FA is not enabled. Enable it to add an extra layer of security.</value></data>
+  <data name="Enable2FA" xml:space="preserve"><value>Enable 2FA</value></data>
+  <data name="Disable2FA" xml:space="preserve"><value>Disable 2FA</value></data>
+  <data name="TotpScanQR" xml:space="preserve"><value>Scan the QR code with your authenticator app, then enter the 6-digit code below.</value></data>
+  <data name="TotpSaveRecoveryCodes" xml:space="preserve"><value>Save these recovery codes in a safe place. Each can only be used once.</value></data>
+  <data name="TotpDisableHint" xml:space="preserve"><value>Enter your password to disable two-factor authentication.</value></data>
+  <data name="TotpEnabledSuccess" xml:space="preserve"><value>2FA enabled successfully</value></data>
+  <data name="TotpDisabledSuccess" xml:space="preserve"><value>2FA disabled</value></data>
+  <data name="TotpVerifyFailed" xml:space="preserve"><value>Invalid code. Please try again.</value></data>
+  <data name="TotpDisableFailed" xml:space="preserve"><value>Incorrect password</value></data>
+  <data name="Alerts" xml:space="preserve"><value>Alerts</value></data>
+  <data name="Dashboards" xml:space="preserve"><value>Dashboards</value></data>
+  <data name="Plugins" xml:space="preserve"><value>Plugins</value></data>
+  <data name="WidgetType" xml:space="preserve"><value>Widget Type</value></data>
+  <data name="IsDefault" xml:space="preserve"><value>Default</value></data>
+  <data name="AddWidget" xml:space="preserve"><value>Add Widget</value></data>
+  <data name="PluginName" xml:space="preserve"><value>Plugin Name</value></data>
+  <data name="Author" xml:space="preserve"><value>Author</value></data>
+  <data name="EntryPoint" xml:space="preserve"><value>Entry Point</value></data>
+  <data name="PluginType" xml:space="preserve"><value>Type</value></data>
+  <data name="Register" xml:space="preserve"><value>Register</value></data>
+  <data name="Unregister" xml:space="preserve"><value>Unregister</value></data>
+  <data name="AlertName" xml:space="preserve"><value>Alert Name</value></data>
+  <data name="RecentAlerts" xml:space="preserve"><value>Recent alerts</value></data>
+  <data name="MarkAllRead" xml:space="preserve"><value>Mark all read</value></data>
+  <data name="AlertRules" xml:space="preserve"><value>Alert rules</value></data>
+  <data name="TriggeredAt" xml:space="preserve"><value>Triggered at</value></data>
+  <data name="AlertMessage" xml:space="preserve"><value>Message</value></data>
+  <data name="Metric" xml:space="preserve"><value>Metric</value></data>
+  <data name="Threshold" xml:space="preserve"><value>Threshold</value></data>
+  <data name="SustainedSeconds" xml:space="preserve"><value>Duration (s)</value></data>
+  <data name="TestResults" xml:space="preserve"><value>Test Results</value></data>
+  <data name="Coverage" xml:space="preserve"><value>Coverage</value></data>
+  <data name="LastReleaseMetrics" xml:space="preserve"><value>Metrics · latest release</value></data>
+  <data name="LinesOfCode" xml:space="preserve"><value>Lines of code</value></data>
+  <data name="CoverageByFile" xml:space="preserve"><value>Coverage by file</value></data>
+  <data name="CoverageByAssembly" xml:space="preserve"><value>Coverage by assembly</value></data>
+  <data name="Assembly" xml:space="preserve"><value>Assembly</value></data>
+  <data name="File" xml:space="preserve"><value>File</value></data>
+  <data name="CodeQuality" xml:space="preserve"><value>Code quality</value></data>
+  <data name="AvgComplexity" xml:space="preserve"><value>Avg. complexity</value></data>
+  <data name="MaxComplexity" xml:space="preserve"><value>Max complexity</value></data>
+  <data name="Crap" xml:space="preserve"><value>CRAP</value></data>
+  <data name="ComplexityTrend" xml:space="preserve"><value>Complexity trend</value></data>
+  <data name="Quality" xml:space="preserve"><value>Quality</value></data>
+  <data name="QualityTrend" xml:space="preserve"><value>Quality trend</value></data>
+  <data name="CoverageTrend" xml:space="preserve"><value>Coverage trend</value></data>
+  <data name="TestTrend" xml:space="preserve"><value>Test results trend</value></data>
+  <data name="AvgCyclomatic" xml:space="preserve"><value>Avg. cyclomatic</value></data>
+  <data name="NoQualityData" xml:space="preserve"><value>No quality data yet</value></data>
+  <data name="NoQualityDataDescription" xml:space="preserve"><value>Run pipelines that publish coverage, test, or complexity results to see this project's quality trend.</value></data>
+  <data name="HighComplexity" xml:space="preserve"><value>High complexity</value></data>
+  <data name="Methods" xml:space="preserve"><value>Methods</value></data>
+  <data name="NoCoverageData" xml:space="preserve"><value>No coverage data available for this run.</value></data>
+  <data name="LineCoverage" xml:space="preserve"><value>Line Coverage</value></data>
+  <data name="BranchCoverage" xml:space="preserve"><value>Branch Coverage</value></data>
+  <data name="Passed" xml:space="preserve"><value>Passed</value></data>
+  <data name="Skipped" xml:space="preserve"><value>Skipped</value></data>
+  <data name="MatrixLeg" xml:space="preserve"><value>Matrix Leg</value></data>
+  <data name="Severity" xml:space="preserve"><value>Severity</value></data>
+  <data name="AlertUpdated" xml:space="preserve"><value>Alert updated successfully</value></data>
+  <data name="AlertCreated" xml:space="preserve"><value>Alert created successfully</value></data>
+  <data name="DashboardCreated" xml:space="preserve"><value>Dashboard created successfully</value></data>
+  <data name="DashboardUpdated" xml:space="preserve"><value>Dashboard updated successfully</value></data>
+  <data name="EditDashboard" xml:space="preserve"><value>Edit Dashboard</value></data>
+  <data name="DashboardName" xml:space="preserve"><value>Dashboard Name</value></data>
+  <data name="WidgetTitle" xml:space="preserve"><value>Widget Title</value></data>
+  <data name="WidgetDefaultName" xml:space="preserve"><value>Widget</value></data>
+  <data name="Column" xml:space="preserve"><value>Column</value></data>
+  <data name="Row" xml:space="preserve"><value>Row</value></data>
+  <data name="Width" xml:space="preserve"><value>Width</value></data>
+  <data name="Height" xml:space="preserve"><value>Height</value></data>
+  <data name="RemoveWidget" xml:space="preserve"><value>Remove Widget</value></data>
+  <data name="MoveUp" xml:space="preserve"><value>Move Up</value></data>
+  <data name="MoveDown" xml:space="preserve"><value>Move Down</value></data>
+  <data name="SaveDashboard" xml:space="preserve"><value>Save Dashboard</value></data>
+  <data name="Visible" xml:space="preserve"><value>Visible</value></data>
+  <data name="Widgets" xml:space="preserve"><value>Widgets</value></data>
+  <data name="BackToDashboards" xml:space="preserve"><value>Back to Dashboards</value></data>
+  <data name="HelpCenter" xml:space="preserve"><value>Help Center</value></data>
+  <data name="Help" xml:space="preserve"><value>Help</value></data>
+  <data name="SearchHelp" xml:space="preserve"><value>Search help topics...</value></data>
+  <data name="NoHelpResults" xml:space="preserve"><value>No help topics found.</value></data>
+  <data name="BackToHelp" xml:space="preserve"><value>Back to Help</value></data>
+  <data name="GoToPage" xml:space="preserve"><value>Go to Page</value></data>
+  <data name="AddAgent" xml:space="preserve"><value>Add Agent</value></data>
+  <data name="WizardPrevious" xml:space="preserve"><value>Previous</value></data>
+  <data name="WizardNext" xml:space="preserve"><value>Next</value></data>
+  <data name="WizardFinish" xml:space="preserve"><value>Finish</value></data>
+  <data name="WizardDone" xml:space="preserve"><value>Done</value></data>
+  <data name="WizardStepPlatform" xml:space="preserve"><value>Platform</value></data>
+  <data name="WizardStepToken" xml:space="preserve"><value>Token</value></data>
+  <data name="WizardStepCapabilities" xml:space="preserve"><value>Capabilities</value></data>
+  <data name="WizardCapabilitiesDescription" xml:space="preserve"><value>Choose which capabilities to enable on this agent.</value></data>
+  <data name="WizardStepInstall" xml:space="preserve"><value>Install</value></data>
+  <data name="WizardStepConfigure" xml:space="preserve"><value>Configure</value></data>
+  <data name="WizardStepSummary" xml:space="preserve"><value>Summary</value></data>
+  <data name="WizardStepVerify" xml:space="preserve"><value>Verify</value></data>
+  <data name="WizardPlatformDescription" xml:space="preserve"><value>Select the operating system where the agent will be installed.</value></data>
+  <data name="WizardTokenDescription" xml:space="preserve"><value>Generate a one-time registration token for the agent to authenticate with the server.</value></data>
+  <data name="WizardTokenExpiration" xml:space="preserve"><value>Expires in</value></data>
+  <data name="Hours" xml:space="preserve"><value>hours</value></data>
+  <data name="WizardTokenGenerated" xml:space="preserve"><value>Token generated successfully. Copy it before proceeding.</value></data>
+  <data name="WizardTokenFailed" xml:space="preserve"><value>Failed to generate token.</value></data>
+  <data name="WizardInstallDescription" xml:space="preserve"><value>Follow these steps to install the Aetheus agent on the target machine.</value></data>
+  <data name="WizardInstallLinuxStep1" xml:space="preserve"><value>1. Download the agent</value></data>
+  <data name="WizardInstallLinuxStep2" xml:space="preserve"><value>2. Extract and make executable</value></data>
+  <data name="WizardInstallLinuxStep3" xml:space="preserve"><value>3. Run the install script (prompts for token, URL and agent name)</value></data>
+  <data name="WizardConfigureLinuxAutomated" xml:space="preserve"><value>On Linux, the install script automatically creates the config file, registers the systemd service and starts the agent.</value></data>
+  <data name="WizardConfigureLinuxPromptToken" xml:space="preserve"><value>When prompted, paste this registration token: {0}</value></data>
+  <data name="WizardConfigurePromptTokenLabel" xml:space="preserve"><value>When prompted, paste this registration token:</value></data>
+  <data name="WizardConfigureVerifyLabel" xml:space="preserve"><value>Verify the agent is running:</value></data>
+  <data name="WizardConfigureWindowsAutomated" xml:space="preserve"><value>On Windows, the install script automatically creates the config file, registers the Windows service and starts the agent.</value></data>
+  <data name="WizardInstallWindowsStep1" xml:space="preserve"><value>1. Download the agent archive</value></data>
+  <data name="WizardInstallWindowsStep2" xml:space="preserve"><value>2. Extract to Program Files</value></data>
+  <data name="WizardInstallWindowsStep3" xml:space="preserve"><value>3. Run the install script (prompts for token, URL and agent name)</value></data>
+  <data name="WizardConfigureDescription" xml:space="preserve"><value>Configure the agent with the registration token and server URL.</value></data>
+  <data name="WizardConfigureEditFile" xml:space="preserve"><value>Edit the configuration file: {0}</value></data>
+  <data name="WizardConfigureStartService" xml:space="preserve"><value>Start the agent service</value></data>
+  <data name="WizardSummaryDescription" xml:space="preserve"><value>Review your configuration before verifying the connection.</value></data>
+  <data name="WizardSummaryPlatform" xml:space="preserve"><value>Platform:</value></data>
+  <data name="WizardSummaryToken" xml:space="preserve"><value>Token:</value></data>
+  <data name="WizardSummaryCommands" xml:space="preserve"><value>Commands</value></data>
+  <data name="WizardCopyAll" xml:space="preserve"><value>Copy All</value></data>
+  <data name="WizardVerifyDescription" xml:space="preserve"><value>Once the agent is started, it will automatically register with the server.</value></data>
+  <data name="WizardVerifyStep1" xml:space="preserve"><value>The agent will appear in the server list within a few seconds.</value></data>
+  <data name="WizardVerifyStep2" xml:space="preserve"><value>Check the server status - it should show as Online.</value></data>
+  <data name="WizardVerifyStep3" xml:space="preserve"><value>If the agent does not appear, check the agent logs for errors.</value></data>
+  <data name="WizardPolling" xml:space="preserve"><value>Looking for new agents...</value></data>
+  <data name="WizardPollingRemaining" xml:space="preserve"><value>{0}s remaining (max {1}s)</value></data>
+  <data name="WizardVerifyTimeout" xml:space="preserve"><value>No agent detected within the maximum wait window. Verify the service is running and try again.</value></data>
+  <data name="WizardHubError" xml:space="preserve"><value>Real-time connection unavailable. Agent detection via polling is still active - this may take a few extra seconds.</value></data>
+  <data name="WizardAgentDetected" xml:space="preserve"><value>Agent detected: {0}</value></data>
+  <data name="ViewServer" xml:space="preserve"><value>View Server</value></data>
+  <data name="WizardCheckConnection" xml:space="preserve"><value>Check Connection</value></data>
+  <data name="WizardCancelCheck" xml:space="preserve"><value>Cancel</value></data>
+  <data name="WizardDownloadLinux" xml:space="preserve"><value>Download Linux Agent</value></data>
+  <data name="WizardDownloadWindows" xml:space="preserve"><value>Download Windows Agent</value></data>
+  <data name="WizardCopyInstallerLink" xml:space="preserve"><value>Copy install link</value></data>
+  <data name="WizardInstallerLinkCopied" xml:space="preserve"><value>Link copied</value></data>
+  <data name="WizardInstallerLinkHint" xml:space="preserve"><value>Share this link with the operator (Admin only): the endpoint returns a one-shot bash / PowerShell script pre-filled with the registration token.</value></data>
+  <data name="ServerOfflineToastTitle" xml:space="preserve"><value>Server offline</value></data>
+  <data name="ServerOfflineToastMessage" xml:space="preserve"><value>Server '{0}' has been marked offline (no heartbeat).</value></data>
+  <data name="Linux" xml:space="preserve"><value>Linux</value></data>
+  <data name="Windows" xml:space="preserve"><value>Windows</value></data>
+  <data name="Agent" xml:space="preserve"><value>Agent</value></data>
+  <data name="DeleteConfirm" xml:space="preserve"><value>Are you sure you want to delete?</value></data>
+  <data name="Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="LastTriggered" xml:space="preserve"><value>Last Triggered</value></data>
+  <data name="Service" xml:space="preserve"><value>Service</value></data>
+  <data name="Size" xml:space="preserve"><value>Size</value></data>
+  <data name="ID" xml:space="preserve"><value>ID</value></data>
+  <data name="Task" xml:space="preserve"><value>Task</value></data>
+  <data name="YAML" xml:space="preserve"><value>YAML</value></data>
+  <data name="Administration" xml:space="preserve"><value>Administration</value></data>
+  <data name="ManageDashboards" xml:space="preserve"><value>Manage Dashboards</value></data>
+  <data name="Profile" xml:space="preserve"><value>Profile</value></data>
+  <data name="NotificationPreferences" xml:space="preserve"><value>Notification Preferences</value></data>
+  <data name="Appearance" xml:space="preserve"><value>Appearance</value></data>
+  <data name="UserManagement" xml:space="preserve"><value>User Management</value></data>
+  <data name="PlatformSettings" xml:space="preserve"><value>Platform Settings</value></data>
+  <data name="SecurityTokens" xml:space="preserve"><value>Security &amp; Tokens</value></data>
+  <data name="Templates" xml:space="preserve"><value>Templates</value></data>
+  <data name="DisplayName" xml:space="preserve"><value>Display Name</value></data>
+  <data name="Theme" xml:space="preserve"><value>Theme</value></data>
+  <data name="ServerNotFound" xml:space="preserve"><value>Server not found</value></data>
+  <data name="BackToServers" xml:space="preserve"><value>Back to servers</value></data>
+  <data name="RoleAdminDescription" xml:space="preserve"><value>Full access</value></data>
+  <data name="RoleReaderDescription" xml:space="preserve"><value>Read access to all resources</value></data>
+  <data name="RoleContributorDescription" xml:space="preserve"><value>Read and write access to all resources</value></data>
+  <data name="NewDashboardNamePrompt" xml:space="preserve"><value>Enter a name for the new dashboard:</value></data>
+  <data name="Validation_Required" xml:space="preserve"><value>The {0} field is required.</value></data>
+  <data name="Validation_MaxLength" xml:space="preserve"><value>The field {0} must have a maximum length of {1} characters.</value></data>
+  <data name="Validation_StringLength" xml:space="preserve"><value>The field {0} must be between {1} and {2} characters.</value></data>
+  <data name="Validation_Range" xml:space="preserve"><value>The field {0} must be between {1} and {2}.</value></data>
+  <data name="Validation_Email" xml:space="preserve"><value>The {0} field is not a valid email address.</value></data>
+  <data name="Validation_Url" xml:space="preserve"><value>The {0} field is not a valid URL.</value></data>
+  <data name="Validation_Compare" xml:space="preserve"><value>{0} and {1} do not match.</value></data>
+  <data name="ThemeDark" xml:space="preserve"><value>Dark</value></data>
+  <data name="ThemeLight" xml:space="preserve"><value>Light</value></data>
+  <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
+  <data name="LanguageFrench" xml:space="preserve"><value>French</value></data>
+  <data name="EmailNotifications" xml:space="preserve"><value>Email Notifications</value></data>
+  <data name="PipelineAlerts" xml:space="preserve"><value>Pipeline Alerts</value></data>
+  <data name="ServerAlerts" xml:space="preserve"><value>Server Alerts</value></data>
+  <data name="ProfileSaveNotImplemented" xml:space="preserve"><value>Profile save is not yet available</value></data>
+  <data name="PreferencesSaved" xml:space="preserve"><value>Preferences saved</value></data>
+  <data name="ProfileSaved" xml:space="preserve"><value>Profile saved</value></data>
+  <data name="AppearanceSaved" xml:space="preserve"><value>Appearance saved</value></data>
+  <data name="Apache" xml:space="preserve"><value>Apache</value></data>
+  <data name="StopApache" xml:space="preserve"><value>Stop Apache</value></data>
+  <data name="ConfirmStopApache" xml:space="preserve"><value>Are you sure you want to stop Apache?</value></data>
+  <data name="TestConfig" xml:space="preserve"><value>Test Config</value></data>
+  <data name="Reload" xml:space="preserve"><value>Reload</value></data>
+  <data name="Cron" xml:space="preserve"><value>Cron</value></data>
+  <data name="CronJobs" xml:space="preserve"><value>Cron jobs</value></data>
+  <data name="NextRun" xml:space="preserve"><value>Next run</value></data>
+  <data name="CronNonRootHint" xml:space="preserve"><value>A non-root user is required (root cron jobs are rejected).</value></data>
+  <data name="CronJobCount" xml:space="preserve"><value>{0} job(s)</value></data>
+  <data name="CronJobInvalid" xml:space="preserve"><value>Schedule and command are required.</value></data>
+  <data name="FilterCronJobs" xml:space="preserve"><value>Filter cron jobs...</value></data>
+  <data name="NewCronJob" xml:space="preserve"><value>New cron job</value></data>
+  <data name="EditCronJob" xml:space="preserve"><value>Edit cron job</value></data>
+  <data name="DeleteCronJob" xml:space="preserve"><value>Delete cron job</value></data>
+  <data name="ConfirmDeleteCronJob" xml:space="preserve"><value>Delete cron job "{0}"?</value></data>
+  <data name="Schedule" xml:space="preserve"><value>Schedule</value></data>
+  <data name="Command" xml:space="preserve"><value>Command</value></data>
+  <data name="VirtualHosts" xml:space="preserve"><value>Virtual Hosts</value></data>
+  <data name="FilterVirtualHosts" xml:space="preserve"><value>Filter virtual hosts...</value></data>
+  <data name="Sites" xml:space="preserve"><value>Sites</value></data>
+  <data name="SitesAvailable" xml:space="preserve"><value>Sites available</value></data>
+  <data name="SitesEnabled" xml:space="preserve"><value>Sites enabled</value></data>
+  <data name="SitesDisabled" xml:space="preserve"><value>Sites disabled</value></data>
+  <data name="FilterSites" xml:space="preserve"><value>Filter sites...</value></data>
+  <data name="ApacheCollectionDegraded" xml:space="preserve"><value>Apache data may be incomplete</value></data>
+  <data name="ApacheCollectionDegradedHint" xml:space="preserve"><value>The agent could not fully read the Apache configuration, so the sites and modules below may be empty or out of date - they are not a reliable picture of the server.</value></data>
+  <data name="ServerName" xml:space="preserve"><value>Server Name</value></data>
+  <data name="DocumentRoot" xml:space="preserve"><value>Document Root</value></data>
+  <data name="EditConfig" xml:space="preserve"><value>Edit Config</value></data>
+  <data name="LoadingConfig" xml:space="preserve"><value>Loading configuration...</value></data>
+  <data name="Modules" xml:space="preserve"><value>Modules</value></data>
+  <data name="FilterModules" xml:space="preserve"><value>Filter modules...</value></data>
+  <data name="DisableModule" xml:space="preserve"><value>Disable Module</value></data>
+  <data name="ConfirmDisableModule" xml:space="preserve"><value>Are you sure you want to disable module {0}?</value></data>
+  <data name="FetchLogs" xml:space="preserve"><value>Fetch Logs</value></data>
+  <data name="FollowLogs" xml:space="preserve"><value>Follow</value></data>
+  <data name="StopFollow" xml:space="preserve"><value>Stop</value></data>
+  <data name="CancelRun" xml:space="preserve"><value>Cancel run</value></data>
+  <data name="CancelRunConfirm" xml:space="preserve"><value>Cancel this run? Its running steps will be stopped.</value></data>
+  <data name="RunCancelled" xml:space="preserve"><value>Run cancelled</value></data>
+  <data name="RunCancelledDetail" xml:space="preserve"><value>The run was cancelled and its running steps stopped.</value></data>
+  <data name="ScrollToTop" xml:space="preserve"><value>Jump to top</value></data>
+  <data name="ScrollToBottom" xml:space="preserve"><value>Jump to bottom</value></data>
+  <data name="ConfirmServiceAction" xml:space="preserve"><value>Are you sure you want to {0} the service "{1}"?</value></data>
+  <data name="ConfirmBulkServiceAction" xml:space="preserve"><value>Apply "{0}" to {1} selected service(s)?</value></data>
+  <data name="ServicesSelected" xml:space="preserve"><value>{0} selected</value></data>
+  <data name="SelectAll" xml:space="preserve"><value>Select all</value></data>
+  <data name="ClearSelection" xml:space="preserve"><value>Clear selection</value></data>
+  <data name="BulkServiceQueued" xml:space="preserve"><value>{0}/{1} task(s) queued</value></data>
+  <data name="ConfirmInstallService" xml:space="preserve"><value>Install the service "{0}" on this server?</value></data>
+  <data name="ConfirmStartAfterInstall" xml:space="preserve"><value>"{0}" was installed but is not running yet. Start it now?</value></data>
+  <data name="ServiceInstalledTitle" xml:space="preserve"><value>Service installed</value></data>
+  <data name="Later" xml:space="preserve"><value>Later</value></data>
+  <data name="ServiceInstallCapabilityDisabled" xml:space="preserve"><value>Package management is not enabled on this agent, so services cannot be installed or uninstalled. Re-run the agent installer with the server-management module (or --enable-package-manage) to grant the capability; it activates automatically on the next heartbeat.</value></data>
+  <data name="ServiceNotAptInstallable" xml:space="preserve"><value>Managed through its own module, not installable via apt.</value></data>
+  <data name="TeamspeakSetupCapabilityDisabled" xml:space="preserve"><value>TeamSpeak install is not enabled on this agent. Re-run the agent installer with the server-management module (or --enable-teamspeak-setup) to deploy the root-owned setup helper; it activates automatically on the next heartbeat.</value></data>
+  <data name="ConfirmUninstallService" xml:space="preserve"><value>Uninstall the service "{0}" from this server?</value></data>
+  <data name="Uninstall" xml:space="preserve"><value>Uninstall</value></data>
+  <data name="InstalledServices" xml:space="preserve"><value>Installed</value></data>
+  <data name="AvailableServices" xml:space="preserve"><value>Available</value></data>
+  <data name="AllServicesInstalled" xml:space="preserve"><value>All manageable services are installed.</value></data>
+  <data name="TaskQueued" xml:space="preserve"><value>Task queued.</value></data>
+  <data name="TaskAgentOffline" xml:space="preserve"><value>Agent offline</value></data>
+  <data name="TaskAgentOfflineHint" xml:space="preserve"><value>The target server's agent is offline, so this task cannot run. It will time out after 30 minutes unless the agent reconnects.</value></data>
+  <data name="AgentOfflineActionBlocked" xml:space="preserve"><value>The server's agent is offline, so this action cannot be queued. Reconnect the agent and try again.</value></data>
+  <data name="TaskSucceeded" xml:space="preserve"><value>Task completed.</value></data>
+  <data name="TaskFailed" xml:space="preserve"><value>Task failed.</value></data>
+  <data name="ActionFailed" xml:space="preserve"><value>Action failed.</value></data>
+  <data name="ConfigSaved" xml:space="preserve"><value>Configuration saved.</value></data>
+  <data name="Lines" xml:space="preserve"><value>Lines</value></data>
+  <data name="Uncovered" xml:space="preserve"><value>Uncovered</value></data>
+  <data name="Stopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="Start" xml:space="preserve"><value>Start</value></data>
+  <data name="Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Restart" xml:space="preserve"><value>Restart</value></data>
+  <data name="Enable" xml:space="preserve"><value>Enable</value></data>
+  <data name="Disable" xml:space="preserve"><value>Disable</value></data>
+  <data name="Port" xml:space="preserve"><value>Port</value></data>
+  <data name="Module" xml:space="preserve"><value>Module</value></data>
+  <data name="Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Applications" xml:space="preserve"><value>Applications</value></data>
+  <data name="Source" xml:space="preserve"><value>Source</value></data>
+  <data name="LoadMore" xml:space="preserve"><value>Load more</value></data>
+  <data name="Loading" xml:space="preserve"><value>Loading…</value></data>
+  <data name="LogsShownCount" xml:space="preserve"><value>{0} of {1} entries shown</value></data>
+  <data name="Time" xml:space="preserve"><value>Time</value></data>
+  <data name="Level" xml:space="preserve"><value>Level</value></data>
+  <data name="Message" xml:space="preserve"><value>Message</value></data>
+  <data name="Libraries" xml:space="preserve"><value>Libraries</value></data>
+  <data name="RecentPipelines" xml:space="preserve"><value>Recent pipelines</value></data>
+  <data name="NoRecentPipelines" xml:space="preserve"><value>No recent pipelines.</value></data>
+  <data name="RecentCommits" xml:space="preserve"><value>Recent commits</value></data>
+  <data name="NoRecentCommits" xml:space="preserve"><value>No recent commits.</value></data>
+  <data name="Certbot" xml:space="preserve"><value>Certbot</value></data>
+  <data name="Certificates" xml:space="preserve"><value>Certificates</value></data>
+  <data name="CertificateCount" xml:space="preserve"><value>{0} certificate(s)</value></data>
+  <data name="CertName" xml:space="preserve"><value>Certificate Name</value></data>
+  <data name="Domains" xml:space="preserve"><value>Domains</value></data>
+  <data name="Expiry" xml:space="preserve"><value>Expiry</value></data>
+  <data name="ExpiringSoon" xml:space="preserve"><value>Expiring Soon</value></data>
+  <data name="Renew" xml:space="preserve"><value>Renew</value></data>
+  <data name="RenewAll" xml:space="preserve"><value>Renew All</value></data>
+  <data name="RenewAllCerts" xml:space="preserve"><value>Renew All Certificates</value></data>
+  <data name="ConfirmRenewAllCerts" xml:space="preserve"><value>Are you sure you want to renew all certificates?</value></data>
+  <data name="RevokeCert" xml:space="preserve"><value>Revoke Certificate</value></data>
+  <data name="ConfirmRevokeCert" xml:space="preserve"><value>Are you sure you want to revoke and delete certificate {0}?</value></data>
+  <data name="NewCertificate" xml:space="preserve"><value>New Certificate</value></data>
+  <data name="UseWebroot" xml:space="preserve"><value>Use Webroot</value></data>
+  <data name="WebrootPath" xml:space="preserve"><value>Webroot Path</value></data>
+  <data name="FilterCertificates" xml:space="preserve"><value>Filter certificates...</value></data>
+  <data name="NotInstalled" xml:space="preserve"><value>Not Installed</value></data>
+  <data name="Installed" xml:space="preserve"><value>Installed</value></data>
+  <data name="Relations" xml:space="preserve"><value>Relations</value></data>
+  <data name="AutoDetect" xml:space="preserve"><value>Auto-Detect</value></data>
+  <data name="AutoDetectComplete" xml:space="preserve"><value>Auto-detection completed.</value></data>
+  <data name="AddLink" xml:space="preserve"><value>Add Link</value></data>
+  <data name="LinkCreated" xml:space="preserve"><value>Link created.</value></data>
+  <data name="LinkDeleted" xml:space="preserve"><value>Link deleted.</value></data>
+  <data name="TargetType" xml:space="preserve"><value>Target Type</value></data>
+  <data name="TargetIdentifier" xml:space="preserve"><value>Target Identifier</value></data>
+  <data name="SourceResource" xml:space="preserve"><value>Source Resource</value></data>
+  <data name="ResourceName" xml:space="preserve"><value>Resource name</value></data>
+  <data name="Resource" xml:space="preserve"><value>Resource</value></data>
+  <data name="Auto" xml:space="preserve"><value>Auto</value></data>
+  <data name="Manual" xml:space="preserve"><value>Manual</value></data>
+  <data name="LoadFailed" xml:space="preserve"><value>Failed to load data.</value></data>
+  <data name="Git" xml:space="preserve"><value>Git</value></data>
+  <data name="ComingSoon" xml:space="preserve"><value>Coming soon</value></data>
+  <data name="DarkMode" xml:space="preserve"><value>Dark mode</value></data>
+  <data name="LightMode" xml:space="preserve"><value>Light mode</value></data>
+  <data name="Role" xml:space="preserve"><value>Role</value></data>
+  <data name="GitRepositories" xml:space="preserve"><value>Git Repositories</value></data>
+  <data name="GitRepository" xml:space="preserve"><value>Git Repository</value></data>
+  <data name="NewRepository" xml:space="preserve"><value>New</value></data>
+  <data name="SelectProjectToViewRepos" xml:space="preserve"><value>Select a project to view its repositories.</value></data>
+  <data name="NoRepositoriesFound" xml:space="preserve"><value>No repositories found.</value></data>
+  <data name="CloneUrl" xml:space="preserve"><value>Clone URL</value></data>
+  <data name="Empty" xml:space="preserve"><value>Empty</value></data>
+  <data name="LastPush" xml:space="preserve"><value>Last Push</value></data>
+  <data name="Commits" xml:space="preserve"><value>Commits</value></data>
+  <data name="Commit" xml:space="preserve"><value>Commit</value></data>
+  <data name="CommitDetails" xml:space="preserve"><value>Commit details</value></data>
+  <data name="Parents" xml:space="preserve"><value>Parents</value></data>
+  <data name="FilesChanged" xml:space="preserve"><value>Files changed</value></data>
+  <data name="Additions" xml:space="preserve"><value>Additions</value></data>
+  <data name="Deletions" xml:space="preserve"><value>Deletions</value></data>
+  <data name="NoFileChanges" xml:space="preserve"><value>No file changes in this commit.</value></data>
+  <data name="Lint" xml:space="preserve"><value>Lint</value></data>
+  <data name="LintTool" xml:space="preserve"><value>Tool</value></data>
+  <data name="LintErrors" xml:space="preserve"><value>errors</value></data>
+  <data name="LintWarnings" xml:space="preserve"><value>warnings</value></data>
+  <data name="LintInfo" xml:space="preserve"><value>info</value></data>
+  <data name="Sha" xml:space="preserve"><value>SHA</value></data>
+  <data name="CommittedAt" xml:space="preserve"><value>Committed at</value></data>
+  <data name="OpenInRepository" xml:space="preserve"><value>Open in repository</value></data>
+  <data name="CommitNotFound" xml:space="preserve"><value>Commit not found.</value></data>
+  <data name="BranchNotFound" xml:space="preserve"><value>Branch not found.</value></data>
+  <data name="NoLinkedItems" xml:space="preserve"><value>No linked items.</value></data>
+  <data name="NoCommitsFound" xml:space="preserve"><value>No commits found.</value></data>
+  <data name="Branches" xml:space="preserve"><value>Branches</value></data>
+  <data name="NewBranch" xml:space="preserve"><value>New Branch</value></data>
+  <data name="BranchName" xml:space="preserve"><value>Branch Name</value></data>
+  <data name="StartFrom" xml:space="preserve"><value>Start From</value></data>
+  <data name="NoBranchesFound" xml:space="preserve"><value>No branches found.</value></data>
+  <data name="LastCommit" xml:space="preserve"><value>Last Commit</value></data>
+  <data name="Default" xml:space="preserve"><value>Default</value></data>
+  <data name="NewTag" xml:space="preserve"><value>New Tag</value></data>
+  <data name="TagName" xml:space="preserve"><value>Tag Name</value></data>
+  <data name="PointsTo" xml:space="preserve"><value>Points To</value></data>
+  <data name="NoTagsFound" xml:space="preserve"><value>No tags found.</value></data>
+  <data name="Files" xml:space="preserve"><value>Files</value></data>
+  <data name="NoFilesFound" xml:space="preserve"><value>No files found.</value></data>
+  <data name="BinaryFile" xml:space="preserve"><value>Binary file - cannot display content.</value></data>
+  <data name="PullRequests" xml:space="preserve"><value>Pull Requests</value></data>
+  <data name="NewPullRequest" xml:space="preserve"><value>New Pull Request</value></data>
+  <data name="NoPullRequestsFound" xml:space="preserve"><value>No pull requests found.</value></data>
+  <data name="SourceBranch" xml:space="preserve"><value>Source Branch</value></data>
+  <data name="PipelineParents" xml:space="preserve"><value>Pipelines that trigger other pipelines</value></data>
+  <data name="PipelineReferences" xml:space="preserve"><value>Referenced pipelines</value></data>
+  <data name="Unknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="RkhunterStatusClean" xml:space="preserve"><value>Clean</value></data>
+  <data name="RkhunterStatusUnknown" xml:space="preserve"><value>Unknown status ({0})</value></data>
+  <data name="PipelineLeaves" xml:space="preserve"><value>Pipelines without child pipeline</value></data>
+  <data name="TargetBranch" xml:space="preserve"><value>Target Branch</value></data>
+  <data name="MergeConfirm" xml:space="preserve"><value>Are you sure you want to merge PR #{0}?</value></data>
+  <data name="CloseConfirm" xml:space="preserve"><value>Are you sure you want to close PR #{0}?</value></data>
+  <data name="Merge" xml:space="preserve"><value>Merge</value></data>
+  <data name="Merged" xml:space="preserve"><value>Merged</value></data>
+  <data name="Closed" xml:space="preserve"><value>Closed</value></data>
+  <data name="SelectProject" xml:space="preserve"><value>Select a project</value></data>
+  <data name="Enum_PullRequestStatus_Open" xml:space="preserve"><value>Open</value></data>
+  <data name="Enum_PullRequestStatus_Merged" xml:space="preserve"><value>Merged</value></data>
+  <data name="Enum_PullRequestStatus_Closed" xml:space="preserve"><value>Closed</value></data>
+  <data name="Enum_PullRequestStatus_Draft" xml:space="preserve"><value>Draft</value></data>
+  <data name="BranchProtection" xml:space="preserve"><value>Branch Protection</value></data>
+  <data name="AddRule" xml:space="preserve"><value>Add Rule</value></data>
+  <data name="NoRulesFound" xml:space="preserve"><value>No protection rules found.</value></data>
+  <data name="PreventDeletion" xml:space="preserve"><value>Prevent Deletion</value></data>
+  <data name="PreventForcePush" xml:space="preserve"><value>Prevent Force Push</value></data>
+  <data name="RequirePR" xml:space="preserve"><value>Require PR</value></data>
+  <data name="Pattern" xml:space="preserve"><value>Pattern</value></data>
+  <data name="Graph" xml:space="preserve"><value>Graph</value></data>
+  <data name="SearchCommits" xml:space="preserve"><value>Search commits...</value></data>
+  <data name="Blame" xml:space="preserve"><value>Blame</value></data>
+  <data name="Code" xml:space="preserve"><value>Code</value></data>
+  <data name="Protected" xml:space="preserve"><value>Protected</value></data>
+  <data name="RBACManagement" xml:space="preserve"><value>Roles &amp; Permissions</value></data>
+  <data name="NewRole" xml:space="preserve"><value>New Role</value></data>
+  <data name="ConfirmDeleteRole" xml:space="preserve"><value>Delete role "{0}"?</value></data>
+  <data name="PermissionMatrix" xml:space="preserve"><value>Permission Matrix</value></data>
+  <data name="ResourceType" xml:space="preserve"><value>Resource Type</value></data>
+  <data name="Read" xml:space="preserve"><value>Read</value></data>
+  <data name="Write" xml:space="preserve"><value>Write</value></data>
+  <data name="SavePermissions" xml:space="preserve"><value>Save Permissions</value></data>
+  <data name="PermissionsSaved" xml:space="preserve"><value>Permissions saved</value></data>
+  <data name="InsufficientPermissions" xml:space="preserve"><value>Insufficient permissions</value></data>
+  <data name="CloneRole" xml:space="preserve"><value>Clone Role</value></data>
+  <data name="CloneRoleConfirm" xml:space="preserve"><value>Clone role '{0}'?</value></data>
+  <data name="RoleCloned" xml:space="preserve"><value>Role cloned</value></data>
+  <data name="AuditTrail" xml:space="preserve"><value>Audit Trail</value></data>
+  <data name="NoAuditLogs" xml:space="preserve"><value>No audit logs found</value></data>
+  <data name="BulkPermissions" xml:space="preserve"><value>Bulk Permissions</value></data>
+  <data name="ApplyBulkPermissions" xml:space="preserve"><value>Apply Bulk Permissions</value></data>
+  <data name="BulkPermissionsApplied" xml:space="preserve"><value>Bulk permissions applied</value></data>
+  <data name="SelectResourceTypes" xml:space="preserve"><value>Select resource types</value></data>
+  <data name="PermissionLevel" xml:space="preserve"><value>Permission level</value></data>
+  <data name="EffectivePermissions" xml:space="preserve"><value>Effective Permissions</value></data>
+  <data name="NoPermissionsAssigned" xml:space="preserve"><value>No permissions assigned</value></data>
+  <data name="GrantedByRole" xml:space="preserve"><value>Granted by</value></data>
+  <data name="AgentPool" xml:space="preserve"><value>Agent Pool</value></data>
+  <data name="ServiceConnection" xml:space="preserve"><value>Service Connection</value></data>
+  <data name="ServiceConnections" xml:space="preserve"><value>Service Connections</value></data>
+  <data name="ConnectionStatus" xml:space="preserve"><value>Status</value></data>
+  <data name="TestConnection" xml:space="preserve"><value>Test</value></data>
+  <data name="Url" xml:space="preserve"><value>URL</value></data>
+  <data name="Credentials" xml:space="preserve"><value>Credentials (JSON)</value></data>
+  <data name="ServiceConnectionCredentialsHint" xml:space="preserve"><value>JSON object, e.g. {"token":"..."} for GitHub/GitLab, or {"username":"...","password":"..."} for a registry. Encrypted at rest.</value></data>
+  <data name="NoServiceConnections" xml:space="preserve"><value>No service connections</value></data>
+  <data name="NoServiceConnectionsDescription" xml:space="preserve"><value>Add a connection to let pipelines authenticate against GitHub, GitLab, or a container registry.</value></data>
+  <data name="DeleteServiceConnectionConfirm" xml:space="preserve"><value>Delete the service connection "{0}"?</value></data>
+  <data name="ServiceConnectionNotFound" xml:space="preserve"><value>Connection not found (it may have been deleted).</value></data>
+  <data name="ServiceConnectionTestFailed" xml:space="preserve"><value>The test could not be completed.</value></data>
+  <data name="NotificationChannelTestFailed" xml:space="preserve"><value>The channel test could not be completed.</value></data>
+  <data name="Enum_ServiceConnectionTestStatus_Valid" xml:space="preserve"><value>Valid</value></data>
+  <data name="Enum_ServiceConnectionTestStatus_Invalid" xml:space="preserve"><value>Invalid</value></data>
+  <data name="Enum_ServiceConnectionTestStatus_Unsupported" xml:space="preserve"><value>Not testable</value></data>
+  <data name="Enum_ServiceConnectionTestStatus_Error" xml:space="preserve"><value>Error</value></data>
+  <data name="Admin" xml:space="preserve"><value>Admin</value></data>
+  <data name="InvalidRequest" xml:space="preserve"><value>Invalid request.</value></data>
+  <data name="AccessDenied" xml:space="preserve"><value>Access denied.</value></data>
+  <data name="ResourceNotFound" xml:space="preserve"><value>Resource not found.</value></data>
+  <data name="ConflictingOperation" xml:space="preserve"><value>Conflicting operation.</value></data>
+  <data name="UnexpectedServerError" xml:space="preserve"><value>An unexpected server error occurred.</value></data>
+  <data name="RequestFailed" xml:space="preserve"><value>Request failed ({0}).</value></data>
+  <data name="Mail" xml:space="preserve"><value>Mail</value></data>
+  <data name="MailQueueCount" xml:space="preserve"><value>{0} in queue</value></data>
+  <data name="MailSetup" xml:space="preserve"><value>Mail Setup</value></data>
+  <data name="MailSetupCapabilityRequired" xml:space="preserve"><value>Mail setup is not enabled on this server. Re-run the agent installer with the mail-setup capability (--enable-mail-setup).</value></data>
+  <data name="MailInstalledNotConfigured" xml:space="preserve"><value>Postfix/Dovecot are installed but the mail stack is not configured (no domain). Run Setup to provision virtual mailboxes, Dovecot authentication, and DKIM.</value></data>
+  <data name="MailDomains" xml:space="preserve"><value>Domains</value></data>
+  <data name="MailAccounts" xml:space="preserve"><value>Accounts</value></data>
+  <data name="MailQueue" xml:space="preserve"><value>Queue</value></data>
+  <data name="AddDomain" xml:space="preserve"><value>Add Domain</value></data>
+  <data name="DomainName" xml:space="preserve"><value>Domain Name</value></data>
+  <data name="DeleteDomain" xml:space="preserve"><value>Delete Domain</value></data>
+  <data name="ConfirmDeleteMailDomain" xml:space="preserve"><value>Are you sure you want to delete domain {0} and all its accounts?</value></data>
+  <data name="AddAccount" xml:space="preserve"><value>Add Account</value></data>
+  <data name="DeleteAccount" xml:space="preserve"><value>Delete Account</value></data>
+  <data name="ConfirmDeleteMailAccount" xml:space="preserve"><value>Are you sure you want to delete mail account {0}?</value></data>
+  <data name="ViewQueue" xml:space="preserve"><value>View Queue</value></data>
+  <data name="FlushQueue" xml:space="preserve"><value>Flush Queue</value></data>
+  <data name="ConfirmFlushQueue" xml:space="preserve"><value>Are you sure you want to flush the mail queue?</value></data>
+  <data name="SelectLogType" xml:space="preserve"><value>Log type</value></data>
+  <data name="DnsRecords" xml:space="preserve"><value>DNS Records</value></data>
+  <data name="AdminEmail" xml:space="preserve"><value>Admin Email</value></data>
+  <data name="AdminPassword" xml:space="preserve"><value>Admin Password</value></data>
+  <data name="Install" xml:space="preserve"><value>Install</value></data>
+  <data name="NoMailDomains" xml:space="preserve"><value>No mail domains configured</value></data>
+  <data name="AddDomainHint" xml:space="preserve"><value>Add a domain to start managing mail</value></data>
+  <data name="MailSetupSummary" xml:space="preserve"><value>Summary</value></data>
+  <data name="Previous" xml:space="preserve"><value>Previous</value></data>
+  <data name="PreviousRunDuration" xml:space="preserve"><value>Previous: {0}</value></data>
+  <data name="Next" xml:space="preserve"><value>Next</value></data>
+  <data name="Sender" xml:space="preserve"><value>Sender</value></data>
+  <data name="Recipient" xml:space="preserve"><value>Recipient</value></data>
+  <data name="InvalidDomainName" xml:space="preserve"><value>Invalid domain name format</value></data>
+  <data name="InvalidEmail" xml:space="preserve"><value>Invalid email address format</value></data>
+  <data name="Aliases" xml:space="preserve"><value>Aliases</value></data>
+  <data name="AddAlias" xml:space="preserve"><value>Add Alias</value></data>
+  <data name="NoMailAliases" xml:space="preserve"><value>No mail aliases configured</value></data>
+  <data name="Destination" xml:space="preserve"><value>Destination</value></data>
+  <data name="DeleteAlias" xml:space="preserve"><value>Delete Alias</value></data>
+  <data name="ConfirmDeleteAlias" xml:space="preserve"><value>Are you sure you want to delete this alias?</value></data>
+  <data name="AliasCreated" xml:space="preserve"><value>Alias created successfully</value></data>
+  <data name="AliasDeleted" xml:space="preserve"><value>Alias deleted successfully</value></data>
+  <data name="SelectDomain" xml:space="preserve"><value>Select a domain</value></data>
+  <data name="RotateDkimKey" xml:space="preserve"><value>Rotate DKIM Key</value></data>
+  <data name="DkimRotationWarning" xml:space="preserve"><value>Rotating the DKIM key will require updating your DNS records. Email signing will use the new key after rotation.</value></data>
+  <data name="CurrentSelector" xml:space="preserve"><value>Current Selector</value></data>
+  <data name="NewSelector" xml:space="preserve"><value>New Selector</value></data>
+  <data name="Rotate" xml:space="preserve"><value>Rotate</value></data>
+  <data name="DkimKeyRotated" xml:space="preserve"><value>DKIM key rotation initiated</value></data>
+  <data name="Channels" xml:space="preserve"><value>Channels</value></data>
+  <data name="Clients" xml:space="preserve"><value>Clients</value></data>
+  <data name="Nickname" xml:space="preserve"><value>Nickname</value></data>
+  <data name="Uptime" xml:space="preserve"><value>Uptime</value></data>
+  <data name="OnlineClients" xml:space="preserve"><value>clients</value></data>
+  <data name="Kick" xml:space="preserve"><value>Kick</value></data>
+  <data name="Ban" xml:space="preserve"><value>Ban</value></data>
+  <data name="Bans" xml:space="preserve"><value>Bans</value></data>
+  <data name="Platform" xml:space="preserve"><value>Platform</value></data>
+  <data name="Send" xml:space="preserve"><value>Send</value></data>
+  <data name="VoicePort" xml:space="preserve"><value>Voice Port</value></data>
+  <data name="QueryPort" xml:space="preserve"><value>Query Port</value></data>
+  <data name="InstallPath" xml:space="preserve"><value>Install Path</value></data>
+  <data name="WelcomeMessage" xml:space="preserve"><value>Welcome Message</value></data>
+  <data name="Permanent" xml:space="preserve"><value>Permanent</value></data>
+  <data name="Postfix" xml:space="preserve"><value>Postfix</value></data>
+  <data name="Dovecot" xml:space="preserve"><value>Dovecot</value></data>
+  <data name="TeamSpeak" xml:space="preserve"><value>TeamSpeak</value></data>
+  <data name="PortSentry" xml:space="preserve"><value>PortSentry</value></data>
+  <data name="Perm" xml:space="preserve"><value>Perm</value></data>
+  <data name="None" xml:space="preserve"><value>None</value></data>
+  <data name="LoadLogs" xml:space="preserve"><value>Load Logs</value></data>
+  <data name="RefreshBans" xml:space="preserve"><value>Refresh Bans</value></data>
+  <data name="Flags" xml:space="preserve"><value>Flags</value></data>
+  <data name="SendMessage" xml:space="preserve"><value>Send Message</value></data>
+  <data name="GlobalMessage" xml:space="preserve"><value>Global Message</value></data>
+  <data name="TeamspeakSetup" xml:space="preserve"><value>TeamSpeak Setup</value></data>
+  <data name="CreateChannel" xml:space="preserve"><value>Create Channel</value></data>
+  <data name="EditChannel" xml:space="preserve"><value>Edit Channel</value></data>
+  <data name="DeleteChannel" xml:space="preserve"><value>Delete Channel</value></data>
+  <data name="ConfirmKickClient" xml:space="preserve"><value>Kick {0}?</value></data>
+  <data name="ConfirmBanClient" xml:space="preserve"><value>Ban {0}?</value></data>
+  <data name="ConfirmDeleteChannel" xml:space="preserve"><value>Delete channel {0}?</value></data>
+  <data name="KickReason" xml:space="preserve"><value>Reason</value></data>
+  <data name="BanReason" xml:space="preserve"><value>Reason</value></data>
+  <data name="BanDuration" xml:space="preserve"><value>Duration (seconds)</value></data>
+  <data name="BanDurationHint" xml:space="preserve"><value>0 = permanent ban</value></data>
+  <data name="BansLoadedViaTask" xml:space="preserve"><value>Bans are loaded via a server task. Click Refresh to fetch the current ban list.</value></data>
+  <data name="TeamspeakRelationsInfo" xml:space="preserve"><value>Use Module Links to associate resources with this TeamSpeak server.</value></data>
+  <data name="KickClient" xml:space="preserve"><value>Kick Client</value></data>
+  <data name="Move" xml:space="preserve"><value>Move</value></data>
+  <data name="MoveClient" xml:space="preserve"><value>Move client</value></data>
+  <data name="ConfirmMoveClient" xml:space="preserve"><value>Move {0} to another channel</value></data>
+  <data name="TargetChannel" xml:space="preserve"><value>Target channel</value></data>
+  <data name="SelectChannel" xml:space="preserve"><value>Select a channel…</value></data>
+  <data name="ChannelPasswordOptional" xml:space="preserve"><value>Channel password (optional)</value></data>
+  <data name="Poke" xml:space="preserve"><value>Poke</value></data>
+  <data name="PokeClient" xml:space="preserve"><value>Poke client</value></data>
+  <data name="ConfirmPokeClient" xml:space="preserve"><value>Send a popup notification to {0}</value></data>
+  <data name="PokeMessage" xml:space="preserve"><value>Message</value></data>
+  <data name="PokeMessageHint" xml:space="preserve"><value>Max 200 characters. The recipient sees a popup until they dismiss it.</value></data>
+  <data name="ClientInfo" xml:space="preserve"><value>Client info</value></data>
+  <data name="GracefulRestart" xml:space="preserve"><value>Graceful restart</value></data>
+  <data name="GracefulRestartBody" xml:space="preserve"><value>Broadcast a warning to all connected clients, wait for them to reconnect, then restart the TeamSpeak service.</value></data>
+  <data name="WarningSeconds" xml:space="preserve"><value>Warning delay (seconds)</value></data>
+  <data name="WarningMessage" xml:space="preserve"><value>Warning message</value></data>
+  <data name="WarningMessageHint" xml:space="preserve"><value>Use {0} as a placeholder for the seconds count.</value></data>
+  <data name="TeamspeakStats" xml:space="preserve"><value>Server stats</value></data>
+  <data name="TeamspeakSlots" xml:space="preserve"><value>Slot usage</value></data>
+  <data name="TeamspeakAdvancedStatsHint" xml:space="preserve"><value>Server groups, tokens and complaints surface in the task tracker - structured cards require the ServerQuery TCP client refactor.</value></data>
+  <data name="SnapshotCreate" xml:space="preserve"><value>Create snapshot</value></data>
+  <data name="TeamspeakServerGroups" xml:space="preserve"><value>Server groups</value></data>
+  <data name="TeamspeakTokens" xml:space="preserve"><value>Tokens</value></data>
+  <data name="TeamspeakComplaints" xml:space="preserve"><value>Complaints</value></data>
+  <data name="BanClient" xml:space="preserve"><value>Ban Client</value></data>
+  <data name="ParentChannel" xml:space="preserve"><value>Parent Channel</value></data>
+  <data name="MaxClients" xml:space="preserve"><value>Max Clients</value></data>
+  <data name="TaskCreated" xml:space="preserve"><value>Task created</value></data>
+  <data name="ChannelName" xml:space="preserve"><value>Channel Name</value></data>
+  <data name="Channel" xml:space="preserve"><value>Channel</value></data>
+  <data name="CopyCredentials" xml:space="preserve"><value>Copy Credentials</value></data>
+  <data name="QuickConnect" xml:space="preserve"><value>Quick Connect</value></data>
+  <data name="Unban" xml:space="preserve"><value>Unban</value></data>
+  <data name="ConfirmUnban" xml:space="preserve"><value>Remove ban #{0}?</value></data>
+  <data name="PortsentrySetup" xml:space="preserve"><value>PortSentry Setup</value></data>
+  <data name="Mode" xml:space="preserve"><value>Mode</value></data>
+  <data name="BlockedIps" xml:space="preserve"><value>blocked IPs</value></data>
+  <data name="BlockedAt" xml:space="preserve"><value>Blocked At</value></data>
+  <data name="Unblock" xml:space="preserve"><value>Unblock</value></data>
+  <data name="TcpPorts" xml:space="preserve"><value>TCP Ports</value></data>
+  <data name="UdpPorts" xml:space="preserve"><value>UDP Ports</value></data>
+  <data name="Protocol" xml:space="preserve"><value>Protocol</value></data>
+  <data name="RkhunterSetup" xml:space="preserve"><value>RKHunter Setup</value></data>
+  <data name="RunScan" xml:space="preserve"><value>Run Scan</value></data>
+  <data name="UpdateDatabase" xml:space="preserve"><value>Update Database</value></data>
+  <data name="UpdateProperties" xml:space="preserve"><value>Update Properties</value></data>
+  <data name="MailOnWarning" xml:space="preserve"><value>Mail on Warning</value></data>
+  <data name="DatabaseVersion" xml:space="preserve"><value>Database Version</value></data>
+  <data name="DatabaseLastUpdated" xml:space="preserve"><value>Database Last Updated</value></data>
+  <data name="LastScan" xml:space="preserve"><value>Last Scan</value></data>
+  <data name="LastScanStatus" xml:space="preserve"><value>Last Scan Status</value></data>
+  <data name="Warnings" xml:space="preserve"><value>warnings</value></data>
+  <data name="Detail" xml:space="preserve"><value>Detail</value></data>
+  <data name="FoundAt" xml:space="preserve"><value>Found At</value></data>
+  <data name="UnblockConfirm" xml:space="preserve"><value>Are you sure you want to unblock this IP?</value></data>
+  <data name="NoBlockedIps" xml:space="preserve"><value>No blocked IPs detected.</value></data>
+  <data name="Whitelist" xml:space="preserve"><value>Whitelist</value></data>
+  <data name="WhitelistDescription" xml:space="preserve"><value>Optional description</value></data>
+  <data name="NoWhitelistEntries" xml:space="preserve"><value>No whitelisted IPs yet.</value></data>
+  <data name="SetupFailed" xml:space="preserve"><value>Setup failed. Please try again.</value></data>
+  <data name="ScanHistory" xml:space="preserve"><value>Scan History</value></data>
+  <data name="NoScanHistory" xml:space="preserve"><value>No scan history available.</value></data>
+  <data name="ScanClean" xml:space="preserve"><value>Clean</value></data>
+  <data name="ScanWarning" xml:space="preserve"><value>Warning</value></data>
+  <data name="CreatedAt" xml:space="preserve"><value>Created At</value></data>
+  <data name="CreatedBy" xml:space="preserve"><value>Created By</value></data>
+  <data name="NoWarnings" xml:space="preserve"><value>No warnings detected.</value></data>
+  <data name="Reason" xml:space="preserve"><value>Reason</value></data>
+  <data name="Summary" xml:space="preserve"><value>Summary</value></data>
+  <data name="ScanTime" xml:space="preserve"><value>Scan Time</value></data>
+  <data name="ScheduledScan" xml:space="preserve"><value>Scheduled Scan</value></data>
+  <data name="CronExpression" xml:space="preserve"><value>Cron Expression</value></data>
+  <data name="SystemLogs" xml:space="preserve"><value>System Logs</value></data>
+  <data name="SystemLogsDescription" xml:space="preserve"><value>Application log files</value></data>
+  <data name="Success" xml:space="preserve"><value>Success</value></data>
+  <data name="LogFile" xml:space="preserve"><value>Log File</value></data>
+  <data name="LogFiles" xml:space="preserve"><value>Log Files</value></data>
+  <data name="AllFiles" xml:space="preserve"><value>All files</value></data>
+  <data name="LogLevel" xml:space="preserve"><value>Level</value></data>
+  <data name="AllLevels" xml:space="preserve"><value>All levels</value></data>
+  <data name="SearchLogs" xml:space="preserve"><value>Search logs…</value></data>
+  <data name="AutoRefreshOn" xml:space="preserve"><value>Auto-refresh on</value></data>
+  <data name="AutoRefreshOff" xml:space="preserve"><value>Auto-refresh off</value></data>
+  <data name="ExportCsv" xml:space="preserve"><value>Export CSV</value></data>
+  <data name="PurgeLogs" xml:space="preserve"><value>Purge logs</value></data>
+  <data name="PurgeConfirmMessage" xml:space="preserve"><value>Delete log files older than 30 days?</value></data>
+  <data name="PurgeResult" xml:space="preserve"><value>{0} file(s) deleted.</value></data>
+  <data name="NoLogsAvailable" xml:space="preserve"><value>No logs available.</value></data>
+  <data name="JournalPermissionInsufficient" xml:space="preserve"><value>Insufficient journal permissions - add the agent user to the 'systemd-journal' group to read this service's logs.</value></data>
+  <data name="ShowException" xml:space="preserve"><value>Show exception</value></data>
+  <data name="ExceptionDetails" xml:space="preserve"><value>Exception details</value></data>
+  <data name="Download" xml:space="preserve"><value>Download</value></data>
+  <data name="DownloadFailed" xml:space="preserve"><value>Download failed.</value></data>
+  <data name="ExportFailed" xml:space="preserve"><value>Export failed.</value></data>
+  <data name="ServiceLogs" xml:space="preserve"><value>Service Logs</value></data>
+  <data name="FetchingServiceLogs" xml:space="preserve"><value>Fetching logs…</value></data>
+  <data name="LogLines" xml:space="preserve"><value>Lines</value></data>
+  <data name="FollowingLogs" xml:space="preserve"><value>Streaming live logs…</value></data>
+  <data name="OpenModule" xml:space="preserve"><value>Open management module</value></data>
+  <data name="OtherServices" xml:space="preserve"><value>Other</value></data>
+  <data name="Organization" xml:space="preserve"><value>Organization</value></data>
+  <data name="Organizations" xml:space="preserve"><value>Organizations</value></data>
+  <data name="OrganizationManagement" xml:space="preserve"><value>Organization Management</value></data>
+  <data name="ActiveOrganization" xml:space="preserve"><value>Active organization</value></data>
+  <data name="AllOrganizations" xml:space="preserve"><value>All organizations</value></data>
+  <data name="NewOrganization" xml:space="preserve"><value>New Organization</value></data>
+  <data name="EditOrganization" xml:space="preserve"><value>Edit Organization</value></data>
+  <data name="ConfirmDeleteOrganization" xml:space="preserve"><value>Are you sure you want to delete the organization '{0}'?</value></data>
+  <data name="ConfirmRemoveMember" xml:space="preserve"><value>Remove member '{0}' from this organization?</value></data>
+  <data name="Slug" xml:space="preserve"><value>Slug</value></data>
+  <data name="Members" xml:space="preserve"><value>Members</value></data>
+  <data name="AddMember" xml:space="preserve"><value>Add member</value></data>
+  <data name="MemberAdded" xml:space="preserve"><value>Member added.</value></data>
+  <data name="SelectUser" xml:space="preserve"><value>Select a user…</value></data>
+  <data name="RoleMember" xml:space="preserve"><value>Member</value></data>
+  <data name="RoleMaintainer" xml:space="preserve"><value>Maintainer</value></data>
+  <data name="RoleOwner" xml:space="preserve"><value>Owner</value></data>
+  <data name="AssignProjectsHelp" xml:space="preserve"><value>Select the projects that belong to this organization. Unselected projects will be detached.</value></data>
+  <data name="NewVersionAvailable" xml:space="preserve"><value>A new version of Aetheus is available.</value></data>
+  <data name="ReloadNow" xml:space="preserve"><value>Reload now</value></data>
+  <data name="StartAll" xml:space="preserve"><value>Start all</value></data>
+  <data name="StopAll" xml:space="preserve"><value>Stop all</value></data>
+  <data name="RestartAll" xml:space="preserve"><value>Restart all</value></data>
+  <data name="ZoomProject" xml:space="preserve"><value>Zoom project</value></data>
+  <data name="State" xml:space="preserve"><value>State</value></data>
+  <data name="NodeType" xml:space="preserve"><value>Node type</value></data>
+  <data name="ResetView" xml:space="preserve"><value>Reset view</value></data>
+  <data name="Host" xml:space="preserve"><value>Host</value></data>
+  <data name="Notes" xml:space="preserve"><value>Notes</value></data>
+  <data name="External" xml:space="preserve"><value>External</value></data>
+  <data name="SelectServer" xml:space="preserve"><value>Select server</value></data>
+  <data name="AgentServer" xml:space="preserve"><value>Agent Server</value></data>
+  <data name="ExternalHost" xml:space="preserve"><value>External Host</value></data>
+  <data name="AddProjectServer" xml:space="preserve"><value>Add Project Server</value></data>
+  <data name="EditProjectServer" xml:space="preserve"><value>Edit Project Server</value></data>
+  <data name="ProjectServerCreated" xml:space="preserve"><value>Project server added</value></data>
+  <data name="ProjectServerUpdated" xml:space="preserve"><value>Project server updated</value></data>
+  <data name="Retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="Close" xml:space="preserve"><value>Close</value></data>
+  <data name="ContactAgent" xml:space="preserve"><value>Contact agent</value></data>
+  <data name="ContactAgentTarget" xml:space="preserve"><value>Attempting to contact the agent on '{0}'…</value></data>
+  <data name="ContactAgentAttempt" xml:space="preserve"><value>Attempt {0} of {1}</value></data>
+  <data name="ContactAgentWaiting" xml:space="preserve"><value>Waiting for the agent to respond…</value></data>
+  <data name="ContactAgentReachable" xml:space="preserve"><value>The agent responded - it is reachable.</value></data>
+  <data name="ContactAgentLastSeen" xml:space="preserve"><value>Last heartbeat {0}.</value></data>
+  <data name="ContactAgentVersion" xml:space="preserve"><value>Agent version: {0}</value></data>
+  <data name="ContactAgentFailed" xml:space="preserve"><value>The agent did not respond after {0} attempts.</value></data>
+  <data name="ContactAgentRequestFailed" xml:space="preserve"><value>The request failed. Check your permissions and that the server still exists.</value></data>
+  <data name="ContactAgentUnreachable" xml:space="preserve"><value>The agent is not responding.</value></data>
+  <data name="ContactAgentSecondsAgo" xml:space="preserve"><value>{0}s ago</value></data>
+  <data name="ContactAgentMinutesAgo" xml:space="preserve"><value>{0}m {1}s ago</value></data>
+  <data name="ContactAgentHoursAgo" xml:space="preserve"><value>{0}h {1}m ago</value></data>
+  <data name="JustNow" xml:space="preserve"><value>just now</value></data>
+  <data name="Never" xml:space="preserve"><value>never</value></data>
+  <data name="DaysAgo" xml:space="preserve"><value>{0}d {1}h ago</value></data>
+  <data name="WhyOffline" xml:space="preserve"><value>Why offline?</value></data>
+  <data name="Backend" xml:space="preserve"><value>Backend</value></data>
+  <data name="TokenDaysRemaining" xml:space="preserve"><value>{0:0.0} days remaining</value></data>
+  <data name="HeartbeatsLast30Min" xml:space="preserve"><value>Heartbeats (last 30 min)</value></data>
+  <data name="Heartbeat" xml:space="preserve"><value>Heartbeat</value></data>
+  <data name="ServerAlive" xml:space="preserve"><value>Alive</value></data>
+  <data name="DurationSecondsShort" xml:space="preserve"><value>{0} s</value></data>
+  <data name="DurationMinutesShort" xml:space="preserve"><value>{0} min</value></data>
+  <data name="DurationHoursShort" xml:space="preserve"><value>{0} h</value></data>
+  <data name="DurationDaysShort" xml:space="preserve"><value>{0} d</value></data>
+  <data name="UpdateAgent" xml:space="preserve"><value>Update agent</value></data>
+  <data name="UpdateAllAgents" xml:space="preserve"><value>Update all agents</value></data>
+  <data name="UpdateAgentConfirm" xml:space="preserve"><value>Queue an agent self-update for '{0}'? The agent will download the latest build and restart on it.</value></data>
+  <data name="UpdateAllAgentsConfirm" xml:space="preserve"><value>Queue an agent self-update for every server you can administer?</value></data>
+  <data name="UpdateAgentQueued" xml:space="preserve"><value>Agent self-update queued for '{0}'.</value></data>
+  <data name="UpdateAllAgentsQueued" xml:space="preserve"><value>Agent self-update queued for {0} server(s).</value></data>
+  <data name="UpdateAgentFailed" xml:space="preserve"><value>Failed to queue the agent update. Check your permissions.</value></data>
+  <data name="AddApplication" xml:space="preserve"><value>Add application</value></data>
+  <data name="AddModule" xml:space="preserve"><value>Add module</value></data>
+  <data name="Apps" xml:space="preserve"><value>Applications</value></data>
+  <data name="Back" xml:space="preserve"><value>Back</value></data>
+  <data name="DockerNotInstalled" xml:space="preserve"><value>Docker is not installed on this server</value></data>
+  <data name="Inactive" xml:space="preserve"><value>Inactive</value></data>
+  <data name="OperationFailed" xml:space="preserve"><value>Operation failed</value></data>
+  <data name="Permission" xml:space="preserve"><value>Permission</value></data>
+  <data name="Permissions" xml:space="preserve"><value>Permissions</value></data>
+  <data name="Quota" xml:space="preserve"><value>Quota</value></data>
+  <data name="Remove" xml:space="preserve"><value>Remove</value></data>
+  <data name="RequiredFields" xml:space="preserve"><value>Please fill in all required fields</value></data>
+  <data name="Revoke" xml:space="preserve"><value>Revoke</value></data>
+  <data name="Saving" xml:space="preserve"><value>Saving...</value></data>
+  <data name="Title" xml:space="preserve"><value>Title</value></data>
+  <data name="View" xml:space="preserve"><value>View</value></data>
+  <data name="EmptyServersTitle" xml:space="preserve"><value>No servers registered</value></data>
+  <data name="EmptyServersHint" xml:space="preserve"><value>Add your first agent to get started.</value></data>
+  <data name="EmptyProjectsHint" xml:space="preserve"><value>Create a project to organize your pipelines.</value></data>
+  <data name="EmptyPipelinesHint" xml:space="preserve"><value>Create a pipeline to automate your deployments.</value></data>
+  <data name="EmptyReleasesHint" xml:space="preserve"><value>Releases are detected automatically from your git repositories.</value></data>
+  <data name="EmptyVaultsHint" xml:space="preserve"><value>Create a vault to store your secrets securely.</value></data>
+  <data name="EmptyLibrariesHint" xml:space="preserve"><value>Create a library to share variables across pipelines.</value></data>
+  <data name="EmptyDashboardServers" xml:space="preserve"><value>No servers</value></data>
+  <data name="EmptyDashboardRuns" xml:space="preserve"><value>No recent runs</value></data>
+  <data name="EmptyDashboardProjects" xml:space="preserve"><value>No projects</value></data>
+  <data name="SnapshotDeploy" xml:space="preserve"><value>Deploy snapshot</value></data>
+  <data name="SnapshotDeployWarning" xml:space="preserve"><value>Deploying a snapshot will overwrite channels, groups, and permissions. This action is destructive and cannot be undone.</value></data>
+  <data name="SnapshotBlob" xml:space="preserve"><value>Snapshot data</value></data>
+  <data name="SnapshotBlobPlaceholder" xml:space="preserve"><value>Paste the snapshot blob here...</value></data>
+  <data name="SnapshotConfirmation" xml:space="preserve"><value>Type the server name to confirm: {0}</value></data>
+  <data name="Progress" xml:space="preserve"><value>Progress</value></data>
+  <data name="Retention" xml:space="preserve"><value>Retention</value></data>
+  <data name="FilePath" xml:space="preserve"><value>File path</value></data>
+  <data name="ReleaseNotFound" xml:space="preserve"><value>Release not found.</value></data>
+  <data name="ArtifactNotFound" xml:space="preserve"><value>Artifact not found.</value></data>
+  <data name="TimesAreLocal" xml:space="preserve"><value>Times are local</value></data>
+  <data name="ZoomIn" xml:space="preserve"><value>Zoom in</value></data>
+  <data name="ZoomOut" xml:space="preserve"><value>Zoom out</value></data>
+  <data name="FitScreen" xml:space="preserve"><value>Fit to screen</value></data>
+  <data name="Unlink" xml:space="preserve"><value>Unlink</value></data>
+  <data name="Duplicate" xml:space="preserve"><value>Duplicate</value></data>
+  <data name="OperatingSystem" xml:space="preserve"><value>Operating system</value></data>
+  <data name="OsAny" xml:space="preserve"><value>Any OS</value></data>
+  <data name="WizardModules" xml:space="preserve"><value>Capabilities to install</value></data>
+  <data name="WizardModulePipelineRunner" xml:space="preserve"><value>Pipeline runner (.NET SDK, git, sshpass)</value></data>
+  <data name="WizardModulePipelineRunnerHint" xml:space="preserve"><value>Installs the build/deploy toolchain so this agent can run pipelines. No elevated privileges.</value></data>
+  <data name="WizardModuleServerManagement" xml:space="preserve"><value>Server management (Apache, Docker, RKHunter, Certbot, Cron, Portsentry)</value></data>
+  <data name="WizardModuleServerManagementHint" xml:space="preserve"><value>Grants the agent the privileges needed to administer services. Linux only for now.</value></data>
+  <data name="WizardModuleDeploymentAgent" xml:space="preserve"><value>Deployment agent (cross-agent deploy target)</value></data>
+  <data name="WizardModuleDeploymentAgentHint" xml:space="preserve"><value>Lets pipelines deploy build artifacts to this host (atomic binary swap + restart, or container compose up), publish a static site to an agent-writable web root, and issue its HTTPS certificates (apache + certbot). Installs narrow, audited sudo grants. Linux only for now.</value></data>
+  <data name="WizardModuleDocker" xml:space="preserve"><value>Container isolation (Docker)</value></data>
+  <data name="WizardModuleDockerHint" xml:space="preserve"><value>Adds the agent to the docker group so pipeline steps can run in isolated containers (isolation: container). Keeps the agent otherwise fully sandboxed. Requires the Pipeline runner module.</value></data>
+  <data name="WizardModuleDockerRequiresRunner" xml:space="preserve"><value>Requires the Pipeline runner module.</value></data>
+  <data name="WizardNoModuleWarning" xml:space="preserve"><value>This agent has no actionable role: enable Pipeline runner (CI/CD), Server management, or Deployment agent to continue.</value></data>
+  <data name="WizardNoModuleError" xml:space="preserve"><value>Select at least one capability - Pipeline runner, Server management, or Deployment agent - to continue.</value></data>
+  <data name="WizardNoModuleErrorTitle" xml:space="preserve"><value>No capability selected</value></data>
+  <data name="WizardDevModeInsecureTls" xml:space="preserve"><value>Dev mode (self-signed certificate)</value></data>
+  <data name="WizardDevModeInsecureTlsHint" xml:space="preserve"><value>Disables TLS certificate validation in the generated commands. Only for local/dev servers using a self-signed certificate.</value></data>
+  <data name="ApplicationCreated" xml:space="preserve"><value>Application created.</value></data>
+  <data name="BackToProjects" xml:space="preserve"><value>Back to projects</value></data>
+  <data name="Disconnected" xml:space="preserve"><value>Disconnected</value></data>
+  <data name="DevBannerBranchTooltip" xml:space="preserve"><value>Current Git branch</value></data>
+  <data name="DevBannerEnvTooltip" xml:space="preserve"><value>Environment</value></data>
+  <data name="DevBannerLabelTooltip" xml:space="preserve"><value>Worktree label (.ylaunch.local)</value></data>
+  <data name="EnvironmentDuplicated" xml:space="preserve"><value>Environment duplicated.</value></data>
+  <data name="ModuleCreated" xml:space="preserve"><value>Module created.</value></data>
+  <data name="PluginRegistered" xml:space="preserve"><value>Plugin registered.</value></data>
+  <data name="PluginUnregistered" xml:space="preserve"><value>Plugin unregistered.</value></data>
+  <data name="ProjectNotFound" xml:space="preserve"><value>Project not found</value></data>
+  <data name="Reconnecting" xml:space="preserve"><value>Reconnecting…</value></data>
+  <data name="Registered" xml:space="preserve"><value>Registered</value></data>
+  <data name="Release" xml:space="preserve"><value>Release</value></data>
+  <data name="Rotated" xml:space="preserve"><value>Rotated</value></data>
+  <data name="Stage" xml:space="preserve"><value>Stage</value></data>
+  <data name="Verify" xml:space="preserve"><value>Verify</value></data>
+  <data name="EditorLine" xml:space="preserve"><value>Ln </value></data>
+  <data name="EditorColumn" xml:space="preserve"><value>Col </value></data>
+  <data name="TeamspeakGracefulRestartMessage" xml:space="preserve"><value>Server restart in {0} s - please reconnect after.</value></data>
+  <data name="NoAlerts" xml:space="preserve"><value>No alert rules configured.</value></data>
+  <data name="NoAlertsDescription" xml:space="preserve"><value>Click Create to add your first alert rule.</value></data>
+  <data name="NoLogEntriesYet" xml:space="preserve"><value>No log entries yet.</value></data>
+  <data name="WaitingForLogEntries" xml:space="preserve"><value>Waiting for the agent to emit log lines…</value></data>
+  <data name="SelectTaskToWatch" xml:space="preserve"><value>No task selected.</value></data>
+  <data name="SelectTaskToWatchDescription" xml:space="preserve"><value>Enter a task ID above and click Watch to stream live logs.</value></data>
+  <data name="CurrentStep" xml:space="preserve"><value>Current step</value></data>
+  <data name="RerunCurrent" xml:space="preserve"><value>Rerun (current definition)</value></data>
+  <data name="RerunSameCommit" xml:space="preserve"><value>Rerun (same commit)</value></data>
+  <data name="RerunBranchHead" xml:space="preserve"><value>Rerun (branch head)</value></data>
+  <data name="Provenance" xml:space="preserve"><value>Provenance</value></data>
+  <data name="Distribution" xml:space="preserve"><value>Distribution</value></data>
+  <data name="Deliverables" xml:space="preserve"><value>Deliverables</value></data>
+  <data name="Done" xml:space="preserve"><value>Done</value></data>
+  <data name="PersonalAccessTokens" xml:space="preserve"><value>Personal access tokens</value></data>
+  <data name="PatPageDescription" xml:space="preserve"><value>Create tokens to authenticate scripts, external CI, or the CLI with your account. A token can never do more than your current permissions allow, and is shown only once.</value></data>
+  <data name="PatName" xml:space="preserve"><value>Name</value></data>
+  <data name="PatScope" xml:space="preserve"><value>Scope</value></data>
+  <data name="PatScopeReadOnly" xml:space="preserve"><value>Read-only</value></data>
+  <data name="PatScopeReadWrite" xml:space="preserve"><value>Read and write</value></data>
+  <data name="PatExpirationDays" xml:space="preserve"><value>Expires in (days)</value></data>
+  <data name="PatCreate" xml:space="preserve"><value>Create token</value></data>
+  <data name="PatCreated" xml:space="preserve"><value>Token created.</value></data>
+  <data name="PatCreateFailed" xml:space="preserve"><value>Could not create the token.</value></data>
+  <data name="PatRevealTitle" xml:space="preserve"><value>Copy your token now</value></data>
+  <data name="PatRevealWarning" xml:space="preserve"><value>This is the only time the token is shown. Store it securely; you will not be able to see it again.</value></data>
+  <data name="PatTokenPrefix" xml:space="preserve"><value>Prefix</value></data>
+  <data name="PatCreatedAt" xml:space="preserve"><value>Created</value></data>
+  <data name="PatExpires" xml:space="preserve"><value>Expires</value></data>
+  <data name="PatLastUsed" xml:space="preserve"><value>Last used</value></data>
+  <data name="PatNever" xml:space="preserve"><value>Never</value></data>
+  <data name="PatStatus" xml:space="preserve"><value>Status</value></data>
+  <data name="PatStatusActive" xml:space="preserve"><value>Active</value></data>
+  <data name="PatStatusRevoked" xml:space="preserve"><value>Revoked</value></data>
+  <data name="PatStatusExpired" xml:space="preserve"><value>Expired</value></data>
+  <data name="PatEmptyTitle" xml:space="preserve"><value>No personal access tokens</value></data>
+  <data name="PatEmptyDescription" xml:space="preserve"><value>Create a token to authenticate scripts or external tools with your account.</value></data>
+  <data name="PatRevoke" xml:space="preserve"><value>Revoke</value></data>
+  <data name="PatRevokeConfirm" xml:space="preserve"><value>Revoke the token "{0}"? Any script using it will immediately lose access.</value></data>
+  <data name="PatRevoked" xml:space="preserve"><value>Token revoked.</value></data>
+  <data name="PatRevokeFailed" xml:space="preserve"><value>Could not revoke the token.</value></data>
+  <data name="PatchTitle" xml:space="preserve"><value>OS updates</value></data>
+  <data name="PatchCheck" xml:space="preserve"><value>Check for updates</value></data>
+  <data name="PatchApply" xml:space="preserve"><value>Apply updates</value></data>
+  <data name="PatchApplyConfirm" xml:space="preserve"><value>Apply all pending OS updates now? Critical packages (kernel, libc, OpenSSL, databases) are held back automatically; the upgrade aborts if one would be touched.</value></data>
+  <data name="PatchDryRunQueued" xml:space="preserve"><value>Update check queued.</value></data>
+  <data name="PatchApplyQueued" xml:space="preserve"><value>Upgrade queued.</value></data>
+  <data name="PatchActionFailed" xml:space="preserve"><value>Could not queue the action.</value></data>
+  <data name="PatchNotApplicableTitle" xml:space="preserve"><value>Updates not available</value></data>
+  <data name="PatchNotApplicableDescription" xml:space="preserve"><value>This server does not report an apt package manager, so OS update status is not available.</value></data>
+  <data name="PatchUnknown" xml:space="preserve"><value>Update status is unknown - the agent has not reported a successful probe yet.</value></data>
+  <data name="PatchPendingCount" xml:space="preserve"><value>{0} pending</value></data>
+  <data name="PatchSecurityCount" xml:space="preserve"><value>{0} security</value></data>
+  <data name="PatchCheckedAt" xml:space="preserve"><value>Checked {0}</value></data>
+  <data name="PatchApplyDisabledHint" xml:space="preserve"><value>Enable the patch-manage capability (re-run the installer with --enable-patch-manage) to apply updates from here.</value></data>
+  <data name="PatchPackage" xml:space="preserve"><value>Package</value></data>
+  <data name="PatchCurrentVersion" xml:space="preserve"><value>Current</value></data>
+  <data name="PatchCandidateVersion" xml:space="preserve"><value>Candidate</value></data>
+  <data name="PatchSecurity" xml:space="preserve"><value>Security</value></data>
+  <data name="PatchSecurityYes" xml:space="preserve"><value>Security</value></data>
+  <data name="WizardModulePatchManagement" xml:space="preserve"><value>OS patch management</value></data>
+  <data name="WizardModulePatchManagementHint" xml:space="preserve"><value>Apply pending OS security updates from the fleet (apt-get upgrade, argv-exact sudo). Critical packages are held back automatically.</value></data>
+  <data name="FirewallTitle" xml:space="preserve"><value>Firewall</value></data>
+  <data name="FirewallActive" xml:space="preserve"><value>Active</value></data>
+  <data name="FirewallInactive" xml:space="preserve"><value>Inactive</value></data>
+  <data name="FirewallStatusUnknown" xml:space="preserve"><value>Status unknown</value></data>
+  <data name="FirewallStatusUnknownHint" xml:space="preserve"><value>The agent could not read the ufw status. Check the firewall-manage capability and agent logs.</value></data>
+  <data name="FirewallEnable" xml:space="preserve"><value>Enable</value></data>
+  <data name="FirewallDisable" xml:space="preserve"><value>Disable</value></data>
+  <data name="FirewallToggle" xml:space="preserve"><value>Firewall</value></data>
+  <data name="FirewallDisableConfirm" xml:space="preserve"><value>Disable the firewall? All ports will be open until you re-enable it.</value></data>
+  <data name="FirewallNotInstalledTitle" xml:space="preserve"><value>Firewall not available</value></data>
+  <data name="FirewallNotInstalledDescription" xml:space="preserve"><value>ufw is not installed on this server, or firewall management is not enabled.</value></data>
+  <data name="FirewallManageDisabledHint" xml:space="preserve"><value>Enable firewall management (re-run the installer with --enable-firewall-manage) to view and control ufw rules.</value></data>
+  <data name="FirewallPort" xml:space="preserve"><value>Port</value></data>
+  <data name="FirewallProtocol" xml:space="preserve"><value>Protocol</value></data>
+  <data name="FirewallSource" xml:space="preserve"><value>Source</value></data>
+  <data name="FirewallAllow" xml:space="preserve"><value>Allow</value></data>
+  <data name="FirewallUnknownAction" xml:space="preserve"><value>Unknown action ({0})</value></data>
+  <data name="FirewallDeny" xml:space="preserve"><value>Deny</value></data>
+  <data name="FirewallActionColumn" xml:space="preserve"><value>Action</value></data>
+  <data name="FirewallNoRulesTitle" xml:space="preserve"><value>No rules</value></data>
+  <data name="FirewallNoRulesDescription" xml:space="preserve"><value>No firewall rules are defined.</value></data>
+  <data name="FirewallDeleteConfirm" xml:space="preserve"><value>Delete the rule "{0}"?</value></data>
+  <data name="FirewallRuleQueued" xml:space="preserve"><value>Firewall change queued.</value></data>
+  <data name="FirewallEnableQueued" xml:space="preserve"><value>Firewall enable queued.</value></data>
+  <data name="FirewallDisableQueued" xml:space="preserve"><value>Firewall disable queued.</value></data>
+  <data name="FirewallActionFailed" xml:space="preserve"><value>Could not queue the firewall action.</value></data>
+  <data name="WizardModuleFirewallManage" xml:space="preserve"><value>Firewall management</value></data>
+  <data name="WizardModuleFirewallManageHint" xml:space="preserve"><value>Control ufw from the fleet (open/close ports, enable/disable). The agent refuses to close the SSH port (anti-lockout).</value></data>
+  <data name="Backups" xml:space="preserve"><value>Backups</value></data>
+  <data name="BackupPageDescription" xml:space="preserve"><value>Scheduled database and file backups for your projects. A backup is only marked verified when a real restore-check actually succeeds on a throwaway target.</value></data>
+  <data name="BackupNewPolicy" xml:space="preserve"><value>New backup policy</value></data>
+  <data name="BackupEditPolicy" xml:space="preserve"><value>Edit backup policy</value></data>
+  <data name="BackupName" xml:space="preserve"><value>Name</value></data>
+  <data name="BackupEngine" xml:space="preserve"><value>Database engine</value></data>
+  <data name="BackupDbHost" xml:space="preserve"><value>DB host</value></data>
+  <data name="BackupDbPort" xml:space="preserve"><value>DB port</value></data>
+  <data name="BackupDbName" xml:space="preserve"><value>DB name</value></data>
+  <data name="BackupDbUser" xml:space="preserve"><value>DB user</value></data>
+  <data name="BackupDbPassword" xml:space="preserve"><value>DB password</value></data>
+  <data name="BackupDbPasswordKeep" xml:space="preserve"><value>DB password (leave blank to keep)</value></data>
+  <data name="BackupFilePaths" xml:space="preserve"><value>File paths (one per line)</value></data>
+  <data name="BackupScheduleCron" xml:space="preserve"><value>Schedule (cron)</value></data>
+  <data name="BackupRetention" xml:space="preserve"><value>Keep (copies)</value></data>
+  <data name="BackupRestoreCheckCron" xml:space="preserve"><value>Restore-check (cron)</value></data>
+  <data name="BackupEnabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="BackupEnabledYes" xml:space="preserve"><value>Enabled</value></data>
+  <data name="BackupEnabledNo" xml:space="preserve"><value>Disabled</value></data>
+  <data name="BackupLastRun" xml:space="preserve"><value>Last run</value></data>
+  <data name="BackupNever" xml:space="preserve"><value>Never</value></data>
+  <data name="BackupRuns" xml:space="preserve"><value>Run history</value></data>
+  <data name="BackupRunNow" xml:space="preserve"><value>Run now</value></data>
+  <data name="BackupRunsFor" xml:space="preserve"><value>Run history: {0}</value></data>
+  <data name="BackupNoRuns" xml:space="preserve"><value>No runs yet</value></data>
+  <data name="BackupNoRunsDescription" xml:space="preserve"><value>This policy has not run yet.</value></data>
+  <data name="BackupStartedAt" xml:space="preserve"><value>Started</value></data>
+  <data name="BackupStatus" xml:space="preserve"><value>Status</value></data>
+  <data name="BackupRestoreCheck" xml:space="preserve"><value>Restore-check</value></data>
+  <data name="BackupSize" xml:space="preserve"><value>Size (bytes)</value></data>
+  <data name="BackupMessage" xml:space="preserve"><value>Message</value></data>
+  <data name="BackupRestoreVerified" xml:space="preserve"><value>Verified</value></data>
+  <data name="BackupRestoreFailed" xml:space="preserve"><value>Failed</value></data>
+  <data name="BackupRestoreUnverified" xml:space="preserve"><value>Unverified</value></data>
+  <data name="BackupEmptyTitle" xml:space="preserve"><value>No backup policies</value></data>
+  <data name="BackupEmptyDescription" xml:space="preserve"><value>Create a policy to schedule database and file backups for a project.</value></data>
+  <data name="BackupSaved" xml:space="preserve"><value>Backup policy saved.</value></data>
+  <data name="BackupSaveFailed" xml:space="preserve"><value>Could not save the backup policy.</value></data>
+  <data name="BackupDeleteConfirm" xml:space="preserve"><value>Delete the backup policy "{0}"? Its schedule stops; existing archives on the server are not removed.</value></data>
+  <data name="BackupDeleted" xml:space="preserve"><value>Backup policy deleted.</value></data>
+  <data name="BackupDeleteFailed" xml:space="preserve"><value>Could not delete the backup policy.</value></data>
+  <data name="BackupRunQueued" xml:space="preserve"><value>Backup queued.</value></data>
+  <data name="BackupRunFailed" xml:space="preserve"><value>Could not queue the backup.</value></data>
+  <data name="Monitoring" xml:space="preserve"><value>Monitoring</value></data>
+  <data name="MonitoredApps" xml:space="preserve"><value>Monitored applications</value></data>
+  <data name="MonitoredAppName" xml:space="preserve"><value>Application name</value></data>
+  <data name="ProbeUrl" xml:space="preserve"><value>Probe URL</value></data>
+  <data name="HostingServer" xml:space="preserve"><value>Hosting server</value></data>
+  <data name="OffFleetBackendProbe" xml:space="preserve"><value>Off-fleet (backend probe)</value></data>
+  <data name="ProbeIntervalSeconds" xml:space="preserve"><value>Interval (s)</value></data>
+  <data name="ProbeTimeoutSeconds" xml:space="preserve"><value>Timeout (s)</value></data>
+  <data name="ExpectedStatusCode" xml:space="preserve"><value>Expected status code</value></data>
+  <data name="FailureThreshold" xml:space="preserve"><value>Failure threshold</value></data>
+  <data name="RecoveryThreshold" xml:space="preserve"><value>Recovery threshold</value></data>
+  <data name="AddMonitoredApp" xml:space="preserve"><value>Add application</value></data>
+  <data name="NoMonitoredApps" xml:space="preserve"><value>No monitored applications yet</value></data>
+  <data name="Uptime24h" xml:space="preserve"><value>Uptime 24h</value></data>
+  <data name="Uptime7d" xml:space="preserve"><value>Uptime 7d</value></data>
+  <data name="ResponseTime" xml:space="preserve"><value>Response time</value></data>
+  <data name="Since" xml:space="preserve"><value>Since</value></data>
+  <data name="DeleteMonitoredAppConfirm" xml:space="preserve"><value>Delete this monitored application and its history?</value></data>
+  <data name="MonitoredAppCreated" xml:space="preserve"><value>Monitored application created</value></data>
+  <data name="MonitoredAppUpdated" xml:space="preserve"><value>Monitored application updated</value></data>
+  <data name="MonitoredAppDeleted" xml:space="preserve"><value>Monitored application deleted</value></data>
+  <data name="NoTroubledApps" xml:space="preserve"><value>All monitored applications are healthy</value></data>
+  <data name="AppHealthUnknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="AppHealthUp" xml:space="preserve"><value>Up</value></data>
+  <data name="AppHealthDown" xml:space="preserve"><value>Down</value></data>
+  <data name="AppHealthDegraded" xml:space="preserve"><value>Degraded</value></data>
+  <data name="AppHealthNeverProbed" xml:space="preserve"><value>Never probed</value></data>
+  <data name="AppThrottled" xml:space="preserve"><value>Throttled</value></data>
+  <data name="AppThrottledHint" xml:space="preserve"><value>This app's telemetry is being capped by ingestion limits (dropped data points).</value></data>
+  <data name="Availability" xml:space="preserve"><value>Availability</value></data>
+  <data name="Telemetry" xml:space="preserve"><value>Telemetry</value></data>
+  <data name="Metrics" xml:space="preserve"><value>Metrics</value></data>
+  <data name="Errors" xml:space="preserve"><value>Errors</value></data>
+  <data name="Ingestion" xml:space="preserve"><value>Ingestion</value></data>
+  <data name="Application" xml:space="preserve"><value>Application</value></data>
+  <data name="Period" xml:space="preserve"><value>Period</value></data>
+  <data name="P95" xml:space="preserve"><value>P95</value></data>
+  <data name="NoMetricsYet" xml:space="preserve"><value>No metrics ingested yet</value></data>
+  <data name="NotEnoughDataPoints" xml:space="preserve"><value>Not enough data points to plot</value></data>
+  <data name="NoLogsYet" xml:space="preserve"><value>No logs ingested yet</value></data>
+  <data name="ErrorType" xml:space="preserve"><value>Type</value></data>
+  <data name="Occurrences" xml:space="preserve"><value>Occurrences</value></data>
+  <data name="FirstSeen" xml:space="preserve"><value>First seen</value></data>
+  <data name="LastSeen" xml:space="preserve"><value>Last seen</value></data>
+  <data name="NoErrorsYet" xml:space="preserve"><value>No errors reported</value></data>
+  <data name="IngestionKey" xml:space="preserve"><value>Ingestion key</value></data>
+  <data name="IngestKeyConfigured" xml:space="preserve"><value>Key configured on</value></data>
+  <data name="IngestDroppedCount" xml:space="preserve"><value>{0} data point(s) dropped by ingestion caps</value></data>
+  <data name="NoIngestKey" xml:space="preserve"><value>No ingestion key configured</value></data>
+  <data name="IngestKeyShownOnce" xml:space="preserve"><value>Copy this key now: it is shown only once and cannot be recovered.</value></data>
+  <data name="RegenerateKey" xml:space="preserve"><value>Regenerate key</value></data>
+  <data name="GenerateKey" xml:space="preserve"><value>Generate key</value></data>
+  <data name="RevokeIngestKey" xml:space="preserve"><value>Revoke key</value></data>
+  <data name="RevokeIngestKeyConfirm" xml:space="preserve"><value>Revoke this ingestion key? Clients using it will stop being accepted.</value></data>
+  <data name="IngestKeyGenerated" xml:space="preserve"><value>Ingestion key generated</value></data>
+  <data name="IngestKeyRevoked" xml:space="preserve"><value>Ingestion key revoked</value></data>
+  <data name="MetricThresholds" xml:space="preserve"><value>Metric thresholds</value></data>
+  <data name="NoThresholds" xml:space="preserve"><value>No thresholds configured</value></data>
+  <data name="Operator" xml:space="preserve"><value>Operator</value></data>
+  <data name="Breached" xml:space="preserve"><value>Breached</value></data>
+  <data name="AddThreshold" xml:space="preserve"><value>Add threshold</value></data>
+  <data name="ThresholdCreated" xml:space="preserve"><value>Threshold created</value></data>
+  <data name="ThresholdDeleted" xml:space="preserve"><value>Threshold deleted</value></data>
+  <data name="NotAvailable" xml:space="preserve"><value>n/a</value></data>
+  <data name="PermissionsChangedTitle" xml:space="preserve"><value>Your permissions changed</value></data>
+  <data name="PermissionsChangedBody" xml:space="preserve"><value>An administrator updated your roles or organizations. Reload to apply your new permissions.</value></data>
+  <data name="RefreshNow" xml:space="preserve"><value>Refresh</value></data>
+  <data name="AddUserToRole" xml:space="preserve"><value>Add to role</value></data>
+  <data name="NoUsersInRole" xml:space="preserve"><value>No users hold this role yet.</value></data>
+  <data name="ConfirmRemoveUserFromRole" xml:space="preserve"><value>Remove {0} from this role?</value></data>
+  <data name="AddToOrganization" xml:space="preserve"><value>Add to organization</value></data>
+  <data name="SelectOrganization" xml:space="preserve"><value>Select an organization...</value></data>
+  <data name="NoOrganizations" xml:space="preserve"><value>This user belongs to no organization yet.</value></data>
+  <data name="ConfirmRemoveFromOrganization" xml:space="preserve"><value>Remove this user from {0}?</value></data>
+  <data name="LastModified" xml:space="preserve"><value>Last modified</value></data>
+  <data name="DeleteOrganization" xml:space="preserve"><value>Delete organization</value></data>
+  <data name="SlugFormatError" xml:space="preserve"><value>The slug must be lowercase alphanumeric with optional hyphens.</value></data>
+  <data name="VisualPipelineGuide" xml:space="preserve"><value>Each tile is a pipeline stage. Click a tile to configure it; drag its handle to move it. Arrows show stage dependencies.</value></data>
+  <data name="ReviewPipelineChange" xml:space="preserve"><value>Review pipeline change</value></data>
+  <data name="CommitBranch" xml:space="preserve"><value>Commit branch</value></data>
+  <data name="PipelineSaveCommitPreview" xml:space="preserve"><value>Saving commits this definition to the selected branch before updating the pipeline.</value></data>
+  <data name="ChooseBranch" xml:space="preserve"><value>Choose branch</value></data>
+  <data name="RunFromBranch" xml:space="preserve"><value>Run from a branch</value></data>
+  <data name="BranchListRefreshedHint" xml:space="preserve"><value>The current branches were just refreshed. The repository's default branch is selected first.</value></data>
+  <data name="SetDefaultBranch" xml:space="preserve"><value>Set as default branch</value></data>
+  <data name="DefaultBranchUpdated" xml:space="preserve"><value>Default branch updated.</value></data>
+  <data name="PreparingRun" xml:space="preserve"><value>Preparing run</value></data>
+  <data name="PipelineFleet" xml:space="preserve"><value>Pipeline fleet</value></data>
+  <data name="AllTemplates" xml:space="preserve"><value>All templates</value></data>
+  <data name="Current" xml:space="preserve"><value>Current</value></data>
+  <data name="Outdated" xml:space="preserve"><value>Outdated</value></data>
+  <data name="OffCatalog" xml:space="preserve"><value>Off catalog</value></data>
+  <data name="Owner" xml:space="preserve"><value>Owner</value></data>
+  <data name="PinnedVersion" xml:space="preserve"><value>Pinned version</value></data>
+  <data name="LegacyLatest" xml:space="preserve"><value>Legacy latest</value></data>
+  <data name="UpdatePipelineTemplate" xml:space="preserve"><value>Update pipeline template</value></data>
+  <data name="TemplateVersionTransition" xml:space="preserve"><value>{0}: v{1} to v{2}</value></data>
+  <data name="OrphanOverridesWarning" xml:space="preserve"><value>These overrides matched the old version but no longer match the target version.</value></data>
+  <data name="AcknowledgeOrphanOverrides" xml:space="preserve"><value>I acknowledge the orphan overrides</value></data>
+  <data name="ConfirmUpdate" xml:space="preserve"><value>Confirm update</value></data>
+  <data name="LoadError" xml:space="preserve"><value>The data could not be loaded.</value></data>
+  <data name="FiltersLoadError" xml:space="preserve"><value>The filters could not be loaded. The fleet data remains available.</value></data>
+  <data name="OriginalVersion" xml:space="preserve"><value>Original version</value></data>
+  <data name="ModifiedVersion" xml:space="preserve"><value>Modified version</value></data>
+  <data name="VersionHistoryTitle" xml:space="preserve"><value>Version history</value></data>
+  <data name="InheritedElements" xml:space="preserve"><value>Inherited elements (read-only)</value></data>
+  <data name="Inherited" xml:space="preserve"><value>Inherited</value></data>
+  <data name="Overridden" xml:space="preserve"><value>Overridden</value></data>
+  <data name="Local" xml:space="preserve"><value>Local</value></data>
+  <data name="PromoteToTemplate" xml:space="preserve"><value>Promote to template</value></data>
+  <data name="ExtractAsTemplate" xml:space="preserve"><value>Extract as template</value></data>
+  <data name="RewritePipelineToPin" xml:space="preserve"><value>Rewrite the pipeline to pin template v1</value></data>
+  <data name="Extract" xml:space="preserve"><value>Extract</value></data>
+  <data name="PromoteTemplateVersion" xml:space="preserve"><value>Publish {0} v{1}</value></data>
+  <data name="NewTemplateYaml" xml:space="preserve"><value>New template YAML</value></data>
+  <data name="RewrittenPipelineYaml" xml:space="preserve"><value>Pipeline YAML pinned to v1</value></data>
+  <data name="ExtractionParametersHelp" xml:space="preserve"><value>Edit both YAML documents before extraction. Introduce typed parameters and ${{ parameters.name }} placeholders in the template, then provide defaults or project-specific values in the pinned pipeline.</value></data>
+  <data name="RebaseSourcePipeline" xml:space="preserve"><value>Rebase the source pipeline onto the new version</value></data>
+  <data name="PublishVersion" xml:space="preserve"><value>Publish version</value></data>
+  <data name="LegacyTemplateReferenceWarning" xml:space="preserve">
+    <value>This pipeline follows the latest template version automatically. Pin it before editing or promoting to keep runs reproducible.</value>
+  </data>
+  <data name="PinTemplateVersion" xml:space="preserve">
+    <value>Pin current version</value>
+  </data>
+  <data name="StorageDiagnostics" xml:space="preserve"><value>Storage diagnostics</value></data>
+  <data name="StorageDiagnosticsUnavailable" xml:space="preserve"><value>No storage diagnostics have been reported by this agent yet.</value></data>
+  <data name="StorageDiagnosticsCollectedAt" xml:space="preserve"><value>Last collected: {0}</value></data>
+  <data name="CleanupApplyMode" xml:space="preserve"><value>Apply mode</value></data>
+  <data name="BuildCache" xml:space="preserve"><value>Build cache</value></data>
+  <data name="Reclaimable" xml:space="preserve"><value>Reclaimable</value></data>
+  <data name="Growth24Hours" xml:space="preserve"><value>24-hour growth</value></data>
+  <data name="AgentAndNuGet" xml:space="preserve"><value>Agent and NuGet</value></data>
+</root>

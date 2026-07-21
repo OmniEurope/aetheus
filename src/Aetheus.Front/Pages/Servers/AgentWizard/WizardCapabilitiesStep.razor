@@ -1,0 +1,96 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenStack Gap="1rem">
+    <p>@L["WizardCapabilitiesDescription"]</p>
+    <RadzenStack Gap="0.75rem">
+        <div class="wizard-platform-card @(IncludePipelineRunner ? "wizard-platform-selected" : "")"
+             role="checkbox" aria-checked="@IncludePipelineRunner" tabindex="0"
+             @onclick="@(() => IncludePipelineRunnerChanged.InvokeAsync(!IncludePipelineRunner))"
+             @onkeydown="@(e => { if (IsActivationKey(e)) IncludePipelineRunnerChanged.InvokeAsync(!IncludePipelineRunner); })">
+            <RadzenIcon Icon="rocket_launch" class="wizard-platform-icon" />
+            <div class="wizard-platform-label">
+                <div>@L["WizardModulePipelineRunner"]</div>
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["WizardModulePipelineRunnerHint"]</RadzenText>
+            </div>
+            @if (IncludePipelineRunner) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+        </div>
+
+        @if (IsLinux)
+        {
+            <div class="wizard-platform-card @(DockerChecked ? "wizard-platform-selected" : "") @(DockerLocked ? "wizard-card-locked" : "")"
+                 role="checkbox" aria-checked="@DockerChecked" aria-disabled="@DockerLocked" tabindex="0"
+                 @onclick="@(() => { if (!DockerLocked) IncludeDockerChanged.InvokeAsync(!IncludeDocker); })"
+                 @onkeydown="@(e => { if (IsActivationKey(e) && !DockerLocked) IncludeDockerChanged.InvokeAsync(!IncludeDocker); })">
+                <RadzenIcon Icon="deployed_code" class="wizard-platform-icon" />
+                <div class="wizard-platform-label">
+                    <div>@L["WizardModuleDocker"]</div>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@(DockerRequiresRunner ? L["WizardModuleDockerRequiresRunner"] : L["WizardModuleDockerHint"])</RadzenText>
+                </div>
+                @if (DockerChecked) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+            </div>
+
+            <div class="wizard-platform-card @(IncludeServerManagement ? "wizard-platform-selected" : "")"
+                 role="checkbox" aria-checked="@IncludeServerManagement" tabindex="0"
+                 @onclick="@(() => IncludeServerManagementChanged.InvokeAsync(!IncludeServerManagement))"
+                 @onkeydown="@(e => { if (IsActivationKey(e)) IncludeServerManagementChanged.InvokeAsync(!IncludeServerManagement); })">
+                <RadzenIcon Icon="admin_panel_settings" class="wizard-platform-icon" />
+                <div class="wizard-platform-label">
+                    <div>@L["WizardModuleServerManagement"]</div>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["WizardModuleServerManagementHint"]</RadzenText>
+                </div>
+                @if (IncludeServerManagement) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+            </div>
+
+            <div class="wizard-platform-card @(IncludeDeploymentAgent ? "wizard-platform-selected" : "")"
+                 role="checkbox" aria-checked="@IncludeDeploymentAgent" tabindex="0"
+                 @onclick="@(() => IncludeDeploymentAgentChanged.InvokeAsync(!IncludeDeploymentAgent))"
+                 @onkeydown="@(e => { if (IsActivationKey(e)) IncludeDeploymentAgentChanged.InvokeAsync(!IncludeDeploymentAgent); })">
+                <RadzenIcon Icon="cloud_upload" class="wizard-platform-icon" />
+                <div class="wizard-platform-label">
+                    <div>@L["WizardModuleDeploymentAgent"]</div>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["WizardModuleDeploymentAgentHint"]</RadzenText>
+                </div>
+                @if (IncludeDeploymentAgent) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+            </div>
+
+            <div class="wizard-platform-card @(IncludePatchManagement ? "wizard-platform-selected" : "")"
+                 role="checkbox" aria-checked="@IncludePatchManagement" tabindex="0"
+                 @onclick="@(() => IncludePatchManagementChanged.InvokeAsync(!IncludePatchManagement))"
+                 @onkeydown="@(e => { if (IsActivationKey(e)) IncludePatchManagementChanged.InvokeAsync(!IncludePatchManagement); })">
+                <RadzenIcon Icon="system_security_update" class="wizard-platform-icon" />
+                <div class="wizard-platform-label">
+                    <div>@L["WizardModulePatchManagement"]</div>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["WizardModulePatchManagementHint"]</RadzenText>
+                </div>
+                @if (IncludePatchManagement) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+            </div>
+
+            <div class="wizard-platform-card @(IncludeFirewallManagement ? "wizard-platform-selected" : "")"
+                 role="checkbox" aria-checked="@IncludeFirewallManagement" tabindex="0"
+                 @onclick="@(() => IncludeFirewallManagementChanged.InvokeAsync(!IncludeFirewallManagement))"
+                 @onkeydown="@(e => { if (IsActivationKey(e)) IncludeFirewallManagementChanged.InvokeAsync(!IncludeFirewallManagement); })">
+                <RadzenIcon Icon="security" class="wizard-platform-icon" />
+                <div class="wizard-platform-label">
+                    <div>@L["WizardModuleFirewallManage"]</div>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["WizardModuleFirewallManageHint"]</RadzenText>
+                </div>
+                @if (IncludeFirewallManagement) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+            </div>
+        }
+
+        <div class="wizard-platform-card @(DevModeInsecureTls ? "wizard-platform-selected" : "")"
+             role="checkbox" aria-checked="@DevModeInsecureTls" tabindex="0"
+             @onclick="@(() => DevModeInsecureTlsChanged.InvokeAsync(!DevModeInsecureTls))"
+             @onkeydown="@(e => { if (IsActivationKey(e)) DevModeInsecureTlsChanged.InvokeAsync(!DevModeInsecureTls); })">
+            <RadzenIcon Icon="gpp_maybe" class="wizard-platform-icon" />
+            <div class="wizard-platform-label">
+                <div>@L["WizardDevModeInsecureTls"]</div>
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["WizardDevModeInsecureTlsHint"]</RadzenText>
+            </div>
+            @if (DevModeInsecureTls) { <RadzenIcon Icon="check_circle" class="wizard-platform-check" /> }
+        </div>
+    </RadzenStack>
+    @if (NoActionableModule)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" AllowClose="false">@L["WizardNoModuleWarning"]</RadzenAlert>
+    }
+</RadzenStack>

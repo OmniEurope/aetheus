@@ -1,0 +1,62 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<RadzenTemplateForm TItem="UserModel" Data="@_model" Submit="@OnSubmit">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="@L["Username"]">
+            <RadzenTextBox @bind-Value="_model.Username" Name="Username" aria-label="@L["Username"]" />
+            <ValidationMessage For="@(() => _model.Username)" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["Email"]">
+            <RadzenTextBox @bind-Value="_model.Email" Name="Email" aria-label="@L["Email"]" />
+            <ValidationMessage For="@(() => _model.Email)" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["Password"]">
+            <ChildContent>
+                @if (_showPassword)
+                {
+                    <RadzenTextBox @bind-Value="_model.Password" Name="Password" aria-label="@L["Password"]" />
+                }
+                else
+                {
+                    <RadzenPassword @bind-Value="_model.Password" Name="Password" aria-label="@L["Password"]" />
+                }
+            </ChildContent>
+            <End>
+                <RadzenButton ButtonType="ButtonType.Button" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light"
+                              Icon="@(_showPassword ? "visibility_off" : "visibility")"
+                              Click="@ToggleShowPassword" Size="ButtonSize.Small"
+                              title="@(_showPassword ? L["HidePassword"] : L["ShowPassword"])"
+                              aria-label="@(_showPassword ? L["HidePassword"] : L["ShowPassword"])" />
+                <RadzenButton ButtonType="ButtonType.Button" Icon="autorenew" Click="@GeneratePassword" Size="ButtonSize.Small"
+                              title="@L["GeneratePassword"]" aria-label="@L["GeneratePassword"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            </End>
+            <Helper>
+                <ValidationMessage For="@(() => _model.Password)" />
+            </Helper>
+        </RadzenFormField>
+
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-1">@L["Roles"]</RadzenText>
+            @foreach (var role in AvailableRoles)
+            {
+                <LabeledToggle Value="@_model.Roles.Contains(role)" ValueChanged="@(v => OnRoleToggled(role, v))" Text="@role" />
+            }
+        </div>
+
+        <LabeledToggle @bind-Value="_model.MustChangePassword" Text="@L["MustChangePassword"]" />
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" ShowIcon="true">@_error</RadzenAlert>
+        }
+
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End" class="rz-mt-2">
+            <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Create"]"
+                          Icon="person_add" IsBusy="@_busy" BusyText="@L["Saving"]" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenStack>
+    </RadzenStack>
+</RadzenTemplateForm>

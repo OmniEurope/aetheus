@@ -1,0 +1,61 @@
+name: test-gittoto
+trigger: manual
+stages:
+  - name: Create App
+    agent: production-host
+    os: linux
+    steps:
+      - name: Create Projects
+        shell: mkdir -p /tmp/pt$(BUILD_BUILDID) && dotnet new classlib -n MyApp --force -o /tmp/pt$(BUILD_BUILDID)/MyApp && dotnet new xunit -n UTs --force -o /tmp/pt$(BUILD_BUILDID)/UTs && dotnet add /tmp/pt$(BUILD_BUILDID)/UTs reference /tmp/pt$(BUILD_BUILDID)/MyApp && dotnet new xunit -n ITs --force -o /tmp/pt$(BUILD_BUILDID)/ITs && dotnet add /tmp/pt$(BUILD_BUILDID)/ITs reference /tmp/pt$(BUILD_BUILDID)/MyApp
+        timeout_seconds: 120
+
+  - name: Build
+    agent: production-host
+    os: linux
+    depends_on:
+      - Create App
+    steps:
+      - name: Build All
+        shell: dotnet build /tmp/pt$(BUILD_BUILDID)/MyApp && dotnet build /tmp/pt$(BUILD_BUILDID)/UTs && dotnet build /tmp/pt$(BUILD_BUILDID)/ITs
+        timeout_seconds: 120
+
+  - name: Unit Tests
+    agent: production-host
+    os: linux
+    depends_on:
+      - Build
+    steps:
+      - name: Run Unit Tests
+        shell: dotnet test /tmp/pt$(BUILD_BUILDID)/UTs --no-build -v normal
+        timeout_seconds: 60
+
+  - name: Integration Tests
+    agent: production-host
+    os: linux
+    depends_on:
+      - Unit Tests
+    steps:
+      - name: Run Integration Tests
+        shell: dotnet test /tmp/pt$(BUILD_BUILDID)/ITs --no-build -v normal
+        timeout_seconds: 60
+
+  - name: Coverage
+    agent: production-host
+    os: linux
+    depends_on:
+      - Integration Tests
+    steps:
+      - name: Collect Coverage
+        shell: dotnet test /tmp/pt$(BUILD_BUILDID)/UTs --no-build -v q --collect:"XPlat Code Coverage" --results-directory /tmp/pt$(BUILD_BUILDID)/cov && dotnet test /tmp/pt$(BUILD_BUILDID)/ITs --no-build -v q --collect:"XPlat Code Coverage" --results-directory /tmp/pt$(BUILD_BUILDID)/cov
+        timeout_seconds: 120
+
+  - name: Cleanup
+    agent: production-host
+    os: linux
+    depends_on:
+      - Coverage
+    condition: always()
+    steps:
+      - name: Remove Temporary Workspace
+        shell: rm -rf /tmp/pt$(BUILD_BUILDID)
+        timeout_seconds: 30

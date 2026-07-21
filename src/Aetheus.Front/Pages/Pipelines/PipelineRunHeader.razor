@@ -1,0 +1,94 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using static Aetheus.Front.Pages.Pipelines.PipelineRunFormatting
+
+<div class="pipeline-run-toolbar">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+        <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
+        <RadzenIcon Icon="account_tree" class="rz-color-primary" />
+        <h1 class="rz-text-h4 rz-m-0">
+            <a href="@PipelineHref" class="pipeline-name-link">@Run.PipelineName</a>
+            <span class="rz-color-secondary"> / </span>
+            @L["Run"] #@Run.Id
+        </h1>
+        <RadzenBadge BadgeStyle="@GetRunBadge(Run.Status)" Text="@L.Localize(Run.Status)" />
+        @if (Run.ResolvedVariables.Count > 0)
+        {
+            <a href="javascript:void(0)" class="pipeline-name-link" @onclick="VariablesRequested" @onclick:preventDefault>
+                <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@string.Format(L["VarsCount"], Run.ResolvedVariables.Count)" />
+            </a>
+        }
+        @if (Run.Parameters.Count > 0)
+        {
+            <span title="@string.Join("\n", Run.Parameters.Select(p => $"{p.Key} = {p.Value}"))">
+                <RadzenBadge BadgeStyle="BadgeStyle.Secondary" Text="@string.Format(L["RunParametersCount"], Run.Parameters.Count)" />
+            </span>
+        }
+        @{ var upstreamPipeline = UpstreamPipeline(Run.ResolvedVariables); }
+        @if (upstreamPipeline is not null)
+        {
+            var upstreamRunId = UpstreamRunId(Run.ResolvedVariables);
+            var upstreamDepth = UpstreamChainDepth(Run.ResolvedVariables);
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                <RadzenIcon Icon="conversion_path" class="rz-color-secondary icon-md-app" title="@L["UpstreamLineage"]" />
+                @if (upstreamRunId is { } runId)
+                {
+                    <a href="/pipelines/runs/@runId" class="pipeline-name-link">
+                        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["RunTriggeredByUpstream"], upstreamPipeline)" />
+                    </a>
+                }
+                else
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["RunTriggeredByUpstream"], upstreamPipeline)" />
+                }
+                @if (upstreamDepth > 1)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["UpstreamChainDepth"], upstreamDepth)"
+                                 title="@L["UpstreamChainDepthHint"]" />
+                }
+            </RadzenStack>
+        }
+        @if (!string.IsNullOrEmpty(GitBranch))
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Light" Icon="account_tree" Text="@GitBranch" />
+        }
+        @if (BlockingWarningCount > 0)
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="@string.Format(L["BlockingWarningsCount"], BlockingWarningCount)" />
+        }
+        @if (InfoWarningCount > 0)
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@string.Format(L["WarningsCount"], InfoWarningCount)" />
+        }
+        <div class="pipeline-list-spacer"></div>
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">
+            <span title="@Run.StartedAt.ToString("g")">@RelativeTime.FormatAgo(L, Run.StartedAt)</span>
+            @{ var duration = FormatDuration(Run.StartedAt, Run.CompletedAt); }
+            @if (!string.IsNullOrEmpty(duration))
+            {
+                <span> · @duration</span>
+            }
+        </RadzenText>
+        <RadzenButton Icon="edit" Text="@L["Edit"]" Size="ButtonSize.Small" Click="EditRequested"
+            aria-label="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+        @if (RunInProgress)
+        {
+            <RadzenButton Icon="cancel" Text="@L["CancelRun"]" Size="ButtonSize.Small" Click="CancelRequested" IsBusy="Cancelling" BusyText="@L["CancelRun"]"
+                class="rz-ml-2" aria-label="@L["CancelRun"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+        }
+        @if (CanRerun)
+        {
+            <RadzenSplitButton Icon="replay" Text="@L["Rerun"]" Size="ButtonSize.Small" Click="RerunRequested" IsBusy="Rerunning" BusyText="@L["Rerun"]"
+                class="rz-ml-2" aria-label="@L["Rerun"]">
+                <RadzenSplitButtonItem Text="@L["RerunCurrent"]" Value="current" Icon="replay" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                <RadzenSplitButtonItem Text="@L["RerunSameCommit"]" Value="sameCommit" Icon="commit" />
+                <RadzenSplitButtonItem Text="@L["RerunBranchHead"]" Value="branchHead" Icon="account_tree" />
+            </RadzenSplitButton>
+            @if (HasFailedSteps)
+            {
+                <RadzenButton Icon="restart_alt" Text="@L["RerunFailedSteps"]" Size="ButtonSize.Small" Click="RetryFailedRequested"
+                    IsBusy="Retrying" BusyText="@L["RerunFailedSteps"]"
+                    class="rz-ml-1" aria-label="@L["RerunFailedSteps"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+            }
+        }
+    </RadzenStack>
+</div>

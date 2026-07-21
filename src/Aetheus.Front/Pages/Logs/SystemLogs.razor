@@ -1,0 +1,159 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/system-logs"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using Aetheus.Shared.DTOs
+
+<PageTitle>@L["SystemLogs"]</PageTitle>
+
+<RadzenText TextStyle="TextStyle.H3" class="rz-mb-4">@L["SystemLogs"]</RadzenText>
+
+<RadzenCard class="rz-mb-4">
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" AlignItems="AlignItems.End" Wrap="FlexWrap.Wrap">
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["LogFile"]" Component="ddFile" />
+            <RadzenDropDown TValue="string" @bind-Value="_selectedFile"
+                            Data="_fileNames" Name="ddFile"
+                            AllowClear="true" Placeholder="@L["AllFiles"]"
+                            Change="@(_ => OnFilterChangedAsync())"
+                            class="w-rem-16" />
+        </RadzenStack>
+
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["LogLevel"]" Component="ddLevel" />
+            <RadzenDropDown TValue="string" @bind-Value="_selectedLevel"
+                            Data="_levelOptions" TextProperty="Text" ValueProperty="Value" Name="ddLevel"
+                            AllowClear="true" Placeholder="@L["AllLevels"]"
+                            Change="@(_ => OnFilterChangedAsync())"
+                            class="w-rem-10" />
+        </RadzenStack>
+
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["DateFrom"]" Component="dtFrom" />
+            <RadzenDatePicker TValue="DateTime?" @bind-Value="_dateFrom" Name="dtFrom"
+                              ShowTime="true" DateFormat="yyyy-MM-dd HH:mm"
+                              Change="@(_ => OnFilterChangedAsync())"
+                              class="w-rem-12-5" />
+        </RadzenStack>
+
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["DateTo"]" Component="dtTo" />
+            <RadzenDatePicker TValue="DateTime?" @bind-Value="_dateTo" Name="dtTo"
+                              ShowTime="true" DateFormat="yyyy-MM-dd HH:mm"
+                              Change="@(_ => OnFilterChangedAsync())"
+                              class="w-rem-12-5" />
+        </RadzenStack>
+
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["Search"]" Component="txtSearch" />
+            <RadzenTextBox Value="@_searchText" Name="txtSearch"
+                           Placeholder="@L["SearchLogs"]"
+                           Change="OnSearchTextChanged"
+                           class="w-rem-16" />
+        </RadzenStack>
+
+        <RadzenButton Text="@L["Refresh"]" Icon="refresh"
+                      Click="OnRefreshAsync" IsBusy="_isLoading" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+
+        <RadzenButton Text="@(_autoRefresh ? L["AutoRefreshOn"] : L["AutoRefreshOff"])"
+                      Icon="@(_autoRefresh ? "timer" : "timer_off")"
+                      ButtonStyle="@(_autoRefresh ? ButtonStyle.Success : ButtonStyle.Light)"
+                      Variant="Variant.Filled"
+                      Click="ToggleAutoRefresh" />
+
+        @if (!string.IsNullOrWhiteSpace(_selectedFile))
+        {
+            <RadzenButton Text="@L["Download"]" Icon="download"
+                          Click="OnDownloadAsync" IsBusy="_isDownloading" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        }
+
+        <RadzenButton Text="@L["ExportCsv"]" Icon="file_download"
+                      Click="OnExportCsvAsync" IsBusy="_isExporting" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+
+        <RadzenButton Text="@L["PurgeLogs"]" Icon="delete_sweep"
+                      Click="OnPurgeAsync" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+    </RadzenStack>
+</RadzenCard>
+
+@if (_isLoading)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" class="rz-my-4" />
+}
+else if (_entries is not null)
+{
+    <RadzenDataGrid Data="_accumulated" TItem="SystemLogEntryDto"
+                    KeyProperty="Id"
+                    AllowPaging="false"
+                    AllowSorting="true"
+                    Density="Density.Compact"
+                    RowClick="@OnRowClick"
+                    class="rz-mb-4 aetheus-grid-fullheight aetheus-clickable-rows" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+        <Columns>
+            <RadzenDataGridColumn TItem="SystemLogEntryDto" Property="Timestamp"
+                                  Title="@L["Timestamp"]" Width="180px"
+                                  FormatString="{0:yyyy-MM-dd HH:mm:ss.fff}" />
+            <RadzenDataGridColumn TItem="SystemLogEntryDto" Property="Level"
+                                  Title="@L["LogLevel"]" Width="120px">
+                <Template Context="entry">
+                    <RadzenBadge Text="@entry.Level"
+                                 BadgeStyle="@GetBadgeStyle(entry.Level)"
+                                 IsPill="true" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="SystemLogEntryDto" Property="Category"
+                                  Title="@L["Category"]" Width="260px" />
+            <RadzenDataGridColumn TItem="SystemLogEntryDto" Property="Message"
+                                  Title="@L["Message"]">
+                <Template Context="entry">
+                    <span title="@entry.Message" class="log-message-cell">
+                        @(entry.Message.Length > 300 ? entry.Message[..300] + "…" : entry.Message)
+                    </span>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="SystemLogEntryDto" Property="CorrelationId"
+                                  Title="@L["CorrelationId"]" Width="170px">
+                <Template Context="entry">
+                    @if (!string.IsNullOrWhiteSpace(entry.CorrelationId))
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem" @onclick:stopPropagation="true">
+                            <span class="correlation-id-text">@entry.CorrelationId</span>
+                            <RadzenButton Icon="content_copy" Size="ButtonSize.ExtraSmall"
+                                          title="@L["CopyCorrelationId"]"
+                                          Click="@(() => OnCopyCorrelationIdAsync(entry.CorrelationId!))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                        </RadzenStack>
+                    }
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="SystemLogEntryDto" Title="" Width="92px"
+                                  Sortable="false" Filterable="false" TextAlign="TextAlign.Center">
+                <Template Context="entry">
+                    <span @onclick:stopPropagation="true">
+                        <RadzenButton Icon="visibility" Size="ButtonSize.ExtraSmall"
+                                      ButtonStyle="@(string.IsNullOrWhiteSpace(entry.Exception) ? ButtonStyle.Light : ButtonStyle.Danger)"
+                                      title="@L["ViewMessage"]"
+                                      Click="@(() => ShowMessageDialogAsync(entry))" Variant="Variant.Filled" />
+                        <RadzenButton Icon="content_copy" Size="ButtonSize.ExtraSmall"
+                                      title="@L["CopyMessage"]"
+                                      Click="@(() => OnCopyMessageAsync(entry.Message))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    </span>
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+
+    @* LM3K: load-more control replacing the removed 1/N pager - appends the next page in place. *@
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
+                 JustifyContent="JustifyContent.Center" Gap="0.75rem" class="rz-mb-4">
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">
+            @string.Format(L["LogsShownCount"], _accumulated.Count, _entries.TotalCount)
+        </RadzenText>
+        @if (_entries.HasNext)
+        {
+            <RadzenButton Text="@L["LoadMore"]" Icon="expand_more"
+                          Click="LoadMoreAsync" IsBusy="_isLoadingMore" BusyText="@L["Loading"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+    </RadzenStack>
+}
+else
+{
+    <EmptyState Icon="search_off" Title="@L["NoLogsAvailable"]" />
+}

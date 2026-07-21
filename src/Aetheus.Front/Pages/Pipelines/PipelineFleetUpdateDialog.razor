@@ -1,0 +1,41 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+}
+else if (_preview is not null)
+{
+    <RadzenStack Gap="1rem">
+        <RadzenText TextStyle="TextStyle.Subtitle1">
+            @string.Format(L["TemplateVersionTransition"], _preview.TemplateName, _preview.CurrentVersion, _preview.TargetVersion)
+        </RadzenText>
+        @if (_preview.OrphanOverrides.Count > 0)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" ShowIcon="true">
+                <RadzenText>@L["OrphanOverridesWarning"]</RadzenText>
+                <ul>
+                    @foreach (var orphan in _preview.OrphanOverrides)
+                    {
+                        <li><code>@orphan</code></li>
+                    }
+                </ul>
+            </RadzenAlert>
+            <LabeledToggle @bind-Value="_acknowledged" Text="@L["AcknowledgeOrphanOverrides"]" />
+        }
+        <MonacoDiffViewer OriginalValue="@_preview.CurrentResolvedYaml" ModifiedValue="@_preview.TargetResolvedYaml" />
+        <DialogFooter OnCancel="@Cancel">
+            <RadzenButton Text="@L["ConfirmUpdate"]" Icon="system_update_alt" Click="@ConfirmAsync"
+                          IsBusy="@_saving" Disabled="@(_saving || (_preview.RequiresOrphanAcknowledgement && !_acknowledged))"
+                          ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        </DialogFooter>
+    </RadzenStack>
+}
+else if (_loadFailed)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">@L["LoadError"]</RadzenAlert>
+    <DialogFooter OnCancel="@Cancel">
+        <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@LoadPreviewAsync"
+                      ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </DialogFooter>
+}

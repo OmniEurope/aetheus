@@ -1,0 +1,23 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Item #1 of the plan - first concrete section page using the new ServerDetailLayout.
+
+    Replaces `/servers/{id}?section=overview` with `/servers/{id}/overview`.
+    A redirect from the legacy bare `/servers/{id}` route lives in ServerDetail.razor (it
+    becomes a 3-line redirector once the migration completes). *@
+
+@page "/servers/{Id:int}/overview"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["Overview"] - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Pages.Servers.ServerDetailSections.ServerOverviewSection
+        Server="@Loader.Server"
+        MetricsReceived="@Loader.MetricsReceived"
+        Metrics="@Loader.Metrics"
+        PipelineRunnerAvailable="@Loader.PipelineRunnerAvailable"
+        LastUpdated="@Loader.LastUpdated" />
+}

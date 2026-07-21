@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+public interface IPipelineRunService
+{
+    /// <summary>Resolves the exact branch, commit, YAML and target servers that a run would execute.
+    /// Callers must authorize <see cref="PipelineRunPreparation.TargetServerIds"/> before launching.</summary>
+    Task<PipelineRunPreparation?> PrepareRunAsync(int pipelineId, string? sourceBranch = null,
+        CancellationToken ct = default);
+
+    /// <summary>Applies queue-time parameters to every YAML field and recomputes the exact target
+    /// servers. Callers authorize the returned preparation before launching it.</summary>
+    Task<PipelineRunPreparation> ResolveRunParametersAsync(
+        PipelineRunPreparation preparation,
+        IReadOnlyDictionary<string, string>? parameters,
+        CancellationToken ct = default);
+
+    /// <summary>Launches an already-resolved snapshot. No Git ref is read again.</summary>
+    Task<PipelineRunDto?> TriggerPreparedRunAsync(PipelineRunPreparation preparation,
+        Dictionary<string, string>? additionalVariables = null,
+        Dictionary<string, string>? parameters = null, CancellationToken ct = default);
+
+    Task<PipelineRunDto?> TriggerRunAsync(int id, Dictionary<string, string>? additionalVariables = null,
+        Dictionary<string, string>? parameters = null, CancellationToken ct = default);
+
+    /// <summary>P: the queue-time parameters declared by the pipeline's authoritative (git-first) YAML,
+    /// for rendering the run dialog. Empty list when the pipeline declares no <c>parameters:</c>.</summary>
+    Task<List<PipelineRunParameterDto>> GetRunParametersAsync(int pipelineId, string? sourceBranch = null, CancellationToken ct = default);
+    Task<PaginatedResult<PipelineRunDto>> GetRunsAsync(int pipelineId, PaginationRequest request, CancellationToken ct = default);
+    Task<List<PipelineRunDto>> GetActiveRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
+    Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
+    Task<PipelineRunDto?> GetRunAsync(int runId, CancellationToken ct = default);
+    Task<DryRunResultDto?> DryRunAsync(int pipelineId, Dictionary<string, string>? additionalVars = null, CancellationToken ct = default);
+
+    /// <summary>Resolves each stage's target server without launching, so the caller can warn
+    /// when no online agent matches. Returns null if the pipeline or its YAML is invalid.</summary>
+    Task<PipelinePreflightDto?> PreflightAsync(int pipelineId, Dictionary<string, string>? additionalVars = null, CancellationToken ct = default);
+    Task<PipelinePreflightDto?> PreflightAsync(PipelineRunPreparation preparation,
+        Dictionary<string, string>? additionalVars = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// F-EXEC-1: every server id the pipeline's stages could resolve to (pool &gt; environment &gt;
+    /// agent precedence, ANY status). The caller MUST verify the triggering principal holds
+    /// <see cref="Aetheus.Shared.Enums.Permission.Admin"/> on each before launching - pipeline
+    /// steps are free-form shell (= RCE), so this mirrors the F-15 gate on <c>POST /api/tasks</c>.
+    /// Returns an empty set when the pipeline/YAML is invalid or matches no server (the run cannot
+    /// execute, so there is nothing to authorize).
+    /// </summary>
+    Task<IReadOnlyCollection<int>> ResolveCandidateTargetServerIdsAsync(int pipelineId, CancellationToken ct = default);
+
+    /// <summary>
+    /// F-EXEC-1b: non-interactive trigger (webhook / scheduler). There is no
+    /// <see cref="System.Security.Claims.ClaimsPrincipal"/>, so the run is authorized against
+    /// the pipeline OWNER (<c>Pipeline.CreatedByUsername</c>): the pipeline must be owned and
+    /// the owner must hold <see cref="Aetheus.Shared.Enums.Permission.Admin"/> on every
+    /// resolvable target server. Fail-closed - returns <c>null</c> without launching when the
+    /// pipeline is unowned or the owner lacks the required permission (the breach is logged and
+    /// audited). Mirrors the interactive F-EXEC-1 gate for the no-principal paths.
+    /// </summary>
+    Task<PipelineRunDto?> TriggerAutomatedRunAsync(int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// F-EXEC-1b (chaining): launch a child pipeline from a <c>trigger:</c> step or an <c>on_success:</c>
+    /// hop. There is no caller principal at the chaining link, so the child run is authorized against the
+    /// CHILD pipeline's OWNER - the upstream caller may administer one pipeline's servers but not the next
+    /// hop's. Fail-closed: returns <c>null</c> without launching when the child is unowned or its owner
+    /// lacks <see cref="Aetheus.Shared.Enums.Permission.Admin"/> on a resolvable target (audited as
+    /// <c>BlockedUnauthorizedChainedRun</c>).
+    /// </summary>
+    Task<PipelineRunDto?> TriggerChainedRunAsync(int childPipelineId, Dictionary<string, string> upstreamVariables, CancellationToken ct = default);
+
+    Task AdvanceStageAsync(int pipelineRunId, string completedStageName, CancellationToken ct = default);
+
+    /// <summary>Re-evaluates an active run from persisted step state without requiring a new task
+    /// completion callback. Used by the scheduler self-heal after a lost advancement signal.</summary>
+    Task ReconcileRunAsync(int pipelineRunId, CancellationToken ct = default);
+
+    /// <summary>
+    /// S-TECH-ARCR: re-entry point invoked when a post-stage artifact-collection task completes. A
+    /// successful collection advances the run; every other terminal status fails it closed.
+    /// </summary>
+    Task ContinueAfterArtifactCollectionAsync(
+        int pipelineRunId, TaskExecutionStatus collectionStatus, CancellationToken ct = default);
+
+    Task<bool> CancelRunAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>Force-completes a run wedged in Running as Failed (reconcile backstop). Used by the
+    /// trigger-reconcile sweep for runs that can no longer make progress - e.g. a step failed but the run
+    /// never finalized, or the run outlived every task without a completion event. Dispatches the normal
+    /// completion event so waiting parent trigger steps unblock too.</summary>
+    Task FailStuckRunAsync(int runId, CancellationToken ct = default);
+
+    Task<bool> ResumeAfterApprovalAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>Re-runs ONLY the failed steps of a previously-failed run (resets them to Pending and
+    /// re-schedules), instead of starting a whole new run. Returns the updated run, or null if the
+    /// run is not found, not in a Failed state, or has no failed steps to retry.</summary>
+    Task<PipelineRunDto?> RetryFailedStepsAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>G: re-launches a run from an existing one. <see cref="RerunMode.Current"/> starts a
+    /// fresh run from the live definition; the snapshot modes replay the source run's captured YAML,
+    /// pinned to the same commit or floated to the branch head. Null when the source run is unknown.</summary>
+    Task<PipelineRunDto?> RerunAsync(int sourceRunId, RerunMode mode, CancellationToken ct = default);
+
+
+    /// <summary>Returns the pipeline id and owning project id for a run.
+    /// Null when the run does not exist.</summary>
+    Task<(int PipelineId, int? ProjectId)?> GetRunPipelineContextAsync(int runId, CancellationToken ct = default);
+    Task<int?> GetPipelineIdForRunAsync(int runId, CancellationToken ct = default);
+    Task<int?> GetPipelineIdForApprovalAsync(int approvalId, CancellationToken ct = default);
+    Task<bool> IsServerAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default);
+}

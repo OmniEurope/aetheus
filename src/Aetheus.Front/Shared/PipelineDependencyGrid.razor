@@ -1,0 +1,98 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenDataGrid Data="@DisplayItems" TItem="PipelineDependencyDto" Density="Density.Compact"
+    AllowPaging="@(!Virtualize && !FillHeight)" PageSize="@PageSize" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    AllowVirtualization="@Virtualize" VirtualizationOverscanCount="3"
+    ExpandMode="DataGridExpandMode.Single" RowRender="@OnRowRender" RowClick="@OnRowClick"
+    ExpandChildItemAriaLabel="@L["ExpandChildItem"]"
+    class="@GridCssClass">
+    <Template Context="pipeline">
+        @{ var relations = Relations(pipeline); }
+        <div class="pipeline-dependency-details">
+            <div class="pipeline-relation-header">
+                <span class="pipeline-relation-header-icon" aria-hidden="true">
+                    <RadzenIcon Icon="@(ShowsChildren ? "account_tree" : "call_merge")" />
+                </span>
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">
+                    @(ShowsChildren ? L["ChildPipelines"] : L["ParentPipelines"])
+                </RadzenText>
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@relations.Count.ToString()" />
+            </div>
+            <ol class="@RelationListCss">
+                @for (var index = 0; index < relations.Count; index++)
+                {
+                    var relation = relations[index];
+                    <li class="pipeline-relation-item">
+                        @if (relation.Id.HasValue)
+                        {
+                            <a href="@PipelineHref(relation.Id.Value)" class="pipeline-relation-card">
+                                <span class="pipeline-relation-marker" aria-hidden="true">
+                                    @if (ShowsChildren)
+                                    {
+                                        @((index + 1).ToString())
+                                    }
+                                    else
+                                    {
+                                        <RadzenIcon Icon="call_merge" />
+                                    }
+                                </span>
+                                <span class="pipeline-relation-name">@relation.Name</span>
+                                <RadzenIcon Icon="arrow_forward" class="pipeline-relation-open" aria-hidden="true" />
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="pipeline-relation-card pipeline-relation-card-static">
+                                <span class="pipeline-relation-marker" aria-hidden="true">
+                                    @if (ShowsChildren)
+                                    {
+                                        @((index + 1).ToString())
+                                    }
+                                    else
+                                    {
+                                        <RadzenIcon Icon="call_merge" />
+                                    }
+                                </span>
+                                <span class="pipeline-relation-name">@relation.Name</span>
+                            </span>
+                        }
+                    </li>
+                }
+            </ol>
+        </div>
+    </Template>
+    <Columns>
+        <RadzenDataGridColumn TItem="PipelineDependencyDto" Property="ProjectName" Title="@L["Project"]" Width="10rem"
+            Visible="@GroupByProject" CssClass="pipeline-project-column" HeaderCssClass="pipeline-project-column">
+            <Template Context="pipeline">
+                <span class="pipeline-project-context"><RadzenIcon Icon="folder" /> @(pipeline.ProjectName ?? L["Unassigned"])</span>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PipelineDependencyDto" Property="Name" Title="@L["Pipeline"]" MinWidth="11rem">
+            <Template Context="pipeline">
+                <a href="@PipelineHref(pipeline.Id)" class="pipeline-name-link" @onclick:stopPropagation="true">@pipeline.Name</a>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PipelineDependencyDto" Title="@L["RecentRunsColumn"]" Width="6rem"
+            Sortable="false" Filterable="false">
+            <Template Context="pipeline">
+                <PipelineRunHistory Runs="@pipeline.RecentRuns" ProjectId="@pipeline.ProjectId" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PipelineDependencyDto" Property="TriggerType" Title="@L["Trigger"]" Width="8rem"
+            CssClass="pipeline-secondary-column" HeaderCssClass="pipeline-secondary-column">
+            <Template Context="pipeline">@L.Localize(pipeline.TriggerType)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PipelineDependencyDto" Title="" Width="13rem" Sortable="false" Filterable="false" TextAlign="TextAlign.Right">
+            <Template Context="pipeline">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.35rem" JustifyContent="JustifyContent.End" class="pipeline-row-actions" @onclick:stopPropagation="true">
+                    <RadzenButton Text="@L["Edit"]" Icon="edit" Click="@(() => EditPipeline(pipeline.Id))"
+                        Disabled="@(!CanWrite)" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenSplitButton Text="@L["Run"]" Icon="play_arrow" Click="@(item => RunPipeline(pipeline.Id, item))"
+                        aria-label="@L["RunPipelineAction"]" Disabled="@(!CanWrite)" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled">
+                        <RadzenSplitButtonItem Text="@L["ChooseBranch"]" Value="branch" Icon="account_tree" />
+                    </RadzenSplitButton>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>

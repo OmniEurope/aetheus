@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Data;
+using Aetheus.Back.Data.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace Aetheus.Back.Components.Vaults;
+
+public class VaultRepository(AppDbContext db, TimeProvider timeProvider) : IVaultRepository
+{
+    public async Task<(List<Vault> Items, int TotalCount)> GetVaultsPagedAsync(
+        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
+    {
+        var query = db.Vaults.AsNoTracking().AsQueryable();
+
+        if (accessibleIds is not null)
+            query = query.Where(v => accessibleIds.Contains(v.Id));
+
+        if (environmentId.HasValue)
+            query = query.Where(v => v.EnvironmentId == environmentId.Value);
+        else if (projectServerId.HasValue)
+            query = query.Where(v => v.ProjectServerId == projectServerId.Value);
+        else if (projectId.HasValue)
+            query = query.Where(v => v.ProjectId == projectId.Value || v.ProjectId == null);
+
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(v => v.Name.Contains(search) || v.Description.Contains(search));
+
+        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
+
+        var items = await query
+            .Include(v => v.Project)
+            .Include(v => v.Environment)
+            .Include(v => v.ProjectServer)
+            .Include(v => v.Secrets)
+            .OrderBy(v => v.Name)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .AsSplitQuery()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return (items, totalCount);
+    }
+
+    public async Task<Vault?> GetVaultDetailAsync(int id, CancellationToken ct = default)
+    {
+        return await db.Vaults
+            .Where(v => v.Id == id)
+            .Include(v => v.Project)
+            .Include(v => v.Environment)
+            .Include(v => v.ProjectServer)
+            .Include(v => v.Secrets)
+                .ThenInclude(s => s.Versions)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<List<Vault>> FindByNamesAsync(List<string> names, int? projectId, CancellationToken ct = default)
+    {
+        return await db.Vaults
+            .AsNoTracking()
+            .Where(v => names.Contains(v.Name)
+                && (v.ProjectId == projectId || v.ProjectId == null))
+            .Include(v => v.Secrets)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<List<Vault>> FindByNamesWithCrossAccessAsync(List<string> names, int projectId, CancellationToken ct = default)
+    {
+        return await db.Vaults
+            .AsNoTracking()
+            .Where(v => names.Contains(v.Name)
+                && (v.ProjectId == projectId
+                    || (v.EnvironmentId != null && v.Environment!.ProjectId == projectId)
+                    || (v.ProjectServerId != null && v.ProjectServer!.ProjectId == projectId)
+                    || (v.ProjectId == null && v.EnvironmentId == null && v.ProjectServerId == null)))
+            .Include(v => v.Secrets)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<List<string>> GetVaultNamesAsync(int? projectId, List<int>? accessibleIds = null, CancellationToken ct = default)
+    {
+        var query = db.Vaults
+            .AsNoTracking()
+            .Where(v => v.ProjectId == projectId || v.ProjectId == null);
+        if (accessibleIds is not null) query = query.Where(v => accessibleIds.Contains(v.Id));
+        return await query
+            .Select(v => v.Name)
+            .OrderBy(n => n)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<Vault?> FindVaultAsync(int id, CancellationToken ct = default)
+    {
+        return await db.Vaults.FindAsync([id], ct).ConfigureAwait(false);
+    }
+
+    public async Task AddVaultAsync(Vault vault, CancellationToken ct = default)
+    {
+        db.Vaults.Add(vault);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task RemoveVaultAsync(Vault vault, CancellationToken ct = default)
+    {
+        db.Vaults.Remove(vault);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<VaultSecret?> FindSecretAsync(int secretId, CancellationToken ct = default)
+    {
+        return await db.VaultSecrets.FindAsync([secretId], ct).ConfigureAwait(false);
+    }
+
+    public async Task AddSecretAsync(VaultSecret secret, CancellationToken ct = default)
+    {
+        db.VaultSecrets.Add(secret);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task AddSecretsRangeAsync(List<VaultSecret> secrets, CancellationToken ct = default)
+    {
+        db.VaultSecrets.AddRange(secrets);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task RemoveSecretAsync(VaultSecret secret, CancellationToken ct = default)
+    {
+        db.VaultSecrets.Remove(secret);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task AddSecretVersionAsync(VaultSecretVersion version, CancellationToken ct = default)
+    {
+        db.VaultSecretVersions.Add(version);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task AddSecretVersionsRangeAsync(List<VaultSecretVersion> versions, CancellationToken ct = default)
+    {
+        db.VaultSecretVersions.AddRange(versions);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<List<VaultSecretVersion>> GetSecretVersionsAsync(int secretId, CancellationToken ct = default)
+    {
+        return await db.VaultSecretVersions
+            .AsNoTracking()
+            .Where(v => v.VaultSecretId == secretId)
+            .OrderByDescending(v => v.Version)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<int> GetNextVersionAsync(int secretId, CancellationToken ct = default)
+    {
+        var maxVersion = await db.VaultSecretVersions
+            .Where(v => v.VaultSecretId == secretId)
+            .MaxAsync(v => (int?)v.Version, ct)
+            .ConfigureAwait(false);
+
+        return (maxVersion ?? 0) + 1;
+    }
+
+    public async Task<List<VaultSecret>> GetExpiringSecretsAsync(DateTime threshold, CancellationToken ct = default)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        return await db.VaultSecrets
+            .AsNoTracking()
+            .Where(s => s.ExpiresAt != null && s.ExpiresAt <= threshold && s.ExpiresAt > now)
+            .Include(s => s.Vault)
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task SaveChangesAsync(CancellationToken ct = default)
+    {
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}

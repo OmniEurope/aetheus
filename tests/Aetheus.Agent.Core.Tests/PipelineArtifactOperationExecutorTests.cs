@@ -1,0 +1,789 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using Aetheus.Agent.Core.Operations;
+using Aetheus.Agent.Core.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+
+namespace Aetheus.Agent.Core.Tests;
+
+/// <summary>
+/// Covers S-TECH-61: artifact collection auto-detects Cobertura coverage and publishes it so
+/// shell-based runs light up the coverage tile without an explicit <c>type: coverage</c> step.
+/// </summary>
+public class PipelineArtifactOperationExecutorTests
+{
+    [Theory]
+    [InlineData("nminus1", "nminus1")]
+    [InlineData("versions/v1", "versions/v1")]
+    public void RestoreArtifacts_TargetDirectory_StaysInsideWorkspace(string target, string expectedSuffix)
+    {
+        var workspace = Path.Combine(Path.GetTempPath(), "aetheus-restore-root");
+
+        var resolved = PipelineArtifactRestorer.ResolveRestoreDirectory(workspace, target);
+
+        Assert.Equal(Path.GetFullPath(Path.Combine(workspace, expectedSuffix)), resolved);
+    }
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("nested/../../escape")]
+    public void RestoreArtifacts_TargetDirectoryTraversal_IsRejected(string target)
+    {
+        var workspace = Path.Combine(Path.GetTempPath(), "aetheus-restore-root");
+
+        Assert.Throws<InvalidDataException>(() =>
+            PipelineArtifactRestorer.ResolveRestoreDirectory(workspace, target));
+    }
+
+    private const string CoberturaXml =
+        "<?xml version=\"1.0\"?><coverage line-rate=\"0.85\" branch-rate=\"0.7\" " +
+        "lines-covered=\"85\" lines-valid=\"100\" branches-covered=\"7\" branches-valid=\"10\"></coverage>";
+
+    private static PipelineArtifactOperationExecutor NewExecutor(IServerApiClient apiClient) =>
+        new(apiClient, NullLogger<PipelineArtifactOperationExecutor>.Instance);
+
+    private static string Sha256(Stream stream)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        stream.Position = 0;
+        return hash;
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_DownloadsAndExtractsVerifiedArchiveIntoRequestedSubdirectory()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-restore-").FullName;
+        try
+        {
+            var bytes = new MemoryStream();
+            using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var entry = archive.CreateEntry("src/Aetheus.Back/bin/Release/net10.0/Aetheus.Back.dll");
+                await using var writer = new StreamWriter(entry.Open());
+                await writer.WriteAsync("verified-build");
+            }
+            bytes.Position = 0;
+            var api = Substitute.For<IServerApiClient>();
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<Stream?>(bytes));
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineRestoreArtifacts,
+                target: "BuildArtifacts-artifacts",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = Sha256(bytes),
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_RESTORE_TARGET_DIR"] = ".nminus1"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal("verified-build", await File.ReadAllTextAsync(
+                Path.Combine(workDir, ".nminus1", "src", "Aetheus.Back", "bin", "Release", "net10.0", "Aetheus.Back.dll"),
+                TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(Path.Combine(workDir,
+                "src", "Aetheus.Back", "bin", "Release", "net10.0", "Aetheus.Back.dll")));
+            await api.Received(1).DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_WithoutRequiredMetadata_FailsHonestly()
+    {
+        var api = Substitute.For<IServerApiClient>();
+
+        var result = await NewExecutor(api).ExecuteAsync(
+            OperationKind.PipelineRestoreArtifacts,
+            target: "BuildArtifacts-artifacts",
+            envVars: new Dictionary<string, string>(),
+            timeoutSeconds: 60,
+            onOutput: (_, _) => Task.CompletedTask,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(0, result.ExitCode);
+        await api.DidNotReceive().DownloadArtifactAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_Sha256Mismatch_IsRefusedBeforeExtraction()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-sha-").FullName;
+        try
+        {
+            var bytes = new MemoryStream();
+            using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var entry = archive.CreateEntry("payload.txt");
+                await using var writer = new StreamWriter(entry.Open());
+                await writer.WriteAsync("tampered");
+            }
+            bytes.Position = 0;
+            var api = Substitute.For<IServerApiClient>();
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<Stream?>(bytes));
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineRestoreArtifacts,
+                "BuildArtifacts-artifacts",
+                new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = new string('0', 64),
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                60,
+                (message, _) => { output.Add(message); return Task.CompletedTask; },
+                TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.StartsWith("Artifact SHA-256 mismatch:", StringComparison.Ordinal));
+            Assert.False(File.Exists(Path.Combine(workDir, "payload.txt")));
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CreateRelease_UsesAuthoritativeRunMetadataAndCiArtifactRun()
+    {
+        const string commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var api = Substitute.For<IServerApiClient>();
+        api.CreateReleaseAsync(5, 99, "1.0.99", null, commit, "main", 42, true, Arg.Any<CancellationToken>())
+            .Returns(new ReleaseCreatedResponse { Id = 7, Version = "1.0.99", BuildNumber = 3 });
+
+        var result = await NewExecutor(api).ExecuteAsync(
+            OperationKind.PipelineCreateRelease,
+            target: "1.0.99",
+            envVars: new Dictionary<string, string>
+            {
+                ["AETHEUS_PROJECT_ID"] = "5",
+                ["AETHEUS_RUN_ID"] = "99",
+                ["AETHEUS_CHANGELOG"] = "false",
+                ["AETHEUS_RELEASE_COMMIT"] = commit,
+                ["AETHEUS_RELEASE_BRANCH"] = "main",
+                ["AETHEUS_RELEASE_ARTIFACT_RUN_ID"] = "42",
+                ["AETHEUS_RELEASE_DEPLOYED"] = "true"
+            },
+            timeoutSeconds: 60,
+            onOutput: (_, _) => Task.CompletedTask,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, result.ExitCode);
+        await api.Received(1).CreateReleaseAsync(
+            5, 99, "1.0.99", null, commit, "main", 42, true, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateRelease_NullServerResponse_FailsHonestly()
+    {
+        var api = Substitute.For<IServerApiClient>();
+        api.CreateReleaseAsync(5, 99, "1.0.99", null, null, null, null, false, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<ReleaseCreatedResponse?>(null));
+        var output = new List<string>();
+
+        var result = await NewExecutor(api).ExecuteAsync(
+            OperationKind.PipelineCreateRelease,
+            target: "1.0.99",
+            envVars: new Dictionary<string, string>
+            {
+                ["AETHEUS_PROJECT_ID"] = "5",
+                ["AETHEUS_RUN_ID"] = "99",
+                ["AETHEUS_CHANGELOG"] = "false"
+            },
+            timeoutSeconds: 60,
+            onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(output, message => message.Contains("server returned no release", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_MissingDownload_FailsHonestly()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-restore-").FullName;
+        try
+        {
+            var api = Substitute.For<IServerApiClient>();
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>()).Returns(Task.FromResult<Stream?>(null));
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineRestoreArtifacts, "BuildArtifacts-artifacts",
+                new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = new string('0', 64),
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                }, 60, (message, _) => { output.Add(message); return Task.CompletedTask; }, TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.Contains("not found / forbidden", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(workDir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_InvalidZip_FailsHonestly()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-restore-").FullName;
+        try
+        {
+            var api = Substitute.For<IServerApiClient>();
+            var invalidZip = new MemoryStream("not a zip"u8.ToArray());
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<Stream?>(invalidZip));
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineRestoreArtifacts, "BuildArtifacts-artifacts",
+                new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = Sha256(invalidZip),
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                }, 60, (message, _) => { output.Add(message); return Task.CompletedTask; }, TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.StartsWith("Artifact restore failed:", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(workDir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_InsufficientFreeSpace_IsRefusedBeforeExtraction()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-space-").FullName;
+        try
+        {
+            var bytes = new MemoryStream();
+            using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var entry = archive.CreateEntry("must-not-extract.txt");
+                await using var writer = new StreamWriter(entry.Open());
+                await writer.WriteAsync("payload");
+            }
+            bytes.Position = 0;
+            var api = Substitute.For<IServerApiClient>();
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<Stream?>(bytes));
+            var output = new List<string>();
+
+            var result = await PipelineArtifactRestorer.RestoreAsync(
+                api, NullLogger.Instance,
+                new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = Sha256(bytes),
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                (message, _) => { output.Add(message); return Task.CompletedTask; },
+                TestContext.Current.CancellationToken,
+                _ => 512L * 1024 * 1024);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.StartsWith("Artifact restore refused:", StringComparison.Ordinal));
+            Assert.False(File.Exists(Path.Combine(workDir, "must-not-extract.txt")));
+        }
+        finally { Directory.Delete(workDir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task CollectArtifacts_WithCoberturaInWorkspace_AutoPublishesCoverage()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "coverage.cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineCollectArtifacts,
+                target: "[]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_STAGE_NAME"] = "Tests",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            await api.Received(1).PublishCoverageAsync(42, CoberturaXml, "Tests",
+                Arg.Any<string>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CollectArtifacts_WithoutCoverage_DoesNotPublish()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "app.dll"), "binary", TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineCollectArtifacts,
+                target: "[]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            await api.DidNotReceive().PublishCoverageAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CollectArtifacts_ExplicitPatternsWithoutMatches_FailsWithoutUpload()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-artifact-").FullName;
+        try
+        {
+            var api = Substitute.For<IServerApiClient>();
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineCollectArtifacts,
+                target: "[\"bin/**/*.zip\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.Contains("no files matched", StringComparison.Ordinal));
+            await api.DidNotReceive().UploadArtifactAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_WithNestedCoberturaFile_FindsAndPublishesIt()
+    {
+        // 0-d: the dotnet `--collect` writes to coverage/<guid>/coverage.cobertura.xml - the default
+        // `**/coverage.cobertura.xml` glob must match that nested path, not only the workspace root.
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-").FullName;
+        try
+        {
+            var nested = Path.Combine(workDir, "coverage", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(nested);
+            await File.WriteAllTextAsync(Path.Combine(nested, "coverage.cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"**/coverage.cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_STAGE_NAME"] = "Coverage",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            await api.Received(1).PublishCoverageAsync(42, CoberturaXml, "Coverage",
+                Arg.Any<string>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_WithExactNestedRelativePath_FindsAndPublishesIt()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-exact-").FullName;
+        try
+        {
+            var nested = Path.Combine(workDir, "coverage-merged");
+            Directory.CreateDirectory(nested);
+            await File.WriteAllTextAsync(Path.Combine(nested, "Cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"coverage-merged/Cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_STAGE_NAME"] = "Coverage",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            await api.Received(1).PublishCoverageAsync(42, CoberturaXml, "Coverage",
+                Arg.Any<string>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_NoFilesFound_FailsInsteadOfFalseGreen()
+    {
+        // 0-d / no-fake regression: a coverage step that finds nothing must NOT report success.
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-").FullName;
+        try
+        {
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"**/coverage.cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.DidNotReceive().PublishCoverageAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_MultipleRawReports_RequiresExplicitMerge()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-multi-").FullName;
+        try
+        {
+            var first = Directory.CreateDirectory(Path.Combine(workDir, "coverage", "one")).FullName;
+            var second = Directory.CreateDirectory(Path.Combine(workDir, "coverage", "two")).FullName;
+            await File.WriteAllTextAsync(Path.Combine(first, "coverage.cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(second, "coverage.cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"**/coverage.cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.Contains("one merged Cobertura report", StringComparison.Ordinal));
+            await api.DidNotReceive().PublishCoverageAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally { Directory.Delete(workDir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_InvalidLineTotals_FailsBeforePublishing()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-invalid-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "Cobertura.xml"),
+                "<coverage line-rate=\"1\" lines-covered=\"2\" lines-valid=\"1\" />",
+                TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"Cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.DidNotReceive().PublishCoverageAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally { Directory.Delete(workDir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_SourceCommitMismatch_FailsBeforePublishing()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-sha-").FullName;
+        try
+        {
+            await RunGitAsync(workDir, "init");
+            await RunGitAsync(workDir, "-c", "user.name=Aetheus Tests", "-c", "user.email=aetheus@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture");
+            await File.WriteAllTextAsync(Path.Combine(workDir, "Cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"Cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["BUILD_SOURCEVERSION"] = new string('a', 40)
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.DidNotReceive().PublishCoverageAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally { DeleteGitFixture(workDir); }
+    }
+
+    private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        using var process = Process.Start(startInfo)!;
+        var standardError = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {standardError}");
+    }
+
+    private static void DeleteGitFixture(string workingDirectory)
+    {
+        foreach (var file in Directory.EnumerateFiles(workingDirectory, "*", SearchOption.AllDirectories))
+            File.SetAttributes(file, FileAttributes.Normal);
+        Directory.Delete(workingDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task PublishCoverage_BelowThreshold_PublishesButFailsStep()
+    {
+        // S-FEAT-K3P8: coverage is published (trend recorded) but the step fails when below the floor.
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "coverage.cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken); // 85%
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"**/coverage.cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_MIN_COVERAGE"] = "90"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.Received(1).PublishCoverageAsync(42, CoberturaXml, Arg.Any<string?>(),
+                Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishCoverage_MeetsThreshold_Succeeds()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "coverage.cobertura.xml"), CoberturaXml, TestContext.Current.CancellationToken); // 85%
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"**/coverage.cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_MIN_COVERAGE"] = "80"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    private const string HighComplexitySource =
+        "class C { int M(int x) { if (x > 0) return 1; if (x > 1) return 2; if (x > 2) return 3; " +
+        "if (x > 3) return 4; return 0; } }";
+
+    [Fact]
+    public async Task PublishComplexity_OverBudget_PublishesButFailsStep()
+    {
+        // S-FEAT-D7M5: metrics are published (trend recorded) but the step fails when max CC > budget.
+        var workDir = Directory.CreateTempSubdirectory("prm-cc-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "Sample.cs"), HighComplexitySource, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishComplexity,
+                target: string.Empty,
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_MAX_COMPLEXITY"] = "2"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.Received(1).PublishComplexityAsync(42, Arg.Any<double>(), Arg.Any<int>(),
+                Arg.Any<int>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishComplexity_WithinBudget_Succeeds()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cc-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "Sample.cs"), HighComplexitySource, TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishComplexity,
+                target: string.Empty,
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_MAX_COMPLEXITY"] = "100"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishLint_NoFilesFound_FailsInsteadOfFalseGreen()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-lint-").FullName;
+        try
+        {
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishLint,
+                target: "[\"**/*.sarif\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.DidNotReceive().PublishLintAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+}

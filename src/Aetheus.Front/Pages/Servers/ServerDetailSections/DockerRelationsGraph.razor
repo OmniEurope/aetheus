@@ -1,0 +1,34 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using Microsoft.JSInterop
+@using Aetheus.Front.Resources
+@using Aetheus.Shared.DTOs
+
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
+    <RadzenLabel Text="@L["Project"]" />
+    <RadzenDropDown TValue="string" Data="@_projectOptions" @bind-Value="_selectedProject"
+        Change="@(_ => RebuildAndLoad())" AllowClear="true" Placeholder="@L["AllProjects"]" class="docker-graph-filter-dropdown" />
+    <RadzenLabel Text="@L["NodeType"]" />
+    @foreach (var kind in NodeKinds)
+    {
+        <LabeledToggle Value="_kindFilter[kind.Key]"
+            ValueChanged="@(v => { _kindFilter[kind.Key] = v; return RebuildAndLoad(); })" Text="@kind.Label" />
+    }
+    <div class="flex-spacer"></div>
+    <RadzenButton Icon="center_focus_strong" Size="ButtonSize.Small" Text="@L["ResetView"]" Click="@ResetViewAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+</RadzenStack>
+
+<svg id="@_svgId" class="docker-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+@if (_selectedNodeLabel is not null)
+{
+    <RadzenCard class="rz-mt-2">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@_selectedNodeKind" />
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0"><strong>@_selectedNodeLabel</strong></RadzenText>
+            <div class="flex-spacer"></div>
+            <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@(() => { _selectedNodeLabel = null; _selectedNodeKind = null; })" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    </RadzenCard>
+}

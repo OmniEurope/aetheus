@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Alerts;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Enums;
+
+namespace Aetheus.Back.Tests;
+
+public class AlertEvaluatorServiceTests
+{
+    private static readonly DateTime Now = new(2026, 7, 17, 12, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void HasContinuousCoverage_RequiresBoundaryAndRecentMetric()
+    {
+        var metrics = new List<ServerMetric>
+        {
+            new() { Timestamp = Now.AddMinutes(-5) },
+            new() { Timestamp = Now.AddMinutes(-4) },
+            new() { Timestamp = Now.AddMinutes(-3) },
+            new() { Timestamp = Now.AddMinutes(-2) },
+            new() { Timestamp = Now.AddMinutes(-1) },
+            new() { Timestamp = Now }
+        };
+
+        Assert.True(AlertEvaluatorService.HasContinuousCoverage(metrics, Now.AddMinutes(-5), Now));
+        Assert.False(AlertEvaluatorService.HasContinuousCoverage(
+            metrics[1..], Now.AddMinutes(-5), Now));
+        Assert.False(AlertEvaluatorService.HasContinuousCoverage(
+            metrics[..^2], Now.AddMinutes(-5), Now));
+    }
+
+    [Fact]
+    public void HasContinuousCoverage_RejectsGapLongerThanTelemetryTolerance()
+    {
+        var metrics = new List<ServerMetric>
+        {
+            new() { Timestamp = Now.AddMinutes(-5) },
+            new() { Timestamp = Now.AddMinutes(-4) },
+            new() { Timestamp = Now.AddMinutes(-1) },
+            new() { Timestamp = Now }
+        };
+
+        Assert.False(AlertEvaluatorService.HasContinuousCoverage(metrics, Now.AddMinutes(-5), Now));
+    }
+
+    // --- IsThresholdBreached CPU ---
+
+    [Theory]
+    [InlineData(ComparisonOperator.GreaterThan, 80, 85, true)]
+    [InlineData(ComparisonOperator.GreaterThan, 80, 80, false)]
+    [InlineData(ComparisonOperator.GreaterThan, 80, 75, false)]
+    [InlineData(ComparisonOperator.GreaterThanOrEqual, 80, 80, true)]
+    [InlineData(ComparisonOperator.GreaterThanOrEqual, 80, 79, false)]
+    [InlineData(ComparisonOperator.LessThan, 20, 15, true)]
+    [InlineData(ComparisonOperator.LessThan, 20, 20, false)]
+    [InlineData(ComparisonOperator.LessThanOrEqual, 20, 20, true)]
+    [InlineData(ComparisonOperator.LessThanOrEqual, 20, 21, false)]
+    public void IsThresholdBreached_CpuMetric_EvaluatesCorrectly(
+        ComparisonOperator op, double threshold, double cpuPercent, bool expected)
+    {
+        var rule = new AlertRule { Metric = MetricType.Cpu, Operator = op, Threshold = threshold };
+        var metric = new ServerMetric { CpuPercent = cpuPercent };
+
+        var result = AlertEvaluatorService.IsThresholdBreached(rule, metric);
+
+        Assert.Equal(expected, result);
+    }
+
+    // --- IsThresholdBreached Memory ---
+
+    [Fact]
+    public void IsThresholdBreached_MemoryPercent_CalculatesFromUsedAndTotal()
+    {
+        var rule = new AlertRule
+        {
+            Metric = MetricType.Memory,
+            Operator = ComparisonOperator.GreaterThan,
+            Threshold = 80
+        };
+        // 9000 / 10000 = 90% > 80
+        var metric = new ServerMetric { MemoryUsedMb = 9000, MemoryTotalMb = 10000 };
+
+        Assert.True(AlertEvaluatorService.IsThresholdBreached(rule, metric));
+    }
+
+    [Fact]
+    public void IsThresholdBreached_MemoryZeroTotal_ReturnsZeroPercent()
+    {
+        var rule = new AlertRule
+        {
+            Metric = MetricType.Memory,
+            Operator = ComparisonOperator.GreaterThan,
+            Threshold = 0.1
+        };
+        var metric = new ServerMetric { MemoryUsedMb = 100, MemoryTotalMb = 0 };
+
+        Assert.False(AlertEvaluatorService.IsThresholdBreached(rule, metric));
+    }
+
+    // --- IsThresholdBreached Disk ---
+
+    [Fact]
+    public void IsThresholdBreached_DiskPercent_CalculatesFromUsedAndTotal()
+    {
+        var rule = new AlertRule
+        {
+            Metric = MetricType.Disk,
+            Operator = ComparisonOperator.GreaterThanOrEqual,
+            Threshold = 90
+        };
+        // 450 / 500 = 90% >= 90
+        var metric = new ServerMetric { DiskUsedGb = 450, DiskTotalGb = 500 };
+
+        Assert.True(AlertEvaluatorService.IsThresholdBreached(rule, metric));
+    }
+
+    [Fact]
+    public void IsThresholdBreached_DiskZeroTotal_ReturnsZeroPercent()
+    {
+        var rule = new AlertRule
+        {
+            Metric = MetricType.Disk,
+            Operator = ComparisonOperator.GreaterThan,
+            Threshold = 0.1
+        };
+        var metric = new ServerMetric { DiskUsedGb = 100, DiskTotalGb = 0 };
+
+        Assert.False(AlertEvaluatorService.IsThresholdBreached(rule, metric));
+    }
+
+    // --- Unknown metric / operator ---
+
+    [Fact]
+    public void IsThresholdBreached_UnknownMetric_ReturnsFalse()
+    {
+        var rule = new AlertRule
+        {
+            Metric = (MetricType)999,
+            Operator = ComparisonOperator.GreaterThan,
+            Threshold = 50
+        };
+        var metric = new ServerMetric { CpuPercent = 99 };
+
+        Assert.False(AlertEvaluatorService.IsThresholdBreached(rule, metric));
+    }
+
+    [Fact]
+    public void IsThresholdBreached_UnknownOperator_ReturnsFalse()
+    {
+        var rule = new AlertRule
+        {
+            Metric = MetricType.Cpu,
+            Operator = (ComparisonOperator)999,
+            Threshold = 50
+        };
+        var metric = new ServerMetric { CpuPercent = 99 };
+
+        Assert.False(AlertEvaluatorService.IsThresholdBreached(rule, metric));
+    }
+}

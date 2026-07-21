@@ -1,0 +1,5 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Per-server tasks: hosts the same TaskListView as the global /tasks page, scoped to this server,
+   so both views expose identical features (search, status filter, pagination, badges, logs, live). *@
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Tasks"]</RadzenText>
+<Aetheus.Front.Pages.Tasks.TaskListView ServerId="@Server.Id" />

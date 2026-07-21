@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Git;
+using Microsoft.Extensions.Options;
+
+namespace Aetheus.Back.Services;
+
+public sealed class GitLightMaintenanceService(
+    IServiceScopeFactory scopeFactory,
+    IOptions<GitLightOptions> options,
+    ILogger<GitLightMaintenanceService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var interval = TimeSpan.FromHours(options.Value.MaintenanceIntervalHours);
+        using var timer = new PeriodicTimer(interval);
+
+        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        {
+            try
+            {
+                await RunMaintenanceAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during git maintenance");
+            }
+        }
+    }
+
+    internal async Task RunMaintenanceAsync(CancellationToken ct)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var lightRepo = scope.ServiceProvider.GetRequiredService<IGitLightRepository>();
+        var cli = scope.ServiceProvider.GetRequiredService<IGitLightCliService>();
+        var lightService = scope.ServiceProvider.GetRequiredService<IGitLightService>();
+
+        var repos = await lightRepo.GetAllAsync(ct).ConfigureAwait(false);
+
+        foreach (var repo in repos)
+        {
+            try
+            {
+                var diskPath = lightService.ResolveDiskPath(repo.ProjectId, repo.Slug);
+                if (!Directory.Exists(diskPath)) continue;
+
+                await cli.RunGcAsync(diskPath, ct).ConfigureAwait(false);
+                logger.LogDebug("Ran git gc on {Slug}", repo.Slug);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Git maintenance failed for repo {RepoId} ({Slug})", repo.Id, repo.Slug);
+            }
+        }
+
+        logger.LogInformation("Git maintenance completed for {Count} repositories", repos.Count);
+    }
+}

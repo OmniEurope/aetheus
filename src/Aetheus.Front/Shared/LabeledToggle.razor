@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<label class="labeled-toggle @Class"
+       aria-disabled="@(Disabled ? "true" : null)">
+    <input type="checkbox" class="labeled-toggle-native-input"
+           checked="@Value" disabled="@Disabled" @onchange="OnNativeChangeAsync" />
+    @if (TextFirst)
+    {
+        <span class="labeled-toggle-text">@Text</span>
+    }
+    @if (Kind == ToggleKind.Switch)
+    {
+        <RadzenSwitch Value="Value" TValue="bool" Disabled="Disabled" TabIndex="-1" aria-hidden="true" />
+    }
+    else
+    {
+        <RadzenCheckBox Value="Value" TValue="bool" Disabled="Disabled" TabIndex="-1" aria-hidden="true" />
+    }
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <RadzenIcon Icon="@Icon" />
+    }
+    @if (!TextFirst)
+    {
+        <span class="labeled-toggle-text">@Text</span>
+    }
+</label>

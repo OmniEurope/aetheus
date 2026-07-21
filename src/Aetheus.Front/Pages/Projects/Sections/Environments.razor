@@ -1,0 +1,12 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/environments"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Environments"] - Aetheus</PageTitle>
+
+@* 0-a: project-scoped environments render through the shared EnvironmentsList (self-loading). *@
+@if (Loader?.Project is not null)
+{
+    <EnvironmentsList ProjectId="Id" />
+}

@@ -1,0 +1,325 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Front.Helpers
+@using Aetheus.Front.Shared
+
+<RadzenCard class="rz-mb-4">
+    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-3">@L["Essentials"]</RadzenText>
+    <div class="essentials-grid">
+        <div class="essential-item">
+            <RadzenIcon Icon="sensors" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["Status"]</span>
+                <span class="essential-value">
+                    <RadzenBadge BadgeStyle="@(Server.Status == ServerStatus.Online ? BadgeStyle.Success : Server.Status == ServerStatus.Offline ? BadgeStyle.Danger : BadgeStyle.Light)"
+                                 Text="@L.Localize(Server.Status)" />
+                </span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="@ServerTypeHelper.GetIcon(Server.Type)" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["Type"]</span>
+                <span class="essential-value">
+                    <RadzenBadge BadgeStyle="@ServerTypeHelper.GetBadgeStyle(Server.Type)" Text="@L.Localize(Server.Type)" />
+                </span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="lan" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["IpAddress"]</span>
+                <span class="essential-value">@Server.IpAddress</span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="dns" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["Hostname"]</span>
+                <span class="essential-value">@Server.Hostname</span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="computer" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["OS"]</span>
+                <span class="essential-value">@Server.OsDescription</span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="deployed_code" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["AgentVersion"]</span>
+                <span class="essential-value">@FormatAgentVersion(Server.AgentVersion)</span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="update" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["LastUpdate"]</span>
+                <span class="essential-value" title="@(Server.AgentInstalledAt?.ToString("F") ?? L["AgentInstalledAtNullHint"])">
+                    @(Server.AgentInstalledAt is { } iat ? RelativeTime.FormatAgo(L, iat) : "-")
+                    @if (Server.AgentInstalledAt is { } iat2 && (DateTime.Now - iat2).TotalDays > 90)
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@L["Stale"]" class="badge-xs" />
+                    }
+                </span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="monitor_heart" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["LastHeartbeat"]</span>
+                <span class="essential-value">@Server.LastHeartbeat.ToString("g")</span>
+            </div>
+        </div>
+        <div class="essential-item">
+            <RadzenIcon Icon="event" class="essential-icon" />
+            <div class="essential-text">
+                <span class="essential-label">@L["Created"]</span>
+                <span class="essential-value">@Server.CreatedAt.ToString("g")</span>
+            </div>
+        </div>
+    </div>
+    @if (Server.Tags.Count > 0)
+    {
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" Wrap="FlexWrap.Wrap" class="rz-mt-3">
+            @foreach (var tag in Server.Tags)
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@tag" />
+            }
+        </RadzenStack>
+    }
+</RadzenCard>
+
+@* Live metrics tiles - placed directly under Essentials so the at-a-glance health
+   numbers sit above the (less frequently touched) runner / isolation posture cards. *@
+<div class="rz-mb-4 metric-tile-grid">
+    <RadzenCard>
+        <HeartbeatPulse Server="Server" LastUpdated="LastUpdated" />
+    </RadzenCard>
+    <RadzenCard>
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-color-secondary">@L["CPU"]</RadzenText>
+        @if (MetricsReceived)
+        {
+            <RadzenText TextStyle="TextStyle.H5" class="metric-value">@Server.CpuPercent.ToString("F1")%</RadzenText>
+            <RadzenProgressBar Value="@Server.CpuPercent" Max="100" ShowValue="false"
+                class="@($"metric-bar metric-bar-thin {MetricThresholdHelper.BarClass(Server.CpuPercent)}")" />
+        }
+        else
+        {
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+        }
+    </RadzenCard>
+    <RadzenCard>
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-color-secondary">@L["Memory"]</RadzenText>
+        @if (MetricsReceived)
+        {
+            <RadzenText TextStyle="TextStyle.H5" class="metric-value">@((Server.MemoryUsedMb / 1024).ToString("F1")) / @((Server.MemoryTotalMb / 1024).ToString("F1")) GB</RadzenText>
+            <RadzenProgressBar Value="@Server.MemoryUsedMb" Max="@Server.MemoryTotalMb" ShowValue="false"
+                class="@($"metric-bar metric-bar-thin {MetricThresholdHelper.BarClass(MetricThresholdHelper.Percent(Server.MemoryUsedMb, Server.MemoryTotalMb))}")" />
+        }
+        else
+        {
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+        }
+    </RadzenCard>
+    <RadzenCard>
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-color-secondary">@L["Disk"]</RadzenText>
+        @if (MetricsReceived)
+        {
+            <RadzenText TextStyle="TextStyle.H5" class="metric-value">@(Server.DiskUsedGb.ToString("F1")) / @(Server.DiskTotalGb.ToString("F1")) GB</RadzenText>
+            <RadzenProgressBar Value="@Server.DiskUsedGb" Max="@Server.DiskTotalGb" ShowValue="false"
+                class="@($"metric-bar metric-bar-thin {MetricThresholdHelper.BarClass(MetricThresholdHelper.Percent(Server.DiskUsedGb, Server.DiskTotalGb))}")" />
+        }
+        else
+        {
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+        }
+    </RadzenCard>
+    <a href="@($"/servers/{Server.Id}/services")" class="tile-link">
+        <RadzenCard class="tile-clickable">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-color-secondary">@L["Services"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="metric-value">@(Server.Services?.Count(s => s.IsRunning) ?? 0) / @(Server.Services?.Count ?? 0)</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Running"]</RadzenText>
+        </RadzenCard>
+    </a>
+</div>
+
+<RadzenCard class="rz-mb-4 storage-overview-card">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem" class="rz-mb-3">
+        <RadzenIcon Icon="hard_drive" class="rz-color-secondary" />
+        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0 flex-1">@L["StorageDiagnostics"]</RadzenText>
+        @if (Server.StorageDiagnostics.CollectedAtUtc != default)
+        {
+            <RadzenBadge BadgeStyle="@(Server.StorageDiagnostics.DryRun ? BadgeStyle.Warning : BadgeStyle.Success)"
+                         Text="@(Server.StorageDiagnostics.DryRun ? L["DryRun"] : L["CleanupApplyMode"])" />
+        }
+    </RadzenStack>
+    @if (Server.StorageDiagnostics.CollectedAtUtc == default && Metrics.Count == 0)
+    {
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-m-0">@L["StorageDiagnosticsUnavailable"]</RadzenText>
+    }
+    else
+    {
+        <div class="storage-diagnostic-grid">
+            <div>
+                <span class="essential-label">@L["BuildCache"]</span>
+                <span class="essential-value">@(Server.StorageDiagnostics.BuildCacheAvailable ? FormatBytes(Server.StorageDiagnostics.BuildCacheBytes) : L["Unavailable"])</span>
+            </div>
+            <div>
+                <span class="essential-label">@L["Reclaimable"]</span>
+                <span class="essential-value">@(Server.StorageDiagnostics.BuildCacheAvailable ? FormatBytes(Server.StorageDiagnostics.BuildCacheReclaimableBytes) : L["Unavailable"])</span>
+            </div>
+            <div>
+                <span class="essential-label">@L["Growth24Hours"]</span>
+                <span class="essential-value @(BuildCacheGrowthBytes > 0 ? "rz-color-warning" : BuildCacheGrowthBytes < 0 ? "rz-color-success" : string.Empty)">
+                    @FormatTrend(BuildCacheGrowthBytes)
+                </span>
+            </div>
+            <div>
+                <span class="essential-label">@L["DockerImages"]</span>
+                <span class="essential-value">@(Server.StorageDiagnostics.DockerInventoryAvailable ? FormatBytes(Server.StorageDiagnostics.DockerImagesBytes) : L["Unavailable"])</span>
+            </div>
+            <div>
+                <span class="essential-label">@L["DockerVolumes"]</span>
+                <span class="essential-value">@(Server.StorageDiagnostics.DockerInventoryAvailable ? FormatBytes(Server.StorageDiagnostics.DockerVolumesBytes) : L["Unavailable"])</span>
+            </div>
+            <div>
+                <span class="essential-label">@L["AgentAndNuGet"]</span>
+                <span class="essential-value">@FormatBytes(Server.StorageDiagnostics.AgentWorkDirectoryBytes + Server.StorageDiagnostics.AgentInstallDirectoryBytes + Server.StorageDiagnostics.NuGetCacheBytes)</span>
+            </div>
+        </div>
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mt-3 rz-mb-0">
+            @string.Format(L["StorageDiagnosticsCollectedAt"], Server.StorageDiagnostics.CollectedAtUtc.ToLocalTime().ToString("g"))
+        </RadzenText>
+    }
+</RadzenCard>
+
+@* Pipeline runner + Container isolation, side by side as two equal-height tiles.
+   Both are secure-by-default posture cards: visible to all readers (transparency) but
+   only flipped by Server.Admin; enabling either is confirmed inline before it takes effect. *@
+<RadzenRow Gap="1rem" class="rz-mb-4 equal-tile-row">
+    <RadzenColumn SizeMD="6" Size="12">
+        <RadzenCard class="overview-feature-card">
+            <RadzenStack Gap="0.75rem">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem">
+                    <RadzenIcon Icon="@(Server.PipelineRunnerEnabled == true ? "play_circle" : "pause_circle")"
+                                class="@(Server.PipelineRunnerEnabled == true ? "pipeline-runner-icon-on" : "pipeline-runner-icon-off")" />
+                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0 flex-1">@L["PipelineRunner"]</RadzenText>
+                    <RadzenBadge BadgeStyle="@(Server.PipelineRunnerEnabled == true ? BadgeStyle.Success : BadgeStyle.Light)"
+                                 Text="@(Server.PipelineRunnerEnabled == true ? L["Enabled"] : L["Disabled"])" />
+                </RadzenStack>
+                <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-m-0">
+                    @(Server.PipelineRunnerEnabled == true ? L["PipelineRunnerEnabledHint"] : L["PipelineRunnerDisabledHint"])
+                </RadzenText>
+                @* TC8R: capability (auto-detected toolchain) shown alongside, and distinct from, the
+                   authorization badge. PipelineRunnerAvailable is nullable - null = unknown (legacy agent). *@
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.4rem"
+                             title="@L["PipelineToolchainHint"]">
+                    <RadzenIcon Icon="@(PipelineRunnerAvailable == true ? "build" : PipelineRunnerAvailable == false ? "build_circle" : "help")"
+                                class="rz-color-secondary" />
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["PipelineToolchain"]</RadzenText>
+                    <RadzenBadge BadgeStyle="@(PipelineRunnerAvailable == true ? BadgeStyle.Info : PipelineRunnerAvailable == false ? BadgeStyle.Warning : BadgeStyle.Light)"
+                                 Text="@(PipelineRunnerAvailable == true ? L["ToolchainInstalled"] : PipelineRunnerAvailable == false ? L["ToolchainMissing"] : L["ToolchainUnknown"])" />
+                </RadzenStack>
+                @* DPB7: surface the deploy-target capability (DeploymentTargetAvailable) on the detail
+                   overview too, not just the servers list - mirrors the list badge. Capability-only
+                   (no admin toggle): it is derived from the server-management sudoers posture. *@
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.4rem"
+                             title="@L["DeploymentTargetHint"]">
+                    <RadzenIcon Icon="@(Server.DeploymentTargetAvailable == true ? "cloud_upload" : "cloud_off")"
+                                class="rz-color-secondary" />
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["DeploymentTarget"]</RadzenText>
+                    <RadzenBadge BadgeStyle="@(Server.DeploymentTargetAvailable == true ? BadgeStyle.Info : BadgeStyle.Light)"
+                                 Text="@(Server.DeploymentTargetAvailable == true ? L["DeploymentTargetBadge"] : L["DeploymentTargetUnavailable"])" />
+                </RadzenStack>
+                @* S-TECH-CDUI: surface the agent's capability diagnostics (a drop-in unreadable, a sudo probe
+                   that failed) so an operator sees WHY a capability is OFF, without SSHing to the box. *@
+                @if (Server.CapabilityDiagnostics.Count > 0)
+                {
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Start" Gap="0.4rem">
+                        <RadzenIcon Icon="info" class="rz-color-warning" />
+                        <RadzenStack Gap="0.1rem">
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["CapabilityDiagnosticsHint"]</RadzenText>
+                            @foreach (var diag in Server.CapabilityDiagnostics)
+                            {
+                                <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@diag</RadzenText>
+                            }
+                        </RadzenStack>
+                    </RadzenStack>
+                }
+                @if (CanAdmin)
+                {
+                    <RadzenButton Icon="@(Server.PipelineRunnerEnabled == true ? "toggle_on" : "toggle_off")"
+                                  Text="@(Server.PipelineRunnerEnabled == true ? L["Disable"] : L["Enable"])"
+                                  Size="ButtonSize.Small"
+                                  ButtonStyle="@(Server.PipelineRunnerEnabled == true ? ButtonStyle.Warning : ButtonStyle.Success)"
+                                  Variant="Variant.Filled"
+                                  IsBusy="@_runnerBusy"
+                                  Click="@TogglePipelineRunnerAsync" />
+                }
+            </RadzenStack>
+        </RadzenCard>
+    </RadzenColumn>
+    <RadzenColumn SizeMD="6" Size="12">
+        @* Container-isolation: surfaces the auto-detected Docker capability and the "containers only"
+           admin policy. Without Docker, a pipeline stage that requests `isolation: container` is blocked. *@
+        <RadzenCard class="overview-feature-card">
+            <RadzenStack Gap="0.75rem">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem">
+                    <RadzenIcon Icon="@(Server.DockerAvailable ? "verified" : "block")"
+                                class="@(Server.DockerAvailable ? "pipeline-runner-icon-on" : "pipeline-runner-icon-off")" />
+                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0 flex-1">@L["ContainerIsolation"]</RadzenText>
+                    <RadzenBadge BadgeStyle="@(Server.RequireContainerIsolation ? BadgeStyle.Warning : BadgeStyle.Light)"
+                                 Text="@(Server.RequireContainerIsolation ? L["ContainersOnly"] : L["ContainersOptional"])" />
+                </RadzenStack>
+                <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-m-0">
+                    @(Server.DockerAvailable ? L["DockerAvailableHint"] : L["DockerUnavailableHint"])
+                </RadzenText>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.4rem">
+                    <RadzenIcon Icon="@(Server.DockerAvailable ? "deployed_code" : "block")" class="rz-color-secondary" />
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["ContainerIsolation"]</RadzenText>
+                    <RadzenBadge BadgeStyle="@(Server.DockerAvailable ? BadgeStyle.Info : BadgeStyle.Light)"
+                                 Text="@(Server.DockerAvailable ? L["DockerReady"] : L["DockerMissing"])" />
+                </RadzenStack>
+                @if (CanAdmin)
+                {
+                    <RadzenButton Icon="@(Server.RequireContainerIsolation ? "lock" : "lock_open")"
+                                  Text="@(Server.RequireContainerIsolation ? L["Relax"] : L["Enforce"])"
+                                  Size="ButtonSize.Small"
+                                  ButtonStyle="@(Server.RequireContainerIsolation ? ButtonStyle.Warning : ButtonStyle.Info)"
+                                  Variant="Variant.Filled"
+                                  Disabled="@(!Server.DockerAvailable && !Server.RequireContainerIsolation)"
+                                  IsBusy="@_isolationBusy"
+                                  Click="@ToggleContainerIsolationAsync" />
+                }
+            </RadzenStack>
+        </RadzenCard>
+    </RadzenColumn>
+</RadzenRow>
+
+@* H / E2: fill the bottom of the overview with the server's most recent tasks (was empty space). *@
+<RadzenCard class="rz-mb-4">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-3">
+        <RadzenIcon Icon="receipt_long" class="rz-color-secondary" />
+        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["RecentTasks"]</RadzenText>
+    </RadzenStack>
+    @if (Server.RecentTasks.Count == 0)
+    {
+        <EmptyState Icon="receipt_long" Description="@L["NoRecentTasks"]" />
+    }
+    else
+    {
+        <RadzenStack Gap="0.5rem">
+            @foreach (var task in Server.RecentTasks.Take(5))
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="task-row">
+                    <RadzenBadge BadgeStyle="@Aetheus.Front.Pages.Tasks.TaskListView.GetTaskBadge(task.Status)" Text="@L.Localize(task.Status)" />
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-flex-grow-1">@task.Name</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0"
+                        title="@task.CreatedAt.ToString("F")">@RelativeTime.FormatAgo(L, task.CreatedAt)</RadzenText>
+                </RadzenStack>
+            }
+        </RadzenStack>
+    }
+</RadzenCard>

@@ -1,0 +1,206 @@
+# =============================================================================
+# Dockerfile.vpssim - Aetheus disposable local "VPS simulator"
+# =============================================================================
+# A throwaway Ubuntu box that boots systemd as PID 1 and runs the same services
+# the production VPS does, so the Aetheus agent's collectors and the real
+# install script can be exercised locally instead of on prod. Disposable:
+# `down` + `up` = a clean machine.
+#
+# Boot core (proven): systemd PID 1 + dockerd (DinD) + sshd.
+# Managed services baked here (real packages, real config — no fakes):
+#   apache2, certbot (+ self-signed cert), postfix+dovecot, portsentry,
+#   rkhunter, TeamSpeak server.
+# First-boot provisioning (deploy/docker/vpssim-provision.sh) handles the bits
+# that need a live daemon (a test container, an rkhunter scan).
+#
+# Run via deploy/compose/vpssim.compose.yml (needs privileged + cgroup access).
+# LOCAL TEST artifact — never deployed to prod.
+# =============================================================================
+
+# --- Agent build stage: publish the Linux agent SELF-CONTAINED so the box needs
+#     no .NET runtime — the install script's systemd unit launches the native
+#     apphost directly. Bundled with install-agent-linux.sh into /agentpkg.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS agent-build
+WORKDIR /src
+COPY Directory.Build.props Directory.Packages.props NuGet.config ./
+COPY src/Aetheus.Shared/Aetheus.Shared.csproj src/Aetheus.Shared/
+COPY src/Aetheus.Agent.Core/Aetheus.Agent.Core.csproj src/Aetheus.Agent.Core/
+COPY src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj src/Aetheus.Agent.Linux/
+RUN dotnet restore src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj -r linux-x64
+COPY src/Aetheus.Shared/ src/Aetheus.Shared/
+COPY src/Aetheus.Agent.Core/ src/Aetheus.Agent.Core/
+COPY src/Aetheus.Agent.Linux/ src/Aetheus.Agent.Linux/
+RUN dotnet publish src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj \
+        -c Release -r linux-x64 --self-contained true -o /agentpkg
+COPY deploy/scripts/install-agent-linux.sh /agentpkg/install-agent-linux.sh
+
+FROM ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    container=docker
+
+# --- Boot core: systemd, dbus, ssh, docker engine + base tooling -------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        systemd systemd-sysv dbus dbus-user-session \
+        openssh-server sudo ca-certificates curl wget bzip2 iproute2 iputils-ping \
+        jq git sshpass acl \
+        postgresql-client default-mysql-client \
+        docker.io docker-buildx docker-compose-v2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Managed services the collectors introspect -----------------------------
+# debconf preseed so postfix installs non-interactively as an "Internet Site".
+RUN echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections \
+    && echo "postfix postfix/mailname string vpssim.local" | debconf-set-selections \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        apache2 apache2-utils \
+        certbot openssl \
+        postfix dovecot-core dovecot-imapd \
+        portsentry \
+        rkhunter \
+    && rm -rf /var/lib/apt/lists/*
+
+# Match the Apache module prerequisites of the real Aetheus vhosts. The release pipeline writes
+# redirects, security headers, TLS vhosts, HTTP reverse proxies and a SignalR WebSocket proxy.
+RUN a2enmod rewrite headers ssl proxy proxy_http proxy_wstunnel >/dev/null
+
+# Strip systemd units that are pointless/harmful inside a container.
+RUN systemctl mask \
+        systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket \
+        systemd-firstboot.service \
+        getty.target console-getty.service \
+    ; rm -f /lib/systemd/system/multi-user.target.wants/systemd-resolved.service 2>/dev/null || true
+
+# --- ApacheCollector: a real enabled vhost with a DocumentRoot ---------------
+RUN mkdir -p /var/www/vpssim \
+    && printf 'VPS-sim test site\n' > /var/www/vpssim/index.html \
+    && printf '<VirtualHost *:80>\n    ServerName vpssim.local\n    DocumentRoot /var/www/vpssim\n</VirtualHost>\n' \
+        > /etc/apache2/sites-available/vpssim.conf \
+    && a2ensite vpssim >/dev/null
+
+# --- CertbotCollector: a real (self-signed) cert in the Let's Encrypt layout.
+#     Not LE-signed (impossible on localhost) but a genuine X.509 the collector
+#     parses for expiry/SANs. /etc/letsencrypt/live/<domain>/{fullchain,privkey}.pem
+RUN mkdir -p /etc/letsencrypt/live/vpssim.local \
+    && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+        -keyout /etc/letsencrypt/live/vpssim.local/privkey.pem \
+        -out /etc/letsencrypt/live/vpssim.local/fullchain.pem \
+        -subj "/CN=vpssim.local" \
+        -addext "subjectAltName=DNS:vpssim.local,DNS:www.vpssim.local" >/dev/null 2>&1 \
+    && chmod 644 /etc/letsencrypt/live/vpssim.local/fullchain.pem \
+    && chmod 600 /etc/letsencrypt/live/vpssim.local/privkey.pem
+
+# Certbot's Apache plugin creates this shared include on a real host. The local certificate path
+# deliberately avoids ACME, so provide the equivalent secure protocol baseline explicitly; the
+# production vhosts can then be exercised byte-for-byte without weakening or removing the include.
+RUN printf '%s\n' \
+        'SSLProtocol all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1' \
+        'SSLHonorCipherOrder off' \
+        'SSLSessionTickets off' \
+        > /etc/letsencrypt/options-ssl-apache.conf \
+    && chmod 644 /etc/letsencrypt/options-ssl-apache.conf
+
+# --- MailCollector: postfix with virtual mailbox domains + dovecot -----------
+RUN postconf -e "virtual_mailbox_domains = vpssim.local, test.local" \
+    && postconf -e "virtual_mailbox_base = /var/mail/vhosts" \
+    && postconf -e "virtual_uid_maps = static:5000" \
+    && postconf -e "virtual_gid_maps = static:5000"
+
+# --- PortsentryCollector: config + (sample) blocked-IP files -----------------
+RUN install -d /etc/portsentry \
+    && printf 'TCP_MODE="atcp"\nBLOCK_TCP="1"\nTCP_PORTS="1,11,79,111,540,1524,135,139,445,1433,3306,31337"\nUDP_PORTS="1,11,161,162,513,635,1024,31335"\n' \
+        > /etc/portsentry/portsentry.conf \
+    && touch /etc/portsentry/portsentry.blocked.atcp /etc/portsentry/portsentry.blocked.audp \
+    && echo "203.0.113.66" >> /etc/portsentry/portsentry.blocked.atcp
+
+# --- RkhunterCollector: initialise the file-properties database (fast). The
+#     actual scan that writes /var/log/rkhunter.log runs at first boot.
+RUN rkhunter --propupd >/dev/null 2>&1 || true
+
+# --- TeamspeakCollector: a real ts3server under /opt/teamspeak, ServerQuery on
+#     the default port 10011, started by systemd. Server refuses to run as root,
+#     so it runs as a dedicated unprivileged user.
+ARG TS3_VERSION=3.13.7
+RUN useradd -r -m -d /opt/teamspeak -s /usr/sbin/nologin teamspeak \
+    && wget -qO /tmp/ts3.tar.bz2 \
+        "https://files.teamspeak-services.com/releases/server/${TS3_VERSION}/teamspeak3-server_linux_amd64-${TS3_VERSION}.tar.bz2" \
+    && tar -xjf /tmp/ts3.tar.bz2 -C /tmp \
+    && cp -a /tmp/teamspeak3-server_linux_amd64/. /opt/teamspeak/ \
+    && rm -rf /tmp/ts3.tar.bz2 /tmp/teamspeak3-server_linux_amd64 \
+    && printf 'query_port=10011\n' > /opt/teamspeak/ts3server.ini \
+    && touch /opt/teamspeak/.ts3server_license_accepted \
+    && chown -R teamspeak:teamspeak /opt/teamspeak
+
+# TeamSpeak systemd unit (license accepted via launch arg + marker file).
+RUN printf '[Unit]\nDescription=TeamSpeak 3 Server (VPS-sim)\nAfter=network.target\n\n[Service]\nUser=teamspeak\nWorkingDirectory=/opt/teamspeak\nExecStart=/opt/teamspeak/ts3server inifile=/opt/teamspeak/ts3server.ini license_accepted=1\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n' \
+        > /etc/systemd/system/teamspeak.service
+
+# --- First-boot provisioning oneshot (needs a live dockerd) ------------------
+COPY deploy/docker/vpssim-provision.sh /usr/local/sbin/vpssim-provision.sh
+RUN chmod +x /usr/local/sbin/vpssim-provision.sh \
+    && printf '[Unit]\nDescription=VPS-sim first-boot provisioning\nAfter=docker.service\nWants=docker.service\nConditionPathExists=!/var/lib/vpssim-provisioned\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/local/sbin/vpssim-provision.sh\n\n[Install]\nWantedBy=multi-user.target\n' \
+        > /etc/systemd/system/vpssim-provision.service
+
+# --- Optional agent auto-install layer --------------------------------------
+# The self-contained agent + the real install script, ready to run. The oneshot
+# is gated by AGENT_AUTOINSTALL=1 (set in compose); when off, the box stays a
+# blank VPS and the script exits immediately.
+COPY --from=agent-build /agentpkg /opt/agent-pkg
+COPY deploy/docker/vpssim-agent-bootstrap.sh /usr/local/sbin/vpssim-agent-bootstrap.sh
+RUN chmod +x /usr/local/sbin/vpssim-agent-bootstrap.sh /opt/agent-pkg/install-agent-linux.sh \
+    && printf '[Unit]\nDescription=VPS-sim agent auto-install\nAfter=docker.service network-online.target vpssim-provision.service\nWants=network-online.target\nConditionPathExists=!/var/lib/vpssim-agent-installed\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/local/sbin/vpssim-agent-bootstrap.sh\n\n[Install]\nWantedBy=multi-user.target\n' \
+        > /etc/systemd/system/vpssim-agent.service
+
+# --- Enable everything on boot ----------------------------------------------
+# Enable units one by one so a missing/odd unit never aborts the rest (a single
+# `systemctl enable a b c` stops at the first failure). ssh uses socket
+# activation on Ubuntu 24.04 (ssh.socket); rkhunter is cron-based (no daemon
+# unit) — its log is produced by the first-boot scan instead.
+RUN for unit in \
+        docker.service ssh.socket \
+        apache2.service postfix.service dovecot.service \
+        portsentry.service teamspeak.service \
+        vpssim-provision.service vpssim-agent.service; do \
+        systemctl enable "$unit" 2>/dev/null || echo "WARN: could not enable $unit"; \
+    done
+
+# Throwaway dev access: root login over SSH with a fixed password. Disposable,
+# local-only — never mirror near prod. VPW3: the password is a build arg (default
+# 'aetheus') so it can be overridden per-run instead of being hard-coded here.
+ARG VPSSIM_ROOT_PASSWORD=aetheus
+RUN echo "root:${VPSSIM_ROOT_PASSWORD}" | chpasswd \
+    && mkdir -p /run/sshd \
+    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && printf '\n=== Aetheus VPS-sim — disposable local sandbox (NOT production) ===\n\n' > /etc/motd
+
+# --- Optional .NET SDK 10.0 (-vps -net10) ------------------------------------
+# Opt-in build arg (INSTALL_DOTNET=1, set by ylaunch's -net10 via compose). The
+# final runtime stage ships no .NET (the agent published self-contained), so this
+# adds a usable SDK on demand. Installs via Microsoft's official version-pinned
+# dotnet-install.sh - the same mechanism + SDK version the agent's pipeline-
+# runner module uses (deploy/scripts/install-agent-linux.sh). Placed last so
+# toggling -net10 only rebuilds this cheap tail layer.
+ARG INSTALL_DOTNET=0
+ARG DOTNET_INSTALLER_URL=https://raw.githubusercontent.com/dotnet/install-scripts/da3ce11ba63f3dbb0fb835d41bda2665d5c48e84/src/dotnet-install.sh
+ARG DOTNET_INSTALLER_SHA256=082f7685e156738a1b2e2ed8381a621870d4ce8e8c59278034556f05c186eb2e
+ENV DOTNET_ROOT=/usr/share/dotnet
+# dotnet-install.sh uses `set -o pipefail` (a bashism), so run it with bash — on
+# Ubuntu /bin/sh is dash, which rejects that option. .NET needs ICU or the muxer
+# aborts ("Couldn't find a valid ICU package"), so ensure libicu is present.
+RUN if [ "$INSTALL_DOTNET" = "1" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends libicu74 \
+        && rm -rf /var/lib/apt/lists/* \
+        && curl -fsSL "$DOTNET_INSTALLER_URL" -o /tmp/dotnet-install.sh \
+        && echo "$DOTNET_INSTALLER_SHA256  /tmp/dotnet-install.sh" | sha256sum -c - \
+        && bash /tmp/dotnet-install.sh --version 10.0.202 --install-dir /usr/share/dotnet \
+        && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+        && rm -f /tmp/dotnet-install.sh \
+        && /usr/local/bin/dotnet --version; \
+    fi
+
+STOPSIGNAL SIGRTMIN+3
+EXPOSE 22
+CMD ["/sbin/init"]

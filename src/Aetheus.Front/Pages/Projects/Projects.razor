@@ -1,0 +1,135 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects"
+
+<PageTitle>@L["Projects"] - Aetheus</PageTitle>
+
+<div class="project-list-toolbar">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap"
+        class="project-list-heading">
+        <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["Projects"]</RadzenText>
+        <HelpLink PageKey="projects" />
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@(string.Format(L["Total"], _totalCount))" />
+        <div class="project-list-spacer"></div>
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small"
+            Click="@LoadData" title="@L["Refresh"]" aria-label="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        <RadzenButton Text="@L["NewProject"]" Icon="add" Click="@OpenCreateDialog"
+            Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled"
+            class="project-list-create" />
+    </RadzenStack>
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap"
+        class="rz-mt-2 project-list-filters">
+        <div class="project-list-search-wrap">
+            <RadzenIcon Icon="search" class="rz-color-secondary project-list-search-icon" />
+            <RadzenTextBox Placeholder="@L["SearchProjects"]" @bind-Value="_search" Change="@LoadData"
+                class="project-list-search" aria-label="@L["SearchProjects"]" />
+        </div>
+        <RadzenDropDown TValue="ProjectStatus?" Data="@_statusOptions" TextProperty="Text" ValueProperty="Value"
+            Placeholder="@L["AllStatuses"]" AllowClear="true" @bind-Value="_statusFilter" Change="@(_ => LoadData())"
+            aria-label="@L["FilterByStatus"]" />
+        @if (_statusFilter.HasValue || !string.IsNullOrEmpty(_search))
+        {
+            <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small"
+                Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+    </RadzenStack>
+</div>
+
+@if (_loading)
+{
+    <div class="project-card-grid-loading">
+        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+    </div>
+}
+else
+{
+    <div class="project-card-grid">
+        @foreach (var project in _projects)
+        {
+            <a href="/projects/@project.Id" class="project-card-link">
+            <RadzenCard class="project-card">
+                <RadzenStack Gap="0.5rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                        <RadzenIcon Icon="folder" class="project-card-icon" />
+                        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0 project-card-name">@project.Name</RadzenText>
+                        @if (!Permissions.CanWrite(ResourceType.Project, project.Id))
+                        {
+                            <RadzenIcon Icon="lock" class="rz-color-secondary icon-xs-app"
+                                title="@L["Read"]" />
+                        }
+                        <div class="project-list-spacer"></div>
+                        <RadzenBadge BadgeStyle="@(project.Status == ProjectStatus.Active ? BadgeStyle.Success : BadgeStyle.Light)"
+                            Text="@L[project.Status.ToString()]" />
+                    </RadzenStack>
+                    @if (!string.IsNullOrEmpty(project.Description))
+                    {
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary project-card-desc">@TruncateText(project.Description, 100)</RadzenText>
+                    }
+                    <div class="project-card-footer">
+                        <span class="project-card-meta rz-color-secondary">
+                            <RadzenIcon Icon="account_tree" class="rz-color-secondary project-card-meta-icon" />
+                            @(string.Format(L["PipelineCount"], project.PipelineCount))
+                        </span>
+                        @if (!string.IsNullOrEmpty(project.RepositoryUrl))
+                        {
+                            @* B3KP: the chip opens the repository. An internal-mirror URL (the self-hosted
+                               control plane's own /git/{id}/*.git clone endpoint) deep-links to the internal
+                               git browser; a genuine external URL opens in a new tab. stop/prevent so the
+                               click doesn't trigger the surrounding card link to the project detail. *@
+                            <span class="project-card-meta rz-color-secondary project-card-meta-clickable"
+                                  role="button" tabindex="0" title="@project.RepositoryUrl"
+                                  @onclick="@(() => OpenRepositoryAsync(project))"
+                                  @onclick:stopPropagation="true" @onclick:preventDefault="true">
+                                <RadzenIcon Icon="link" class="rz-color-secondary project-card-meta-icon" />
+                                @L["Repository"]
+                            </span>
+                        }
+                        @if (project.LastRunStatus.HasValue)
+                        {
+                            <span class="project-card-meta rz-color-secondary"
+                                title="@($"{L["LastRun"]}: {L.Localize(project.LastRunStatus.Value)}")">
+                                <span class="pipeline-run-dot pipeline-run-dot-@project.LastRunStatus.Value.ToString().ToLowerInvariant()"></span>
+                                @(project.LastRunAt.HasValue ? RelativeTime.FormatAgo(L, project.LastRunAt.Value) : L.Localize(project.LastRunStatus.Value))
+                            </span>
+                        }
+                        @if (project.LastGitUpdateAt.HasValue)
+                        {
+                            @* B3KP: the git chip deep-links to the project overview, which hosts the
+                               changelog/history tab. stop/prevent so it overrides the card link. *@
+                            <span class="project-card-meta rz-color-secondary project-card-meta-clickable"
+                                role="button" tabindex="0"
+                                title="@($"{L["LastGitUpdate"]}: {project.LastGitUpdateAt.Value:g}")"
+                                @onclick="@(() => OpenGitHistory(project.Id))"
+                                @onclick:stopPropagation="true" @onclick:preventDefault="true">
+                                <RadzenIcon Icon="commit" class="rz-color-secondary project-card-meta-icon" />
+                                @RelativeTime.FormatAgo(L, project.LastGitUpdateAt.Value)
+                            </span>
+                        }
+                    </div>
+                    @if (project.Tags.Count > 0)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" Wrap="FlexWrap.Wrap">
+                            @foreach (var tag in project.Tags.Take(4))
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@tag" />
+                            }
+                            @if (project.Tags.Count > 4)
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@($"+{project.Tags.Count - 4}")" />
+                            }
+                        </RadzenStack>
+                    }
+                </RadzenStack>
+            </RadzenCard>
+            </a>
+        }
+    </div>
+
+    @if (_projects.Count == 0)
+    {
+        <EmptyState Icon="folder" Title="@L["NoProjectsFound"]" Description="@L["EmptyProjectsHint"]">
+            <ActionContent>
+                <RadzenButton Text="@L["NewProject"]" Icon="add" Size="ButtonSize.Small" Click="@OpenCreateDialog" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+            </ActionContent>
+        </EmptyState>
+    }
+}

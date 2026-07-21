@@ -1,0 +1,78 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+
+<div class="vp-edit-panel">
+    <div class="vp-edit-panel-header">
+        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">
+            <RadzenIcon Icon="edit" class="icon-md-app" /> @L["EditStage"]
+        </RadzenText>
+        <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@OnCloseClicked" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </div>
+
+    <RadzenStack Gap="0.75rem">
+        <RadzenFormField Text="@L["StageName"]">
+            <RadzenTextBox Value="@Stage.Name" Change="@OnNameChanged" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["Agent"]">
+            <RadzenDropDown TValue="string" Value="@Stage.Agent" Data="@AvailableServers"
+                            AllowClear="true" AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                            Placeholder="@L["SelectAgent"]" Change="@(val => OnAgentChanged((string?)val))" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["OperatingSystem"]">
+            <RadzenDropDown TValue="string" Value="@Stage.Os" Data="@OsOptions"
+                            AllowClear="true" Placeholder="@L["OsAny"]"
+                            Change="@(val => OnOsChanged((string?)val))" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["DependsOn"]">
+            <RadzenDropDown TValue="IEnumerable<string>" Value="@Stage.DependsOn" Data="@OtherStageNames"
+                            Multiple="true" AllowClear="true" Chips="true"
+                            Placeholder="@L["SelectDependencies"]"
+                            Change="@(val => OnDependsOnChanged(val as IEnumerable<string>))" />
+        </RadzenFormField>
+
+        @* Stage-level variables *@
+        <RadzenFieldset Text="@L["StageVariables"]" AllowCollapse="true" Collapsed="true">
+            <div class="vp-var-grid">
+                @foreach (var kvp in _variables)
+                {
+                    var key = kvp.Key;
+                    <RadzenTextBox Value="@key" Placeholder="@L["Key"]" Disabled="true"
+                                   class="icon-input-sm" />
+                    <RadzenTextBox Value="@kvp.Value" Placeholder="@L["Value"]"
+                                   Change="@(val => OnVariableValueChanged(key, val))"
+                                   class="icon-input-sm" />
+                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => OnRemoveVariable(key))" Title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                }
+            </div>
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" class="rz-mt-2">
+                <RadzenTextBox @bind-Value="_newVarKey" Placeholder="@L["Key"]" class="text-input-flex" />
+                <RadzenTextBox @bind-Value="_newVarValue" Placeholder="@L["Value"]" class="text-input-flex" />
+                <RadzenButton Icon="add" Size="ButtonSize.ExtraSmall" Click="@OnAddVariable" Disabled="@string.IsNullOrWhiteSpace(_newVarKey)" Title="@L["Add"]" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+            </RadzenStack>
+        </RadzenFieldset>
+
+        @* Steps list *@
+        <RadzenFieldset Text="@L["Steps"]" AllowCollapse="false">
+            @for (var i = 0; i < Stage.Steps.Count; i++)
+            {
+                var step = Stage.Steps[i];
+                var index = i;
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" AlignItems="AlignItems.Center" class="rz-mb-1">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 text-num-cell">@(index + 1).</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 flex-1">@step.Name</RadzenText>
+                    <RadzenButton Icon="arrow_upward" Size="ButtonSize.ExtraSmall" Disabled="@(index == 0)" Click="@(() => OnMoveStep(index, -1))" Title="@L["MoveUp"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    <RadzenButton Icon="arrow_downward" Size="ButtonSize.ExtraSmall" Disabled="@(index == Stage.Steps.Count - 1)" Click="@(() => OnMoveStep(index, 1))" Title="@L["MoveDown"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall" Click="@(() => EditStep.InvokeAsync(index))" Title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => OnRemoveStep(index))" Title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </RadzenStack>
+            }
+            <RadzenButton Text="@L["AddStep"]" Icon="add"
+                          Click="@(() => AddStep.InvokeAsync())" class="rz-mt-2" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenFieldset>
+
+        <RadzenButton Text="@L["DeleteStage"]" Icon="delete" Size="ButtonSize.Small" Click="@OnDeleteClicked" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+    </RadzenStack>
+</div>

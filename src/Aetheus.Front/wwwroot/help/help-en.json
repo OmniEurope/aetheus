@@ -1,0 +1,378 @@
+[
+  {
+    "key": "dashboard",
+    "title": "Dashboard",
+    "description": "Overview of your infrastructure: server status, pipeline activity, and pending tasks.",
+    "icon": "dashboard",
+    "sections": [
+      {
+        "title": "Status Cards",
+        "content": "The top row displays key metrics: total servers, online/offline count, and pending tasks. They update automatically when agents report status changes over the real-time connection."
+      },
+      {
+        "title": "Recent Activity",
+        "content": "The lower section lists your servers with their status and the most recent pipeline runs with their results. Click any item to open its detail page."
+      },
+      {
+        "title": "Custom Dashboards",
+        "content": "Administrators can build custom dashboards with widgets and set one as the default home view. See the Custom Dashboards article for details."
+      }
+    ]
+  },
+  {
+    "key": "servers",
+    "title": "Servers",
+    "description": "Manage your fleet of servers - monitor status, view metrics, and configure agents.",
+    "icon": "dns",
+    "sections": [
+      {
+        "title": "Server List",
+        "content": "Browse all registered servers with filters by type (Normal, Build, Docker) and status (Online, Offline). Use the search bar to find a server by name or hostname."
+      },
+      {
+        "title": "Server Detail",
+        "content": "Open a server to see its overview, system metrics (CPU, RAM, Disk), installed services, Docker containers, projects, pipelines, releases, tasks, and logs, organized into sections."
+      },
+      {
+        "title": "Services",
+        "content": "From the Services section you manage detected modules - Docker, Apache, Certbot, Mail, TeamSpeak, Portsentry, Rkhunter - and run install, start, and stop actions. Results stream back in real time."
+      },
+      {
+        "title": "Agent Enrollment",
+        "content": "Servers appear automatically when an agent enrolls using a registration token. Generate a token from the Add Agent wizard, then run the generated install command on the target machine."
+      }
+    ]
+  },
+  {
+    "key": "projects",
+    "title": "Projects",
+    "description": "Organize your work into projects with Git repositories, environments, and deployment pipelines.",
+    "icon": "folder",
+    "sections": [
+      {
+        "title": "Creating Projects",
+        "content": "Create a project by providing a name, optional description, and Git repository URL. Projects can be tagged for easy filtering and belong to an organization."
+      },
+      {
+        "title": "Project Sections",
+        "content": "Each project groups its pipelines, target servers, releases, artifacts, variable libraries, vaults, environments, tasks, logs, and Git repository into dedicated sections."
+      },
+      {
+        "title": "Project Management",
+        "content": "Edit project settings or remove projects you no longer need. Each project shows the number of associated pipelines and the status of their last run."
+      }
+    ]
+  },
+  {
+    "key": "git-repositories",
+    "title": "Git Repositories",
+    "description": "Browse the Git repositories linked to your projects - branches, commits, and history.",
+    "icon": "commit",
+    "sections": [
+      {
+        "title": "Browsing Repositories",
+        "content": "Inspect a project's repository: list branches, view recent commits, and open a commit to see its details. The view is read-only and built for quickly checking what changed."
+      },
+      {
+        "title": "Local Mirror",
+        "content": "Repositories are mirrored locally, so browsing stays fast and keeps working even when the upstream host is slow or temporarily unavailable. Pipelines clone from the same mirror."
+      }
+    ]
+  },
+  {
+    "key": "environments",
+    "title": "Environments",
+    "description": "Define deployment environments such as Development, Staging, and Production for a project.",
+    "icon": "layers",
+    "sections": [
+      {
+        "title": "Managing Environments",
+        "content": "Create environments per project to represent your deployment targets. Give each one a clear name so it is obvious where a pipeline deploys."
+      },
+      {
+        "title": "Using Environments",
+        "content": "Pipelines reference an environment to scope where a release is deployed, making it easy to track which version is live in each stage of your delivery flow."
+      }
+    ]
+  },
+  {
+    "key": "pipelines",
+    "title": "Pipelines",
+    "description": "Define and run CI/CD pipelines with stages, steps, and variables.",
+    "icon": "account_tree",
+    "sections": [
+      {
+        "title": "Pipeline Definition",
+        "content": "Pipelines are defined in YAML with stages and steps (Azure DevOps-style stages > jobs > steps). Use the visual editor for drag-and-drop design, or edit the YAML directly with syntax validation."
+      },
+      {
+        "title": "Running Pipelines",
+        "content": "Trigger pipelines manually, via webhooks, or on a schedule. Follow progress in real time with live log streaming. Each run shows stage-by-stage status and durations."
+      },
+      {
+        "title": "Variables and Secrets",
+        "content": "Attach variable libraries and vaults to a pipeline. Variables are substituted at runtime. Use the dry-run to preview the resolved commands before executing for real."
+      }
+    ]
+  },
+  {
+    "key": "templates",
+    "title": "Pipeline Templates",
+    "description": "Reusable pipeline templates to standardize your deployment workflows.",
+    "icon": "description",
+    "sections": [
+      {
+        "title": "Using Templates",
+        "content": "Create templates from existing pipelines or from scratch. When creating a new pipeline, pick a template to pre-populate stages and steps. Templates are versioned with changelog entries."
+      }
+    ]
+  },
+  {
+    "key": "variable-libraries",
+    "title": "Variable Libraries",
+    "description": "Shared key-value stores for pipeline variables, reusable across multiple pipelines.",
+    "icon": "data_object",
+    "sections": [
+      {
+        "title": "Managing Entries",
+        "content": "Add, edit, or delete key-value entries. Changes are versioned - view the history to see previous values and who made each change. A library belongs to an organization or a project."
+      },
+      {
+        "title": "Using in Pipelines",
+        "content": "Link a library to a pipeline, then reference its values with $(key) syntax in your steps. Use the copy button to grab the exact key reference."
+      }
+    ]
+  },
+  {
+    "key": "vaults",
+    "title": "Vaults",
+    "description": "Encrypted secret storage for sensitive values like API keys, passwords, and tokens.",
+    "icon": "lock",
+    "sections": [
+      {
+        "title": "Secret Management",
+        "content": "Secrets are encrypted with AES-256 at rest. Add a secret with a key and value - values are masked in the UI and in logs. View the version history to audit changes."
+      },
+      {
+        "title": "Using Secrets in Pipelines",
+        "content": "Link a vault to a pipeline and reference secrets with $(secret.key) syntax. Secrets are resolved at execution time and automatically masked in log output."
+      }
+    ]
+  },
+  {
+    "key": "releases",
+    "title": "Releases",
+    "description": "Track software releases across your projects with build status and promotion workflows.",
+    "icon": "new_releases",
+    "sections": [
+      {
+        "title": "Release Detection",
+        "content": "Releases are detected automatically from Git tags. Use Sync to fetch new releases on demand. Each release shows its version, branch, and current status."
+      },
+      {
+        "title": "Promotion and Rollback",
+        "content": "Promote a successful release to production or roll back to a previous version. Trigger the associated build pipelines directly from the release view."
+      }
+    ]
+  },
+  {
+    "key": "artifacts",
+    "title": "Artifacts",
+    "description": "Browse and download the build artifacts produced by your project pipelines.",
+    "icon": "inventory_2",
+    "sections": [
+      {
+        "title": "Artifact Storage",
+        "content": "Pipeline steps can publish artifacts such as build output, packages, or reports. Each artifact is listed with its name, size, and the run that produced it."
+      },
+      {
+        "title": "Downloading Artifacts",
+        "content": "Download any artifact to inspect it locally or to deploy it manually. Artifacts stay attached to the run that created them for full traceability."
+      }
+    ]
+  },
+  {
+    "key": "tasks",
+    "title": "Tasks",
+    "description": "View and manage task executions across all servers and pipelines.",
+    "icon": "task_alt",
+    "sections": [
+      {
+        "title": "Task List",
+        "content": "Browse all tasks with filters by status, executor, and server. Each task shows its current status, the associated pipeline step, and its execution duration."
+      },
+      {
+        "title": "Task Logs",
+        "content": "Open a task to view its output. Logs stream in real time for running tasks; completed task logs are stored and remain available for review."
+      }
+    ]
+  },
+  {
+    "key": "logs",
+    "title": "Logs",
+    "description": "Real-time log console with filtering, search, and color-coded log levels.",
+    "icon": "receipt_long",
+    "sections": [
+      {
+        "title": "Live Streaming",
+        "content": "Logs stream in real time over the SignalR connection. The console auto-scrolls to show new entries; use pause to freeze the view and examine specific lines."
+      },
+      {
+        "title": "Filtering",
+        "content": "Filter logs by agent, pipeline, or level (Info, Warning, Error). Use the search box to find specific text within the displayed logs."
+      }
+    ]
+  },
+  {
+    "key": "alerts",
+    "title": "Alerts",
+    "description": "Configure metric-based alerts to get notified when thresholds are exceeded.",
+    "icon": "notification_important",
+    "sections": [
+      {
+        "title": "Creating Alerts",
+        "content": "Define an alert by selecting a metric (CPU, Memory, Disk), setting a threshold percentage, and choosing how long the condition must hold before it triggers."
+      },
+      {
+        "title": "Alert Notifications",
+        "content": "When an alert fires, notifications are surfaced in the app and the unread count appears in the sidebar. Review active and past alerts from the alerts view."
+      }
+    ]
+  },
+  {
+    "key": "dashboards",
+    "title": "Custom Dashboards",
+    "description": "Create custom dashboards with configurable widgets (admin only).",
+    "icon": "space_dashboard",
+    "sections": [
+      {
+        "title": "Widget Configuration",
+        "content": "Add widgets to a dashboard and configure their type, position, and size. Available widget types include charts, counters, and status indicators."
+      },
+      {
+        "title": "Default Dashboard",
+        "content": "Mark a dashboard as default to show it on the home page, giving your team the view that matters most as soon as they sign in."
+      }
+    ]
+  },
+  {
+    "key": "organizations",
+    "title": "Organizations",
+    "description": "Group servers, projects, and members under an organization with scoped ownership (admin only).",
+    "icon": "apartment",
+    "sections": [
+      {
+        "title": "Membership and Roles",
+        "content": "Each organization has members with roles, including Owner. Owners manage membership and settings. A default organization is created at first startup with the bootstrap administrator as its Owner."
+      },
+      {
+        "title": "Scoped Ownership",
+        "content": "Servers, projects, plugin registrations, and registration tokens belong to an organization. Members see the resources of the organizations they belong to. When creating a resource you can pick its organization, or let it default to yours."
+      }
+    ]
+  },
+  {
+    "key": "roles",
+    "title": "Roles",
+    "description": "Define roles and resource-based permissions to control who can view or change each resource (admin only).",
+    "icon": "admin_panel_settings",
+    "sections": [
+      {
+        "title": "Resource Permissions",
+        "content": "Permissions are granted per resource (server or project) and per action, such as read or write. Group permissions into roles and assign roles to users."
+      },
+      {
+        "title": "Effective Access",
+        "content": "A user's effective access is the union of their direct resource permissions and the resources of their organizations. Changes take effect immediately as the permission cache refreshes."
+      }
+    ]
+  },
+  {
+    "key": "users",
+    "title": "Users",
+    "description": "Manage user accounts, roles, and access permissions (admin only).",
+    "icon": "group",
+    "sections": [
+      {
+        "title": "User Management",
+        "content": "Create, edit, and delete user accounts. Reset a password when needed, and enable or require two-factor authentication for stronger account security."
+      },
+      {
+        "title": "Roles and Permissions",
+        "content": "Assign roles to control what each user can access. Access is resource-based: a user only sees the servers and projects granted to them, directly or through their organizations. See the Roles article for details."
+      }
+    ]
+  },
+  {
+    "key": "plugins",
+    "title": "Plugins",
+    "description": "Extend Aetheus functionality by registering and managing plugins (admin only).",
+    "icon": "extension",
+    "sections": [
+      {
+        "title": "Plugin Management",
+        "content": "Register a plugin by providing its name, author, entry point, and type. Enable or disable plugins as needed, and unregister those that are no longer required."
+      }
+    ]
+  },
+  {
+    "key": "audit",
+    "title": "Audit Logs",
+    "description": "Track all changes made in the system for security and compliance (admin only).",
+    "icon": "policy",
+    "sections": [
+      {
+        "title": "Browsing Audit Logs",
+        "content": "Filter audit entries by action type (Created, Updated, Deleted), entity type, date range, and user. Each entry records a timestamp, the action, the affected entity, and who made the change."
+      }
+    ]
+  },
+  {
+    "key": "system-logs",
+    "title": "System Logs",
+    "description": "Inspect the backend application logs for troubleshooting and diagnostics (admin only).",
+    "icon": "description",
+    "sections": [
+      {
+        "title": "Browsing System Logs",
+        "content": "View server-side application logs with their level, timestamp, and message. Use this to diagnose backend errors that are not tied to a specific agent task or pipeline run."
+      }
+    ]
+  },
+  {
+    "key": "api-reference",
+    "title": "API Reference",
+    "description": "Browse every backend API endpoint exposed by Aetheus, grouped by area (admin only).",
+    "icon": "api",
+    "sections": [
+      {
+        "title": "Browsing Endpoints",
+        "content": "The reference is generated from the live OpenAPI document, so it always matches the running backend. Endpoints are grouped by tag and show the HTTP method, path, and summary."
+      },
+      {
+        "title": "Finding an Endpoint",
+        "content": "Use the search box to filter endpoints by path or description. This is the quickest way to discover the exact route and method for an integration."
+      }
+    ]
+  },
+  {
+    "key": "settings",
+    "title": "Settings",
+    "description": "Manage your profile, appearance, notifications, and account security.",
+    "icon": "settings",
+    "sections": [
+      {
+        "title": "Profile and Appearance",
+        "content": "Set your display name, switch between the dark and light theme, and choose your language (English or French). Appearance preferences are saved in your browser."
+      },
+      {
+        "title": "Notifications",
+        "content": "Choose which alerts you want to receive - email, pipeline, and server notifications - so the app surfaces only what matters to you."
+      },
+      {
+        "title": "Security",
+        "content": "Change your password and enable two-factor authentication (TOTP) for an extra layer of protection on your account."
+      }
+    ]
+  }
+]

@@ -1,0 +1,70 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_apps is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="1rem">
+        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Applications"]</RadzenText>
+        <RadzenButton Icon="add" Text="@L["Add"]" Size="ButtonSize.Small" Click="@(() => _addVisible = true)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+
+    <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search" Change="@OnSearchChangedAsync"
+        class="pipeline-list-search rz-mb-2" />
+    <AetheusDataGrid @ref="_grid" Data="@_apps" TItem="ServerAppDto"
+        Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
+        PageSize="25" EmptyText="@L["NoRecords"]">
+        <Columns>
+            <RadzenDataGridColumn TItem="ServerAppDto" Property="Name" Title="@L["Name"]" />
+            <RadzenDataGridColumn TItem="ServerAppDto" Property="Status" Title="@L["Status"]" Width="120px">
+                <Template Context="a">
+                    <RadzenBadge BadgeStyle="@GetAppStatusBadge(a.Status)" Text="@L[a.Status.ToString()]" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="ServerAppDto" Property="Version" Title="@L["Version"]" Width="100px" />
+            <RadzenDataGridColumn TItem="ServerAppDto" Property="Port" Title="@L["Port"]" Width="80px" />
+            <RadzenDataGridColumn TItem="ServerAppDto" Property="Source" Title="@L["Source"]" Width="100px" />
+            <RadzenDataGridColumn TItem="ServerAppDto" Title="" Width="80px" TextAlign="TextAlign.Center">
+                <Template Context="a">
+                    <RadzenButton Icon="delete" Size="ButtonSize.Small" Click="@(() => DeleteAppAsync(a))" Title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+
+    @if (_addVisible)
+    {
+        <RadzenCard class="rz-mt-4">
+            <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["AddApplication"]</RadzenText>
+            <RadzenRow Gap="1rem">
+                <RadzenColumn SizeMD="3" Size="12">
+                    <RadzenFormField Text="@L["Name"]">
+                        <RadzenTextBox @bind-Value="_addName" MaxLength="100" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="2" Size="6">
+                    <RadzenFormField Text="@L["Version"]">
+                        <RadzenTextBox @bind-Value="_addVersion" MaxLength="50" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="2" Size="6">
+                    <RadzenFormField Text="@L["Port"]">
+                        <RadzenNumeric TValue="int?" @bind-Value="_addPort" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="3" Size="6">
+                    <RadzenFormField Text="@L["Source"]">
+                        <RadzenDropDown TValue="string" Data="@_sources" @bind-Value="_addSource" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="2" Size="12">
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-5">
+                        <RadzenButton Text="@L["Add"]" Icon="add" Click="@AddAppAsync" IsBusy="@_addSaving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                        <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@(() => _addVisible = false)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    </RadzenStack>
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenCard>
+    }
+}

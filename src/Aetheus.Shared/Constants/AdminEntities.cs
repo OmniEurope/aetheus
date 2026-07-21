@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: EUPL-1.2
+namespace Aetheus.Shared.Constants;
+
+/// <summary>
+/// Logical entity names broadcast over the admin realtime hub (<c>AdminEntityChanged(entity, id, op)</c>).
+/// Shared between backend (broadcast) and frontend (subscription filter) so the case-sensitive string
+/// contract can never drift between the two sides (S-TECH-RT4M).
+/// </summary>
+public static class AdminEntities
+{
+    public const string User = "User";
+    public const string Role = "Role";
+    public const string Organization = "Organization";
+    public const string Plugin = "Plugin";
+    public const string RegistrationToken = "RegistrationToken";
+}

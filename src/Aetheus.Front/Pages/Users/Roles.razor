@@ -1,0 +1,46 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/roles"
+
+<PageTitle>@L["Roles"] - Aetheus</PageTitle>
+
+<div class="user-list-toolbar">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+        <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["Roles"]</RadzenText>
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+        <div class="server-list-spacer"></div>
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small"
+            Click="@LoadAsync" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        <RadzenButton Text="@L["NewRole"]" Icon="add" Click="@OnCreate" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+</div>
+
+<RadzenDataGrid @ref="_grid" TItem="RoleDto" Data="@_roles" Count="@_totalCount"
+    LoadData="@LoadDataAsync" AllowPaging="true" PageSize="25" IsLoading="@_loading"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    class="rz-mt-4 aetheus-clickable-rows aetheus-grid-fullheight" Density="Density.Compact"
+    RowClick="@OnRowClick">
+        <Columns>
+            <RadzenDataGridColumn TItem="RoleDto" Property="Name" Title="@L["Name"]" MinWidth="150px">
+                <Template Context="role">
+                    <a href="/admin/roles/@role.Id" class="server-name-link" @onclick:stopPropagation="true">@role.Name</a>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="RoleDto" Property="Description" Title="@L["Description"]" MinWidth="200px">
+                <Template Context="role">@LocalizeDescription(role)</Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="RoleDto" Property="PermissionCount" Title="@L["Permissions"]" Width="150px" />
+            <RadzenDataGridColumn TItem="RoleDto" Property="UserCount" Title="@L["Users"]" Width="130px" />
+            <RadzenDataGridColumn TItem="RoleDto" Title="@L["Actions"]" Width="120px" Sortable="false">
+                <Template Context="role">
+                    <span @onclick:stopPropagation="true">
+                        <RadzenButton Icon="content_copy" Size="ButtonSize.Small"
+                            Click="@(() => OnClone(role))" title="@L["CloneRole"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                        @if (role.Name != "Admin")
+                        {
+                            <RadzenButton Icon="delete" Size="ButtonSize.Small" Click="@(() => OnDelete(role))" title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                        }
+                    </span>
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+</RadzenDataGrid>

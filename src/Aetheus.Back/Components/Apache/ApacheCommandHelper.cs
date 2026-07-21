@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Text.RegularExpressions;
+using Aetheus.Shared.Enums;
+
+namespace Aetheus.Back.Components.Apache;
+
+public static partial class ApacheCommandHelper
+{
+    public static bool IsValidSiteName(string name) =>
+        !string.IsNullOrWhiteSpace(name) && SiteNameRegex().IsMatch(name);
+
+    public static bool IsValidModuleName(string name) =>
+        !string.IsNullOrWhiteSpace(name) && ModuleNameRegex().IsMatch(name);
+
+    public static string BuildServiceCommand(ApacheAction action) => action switch
+    {
+        ApacheAction.Start => "systemctl start apache2 || systemctl start httpd",
+        ApacheAction.Stop => "systemctl stop apache2 || systemctl stop httpd",
+        ApacheAction.Restart => "systemctl restart apache2 || systemctl restart httpd",
+        ApacheAction.Reload => "systemctl reload apache2 || systemctl reload httpd",
+        ApacheAction.TestConfig => "apache2ctl configtest 2>&1 || apachectl configtest 2>&1 || httpd -t 2>&1",
+        _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
+    };
+
+    public static string BuildEnableSiteCommand(string siteName) =>
+        $"a2ensite {siteName} && systemctl reload apache2";
+
+    public static string BuildDisableSiteCommand(string siteName) =>
+        $"a2dissite {siteName} && systemctl reload apache2";
+
+    public static string BuildEnableModuleCommand(string moduleName) =>
+        $"a2enmod {moduleName} && systemctl restart apache2";
+
+    public static string BuildDisableModuleCommand(string moduleName) =>
+        $"a2dismod {moduleName} && systemctl restart apache2";
+
+    public static string BuildGetLogsCommand(string logType, int lines)
+    {
+        var logFile = logType == "access"
+            ? "/var/log/apache2/access.log"
+            : "/var/log/apache2/error.log";
+        var altLogFile = logType == "access"
+            ? "/var/log/httpd/access_log"
+            : "/var/log/httpd/error_log";
+
+        return $"tail -n {lines} {logFile} 2>/dev/null || tail -n {lines} {altLogFile} 2>/dev/null";
+    }
+
+    // BuildGetConfigCommand / BuildGetHtaccessCommand / BuildSaveHtaccessCommand were removed: those
+    // shell builders (cat "..." || cat, printf | base64 -d > ...) carry metacharacters the agent's
+    // CommandValidator rejects, so the tasks died silently. GetVHostConfig / GetHtaccess / SaveHtaccess
+    // now dispatch typed OperationKind.ApacheGetConfig / ApacheGetHtaccess / ApacheSaveHtaccess handled
+    // by ApacheOperationExecutor (direct File read/write, no shell).
+
+    public static bool IsValidDocumentRoot(string path) =>
+        !string.IsNullOrWhiteSpace(path) && DocumentRootRegex().IsMatch(path);
+
+    // Only allow alphanumeric, hyphens, dots, and .conf extension
+    [GeneratedRegex(@"^[a-zA-Z0-9._-]+$")]
+    private static partial Regex SiteNameRegex();
+
+    [GeneratedRegex(@"^[a-zA-Z0-9_-]+$")]
+    private static partial Regex ModuleNameRegex();
+
+    // Absolute Linux path: letters, digits, hyphens, underscores, dots, slashes
+    [GeneratedRegex(@"^/[a-zA-Z0-9._/-]+$")]
+    private static partial Regex DocumentRootRegex();
+}

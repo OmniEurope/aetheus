@@ -1,0 +1,226 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Net;
+using Aetheus.Front.Services;
+using Aetheus.Front.Tests.TestDoubles;
+using Aetheus.Shared.DTOs;
+using Bunit;
+using Microsoft.Extensions.DependencyInjection;
+using Radzen;
+
+namespace Aetheus.Front.Tests.Services;
+
+public class PipelineRunGateTests : BunitContext
+{
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    public PipelineRunGateTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+    }
+
+    private PipelineRunGate Sut => Services.GetRequiredService<PipelineRunGate>();
+    private NotificationService Toasts => Services.GetRequiredService<NotificationService>();
+    private ImmediateDialogService Dialog =>
+        (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+
+    // === Happy path - all stages resolved, no dialog ===
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_AllResolved_NoFallbacks_ReturnsTrue()
+    {
+        // 200 → PipelinePreflightDto (no unresolved stages, no server names)
+        _handler.SetJsonResponse("api/pipelines/1/preflight", new PipelinePreflightDto
+        {
+            Stages =
+            [
+                new PreflightStageDto { StageName = "Build", Resolved = true, ServerName = null, Target = "build-pool" }
+            ]
+        });
+
+        var result = await Sut.ConfirmPreflightAsync(1);
+
+        Assert.True(result);
+        // No resolved stage carries a ServerName, so no fallback-transparency toast is shown.
+        Assert.Empty(Toasts.Messages);
+    }
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_AllResolved_WithFallbacks_ReturnsTrueAndToasts()
+    {
+        // 200 → resolved stages with server names (shows info toast)
+        _handler.SetJsonResponse("api/pipelines/2/preflight", new PipelinePreflightDto
+        {
+            Stages =
+            [
+                new PreflightStageDto { StageName = "Deploy", Resolved = true, ServerName = "web-01", Reason = "tag match", Target = "prod" }
+            ]
+        });
+
+        var result = await Sut.ConfirmPreflightAsync(2);
+
+        Assert.True(result);
+        // A resolved stage with a ServerName triggers the "PreflightResolved" info toast, whose detail
+        // names the stage, the picked server and the reason.
+        var toast = Assert.Single(Toasts.Messages);
+        Assert.Equal(NotificationSeverity.Info, toast.Severity);
+        Assert.Equal("PreflightResolved", toast.Summary?.ToString());
+        var detail = toast.Detail?.ToString() ?? "";
+        Assert.Contains("Deploy", detail);
+        Assert.Contains("web-01", detail);
+        Assert.Contains("tag match", detail);
+    }
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_EmptyStages_ReturnsTrue()
+    {
+        _handler.SetJsonResponse("api/pipelines/3/preflight", new PipelinePreflightDto { Stages = [] });
+
+        var result = await Sut.ConfirmPreflightAsync(3);
+
+        Assert.True(result);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmPreflightAsync_UnresolvedTarget_UsesExplicitConfirmation(bool confirm)
+    {
+        _handler.SetJsonResponse("api/pipelines/9/preflight", new PipelinePreflightDto
+        {
+            Stages =
+            [
+                new PreflightStageDto
+                {
+                    StageName = "Deploy",
+                    Resolved = false,
+                    Target = "prod-web",
+                    Reason = "no online matching agent"
+                }
+            ]
+        });
+        Dialog.ConfirmResult = confirm;
+
+        var result = await Sut.ConfirmPreflightAsync(9);
+
+        Assert.Equal(confirm, result);
+        Assert.Equal(1, Dialog.OpenCount);
+        Assert.Equal("PreflightNoAgentTitle", Dialog.LastTitle);
+        Assert.Contains("Deploy", Dialog.LastConfirmMessage, StringComparison.Ordinal);
+        Assert.Contains("prod-web", Dialog.LastConfirmMessage, StringComparison.Ordinal);
+        Assert.Contains("no online matching agent", Dialog.LastConfirmMessage, StringComparison.Ordinal);
+    }
+
+    // === Error path - 400 with YamlValidationResultDto body, no dialog ===
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_WithError_ReturnsFalse()
+    {
+        // 400 → YamlValidationResultDto parsed as error
+        _handler.SetJsonResponse("api/pipelines/4/preflight",
+            new YamlValidationResultDto { IsValid = false, Errors = ["Invalid YAML: line 5"] });
+        // Override with 400 status - we need to re-register as 400
+        // The TestHandler uses SetResponse for a specific status:
+        // We can't set 400 with typed body via the helper, so use a workaround:
+        // Return a 400 with the JSON body by registering a custom response
+        RegisterBadRequest("api/pipelines/4/preflight",
+            new YamlValidationResultDto { IsValid = false, Errors = ["Invalid YAML: line 5"] });
+
+        var result = await Sut.ConfirmPreflightAsync(4);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_WithMultipleErrors_ReturnsFalse()
+    {
+        RegisterBadRequest("api/pipelines/5/preflight",
+            new YamlValidationResultDto { IsValid = false, Errors = ["Error 1", "Error 2"] });
+
+        var result = await Sut.ConfirmPreflightAsync(5);
+
+        Assert.False(result);
+    }
+
+    // === Null value path - 200 with empty body ===
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_NullPreflightDto_ReturnsTrue()
+    {
+        // 200 with no stages means proceed (no unresolved)
+        _handler.SetJsonResponse("api/pipelines/6/preflight", new PipelinePreflightDto { Stages = [] });
+
+        var result = await Sut.ConfirmPreflightAsync(6);
+
+        Assert.True(result);
+    }
+
+    // === Multiple fallbacks ===
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_MultipleFallbacks_ReturnsTrue()
+    {
+        _handler.SetJsonResponse("api/pipelines/7/preflight", new PipelinePreflightDto
+        {
+            Stages =
+            [
+                new PreflightStageDto { StageName = "Build", Resolved = true, ServerName = "build-01", Reason = "pool", Target = "build-pool" },
+                new PreflightStageDto { StageName = "Deploy", Resolved = true, ServerName = "web-01", Reason = null, Target = "prod" }
+            ]
+        });
+
+        var result = await Sut.ConfirmPreflightAsync(7);
+
+        Assert.True(result);
+        // Both resolved stages carry a ServerName, so the single info toast lists both picks.
+        var toast = Assert.Single(Toasts.Messages);
+        Assert.Equal(NotificationSeverity.Info, toast.Severity);
+        var detail = toast.Detail?.ToString() ?? "";
+        Assert.Contains("build-01", detail);
+        Assert.Contains("web-01", detail);
+    }
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_FallbackWithNoReason_IncludesServerNameOnly()
+    {
+        _handler.SetJsonResponse("api/pipelines/8/preflight", new PipelinePreflightDto
+        {
+            Stages =
+            [
+                new PreflightStageDto { StageName = "Test", Resolved = true, ServerName = "ci-01", Reason = null, Target = "ci" }
+            ]
+        });
+
+        var result = await Sut.ConfirmPreflightAsync(8);
+
+        Assert.True(result);
+        // ServerName present but Reason null: the toast names the server without the parenthetical reason.
+        var toast = Assert.Single(Toasts.Messages);
+        var detail = toast.Detail?.ToString() ?? "";
+        Assert.Contains("ci-01", detail);
+        Assert.DoesNotContain("(", detail);
+    }
+
+    /// <summary>
+    /// Helper: register a response that returns 400 Bad Request with a JSON body.
+    /// Used to exercise the error-path in PipelineRunGate without triggering Dialog.Confirm.
+    /// </summary>
+    private void RegisterBadRequest<T>(string urlContains, T body)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(body,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        // We reach into the handler using the same mechanism as SetJsonResponse but with status 400.
+        // TestHandler doesn't expose this directly, so we use SetResponse then rely on the
+        // overload to return a pre-built response (workaround: override with a custom content).
+        // Instead, simply call the internal dictionary via reflection.
+        var responses = (System.Collections.Generic.Dictionary<string, Func<System.Net.Http.HttpResponseMessage>>)
+            typeof(BunitTestHelper.TestHandler)
+                .GetField("_responses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .GetValue(_handler)!;
+
+        responses[urlContains] = () => new System.Net.Http.HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+    }
+}

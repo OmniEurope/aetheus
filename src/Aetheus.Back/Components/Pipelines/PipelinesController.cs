@@ -1,0 +1,562 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+[ProducesResponseType(StatusCodes.Status200OK)]
+[ProducesResponseType(StatusCodes.Status404NotFound)]
+[ProducesResponseType(StatusCodes.Status400BadRequest)]
+public class PipelinesController(
+    IPipelineService pipelineService,
+    IPipelineRunService runService,
+    IPipelineApprovalService approvalService,
+    IPipelineArtifactService artifactService,
+    IPipelineWebhookService webhookService,
+    IResourceAuthorizationService authz) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<PaginatedResult<PipelineDto>>> GetPipelines(
+        [FromQuery] PipelinePaginationRequest request, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<PipelineDto>());
+        return Ok(await pipelineService.GetPipelinesAsync(request, accessibleIds, ct));
+    }
+
+    [HttpGet("dependencies")]
+    public async Task<ActionResult<PipelineDependencyGroupsDto>> GetDependencies(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new PipelineDependencyGroupsDto());
+        return Ok(await pipelineService.GetDependencyGroupsAsync(accessibleIds, ct));
+    }
+
+    [HttpGet("runs/active")]
+    public async Task<ActionResult<List<PipelineRunDto>>> GetActiveRuns([FromQuery] int? projectId, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new List<PipelineRunDto>());
+        return Ok(await runService.GetActiveRunsAsync(accessibleIds, projectId, ct));
+    }
+
+    [HttpGet("runs/recent")]
+    public async Task<ActionResult<List<PipelineRunDto>>> GetRecentRuns([FromQuery] int? projectId, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new List<PipelineRunDto>());
+        return Ok(await runService.GetRecentRunsAsync(accessibleIds, projectId, ct));
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<PipelineDto>> GetPipeline(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Read, ct))
+            return Forbid();
+
+        var pipeline = await pipelineService.GetPipelineAsync(id, ct);
+        if (pipeline is null) return NotFound();
+        return Ok(pipeline);
+    }
+
+    [HttpGet("{id:int}/source")]
+    public async Task<ActionResult<PipelineSourceDto>> GetSource(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Read, ct))
+            return Forbid();
+
+        var pipeline = await pipelineService.GetPipelineAsync(id, ct);
+        if (pipeline is null) return NotFound();
+        if (pipeline.ProjectId is not { } projectId) return NoContent();
+
+        var source = await pipelineService.GetPipelineSourceAsync(projectId, pipeline.Name, ct, pipeline.SourceBranch);
+        return source is null ? NoContent() : Ok(source);
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<PipelineDto>> CreatePipeline([FromBody] CreatePipelineRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, null, Permission.Write, ct))
+            return Forbid();
+        if (request.ProjectId is { } projectId
+            && !await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Write, ct))
+            return Forbid();
+
+        // Reject invalid YAML at save time with the concrete errors (same contract as
+        // TriggerRun/Preflight) so the editor can surface them instead of failing generically.
+        var validation = await pipelineService.ValidateYamlStrictAsync(
+            request.YamlDefinition, request.ProjectId, request.EnvironmentId, request.ProjectServerId, ct: ct)
+            ?? pipelineService.ValidateYamlStrict(request.YamlDefinition);
+        if (!validation.IsValid) return BadRequest(validation);
+
+        var pipeline = await pipelineService.CreatePipelineAsync(request, ct);
+        return CreatedAtAction(nameof(GetPipeline), new { id = pipeline.Id }, pipeline);
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<PipelineDto>> UpdatePipeline(int id, [FromBody] UpdatePipelineRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Write, ct))
+            return Forbid();
+
+        var existing = await pipelineService.GetPipelineAsync(id, ct);
+        if (existing is null) return NotFound();
+
+        foreach (var projectId in new int?[] { existing.ProjectId, request.ProjectId }.OfType<int>().Distinct())
+        {
+            if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Write, ct))
+                return Forbid();
+        }
+
+        var validation = await pipelineService.ValidateYamlStrictAsync(
+            request.YamlDefinition, request.ProjectId, request.EnvironmentId, request.ProjectServerId, ct: ct)
+            ?? pipelineService.ValidateYamlStrict(request.YamlDefinition);
+        if (!validation.IsValid) return BadRequest(validation);
+
+        var pipeline = await pipelineService.UpdatePipelineAsync(id, request, ct);
+        if (pipeline is null) return NotFound();
+        return Ok(pipeline);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeletePipeline(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Admin, ct))
+            return Forbid();
+
+        var deleted = await pipelineService.DeletePipelineAsync(id, ct);
+        if (!deleted) return NotFound();
+        return NoContent();
+    }
+
+    [HttpPost("{id:int}/run")]
+    public async Task<ActionResult<PipelineRunDto>> TriggerRun(int id, [FromBody] PipelineRunRequest? request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Write, ct))
+            return Forbid();
+
+        var pipeline = await pipelineService.GetPipelineAsync(id, ct);
+        if (pipeline is null) return NotFound();
+        if (!string.IsNullOrWhiteSpace(request?.SourceBranch)
+            && !PipelineBranchValidator.IsValid(request.SourceBranch))
+            return BadRequest("The selected source branch is invalid.");
+
+        // Resolve Git exactly once. Authorization below and execution use the same branch, commit and YAML.
+        var preparation = await runService.PrepareRunAsync(id, request?.SourceBranch, ct);
+        if (preparation is null)
+            return BadRequest("The authoritative pipeline YAML is invalid and cannot be run.");
+        var runtimePreparation = await runService.ResolveRunParametersAsync(
+            preparation, request?.Parameters, ct);
+        if (!await CallerAdministersAllTargetsAsync(runtimePreparation.TargetServerIds, ct))
+            return Forbid();
+
+        // Invalid queue-time parameters surface as a BadRequestException and become HTTP 400.
+        var run = await runService.TriggerPreparedRunAsync(
+            runtimePreparation, parameters: request?.Parameters, ct: ct);
+        if (run is null) return NotFound();
+        return CreatedAtAction(nameof(GetRun), new { runId = run.Id }, run);
+    }
+
+    [HttpGet("dependencies/page")]
+    public async Task<ActionResult<PaginatedResult<PipelineDependencyDto>>> GetDependencyPage(
+        [FromQuery] PipelinePaginationRequest request, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<PipelineDependencyDto>());
+        return Ok(await pipelineService.GetDependencyPageAsync(request, accessibleIds, ct));
+    }
+
+    /// <summary>P: the queue-time parameters declared by the pipeline's authoritative (git-first) YAML,
+    /// so the UI can render the run dialog. Empty when the pipeline declares no <c>parameters:</c>.</summary>
+    [HttpGet("{id:int}/parameters")]
+    public async Task<ActionResult<List<PipelineRunParameterDto>>> GetRunParameters(int id, [FromQuery] string? sourceBranch, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Write, ct))
+            return Forbid();
+
+        if (!string.IsNullOrWhiteSpace(sourceBranch) && !PipelineBranchValidator.IsValid(sourceBranch))
+            return BadRequest("The selected source branch is invalid.");
+
+        return await runService.GetRunParametersAsync(id, sourceBranch, ct);
+    }
+
+    /// <summary>Pre-flight: resolves each stage's target server without launching, so the UI can
+    /// warn before a run starts when no online agent matches (the YAML 400 doesn't cover that).</summary>
+    [HttpPost("{id:int}/preflight")]
+    public async Task<ActionResult<PipelinePreflightDto>> Preflight(
+        int id, CancellationToken ct, [FromQuery] string? sourceBranch = null)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Write, ct))
+            return Forbid();
+
+        var pipeline = await pipelineService.GetPipelineAsync(id, ct);
+        if (pipeline is null) return NotFound();
+
+        if (!string.IsNullOrWhiteSpace(sourceBranch) && !PipelineBranchValidator.IsValid(sourceBranch))
+            return BadRequest("The selected source branch is invalid.");
+
+        var preparation = await runService.PrepareRunAsync(id, sourceBranch, ct);
+        if (preparation is null)
+            return BadRequest("The authoritative pipeline YAML is invalid and cannot be checked.");
+
+        // F-EXEC-1: Preflight enumerates the resolved target servers - same Server.Admin gate
+        // as TriggerRun so it cannot be used as a recon oracle for servers the caller may not
+        // deploy to.
+        if (!await CallerAdministersAllTargetsAsync(preparation.TargetServerIds, ct))
+            return Forbid();
+
+        var result = await runService.PreflightAsync(preparation, ct: ct);
+        if (result is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpGet("{id:int}/runs")]
+    public async Task<ActionResult<PaginatedResult<PipelineRunDto>>> GetRuns(int id, [FromQuery] PaginationRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await runService.GetRunsAsync(id, request, ct));
+    }
+
+    [HttpGet("runs/{runId:int}")]
+    public async Task<ActionResult<PipelineRunDto>> GetRun(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        var run = await runService.GetRunAsync(runId, ct);
+        if (run is null) return NotFound();
+        return Ok(run);
+    }
+
+    [HttpPost("validate")]
+    [RequestSizeLimit(256 * 1024)]
+    public async Task<ActionResult<YamlValidationResultDto>> ValidateYaml(
+        [FromBody] ValidateYamlRequest request, CancellationToken ct)
+    {
+        int? organizationId = request.OrganizationId;
+        if (!User.IsInRole("Admin"))
+        {
+            var organizationIds = await authz.GetUserOrganizationIdsAsync(User, ct);
+            organizationId ??= organizationIds.FirstOrDefault();
+            if (organizationId <= 0 || !organizationIds.Contains(organizationId.Value))
+                return Forbid();
+        }
+        var result = await pipelineService.ValidateYamlStrictAsync(
+            request.Yaml, null, null, null, organizationId, ct)
+            ?? pipelineService.ValidateYamlStrict(request.Yaml);
+        if (!result.IsValid) return BadRequest(result);
+        return Ok(result);
+    }
+
+    [HttpPost("{id:int}/dry-run")]
+    public async Task<ActionResult<DryRunResultDto>> DryRun(int id, [FromBody] Dictionary<string, string>? additionalVars, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Write, ct))
+            return Forbid();
+
+        // F-EXEC-1: dry-run reveals the fully resolved commands (with masked secrets) per target
+        // server - gate it on Server.Admin like the real run so it isn't a recon oracle.
+        if (!await CallerAdministersAllTargetsAsync(id, ct))
+            return Forbid();
+
+        var result = await runService.DryRunAsync(id, additionalVars, ct);
+        if (result is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpPost("runs/{runId:int}/cancel")]
+    public async Task<IActionResult> CancelRun(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Write, ct))
+            return Forbid();
+
+        var cancelled = await runService.CancelRunAsync(runId, ct);
+        if (!cancelled) return NotFound();
+        return NoContent();
+    }
+
+    /// <summary>Re-runs only the failed steps of a failed run (instead of a brand-new run).</summary>
+    [HttpPost("runs/{runId:int}/retry-failed")]
+    public async Task<ActionResult<PipelineRunDto>> RetryFailedSteps(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Write, ct))
+            return Forbid();
+
+        if (!await CallerAdministersAllTargetsAsync(pipelineId.Value, ct))
+            return Forbid();
+
+        var run = await runService.RetryFailedStepsAsync(runId, ct);
+        if (run is null) return NotFound();
+        return Ok(run);
+    }
+
+    /// <summary>G: re-launches a run - the current definition (a fresh run), or the source run's
+    /// captured YAML snapshot pinned to its commit / floated to the branch head.</summary>
+    [HttpPost("runs/{runId:int}/rerun")]
+    public async Task<ActionResult<PipelineRunDto>> Rerun(int runId, [FromQuery] RerunMode mode, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Write, ct))
+            return Forbid();
+
+        // Same Server.Admin gate as TriggerRun - a rerun launches free-form shell (= RCE).
+        if (!await CallerAdministersAllTargetsAsync(pipelineId.Value, ct))
+            return Forbid();
+
+        var run = await runService.RerunAsync(runId, mode, ct);
+        if (run is null) return NotFound();
+        return CreatedAtAction(nameof(GetRun), new { runId = run.Id }, run);
+    }
+
+    [HttpGet("runs/{runId:int}/artifacts")]
+    public async Task<ActionResult<List<PipelineArtifactDto>>> GetArtifacts(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetArtifactsAsync(runId, ct));
+    }
+
+    [HttpPost("runs/{runId:int}/artifacts")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<ActionResult<PipelineArtifactDto>> PublishArtifact(
+        int runId, [FromBody] PublishArtifactRequest request, CancellationToken ct)
+    {
+        // F-06: agent IDOR \u2014 ensure the caller's server is actually assigned to this run.
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+
+        var artifact = await artifactService.PublishArtifactAsync(runId, request, ct);
+        if (artifact is null) return NotFound();
+        return Ok(artifact);
+    }
+
+    [HttpGet("runs/{runId:int}/approvals")]
+    public async Task<ActionResult<List<PipelineApprovalDto>>> GetApprovals(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await approvalService.GetApprovalsAsync(runId, ct));
+    }
+
+    [HttpPost("approvals/{approvalId:int}/decide")]
+    public async Task<ActionResult<PipelineApprovalDto>> DecideApproval(
+        int approvalId, [FromBody] ApprovalDecisionRequest request, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForApprovalAsync(approvalId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Write, ct))
+            return Forbid();
+
+        var approval = await approvalService.DecideApprovalAsync(approvalId, request, ct);
+        if (approval is null) return NotFound();
+        return Ok(approval);
+    }
+
+    [AllowAnonymous]
+    [EnableRateLimiting("webhook")]
+    [RequestSizeLimit(64 * 1024)]
+    [HttpPost("webhook")]
+    public async Task<IActionResult> HandleWebhook(CancellationToken ct)
+    {
+        using var reader = new StreamReader(Request.Body);
+        var rawBody = await reader.ReadToEndAsync(ct);
+
+        var signature = Request.Headers["X-Hub-Signature-256"].FirstOrDefault()
+                        ?? Request.Headers["X-Gitlab-Token"].FirstOrDefault();
+
+        var result = await webhookService.HandleWebhookAsync(rawBody, signature, ct);
+        if (!result) return Unauthorized(new ApiError { Message = "Invalid webhook signature." });
+        return NoContent();
+    }
+
+    [HttpGet("runs/{runId:int}/test-results")]
+    public async Task<ActionResult<List<PipelineTestResultDto>>> GetTestResults(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetTestResultsAsync(runId, ct));
+    }
+
+    [HttpPost("runs/{runId:int}/test-results")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<ActionResult<PipelineTestResultSummaryDto>> PublishTestResults(
+        int runId, [FromBody] PublishTestResultsRequest request, CancellationToken ct)
+    {
+        // F-06: agent IDOR.
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+
+        var summary = await artifactService.PublishTestResultsAsync(runId, request, ct);
+        if (summary is null) return NotFound();
+        return Ok(summary);
+    }
+
+    [HttpGet("runs/{runId:int}/coverage")]
+    public async Task<ActionResult<PipelineCoverageSummaryDto>> GetCoverage(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        var summary = await artifactService.GetCoverageSummaryAsync(runId, ct);
+        if (summary is null) return NotFound();
+        return Ok(summary);
+    }
+
+    [HttpGet("runs/{runId:int}/coverage/assemblies")]
+    public async Task<ActionResult<PaginatedResult<CoverageAssemblyDto>>> GetCoverageAssemblies(
+        int runId, [FromQuery] PaginationRequest request, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetCoverageAssembliesAsync(runId, request, ct));
+    }
+
+    [HttpGet("runs/{runId:int}/coverage-trend")]
+    public async Task<ActionResult<List<CoverageTrendPointDto>>> GetCoverageTrend(int runId, [FromQuery] int take = 15, CancellationToken ct = default)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetCoverageTrendAsync(runId, take, ct));
+    }
+
+    [HttpGet("projects/{projectId:int}/quality-trend")]
+    public async Task<ActionResult<ProjectQualityTrendDto>> GetProjectQualityTrend(int projectId, [FromQuery] int take = 15, CancellationToken ct = default)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetProjectQualityTrendAsync(projectId, take, ct));
+    }
+
+    [HttpGet("runs/{runId:int}/metrics-trend")]
+    public async Task<ActionResult<List<ComplexityTrendPointDto>>> GetMetricsTrend(int runId, [FromQuery] int take = 15, CancellationToken ct = default)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetComplexityTrendAsync(runId, take, ct));
+    }
+
+    [HttpPost("runs/{runId:int}/coverage")]
+    [Authorize(Policy = "AgentToken")]
+    // A full-solution Cobertura report (JSON-embedded, escaped) routinely exceeds the global 10 MB
+    // Kestrel body cap, which reset the upload mid-stream and surfaced on the agent as "Error while
+    // copying content to a stream". Raise the per-action cap so the coverage step can publish.
+    [RequestSizeLimit(104_857_600)]
+    public async Task<ActionResult<PipelineCoverageSummaryDto>> PublishCoverage(
+        int runId, [FromBody] PublishCoverageRequest request, CancellationToken ct)
+    {
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+
+        var summary = await artifactService.PublishCoverageAsync(runId, request, ct);
+        if (summary is null) return NotFound();
+        return Ok(summary);
+    }
+
+    [HttpGet("runs/{runId:int}/lint")]
+    public async Task<ActionResult<PipelineLintSummaryDto>> GetLint(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+            return Forbid();
+
+        var summary = await artifactService.GetLintSummaryAsync(runId, ct);
+        if (summary is null) return NotFound();
+        return Ok(summary);
+    }
+
+    [HttpPost("runs/{runId:int}/lint")]
+    [Authorize(Policy = "AgentToken")]
+    // A large SARIF report can also breach the global 10 MB cap - same override as coverage above.
+    [RequestSizeLimit(104_857_600)]
+    public async Task<ActionResult<PipelineLintSummaryDto>> PublishLint(
+        int runId, [FromBody] PublishLintRequest request, CancellationToken ct)
+    {
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+
+        var summary = await artifactService.PublishLintAsync(runId, request, ct);
+        if (summary is null) return NotFound();
+        return Ok(summary);
+    }
+
+    [HttpPost("runs/{runId:int}/complexity")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<IActionResult> PublishComplexity(
+        int runId, [FromBody] PublishComplexityRequest request, CancellationToken ct)
+    {
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+
+        return await artifactService.PublishComplexityAsync(runId, request, ct) ? Ok() : NotFound();
+    }
+
+    // F-EXEC-1: a pipeline step is a free-form shell command, i.e. arbitrary code execution on
+    // the target server - exactly what the F-15 gate on POST /api/tasks requires Server Admin
+    // for. Triggering a run is only Pipeline.Write-gated, so without this check a user with
+    // pipeline edit rights but no Server Admin could escalate to RCE on servers they do not
+    // administer. Require Server Admin on EVERY server any stage could resolve to (pool >
+    // environment > agent, all statuses). An empty set means the run can target nothing and
+    // will fail "no server matched" - nothing to authorize. Non-interactive triggers
+    // (webhook / scheduler) have no ClaimsPrincipal and are tracked separately as F-EXEC-1b.
+    private async Task<bool> CallerAdministersAllTargetsAsync(int pipelineId, CancellationToken ct)
+    {
+        var preparation = await runService.PrepareRunAsync(pipelineId, ct: ct);
+        return preparation is not null
+            && await CallerAdministersAllTargetsAsync(preparation.TargetServerIds, ct);
+    }
+
+    private async Task<bool> CallerAdministersAllTargetsAsync(
+        IReadOnlyCollection<int> targetIds, CancellationToken ct)
+    {
+        foreach (var serverId in targetIds)
+        {
+            if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Admin, ct))
+                return false;
+        }
+        return true;
+    }
+
+}

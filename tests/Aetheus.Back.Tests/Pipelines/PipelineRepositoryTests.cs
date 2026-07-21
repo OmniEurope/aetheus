@@ -1,0 +1,728 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
+using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Data;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Enums;
+using Microsoft.EntityFrameworkCore;
+
+namespace Aetheus.Back.Tests;
+
+public class PipelineRepositoryTests : IDisposable
+{
+    private readonly AppDbContext _db;
+    private readonly PipelineRepository _repo;
+
+    public PipelineRepositoryTests()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        _db = new AppDbContext(options);
+        _repo = new PipelineRepository(_db, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<Aetheus.Back.Components.Pipelines.PipelineRepository>.Instance);
+    }
+
+    // --- GetPipelinesPagedAsync ---
+
+    [Fact]
+    public async Task GetPipelinesPagedAsync_ReturnsPagedResults()
+    {
+        _db.Pipelines.AddRange(
+            new Pipeline { Name = "Alpha", YamlDefinition = "y" },
+            new Pipeline { Name = "Beta", YamlDefinition = "y" },
+            new Pipeline { Name = "Gamma", YamlDefinition = "y" }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetPipelinesPagedAsync(null, null, 1, 2, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, total);
+        Assert.Equal(2, items.Count);
+        Assert.Equal("Alpha", items[0].Name);
+        Assert.Equal("Beta", items[1].Name);
+    }
+
+    [Fact]
+    public async Task GetPipelinesPagedAsync_WithSearch_Filters()
+    {
+        _db.Pipelines.AddRange(
+            new Pipeline { Name = "Deploy API", YamlDefinition = "y" },
+            new Pipeline { Name = "Build UI", YamlDefinition = "y" }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetPipelinesPagedAsync("Deploy", null, 1, 10, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, total);
+        Assert.Single(items);
+        Assert.Equal("Deploy API", items[0].Name);
+    }
+
+    [Fact]
+    public async Task GetPipelinesPagedAsync_WithTriggerFilter_Filters()
+    {
+        _db.Pipelines.AddRange(
+            new Pipeline { Name = "Manual", YamlDefinition = "y", TriggerType = PipelineTriggerType.Manual },
+            new Pipeline { Name = "Webhook", YamlDefinition = "y", TriggerType = PipelineTriggerType.Webhook }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetPipelinesPagedAsync(null, PipelineTriggerType.Webhook, 1, 10, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, total);
+        Assert.Equal("Webhook", items[0].Name);
+    }
+
+    [Fact]
+    public async Task GetPipelinesPagedAsync_Page2_ReturnsCorrectSlice()
+    {
+        for (var i = 1; i <= 5; i++)
+            _db.Pipelines.Add(new Pipeline { Name = $"P{i:D2}", YamlDefinition = "y" });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetPipelinesPagedAsync(null, null, 2, 2, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(5, total);
+        Assert.Equal(2, items.Count);
+        Assert.Equal("P03", items[0].Name);
+    }
+
+    // --- GetPipelineWithRunsAsync ---
+
+    [Fact]
+    public async Task GetPipelineWithRunsAsync_Found_IncludesRuns()
+    {
+        var pipeline = new Pipeline { Name = "CI", YamlDefinition = "y" };
+        _db.Pipelines.Add(pipeline);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow.AddHours(-2) },
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetPipelineWithRunsAsync(pipeline.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Runs.Count);
+    }
+
+    [Fact]
+    public async Task GetPipelineWithRunsAsync_NotFound_ReturnsNull()
+    {
+        var result = await _repo.GetPipelineWithRunsAsync(999, ct: TestContext.Current.CancellationToken);
+        Assert.Null(result);
+    }
+
+    // --- FindPipelineAsync ---
+
+    [Fact]
+    public async Task FindPipelineAsync_Found_ReturnsPipeline()
+    {
+        var p = new Pipeline { Name = "Test", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.FindPipelineAsync(p.Id, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.Equal("Test", result.Name);
+    }
+
+    [Fact]
+    public async Task FindPipelineAsync_NotFound_ReturnsNull()
+    {
+        var result = await _repo.FindPipelineAsync(999, ct: TestContext.Current.CancellationToken);
+        Assert.Null(result);
+    }
+
+    // --- AddPipelineAsync ---
+
+    [Fact]
+    public async Task AddPipelineAsync_Persists()
+    {
+        var p = new Pipeline { Name = "New", YamlDefinition = "stages: []" };
+        await _repo.AddPipelineAsync(p, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(p.Id > 0);
+        Assert.Equal(1, await _db.Pipelines.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    // --- RemovePipelineAsync ---
+
+    [Fact]
+    public async Task RemovePipelineAsync_Removes()
+    {
+        var p = new Pipeline { Name = "Del", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await _repo.RemovePipelineAsync(p, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, await _db.Pipelines.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    // --- AddPipelineRunAsync ---
+
+    [Fact]
+    public async Task AddPipelineRunAsync_Persists()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        await _repo.AddPipelineRunAsync(run, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(run.Id > 0);
+    }
+
+    // --- TrackPipelineStepRun ---
+
+    [Fact]
+    public async Task TrackPipelineStepRun_AddsToContext()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var stepRun = new PipelineStepRun { PipelineRunId = run.Id, StepName = "build", StageName = "build", Order = 1, Status = TaskExecutionStatus.Pending };
+        _repo.TrackPipelineStepRun(stepRun);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, await _db.PipelineStepRuns.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    // --- AppendRunWarningsAsync (regression: no-server failure must persist a visible reason) ---
+
+    [Fact]
+    public async Task AppendRunWarningsAsync_PersistsReasonToStore()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await _repo.AppendRunWarningsAsync(run.Id, ["Stage 'deploy': no online server matches agent 'linux-01'."], ct: TestContext.Current.CancellationToken);
+
+        // Drop the identity map so the assertion reflects what is actually persisted in the store,
+        // not an in-memory mutation. The previous AsNoTracking-mutate bug would fail here.
+        _db.ChangeTracker.Clear();
+        var reloaded = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.NotNull(reloaded);
+        Assert.NotNull(reloaded.WarningsJson);
+        // Deserialize (as MapRunToDto does) so the assertion is independent of JSON unicode escaping.
+        var warnings = JsonSerializer.Deserialize<List<string>>(reloaded.WarningsJson!);
+        Assert.NotNull(warnings);
+        Assert.Contains("Stage 'deploy': no online server matches agent 'linux-01'.", warnings);
+    }
+
+    [Fact]
+    public async Task AppendRunWarningsAsync_MergesWithExistingWarnings()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun
+        {
+            PipelineId = p.Id,
+            Status = PipelineStatus.Running,
+            StartedAt = DateTime.UtcNow,
+            WarningsJson = """["Vault 'prod' not found."]"""
+        };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await _repo.AppendRunWarningsAsync(run.Id, ["Stage 'x': no online server."], ct: TestContext.Current.CancellationToken);
+
+        _db.ChangeTracker.Clear();
+        var reloaded = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.NotNull(reloaded);
+        var warnings = JsonSerializer.Deserialize<List<string>>(reloaded.WarningsJson!);
+        Assert.NotNull(warnings);
+        Assert.Contains("Vault 'prod' not found.", warnings);
+        Assert.Contains("Stage 'x': no online server.", warnings);
+    }
+
+    [Fact]
+    public async Task AppendRunWarningsAsync_EmptyCollection_IsNoOp()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await _repo.AppendRunWarningsAsync(run.Id, [], ct: TestContext.Current.CancellationToken);
+
+        _db.ChangeTracker.Clear();
+        var reloaded = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.NotNull(reloaded);
+        Assert.Null(reloaded.WarningsJson);
+    }
+
+    // --- ResetFailedStepRunsAsync (partial re-run) ---
+
+    [Fact]
+    public async Task ResetFailedStepRunsAsync_ResetsFailedStepsAndReopensRun()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun
+        {
+            PipelineId = p.Id,
+            Status = PipelineStatus.Failed,
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = "a", StepName = "ok", Order = 0, Status = TaskExecutionStatus.Success },
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = "a", StepName = "ko", Order = 1, Status = TaskExecutionStatus.Failed, ExitCode = 1, StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var count = await _repo.ResetFailedStepRunsAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, count);
+        _db.ChangeTracker.Clear();
+        var reloadedRun = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.NotNull(reloadedRun);
+        Assert.Equal(PipelineStatus.Running, reloadedRun.Status);
+        Assert.Null(reloadedRun.CompletedAt);
+        var steps = await _db.PipelineStepRuns.AsNoTracking().Where(s => s.PipelineRunId == run.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(TaskExecutionStatus.Success, steps.Single(s => s.StepName == "ok").Status);
+        var retried = steps.Single(s => s.StepName == "ko");
+        Assert.Equal(TaskExecutionStatus.Pending, retried.Status);
+        Assert.Null(retried.ExitCode);
+        Assert.Null(retried.StartedAt);
+        Assert.Null(retried.CompletedAt);
+    }
+
+    [Fact]
+    public async Task ResetFailedStepRunsAsync_NoFailedSteps_ReturnsZeroAndNoChange()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Failed, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.Add(new PipelineStepRun { PipelineRunId = run.Id, StageName = "a", StepName = "ok", Order = 0, Status = TaskExecutionStatus.Success });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var count = await _repo.ResetFailedStepRunsAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, count);
+        _db.ChangeTracker.Clear();
+        var reloadedRun = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.Equal(PipelineStatus.Failed, reloadedRun!.Status);
+    }
+
+    // --- GetPendingStepRunsAsync ---
+
+    [Fact]
+    public async Task GetPendingStepRunsAsync_ReturnsPendingOnly()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s1", StageName = "build", Order = 1, Status = TaskExecutionStatus.Pending },
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s2", StageName = "build", Order = 2, Status = TaskExecutionStatus.Success },
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s3", StageName = "build", Order = 3, Status = TaskExecutionStatus.Pending }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetPendingStepRunsAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal("s1", result[0].StepName);
+        Assert.Equal("s3", result[1].StepName);
+    }
+
+    // --- FindOnlineServerByAgentAsync ---
+
+    [Fact]
+    public async Task FindOnlineServerByAgent_ByName_ReturnsServer()
+    {
+        // Item #11: PipelineRunnerEnabled is secure-by-default OFF; tests that expect a match
+        // must opt the server in.
+        _db.Servers.Add(new Server { Name = "build-01", Hostname = "h", Status = ServerStatus.Online, PipelineRunnerEnabled = true });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.FindOnlineServerByAgentAsync("build-01", ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task FindOnlineServerByAgent_OfflineServer_ReturnsNull()
+    {
+        _db.Servers.Add(new Server { Name = "build-01", Hostname = "h", Status = ServerStatus.Offline });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.FindOnlineServerByAgentAsync("build-01", ct: TestContext.Current.CancellationToken);
+        Assert.Null(result);
+    }
+
+    // --- OS typing (Phase 8) ---
+
+    [Fact]
+    public async Task FindOnlineServerByAgent_OsMismatch_ReturnsNull()
+    {
+        _db.Servers.Add(new Server
+        {
+            Name = "linux-01",
+            Hostname = "h",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            OsType = OsType.Linux
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        // Requesting a Windows runner must NOT resolve the Linux server.
+        var result = await _repo.FindOnlineServerByAgentAsync("linux-01", OsType.Windows, ct: TestContext.Current.CancellationToken);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task FindOnlineServerByAgent_OsMatch_ReturnsServer()
+    {
+        _db.Servers.Add(new Server
+        {
+            Name = "linux-01",
+            Hostname = "h",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            OsType = OsType.Linux
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.FindOnlineServerByAgentAsync("linux-01", OsType.Linux, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task FindAnyOnlineRunner_OsFilter_PicksMatchingOsOnly()
+    {
+        _db.Servers.AddRange(
+            new Server { Name = "lin", Hostname = "h1", Status = ServerStatus.Online, PipelineRunnerEnabled = true, OsType = OsType.Linux },
+            new Server { Name = "win", Hostname = "h2", Status = ServerStatus.Online, PipelineRunnerEnabled = true, OsType = OsType.Windows });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var win = await _repo.FindAnyOnlineRunnerAsync(null, OsType.Windows, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(win);
+        Assert.Equal("win", win!.Name);
+    }
+
+    [Fact]
+    public async Task FindAnyOnlineRunner_OsFilter_NoCompatibleServer_ReturnsNull()
+    {
+        _db.Servers.Add(new Server
+        {
+            Name = "lin",
+            Hostname = "h1",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            OsType = OsType.Linux
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        // Only a Linux runner is online - a Windows-typed stage finds nothing.
+        var result = await _repo.FindAnyOnlineRunnerAsync(null, OsType.Windows, ct: TestContext.Current.CancellationToken);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task FindAnyOnlineRunner_UnknownOs_NoConstraint_ReturnsAny()
+    {
+        _db.Servers.Add(new Server
+        {
+            Name = "lin",
+            Hostname = "h1",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            OsType = OsType.Linux
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        // OsType.Unknown means "no constraint" - pre-typing behavior preserved.
+        var result = await _repo.FindAnyOnlineRunnerAsync(null, OsType.Unknown, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+    }
+
+    // --- TrackTask ---
+
+    [Fact]
+    public async Task TrackTask_AddsToContext()
+    {
+        var s = new Server { Name = "srv", Hostname = "h" };
+        _db.Servers.Add(s);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var task = new ServerTask { ServerId = s.Id, Name = "t", Command = "echo" };
+        _repo.TrackTask(task);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, await _db.Tasks.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    // --- GetRunsAsync ---
+
+    [Fact]
+    public async Task GetRunsAsync_ReturnsOrderedByStartedAt()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow.AddHours(-2) },
+            new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetRunsAsync(p.Id, 10, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.Count);
+        Assert.True(result[0].StartedAt > result[1].StartedAt);
+    }
+
+    // --- GetRunDetailAsync ---
+
+    [Fact]
+    public async Task GetRunDetailAsync_Found_IncludesStepRuns()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.Add(new PipelineStepRun { PipelineRunId = run.Id, StepName = "build", StageName = "build", Order = 1, Status = TaskExecutionStatus.Pending });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetRunDetailAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Single(result.StepRuns);
+    }
+
+    [Fact]
+    public async Task GetRunDetailAsync_NotFound_ReturnsNull()
+    {
+        var result = await _repo.GetRunDetailAsync(999, ct: TestContext.Current.CancellationToken);
+        Assert.Null(result);
+    }
+
+    // --- GetPipelineRunWithPipelineAsync ---
+
+    [Fact]
+    public async Task GetPipelineRunWithPipelineAsync_Found_IncludesPipeline()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetPipelineRunWithPipelineAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.NotNull(result.Pipeline);
+    }
+
+    // --- AreAllStepsInStageCompletedAsync ---
+
+    [Fact]
+    public async Task AreAllStepsInStageCompleted_AllSucceeded_ReturnsTrue()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s1", StageName = "build", Order = 1, Status = TaskExecutionStatus.Success },
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s2", StageName = "build", Order = 2, Status = TaskExecutionStatus.Success }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.AreAllStepsInStageCompletedAsync(run.Id, "build", ct: TestContext.Current.CancellationToken);
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task AreAllStepsInStageCompleted_OnePending_ReturnsFalse()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s1", StageName = "build", Order = 1, Status = TaskExecutionStatus.Success },
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s2", StageName = "build", Order = 2, Status = TaskExecutionStatus.Pending }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.AreAllStepsInStageCompletedAsync(run.Id, "build", ct: TestContext.Current.CancellationToken);
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task AreAllStepsInStageCompleted_MixedSuccessAndFailed_ReturnsTrue()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s1", StageName = "build", Order = 1, Status = TaskExecutionStatus.Success },
+            new PipelineStepRun { PipelineRunId = run.Id, StepName = "s2", StageName = "build", Order = 2, Status = TaskExecutionStatus.Failed }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.AreAllStepsInStageCompletedAsync(run.Id, "build", ct: TestContext.Current.CancellationToken);
+        Assert.True(result);
+    }
+
+    // --- UpdatePipelineRunStatusAsync ---
+
+    [Fact]
+    public async Task UpdatePipelineRunStatus_SetsStatusAndCompletedAt()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await _repo.UpdatePipelineRunStatusAsync(run.Id, PipelineStatus.Success, ct: TestContext.Current.CancellationToken);
+
+        var updated = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.Equal(PipelineStatus.Success, updated!.Status);
+        Assert.NotNull(updated.CompletedAt);
+    }
+
+    [Fact]
+    public async Task UpdatePipelineRunStatus_RunNotFound_DoesNothing()
+    {
+        await _repo.UpdatePipelineRunStatusAsync(999, PipelineStatus.Failed, ct: TestContext.Current.CancellationToken);
+        // No exception
+    }
+
+    // --- SaveChangesAsync ---
+
+    [Fact]
+    public async Task SaveChangesAsync_PersistsPendingChanges()
+    {
+        var p = new Pipeline { Name = "Unsaved", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+
+        await _repo.SaveChangesAsync(ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, await _db.Pipelines.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    // --- GetPipelinesPagedProjectedAsync projectId filter (X4F9 / #13) ---
+
+    [Fact]
+    public async Task GetPipelinesPagedProjectedAsync_FiltersByProjectId()
+    {
+        _db.Pipelines.AddRange(
+            new Pipeline { Name = "P1-A", YamlDefinition = "y", ProjectId = 1 },
+            new Pipeline { Name = "P1-B", YamlDefinition = "y", ProjectId = 1 },
+            new Pipeline { Name = "P2-A", YamlDefinition = "y", ProjectId = 2 }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetPipelinesPagedProjectedAsync(
+            search: null, triggerType: null, environmentId: null, projectServerId: null, projectId: 1,
+            page: 1, pageSize: 10, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, total);
+        Assert.All(items, p => Assert.Equal(1, p.ProjectId));
+        Assert.Equal(new[] { "P1-A", "P1-B" }, items.Select(p => p.Name).ToArray());
+    }
+
+    // --- GetCoverageTrendAsync (K) - #6 ---
+
+    [Fact]
+    public async Task GetCoverageTrendAsync_DedupesToOnePointPerRun_OrderedOldestToNewest_ExcludesOtherPipelines()
+    {
+        var runA = new PipelineRun { Id = 1, PipelineId = 1, StartedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
+        var runB = new PipelineRun { Id = 2, PipelineId = 1, StartedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc) };
+        var runOther = new PipelineRun { Id = 3, PipelineId = 2, StartedAt = new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc) };
+        _db.PipelineRuns.AddRange(runA, runB, runOther);
+        _db.CoverageResults.AddRange(
+            // run A and run B each have MULTIPLE results - the trend must collapse to one point per run.
+            new CoverageResult { PipelineRun = runA, LineRate = 0.50, BranchRate = 0.40, CreatedAt = new DateTime(2026, 1, 1, 1, 0, 0, DateTimeKind.Utc) },
+            new CoverageResult { PipelineRun = runA, LineRate = 0.60, BranchRate = 0.45, CreatedAt = new DateTime(2026, 1, 1, 2, 0, 0, DateTimeKind.Utc) },
+            new CoverageResult { PipelineRun = runB, LineRate = 0.80, BranchRate = 0.70, CreatedAt = new DateTime(2026, 1, 2, 1, 0, 0, DateTimeKind.Utc) },
+            new CoverageResult { PipelineRun = runB, LineRate = 0.82, BranchRate = 0.72, CreatedAt = new DateTime(2026, 1, 2, 2, 0, 0, DateTimeKind.Utc) },
+            // Different pipeline - must be excluded entirely.
+            new CoverageResult { PipelineRun = runOther, LineRate = 0.99, BranchRate = 0.99, CreatedAt = new DateTime(2026, 1, 3, 1, 0, 0, DateTimeKind.Utc) }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var trend = await _repo.GetCoverageTrendAsync(runId: 1, take: 10, ct: TestContext.Current.CancellationToken);
+
+        // One point per run, oldest run first (A) then newest (B); the other pipeline's run is excluded.
+        Assert.Equal(new[] { 1, 2 }, trend.Select(t => t.RunId).ToArray());
+        // Assert the retained value belongs to the CORRECT run (run 1's point must be one of run A's two
+        // values, run 2's one of run B's) - catches cross-run contamination the old flat Contains missed.
+        // (Which of a run's two rows wins is an ordering the InMemory provider does not model faithfully;
+        // the exact most-recent-CreatedAt tie-break is asserted against real Postgres in integration tests.)
+        var byRun = trend.ToDictionary(t => t.RunId, t => t.LineRate);
+        Assert.Contains(byRun[1], new[] { 0.50, 0.60 });
+        Assert.Contains(byRun[2], new[] { 0.80, 0.82 });
+    }
+
+    [Fact]
+    public async Task GetCoverageTrendAsync_HonoursTake_KeepsMostRecentRuns()
+    {
+        var runA = new PipelineRun { Id = 1, PipelineId = 1, StartedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
+        var runB = new PipelineRun { Id = 2, PipelineId = 1, StartedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc) };
+        _db.PipelineRuns.AddRange(runA, runB);
+        _db.CoverageResults.AddRange(
+            new CoverageResult { PipelineRun = runA, LineRate = 0.50, CreatedAt = new DateTime(2026, 1, 1, 1, 0, 0, DateTimeKind.Utc) },
+            new CoverageResult { PipelineRun = runB, LineRate = 0.80, CreatedAt = new DateTime(2026, 1, 2, 1, 0, 0, DateTimeKind.Utc) }
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var trend = await _repo.GetCoverageTrendAsync(runId: 1, take: 1, ct: TestContext.Current.CancellationToken);
+
+        Assert.Single(trend);
+        Assert.Equal(2, trend[0].RunId); // the most recent run is kept
+    }
+
+    [Fact]
+    public async Task GetCoverageTrendAsync_UnknownRun_ReturnsEmpty()
+    {
+        var trend = await _repo.GetCoverageTrendAsync(runId: 404, take: 10, ct: TestContext.Current.CancellationToken);
+        Assert.Empty(trend);
+    }
+
+    public void Dispose() => _db.Dispose();
+}

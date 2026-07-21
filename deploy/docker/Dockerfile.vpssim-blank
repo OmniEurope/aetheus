@@ -1,0 +1,77 @@
+# =============================================================================
+# Dockerfile.vpssim-blank - Aetheus disposable local "VPS simulator" (BLANK)
+# =============================================================================
+# A throwaway, *bare* Ubuntu box: systemd as PID 1 + sshd, and nothing else.
+# No apache/certbot/mail/portsentry/rkhunter/teamspeak, no Docker engine, no
+# agent. This is the clean slate we install onto progressively — the goal being
+# to drive those installs from Aetheus itself.
+#
+# For the fully-provisioned variant (all collectors pre-baked), use the sibling
+# Dockerfile.vpssim instead. Disposable: `down` + `up` = a clean machine.
+#
+# Run via deploy/compose/vpssim-blank.compose.yml (needs privileged + cgroup
+# access for systemd). LOCAL TEST artifact — never deployed to prod.
+# =============================================================================
+FROM ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    container=docker
+
+# --- Boot core ONLY: systemd, dbus, ssh + a minimal server baseline ----------
+# This mirrors a fresh Ubuntu Server: an init, an ssh daemon, sudo, CA certs and
+# enough networking tooling to reach out. Deliberately NO git/docker/build tools
+# — those are installed later (by the agent installer or via Aetheus).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        systemd systemd-sysv dbus dbus-user-session \
+        openssh-server sudo ca-certificates curl iproute2 iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# Strip systemd units that are pointless/harmful inside a container.
+RUN systemctl mask \
+        systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket \
+        systemd-firstboot.service \
+        getty.target console-getty.service \
+    ; rm -f /lib/systemd/system/multi-user.target.wants/systemd-resolved.service 2>/dev/null || true
+
+# ssh on Ubuntu 24.04 is socket-activated (ssh.socket, not ssh.service).
+RUN systemctl enable ssh.socket 2>/dev/null || true
+
+# Throwaway dev access: root login over SSH with a fixed password. Disposable,
+# local-only — never mirror near prod. VPW3: the password is a build arg (default
+# 'aetheus') so it can be overridden per-run instead of being hard-coded here.
+ARG VPSSIM_ROOT_PASSWORD=aetheus
+RUN echo "root:${VPSSIM_ROOT_PASSWORD}" | chpasswd \
+    && mkdir -p /run/sshd \
+    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && printf '\n=== Aetheus VPS-sim (BLANK) — disposable local sandbox (NOT production) ===\n\n' > /etc/motd
+
+# --- Optional .NET SDK 10.0 (-vps -net10) ------------------------------------
+# Opt-in build arg (INSTALL_DOTNET=1, set by ylaunch's -net10 via compose). When
+# off (default) the box stays bare. Installs via Microsoft's official, channel-
+# pinned dotnet-install.sh - the same mechanism + SDK version the agent's
+# pipeline-runner module uses (deploy/scripts/install-agent-linux.sh). Placed
+# last so toggling -net10 only rebuilds this cheap tail layer.
+ARG INSTALL_DOTNET=0
+ARG DOTNET_INSTALLER_URL=https://raw.githubusercontent.com/dotnet/install-scripts/da3ce11ba63f3dbb0fb835d41bda2665d5c48e84/src/dotnet-install.sh
+ARG DOTNET_INSTALLER_SHA256=082f7685e156738a1b2e2ed8381a621870d4ce8e8c59278034556f05c186eb2e
+ENV DOTNET_ROOT=/usr/share/dotnet
+# dotnet-install.sh uses `set -o pipefail` (a bashism), so run it with bash — on
+# Ubuntu /bin/sh is dash, which rejects that option. The bare box also lacks ICU,
+# without which the .NET muxer aborts ("Couldn't find a valid ICU package"), so
+# install libicu first.
+RUN if [ "$INSTALL_DOTNET" = "1" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends libicu74 \
+        && rm -rf /var/lib/apt/lists/* \
+        && curl -fsSL "$DOTNET_INSTALLER_URL" -o /tmp/dotnet-install.sh \
+        && echo "$DOTNET_INSTALLER_SHA256  /tmp/dotnet-install.sh" | sha256sum -c - \
+        && bash /tmp/dotnet-install.sh --version 10.0.202 --install-dir /usr/share/dotnet \
+        && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+        && rm -f /tmp/dotnet-install.sh \
+        && /usr/local/bin/dotnet --version; \
+    fi
+
+STOPSIGNAL SIGRTMIN+3
+EXPOSE 22
+CMD ["/sbin/init"]

@@ -1,0 +1,33 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-001 phase 3: OTLP log viewer for a monitored app (severity filter + search + virtualized list). *@
+<RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" AlignItems="AlignItems.End" class="rz-mb-3">
+    <RadzenStack Gap="0.25rem">
+        <RadzenLabel Text="@L["LogLevel"]" />
+        <RadzenDropDown @bind-Value="_minSeverity" Data="@_severities" TextProperty="Label" ValueProperty="MinSeverity"
+                        Change="@(_ => OnFilterChanged())" class="w-rem-10">
+            <Template Context="opt">@L[((SeverityOption)opt).Label]</Template>
+        </RadzenDropDown>
+    </RadzenStack>
+    <RadzenStack Gap="0.25rem">
+        <RadzenLabel Text="@L["Search"]" />
+        <RadzenTextBox @bind-Value="_search" Placeholder="@L["SearchLogs"]" Change="@(_ => OnFilterChanged())" class="w-rem-16" />
+    </RadzenStack>
+    <RadzenButton Icon="refresh" Text="@L["Refresh"]" Click="@LoadAsync" IsBusy="@_loading" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+</RadzenStack>
+
+@if (_logs.Count == 0)
+{
+    <EmptyState Icon="terminal" Title="@L["NoLogsYet"]" />
+}
+else
+{
+    <div class="run-logs-lines" style="max-height: 30rem; overflow-y: auto;">
+        <Virtualize Items="_logs" ItemSize="24" OverscanCount="20" Context="entry">
+            <div class="run-log-line">
+                <RadzenBadge BadgeStyle="@SeverityBadge(entry.SeverityNumber)" Text="@SeverityLabel(entry)" class="rz-mr-2" />
+                <span class="rz-mr-2 rz-color-secondary">@entry.Timestamp.ToString("HH:mm:ss")</span>
+                <span>@entry.Body</span>
+            </div>
+        </Virtualize>
+    </div>
+}

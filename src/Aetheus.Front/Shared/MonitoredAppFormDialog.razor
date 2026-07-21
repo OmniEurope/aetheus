@@ -1,0 +1,63 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-001: create/edit a monitored app. Closes with `true` on success so the caller reloads. *@
+<RadzenTemplateForm TItem="UpdateMonitoredAppRequest" Data="@_model" Submit="@SubmitAsync">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenRow Gap="1rem">
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="@L["MonitoredAppName"]" class="rz-w-100">
+                <RadzenTextBox @bind-Value="_model.Name" />
+            </RadzenFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="@L["ProbeUrl"]" class="rz-w-100">
+                <RadzenTextBox @bind-Value="_model.ProbeUrl" Placeholder="https://app.example.com/health" />
+            </RadzenFormField>
+            <ValidationMessage For="@(() => _model.ProbeUrl)" />
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="@L["HostingServer"]" class="rz-w-100">
+                <RadzenDropDown @bind-Value="_model.ServerId" Data="@_servers" TextProperty="Name" ValueProperty="Id"
+                                AllowClear="true" Placeholder="@L["OffFleetBackendProbe"]" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="@L["Environment"]" class="rz-w-100">
+                <RadzenDropDown @bind-Value="_model.EnvironmentId" Data="@_environments" TextProperty="Name" ValueProperty="Id"
+                                AllowClear="true" Placeholder="@L["None"]" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="@L["ProbeIntervalSeconds"]" class="rz-w-100">
+                <RadzenNumeric @bind-Value="_model.ProbeIntervalSeconds" Min="15" Max="3600" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="@L["ProbeTimeoutSeconds"]" class="rz-w-100">
+                <RadzenNumeric @bind-Value="_model.ProbeTimeoutSeconds" Min="1" Max="120" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="@L["ExpectedStatusCode"]" class="rz-w-100">
+                <RadzenNumeric @bind-Value="_model.ExpectedStatusCode" Min="100" Max="599" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="@L["FailureThreshold"]" class="rz-w-100">
+                <RadzenNumeric @bind-Value="_model.FailureThreshold" Min="1" Max="20" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="@L["RecoveryThreshold"]" class="rz-w-100">
+                <RadzenNumeric @bind-Value="_model.RecoveryThreshold" Min="1" Max="20" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.Enabled" Text="@L["Enabled"]" />
+        </RadzenColumn>
+    </RadzenRow>
+    <DialogFooter OnCancel="@Cancel">
+        <RadzenButton Text="@(IsEdit ? L["Save"] : L["Create"])" Icon="@(IsEdit ? "save" : "add")"
+                      ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" IsBusy="@_busy" />
+    </DialogFooter>
+</RadzenTemplateForm>

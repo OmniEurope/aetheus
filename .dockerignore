@@ -1,0 +1,24 @@
+# Version-control and agent bookkeeping never belong in an image build context.
+.git
+.claude
+.codex
+.agents
+.vs
+
+# Host/CI build outputs must not overwrite RID-specific assets restored inside Docker.
+**/bin
+**/obj
+/artifacts
+/TestResults
+**/TestResults
+/.pipeline-artifacts
+
+# Local-only state and credentials.
+/data
+/logs
+**/node_modules
+*.user
+*.suo
+.env
+.env.*
+!.env.example

@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Reflection;
+using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Bunit;
+using Microsoft.Extensions.DependencyInjection;
+using Radzen;
+
+namespace Aetheus.Front.Tests.Pages.Servers;
+
+public class ServerMailSectionTests : BunitContext
+{
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    public ServerMailSectionTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+    }
+
+    private static ServerDetailDto MakeMailServer(bool installed = true, bool postfixRunning = true, bool dovecotRunning = true) =>
+        ServerTestData.MakeMailServer(installed, postfixRunning, dovecotRunning);
+
+    private static ServerDetailDto MakeNotInstalledServer() => MakeMailServer(installed: false);
+
+    private void SetupMailApiResponses()
+    {
+        _handler.SetJsonResponse("api/servers/10/mail/domains", new PaginatedResult<MailDomainDto>
+        {
+            Items =
+            [
+                new() { Id = 1, Name = "example.com", IsActive = true, DkimSelector = "default", HasSpf = true, HasDkim = true },
+                new() { Id = 2, Name = "test.org", IsActive = false, DkimSelector = "mail" }
+            ],
+            TotalCount = 2
+        });
+        _handler.SetJsonResponse("api/servers/10/mail/accounts", new PaginatedResult<MailAccountDto>
+        {
+            Items = [new() { Id = 1, Email = "admin@example.com", IsActive = true, QuotaMb = 1024 }],
+            TotalCount = 1
+        });
+        _handler.SetJsonResponse("api/servers/10/mail/aliases", new PaginatedResult<MailAliasDto>());
+    }
+
+    private IRenderedComponent<ServerMailSection> RenderSection(ServerDetailDto? server = null)
+    {
+        SetupMailApiResponses();
+        var s = server ?? MakeMailServer();
+        return Render<ServerMailSection>(p => p
+            .Add(x => x.Server, s)
+            .Add(x => x.ServerId, s.Id));
+    }
+
+    // --- Rendering tests ---
+
+    [Fact]
+    public void Renders_InstalledState_ShowsStatusBadges()
+    {
+        var cut = RenderSection();
+
+        var markup = cut.Markup;
+        Assert.Contains("Postfix", markup);
+        Assert.Contains("Dovecot", markup);
+        Assert.Contains("Installed", markup);
+    }
+
+    [Fact]
+    public void Renders_NotInstalled_ShowsSetupButton()
+    {
+        var cut = RenderSection(MakeNotInstalledServer());
+
+        var markup = cut.Markup;
+        Assert.Contains("MailSetup", markup);
+        Assert.DoesNotContain("MailDomains", markup);
+    }
+
+    [Fact]
+    public void Renders_Installed_ShowsTabsAndDomainGrid()
+    {
+        var cut = RenderSection();
+
+        var markup = cut.Markup;
+        Assert.Contains("MailDomains", markup);
+        Assert.Contains("MailAccounts", markup);
+        Assert.Contains("MailQueue", markup);
+        Assert.Contains("Logs", markup);
+    }
+
+    [Fact]
+    public void Renders_DomainList_ShowsDomainNames()
+    {
+        var cut = RenderSection();
+
+        cut.WaitForAssertion(() =>
+        {
+            var markup = cut.Markup;
+            Assert.Contains("example.com", markup);
+            Assert.Contains("test.org", markup);
+        });
+    }
+
+    [Fact]
+    public void Renders_VersionInfo_WhenInstalled()
+    {
+        var cut = RenderSection();
+
+        var markup = cut.Markup;
+        Assert.Contains("3.5.6", markup);
+        Assert.Contains("2.3.19", markup);
+    }
+
+    [Fact]
+    public void Renders_QueueCount()
+    {
+        var cut = RenderSection();
+
+        Assert.Contains("3", cut.Markup);
+    }
+
+    // --- State manipulation via reflection ---
+
+    [Fact]
+    public void HandleTaskCompleted_RefreshesData()
+    {
+        var cut = RenderSection();
+
+        // The installed-server path re-runs LoadDataAsync, which re-GETs the mail domains list.
+        // Clear the initial-render requests so we observe only the refresh-triggered fetch.
+        _handler.Requests.Clear();
+        cut.InvokeAsync(cut.Instance.HandleTaskCompleted);
+
+        cut.WaitForAssertion(() =>
+            Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("api/servers/10/mail/domains")),
+            TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task ShowConfirm_OpensNativeConfirmation()
+    {
+        var cut = RenderSection();
+
+        var method = typeof(ServerMailSection).GetMethod("ShowConfirm", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["Title", "Message", (Func<Task>)(() => Task.CompletedTask)])!);
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+
+        Assert.Equal("Title", dialog.LastTitle);
+        Assert.Equal("Message", dialog.LastConfirmMessage);
+    }
+
+    [Fact]
+    public async Task ShowConfirm_Accepted_ExecutesAction()
+    {
+        var cut = RenderSection();
+        var executed = false;
+
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        dialog.ConfirmResult = true;
+        var method = typeof(ServerMailSection).GetMethod("ShowConfirm", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["Title", "Message", (Func<Task>)(() => { executed = true; return Task.CompletedTask; })])!);
+
+        Assert.True(executed);
+    }
+
+    [Fact]
+    public async Task ShowConfirm_Cancelled_DoesNotExecuteAction()
+    {
+        var cut = RenderSection();
+
+        var executed = false;
+        var method = typeof(ServerMailSection).GetMethod("ShowConfirm", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["Title", "Message", (Func<Task>)(() => { executed = true; return Task.CompletedTask; })])!);
+
+        Assert.False(executed);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_Success_Shows_TaskQueued()
+    {
+        _handler.SetJsonResponse("api/servers/10/mail/action", true);
+        var cut = RenderSection();
+
+        var method = typeof(ServerMailSection).GetMethod("ExecuteActionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await (Task)method.Invoke(cut.Instance, [MailAction.RestartPostfix])!;
+
+        var runningField = typeof(ServerMailSection).GetField("_actionRunning", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Assert.False((bool)runningField.GetValue(cut.Instance)!);
+    }
+
+    [Fact]
+    public async Task FetchLogsAsync_QueuesLogTask()
+    {
+        _handler.SetJsonResponse("api/servers/10/mail/logs", true);
+        var cut = RenderSection();
+
+        var method = typeof(ServerMailSection).GetMethod("FetchLogsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await (Task)method.Invoke(cut.Instance, [])!;
+
+        // GetMailLogsAsync POSTs the log request to the server's mail/logs endpoint.
+        Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/10/mail/logs"));
+    }
+
+    [Fact]
+    public async Task ShowDnsRecordsAsync_SetsDnsRecordsAndShowsDialog()
+    {
+        var dns = new MailDnsRecordsDto
+        {
+            Domain = "example.com",
+            MxRecord = "10 mail.example.com.",
+            SpfRecord = "v=spf1 mx a ~all",
+            DkimSelector = "default",
+            DmarcRecord = "v=DMARC1; p=quarantine"
+        };
+        _handler.SetJsonResponse("api/servers/10/mail/domains/1/dns", dns);
+        var cut = RenderSection();
+
+        var method = typeof(ServerMailSection).GetMethod("ShowDnsRecordsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await (Task)method.Invoke(cut.Instance, [new MailDomainDto { Id = 1, Name = "example.com" }])!;
+
+        var dnsField = typeof(ServerMailSection).GetField("_dnsRecords", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Assert.NotNull(dnsField.GetValue(cut.Instance));
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        Assert.Equal(typeof(MailOperationDialog), dialog.LastComponent);
+        Assert.Equal(MailDialogMode.DnsRecords, dialog.LastParameters!["Mode"]);
+        Assert.Same(dnsField.GetValue(cut.Instance), dialog.LastParameters["DnsRecords"]);
+    }
+}

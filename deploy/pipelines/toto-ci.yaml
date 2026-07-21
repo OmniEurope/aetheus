@@ -1,0 +1,66 @@
+# =============================================================================
+# toto-ci - Continuous Integration for Toto (NO deployment)
+# =============================================================================
+# A copy of toto-ci-cd WITHOUT the cd part: it still compiles, runs unit tests +
+# coverage, complexity, lint, and produces the publish artifact + a Release - but
+# it stops there (no SSH/scp deploy stage). Used as the build half by both the
+# toto-orchestration-accept orchestration pipeline (type: trigger) and, in its
+# toto-ci-trigger variant, by the on_success: chaining demo.
+name: toto-ci
+trigger: manual
+variables:
+  APP_VERSION: "1.0.$(BUILD_BUILDID)"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+stages:
+  - name: Compile
+    os: linux
+    steps:
+      - name: Restore & Build
+        checkout: true
+        shell: "dotnet build $(BUILD_PROJECTNAME).slnx --configuration Release --verbosity minimal"
+  - name: Test
+    os: linux
+    depends_on:
+      - Compile
+    steps:
+      - name: Run Tests
+        working_directory: "$(WORKSPACE)"
+        shell: "set -eu; PROJECTS=$(find tests -name '*.csproj' -print); [ -n \"$PROJECTS\" ]; for project in $PROJECTS; do dotnet test \"$project\" --configuration Release --no-build --collect:\"XPlat Code Coverage\" --results-directory \"$WORKSPACE/coverage\" --verbosity minimal; done"
+  - name: Coverage
+    os: linux
+    depends_on:
+      - Test
+    steps:
+      - name: Publish Coverage
+        type: coverage
+  - name: Complexity
+    os: linux
+    depends_on:
+      - Compile
+    steps:
+      - name: Code Complexity
+        type: complexity
+  - name: Lint
+    os: linux
+    depends_on:
+      - Compile
+    steps:
+      - name: Format Check
+        working_directory: "$(WORKSPACE)"
+        shell: "dotnet format $(BUILD_PROJECTNAME).slnx --no-restore --verify-no-changes --verbosity diagnostic"
+  - name: Package
+    os: linux
+    depends_on:
+      - Test
+      - Lint
+    steps:
+      - name: Publish Artifact
+        working_directory: "$(WORKSPACE)"
+        shell: "dotnet publish $(BUILD_PROJECTNAME).slnx --configuration Release --no-build --output \"$WORKSPACE/publish\" && echo 'Artifact published:' && ls -la \"$WORKSPACE/publish/\""
+      - name: Create Release
+        type: release
+        version: "$(APP_VERSION)"
+        changelog: true
+    artifacts:
+      - "publish/**"

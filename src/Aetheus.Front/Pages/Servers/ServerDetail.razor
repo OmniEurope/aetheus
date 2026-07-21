@@ -1,0 +1,8 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/{Id:int}"
+
+@*  Item #1 of the plan, final step - the monolithic ServerDetail page is gone. This route is
+    now a thin redirector to the routed Sections pattern (/servers/{id}/<section>). Legacy
+    "?section=apache" query strings are preserved by mapping them onto the matching route. *@
+
+<PageTitle>@L["Server"] - Aetheus</PageTitle>

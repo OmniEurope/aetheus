@@ -1,0 +1,160 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+@using Aetheus.Shared.Enums
+
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">RKHunter</RadzenText>
+
+@* --- Status bar --- *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+    <RadzenBadge BadgeStyle="@(Rk.IsInstalled ? BadgeStyle.Success : BadgeStyle.Light)"
+        Text="@(Rk.IsInstalled ? L["Installed"] : L["NotInstalled"])" />
+    @if (Rk.IsInstalled)
+    {
+        @if (!string.IsNullOrEmpty(Rk.Version))
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">v@(Rk.Version)</RadzenText>
+        }
+        <RadzenIcon Icon="@GetScanStatusIcon(Rk.LastScanStatus)" class="@GetScanStatusColor(Rk.LastScanStatus)" />
+        <RadzenBadge BadgeStyle="@GetScanBadgeStyle(Rk.LastScanStatus)"
+            Text="@($"{L["LastScan"]}: {LocalizeScanStatus(Rk.LastScanStatus)}")" />
+        @if (Rk.WarningCount > 0)
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="@($"{Rk.WarningCount} {L["Warnings"]}")" />
+        }
+        @if (Rk.LastScanTime.Year >= 2000)
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Rk.LastScanTime.ToString("g")</RadzenText>
+        }
+    }
+    <div class="blade-content-spacer"></div>
+
+    @if (!Rk.IsInstalled)
+    {
+        <RadzenButton Icon="rocket_launch" Text="@L["RkhunterSetup"]" Size="ButtonSize.Small"
+            Click="@OpenSetupDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+    }
+    else
+    {
+        <RadzenSplitButton Icon="search" Text="@L["RunScan"]" Size="ButtonSize.Small"
+            Disabled="@_actionRunning" Click="@(() => ExecuteActionAsync(RkhunterAction.RunScan))">
+            <ChildContent>
+                <RadzenSplitButtonItem Text="@L["RunScan"]" Value="scan" Icon="search" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                <RadzenSplitButtonItem Text="@L["UpdateDatabase"]" Value="update" Icon="update" />
+                <RadzenSplitButtonItem Text="@L["UpdateProperties"]" Value="propupd" Icon="build" />
+            </ChildContent>
+        </RadzenSplitButton>
+        <RadzenButton Icon="description" Text="@L["ViewLogs"]" Size="ButtonSize.Small"
+            Click="@GetLogsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+    }
+</RadzenStack>
+
+@if (Rk.IsInstalled)
+{
+    <UrlSyncedTabs Slugs="@(new[] { "overview", "warnings", "history" })">
+        <Tabs>
+            @* --- Overview tab --- *@
+            <RadzenTabsItem Text="@L["Overview"]" Icon="dashboard">
+                <RadzenRow Gap="1rem" class="rz-mb-4">
+                    <RadzenColumn Size="12" SizeMD="4">
+                        <RadzenFieldset Text="@L["DatabaseVersion"]">
+                            <RadzenText TextStyle="TextStyle.Body2">@(string.IsNullOrEmpty(Rk.DatabaseVersion) ? "-" : Rk.DatabaseVersion)</RadzenText>
+                        </RadzenFieldset>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="4">
+                        <RadzenFieldset Text="@L["DatabaseLastUpdated"]">
+                            <RadzenText TextStyle="TextStyle.Body2">@(Rk.DatabaseLastUpdated.Year >= 2000 ? Rk.DatabaseLastUpdated.ToString("g") : "-")</RadzenText>
+                        </RadzenFieldset>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="4">
+                        <RadzenFieldset Text="@L["LastScanStatus"]">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                                <RadzenIcon Icon="@GetScanStatusIcon(Rk.LastScanStatus)" class="@GetScanStatusColor(Rk.LastScanStatus)" />
+                                <RadzenText TextStyle="TextStyle.Body2">@LocalizeScanStatus(Rk.LastScanStatus) (@Rk.WarningCount @L["Warnings"])</RadzenText>
+                            </RadzenStack>
+                        </RadzenFieldset>
+                    </RadzenColumn>
+                </RadzenRow>
+                <RadzenFieldset Text="@L["ScheduledScan"]">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.End" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+                        <div>
+                            <RadzenLabel Text="@L["CronExpression"]" Component="CronExpr" />
+                            <RadzenTextBox Value="@_scheduleCron" Change="@OnScheduleChanged" Name="CronExpr" Placeholder="0 3 * * 0" class="w-rem-12-5" />
+                        </div>
+                        <RadzenButton Icon="save" Text="@L["Save"]" Size="ButtonSize.Small"
+                            IsBusy="@_savingSchedule" Click="@SaveScheduleAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                    </RadzenStack>
+                </RadzenFieldset>
+            </RadzenTabsItem>
+
+            @* --- Warnings tab --- *@
+            <RadzenTabsItem Text="@L["Warnings"]" Icon="warning">
+                @if (_warnings.Count == 0)
+                {
+                    <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" class="rz-py-6">
+                        <RadzenIcon Icon="check_circle" class="icon-3xl-success" />
+                        <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["NoWarnings"]</RadzenText>
+                    </RadzenStack>
+                }
+                else
+                {
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                        <RadzenBadge Text="@_warnings.Count.ToString()" BadgeStyle="BadgeStyle.Warning" />
+                        <div class="blade-content-spacer"></div>
+                        <RadzenButton Icon="refresh" Text="@L["Refresh"]" Size="ButtonSize.Small"
+                            Click="@LoadWarningsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    </RadzenStack>
+                    <RadzenDataGrid Data="@_warnings" TItem="RkhunterWarningDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                        <Columns>
+                            <RadzenDataGridColumn TItem="RkhunterWarningDto" Property="Category" Title="@L["Category"]" Width="150px" />
+                            <RadzenDataGridColumn TItem="RkhunterWarningDto" Property="Detail" Title="@L["Detail"]" />
+                            <RadzenDataGridColumn TItem="RkhunterWarningDto" Property="Severity" Title="@L["Severity"]" Width="100px" />
+                            <RadzenDataGridColumn TItem="RkhunterWarningDto" Title="@L["FoundAt"]" Width="150px">
+                                <Template Context="w">
+                                    @w.FoundAt.ToString("g")
+                                </Template>
+                            </RadzenDataGridColumn>
+                        </Columns>
+                    </RadzenDataGrid>
+                }
+            </RadzenTabsItem>
+
+            @* --- Scan History tab --- *@
+            <RadzenTabsItem Text="@L["ScanHistory"]" Icon="history">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                    <div class="blade-content-spacer"></div>
+                    <RadzenButton Icon="refresh" Text="@L["Refresh"]" Size="ButtonSize.Small"
+                        Click="@LoadScanHistoryAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                </RadzenStack>
+                @if (_scanHistory.Count == 0)
+                {
+                    <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" class="rz-py-6">
+                        <RadzenIcon Icon="history" class="icon-3xl-secondary" />
+                        <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["NoScanHistory"]</RadzenText>
+                    </RadzenStack>
+                }
+                else
+                {
+                    <RadzenDataGrid Data="@_scanHistory" TItem="RkhunterScanResultDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                        <Columns>
+                            <RadzenDataGridColumn TItem="RkhunterScanResultDto" Title="@L["Status"]" Width="120px">
+                                <Template Context="r">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                                        <RadzenIcon Icon="@GetScanStatusIcon(r.Status)" class="@GetScanStatusColor(r.Status)" />
+                                        <RadzenText TextStyle="TextStyle.Body2">@LocalizeScanStatus(r.Status)</RadzenText>
+                                    </RadzenStack>
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="RkhunterScanResultDto" Title="@L["ScanTime"]" Width="180px">
+                                <Template Context="r">
+                                    @r.ScanTime.ToString("g")
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="RkhunterScanResultDto" Property="WarningCount" Title="@L["Warnings"]" Width="100px" />
+                            <RadzenDataGridColumn TItem="RkhunterScanResultDto" Property="Summary" Title="@L["Summary"]" />
+                        </Columns>
+                    </RadzenDataGrid>
+                }
+            </RadzenTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

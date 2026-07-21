@@ -1,0 +1,12 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/releases"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Releases"] - Aetheus</PageTitle>
+
+@* 0-a: project-scoped releases render through the shared ReleasesList (self-loading). *@
+@if (Loader?.Project is not null)
+{
+    <ReleasesList ProjectId="Id" />
+}

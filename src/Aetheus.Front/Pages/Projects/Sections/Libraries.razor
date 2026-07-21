@@ -1,0 +1,12 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/libraries"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Libraries"] - Aetheus</PageTitle>
+
+@* 0-a: project-scoped libraries render through the shared VariableLibrariesList (self-loading). *@
+@if (Loader?.Project is not null)
+{
+    <VariableLibrariesList ProjectId="Id" />
+}

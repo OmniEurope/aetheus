@@ -1,0 +1,45 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Microsoft.Extensions.Localization
+@using Aetheus.Front.Resources
+@using Aetheus.Front.Services
+@using Aetheus.Shared.DTOs
+@inject IStringLocalizer<AppStrings> L
+@inject ApiClient Api
+
+<RadzenStack Gap="0.75rem">
+    <RadzenFormField Text="@L["OwnerType"]" class="owner-type-field">
+        <div class="owner-type-options" role="radiogroup" aria-label="@L["OwnerType"]">
+            <label><input type="radio" name="@_radioGroupName" value="Global" checked="@(_kind == OwnerKind.Global)" @onchange="@(() => OnKindChanged(OwnerKind.Global))" /> <span>@L["Global"]</span></label>
+            <label><input type="radio" name="@_radioGroupName" value="Project" checked="@(_kind == OwnerKind.Project)" @onchange="@(() => OnKindChanged(OwnerKind.Project))" /> <span>@L["Project"]</span></label>
+            <label><input type="radio" name="@_radioGroupName" value="Environment" checked="@(_kind == OwnerKind.Environment)" @onchange="@(() => OnKindChanged(OwnerKind.Environment))" /> <span>@L["Environment"]</span></label>
+            <label><input type="radio" name="@_radioGroupName" value="ProjectServer" checked="@(_kind == OwnerKind.ProjectServer)" @onchange="@(() => OnKindChanged(OwnerKind.ProjectServer))" /> <span>@L["Server"]</span></label>
+        </div>
+    </RadzenFormField>
+
+    @if (_kind is OwnerKind.Project or OwnerKind.Environment or OwnerKind.ProjectServer)
+    {
+        <RadzenFormField Text="@L["Project"]">
+            <RadzenDropDown TValue="int?" Data="@Projects" TextProperty="Name" ValueProperty="Id"
+                Value="@ProjectId" Change="@OnProjectChanged"
+                AllowClear="@(_kind == OwnerKind.Project)" Placeholder="@L["SelectProject"]" />
+        </RadzenFormField>
+    }
+
+    @if (_kind == OwnerKind.Environment && _selectedProjectId is > 0)
+    {
+        <RadzenFormField Text="@L["Environment"]">
+            <RadzenDropDown TValue="int?" Data="@_environments" TextProperty="Name" ValueProperty="Id"
+                Value="@EnvironmentId" Change="@OnEnvironmentChanged"
+                Placeholder="@L["SelectEnvironment"]" />
+        </RadzenFormField>
+    }
+
+    @if (_kind == OwnerKind.ProjectServer && _selectedProjectId is > 0)
+    {
+        <RadzenFormField Text="@L["Server"]">
+            <RadzenDropDown TValue="int?" Data="@_projectServers" TextProperty="ServerName" ValueProperty="Id"
+                Value="@ProjectServerId" Change="@OnProjectServerChanged"
+                Placeholder="@L["SelectServer"]" />
+        </RadzenFormField>
+    }
+</RadzenStack>

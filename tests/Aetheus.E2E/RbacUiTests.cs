@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.Playwright;
+
+namespace Aetheus.E2E;
+
+[Category("E2E")]
+[Category("Rbac")]
+public class RbacUiTests : E2ETestBase
+{
+    [Test]
+    public async Task AdminMenuAndUserManagement_AreAccessibleForAdmin()
+    {
+        await LoginAsync();
+        await NavigateToAsync("");
+        await Page.WaitForSelectorAsync(".rz-navigation-item", new() { Timeout = 10000 });
+        var settingsLink = Page.Locator("a[href*='settings']").First;
+        await Expect(settingsLink).ToBeVisibleAsync();
+
+        await NavigateToAsync("users");
+        await Page.WaitForSelectorAsync(".rz-datatable", new() { Timeout = 10000 });
+        await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+    }
+
+    [Test]
+    public async Task UserWithoutRole_SeesEmptyDashboardRestrictedMenuAndDeniedDirectRoute()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var username = $"no-rights-{suffix}";
+        const string password = "NoRights-2026!";
+
+        using var http = new HttpClient(new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+        });
+        var adminLogin = await http.PostAsJsonAsync($"{BackendUrl}/api/auth/login",
+            new { Username = AdminUser, Password = AdminPassword });
+        adminLogin.EnsureSuccessStatusCode();
+        var adminBody = await adminLogin.Content.ReadFromJsonAsync<JsonElement>();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", adminBody.GetProperty("token").GetString());
+
+        var create = await http.PostAsJsonAsync($"{BackendUrl}/api/users", new
+        {
+            Username = username,
+            Password = password,
+            MustChangePassword = false,
+            Roles = Array.Empty<string>()
+        });
+        create.EnsureSuccessStatusCode();
+
+        await LoginAsAsync(username, password);
+
+        await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToBeVisibleAsync();
+        await Expect(SidebarNavItem("Servers")).ToHaveCountAsync(0);
+        await Expect(SidebarNavItem("Projects")).ToHaveCountAsync(0);
+        await Expect(SidebarNavItem("Administration")).ToHaveCountAsync(0);
+
+        await Page.GotoAsync($"{FrontendUrl}/servers");
+        await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
+        await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToBeVisibleAsync();
+        await Expect(Page.Locator(".rz-datatable")).ToHaveCountAsync(0);
+    }
+
+    [Test]
+    public async Task AuthorizedNonAdmin_SeesGrantedSectionButNotAdministration()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var username = $"server-reader-{suffix}";
+        var roleName = $"ServerReader-{suffix}";
+        const string password = "ServerReader-2026!";
+
+        using var http = await CreateAdminClientAsync();
+        var createRole = await http.PostAsJsonAsync($"{BackendUrl}/api/roles", new
+        {
+            Name = roleName,
+            Description = "E2E server reader"
+        });
+        createRole.EnsureSuccessStatusCode();
+        var role = await createRole.Content.ReadFromJsonAsync<JsonElement>();
+        var roleId = role.GetProperty("id").GetInt32();
+
+        var setPermissions = await http.PutAsJsonAsync($"{BackendUrl}/api/roles/{roleId}/permissions", new
+        {
+            Permissions = new[] { new { ResourceType = 3, ResourceId = (int?)null, Permission = 0 } }
+        });
+        setPermissions.EnsureSuccessStatusCode();
+
+        var createUser = await http.PostAsJsonAsync($"{BackendUrl}/api/users", new
+        {
+            Username = username,
+            Password = password,
+            MustChangePassword = false,
+            Roles = new[] { roleName }
+        });
+        createUser.EnsureSuccessStatusCode();
+
+        await LoginAsAsync(username, password);
+
+        await Expect(SidebarNavItem("Servers")).ToBeVisibleAsync();
+        await Expect(SidebarNavItem("Projects")).ToHaveCountAsync(0);
+        await Expect(SidebarNavItem("Administration")).ToHaveCountAsync(0);
+
+        await Page.GotoAsync($"{FrontendUrl}/servers");
+        await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
+        await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToHaveCountAsync(0);
+        await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+    }
+
+    private async Task<HttpClient> CreateAdminClientAsync()
+    {
+        var http = new HttpClient(new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+        });
+        var adminLogin = await http.PostAsJsonAsync($"{BackendUrl}/api/auth/login",
+            new { Username = AdminUser, Password = AdminPassword });
+        adminLogin.EnsureSuccessStatusCode();
+        var adminBody = await adminLogin.Content.ReadFromJsonAsync<JsonElement>();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", adminBody.GetProperty("token").GetString());
+        return http;
+    }
+
+    private async Task LoginAsAsync(string username, string password)
+    {
+        // The PageTest context starts with the shared admin local-storage state. Let that first WASM
+        // bootstrap finish before clearing it: reloading at DOMContentLoaded used to cancel an in-flight
+        // fingerprinted assembly request and report a fake application download failure in teardown.
+        await Page.GotoAsync(FrontendUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await Page.WaitForSelectorAsync("[data-testid='blazor-ready']", new() { Timeout = PlaywrightConfig.AppReadyTimeoutMs });
+        await Page.EvaluateAsync("localStorage.clear()");
+        await Page.GotoAsync($"{FrontendUrl}/login", new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await Page.WaitForSelectorAsync("input[name='Username']", new() { Timeout = PlaywrightConfig.AppReadyTimeoutMs });
+        await Page.FillAsync("input[name='Username']", username);
+        await Page.FillAsync("input[name='Password']", password);
+        await Page.ClickAsync("button[type='submit']");
+        await Page.WaitForURLAsync($"{FrontendUrl}/");
+        await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
+    }
+}

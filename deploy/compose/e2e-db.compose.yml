@@ -1,0 +1,43 @@
+# =============================================================================
+# e2e-db.compose.yml - Aetheus EPHEMERAL E2E PostgreSQL (isolated from dev)
+# =============================================================================
+# A SECOND, throwaway PostgreSQL used ONLY by the E2E run, exposed on host port
+# 15433 so it never collides with - or touches - the shared dev database
+# (aetheus-local-database on :15432). The E2E backend points its
+# ConnectionStrings:Default here. The E2E runner preserves this dedicated volume;
+# the guarded /api/dev/reset-db endpoint recreates THIS database only. Dev is untouched.
+#
+# Distinct compose project name (aetheus-e2e) + own volume keep it fully
+# isolated from the dev stack (aetheus-local).
+#
+# Usage (driven by ylaunch.ps1 -te / Ensure-E2eDb):
+#   docker compose -f deploy/compose/e2e-db.compose.yml up -d
+# =============================================================================
+
+name: aetheus-e2e
+
+services:
+  database:
+    container_name: aetheus-e2e-database
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    ports:
+      - "127.0.0.1:15433:5432"
+    environment:
+      # Distinct DB NAME (not "aetheus") is a fail-safe: the backend's reset-db endpoint refuses to
+      # drop any database whose name does not end with "_e2e", so even a mis-wired E2E backend that
+      # fell back to the dev connection string (Database=aetheus) can never wipe the dev/prod DB.
+      - POSTGRES_DB=aetheus_e2e
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - aetheus-e2e-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aetheus_e2e"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  aetheus-e2e-db-data:

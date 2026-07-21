@@ -1,0 +1,44 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@typeparam TItem
+@inject IStringLocalizer<AppStrings> L
+
+@* W3PN: explicit, retryable error state when a fetch fails - replaces the perpetual refresh spinner
+   the grid would otherwise show forever when LoadData throws / the caller never resets IsLoading. *@
+@if (_loadFailed)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter"
+                 AllowClose="false" class="rz-mb-2">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
+                     JustifyContent="JustifyContent.SpaceBetween" Gap="0.75rem">
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@L["GridLoadFailed"]</RadzenText>
+            <RadzenButton Text="@L["Retry"]" Icon="refresh" Size="ButtonSize.Small"
+                          Click="@RetryAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    </RadzenAlert>
+}
+
+@if (EmptyTemplate is not null)
+{
+    <RadzenDataGrid @ref="Grid" TItem="TItem" Data="@Data" Count="@Count"
+        AllowSorting="@AllowSorting" AllowFiltering="@AllowFiltering" FilterMode="@FilterMode"
+        AllowColumnResize="@AllowColumnResize"
+        AllowPaging="true" PageSize="@PageSize"
+        IsLoading="@(IsLoading && !_loadFailed)" LoadData="@OnLoadData" EmptyText="@(EmptyText ?? L["NoRecords"])"
+        PagerHorizontalAlign="HorizontalAlign.Center" Density="@Density"
+        RowClick="@OnRowClick" class="@GridCssClass" @attributes="OtherAttributes">
+        <EmptyTemplate>@EmptyTemplate</EmptyTemplate>
+        <Columns>@Columns</Columns>
+    </RadzenDataGrid>
+}
+else
+{
+    <RadzenDataGrid @ref="Grid" TItem="TItem" Data="@Data" Count="@Count"
+        AllowSorting="@AllowSorting" AllowFiltering="@AllowFiltering" FilterMode="@FilterMode"
+        AllowColumnResize="@AllowColumnResize"
+        AllowPaging="true" PageSize="@PageSize"
+        IsLoading="@(IsLoading && !_loadFailed)" LoadData="@OnLoadData" EmptyText="@(EmptyText ?? L["NoRecords"])"
+        PagerHorizontalAlign="HorizontalAlign.Center" Density="@Density"
+        RowClick="@OnRowClick" class="@GridCssClass" @attributes="OtherAttributes">
+        <Columns>@Columns</Columns>
+    </RadzenDataGrid>
+}

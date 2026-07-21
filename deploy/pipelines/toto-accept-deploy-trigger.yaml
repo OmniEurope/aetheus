@@ -1,0 +1,79 @@
+# =============================================================================
+# toto-accept-deploy-trigger - copy of toto-accept-deploy (chaining target)
+# =============================================================================
+# Functionally identical to toto-accept-deploy: it builds the Toto image and runs
+# the container stack on the "accept" environment, then configures the Apache
+# reverse proxy and HTTPS. It exists as a separate pipeline so it can be the
+# on_success: target of toto-ci-trigger (auto-launched when that CI succeeds).
+name: toto-accept-deploy-trigger
+trigger: manual
+
+variables:
+  PROXY_DOMAIN: "toto-accept.local"
+  PROXY_PORT: "8090"
+
+stages:
+  - name: Verify
+    os: linux
+    environment: accept
+    steps:
+      - name: Check Docker
+        shell: "docker --version && docker compose version"
+        timeout_seconds: 60
+
+  - name: Deploy
+    os: linux
+    group: Deploy
+    environment: accept
+    depends_on:
+      - Verify
+    steps:
+      - name: Build image and run container stack
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        timeout_seconds: 1800
+        shell: |
+          set -e
+          docker build -f deploy/Dockerfile -t toto-accept:current .
+          docker compose -p toto-accept -f deploy/docker-compose.yml up -d --wait
+          docker compose -p toto-accept -f deploy/docker-compose.yml ps
+
+  - name: Proxy
+    os: linux
+    group: Deploy
+    environment: accept
+    depends_on:
+      - Deploy
+    steps:
+      - name: Configure Apache reverse proxy
+        type: apache-proxy
+        server_name: "$(PROXY_DOMAIN)"
+        upstream: "http://127.0.0.1:$(PROXY_PORT)"
+        timeout_seconds: 120
+
+  - name: HTTPS
+    os: linux
+    group: Deploy
+    environment: accept
+    depends_on:
+      - Proxy
+    steps:
+      - name: Obtain HTTPS certificate
+        type: certbot
+        domains: "$(PROXY_DOMAIN)"
+        email: "admin@toto-accept.local"
+        timeout_seconds: 180
+
+  - name: Smoke
+    os: linux
+    group: Smoke
+    environment: accept
+    depends_on:
+      - HTTPS
+    steps:
+      - name: Verify deployed Todo API
+        timeout_seconds: 120
+        shell: |
+          set -eu
+          curl -fsS http://127.0.0.1:$(PROXY_PORT)/api/todos >/dev/null
+          echo "Chained acceptance smoke passed."

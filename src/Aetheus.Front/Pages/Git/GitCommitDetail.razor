@@ -1,0 +1,104 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git-repositories/{RepoId:int}/commits/{Sha}"
+
+<PageTitle>@(_detail?.Commit.ShortSha ?? L["Commit"]) - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+}
+else if (_detail is null)
+{
+    <Aetheus.Front.Shared.PageHeader Title="@L["Commit"]" Icon="commit" BackHref="@($"/git-repositories/{RepoId}")" />
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat">@L["NotFound"]</RadzenAlert>
+}
+else
+{
+    <Aetheus.Front.Shared.PageHeader Title="@_detail.Commit.ShortSha" Icon="commit" BackHref="@($"/git-repositories/{RepoId}")">
+        <ChildContent>
+            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_detail.Commit.AuthorName" />
+        </ChildContent>
+    </Aetheus.Front.Shared.PageHeader>
+
+    <RadzenCard class="rz-mt-3">
+        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">@_detail.Commit.Message</RadzenText>
+        <div class="essentials-grid essentials-grid--stacked">
+            <div class="essential-item">
+                <RadzenIcon Icon="tag" class="essential-icon" />
+                <div class="essential-text">
+                    <span class="essential-label">@L["Commit"]</span>
+                    <span class="essential-value overview-break-anywhere"><code>@_detail.Commit.Sha</code></span>
+                </div>
+            </div>
+            <div class="essential-item">
+                <RadzenIcon Icon="person" class="essential-icon" />
+                <div class="essential-text">
+                    <span class="essential-label">@L["Author"]</span>
+                    <span class="essential-value">@_detail.Commit.AuthorName &lt;@_detail.Commit.AuthorEmail&gt;</span>
+                </div>
+            </div>
+            <div class="essential-item">
+                <RadzenIcon Icon="event" class="essential-icon" />
+                <div class="essential-text">
+                    <span class="essential-label">@L["Date"]</span>
+                    <span class="essential-value" title="@_detail.Commit.AuthorDate.ToString("F")">@_detail.Commit.AuthorDate.ToString("g")</span>
+                </div>
+            </div>
+            @if (_detail.Commit.ParentShas.Count > 0)
+            {
+                <div class="essential-item">
+                    <RadzenIcon Icon="account_tree" class="essential-icon" />
+                    <div class="essential-text">
+                        <span class="essential-label">@L["Parents"]</span>
+                        <span class="essential-value">
+                            @foreach (var parent in _detail.Commit.ParentShas)
+                            {
+                                <a href="@($"/git-repositories/{RepoId}/commits/{parent}")" class="rz-link rz-mr-2"><code>@Short(parent)</code></a>
+                            }
+                        </span>
+                    </div>
+                </div>
+            }
+        </div>
+    </RadzenCard>
+
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem" class="rz-mt-3 rz-mb-2">
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Icon="description" Text="@($"{L["FilesChanged"]}: {_detail.Diff.Stats.FilesChanged}")" />
+        <span class="diff-file-stat-add">+@_detail.Diff.Stats.Additions</span>
+        <span class="diff-file-stat-del">-@_detail.Diff.Stats.Deletions</span>
+    </RadzenStack>
+
+    @if (_detail.Diff.FileDiffs.Count == 0)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat">@L["NoFileChanges"]</RadzenAlert>
+    }
+    else
+    {
+        @foreach (var file in _detail.Diff.FileDiffs)
+        {
+            <RadzenCard class="rz-mt-2">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2" Wrap="FlexWrap.Wrap">
+                    <RadzenIcon Icon="description" class="rz-color-secondary" />
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0 overview-break-anywhere">@file.Path</RadzenText>
+                    <RadzenBadge BadgeStyle="@StatusBadge(file.Status)" Text="@LocalizeStatus(file.Status)" />
+                    <div class="pipeline-list-spacer"></div>
+                    <span class="diff-file-stat-add">+@file.Additions</span>
+                    <span class="diff-file-stat-del">-@file.Deletions</span>
+                </RadzenStack>
+                @if (!string.IsNullOrEmpty(file.Patch))
+                {
+                    <div class="diff-view">
+                        @foreach (var line in SplitLines(file.Patch))
+                        {
+                            <span class="@LineClass(line)">@line</span>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" class="rz-m-0">@L["BinaryFile"]</RadzenAlert>
+                }
+            </RadzenCard>
+        }
+    }
+}

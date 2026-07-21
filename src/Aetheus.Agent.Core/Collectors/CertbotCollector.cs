@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
+using Aetheus.Shared.DTOs;
+
+namespace Aetheus.Agent.Core.Collectors;
+
+/// <summary>
+/// Certbot/Let's Encrypt collector. Certificate inventory is read <b>directly from
+/// <c>/etc/letsencrypt/live</c></b> and parsed with <see cref="X509CertificateLoader"/> - no
+/// shell, no <c>sudo certbot</c> (which is a GTFOBins root-escalation primitive and was, as
+/// configured, always denied). Reading the live dir needs read access for the non-root agent;
+/// when it is not granted the list is empty (graceful) rather than escalating privileges.
+/// </summary>
+public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollector>, ICertbotCollector
+{
+    private const string LetsEncryptLiveDir = "/etc/letsencrypt/live";
+    private readonly Func<List<CertbotCertificateDto>> _collectCertificates;
+
+    public CertbotCollector(ILogger<CertbotCollector> logger, IShellRunner shell)
+        : this(logger, shell, null)
+    {
+    }
+
+    internal CertbotCollector(
+        ILogger<CertbotCollector> logger,
+        IShellRunner shell,
+        Func<List<CertbotCertificateDto>>? collectCertificates)
+        : base(logger, shell)
+    {
+        _collectCertificates = collectCertificates ?? CollectCertificates;
+    }
+
+    public async Task<CertbotDataDto> CollectAsync(CancellationToken ct = default)
+    {
+        string? binary = null;
+        try
+        {
+            binary = await DetectBinaryAsync(ct).ConfigureAwait(false);
+            if (binary is null)
+                return new CertbotDataDto { IsInstalled = false };
+
+            return new CertbotDataDto
+            {
+                IsInstalled = true,
+                Version = await CollectVersionAsync(binary, ct).ConfigureAwait(false),
+                Certificates = _collectCertificates().Take(2048).ToList()
+            };
+        }
+        catch (Exception ex)
+        {
+            // F-ENG-06: a partial failure after the binary was found must not report certbot as uninstalled,
+            // and must be visible (LogWarning), not hidden in Debug.
+            var installed = binary is not null;
+            Logger.LogWarning(ex, installed
+                ? "Certbot data collection failed after detecting the binary; reporting installed"
+                : "Certbot detection failed");
+            return new CertbotDataDto { IsInstalled = installed };
+        }
+    }
+
+    // Common absolute locations for the certbot binary. The agent runs under a hardened systemd
+    // unit whose PATH may not include these, so a bare `which certbot` can return nothing even
+    // though `apt install certbot` succeeded, which is exactly the Services-tab-says-Installed /
+    // Certbot-section-says-NOT-INSTALLED mismatch (CBDT). Fall back to these before giving up so
+    // both detections agree.
+    private static readonly string[] KnownCertbotPaths =
+    [
+        "/usr/bin/certbot",
+        "/usr/local/bin/certbot",
+        "/snap/bin/certbot",
+        "/opt/certbot/bin/certbot"
+    ];
+
+    private async Task<string?> DetectBinaryAsync(CancellationToken ct)
+    {
+        var (locator, name) = OperatingSystem.IsWindows() ? ("where", "certbot") : ("which", "certbot");
+        var res = await Shell.RunExecAsync(locator, [name], ct).ConfigureAwait(false);
+        if (res.ExitCode == 0)
+        {
+            var path = res.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
+            if (path is { Length: > 0 })
+                return path;
+        }
+
+        // PATH lookup failed: probe the well-known install locations directly (no shell).
+        if (!OperatingSystem.IsWindows())
+            return KnownCertbotPaths.FirstOrDefault(File.Exists);
+
+        return null;
+    }
+
+    private async Task<string> CollectVersionAsync(string binary, CancellationToken ct)
+    {
+        try
+        {
+            var res = await Shell.RunExecAsync(binary, ["--version"], ct).ConfigureAwait(false);
+            // certbot prints "certbot 2.7.4" - to stdout on modern versions, stderr on old ones.
+            var match = VersionRegex().Match(res.StdOut);
+            if (!match.Success)
+                match = VersionRegex().Match(res.StdErr);
+            return match.Success ? match.Groups[1].Value : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to get Certbot version");
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Enumerates <c>/etc/letsencrypt/live/&lt;name&gt;/fullchain.pem</c> and reads expiry/domains
+    /// straight from the X.509 leaf. No shell, no sudo. If the agent lacks read access the dir
+    /// enumeration throws and an empty list is returned (the operator can grant a read ACL).
+    /// </summary>
+    private List<CertbotCertificateDto> CollectCertificates()
+    {
+        var result = new List<CertbotCertificateDto>();
+        if (OperatingSystem.IsWindows() || !Directory.Exists(LetsEncryptLiveDir))
+            return result;
+
+        IEnumerable<string> dirs;
+        try
+        {
+            dirs = Directory.EnumerateDirectories(LetsEncryptLiveDir);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Logger.LogDebug(ex, "No read access to {Dir} - grant the agent a read ACL", LetsEncryptLiveDir);
+            return result;
+        }
+
+        foreach (var dir in dirs)
+        {
+            try
+            {
+                var certPath = Path.Combine(dir, "fullchain.pem");
+                if (!File.Exists(certPath))
+                    continue;
+
+                using var cert = X509CertificateLoader.LoadCertificateFromFile(certPath);
+
+                result.Add(new CertbotCertificateDto
+                {
+                    Name = Path.GetFileName(dir),
+                    Domains = ExtractDomains(cert),
+                    ExpiryDate = cert.NotAfter.ToUniversalTime(),
+                    CertPath = certPath,
+                    KeyPath = Path.Combine(dir, "privkey.pem")
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to read certificate in {Dir}", dir);
+            }
+        }
+        return result;
+    }
+
+    private static List<string> ExtractDomains(X509Certificate2 cert)
+    {
+        var domains = new List<string>();
+
+        var sanRaw = cert.Extensions.FirstOrDefault(e => e.Oid?.Value == "2.5.29.17");
+        if (sanRaw is not null)
+        {
+            var san = sanRaw as X509SubjectAlternativeNameExtension
+                      ?? new X509SubjectAlternativeNameExtension(sanRaw.RawData);
+            domains.AddRange(san.EnumerateDnsNames());
+        }
+
+        if (domains.Count == 0)
+        {
+            var cn = cert.GetNameInfo(X509NameType.DnsName, false);
+            if (!string.IsNullOrEmpty(cn))
+                domains.Add(cn);
+        }
+        return domains;
+    }
+
+    // "certbot 2.7.4"
+    [GeneratedRegex(@"certbot\s+([\d.]+)")]
+    private static partial Regex VersionRegex();
+}

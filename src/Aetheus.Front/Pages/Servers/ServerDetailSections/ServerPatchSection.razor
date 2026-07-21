@@ -1,0 +1,70 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<RadzenStack Gap="1rem">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenIcon Icon="system_security_update" />
+            <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["PatchTitle"]</RadzenText>
+        </RadzenStack>
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+            <RadzenButton Text="@L["PatchCheck"]" Icon="search" Size="ButtonSize.Small" Busy="@_busy" Click="@CheckAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            <RadzenButton Text="@L["PatchApply"]" Icon="system_update_alt" Size="ButtonSize.Small"
+                Busy="@_busy" Disabled="@(!CanApply)" Click="@ApplyAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        </RadzenStack>
+    </RadzenStack>
+
+    @if (_loading)
+    {
+        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+    }
+    else if (_status is null || !_status.PackageManagerPresent)
+    {
+        <EmptyState Icon="help_outline" Title="@L["PatchNotApplicableTitle"]" Description="@L["PatchNotApplicableDescription"]" />
+    }
+    else if (!_status.Known)
+    {
+        <RadzenCard>
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenIcon Icon="help_outline" />
+                <RadzenText>@L["PatchUnknown"]</RadzenText>
+            </RadzenStack>
+        </RadzenCard>
+    }
+    else
+    {
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" AlignItems="AlignItems.Center">
+            <RadzenBadge BadgeStyle="@(_status.PendingTotal > 0 ? BadgeStyle.Warning : BadgeStyle.Success)"
+                Text="@string.Format(L["PatchPendingCount"], _status.PendingTotal)" />
+            <RadzenBadge BadgeStyle="@SecurityBadgeStyle"
+                Text="@string.Format(L["PatchSecurityCount"], _status.PendingSecurity)" />
+            @if (_status.CheckedAt is not null)
+            {
+                <RadzenText TextStyle="TextStyle.Caption">@string.Format(L["PatchCheckedAt"], _status.CheckedAt.Value.ToString("g"))</RadzenText>
+            }
+        </RadzenStack>
+
+        @if (!CanApply)
+        {
+            <RadzenText TextStyle="TextStyle.Caption">@L["PatchApplyDisabledHint"]</RadzenText>
+        }
+
+        @if (_status.Updates.Count > 0)
+        {
+            <RadzenDataGrid Data="@_status.Updates" TItem="PendingUpdateDto" AllowSorting="true" Density="Density.Compact" PageSize="15" AllowPaging="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                <Columns>
+                    <RadzenDataGridColumn TItem="PendingUpdateDto" Property="Package" Title="@L["PatchPackage"]" />
+                    <RadzenDataGridColumn TItem="PendingUpdateDto" Property="CurrentVersion" Title="@L["PatchCurrentVersion"]" Width="200px" />
+                    <RadzenDataGridColumn TItem="PendingUpdateDto" Property="CandidateVersion" Title="@L["PatchCandidateVersion"]" Width="200px" />
+                    <RadzenDataGridColumn TItem="PendingUpdateDto" Property="IsSecurity" Title="@L["PatchSecurity"]" Width="120px">
+                        <Template Context="u">
+                            @if (u.IsSecurity)
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="@L["PatchSecurityYes"]" />
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        }
+    }
+</RadzenStack>

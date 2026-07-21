@@ -1,0 +1,509 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Components.Settings;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Enums;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
+
+namespace Aetheus.Back.Tests;
+
+public class PipelineWebhookServiceTests
+{
+    private readonly IPipelineRepository _pipelineRepoMock = Substitute.For<IPipelineRepository>();
+    private readonly IPipelineRunService _runServiceMock = Substitute.For<IPipelineRunService>();
+    private readonly ISettingsService _settingsMock = Substitute.For<ISettingsService>();
+    private readonly IPipelineGitService _pipelineGitMock = Substitute.For<IPipelineGitService>();
+    private readonly ILogger<PipelineWebhookService> _loggerMock = Substitute.For<ILogger<PipelineWebhookService>>();
+    private readonly PipelineWebhookService _sut;
+
+    public PipelineWebhookServiceTests()
+    {
+        _sut = new PipelineWebhookService(
+            _pipelineRepoMock, _runServiceMock, _settingsMock, _loggerMock, _pipelineGitMock);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_InvalidSignature_ReturnsFalse()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns("my-secret");
+
+        var result = await _sut.HandleWebhookAsync("{}", "wrong-sig", ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_NoSecret_NoSignatureValidation()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var result = await _sut.HandleWebhookAsync(body, null, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_GitHubFormat_TriggersPipeline()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo" };
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_GitLabFormat_TriggersPipeline()
+    {
+        const string secret = "my-gitlab-token";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://gitlab.com/org/repo" };
+        var pipeline = new Pipeline { Id = 20, Name = "Deploy", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(20, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"project\":{\"web_url\":\"https://gitlab.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var result = await _sut.HandleWebhookAsync(body, secret, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        // The secret-configured "no pipelines" case also returns true (see WithWebhookSecretSet_ReturnsTrue),
+        // so Assert.True(result) alone doesn't prove a run actually started - assert the real dispatch.
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(20, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_ActiveRun_SkipsPipeline()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo" };
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var result = await _sut.HandleWebhookAsync(body, null, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+        await _runServiceMock.DidNotReceive().TriggerAutomatedRunAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_UnparsablePayload_ReturnsFalse()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        var result = await _sut.HandleWebhookAsync("not json at all", null, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_NoMatchingProject_ReturnsFalse()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/other/repo" };
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/different-repo\"},\"ref\":\"refs/heads/main\"}";
+        var result = await _sut.HandleWebhookAsync(body, null, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_NullProjectUrl_SkipsPipeline()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = null, Project = null };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var result = await _sut.HandleWebhookAsync(body, null, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_GitLabToken_ValidatesCorrectly()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns("my-gitlab-token");
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://gitlab.com/org/repo" };
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"project\":{\"web_url\":\"https://gitlab.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var result = await _sut.HandleWebhookAsync(body, "my-gitlab-token", ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_UrlWithGitSuffix_MatchesNormalized()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo.git" };
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        // A signature-valid webhook with no triggered pipelines also returns true (see
+        // WithWebhookSecretSet_ReturnsTrue), so Assert.True(result) alone doesn't prove a run actually
+        // started - assert the real dispatch to prove the normalized URL matched the pipeline's project.
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_WithWebhookSecretSet_ReturnsTrue_WhenNoTriggeredPipelines()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns("my-secret");
+
+        // Need proper HMAC signature
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes("my-secret"));
+        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(body));
+        var signature = "sha256=" + Convert.ToHexStringLower(hash);
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        // Returns true because secret is configured (even though no pipelines triggered)
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_ExternalRepo_MatchesViaGitConnection()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        // External-Git project: RepositoryUrl is the internal mirror URL (never equals the external
+        // webhook URL); the GitConnection reconstructs the external remote that the webhook reports.
+        var project = new Project
+        {
+            Id = 1,
+            Name = "P",
+            Description = "d",
+            RepositoryUrl = "https://aetheus.local/git/1/repo.git",
+            GitConnectionId = 99,
+            GitConnection = new GitConnection
+            {
+                Id = 99,
+                ProviderType = GitProviderType.GitHub,
+                OwnerOrGroup = "org",
+                RepositoryName = "repo"
+            }
+        };
+        var pipeline = new Pipeline { Id = 10, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 1, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/main\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_ExternalRepo_SelfHosted_MatchesViaBaseUrl()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project
+        {
+            Id = 2,
+            Name = "P2",
+            Description = "d",
+            RepositoryUrl = "https://aetheus.local/git/2/repo.git",
+            GitConnectionId = 77,
+            GitConnection = new GitConnection
+            {
+                Id = 77,
+                ProviderType = GitProviderType.Gitea,
+                BaseUrl = "https://gitea.example.com",
+                OwnerOrGroup = "team",
+                RepositoryName = "service"
+            }
+        };
+        var pipeline = new Pipeline { Id = 20, Name = "Build", TriggerType = PipelineTriggerType.Webhook, ProjectId = 2, Project = project };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(20, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"repository\":{\"html_url\":\"https://gitea.example.com/team/service\"},\"ref\":\"refs/heads/main\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(20, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_BranchFilter_SkipsNonMatchingBranch()
+    {
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo" };
+        var pipeline = new Pipeline
+        {
+            Id = 10,
+            Name = "Build",
+            TriggerType = PipelineTriggerType.Webhook,
+            ProjectId = 1,
+            Project = project,
+            YamlDefinition = "trigger: webhook\nbranches:\n  - main\n"
+        };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+
+        // Push to develop but the pipeline only listens on main.
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/develop\"}";
+        var result = await _sut.HandleWebhookAsync(body, null, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+        await _runServiceMock.DidNotReceive().TriggerAutomatedRunAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_BranchFilter_TriggersMatchingBranch()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo" };
+        var pipeline = new Pipeline
+        {
+            Id = 10,
+            Name = "Build",
+            TriggerType = PipelineTriggerType.Webhook,
+            ProjectId = 1,
+            Project = project,
+            YamlDefinition = "trigger: webhook\nbranches:\n  - main\n  - develop\n"
+        };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/develop\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_BranchFilter_UsesFreshAuthoritativeGitYaml()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project
+        {
+            Id = 1,
+            Name = "P",
+            Description = "d",
+            RepositoryUrl = "https://github.com/org/repo"
+        };
+        var pipeline = new Pipeline
+        {
+            Id = 10,
+            Name = "Build",
+            TriggerType = PipelineTriggerType.Webhook,
+            ProjectId = 1,
+            Project = project,
+            SourceBranch = "main",
+            // The DB mirror is deliberately stale and would reject a develop push.
+            YamlDefinition = "trigger: webhook\nbranches:\n  - main\n"
+        };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(10, Arg.Any<CancellationToken>())
+            .Returns(false);
+        _pipelineGitMock.ReadProjectPipelineYamlAsync(
+                1, "Build", Arg.Any<CancellationToken>(), "main")
+            .Returns("trigger: webhook\nbranches:\n  - develop\n");
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/develop\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _pipelineGitMock.Received(1).ReadProjectPipelineYamlAsync(
+            1, "Build", Arg.Any<CancellationToken>(), "main");
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(
+            10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_BranchFilter_GlobMatchesReleaseBranch()
+    {
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo" };
+        var pipeline = new Pipeline
+        {
+            Id = 30,
+            Name = "Release",
+            TriggerType = PipelineTriggerType.Webhook,
+            ProjectId = 1,
+            Project = project,
+            YamlDefinition = "trigger: webhook\nbranches:\n  - release/*\n"
+        };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+        _pipelineRepoMock.HasActiveRunAsync(30, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/release/2.0\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _runServiceMock.Received(1).TriggerAutomatedRunAsync(30, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_BranchFilter_UnparseableYamlWithDeclaredFilter_FailsClosed()
+    {
+        // A real secret + valid HMAC signature so we actually reach the branch-matching path (an empty/null
+        // secret would short-circuit to false at the mandatory-secret guard, never exercising fail-closed).
+        const string secret = "test-webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>())
+            .Returns(secret);
+
+        var project = new Project { Id = 1, Name = "P", Description = "d", RepositoryUrl = "https://github.com/org/repo" };
+        var pipeline = new Pipeline
+        {
+            Id = 10,
+            Name = "Build",
+            TriggerType = PipelineTriggerType.Webhook,
+            ProjectId = 1,
+            Project = project,
+            // Genuinely unparseable YAML that STILL textually declares a branches: filter: a TAB used for
+            // indentation is a hard YAML error (tabs are forbidden for indentation), so ParseAndValidate
+            // returns null. The webhook must NOT fall back to "no filter" (which would match every branch -
+            // the opposite of the author's intent) - it must fail closed and skip the pipeline instead.
+            YamlDefinition = "branches:\n\t- main"
+        };
+
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>())
+            .Returns([pipeline]);
+
+        // Push to a branch that would not have matched the declared filter anyway, proving the skip
+        // happens for the fail-closed reason rather than by accidental match.
+        var body = "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/develop\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+        var result = await _sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken);
+
+        // A configured secret makes HandleWebhookAsync report success ("valid webhook, processed") even when
+        // no pipeline is triggered, so `result` is TRUE here - it is NOT the fail-closed signal. The real
+        // proof of fail-closed is that the pipeline was NOT dispatched despite matching the repository.
+        Assert.True(result);
+        await _runServiceMock.DidNotReceive().TriggerAutomatedRunAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+}

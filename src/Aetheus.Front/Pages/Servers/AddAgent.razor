@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/add-agent"
+
+<PageTitle>@L["AddAgent"] - Aetheus</PageTitle>
+
+<div class="add-agent-page">
+    <Aetheus.Front.Shared.PageHeader Title="@L["AddAgent"]" Icon="computer" BackHref="/servers" />
+
+    <WizardDialog @ref="_wizard" Steps="@_steps" CanAdvance="@CanAdvance()" StepChanged="@OnStepChanged"
+        ValidateBeforeNext="@ValidateBeforeNextAsync"
+        ProgressOverride="@((_detection?.AgentFound ?? false) ? 100.0 : null)"
+        OnFinishClicked="@OnFinish" OnCancelClicked="@GoBack" FinishText="@L["WizardDone"]" />
+</div>

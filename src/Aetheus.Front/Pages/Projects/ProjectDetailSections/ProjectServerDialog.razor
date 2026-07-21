@@ -1,0 +1,48 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<RadzenStack Gap="1rem" class="rz-p-2">
+    @if (!_editMode)
+    {
+        <RadzenFormField Text="@L["Type"]">
+            <RadzenDropDown TValue="ProjectServerType" Data="@_serverTypes" Value="@Type"
+                            Change="@((object t) => OnTypeChanged((ProjectServerType)t))" />
+        </RadzenFormField>
+
+        @if (Type == ProjectServerType.AgentServer)
+        {
+            <RadzenFormField Text="@L["AgentServer"]">
+                <RadzenDropDown TValue="int?" Data="@AgentServers" Value="@ServerId"
+                                TextProperty="Name" ValueProperty="Id"
+                                Placeholder="@L["SelectServer"]"
+                                Change="@((object id) => OnAgentServerSelected(id as int?))" />
+            </RadzenFormField>
+        }
+    }
+
+    <RadzenFormField Text="@L["DisplayName"]">
+        <RadzenTextBox @bind-Value="DisplayName" MaxLength="200" />
+    </RadzenFormField>
+
+    <RadzenRow Gap="1rem">
+        <RadzenColumn Size="12" SizeMD="8">
+            <RadzenFormField Text="@L["Host"]" class="rz-w-100">
+                <RadzenTextBox @bind-Value="Host" MaxLength="500" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="@L["Port"]" class="rz-w-100">
+                <RadzenNumeric TValue="int?" @bind-Value="Port" Min="1" Max="65535" />
+            </RadzenFormField>
+        </RadzenColumn>
+    </RadzenRow>
+
+    <RadzenFormField Text="@L["Notes"]">
+        <RadzenTextArea @bind-Value="Notes" MaxLength="2000" Rows="2" />
+    </RadzenFormField>
+
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+        <RadzenButton Text="@L["Cancel"]" Icon="close" Click="@OnCancel" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        <RadzenButton Text="@(_editMode ? L["Save"] : L["Add"])" Icon="@(_editMode ? "save" : "add")"
+                      Click="@OnSubmit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" IsBusy="@Saving" Size="ButtonSize.Small" />
+    </RadzenStack>
+</RadzenStack>

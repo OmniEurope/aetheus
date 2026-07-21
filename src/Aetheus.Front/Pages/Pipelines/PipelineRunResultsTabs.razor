@@ -1,0 +1,182 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using static Aetheus.Front.Pages.Pipelines.PipelineRunFormatting
+
+@if (PipelineRunMetrics.HasCoverage(Run))
+{
+    <RadzenTabsItem Text="@L["Coverage"]" Icon="bar_chart" IconColor="var(--rz-info)">
+        <RadzenCard class="rz-mt-3 rz-p-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">@L["Coverage"]</RadzenText>
+            @if (Run.CoverageSummary is { } coverage)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="2.5rem" Wrap="FlexWrap.Wrap" AlignItems="AlignItems.Center" class="rz-mb-4">
+                    <div class="coverage-gauge-wrap">
+                        <RadzenArcGauge class="coverage-gauge">
+                            <RadzenArcGaugeScale Min="0" Max="100" Step="25" StartAngle="-150" EndAngle="150" TickPosition="GaugeTickPosition.None">
+                                <RadzenArcGaugeScaleValue Value="100" Fill="var(--rz-base-300)" ShowValue="false" />
+                                <RadzenArcGaugeScaleValue Value="@(Math.Round(coverage.LineRate * 100, 1))" Fill="@CoverageColor(coverage.LineRate)" ShowValue="false" />
+                            </RadzenArcGaugeScale>
+                        </RadzenArcGauge>
+                        <div class="coverage-gauge-label">
+                            <RadzenText TextStyle="TextStyle.H5" class="@($"{CoverageColorClass(coverage.LineRate)} rz-m-0")">@FormatPercent(coverage.LineRate)</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["LineCoverage"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@coverage.LinesCovered / @coverage.LinesValid @L["Lines"]</RadzenText>
+                        </div>
+                    </div>
+                    <div class="coverage-gauge-wrap">
+                        <RadzenArcGauge class="coverage-gauge">
+                            <RadzenArcGaugeScale Min="0" Max="100" Step="25" StartAngle="-150" EndAngle="150" TickPosition="GaugeTickPosition.None">
+                                <RadzenArcGaugeScaleValue Value="100" Fill="var(--rz-base-300)" ShowValue="false" />
+                                <RadzenArcGaugeScaleValue Value="@(Math.Round(coverage.BranchRate * 100, 1))" Fill="@CoverageColor(coverage.BranchRate)" ShowValue="false" />
+                            </RadzenArcGaugeScale>
+                        </RadzenArcGauge>
+                        <div class="coverage-gauge-label">
+                            <RadzenText TextStyle="TextStyle.H5" class="@($"{CoverageColorClass(coverage.BranchRate)} rz-m-0")">@FormatPercent(coverage.BranchRate)</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["BranchCoverage"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@coverage.BranchesCovered / @coverage.BranchesValid @L["Branches"]</RadzenText>
+                        </div>
+                    </div>
+                    @if (Metrics.CoverageTrend.Count >= 2)
+                    {
+                        <RadzenChart class="coverage-trend-chart">
+                            <RadzenLineSeries Data="@Metrics.CoverageTrend" CategoryProperty="Label" ValueProperty="LinePct" Title="@L["LineCoverage"]" Smooth="true">
+                                <RadzenMarkers MarkerType="MarkerType.Circle" />
+                            </RadzenLineSeries>
+                            <RadzenLineSeries Data="@Metrics.CoverageTrend" CategoryProperty="Label" ValueProperty="BranchPct" Title="@L["BranchCoverage"]" Smooth="true" />
+                            <RadzenValueAxis Min="0" Max="100" Step="25"><RadzenAxisTitle Text="%" /></RadzenValueAxis>
+                            <RadzenCategoryAxis />
+                            <RadzenLegend Position="LegendPosition.Bottom" />
+                        </RadzenChart>
+                    }
+                </RadzenStack>
+
+                <CoverageAssemblyGrid RunId="@Run.Id" />
+
+                @if (coverage.Files.Count > 0)
+                {
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["CoverageByFile"]</RadzenText>
+                    <RadzenDataGrid Data="@coverage.Files" AllowPaging="true" PageSize="12" AllowSorting="true" Density="Density.Compact"
+                        ExpandMode="DataGridExpandMode.Single" class="coverage-file-grid" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                        <Template Context="file">
+                            <RadzenStack Gap="0.5rem" class="rz-p-3 coverage-file-detail">
+                                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@file.File</RadzenText>
+                                <RadzenRow Gap="1rem">
+                                    <RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["LineCoverage"]</RadzenText><RadzenText TextStyle="TextStyle.Body1" class="@CoverageColorClass(file.LineRate)">@FormatPercent(file.LineRate)</RadzenText></RadzenColumn>
+                                    <RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Lines"]</RadzenText><RadzenText TextStyle="TextStyle.Body1">@file.LinesCovered / @file.LinesValid</RadzenText></RadzenColumn>
+                                    <RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Uncovered"]</RadzenText><RadzenText TextStyle="TextStyle.Body1" class="@((file.LinesValid - file.LinesCovered) > 0 ? "rz-color-warning" : "rz-color-success")">@(file.LinesValid - file.LinesCovered)</RadzenText></RadzenColumn>
+                                </RadzenRow>
+                                <RadzenProgressBar Value="@(file.LineRate * 100)" Max="100" ShowValue="false" class="@CoverageProgressClass(file.LineRate)" />
+                            </RadzenStack>
+                        </Template>
+                        <Columns>
+                            <RadzenDataGridColumn Property="Assembly" Title="@L["Assembly"]" Width="13rem" Sortable="true" />
+                            <RadzenDataGridColumn Property="File" Title="@L["File"]" Sortable="true"><Template Context="file"><span title="@file.File" class="coverage-file-name">@ShortPath(file.File)</span></Template></RadzenDataGridColumn>
+                            <RadzenDataGridColumn Property="LineRate" Title="@L["LineCoverage"]" Width="16rem" Sortable="true">
+                                <Template Context="file"><div class="coverage-file-bar"><RadzenProgressBar Value="@(file.LineRate * 100)" Max="100" ShowValue="false" class="@CoverageProgressClass(file.LineRate)" /><span class="@($"{CoverageColorClass(file.LineRate)} coverage-file-pct")">@FormatPercent(file.LineRate)</span></div></Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn Property="LinesValid" Title="@L["Lines"]" Width="9rem" Sortable="true"><Template Context="file">@file.LinesCovered / @file.LinesValid</Template></RadzenDataGridColumn>
+                        </Columns>
+                    </RadzenDataGrid>
+                }
+            }
+            else
+            {
+                var coverageStep = Run.Steps.FirstOrDefault(s => s.StageName.Contains("Coverage", StringComparison.OrdinalIgnoreCase) && !s.IsSystem);
+                if (coverageStep is not null)
+                {
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-3">
+                        <RadzenBadge BadgeStyle="@GetStepBadge(coverageStep)" Text="@L.Localize(coverageStep.Status)" />
+                        <RadzenText TextStyle="TextStyle.Body1">@coverageStep.StepName</RadzenText>
+                        @if (coverageStep.ServerName is not null) { <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@coverageStep.ServerName</RadzenText> }
+                        @{ var duration = FormatDuration(coverageStep.StartedAt, coverageStep.CompletedAt); }
+                        @if (!string.IsNullOrEmpty(duration)) { <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@duration</RadzenText> }
+                    </RadzenStack>
+                    if (coverageStep.TaskId is { } coverageTaskId)
+                    {
+                        var logs = StepLogs.GetValueOrDefault(coverageTaskId);
+                        if (logs is null) { <RadzenButton Text="@L["Logs"]" Icon="terminal" Size="ButtonSize.Small" Click="@(() => CoverageLogsRequested.InvokeAsync(coverageTaskId))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" /> }
+                        else if (logs.Count > 0) { <PipelineRunLogLines Logs="@logs" Compact="true" /> }
+                        else { <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoCoverageData"]</RadzenText> }
+                    }
+                }
+                else { <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoCoverageData"]</RadzenText> }
+            }
+        </RadzenCard>
+    </RadzenTabsItem>
+}
+
+@if (Run.TestResultSummary is { } tests)
+{
+    <RadzenTabsItem Text="@L["TestResults"]" Icon="science" IconColor="var(--rz-info)">
+        <RadzenCard class="rz-mt-3 rz-p-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">@L["TestResults"]</RadzenText>
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="1.5rem" Wrap="FlexWrap.Wrap">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@tests.TotalTests.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["Total"]</RadzenText></RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@tests.Passed.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["Passed"]</RadzenText></RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="@tests.Failed.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["Failed"]</RadzenText></RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@tests.Skipped.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["Skipped"]</RadzenText></RadzenStack>
+            </RadzenStack>
+        </RadzenCard>
+    </RadzenTabsItem>
+}
+
+@if (HasLintTab)
+{
+    <RadzenTabsItem Text="@L["Lint"]" Icon="rule" IconColor="var(--rz-info)">
+        <RadzenCard class="rz-mt-3 rz-p-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">@L["Lint"]</RadzenText>
+            @if (Run.LintSummary is { } lint)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="1.5rem" Wrap="FlexWrap.Wrap" class="rz-mb-4">
+                    @if (!string.IsNullOrEmpty(lint.Tool)) { <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["LintTool"]</RadzenText><RadzenText TextStyle="TextStyle.Body2">@lint.Tool</RadzenText></RadzenStack> }
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="@(lint.ErrorCount > 0 ? BadgeStyle.Danger : BadgeStyle.Success)" Text="@lint.ErrorCount.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["LintErrors"]</RadzenText></RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="@(lint.WarningCount > 0 ? BadgeStyle.Warning : BadgeStyle.Light)" Text="@lint.WarningCount.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["LintWarnings"]</RadzenText></RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem"><RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@lint.InfoCount.ToString()" /><RadzenText TextStyle="TextStyle.Caption">@L["LintInfo"]</RadzenText></RadzenStack>
+                </RadzenStack>
+            }
+            @foreach (var lintStep in LintSteps)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-3">
+                    <RadzenBadge BadgeStyle="@GetStepBadge(lintStep)" Text="@L.Localize(lintStep.Status)" /><RadzenText TextStyle="TextStyle.Body1">@lintStep.StepName</RadzenText>
+                    @if (lintStep.ServerName is not null) { <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@lintStep.ServerName</RadzenText> }
+                    @{ var duration = FormatDuration(lintStep.StartedAt, lintStep.CompletedAt); }
+                    @if (!string.IsNullOrEmpty(duration)) { <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@duration</RadzenText> }
+                </RadzenStack>
+                @if (lintStep.TaskId is { } lintTaskId)
+                {
+                    var logs = StepLogs.GetValueOrDefault(lintTaskId);
+                    if (logs is null) { <RadzenButton Text="@L["Logs"]" Icon="terminal" Size="ButtonSize.Small" Click="@(() => LintLogsRequested.InvokeAsync(lintTaskId))" class="rz-mb-3" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" /> }
+                    else if (logs.Count > 0) { <PipelineRunLogLines Logs="@logs" HighlightLintWarnings="true" /> }
+                    else { <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-mb-3">@L["NoLogs"]</RadzenText> }
+                }
+            }
+        </RadzenCard>
+    </RadzenTabsItem>
+}
+
+@if (PipelineRunMetrics.HasComplexity(Run))
+{
+    <RadzenTabsItem Text="@L["CodeQuality"]" Icon="code" IconColor="var(--rz-info)">
+        <RadzenCard class="rz-mt-3 rz-p-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-3">@L["CodeQuality"]</RadzenText>
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="1.5rem" Wrap="FlexWrap.Wrap">
+                @{ var averageComplexity = PipelineRunMetrics.Metric(Run, "complexity.cyclomatic.avg") ?? 0; }
+                <RadzenCard class="rz-p-3 coverage-card"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["AvgComplexity"]</RadzenText><RadzenText TextStyle="TextStyle.H4" class="@ComplexityColorClass(averageComplexity)">@averageComplexity.ToString("0.0")</RadzenText></RadzenCard>
+                <RadzenCard class="rz-p-3 coverage-card"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["MaxComplexity"]</RadzenText><RadzenText TextStyle="TextStyle.H4">@((PipelineRunMetrics.Metric(Run, "complexity.cyclomatic.max") ?? 0).ToString("0"))</RadzenText></RadzenCard>
+                @if (PipelineRunMetrics.Metric(Run, "complexity.crap.avg") is { } crap) { <RadzenCard class="rz-p-3 coverage-card"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Crap"]</RadzenText><RadzenText TextStyle="TextStyle.H4" class="@CrapColorClass(crap)">@crap.ToString("0.0")</RadzenText></RadzenCard> }
+                <RadzenCard class="rz-p-3 coverage-card"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["HighComplexity"]</RadzenText><RadzenText TextStyle="TextStyle.H4" class="@((PipelineRunMetrics.Metric(Run, "complexity.high") ?? 0) > 0 ? "rz-color-warning" : "rz-color-success")">@((PipelineRunMetrics.Metric(Run, "complexity.high") ?? 0).ToString("0"))</RadzenText><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">CC &gt; @PipelineRunMetrics.ComplexityHighThreshold</RadzenText></RadzenCard>
+                <RadzenCard class="rz-p-3 coverage-card"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Methods"]</RadzenText><RadzenText TextStyle="TextStyle.H4">@((PipelineRunMetrics.Metric(Run, "complexity.methods") ?? 0).ToString("N0"))</RadzenText></RadzenCard>
+                <RadzenCard class="rz-p-3 coverage-card"><RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["LinesOfCode"]</RadzenText><RadzenText TextStyle="TextStyle.H4">@((PipelineRunMetrics.Metric(Run, "loc.total") ?? 0).ToString("N0"))</RadzenText></RadzenCard>
+            </RadzenStack>
+            @if (Metrics.ComplexityTrend.Count >= 2)
+            {
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mt-4 rz-mb-2">@L["ComplexityTrend"]</RadzenText>
+                <RadzenChart class="coverage-trend-chart">
+                    <RadzenLineSeries Data="@Metrics.ComplexityTrend" CategoryProperty="Label" ValueProperty="AvgCc" Title="@L["AvgComplexity"]" Smooth="true"><RadzenMarkers MarkerType="MarkerType.Circle" /></RadzenLineSeries>
+                    <RadzenLineSeries Data="@Metrics.ComplexityTrend" CategoryProperty="Label" ValueProperty="MaxCc" Title="@L["MaxComplexity"]" Smooth="true" />
+                    @if (Metrics.ComplexityTrend.All(point => point.Crap.HasValue)) { <RadzenLineSeries Data="@Metrics.ComplexityTrend" CategoryProperty="Label" ValueProperty="Crap" Title="@L["Crap"]" Smooth="true" /> }
+                    <RadzenValueAxis Min="0"><RadzenAxisTitle Text="CC / CRAP" /></RadzenValueAxis><RadzenCategoryAxis /><RadzenLegend Position="LegendPosition.Bottom" />
+                </RadzenChart>
+            }
+        </RadzenCard>
+    </RadzenTabsItem>
+}

@@ -1,0 +1,16 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* S-UX-SPKL: compact 24 h availability sparkline - one bar per sample bucket, green=up / red=down. *@
+@if (_bars.Count == 0)
+{
+    <span class="rz-color-secondary">@L["NotAvailable"]</span>
+}
+else
+{
+    <svg width="96" height="18" viewBox="0 0 96 18" role="img" aria-label="@L["Uptime24h"]">
+        @foreach (var bar in _bars)
+        {
+            <rect x="@bar.X" y="0" width="@bar.W" height="18" rx="1"
+                  fill="@(bar.IsUp ? "var(--rz-success)" : "var(--rz-danger)")" />
+        }
+    </svg>
+}

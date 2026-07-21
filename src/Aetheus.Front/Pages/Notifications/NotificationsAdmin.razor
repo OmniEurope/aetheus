@@ -1,0 +1,85 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/notifications"
+@using Aetheus.Shared.Enums
+
+<PageTitle>@L["NotificationRules"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@L["NotificationRules"]" Icon="notifications_active" />
+
+@* Channels: the transports a rule can target. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mt-4 rz-mb-2">
+    <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["NotificationChannels"]</RadzenText>
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+        <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_channelSearch" Change="@(_ => ResetChannelSearchAsync())" />
+        <RadzenButton Text="@L["Create"]" Icon="add" Size="ButtonSize.Small" Click="@(() => OpenChannelDialogAsync(null))" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+</RadzenStack>
+
+<AetheusDataGrid @ref="_channelsGrid" Data="@_channels" Count="@_channelTotalCount"
+    TItem="NotificationChannelDto" IsLoading="@_channelsLoading" LoadData="@LoadChannelsAsync"
+    PageSize="25" AllowFiltering="false" class="rz-mb-6">
+    <EmptyTemplate>
+        <EmptyState Icon="hub" Title="@L["NoNotificationChannels"]" Description="@L["NoNotificationChannelsDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="NotificationChannelDto" Property="Name" Title="@L["Name"]" />
+        <RadzenDataGridColumn TItem="NotificationChannelDto" Property="Type" Title="@L["Type"]" Width="130px">
+            <Template Context="c"><RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@L.Localize(c.Type)" /></Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="NotificationChannelDto" Property="IsEnabled" Title="@L["Status"]" Width="110px">
+            <Template Context="c">
+                <RadzenBadge BadgeStyle="@(c.IsEnabled ? BadgeStyle.Success : BadgeStyle.Light)" Text="@(c.IsEnabled ? L["Active"] : L["Disabled"])" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="NotificationChannelDto" Property="RuleCount" Title="@L["Rules"]" Width="90px" />
+        <RadzenDataGridColumn TItem="NotificationChannelDto" Title="@L["Actions"]" Width="260px" Sortable="false">
+            <Template Context="c">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenButton Icon="send" Size="ButtonSize.ExtraSmall" Text="@L["TestConnection"]"
+                        IsBusy="@(_testing.Contains(c.Id))" Disabled="@(_testing.Contains(c.Id))" Click="@(() => TestChannelAsync(c.Id))" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                    @if (_channelTest.TryGetValue(c.Id, out var r))
+                    {
+                        <RadzenBadge BadgeStyle="@TestBadge(r.Status)" Text="@L.Localize(r.Status)" title="@r.Message" />
+                    }
+                    <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall" Click="@(() => OpenChannelDialogAsync(c))" title="@L["Edit"]" aria-label="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => DeleteChannelAsync(c))" title="@L["Delete"]" aria-label="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+
+@* Rules: event type -> channel mappings. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-2">
+    <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Rules"]</RadzenText>
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+        <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_ruleSearch" Change="@(_ => ResetRuleSearchAsync())" />
+        <RadzenButton Text="@L["Create"]" Icon="add" Size="ButtonSize.Small" Disabled="@(_channelTotalCount == 0)"
+            Click="@(() => OpenRuleDialogAsync(null))" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+</RadzenStack>
+
+<AetheusDataGrid @ref="_rulesGrid" Data="@_rules" Count="@_ruleTotalCount"
+    TItem="NotificationRuleDto" IsLoading="@_rulesLoading" LoadData="@LoadRulesAsync"
+    PageSize="25" AllowFiltering="false">
+    <EmptyTemplate>
+        <EmptyState Icon="rule" Title="@L["NoNotificationRules"]" Description="@L["NoNotificationRulesDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="NotificationRuleDto" Property="EventType" Title="@L["EventType"]">
+            <Template Context="r"><span class="text-mono">@r.EventType</span></Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="NotificationRuleDto" Property="ChannelName" Title="@L["NotificationChannel"]" Width="200px" />
+        <RadzenDataGridColumn TItem="NotificationRuleDto" Property="IsEnabled" Title="@L["Status"]" Width="110px">
+            <Template Context="r">
+                <RadzenBadge BadgeStyle="@(r.IsEnabled ? BadgeStyle.Success : BadgeStyle.Light)" Text="@(r.IsEnabled ? L["Active"] : L["Disabled"])" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="NotificationRuleDto" Title="@L["Actions"]" Width="120px" Sortable="false" TextAlign="TextAlign.Center">
+            <Template Context="r">
+                <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall" Click="@(() => OpenRuleDialogAsync(r))" title="@L["Edit"]" aria-label="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => DeleteRuleAsync(r))" title="@L["Delete"]" aria-label="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

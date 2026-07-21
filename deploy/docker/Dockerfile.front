@@ -1,0 +1,73 @@
+# =============================================================================
+# Dockerfile - Aetheus Frontend (Blazor WebAssembly)
+# =============================================================================
+# syntax=docker/dockerfile:1.7
+FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
+WORKDIR /src
+
+ENV NUGET_PACKAGES=/root/.nuget/packages \
+    DOTNET_NOLOGO=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+COPY Directory.Build.props .
+# Central Package Management: restore needs Directory.Packages.props to resolve every PackageReference
+# version (without it: NU1015), and NuGet.config pins the sole feed. The back Dockerfile copies both;
+# the front was missing them, so the QA/deploy front image build failed at restore.
+COPY Directory.Packages.props .
+COPY NuGet.config .
+COPY src/Aetheus.Shared/Aetheus.Shared.csproj Aetheus.Shared/
+COPY src/Aetheus.Analyzers/Aetheus.Analyzers.csproj Aetheus.Analyzers/
+COPY src/Aetheus.Front/Aetheus.Front.csproj Aetheus.Front/
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+    dotnet restore Aetheus.Front/Aetheus.Front.csproj
+
+COPY src/Aetheus.Shared/ Aetheus.Shared/
+COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
+COPY src/Aetheus.Front/ Aetheus.Front/
+
+# NOT --no-restore: the .csproj-only restore above does not pull the Blazor WASM runtime pack
+# (browser-wasm assets are resolved at publish/build time), so a --no-restore publish fails in
+# ResolvePackageAssets (MSB4018 / FallbackPackagePathResolver). Letting publish restore is cheap -
+# the nuget cache mount already holds every package from the restore layer above.
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+    dotnet publish Aetheus.Front/Aetheus.Front.csproj \
+        -c Release \
+        -o /app/publish -p:StaticWebAssetsPublishFingerprint=false
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS server-build
+WORKDIR /server
+
+ENV NUGET_PACKAGES=/root/.nuget/packages \
+    DOTNET_NOLOGO=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+    dotnet new web --no-https --name StaticServer
+WORKDIR /server/StaticServer
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+    dotnet add package Microsoft.AspNetCore.Components.WebAssembly.Server
+
+COPY deploy/docker/StaticServer.Program.cs Program.cs
+
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+    dotnet publish -c Release -o /server/publish --nologo
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
+WORKDIR /app
+
+COPY --from=server-build /server/publish .
+COPY --from=build /app/publish/wwwroot ./wwwroot
+
+COPY deploy/docker/entrypoint-front.sh /entrypoint.sh
+# chmod 0755 (absolute mode), NOT `chmod +x`: COPY preserves the build-context file's perms, and the
+# agent's checkout can leave entrypoint-front.sh mode 6xx; `+x` then yields 7xx with no world-read, so the
+# non-root `app` user cannot open it (`/bin/sh: cannot open /entrypoint.sh: Permission denied` -> crash-loop).
+# 0755 forces rwxr-xr-x = world-readable+executable. Same fix already applied to Dockerfile.back's entrypoint.
+RUN sed -i 's/\r//' /entrypoint.sh && chmod 0755 /entrypoint.sh
+RUN chown -R app:app /app/wwwroot
+
+EXPOSE 8080
+
+USER app
+
+ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]

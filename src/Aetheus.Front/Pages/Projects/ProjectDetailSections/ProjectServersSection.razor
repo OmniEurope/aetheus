@@ -1,0 +1,70 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_servers is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="1rem">
+        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Servers"]</RadzenText>
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_totalCount.ToString()" />
+        <div class="flex-spacer"></div>
+        <RadzenButton Icon="add" Text="@L["Add"]" Size="ButtonSize.Small" Click="@OpenAddDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+
+    <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search" Change="@OnSearchChangedAsync"
+        class="pipeline-list-search rz-mb-2" />
+    <AetheusDataGrid @ref="_grid" Data="@_servers" TItem="ProjectServerDto"
+                        Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
+                        PageSize="25" EmptyText="@L["NoRecords"]" class="aetheus-clickable-rows"
+                        RowClick="@OnRowClick">
+            <EmptyTemplate>
+                <EmptyState Icon="dns" Title="@L["NoRecords"]" />
+            </EmptyTemplate>
+            <Columns>
+                <RadzenDataGridColumn TItem="ProjectServerDto" Property="DisplayName" Title="@L["Name"]">
+                    <Template Context="s">
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                            <RadzenIcon Icon="@(s.Type == ProjectServerType.AgentServer ? "memory" : "language")"
+                                        class="@(s.Type == ProjectServerType.AgentServer ? "rz-color-info" : "rz-color-warning")" />
+                            @if (s.Type == ProjectServerType.AgentServer && s.ServerId.HasValue)
+                            {
+                                <a href="/servers/@s.ServerId/overview" @onclick:stopPropagation="true">@s.DisplayName</a>
+                            }
+                            else
+                            {
+                                @s.DisplayName
+                            }
+                        </RadzenStack>
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="ProjectServerDto" Property="Host" Title="@L["Host"]" />
+                <RadzenDataGridColumn TItem="ProjectServerDto" Property="Port" Title="@L["Port"]" Width="90px" />
+                <RadzenDataGridColumn TItem="ProjectServerDto" Property="Type" Title="@L["Type"]" Width="140px">
+                    <Template Context="s">
+                        <RadzenBadge BadgeStyle="@GetTypeBadge(s.Type)" Text="@L[s.Type.ToString()]" />
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="ProjectServerDto" Title="@L["Status"]" Width="120px" Sortable="false">
+                    <Template Context="s">
+                        @if (s.Type == ProjectServerType.AgentServer && s.ServerStatus.HasValue)
+                        {
+                            <RadzenBadge BadgeStyle="@GetStatusBadge(s.ServerStatus)" Text="@L[s.ServerStatus.ToString()!]" />
+                        }
+                        else
+                        {
+                            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@L["External"]" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="ProjectServerDto" Title="" Width="100px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="s">
+                        <span @onclick:stopPropagation="true">
+                            <RadzenButton Icon="edit" Size="ButtonSize.Small" Click="@(() => OpenEditDialogAsync(s))" Title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                            <RadzenButton Icon="delete" Size="ButtonSize.Small" Click="@(() => DeleteServerAsync(s))" Title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                        </span>
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </AetheusDataGrid>
+}

@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Shared.DTOs;
+
+namespace Aetheus.Back.Components.ExternalRepos;
+
+/// <summary>
+/// Registration surface for mirror-backed external repositories (Features:ExternalRepos).
+/// Enforces exactly-one-source (XOR) per project and keeps every credential on the backend.
+/// </summary>
+public interface IExternalRepoService
+{
+    /// <summary>True when the feature flag is on; controllers 404 the whole surface otherwise.</summary>
+    bool IsEnabled { get; }
+
+    Task<ExternalRepoDto?> GetForProjectAsync(int projectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Attaches an external repo to a project: persists the credential, the connection and the mirror
+    /// pointer, runs a connectivity probe, performs the initial mirror clone, and marks the project's
+    /// source as external. Throws <c>ConflictException</c> if the project already has a source.
+    /// </summary>
+    Task<ExternalRepoDto> AttachAsync(AttachExternalRepoRequest request, CancellationToken ct = default);
+
+    /// <summary>Triggers an immediate mirror refresh for the project's external source.</summary>
+    Task<ExternalRepoDto?> SyncNowAsync(int projectId, CancellationToken ct = default);
+
+    /// <summary>Detaches the external source (removes connection + mirror + credential, reverts the project).</summary>
+    Task<bool> DetachAsync(int projectId, CancellationToken ct = default);
+}

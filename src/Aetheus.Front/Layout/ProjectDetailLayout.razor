@@ -1,0 +1,52 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Project detail shared layout - simplified version of ServerDetailLayout.
+
+    Each project section page sets `@layout ProjectDetailLayout` and only renders its own
+    body. The header bar, status badge, and back button live here once.
+
+    The loader is shared (scoped DI) so all sections see the same ProjectDetailDto.
+
+    IMPORTANT: @Body is always rendered (hidden when loading) so child pages can trigger
+    the data load via their OnParametersSetAsync → EnsureLoadedAsync. Gating @Body behind
+    an if-block creates a deadlock: the layout waits for data, but the child (which triggers
+    the load) never mounts. *@
+
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject Aetheus.Front.Services.ProjectDetailLoader Loader
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+@inject Microsoft.AspNetCore.Components.NavigationManager Nav
+
+@using Aetheus.Shared.Enums
+
+<CascadingValue Value="Loader" Name="ProjectLoader">
+    @if (Loader.Project is null && !Loader.InitialLoadCompleted)
+    {
+        <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate"
+            Size="ProgressBarCircularSize.Large" />
+    }
+    else if (Loader.Project is null)
+    {
+        <RadzenStack AlignItems="AlignItems.Center" Gap="1rem" class="rz-p-8">
+            <RadzenIcon Icon="error" class="error-state-icon" />
+            <RadzenText TextStyle="TextStyle.H5">@L["ProjectNotFound"]</RadzenText>
+            <Aetheus.Front.Shared.BrowserBackButton Text="@L["BackToProjects"]" Title="@L["GoBack"]" />
+        </RadzenStack>
+    }
+    else
+    {
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
+            class="rz-mb-4 detail-page-header" Gap="1rem">
+            <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
+            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@Loader.Project.Name</RadzenText>
+            <RadzenBadge BadgeStyle="@(Loader.Project.Status == ProjectStatus.Active ? BadgeStyle.Success : BadgeStyle.Light)"
+                Text="@L[Loader.Project.Status.ToString()]" />
+            <div class="flex-spacer"></div>
+            <RadzenButton Icon="edit" Text="@L["Edit"]" Click="@(() => Nav.NavigateTo($"/projects/{Loader.Project.Id}/edit"))" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+        </RadzenStack>
+    }
+
+    <div class="@(Loader.Project is null ? "blade-content blade-content-hidden" : "blade-content")">
+        @Body
+    </div>
+</CascadingValue>

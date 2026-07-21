@@ -1,0 +1,41 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Item #3 of the plan - visible during an agent self-update on the server detail page.
+   Driven by the existing server-group hub via three events:
+     - AgentUpdateQueued       → enters Queued (0%)
+     - AgentUpdateProgress     → walks through PickedUp → LaunchingUpdater (10–80%)
+     - ServerOffline           → AgentOffline (95%)
+     - Heartbeat (post-update) → Done (100%) → auto-hide after 5s
+
+   The card is invisible at rest (Phase == null). It does NOT own its own HubConnection -
+   it reuses the parent ServerDetail page's connection by accepting it as a parameter, so
+   we don't double-subscribe on the server group. *@
+
+@if (_phase is not null && _phase != AgentUpdatePhase.Done || _showDoneUntil > DateTime.Now)
+{
+    <RadzenCard class="@($"rz-mb-4 agent-update-progress-card {(_fadingOut ? "is-fading-out" : "")}")">
+        <RadzenStack Gap="0.5rem">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenIcon Icon="@PhaseIcon(_phase)" class="@PhaseIconClass(_phase)" />
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">
+                    @(_phase == AgentUpdatePhase.Failed ? L["AgentUpdateFailed"] : L["AgentUpdateInProgress"])
+                </RadzenText>
+                <div class="flex-spacer"></div>
+                <RadzenBadge BadgeStyle="@PhaseBadge(_phase)" Text="@L[PhaseLabel(_phase)]" />
+            </RadzenStack>
+            <RadzenProgressBar Value="@_percent" Max="100" ShowValue="false"
+                Mode="@(_phase == AgentUpdatePhase.AgentOffline ? ProgressBarMode.Indeterminate : ProgressBarMode.Determinate)"
+                class="metric-bar metric-bar-thin" />
+            @if (!string.IsNullOrWhiteSpace(_message))
+            {
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@_message</RadzenText>
+            }
+            @if (_phase == AgentUpdatePhase.Failed)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End">
+                    <RadzenButton Icon="replay" Text="@L["Retry"]" Size="ButtonSize.Small"
+                        Click="@RetryAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                </RadzenStack>
+            }
+        </RadzenStack>
+    </RadzenCard>
+}

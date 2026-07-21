@@ -1,0 +1,98 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Item #7 of the plan - top-bar task tracker. Bell-style icon with a numeric badge, click to
+   reveal a popover with the in-flight task list. Lives in MainLayout between Help and the user
+   menu. Stays out of the way when nothing is running (no badge, light icon). *@
+
+<div class="task-tracker-container">
+    <RadzenButton ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+        Click="@TogglePopover"
+        title="@string.Format(L["TaskTrackerTooltip"], _count)"
+        aria-label="@string.Format(L["TaskTrackerTooltip"], _count)"
+        aria-haspopup="dialog"
+        aria-controls="task-tracker-popover"
+        aria-expanded="@_popoverOpen"
+        class="header-action-btn task-tracker-btn">
+        <RadzenIcon Icon="@(_count > 0 ? "pending_actions" : "task_alt")" class="header-icon" />
+        @if (_count > 0)
+        {
+            <span class="task-tracker-badge">@_count</span>
+        }
+    </RadzenButton>
+
+    @if (_popoverOpen)
+    {
+        <div @onclick="@(() => _popoverOpen = false)" class="task-tracker-backdrop"></div>
+        <RadzenCard id="task-tracker-popover" role="dialog" aria-modal="false" aria-labelledby="task-tracker-title" class="task-tracker-popover">
+            <div class="rz-px-4 rz-py-3 task-tracker-header">
+                <RadzenText id="task-tracker-title" TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["TaskTrackerTitle"]</RadzenText>
+                <RadzenBadge BadgeStyle="@(_count > 0 ? BadgeStyle.Info : BadgeStyle.Light)" Text="@_count.ToString()" />
+            </div>
+            <div class="task-tracker-list">
+                @if (_count == 0)
+                {
+                    <div class="task-tracker-empty">
+                        <RadzenIcon Icon="inbox" class="task-tracker-empty-icon" />
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["TaskTrackerEmpty"]</RadzenText>
+                    </div>
+                }
+                else if (_count <= 5)
+                {
+                    @foreach (var task in Tracker.Tasks)
+                    {
+                        <a href="@($"/servers/{task.ServerId}/tasks")" class="task-tracker-row" @onclick="@(() => _popoverOpen = false)">
+                            <RadzenIcon Icon="@StatusIcon(task.Status)" class="@StatusIconClass(task.Status)" />
+                            <div class="task-tracker-row-body">
+                                <div class="task-tracker-row-name">@task.Name</div>
+                                <div class="task-tracker-row-meta">
+                                    @(string.IsNullOrWhiteSpace(task.ServerName) ? $"#{task.ServerId}" : task.ServerName)
+                                    · @(IsStalledOnOfflineAgent(task) ? L["TaskAgentOffline"] : L[$"TaskStatus_{task.Status}"])
+                                </div>
+                            </div>
+                            @if (task.Status == TaskExecutionStatus.Running)
+                            {
+                                <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.ExtraSmall" />
+                            }
+                            else if (IsStalledOnOfflineAgent(task))
+                            {
+                                <RadzenIcon Icon="cloud_off" class="task-tracker-row-offline" title="@L["TaskAgentOfflineHint"]" />
+                            }
+                        </a>
+                    }
+                }
+                else
+                {
+                    @* S-UX-08: group by server when count > 5 for readability *@
+                    @foreach (var group in Tracker.Tasks.GroupBy(t => new { t.ServerId, t.ServerName }).OrderBy(g => g.Key.ServerName))
+                    {
+                        <div class="task-tracker-group-header">
+                            <RadzenIcon Icon="dns" class="task-tracker-group-icon" />
+                            <span class="task-tracker-group-name">@(string.IsNullOrWhiteSpace(group.Key.ServerName) ? $"#{group.Key.ServerId}" : group.Key.ServerName)</span>
+                            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@group.Count().ToString()" class="task-tracker-group-badge" />
+                        </div>
+                        @foreach (var task in group)
+                        {
+                            <a href="@($"/servers/{task.ServerId}/tasks")" class="task-tracker-row task-tracker-row-grouped" @onclick="@(() => _popoverOpen = false)">
+                                <RadzenIcon Icon="@StatusIcon(task.Status)" class="@StatusIconClass(task.Status)" />
+                                <div class="task-tracker-row-body">
+                                    <div class="task-tracker-row-name">@task.Name</div>
+                                    <div class="task-tracker-row-meta">@(IsStalledOnOfflineAgent(task) ? L["TaskAgentOffline"] : L[$"TaskStatus_{task.Status}"])</div>
+                                </div>
+                                @if (task.Status == TaskExecutionStatus.Running)
+                                {
+                                    <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.ExtraSmall" />
+                                }
+                                else if (IsStalledOnOfflineAgent(task))
+                                {
+                                    <RadzenIcon Icon="cloud_off" class="task-tracker-row-offline" title="@L["TaskAgentOfflineHint"]" />
+                                }
+                            </a>
+                        }
+                    }
+                }
+            </div>
+            <div class="rz-px-4 rz-py-2 task-tracker-footer">
+                <a href="/tasks" @onclick="@(() => _popoverOpen = false)">@L["TaskTrackerSeeAll"]</a>
+            </div>
+        </RadzenCard>
+    }
+</div>

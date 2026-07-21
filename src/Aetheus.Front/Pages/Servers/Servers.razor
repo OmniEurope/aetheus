@@ -1,0 +1,173 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers"
+@using Aetheus.Front.Helpers
+
+<PageTitle>@L["Servers"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@L["Servers"]" Icon="dns">
+    <ChildContent>
+        <HelpLink PageKey="servers" />
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+    </ChildContent>
+    <Actions>
+        <div class="column-chooser-wrap">
+            <RadzenButton Icon="view_column" Size="ButtonSize.Small"
+                Click="@ToggleColumnChooser" aria-label="@L["ChooseColumns"]" title="@L["ChooseColumns"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            @if (_showColumnChooser)
+            {
+                <RadzenCard class="column-chooser-popup">
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["ChooseColumns"]</RadzenText>
+                    <RadzenStack Gap="0.25rem">
+                        @foreach (var col in _columnLabels)
+                        {
+                            <LabeledToggle Value="@IsColumnVisible(col.Key)"
+                                ValueChanged="@(v => OnColumnVisibilityChanged(col.Key, v))" Text="@col.Value" />
+                        }
+                    </RadzenStack>
+                </RadzenCard>
+            }
+        </div>
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small"
+            Click="@ResetAndReload" aria-label="@L["Refresh"]" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        <RadzenButton Text="@L["UpdateAllAgents"]" Icon="system_update_alt" Size="ButtonSize.Small"
+            Click="@OnUpdateAllAgents" Disabled="@(!_canWrite)"
+            title="@(!_canWrite ? L["InsufficientPermissions"] : "")" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Text="@L["AddAgent"]" Icon="add" Size="ButtonSize.Small" Click="@GoToAddAgent" Disabled="@(!_canWrite)"
+            title="@(!_canWrite ? L["InsufficientPermissions"] : "")" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </Actions>
+    <Filters>
+        <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+        <RadzenTextBox Placeholder="@L["SearchServers"]" @bind-Value="_search" Change="@ResetAndReload"
+            class="server-list-search" />
+        <RadzenDropDown TValue="ServerType?" Data="@_typeOptions" TextProperty="Text" ValueProperty="Value"
+            Placeholder="@L["AllTypes"]" AllowClear="true" @bind-Value="_typeFilter" Change="@(_ => ResetAndReload())" />
+        <RadzenDropDown TValue="ServerStatus?" Data="@_statusOptions" TextProperty="Text" ValueProperty="Value"
+            Placeholder="@L["AllStatuses"]" AllowClear="true" @bind-Value="_statusFilter" Change="@(_ => ResetAndReload())" />
+        @if (_typeFilter.HasValue || _statusFilter.HasValue || !string.IsNullOrEmpty(_search))
+        {
+            <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small"
+                Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+    </Filters>
+</Aetheus.Front.Shared.PageHeader>
+
+<AetheusDataGrid @ref="_grid" TItem="ServerDto" Data="@_servers"
+    Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadData"
+    RowClick="@(s => Navigation.NavigateTo($"/servers/{s.Id}/overview"))" FullHeight="true" class="server-list-grid">
+    <EmptyTemplate>
+        <EmptyState Icon="dns" Title="@L["EmptyServersTitle"]" Description="@L["EmptyServersHint"]">
+            <ActionContent>
+                <RadzenButton Text="@L["AddAgent"]" Icon="add" Size="ButtonSize.Small" Click="@GoToAddAgent" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="ServerDto" Property="Name" Title="@L["Name"]" MinWidth="180px">
+            <Template Context="server">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <span class="server-status-dot @(server.Status == ServerStatus.Online ? "server-status-online" : "server-status-offline")"></span>
+                    <NavLink href="@($"/servers/{server.Id}/overview")" class="server-name-link">@server.Name</NavLink>
+                    @if (!Permissions.CanWrite(ResourceType.Server, server.Id))
+                    {
+                        <RadzenIcon Icon="lock" class="rz-color-secondary icon-xs-app"
+                            title="@L["Read"]" />
+                    }
+                    @if (server.InsecureTls)
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Warning" Icon="gpp_maybe" Text="@L["InsecureTlsBadge"]"
+                            title="@L["InsecureTlsHint"]" />
+                    }
+                    @if (server.DeploymentTargetAvailable == true)
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Info" Icon="cloud_upload" Text="@L["DeploymentTargetBadge"]"
+                            title="@L["DeploymentTargetHint"]" />
+                    }
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerDto" Property="Type" Title="@L["Type"]" Width="130px" Visible="@IsColumnVisible("Type")">
+            <Template Context="server">
+                <RadzenBadge BadgeStyle="@ServerTypeHelper.GetBadgeStyle(server.Type)" class="rz-display-flex rz-align-items-center rz-gap-1">
+                    <ChildContent>
+                        <RadzenIcon Icon="@ServerTypeHelper.GetIcon(server.Type)" class="icon-md-app" />
+                        @L.Localize(server.Type)
+                    </ChildContent>
+                </RadzenBadge>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerDto" Property="Status" Title="@L["Status"]" Width="110px">
+            <Template Context="server">
+                @if (server.Status == ServerStatus.Online)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L.Localize(server.Status)" />
+                }
+                else
+                {
+                    <span title="@OfflineReason(server)">
+                        <RadzenBadge BadgeStyle="@ServerHeartbeatHelper.Severity(server.LastHeartbeat)"
+                            Text="@L.Localize(server.Status)" />
+                    </span>
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerDto" Property="Hostname" Title="@L["Hostname"]" MinWidth="150px" Visible="@IsColumnVisible("Hostname")" />
+        <RadzenDataGridColumn TItem="ServerDto" Property="OsDescription" Title="@L["OS"]" MinWidth="200px" Visible="@IsColumnVisible("OsDescription")">
+            <Template Context="server">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    @* F-33: inline style sets a CSS custom property from runtime data (per-OS icon colour);
+                       documented exception to the no-inline-style rule. *@
+                    <RadzenIcon Icon="@OsIconHelper.GetIcon(server.OsDescription)"
+                        class="@($"server-os-icon {OsIconHelper.GetColorClass(server.OsDescription)}")"
+                        title="@L[OsIconHelper.GetFamilyLabel(server.OsDescription)]" />
+                    <span>@server.OsDescription</span>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerDto" Property="AgentVersion" Title="@L["AgentVersion"]" Width="140px" Visible="@IsColumnVisible("AgentVersion")" />
+        <RadzenDataGridColumn TItem="ServerDto" Title="@L["Tags"]" Width="220px" Sortable="false" Visible="@IsColumnVisible("Tags")">
+            <Template Context="server">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" Wrap="FlexWrap.Wrap">
+                    @{ var visibleTags = server.Tags.Take(3).ToList(); }
+                    @foreach (var tag in visibleTags)
+                    {
+                        <RadzenButton Text="@tag" Icon="label" class="tag-filter-button"
+                            Click="@(() => FilterByTag(tag))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    }
+                    @if (server.Tags.Count > 3)
+                    {
+                        <details class="tag-more-details">
+                            <summary>@($"+{server.Tags.Count - 3}")</summary>
+                            <span class="tag-more-content">@string.Join(", ", server.Tags.Skip(3))</span>
+                        </details>
+                    }
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerDto" Property="LastHeartbeat" Title="@L["LastHeartbeat"]" Width="170px" Visible="@IsColumnVisible("LastHeartbeat")">
+            <Template Context="server">
+                @if (server.LastHeartbeat.Year >= 2000)
+                {
+                    <span title="@server.LastHeartbeat.ToString("g")">@RelativeTime.FormatAgo(L, server.LastHeartbeat)</span>
+                }
+                else
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["Never"]</RadzenText>
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServerDto" Title="" Width="120px" Sortable="false" Filterable="false" TextAlign="TextAlign.Center">
+            <Template Context="server">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" JustifyContent="JustifyContent.Center"
+                    @onclick:stopPropagation="true">
+                    <RadzenButton Icon="cell_tower" Size="ButtonSize.Small" Click="@(() => OnContactAgent(server))"
+                        title="@L["ContactAgent"]" aria-label="@L["ContactAgent"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    @if (Permissions.CanWrite(ResourceType.Server, server.Id))
+                    {
+                        <RadzenButton Icon="delete" Size="ButtonSize.Small" Click="@(() => OnDeleteServer(server))"
+                            title="@L["Delete"]" aria-label="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                    }
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

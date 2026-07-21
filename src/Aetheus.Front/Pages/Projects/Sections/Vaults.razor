@@ -1,0 +1,12 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/vaults"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Vaults"] - Aetheus</PageTitle>
+
+@* 0-a: project-scoped vaults render through the shared VaultsList (self-loading). *@
+@if (Loader?.Project is not null)
+{
+    <VaultsList ProjectId="Id" />
+}

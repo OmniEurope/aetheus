@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Data.Entities;
+
+namespace Aetheus.Back.Components.Auth;
+
+public interface IAuthRepository
+{
+    Task<RegistrationToken?> FindValidRegistrationTokenAsync(string token, CancellationToken ct = default);
+
+    Task<Server?> FindServerByHostnameAsync(string hostname, CancellationToken ct = default);
+
+    Task<User?> FindUserWithRolesAsync(string username, CancellationToken ct = default);
+    Task<User?> FindUserByIdWithRolesAsync(int userId, CancellationToken ct = default);
+
+    Task<bool> AnyUsersExistAsync(CancellationToken ct = default);
+
+    Task AddUserAsync(User user, CancellationToken ct = default);
+
+    void AddServer(Server server);
+
+    void AddServerToken(ServerToken serverToken);
+
+    void AddRegistrationToken(RegistrationToken token);
+
+    Task<List<RegistrationToken>> GetRegistrationTokensAsync(CancellationToken ct = default);
+
+    Task<RegistrationToken?> FindRegistrationTokenByIdAsync(int id, CancellationToken ct = default);
+
+    Task<int?> ValidateServerTokenHashAsync(string tokenHash, CancellationToken ct = default);
+
+    Task RevokeServerTokensAsync(int serverId, CancellationToken ct = default);
+
+    /// <summary>Latest expiry among the server's still-active (non-revoked, unexpired) tokens, or null if none.</summary>
+    Task<DateTime?> GetLatestActiveServerTokenExpiryAsync(int serverId, CancellationToken ct = default);
+
+    /// <summary>Removes already-dead (revoked or expired) token rows for the server. Active tokens are untouched.</summary>
+    Task<int> DeleteExpiredServerTokensAsync(int serverId, CancellationToken ct = default);
+
+    Task<bool> ServerExistsAsync(int serverId, CancellationToken ct = default);
+
+    Task<bool> ServerHasActiveTokensAsync(int serverId, CancellationToken ct = default);
+
+    Task<bool> ConsumeRegistrationTokenAsync(int tokenId, int? serverId, CancellationToken ct = default);
+
+    Task LinkServerToEnvironmentsByNameAsync(int serverId, IReadOnlyCollection<string> environmentNames, CancellationToken ct = default);
+
+    Task<ExternalLogin?> FindExternalLoginAsync(string provider, string providerSubjectId, CancellationToken ct = default);
+
+    Task AddExternalLoginAsync(ExternalLogin externalLogin, CancellationToken ct = default);
+
+    Task<string?> GetSecurityStampAsync(int userId, CancellationToken ct = default);
+
+    Task BumpSecurityStampAsync(int userId, CancellationToken ct = default);
+
+    // --- Lockout (F-011) ---
+    Task IncrementFailedLoginAsync(int userId, CancellationToken ct = default);
+    Task ResetFailedLoginAsync(int userId, CancellationToken ct = default);
+    Task LockoutUserAsync(int userId, DateTime lockoutEndUtc, CancellationToken ct = default);
+    Task ClearLockoutAsync(int userId, CancellationToken ct = default);
+
+    // --- Refresh Tokens (F-012) ---
+    Task AddRefreshTokenAsync(RefreshToken token, CancellationToken ct = default);
+    Task<RefreshToken?> FindRefreshTokenByHashAsync(string tokenHash, CancellationToken ct = default);
+    Task RevokeRefreshTokenAsync(int tokenId, int? replacedById, CancellationToken ct = default);
+    Task RevokeAllUserRefreshTokensAsync(int userId, CancellationToken ct = default);
+    Task DeleteExpiredRefreshTokensAsync(int userId, CancellationToken ct = default);
+    Task<int> DeleteAllExpiredRefreshTokensAsync(DateTime utcNow, CancellationToken ct = default);
+
+    // --- TOTP (F-010) ---
+    Task<User?> FindUserByIdForUpdateAsync(int userId, CancellationToken ct = default);
+
+    Task SaveChangesAsync(CancellationToken ct = default);
+}

@@ -1,0 +1,39 @@
+# =============================================================================
+# Dockerfile - Aetheus Agent (.NET 10 Worker Service)
+# =============================================================================
+# NOTE: not referenced by any compose file — the agent normally installs onto a host via
+# install-agent-linux.sh, not as a container. Kept for containerized agent smoke-testing. The build
+# below is Central-Package-Management aware: Directory.Packages.props / Directory.Build.props /
+# NuGet.config MUST be present before `dotnet restore`, or restore fails (PackageReference entries
+# carry no Version=). The csproj files sit one level below these props (/src/<proj>), so MSBuild walks
+# up to /src and finds them there.
+# =============================================================================
+FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
+WORKDIR /src
+
+# CPM + build conventions — required for restore to resolve centrally-managed versions.
+COPY Directory.Packages.props Directory.Build.props NuGet.config ./
+
+COPY src/Aetheus.Shared/Aetheus.Shared.csproj Aetheus.Shared/
+COPY src/Aetheus.Agent.Core/Aetheus.Agent.Core.csproj Aetheus.Agent.Core/
+COPY src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj Aetheus.Agent.Linux/
+RUN dotnet restore Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj
+
+COPY src/Aetheus.Shared/ Aetheus.Shared/
+COPY src/Aetheus.Agent.Core/ Aetheus.Agent.Core/
+COPY src/Aetheus.Agent.Linux/ Aetheus.Agent.Linux/
+
+RUN dotnet publish Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj -c Release -o /app/publish
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
+WORKDIR /app
+
+COPY --from=build /app/publish .
+
+RUN useradd -r -s /bin/false aetheus-agent \
+    && mkdir -p /var/lib/aetheus-agent \
+    && chown aetheus-agent:aetheus-agent /var/lib/aetheus-agent
+
+USER aetheus-agent
+
+ENTRYPOINT ["dotnet", "Aetheus.Agent.Linux.dll"]

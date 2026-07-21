@@ -1,0 +1,67 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-001 phase 1: monitored-apps (availability) list for a project. *@
+<RadzenRow AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-3">
+    <RadzenText TextStyle="TextStyle.H6" class="rz-mb-0">@L["MonitoredApps"]</RadzenText>
+    @if (_canWrite)
+    {
+        <RadzenButton Text="@L["AddMonitoredApp"]" Icon="add" Click="@OpenCreateDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    }
+</RadzenRow>
+
+<RadzenDataGrid Data="@_apps" TItem="MonitoredAppDto" AllowSorting="true" Density="Density.Compact"
+                IsLoading="@_loading" EmptyText="@L["NoMonitoredApps"]" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+    <Columns>
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Title="@L["Status"]" Width="160px" Sortable="false">
+            <Template Context="app">
+                @if (app.CurrentStatus == AppHealthStatus.Unknown)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Variant="Variant.Outlined" Text="@L["AppHealthNeverProbed"]" />
+                }
+                else
+                {
+                    <RadzenBadge BadgeStyle="@StatusBadge(app.CurrentStatus)" Text="@StatusLabel(app.CurrentStatus)" />
+                }
+                @if (app.IngestDroppedCount > 0)
+                {
+                    <span title="@L["AppThrottledHint"]" class="rz-ms-1">
+                        <RadzenBadge BadgeStyle="BadgeStyle.Warning" Variant="Variant.Outlined" Text="@L["AppThrottled"]" />
+                    </span>
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Property="Name" Title="@L["Name"]" />
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Property="ProbeUrl" Title="@L["ProbeUrl"]">
+            <Template Context="app">
+                <span class="rz-text-truncate">@(string.IsNullOrEmpty(app.ProbeUrl) ? L["NotAvailable"].Value : app.ProbeUrl)</span>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Title="@L["HostingServer"]" Sortable="false">
+            <Template Context="app">@FormatServer(app)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Title="@L["Uptime24h"]" Width="150px" Sortable="false">
+            <Template Context="app">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.4rem" AlignItems="AlignItems.Center">
+                    <AvailabilitySparkline Samples="@SamplesFor(app.Id)" />
+                    <span>@FormatUptime(app.Uptime24h)</span>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Title="@L["Uptime7d"]" Width="110px" Sortable="false">
+            <Template Context="app">@FormatUptime(app.Uptime7d)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="MonitoredAppDto" Property="LastResponseTimeMs" Title="@L["ResponseTime"]" Width="120px">
+            <Template Context="app">@(app.LastResponseTimeMs is { } ms ? $"{ms} ms" : L["NotAvailable"].Value)</Template>
+        </RadzenDataGridColumn>
+        @if (_canWrite)
+        {
+            <RadzenDataGridColumn TItem="MonitoredAppDto" Title="@L["Actions"]" Width="110px" Sortable="false" Filterable="false">
+                <Template Context="app">
+                    <RadzenButton Icon="edit" Size="ButtonSize.Small"
+                                  Click="@(() => OpenEditDialogAsync(app))" title="@L["Edit"]" class="rz-mr-1" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenButton Icon="delete" Size="ButtonSize.Small"
+                                  Click="@(() => DeleteAppAsync(app))" title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        }
+    </Columns>
+</RadzenDataGrid>

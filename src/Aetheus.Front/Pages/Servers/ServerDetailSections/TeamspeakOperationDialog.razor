@@ -1,0 +1,84 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenTemplateForm TItem="TeamspeakDialogModel" Data="@_model" Submit="@Submit">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="0.75rem">
+        @if (Mode == TeamspeakDialogMode.SnapshotDeploy)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Warning" Shade="Shade.Lighter" AllowClose="false">@L["SnapshotDeployWarning"]</RadzenAlert>
+            <RadzenFormField Text="@L["SnapshotBlob"]"><RadzenTextArea @bind-Value="_model.SnapshotBlob" Rows="6" MaxLength="5000000" Placeholder="@L["SnapshotBlobPlaceholder"]" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.SnapshotBlob)" />
+            <RadzenFormField Text="@string.Format(L["SnapshotConfirmation"], ServerName)"><RadzenTextBox @bind-Value="_model.Confirmation" MaxLength="200" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.Confirmation)" />
+        }
+        else if (Mode == TeamspeakDialogMode.Setup)
+        {
+            <RadzenFormField Text="@L["InstallPath"]"><RadzenTextBox @bind-Value="_model.InstallPath" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.InstallPath)" />
+            <RadzenFormField Text="@L["VoicePort"]"><RadzenNumeric TValue="int" @bind-Value="_model.VoicePort" Min="1024" Max="65535" /></RadzenFormField>
+            <RadzenFormField Text="@L["QueryPort"]"><RadzenNumeric TValue="int" @bind-Value="_model.QueryPort" Min="1024" Max="65535" /></RadzenFormField>
+        }
+        else if (Mode == TeamspeakDialogMode.Kick)
+        {
+            <RadzenText TextStyle="TextStyle.Body1">@string.Format(L["ConfirmKickClient"], _model.Nickname)</RadzenText>
+            <RadzenFormField Text="@L["KickReason"]"><RadzenTextBox @bind-Value="_model.Reason" /></RadzenFormField>
+        }
+        else if (Mode == TeamspeakDialogMode.Move)
+        {
+            <RadzenText TextStyle="TextStyle.Body1">@string.Format(L["ConfirmMoveClient"], _model.Nickname)</RadzenText>
+            <RadzenFormField Text="@L["TargetChannel"]"><RadzenDropDown @bind-Value="_model.TargetChannelId" TValue="int" Data="@Channels" TextProperty="Name" ValueProperty="Id" Placeholder="@L["SelectChannel"]" /></RadzenFormField>
+            <RadzenFormField Text="@L["ChannelPasswordOptional"]"><RadzenPassword @bind-Value="_model.Password" /></RadzenFormField>
+        }
+        else if (Mode == TeamspeakDialogMode.GracefulRestart)
+        {
+            <RadzenText TextStyle="TextStyle.Body1">@L["GracefulRestartBody"]</RadzenText>
+            <RadzenFormField Text="@L["WarningSeconds"]"><RadzenNumeric TValue="int" @bind-Value="_model.WarningSeconds" Min="0" Max="600" /></RadzenFormField>
+            <RadzenFormField Text="@L["WarningMessage"]"><RadzenTextBox @bind-Value="_model.Message" MaxLength="200" /></RadzenFormField>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["WarningMessageHint"]</RadzenText>
+        }
+        else if (Mode == TeamspeakDialogMode.Poke)
+        {
+            <RadzenText TextStyle="TextStyle.Body1">@string.Format(L["ConfirmPokeClient"], _model.Nickname)</RadzenText>
+            <RadzenFormField Text="@L["PokeMessage"]"><RadzenTextArea @bind-Value="_model.Message" Rows="3" MaxLength="200" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.Message)" />
+        }
+        else if (Mode == TeamspeakDialogMode.Ban)
+        {
+            <RadzenText TextStyle="TextStyle.Body1">@string.Format(L["ConfirmBanClient"], _model.Nickname)</RadzenText>
+            <RadzenFormField Text="@L["BanReason"]"><RadzenTextBox @bind-Value="_model.Reason" /></RadzenFormField>
+            <RadzenFormField Text="@L["BanDuration"]"><RadzenNumeric TValue="int" @bind-Value="_model.Duration" Min="0" Max="315360000" /></RadzenFormField>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 rz-color-secondary">@L["BanDurationHint"]</RadzenText>
+        }
+        else if (Mode == TeamspeakDialogMode.CreateChannel)
+        {
+            <RadzenFormField Text="@L["ChannelName"]"><RadzenTextBox @bind-Value="_model.Name" MaxLength="40" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+            <RadzenFormField Text="@L["ParentChannel"]"><RadzenDropDown TValue="int?" @bind-Value="_model.ParentId" Data="@Channels" TextProperty="Name" ValueProperty="Id" AllowClear="true" Placeholder="@L["None"]" /></RadzenFormField>
+            <RadzenFormField Text="@L["Password"]"><RadzenPassword @bind-Value="_model.Password" /></RadzenFormField>
+            <RadzenFormField Text="@L["MaxClients"]"><RadzenNumeric TValue="int?" @bind-Value="_model.MaxClients" Min="1" Max="32" /></RadzenFormField>
+            <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.IsPermanent" Text="@L["Permanent"]" />
+        }
+        else if (Mode == TeamspeakDialogMode.EditChannel)
+        {
+            <RadzenFormField Text="@L["ChannelName"]"><RadzenTextBox @bind-Value="_model.Name" MaxLength="40" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+            <RadzenFormField Text="@L["Password"]"><RadzenPassword @bind-Value="_model.Password" /></RadzenFormField>
+            <RadzenFormField Text="@L["MaxClients"]"><RadzenNumeric TValue="int?" @bind-Value="_model.MaxClients" Min="1" Max="32" /></RadzenFormField>
+        }
+        else if (Mode == TeamspeakDialogMode.EditServer)
+        {
+            <RadzenFormField Text="@L["ServerName"]"><RadzenTextBox @bind-Value="_model.Name" MaxLength="64" /></RadzenFormField>
+            <RadzenFormField Text="@L["Password"]"><RadzenPassword @bind-Value="_model.Password" /></RadzenFormField>
+            <RadzenFormField Text="@L["MaxClients"]"><RadzenNumeric TValue="int?" @bind-Value="_model.MaxClients" Min="1" Max="32" /></RadzenFormField>
+            <RadzenFormField Text="@L["WelcomeMessage"]"><RadzenTextArea @bind-Value="_model.Message" Rows="3" /></RadzenFormField>
+        }
+        else if (Mode == TeamspeakDialogMode.Message)
+        {
+            <RadzenFormField Text="@L["GlobalMessage"]"><RadzenTextArea @bind-Value="_model.Message" Rows="3" MaxLength="1024" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.Message)" />
+        }
+    </RadzenStack>
+    <DialogFooter>
+        <Aetheus.Front.Shared.DialogCloseButton Text="@L["Cancel"]" />
+        <RadzenButton ButtonType="ButtonType.Submit" Icon="@SubmitIcon" Text="@SubmitText" ButtonStyle="@SubmitStyle" Variant="Variant.Filled" />
+    </DialogFooter>
+</RadzenTemplateForm>

@@ -1,0 +1,84 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+@using System.Globalization
+
+@*
+    F-33 exception: this `style` attribute sets two CSS custom properties (`--node-x`, `--node-y`)
+    that drive `left`/`top` in `.stage-node-positioned` (see app.css). Coordinates are runtime data
+    (layout + drag positions), so a class-based alternative is not feasible. Values are formatted
+    with InvariantCulture so a comma-decimal UI locale (e.g. fr-FR) can't corrupt the CSS. This is
+    the only sanctioned inline-style usage in the front-end; all other inline styles have been removed.
+*@
+<div id="@ElementId" class="vp-node stage-node-positioned @(IsSelected ? "vp-node-selected" : "")"
+     style="--node-x: @(X.ToString(CultureInfo.InvariantCulture))px; --node-y: @(Y.ToString(CultureInfo.InvariantCulture))px;"
+     role="button" tabindex="0" aria-label="@Stage.Name"
+     @onclick="OnSelectClicked" @onclick:stopPropagation="true" @onkeydown="OnNodeKeyDownAsync">
+    <div class="vp-node-header">
+        <span class="vp-node-drag-handle" title="@L["Move"]" aria-hidden="true">
+            <RadzenIcon Icon="drag_indicator" class="icon-sm-app" />
+        </span>
+        <RadzenIcon Icon="view_timeline" class="icon-sm-app" />
+        <span class="vp-node-header-title" title="@Stage.Name">@Stage.Name</span>
+        @if (!string.IsNullOrWhiteSpace(Provenance))
+        {
+            <RadzenBadge Text="@Provenance" BadgeStyle="@(Provenance == L["Overridden"] ? BadgeStyle.Warning : BadgeStyle.Info)" />
+        }
+        @if (Warnings.Count > 0)
+        {
+            <span class="vp-node-warning" title="@string.Join("\n", Warnings)">
+                <RadzenIcon Icon="warning" class="icon-warn-sm" />
+            </span>
+        }
+        @if (!ReadOnly)
+        {
+            <span @onclick="OnDuplicateClicked" @onclick:stopPropagation="true" class="vp-node-action-btn"
+                  role="button" tabindex="0" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await OnDuplicateClicked(); })" @onkeydown:stopPropagation="true"
+                  title="@L["Duplicate"]">
+                <RadzenIcon Icon="content_copy" class="icon-sm-app" />
+            </span>
+            <span @onclick="OnDeleteClicked" @onclick:stopPropagation="true" class="vp-node-action-btn"
+                  role="button" tabindex="0" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await OnDeleteClicked(); })" @onkeydown:stopPropagation="true"
+                  title="@L["Delete"]">
+                <RadzenIcon Icon="delete" class="icon-sm-app" />
+            </span>
+        }
+    </div>
+    @if (!string.IsNullOrEmpty(Stage.Agent))
+    {
+        <div class="vp-node-agent">
+            <RadzenIcon Icon="dns" class="icon-xxs" /> @Stage.Agent
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Stage.Os))
+    {
+        <div class="vp-node-agent">
+            <RadzenIcon Icon="@(Stage.Os.Equals("windows", StringComparison.OrdinalIgnoreCase) ? "window" : "terminal")" class="icon-xxs" /> @Stage.Os
+        </div>
+    }
+    <div class="vp-node-steps">
+        @for (var i = 0; i < Stage.Steps.Count; i++)
+        {
+            var step = Stage.Steps[i];
+            var index = i;
+            <div class="vp-node-step">
+                <span class="vp-node-step-number">@(index + 1).</span>
+                <span class="vp-node-step-name" title="@step.Name">@step.Name</span>
+                @if (!ReadOnly)
+                {
+                    <span @onclick="@(() => OnEditStepClicked(index))" @onclick:stopPropagation="true" class="vp-node-step-edit"
+                          role="button" tabindex="0" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await OnEditStepClicked(index); })" @onkeydown:stopPropagation="true"
+                          title="@L["Edit"]">
+                        <RadzenIcon Icon="edit" class="icon-inherit" />
+                    </span>
+                }
+            </div>
+        }
+    </div>
+    @if (!ReadOnly)
+    {
+        <div class="vp-node-footer">
+            <RadzenButton Text="@AddStepText" Icon="add"
+                          Click="@OnAddStepClicked" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </div>
+    }
+</div>

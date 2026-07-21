@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Front.Layout;
+using Aetheus.Front.Resources;
+using Aetheus.Front.Services;
+using Aetheus.Shared.DTOs;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Localization;
+using Radzen;
+
+namespace Aetheus.Front.Pages.Dashboard;
+
+public partial class Dashboards
+{
+    [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
+    [Inject] private DialogService Dialog { get; set; } = default!;
+    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+    [Inject] private AuthStateProvider Auth { get; set; } = default!;
+    [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
+
+    private List<DashboardDto> _dashboards = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAdmin)
+        {
+            Navigation.NavigateTo("/");
+            return;
+        }
+
+        Breadcrumb.Set(new BreadcrumbItem(L["Administration"], "/admin"), new BreadcrumbItem(L["Dashboards"]));
+        try { _dashboards = await Api.GetDashboardsAsync(); }
+        catch (HttpRequestException) { _dashboards = []; }
+        _loading = false;
+    }
+
+    private async Task CreateDashboard()
+    {
+        // F-45: prompt the user for a name via a Radzen dialog instead of the native browser prompt().
+        var defaultName = $"{L["Dashboard"]} {_dashboards.Count + 1}";
+        var dialogResult = await Dialog.OpenAsync<DashboardNameDialog>(
+            L["NewDashboardNamePrompt"].Value,
+            new Dictionary<string, object?> { { "InitialName", defaultName } },
+            new DialogOptions { Width = "400px" });
+
+        if (dialogResult is not string name || string.IsNullOrWhiteSpace(name)) return;
+
+        var result = await Api.CreateDashboardAsync(new CreateDashboardRequest
+        {
+            Name = name.Trim(),
+            Widgets = []
+        });
+        if (result is not null)
+        {
+            _dashboards = await Api.GetDashboardsAsync();
+            Toast.Success("Created", "DashboardCreated");
+        }
+    }
+
+    private void EditDashboard(DashboardDto dashboard)
+    {
+        Navigation.NavigateTo($"/dashboards/{dashboard.Id}");
+    }
+
+    private async Task DeleteDashboard(int id)
+    {
+        var confirmed = await Dialog.Confirm(L["DeleteConfirm"].Value, L["Delete"].Value,
+            new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
+        if (confirmed != true) return;
+
+        var success = await Api.DeleteDashboardAsync(id);
+        if (success)
+        {
+            _dashboards = await Api.GetDashboardsAsync();
+            Toast.Success("Deleted", "Deleted");
+        }
+        else
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
+    }
+}

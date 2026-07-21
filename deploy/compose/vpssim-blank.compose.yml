@@ -1,0 +1,52 @@
+# =============================================================================
+# vpssim-blank.compose.yml - Aetheus disposable local "VPS simulator" (BLANK)
+# =============================================================================
+# Boots a *bare* throwaway Ubuntu box (systemd PID 1 + sshd, nothing else) so we
+# can install onto a clean slate progressively. No Docker-in-Docker here (the
+# blank box ships no docker engine), so the DinD volumes are dropped - systemd
+# still needs privileged + cgroup access under Docker Desktop.
+#
+# This is the DEFAULT flavor of the disposable VPS-sim. It shares one identity
+# with the fully-provisioned vpssim.compose.yml (same container name + SSH port),
+# so only ONE flavor runs at a time - switching tears the other down. Drive it
+# through the launcher rather than raw compose:
+#
+#   .\ylaunch.ps1 -vps           # blank box (this file) - build + start + exit
+#   .\ylaunch.ps1 -vps -net10    # blank box + .NET SDK 10.0 pre-installed
+#   .\ylaunch.ps1 -vps -full     # fully-provisioned box (vpssim.compose.yml)
+#   .\ylaunch.ps1 -vps -r        # reset the current flavor (drops its volumes)
+#
+# LOCAL TEST ONLY - never deployed.
+# =============================================================================
+services:
+
+  vpssim-blank:
+    container_name: ${APPNAME:-aetheus}-vpssim
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.vpssim-blank
+      args:
+        # -net10: pre-bake the .NET SDK 10.0 into the image (1) or keep it bare (0, default).
+        INSTALL_DOTNET: ${VPSSIM_DOTNET:-0}
+        # VPW3: throwaway root password - overridable via env, defaults to 'aetheus'.
+        VPSSIM_ROOT_PASSWORD: ${VPSSIM_ROOT_PASSWORD:-aetheus}
+    # systemd needs to manage cgroups under Docker Desktop (cgroup v2).
+    privileged: true
+    cgroup: host
+    # Reach the host-side backend (started by ylaunch) for later agent enrollment.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # systemd expects writable tmpfs for runtime state.
+    tmpfs:
+      - /run
+      - /run/lock
+    volumes:
+      # systemd cgroup hierarchy.
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    # Bind SSH to loopback only: the box runs root with a known password, so it must never be
+    # reachable from the LAN. Matches the fully-provisioned vpssim.compose.yml.
+    ports:
+      - "127.0.0.1:${VPSSIM_SSH_PORT:-2222}:22"
+    # systemd's graceful-shutdown signal.
+    stop_signal: SIGRTMIN+3
+    stop_grace_period: 10s

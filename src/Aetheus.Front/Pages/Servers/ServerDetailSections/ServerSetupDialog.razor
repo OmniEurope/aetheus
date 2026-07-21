@@ -1,0 +1,18 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenTemplateForm TItem="ServerSetupDialogModel" Data="@_model" Submit="@Submit">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="1rem">
+        @if (Kind == ServerSetupKind.Portsentry)
+        {
+            <RadzenFormField Text="@L["Mode"]"><RadzenTextBox @bind-Value="_model.Mode" /></RadzenFormField>
+            <RadzenFormField Text="@L["TcpPorts"]"><RadzenTextBox @bind-Value="_model.TcpPorts" /></RadzenFormField>
+            <RadzenFormField Text="@L["UdpPorts"]"><RadzenTextBox @bind-Value="_model.UdpPorts" /></RadzenFormField>
+        }
+        else
+        {
+            <RadzenFormField Text="@L["MailOnWarning"]"><RadzenTextBox @bind-Value="_model.MailOnWarning" Placeholder="admin@example.com" /></RadzenFormField>
+            <ValidationMessage For="@(() => _model.MailOnWarning)" />
+        }
+    </RadzenStack>
+    <DialogFooter><Aetheus.Front.Shared.DialogCloseButton Text="@L["Cancel"]" /><RadzenButton ButtonType="ButtonType.Submit" Icon="install_desktop" Text="@L["Install"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" /></DialogFooter>
+</RadzenTemplateForm>

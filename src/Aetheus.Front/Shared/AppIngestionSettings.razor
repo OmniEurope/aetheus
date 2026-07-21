@@ -1,0 +1,92 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-001 phase 2: OTLP ingestion key management + per-metric alert thresholds. *@
+<RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["IngestionKey"]</RadzenText>
+
+<RadzenCard class="rz-mb-3">
+    @if (App?.HasIngestKey == true)
+    {
+        <RadzenText TextStyle="TextStyle.Body2">
+            @L["IngestKeyConfigured"] @(App.IngestKeyCreatedAt?.ToString("g"))
+        </RadzenText>
+        @if (App.IngestDroppedCount > 0)
+        {
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-danger">
+                @string.Format(L["IngestDroppedCount"], App.IngestDroppedCount)
+            </RadzenText>
+        }
+    }
+    else
+    {
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoIngestKey"]</RadzenText>
+    }
+
+    @if (_generatedKey is not null)
+    {
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2 rz-color-warning">@L["IngestKeyShownOnce"]</RadzenText>
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" class="rz-mt-1">
+            <RadzenTextBox Value="@_generatedKey" ReadOnly="true" class="rz-w-100" />
+            <RadzenButton Icon="content_copy" Click="@CopyKeyAsync" title="@L["Copy"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2">
+            <code>OTEL_EXPORTER_OTLP_ENDPOINT=@IngestEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_PROTOCOL=http/json</code><br />
+            <code>OTEL_EXPORTER_OTLP_HEADERS=x-aetheus-ingest-key=&lt;key&gt;</code>
+        </RadzenText>
+    }
+
+    @if (CanWrite)
+    {
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-3">
+            <RadzenButton Text="@(App?.HasIngestKey == true ? L["RegenerateKey"] : L["GenerateKey"])" Icon="vpn_key"
+                          Click="@GenerateKeyAsync" IsBusy="@_busy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            @if (App?.HasIngestKey == true)
+            {
+                <RadzenButton Text="@L["RevokeIngestKey"]" Icon="key_off" Click="@RevokeKeyAsync" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+            }
+        </RadzenStack>
+    }
+</RadzenCard>
+
+<RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["MetricThresholds"]</RadzenText>
+
+<RadzenDataGrid Data="@_thresholds" TItem="AppMetricThresholdDto" Density="Density.Compact" EmptyText="@L["NoThresholds"]" class="rz-mb-3" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+    <Columns>
+        <RadzenDataGridColumn TItem="AppMetricThresholdDto" Property="MetricName" Title="@L["Metric"]" />
+        <RadzenDataGridColumn TItem="AppMetricThresholdDto" Property="Operator" Title="@L["Operator"]" Width="150px" />
+        <RadzenDataGridColumn TItem="AppMetricThresholdDto" Property="Threshold" Title="@L["Threshold"]" Width="120px" />
+        <RadzenDataGridColumn TItem="AppMetricThresholdDto" Title="@L["Status"]" Width="120px" Sortable="false">
+            <Template Context="t">
+                <RadzenBadge BadgeStyle="@(t.IsBreached ? BadgeStyle.Danger : BadgeStyle.Success)"
+                             Text="@(t.IsBreached ? L["Breached"] : L["OK"])" />
+            </Template>
+        </RadzenDataGridColumn>
+        @if (CanWrite)
+        {
+            <RadzenDataGridColumn TItem="AppMetricThresholdDto" Title="" Width="60px" Sortable="false" Filterable="false">
+                <Template Context="t">
+                    <RadzenButton Icon="delete" Size="ButtonSize.Small"
+                                  Click="@(() => DeleteThresholdAsync(t.Id))" title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        }
+    </Columns>
+</RadzenDataGrid>
+
+@if (CanWrite)
+{
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["Metric"]" />
+            <RadzenTextBox @bind-Value="_newThreshold.MetricName" class="w-rem-16" />
+        </RadzenStack>
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["Operator"]" />
+            <RadzenDropDown @bind-Value="_newThreshold.Operator" Data="@_operators" class="w-rem-12" />
+        </RadzenStack>
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["Threshold"]" />
+            <RadzenNumeric @bind-Value="_newThreshold.Threshold" class="w-rem-8" />
+        </RadzenStack>
+        <RadzenButton Text="@L["AddThreshold"]" Icon="add" Click="@AddThresholdAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+}

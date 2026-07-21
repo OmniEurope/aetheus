@@ -1,0 +1,41 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<div class="wizard-dialog" tabindex="0" @ref="_wizardRef" @onkeydown="OnKeyDown">
+    <div class="wizard-progress-bar"><div class="wizard-progress-value" style="@($"width:{_progress}%")"></div></div>
+
+    <RadzenSteps @bind-SelectedIndex="_currentStep" Change="@OnStepChanged" ShowStepsButtons="false" class="wizard-steps">
+        <Steps>
+            @for (var i = 0; i < Steps.Count; i++)
+            {
+                var step = Steps[i];
+                <RadzenStepsItem Text="@step.Title" Disabled="@(!IsStepAccessible(i))">
+                    @if (!string.IsNullOrEmpty(step.Icon))
+                    {
+                        <RadzenIcon Icon="@step.Icon" class="wizard-step-icon" />
+                    }
+                    <div class="wizard-step-content wizard-step-enter">
+                        @step.Content
+                    </div>
+                </RadzenStepsItem>
+            }
+        </Steps>
+    </RadzenSteps>
+
+    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem" class="wizard-actions">
+        <RadzenButton Text="@L["Cancel"]" Icon="close" Size="ButtonSize.Small" Click="@OnCancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        @if (_currentStep > 0)
+        {
+            <RadzenButton Text="@L["WizardPrevious"]" Icon="arrow_back" Size="ButtonSize.Small"
+                Click="@PreviousStep" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+        @if (_currentStep < Steps.Count - 1)
+        {
+            <RadzenButton Text="@L["WizardNext"]" Icon="arrow_forward" IconPosition="IconPosition.Right" Size="ButtonSize.Small"
+                Click="@NextStep" Disabled="@(!CanAdvance)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+        else
+        {
+            <RadzenButton Text="@(FinishText ?? L["WizardFinish"])" Icon="check" Size="ButtonSize.Small"
+                Click="@OnFinish" Disabled="@(!CanAdvance)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        }
+    </RadzenStack>
+</div>

@@ -1,0 +1,21 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/monitoring"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+@using Aetheus.Front.Shared
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Monitoring"] - Aetheus</PageTitle>
+
+@if (Loader?.Project is not null)
+{
+    <UrlSyncedTabs Slugs="@(new[] { "availability", "telemetry" })">
+        <Tabs>
+            <RadzenTabsItem Text="@L["Availability"]" Icon="monitor_heart">
+                <MonitoredAppsList ProjectId="Id" />
+            </RadzenTabsItem>
+            <RadzenTabsItem Text="@L["Telemetry"]" Icon="insights">
+                <AppTelemetryPanel ProjectId="Id" />
+            </RadzenTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

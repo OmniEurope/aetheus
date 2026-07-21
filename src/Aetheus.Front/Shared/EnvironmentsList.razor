@@ -1,0 +1,79 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (IsGlobal)
+{
+    <div class="pipeline-list-toolbar">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["Environments"]</RadzenText>
+            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+            <div class="pipeline-list-spacer"></div>
+            <RadzenButton Icon="refresh" Size="ButtonSize.Small" Click="@ReloadGrid" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            <RadzenButton Text="@L["NewEnvironment"]" Icon="add" Click="@NewEnvironment"
+                Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenStack>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap" class="rz-mt-2">
+            <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+            <RadzenTextBox Placeholder="@L["SearchEnvironments"]" @bind-Value="_search" Change="@ReloadGrid" class="pipeline-list-search" />
+            @if (!string.IsNullOrEmpty(_search))
+            {
+                <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small" Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            }
+        </RadzenStack>
+    </div>
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-4">
+        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Environments"]</RadzenText>
+        <RadzenButton Icon="add" Text="@L["NewEnvironment"]" Size="ButtonSize.Small" Click="@NewEnvironment" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+}
+
+<AetheusDataGrid @ref="_grid" TItem="EnvironmentDto" Data="@_environments"
+    Count="@_totalCount" PageSize="25" IsLoading="@_loading" LoadData="@OnLoadData"
+    RowClick="@(env => Nav.NavigateTo($"/environments/{env.Id}"))"
+    EmptyText="@L["NoEnvironmentsFound"]" FullHeight="@IsGlobal">
+    <Columns>
+        <RadzenDataGridColumn TItem="EnvironmentDto" Property="Name" Title="@L["Name"]" MinWidth="10rem">
+            <Template Context="env">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenIcon Icon="layers" class="rz-color-secondary" />
+                    <RadzenStack Gap="0">
+                        <a href="/environments/@env.Id" class="pipeline-name-link">@env.Name</a>
+                        @if (!IsProjectScope && !string.IsNullOrEmpty(env.ProjectName))
+                        {
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@env.ProjectName</RadzenText>
+                        }
+                    </RadzenStack>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="EnvironmentDto" Property="Type" Title="@L["Type"]" Width="140px">
+            <Template Context="env">
+                <RadzenBadge BadgeStyle="@EnvironmentHelper.TypeStyle(env.Type)" Text="@L.Localize(env.Type)" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="EnvironmentDto" Property="Description" Title="@L["Description"]" MinWidth="10rem" />
+        <RadzenDataGridColumn TItem="EnvironmentDto" Title="@L["Servers"]" Width="100px" TextAlign="TextAlign.Center" Sortable="false">
+            <Template Context="env">
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@env.Servers.Count.ToString()" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="EnvironmentDto" Property="RequireApproval" Title="@L["Approval"]" Width="110px" TextAlign="TextAlign.Center">
+            <Template Context="env">
+                @if (env.RequireApproval)
+                {
+                    <RadzenIcon Icon="check_circle" class="rz-color-warning" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="EnvironmentDto" Property="UpdatedAt" Title="@L["Updated"]" FormatString="{0:g}" Width="160px" />
+        <RadzenDataGridColumn TItem="EnvironmentDto" Title="" Width="60px" Sortable="false" TextAlign="TextAlign.Center">
+            <Template Context="env">
+                <span @onclick:stopPropagation="true">
+                    <RadzenButton Icon="content_copy" Size="ButtonSize.Small" Click="@(() => DuplicateEnvironment(env))" title="@L["Duplicate"]" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                </span>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

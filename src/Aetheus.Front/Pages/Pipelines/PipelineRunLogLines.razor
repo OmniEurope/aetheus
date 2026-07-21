@@ -1,0 +1,12 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using static Aetheus.Front.Pages.Pipelines.PipelineRunFormatting
+
+<div class="run-logs-terminal @(Compact ? "run-logs-terminal-sm" : "run-logs-terminal-md rz-mb-3")">
+    <div class="run-logs-lines">
+        @for (var index = 0; index < Logs.Count; index++)
+        {
+            var log = Logs[index];
+            <div class="run-log-line @(log.Level == TaskLogLevel.Error ? "step-log-error" : (HighlightLintWarnings && IsLintWarning(log.Message) ? "step-log-warning" : ""))"><span class="run-log-num">@(index + 1)</span>@log.Message</div>
+        }
+    </div>
+</div>

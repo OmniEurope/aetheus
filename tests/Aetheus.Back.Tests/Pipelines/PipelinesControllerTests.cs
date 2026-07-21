@@ -1,0 +1,859 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Security.Claims;
+using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Microsoft.AspNetCore.Mvc;
+using NSubstitute;
+
+namespace Aetheus.Back.Tests;
+
+public class PipelinesControllerTests
+{
+    private readonly IPipelineService _service = Substitute.For<IPipelineService>();
+    private readonly IPipelineRunService _runService = Substitute.For<IPipelineRunService>();
+    private readonly IPipelineApprovalService _approvalService = Substitute.For<IPipelineApprovalService>();
+    private readonly IPipelineArtifactService _artifactService = Substitute.For<IPipelineArtifactService>();
+    private readonly IPipelineWebhookService _webhookService = Substitute.For<IPipelineWebhookService>();
+    private readonly IPipelineRepository _pipelineRepo = Substitute.For<IPipelineRepository>();
+    private readonly IResourceAuthorizationService _authz = Substitute.For<IResourceAuthorizationService>();
+    private readonly IPipelineFleetService _fleetService = Substitute.For<IPipelineFleetService>();
+    private readonly PipelinesController _sut;
+    private readonly PipelineFleetController _fleetSut;
+
+    public PipelinesControllerTests()
+    {
+        _authz.HasPermissionAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(),
+            Arg.Any<ResourceType>(), Arg.Any<int?>(), Arg.Any<Permission>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authz.GetUserOrganizationIdsAsync(
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>())
+            .Returns([1]);
+        _runService.GetPipelineIdForRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(1);
+        _runService.GetPipelineIdForApprovalAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(1);
+        _runService.IsServerAssignedToRunAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+        // Default: YAML is valid. Tests that exercise the invalid-YAML path override this.
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = true });
+        _runService.PrepareRunAsync(Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(call => Preparation(call.ArgAt<int>(0)));
+        _runService.ResolveRunParametersAsync(
+                Arg.Any<PipelineRunPreparation>(),
+                Arg.Any<IReadOnlyDictionary<string, string>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<PipelineRunPreparation>(0));
+        _fleetService.GetItemAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(call => new PipelineFleetItemDto
+            {
+                PipelineId = call.ArgAt<int>(0),
+                OrganizationId = 4,
+                TemplateId = 7
+            });
+        _sut = new PipelinesController(
+            _service, _runService, _approvalService, _artifactService, _webhookService, _authz);
+        _fleetSut = new PipelineFleetController(_fleetService, _authz);
+        var controllerContext = new ControllerContext
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("ServerId", "1")], "test"))
+            }
+        };
+        _sut.ControllerContext = controllerContext;
+        _fleetSut.ControllerContext = controllerContext;
+    }
+
+    [Fact]
+    public async Task GetFleet_BoundsResultsToAccessiblePipelinesAndOrganizations()
+    {
+        _authz.GetAccessibleResourceIdsAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, Permission.Read, Arg.Any<CancellationToken>())
+            .Returns([1, 2]);
+        _authz.GetUserOrganizationIdsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>())
+            .Returns([4]);
+        _fleetService.GetAsync(
+                Arg.Any<PipelineFleetPaginationRequest>(),
+                Arg.Any<IReadOnlyCollection<int>?>(),
+                Arg.Any<IReadOnlyCollection<int>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PaginatedResult<PipelineFleetItemDto>());
+
+        var response = await _fleetSut.GetFleet(new PipelineFleetPaginationRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        await _fleetService.Received(1).GetAsync(
+            Arg.Any<PipelineFleetPaginationRequest>(),
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 4 })),
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 1, 2 })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PreviewFleetUpdate_TemplateReadDenied_DoesNotPreview()
+    {
+        _authz.HasPermissionAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.PipelineTemplate, 7, Permission.Read,
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _fleetSut.PreviewFleetUpdate(
+            1, new PipelineFleetUpdateRequest { TargetVersion = 2 }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _fleetService.DidNotReceive().PreviewUpdateAsync(
+            Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ApplyFleetUpdate_Authorized_ReturnsUpdatedPipeline()
+    {
+        _fleetService.UpdateAsync(1, Arg.Any<PipelineFleetUpdateRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PipelineDto { Id = 1, Name = "updated" });
+
+        var response = await _fleetSut.ApplyFleetUpdate(
+            1, new PipelineFleetUpdateRequest { TargetVersion = 2 }, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Equal("updated", Assert.IsType<PipelineDto>(ok.Value).Name);
+    }
+
+    [Fact]
+    public async Task ExtractTemplate_ForeignOrganization_DoesNotExtract()
+    {
+        _authz.GetUserOrganizationIdsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>())
+            .Returns([9]);
+
+        var response = await _fleetSut.ExtractTemplate(1, new ExtractPipelineTemplateRequest
+        {
+            TemplateName = "ci",
+            Category = "CI"
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _fleetService.DidNotReceive().ExtractAsync(
+            Arg.Any<int>(), Arg.Any<ExtractPipelineTemplateRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PromoteTemplate_ExactTemplateWriteDenied_DoesNotPromote()
+    {
+        _authz.HasPermissionAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.PipelineTemplate, 7, Permission.Write,
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _fleetSut.PromoteTemplate(1, new PromotePipelineTemplateRequest
+        {
+            ChangelogEntry = "change",
+            YamlContent = "name: ci\nstages: []"
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _fleetService.DidNotReceive().PromoteAsync(
+            Arg.Any<int>(), Arg.Any<PromotePipelineTemplateRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PreviewPromoteTemplate_Authorized_UsesExactTemplatePermission()
+    {
+        _fleetService.PreviewPromotionAsync(1, Arg.Any<CancellationToken>())
+            .Returns(new PipelinePromotePreviewDto { PipelineId = 1, TemplateId = 7 });
+
+        var response = await _fleetSut.PreviewPromoteTemplate(1, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        await _authz.Received(1).HasPermissionAsync(
+            Arg.Any<ClaimsPrincipal>(), ResourceType.PipelineTemplate, 7, Permission.Write,
+            Arg.Any<CancellationToken>());
+    }
+
+    private static PipelineRunPreparation Preparation(int pipelineId, IReadOnlyCollection<int>? targets = null)
+        => new()
+        {
+            PipelineId = pipelineId,
+            YamlSnapshot = "name: test\nstages: []",
+            TargetServerIds = targets ?? []
+        };
+
+    [Fact]
+    public async Task GetPipelines_ReturnsOk()
+    {
+        var result = new PaginatedResult<PipelineDto> { Items = [], TotalCount = 0 };
+        _service.GetPipelinesAsync(Arg.Any<PipelinePaginationRequest>(), ct: TestContext.Current.CancellationToken).Returns(result);
+
+        var response = await _sut.GetPipelines(new PipelinePaginationRequest(), TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.IsType<PaginatedResult<PipelineDto>>(ok.Value);
+    }
+
+    [Fact]
+    public async Task GetActiveRuns_AppliesReadablePipelineIdsAndProjectScope()
+    {
+        _authz.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, Permission.Read, TestContext.Current.CancellationToken)
+            .Returns([1, 3]);
+        _runService.GetActiveRunsAsync(Arg.Any<List<int>?>(), 7, TestContext.Current.CancellationToken)
+            .Returns([new PipelineRunDto { Id = 9, PipelineId = 3, Status = PipelineStatus.Running }]);
+
+        var response = await _sut.GetActiveRuns(7, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Single(Assert.IsType<List<PipelineRunDto>>(ok.Value));
+        await _runService.Received(1).GetActiveRunsAsync(
+            Arg.Is<List<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 1, 3 })), 7, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetRecentRuns_AppliesReadablePipelineIdsAndProjectScope()
+    {
+        _authz.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, Permission.Read, TestContext.Current.CancellationToken)
+            .Returns([1, 3]);
+        _runService.GetRecentRunsAsync(Arg.Any<List<int>?>(), 7, TestContext.Current.CancellationToken)
+            .Returns([new PipelineRunDto { Id = 9, PipelineId = 3, Status = PipelineStatus.Success }]);
+
+        var response = await _sut.GetRecentRuns(7, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Single(Assert.IsType<List<PipelineRunDto>>(ok.Value));
+        await _runService.Received(1).GetRecentRunsAsync(
+            Arg.Is<List<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 1, 3 })), 7, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetPipeline_Found_ReturnsOk()
+    {
+        var dto = new PipelineDto { Id = 1, Name = "CI" };
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken).Returns(dto);
+
+        var response = await _sut.GetPipeline(1, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Equal("CI", ((PipelineDto)ok.Value!).Name);
+    }
+
+    [Fact]
+    public async Task GetPipeline_NotFound_Returns404()
+    {
+        _service.GetPipelineAsync(99, TestContext.Current.CancellationToken).Returns((PipelineDto?)null);
+
+        var response = await _sut.GetPipeline(99, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task CreatePipeline_ReturnsCreated()
+    {
+        var dto = new PipelineDto { Id = 5, Name = "New" };
+        _service.CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), TestContext.Current.CancellationToken).Returns(dto);
+
+        var response = await _sut.CreatePipeline(new CreatePipelineRequest { Name = "New", YamlDefinition = "yaml" }, TestContext.Current.CancellationToken);
+
+        var created = Assert.IsType<CreatedAtActionResult>(response.Result);
+        Assert.Equal(5, ((PipelineDto)created.Value!).Id);
+    }
+
+    [Fact]
+    public async Task UpdatePipeline_Found_ReturnsOk()
+    {
+        var dto = new PipelineDto { Id = 1, Name = "Updated" };
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken).Returns(new PipelineDto { Id = 1 });
+        _service.UpdatePipelineAsync(1, Arg.Any<UpdatePipelineRequest>(), TestContext.Current.CancellationToken).Returns(dto);
+
+        var response = await _sut.UpdatePipeline(1, new UpdatePipelineRequest { Name = "Updated" }, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Equal("Updated", ((PipelineDto)ok.Value!).Name);
+    }
+
+    [Fact]
+    public async Task UpdatePipeline_NotFound_Returns404()
+    {
+        _service.UpdatePipelineAsync(99, Arg.Any<UpdatePipelineRequest>(), TestContext.Current.CancellationToken)
+            .Returns((PipelineDto?)null);
+
+        var response = await _sut.UpdatePipeline(99, new UpdatePipelineRequest { Name = "X" }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task CreatePipeline_InvalidYaml_ReturnsBadRequestAndDoesNotPersist()
+    {
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = false, Errors = ["bad stage"] });
+
+        var response = await _sut.CreatePipeline(new CreatePipelineRequest { Name = "X", YamlDefinition = "::" }, TestContext.Current.CancellationToken);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(response.Result);
+        Assert.Contains("bad stage", ((YamlValidationResultDto)bad.Value!).Errors);
+        await _service.DidNotReceive().CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdatePipeline_InvalidYaml_ReturnsBadRequestAndDoesNotPersist()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken).Returns(new PipelineDto { Id = 1 });
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = false, Errors = ["bad step"] });
+
+        var response = await _sut.UpdatePipeline(1, new UpdatePipelineRequest { Name = "X", YamlDefinition = "::" }, TestContext.Current.CancellationToken);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(response.Result);
+        Assert.Contains("bad step", ((YamlValidationResultDto)bad.Value!).Errors);
+        await _service.DidNotReceive().UpdatePipelineAsync(Arg.Any<int>(), Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreatePipeline_ProjectWriteDenied_DoesNotPersist()
+    {
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Project, 7, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.CreatePipeline(new CreatePipelineRequest
+        {
+            Name = "release",
+            ProjectId = 7,
+            YamlDefinition = "name: release\nstages: []"
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdatePipeline_ProjectMoveRequiresWriteOnBothProjects()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken).Returns(new PipelineDto { Id = 1, ProjectId = 7 });
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Project, 8, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.UpdatePipeline(1, new UpdatePipelineRequest
+        {
+            Name = "release",
+            ProjectId = 8,
+            YamlDefinition = "name: release\nstages: []"
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _authz.Received(1).HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Project, 7, Permission.Write, Arg.Any<CancellationToken>());
+        await _authz.Received(1).HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Project, 8, Permission.Write, Arg.Any<CancellationToken>());
+        await _service.DidNotReceive().UpdatePipelineAsync(Arg.Any<int>(), Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DeletePipeline_Found_ReturnsNoContent()
+    {
+        _service.DeletePipelineAsync(1, TestContext.Current.CancellationToken).Returns(true);
+
+        var response = await _sut.DeletePipeline(1, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NoContentResult>(response);
+    }
+
+    [Fact]
+    public async Task DeletePipeline_NotFound_Returns404()
+    {
+        _service.DeletePipelineAsync(99, TestContext.Current.CancellationToken).Returns(false);
+
+        var response = await _sut.DeletePipeline(99, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response);
+    }
+
+    [Fact]
+    public async Task TriggerRun_Found_ReturnsCreated()
+    {
+        var run = new PipelineRunDto { Id = 10, PipelineId = 1, Status = PipelineStatus.Running };
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "name: p" });
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = true });
+        _runService.TriggerPreparedRunAsync(Arg.Any<PipelineRunPreparation>(),
+            Arg.Any<Dictionary<string, string>?>(), Arg.Any<Dictionary<string, string>?>(),
+            Arg.Any<CancellationToken>()).Returns(run);
+
+        var response = await _sut.TriggerRun(1, null, TestContext.Current.CancellationToken);
+
+        var created = Assert.IsType<CreatedAtActionResult>(response.Result);
+        Assert.Equal(10, ((PipelineRunDto)created.Value!).Id);
+        Assert.Equal(nameof(_sut.GetRun), created.ActionName);
+    }
+
+    [Fact]
+    public async Task TriggerRun_PipelineNotFound_Returns404()
+    {
+        _service.GetPipelineAsync(99, TestContext.Current.CancellationToken).Returns((PipelineDto?)null);
+
+        var response = await _sut.TriggerRun(99, null, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task TriggerRun_InvalidYaml_ReturnsBadRequestAndDoesNotTrigger()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "::bad::" });
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns((PipelineRunPreparation?)null);
+
+        var response = await _sut.TriggerRun(1, null, TestContext.Current.CancellationToken);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(response.Result);
+        Assert.Contains("authoritative pipeline YAML", Assert.IsType<string>(badRequest.Value));
+        await _runService.DidNotReceive().TriggerPreparedRunAsync(Arg.Any<PipelineRunPreparation>(),
+            Arg.Any<Dictionary<string, string>?>(), Arg.Any<Dictionary<string, string>?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Preflight_Found_ReturnsOk()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "name: p" });
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = true });
+        _runService.PreflightAsync(Arg.Any<PipelineRunPreparation>(), null, TestContext.Current.CancellationToken)
+            .Returns(new PipelinePreflightDto
+            {
+                Stages = [new PreflightStageDto { StageName = "build", Resolved = false, Reason = "no online server" }]
+            });
+
+        var response = await _sut.Preflight(1, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var dto = Assert.IsType<PipelinePreflightDto>(ok.Value);
+        Assert.False(dto.Stages[0].Resolved);
+    }
+
+    [Fact]
+    public async Task Preflight_PipelineNotFound_Returns404()
+    {
+        _service.GetPipelineAsync(99, TestContext.Current.CancellationToken).Returns((PipelineDto?)null);
+
+        var response = await _sut.Preflight(99, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task Preflight_InvalidYaml_ReturnsBadRequest()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "::bad::" });
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns((PipelineRunPreparation?)null);
+
+        var response = await _sut.Preflight(1, TestContext.Current.CancellationToken);
+
+        Assert.IsType<BadRequestObjectResult>(response.Result);
+        await _runService.DidNotReceive().PreflightAsync(Arg.Any<PipelineRunPreparation>(),
+            Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetRuns_ReturnsOk()
+    {
+        _runService.GetRunsAsync(1, Arg.Any<PaginationRequest>(), TestContext.Current.CancellationToken)
+            .Returns(new PaginatedResult<PipelineRunDto>());
+
+        var response = await _sut.GetRuns(1, new PaginationRequest(), TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Empty(((PaginatedResult<PipelineRunDto>)ok.Value!).Items);
+    }
+
+    [Fact]
+    public async Task GetRun_Found_ReturnsOk()
+    {
+        var run = new PipelineRunDto { Id = 10, PipelineId = 1 };
+        _runService.GetRunAsync(10, TestContext.Current.CancellationToken).Returns(run);
+
+        var response = await _sut.GetRun(10, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Equal(10, ((PipelineRunDto)ok.Value!).Id);
+    }
+
+    [Fact]
+    public async Task GetRun_NotFound_Returns404()
+    {
+        _runService.GetRunAsync(99, TestContext.Current.CancellationToken).Returns((PipelineRunDto?)null);
+
+        var response = await _sut.GetRun(99, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    // --- ValidateYaml ---
+
+    [Fact]
+    public async Task ValidateYaml_Valid_ReturnsOk()
+    {
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = true });
+
+        var response = await _sut.ValidateYaml(new ValidateYamlRequest { Yaml = "name: test" }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task ValidateYaml_Invalid_ReturnsBadRequest()
+    {
+        _service.ValidateYamlStrict(Arg.Any<string>())
+            .Returns(new YamlValidationResultDto { IsValid = false, Errors = ["bad"] });
+
+        var response = await _sut.ValidateYaml(new ValidateYamlRequest { Yaml = "bad yaml" }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<BadRequestObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task ValidateYaml_ForeignOrganization_ReturnsForbidWithoutResolving()
+    {
+        var response = await _sut.ValidateYaml(new ValidateYamlRequest
+        {
+            Yaml = "name: test\nextends: secret@1\nstages: []",
+            OrganizationId = 99
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().ValidateYamlStrictAsync(
+            Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<int?>(),
+            Arg.Any<int?>(), Arg.Any<CancellationToken>());
+    }
+
+    // --- DryRun ---
+
+    [Fact]
+    public async Task DryRun_Found_ReturnsOk()
+    {
+        var result = new DryRunResultDto();
+        _runService.DryRunAsync(1, Arg.Any<Dictionary<string, string>?>(), TestContext.Current.CancellationToken).Returns(result);
+
+        var response = await _sut.DryRun(1, null, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task DryRun_NotFound_Returns404()
+    {
+        _runService.DryRunAsync(99, Arg.Any<Dictionary<string, string>?>(), TestContext.Current.CancellationToken)
+            .Returns((DryRunResultDto?)null);
+
+        var response = await _sut.DryRun(99, null, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    // --- CancelRun ---
+
+    [Fact]
+    public async Task CancelRun_Found_ReturnsNoContent()
+    {
+        _runService.CancelRunAsync(10, TestContext.Current.CancellationToken).Returns(true);
+
+        var response = await _sut.CancelRun(10, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NoContentResult>(response);
+    }
+
+    [Fact]
+    public async Task CancelRun_NotFound_Returns404()
+    {
+        _runService.CancelRunAsync(99, TestContext.Current.CancellationToken).Returns(false);
+
+        var response = await _sut.CancelRun(99, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response);
+    }
+
+    [Fact]
+    public async Task RetryFailedSteps_Found_ReturnsOk()
+    {
+        _runService.RetryFailedStepsAsync(10, TestContext.Current.CancellationToken)
+            .Returns(new PipelineRunDto { Id = 10, PipelineId = 1, Status = PipelineStatus.Running });
+
+        var response = await _sut.RetryFailedSteps(10, TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        Assert.Equal(10, ((PipelineRunDto)ok.Value!).Id);
+    }
+
+    [Fact]
+    public async Task RetryFailedSteps_ServiceReturnsNull_Returns404()
+    {
+        _runService.RetryFailedStepsAsync(10, TestContext.Current.CancellationToken).Returns((PipelineRunDto?)null);
+
+        var response = await _sut.RetryFailedSteps(10, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task RetryFailedSteps_UnknownRun_Returns404AndDoesNotCallService()
+    {
+        _runService.GetPipelineIdForRunAsync(77, Arg.Any<CancellationToken>()).Returns((int?)null);
+
+        var response = await _sut.RetryFailedSteps(77, TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+        await _runService.DidNotReceive().RetryFailedStepsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    // --- F-EXEC-1: pipeline trigger requires Server Admin on every resolvable target ---
+    // A pipeline step is free-form shell (= RCE). Triggering is only Pipeline.Write-gated, so
+    // without this gate a Pipeline.Write user could escalate to RCE on servers they do not
+    // administer - the exact escalation the F-15 gate on POST /api/tasks prevents.
+
+    [Fact]
+    public async Task TriggerRun_CallerLacksServerAdminOnResolvedTarget_ReturnsForbidAndDoesNotTrigger()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "name: p" });
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns(Preparation(1, [42]));
+        // Pipeline.Write stays allowed (broad default); only Server.Admin on the target is denied.
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(),
+                ResourceType.Server, 42, Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.TriggerRun(1, null, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _runService.DidNotReceive().TriggerPreparedRunAsync(Arg.Any<PipelineRunPreparation>(),
+            Arg.Any<Dictionary<string, string>?>(), Arg.Any<Dictionary<string, string>?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TriggerRun_SelectedBranchTargetsUnauthorizedServer_ReturnsForbidForPreparedSnapshot()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "name: p" });
+        _runService.PrepareRunAsync(1, "danger", Arg.Any<CancellationToken>())
+            .Returns(Preparation(1, [99]) with { BranchName = "danger", CommitHash = new string('a', 40) });
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(),
+                ResourceType.Server, 99, Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.TriggerRun(1,
+            new PipelineRunRequest { SourceBranch = "danger" }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _runService.Received(1).PrepareRunAsync(1, "danger", Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().TriggerPreparedRunAsync(Arg.Any<PipelineRunPreparation>(),
+            Arg.Any<Dictionary<string, string>?>(), Arg.Any<Dictionary<string, string>?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TriggerRun_CallerHasServerAdminOnAllTargets_ReturnsCreated()
+    {
+        var run = new PipelineRunDto { Id = 10, PipelineId = 1, Status = PipelineStatus.Running };
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "name: p" });
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns(Preparation(1, [42, 43]));
+        // _authz default grants every permission, so the caller administers both targets.
+        _runService.TriggerPreparedRunAsync(Arg.Any<PipelineRunPreparation>(),
+            Arg.Any<Dictionary<string, string>?>(), Arg.Any<Dictionary<string, string>?>(),
+            Arg.Any<CancellationToken>()).Returns(run);
+
+        var response = await _sut.TriggerRun(1, null, TestContext.Current.CancellationToken);
+
+        var created = Assert.IsType<CreatedAtActionResult>(response.Result);
+        Assert.Equal(10, ((PipelineRunDto)created.Value!).Id);
+    }
+
+    [Fact]
+    public async Task RetryFailedSteps_CallerLacksServerAdminOnTarget_ReturnsForbidAndDoesNotRetry()
+    {
+        _runService.GetPipelineIdForRunAsync(10, Arg.Any<CancellationToken>()).Returns(1);
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns(Preparation(1, [42]));
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(),
+                ResourceType.Server, 42, Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.RetryFailedSteps(10, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _runService.DidNotReceive().RetryFailedStepsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Preflight_CallerLacksServerAdminOnResolvedTarget_ReturnsForbidAndDoesNotPreflight()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, Name = "p", YamlDefinition = "name: p" });
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns(Preparation(1, [42]));
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(),
+                ResourceType.Server, 42, Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.Preflight(1, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _runService.DidNotReceive().PreflightAsync(Arg.Any<int>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DryRun_CallerLacksServerAdminOnResolvedTarget_ReturnsForbidAndDoesNotDryRun()
+    {
+        _runService.PrepareRunAsync(1, null, Arg.Any<CancellationToken>())
+            .Returns(Preparation(1, [42]));
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(),
+                ResourceType.Server, 42, Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var response = await _sut.DryRun(1, null, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _runService.DidNotReceive().DryRunAsync(Arg.Any<int>(), Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>());
+    }
+
+    // --- Artifacts ---
+
+    [Fact]
+    public async Task GetArtifacts_ReturnsOk()
+    {
+        _artifactService.GetArtifactsAsync(10, TestContext.Current.CancellationToken).Returns([]);
+
+        var response = await _sut.GetArtifacts(10, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task PublishArtifact_Found_ReturnsOk()
+    {
+        var artifact = new PipelineArtifactDto { Id = 1, Name = "art" };
+        _artifactService.PublishArtifactAsync(10, Arg.Any<PublishArtifactRequest>(), TestContext.Current.CancellationToken)
+            .Returns(artifact);
+
+        var response = await _sut.PublishArtifact(10, new PublishArtifactRequest { Name = "art" }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task PublishArtifact_NotFound_Returns404()
+    {
+        _artifactService.PublishArtifactAsync(99, Arg.Any<PublishArtifactRequest>(), TestContext.Current.CancellationToken)
+            .Returns((PipelineArtifactDto?)null);
+
+        var response = await _sut.PublishArtifact(99, new PublishArtifactRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    // --- Approvals ---
+
+    [Fact]
+    public async Task GetApprovals_ReturnsOk()
+    {
+        _approvalService.GetApprovalsAsync(10, TestContext.Current.CancellationToken).Returns([]);
+
+        var response = await _sut.GetApprovals(10, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task DecideApproval_Found_ReturnsOk()
+    {
+        var approval = new PipelineApprovalDto { Id = 1 };
+        _approvalService.DecideApprovalAsync(1, Arg.Any<ApprovalDecisionRequest>(), TestContext.Current.CancellationToken)
+            .Returns(approval);
+
+        var response = await _sut.DecideApproval(1, new ApprovalDecisionRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task DecideApproval_NotFound_Returns404()
+    {
+        _approvalService.DecideApprovalAsync(99, Arg.Any<ApprovalDecisionRequest>(), TestContext.Current.CancellationToken)
+            .Returns((PipelineApprovalDto?)null);
+
+        var response = await _sut.DecideApproval(99, new ApprovalDecisionRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    // --- Test Results ---
+
+    [Fact]
+    public async Task GetTestResults_ReturnsOk()
+    {
+        _artifactService.GetTestResultsAsync(10, TestContext.Current.CancellationToken).Returns([]);
+
+        var response = await _sut.GetTestResults(10, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task PublishTestResults_Found_ReturnsOk()
+    {
+        var summary = new PipelineTestResultSummaryDto();
+        _artifactService.PublishTestResultsAsync(10, Arg.Any<PublishTestResultsRequest>(), TestContext.Current.CancellationToken)
+            .Returns(summary);
+
+        var response = await _sut.PublishTestResults(10, new PublishTestResultsRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task PublishTestResults_NotFound_Returns404()
+    {
+        _artifactService.PublishTestResultsAsync(99, Arg.Any<PublishTestResultsRequest>(), TestContext.Current.CancellationToken)
+            .Returns((PipelineTestResultSummaryDto?)null);
+
+        var response = await _sut.PublishTestResults(99, new PublishTestResultsRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+    }
+
+    // --- Webhook ---
+
+    [Fact]
+    public async Task HandleWebhook_Valid_ReturnsOk()
+    {
+        _webhookService.HandleWebhookAsync(Arg.Any<string>(), Arg.Any<string?>(), TestContext.Current.CancellationToken)
+            .Returns(true);
+        _sut.ControllerContext = new ControllerContext
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()
+        };
+        _sut.ControllerContext.HttpContext.Request.Body = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes("{}"));
+
+        var response = await _sut.HandleWebhook(TestContext.Current.CancellationToken);
+
+        Assert.IsType<NoContentResult>(response);
+    }
+
+    [Fact]
+    public async Task HandleWebhook_Invalid_ReturnsUnauthorized()
+    {
+        _webhookService.HandleWebhookAsync(Arg.Any<string>(), Arg.Any<string?>(), TestContext.Current.CancellationToken)
+            .Returns(false);
+        _sut.ControllerContext = new ControllerContext
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()
+        };
+        _sut.ControllerContext.HttpContext.Request.Body = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes("{}"));
+
+        var response = await _sut.HandleWebhook(TestContext.Current.CancellationToken);
+
+        Assert.IsType<UnauthorizedObjectResult>(response);
+    }
+}

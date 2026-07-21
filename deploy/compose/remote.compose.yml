@@ -1,0 +1,119 @@
+# =============================================================================
+# remote.compose.yml - Aetheus Remote Deployment (Accept / Prod)
+# =============================================================================
+services:
+
+  front:
+    container_name: ${APPNAME}-${ENV}-front
+    image: ${AETHEUS_FRONT_IMAGE:-aetheus-front:local}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.front
+    ports:
+      # Loopback-only: Apache reverse-proxies from 127.0.0.1. Publishing on 0.0.0.0 would expose
+      # the container in cleartext HTTP (bypassing TLS/HSTS/Apache logs) and Docker's own iptables
+      # chain bypasses ufw, so the port would be internet-reachable on a shared VPS.
+      - "127.0.0.1:${PORT_FRONT}:8080"
+    environment:
+      - API_BASE_URL=${API_BASE_URL}
+      - APP_VERSION=${APP_VERSION}
+    depends_on:
+      back:
+        condition: service_healthy
+    # Overridable per-host: a runaway container must not OOM the whole VPS.
+    mem_limit: ${FRONT_MEM_LIMIT:-256m}
+    restart: unless-stopped
+
+  back:
+    container_name: ${APPNAME}-${ENV}-back
+    image: ${AETHEUS_BACK_IMAGE:-aetheus-back:local}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.back
+      args:
+        - APP_VERSION=${APP_VERSION}
+        - BUILD_AGENTS=${BUILD_AGENTS:-1}
+    ports:
+      # Loopback-only (see front): Apache proxies from 127.0.0.1; never expose the API on 0.0.0.0.
+      - "127.0.0.1:${PORT_BACK}:8080"
+    environment:
+      # Production is the fail-safe default. Ephemeral QA explicitly overrides this to Development
+      # so the guarded reset endpoint exists only beside its disposable *_e2e database.
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      # Keep Program and the entrypoint on the same persistent, app-owned directory in every environment.
+      - DataProtection__KeyPath=/app/data/dp-keys
+      # The container entrypoint owns migration execution; Program must not run it a second time.
+      - Database__SkipMigrations=true
+      - AETHEUS_RUN_MIGRATIONS=true
+      - ConnectionStrings__Default=Host=${APPNAME}-${ENV}-database;Port=5432;Database=${DB_NAME:-aetheus};Username=${DB_USER};Password=${DB_PASSWORD}
+      - Auth__JwtKey=${JWT_KEY}
+      - Auth__AdminPassword=${ADMIN_PASSWORD}
+      - Auth__EncryptionKey=${ENCRYPTION_KEY}
+      - Auth__EncryptionSalt=${ENCRYPTION_SALT}
+      - Cors__Origins__0=${FRONT_URL}
+      - Cors__Origins__1=${FRONT_URL_ACCEPT}
+      - Cors__Origins__2=${FRONT_URL_PROD}
+      - App__Version=${APP_VERSION}
+      - Aetheus__PublicApiBaseUrl=${API_BASE_URL}
+      - ArtifactStorage__ProjectQuotaBytes=${ARTIFACT_PROJECT_QUOTA_BYTES:-21474836480}
+      - Aetheus__EnvironmentTier=${AETHEUS_ENVIRONMENT_TIER:-production}
+      - Seed__Demo=${SEED_DEMO:-false}
+      - Seed__DemoDate=${SEED_DEMO_DATE:-2026-07-14}
+      # QA/local browser suites use virtual demo agents and explicitly extend this window so their
+      # presence cannot expire midway through a long suite. Production keeps the real 2-minute default.
+      - BackgroundServices__ServerHeartbeatTimeout=${SERVER_HEARTBEAT_TIMEOUT:-00:02:00}
+      # Prod keeps rate limiting ON (default false). QA sets RATE_LIMITING_DISABLED=true so the E2E suite's
+      # ~85 per-test logins from one IP are not throttled by the login policy (5/min/IP) -> stuck on /login.
+      - RateLimiting__Disabled=${RATE_LIMITING_DISABLED:-false}
+    volumes:
+      - git-repos:/app/data/git-repos
+      - dp-keys:/app/data/dp-keys
+      - artifacts:/app/data/artifacts
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      # curl is baked into Dockerfile.back's runtime stage for this check.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    mem_limit: ${BACK_MEM_LIMIT:-1g}
+    networks:
+      - default
+      - backend
+    restart: unless-stopped
+
+  database:
+    container_name: ${APPNAME}-${ENV}-database
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      - POSTGRES_DB=${DB_NAME:-aetheus}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME:-aetheus}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+    restart: unless-stopped
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  db-data:
+    name: ${APPNAME}-${ENV}-db-data
+  git-repos:
+    name: ${APPNAME}-${ENV}-git-repos
+  dp-keys:
+    name: ${APPNAME}-${ENV}-dp-keys
+  artifacts:
+    name: ${APPNAME}-${ENV}-artifacts

@@ -1,0 +1,4869 @@
+:root {
+    /* Neutral dark palette — matches the production Material Dark theme. */
+    --rz-base-900: #121212;
+    --rz-base-800: #1e1e1e;
+    --rz-base-700: #252525;
+    --rz-base-600: #2e2e2e;
+
+    --icon-xs: 0.75rem;
+    --icon-sm: 0.8125rem;
+    --icon-md: 0.875rem;
+    --icon-lg: 1rem;
+    --icon-xl: 1.125rem;
+    --icon-2xl: 1.25rem;
+
+    /* Radzen Compact data rows use 0.25rem vertical cell padding around content capped at
+       1.25rem, plus the table border. Keep these tokens shared so rich templates cannot make
+       one row taller than the default compact row. */
+    --aetheus-grid-row-content-height: 1.25rem;
+    --aetheus-grid-row-height: 1.8125rem;
+
+    /* Wizard code-block design tokens (consumed by wizard-code-block, wizard-token-code, wizard-pre, wizard-code-header,
+       and the unified console-style classes .task-output / .pipeline-step-output / .server-detail-code). */
+    --wizard-code-bg: var(--rz-base-800, #1e1e1e);
+    --wizard-code-header-bg: var(--rz-base-700, #2c2c40);
+    --wizard-code-border: var(--rz-base-700, #2e2e2e);
+    --wizard-code-text: var(--rz-text-color, #c8c8c8);
+    --wizard-code-text-muted: var(--rz-text-secondary-color, #9a9aaa);
+    --wizard-code-radius: 0.375rem;
+    /* State variants — applied via .is-success / .is-error modifiers (e.g. agent connected). */
+    --wizard-code-bg-success: color-mix(in srgb, var(--rz-success, #28a745) 12%, var(--wizard-code-bg));
+    --wizard-code-border-success: color-mix(in srgb, var(--rz-success, #28a745) 60%, var(--wizard-code-border));
+    --wizard-code-bg-error: color-mix(in srgb, var(--rz-danger, #dc3545) 12%, var(--wizard-code-bg));
+    --wizard-code-border-error: color-mix(in srgb, var(--rz-danger, #dc3545) 60%, var(--wizard-code-border));
+}
+
+html, body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+h1:focus {
+    outline: none;
+}
+
+/* Material Dark's semantic filled badges use white text on bright green/blue/orange/red
+   backgrounds, which stays below WCAG AA for normal text. A dark foreground exceeds 4.5:1
+   on all four semantic fills and is inherited by badge icons as well. */
+.rz-badge.rz-variant-filled:is(.rz-badge-success, .rz-badge-info, .rz-badge-warning, .rz-badge-danger) {
+    color: var(--rz-base-900, #121212);
+}
+
+a, .btn-link {
+    color: var(--rz-primary);
+}
+
+.btn-primary {
+    color: var(--rz-on-primary);
+    background-color: var(--rz-primary);
+    border-color: var(--rz-primary-dark);
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem var(--rz-primary-light);
+}
+
+.content {
+    padding-top: 1.1rem;
+}
+
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid var(--rz-success);
+}
+
+.invalid {
+    outline: 1px solid red;
+}
+
+.validation-message {
+    color: red;
+}
+
+#blazor-error-ui {
+    color-scheme: light only;
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+    #blazor-error-ui .dismiss {
+        cursor: pointer;
+        position: absolute;
+        right: 0.75rem;
+        top: 0.5rem;
+    }
+
+.blazor-error-boundary {
+    background: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNDkiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIG92ZXJmbG93PSJoaWRkZW4iPjxkZWZzPjxjbGlwUGF0aCBpZD0iY2xpcDAiPjxyZWN0IHg9IjIzNSIgeT0iNTEiIHdpZHRoPSI1NiIgaGVpZ2h0PSI0OSIvPjwvY2xpcFBhdGg+PC9kZWZzPjxnIGNsaXAtcGF0aD0idXJsKCNjbGlwMCkiIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0yMzUgLTUxKSI+PHBhdGggZD0iTTI2My41MDYgNTFDMjY0LjcxNyA1MSAyNjUuODEzIDUxLjQ4MzcgMjY2LjYwNiA1Mi4yNjU4TDI2Ny4wNTIgNTIuNzk4NyAyNjcuNTM5IDUzLjYyODMgMjkwLjE4NSA5Mi4xODMxIDI5MC41NDUgOTIuNzk1IDI5MC42NTYgOTIuOTk2QzI5MC44NzcgOTMuNTEzIDI5MSA5NC4wODE1IDI5MSA5NC42NzgyIDI5MSA5Ny4wNjUxIDI4OS4wMzggOTkgMjg2LjYxNyA5OUwyNDAuMzgzIDk5QzIzNy45NjMgOTkgMjM2IDk3LjA2NTEgMjM2IDk0LjY3ODIgMjM2IDk0LjM3OTkgMjM2LjAzMSA5NC4wODg2IDIzNi4wODkgOTMuODA3MkwyMzYuMzM4IDkzLjAxNjIgMjM2Ljg1OCA5Mi4xMzE0IDI1OS40NzMgNTMuNjI5NCAyNTkuOTYxIDUyLjc5ODUgMjYwLjQwNyA1Mi4yNjU4QzI2MS4yIDUxLjQ4MzcgMjYyLjI5NiA1MSAyNjMuNTA2IDUxWk0yNjMuNTg2IDY2LjAxODNDMjYwLjczNyA2Ni4wMTgzIDI1OS4zMTMgNjcuMTI0NSAyNTkuMzEzIDY5LjMzNyAyNTkuMzEzIDY5LjYxMDIgMjU5LjMzMiA2OS44NjA4IDI1OS4zNzEgNzAuMDg4N0wyNjEuNzk1IDg0LjAxNjEgMjY1LjM4IDg0LjAxNjEgMjY3LjgyMSA2OS43NDc1QzI2Ny44NiA2OS43MzA5IDI2Ny44NzkgNjkuNTg3NyAyNjcuODc5IDY5LjMxNzkgMjY3Ljg3OSA2Ny4xMTgyIDI2Ni40NDggNjYuMDE4MyAyNjMuNTg2IDY2LjAxODNaTTI2My41NzYgODYuMDU0N0MyNjEuMDQ5IDg2LjA1NDcgMjU5Ljc4NiA4Ny4zMDA1IDI1OS43ODYgODkuNzkyMSAyNTkuNzg2IDkyLjI4MzcgMjYxLjA0OSA5My41Mjk1IDI2My41NzYgOTMuNTI5NSAyNjYuMTE2IDkzLjUyOTUgMjY3LjM4NyA5Mi4yODM3IDI2Ny4zODcgODkuNzkyMSAyNjcuMzg3IDg3LjMwMDUgMjY2LjExNiA4Ni4wNTQ3IDI2My41NzYgODYuMDU0N1oiIGZpbGw9IiNGRkU1MDAiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjwvZz48L3N2Zz4=) no-repeat 1rem/1.8rem, #b32121;
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: white;
+}
+
+    .blazor-error-boundary::after {
+        content: "An error has occurred."
+    }
+
+.app-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    /* Theme-aware opaque backdrop so the chrome rendering behind is hidden until the fade-out. */
+    background: var(--rz-body-background-color, #121212);
+    transition: opacity 0.35s ease-out;
+}
+
+/* Applied by Aetheus.hideSplash once the app is ready; fades the single boot-splash node
+   out (revealing the already-painted chrome) before it removes itself from the DOM. */
+.app-splash--hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.app-splash-logo {
+    width: 6rem;
+    height: 6rem;
+    /* The boot loader is the inlined paper plane (see #app-splash in index.html); the external CSS
+       only handles the soft entrance fade. */
+    animation: splash-fade-in 0.4s ease-out;
+}
+
+@keyframes splash-fade-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+
+.dev-exception-pre {
+    max-width: 60rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    text-align: left;
+    font-size: 0.8rem;
+}
+
+code {
+    color: var(--rz-text-color, #c8c8c8);
+}
+
+.form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
+    color: var(--bs-secondary-color);
+    text-align: end;
+}
+
+.form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
+    text-align: start;
+}
+
+/* Metric card smooth transitions */
+.metric-value {
+    transition: opacity 0.3s ease;
+}
+
+.metric-bar .rz-progressbar-value {
+    transition: width 0.6s ease-in-out;
+}
+
+/* Edit panel slide-in animation */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-0.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.edit-panel {
+    animation: slideDown 0.25s ease-out;
+    transition: box-shadow 0.2s ease;
+}
+
+.edit-panel:hover {
+    box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+/* Clickable tag badges */
+.tag-clickable {
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.tag-clickable:hover {
+    opacity: 0.8;
+}
+
+.tag-filter-button {
+    min-height: 2.5rem;
+}
+
+.tag-more-details {
+    position: relative;
+}
+
+.tag-more-details summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.4rem 0.65rem;
+    border-radius: var(--rz-border-radius);
+    background: var(--rz-info-lighter);
+}
+
+.tag-more-content {
+    position: absolute;
+    z-index: 10;
+    right: 0;
+    min-width: 12rem;
+    padding: 0.75rem;
+    border-radius: var(--rz-border-radius);
+    background: var(--rz-base-background-color);
+    box-shadow: var(--rz-shadow-4);
+}
+
+.external-action-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: var(--rz-border-radius);
+    background: var(--rz-secondary);
+    color: var(--rz-on-secondary);
+    text-decoration: none;
+}
+
+.external-action-link:hover {
+    filter: brightness(1.05);
+}
+
+/* Phase 2 / E: consistent row hover highlight on EVERY data grid. Radzen paints the row striping
+   on the <td> CELLS (opaque) — NOT on the transparent <tr> — so a highlight on the row element is
+   completely hidden behind the cells. The highlight therefore targets the cells, and uses
+   !important to beat Radzen's more-specific striping rule. `cursor: pointer` is added only on rows
+   that actually navigate (the `.aetheus-clickable-rows` marker set by lists with a RowClick),
+   so a non-interactive grid never implies a click. */
+.rz-datatable .rz-data-row td {
+    transition: background-color 0.12s ease;
+}
+
+.rz-datatable .rz-data-row:hover td {
+    background-color: rgba(66, 165, 245, 0.2) !important;
+}
+
+.aetheus-clickable-rows .rz-data-row {
+    cursor: pointer;
+}
+
+/* E-row: one Radzen Compact height for EVERY data row. Detail-template rows are intentionally not
+   targeted: their expanded content must retain its natural height. Cell content is clipped to a
+   single line (ellipsis), while icons, togglers and buttons are capped to the same 1.25rem content
+   box as text and badges. This preserves Radzen's default padding and keeps every data row at 29px. */
+.rz-datatable .rz-data-row > td {
+    box-sizing: border-box;
+    height: var(--aetheus-grid-row-height);
+    max-height: var(--aetheus-grid-row-height);
+    padding-block: 0.25rem;
+    line-height: var(--aetheus-grid-row-content-height);
+    overflow: hidden;
+}
+
+.rz-datatable .rz-data-row .rz-cell-data {
+    display: block;
+    height: auto;
+    max-height: var(--aetheus-grid-row-content-height);
+    line-height: var(--rz-grid-cell-line-height, 1rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Rich Radzen templates use 24px icons and controls by default. In a Compact grid they are
+   constrained to the text/badge content box, without changing their natural horizontal size. */
+.rz-datatable .rz-data-row .rz-cell-data > *,
+.rz-datatable .rz-data-row .rz-row-toggler,
+.rz-datatable .rz-data-row .rz-button {
+    max-height: var(--aetheus-grid-row-content-height);
+}
+
+/* Radzen emits an empty responsive-title span before row togglers. Its inline baseline adds almost
+   one pixel to the table row even though it has no content, so remove only that empty placeholder. */
+.rz-datatable .rz-data-row .rz-col-icon > .rz-column-title:empty {
+    display: none;
+}
+
+.rz-datatable .rz-data-row .rz-col-icon > .rz-button {
+    display: block;
+    margin-inline: auto;
+}
+
+.rz-datatable .rz-data-row .rzi,
+.rz-datatable .rz-data-row .rz-row-toggler {
+    width: var(--aetheus-grid-row-content-height);
+    height: var(--aetheus-grid-row-content-height);
+    font-size: var(--aetheus-grid-row-content-height);
+    line-height: var(--aetheus-grid-row-content-height);
+}
+
+.rz-datatable .rz-data-row .rz-button {
+    min-height: var(--aetheus-grid-row-content-height);
+    height: var(--aetheus-grid-row-content-height);
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+/* E: full-height list — uniform sizing model for every list grid. The grid has NO minimum height:
+   it sizes exactly to its content (its bottom sits at the last row), and only grows up to the
+   remaining space, then stays there and scrolls its body internally (the pager stays pinned at the
+   bottom). `min-height: 0` (not the flex default `auto`) is what lets it both collapse to content
+   AND shrink to scroll. Two tiers:
+   1. PRIMARY (E-flex, below): when the grid is a direct child of the body wrapper, the wrapper
+      becomes a flex column that exactly fills the scroll viewport, and the grid sizes to the
+      REAL remaining space — no magic number, adapts to any chrome height (filters, toolbars,
+      breadcrumb) above it.
+   2. FALLBACK (this rule): the `max-height` cap is used only when the grid is NOT a direct child
+      of the body wrapper (e.g. nested inside RadzenTabs, where the flex chain is broken). The
+      15rem cap clears the app bar, a typical page header/filter row and the wrapper padding.
+   Opt-in via AetheusDataGrid FullHeight; server-side pagination remains the scale strategy. */
+.aetheus-grid-fullheight {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: calc(100vh - 15rem);
+}
+
+.aetheus-grid-fullheight .rz-data-grid-data {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* Keep every page in one stable vertical formatting context. Full-height tab panels (logs,
+   YAML, editors) also use flex; applying the same baseline to their sibling pages prevents CSS
+   margin-collapsing from changing when a different tab becomes active. */
+.app-body-wrapper {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Reserve the document scrollbar lane on every page. Switching between tabs whose panels have
+   different heights no longer changes the content width, so the tab strip and surrounding chrome
+   keep the same horizontal position. */
+html {
+    scrollbar-gutter: stable;
+}
+
+/* E-flex (PRIMARY): when the page body DIRECTLY hosts a full-height grid, make the body wrapper a
+   flex column that exactly fills the scroll viewport. The grid (flex: 0 1 auto) then sizes to its
+   content — collapsing to its last row when near-empty (no minimum) — and shrinks to the real
+   remaining space, scrolling its body internally, with NO magic-number cap. The `> ` combinator means
+   tab-nested or otherwise wrapped grids (e.g. Pipelines) don't trigger this and keep the
+   max-height fallback above, so there is no regression for those. */
+.app-body-wrapper:has(> .aetheus-grid-fullheight) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.app-body-wrapper:has(> .aetheus-grid-fullheight) > .aetheus-grid-fullheight {
+    flex: 0 1 auto;
+    max-height: none;
+}
+
+/* E-bis: keep inline action buttons (e.g. "Run again") from inflating a row — compact + centered so
+   every row in a grid keeps the same height regardless of whether it carries action buttons. */
+.rz-datatable .rz-data-row .rz-button.rz-button-sm,
+.rz-datatable .rz-data-row .rz-button.rz-button-xs {
+    vertical-align: middle;
+}
+
+/* C / F-06: shared PageHeader. The spacer pushes actions to the right; the header keeps a small
+   bottom margin so the page body never butts against the title row. */
+.page-header {
+    margin-bottom: 1rem;
+}
+
+.page-header-spacer {
+    flex: 1 1 auto;
+}
+
+.page-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    max-width: 100%;
+}
+
+.page-header-icon {
+    font-size: var(--icon-lg, 1.5rem);
+}
+
+/* C / F-07: cap form/dialog width for readability (long single-column forms become unwieldy past
+   ~45rem). Applied to edit/create form wrappers; two-column RadzenRow forms opt out by not using it. */
+.form-narrow {
+    max-width: 45rem;
+}
+
+/* F-07: mark required fields with a subtle asterisk on the RadzenFormField label. */
+.rz-form-field.field-required .rz-form-field-content > label::after,
+.field-required > .rz-form-field-label::after {
+    content: " *";
+    color: var(--rz-danger, #dc3545);
+}
+
+/* H: semantic threshold tint on the resource metric bars (CPU/RAM/disk). The fill turns amber as
+   usage gets tight (>75%) and red near saturation (>90%); the ok state keeps the theme default. */
+.metric-bar-warn .rz-progressbar-value {
+    background-color: var(--rz-warning, #f59e0b);
+}
+
+.metric-bar-danger .rz-progressbar-value {
+    background-color: var(--rz-danger, #dc3545);
+}
+
+/* H: recent-tasks mini-list row on the server overview. */
+.task-row {
+    padding: 0.25rem 0;
+    border-bottom: 0.0625rem solid var(--rz-base-300, rgba(128, 128, 128, 0.15));
+}
+
+.task-row:last-child {
+    border-bottom: none;
+}
+
+/* Dashboard clickable rows */
+.dashboard-clickable-grid .rz-data-row {
+    cursor: pointer;
+}
+
+.dashboard-clickable-grid .rz-data-row:hover {
+    background-color: var(--rz-data-grid-row-hover-background-color, rgba(255, 255, 255, 0.05));
+}
+
+/* GENERIC TABLE-HEADER RULE - every data-grid column title stays on a SINGLE line, shown in full
+   when the column is wide enough and ellipsis-truncated only when it genuinely doesn't fit (never
+   wraps to a second line like "Pipelin/es"). Applies to every RadzenDataGrid site-wide. */
+.rz-column-title,
+.rz-column-title-content {
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Docker container row backgrounds */
+.docker-row-running {
+    background-color: rgba(40, 167, 69, 0.08) !important;
+}
+
+.docker-row-exited {
+    background-color: rgba(220, 53, 69, 0.08) !important;
+}
+
+.docker-row-paused {
+    background-color: rgba(255, 193, 7, 0.08) !important;
+}
+
+.docker-row-other {
+    background-color: rgba(108, 117, 125, 0.05) !important;
+}
+
+/* Service log line-count selector */
+.log-lines-select {
+    width: 5.5rem;
+}
+
+/* Docker log viewer */
+.docker-logs {
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #c8c8c8);
+    padding: 1rem;
+    border-radius: 0.375rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    max-height: 25rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+}
+
+/* Confirm dialog overlay */
+.confirm-dialog-card {
+    min-width: 20rem;
+}
+
+/* Docker project zoom dialog */
+.docker-zoom-card {
+    width: min(80rem, 95vw);
+    max-height: 90vh;
+    overflow: auto;
+}
+
+/* Docker relations interactive graph */
+.docker-graph-svg {
+    width: 100%;
+    height: 36rem;
+    border: 1px solid var(--rz-border-color, #e0e0e0);
+    border-radius: 0.5rem;
+    background: var(--rz-base-50, #fafafa);
+    user-select: none;
+    cursor: grab;
+    display: block;
+}
+
+.docker-graph-svg:active {
+    cursor: grabbing;
+}
+
+/* Docker search filter */
+.docker-search {
+    max-width: 14rem;
+}
+
+/* Docker memory progress bar */
+.docker-mem-bar {
+    height: 0.375rem;
+}
+
+.docker-mem-bar .rz-progressbar-value {
+    transition: width 0.4s ease;
+}
+
+/* Docker memory progress bar colors */
+.docker-mem-green .rz-progressbar-value {
+    background-color: var(--rz-success, #28a745) !important;
+}
+
+.docker-mem-yellow .rz-progressbar-value {
+    background-color: var(--rz-warning, #ffc107) !important;
+}
+
+.docker-mem-red .rz-progressbar-value {
+    background-color: var(--rz-danger, #dc3545) !important;
+}
+
+/* Docker loading skeleton */
+.docker-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem 0;
+}
+
+.skeleton-row {
+    height: 2.5rem;
+    border-radius: 0.375rem;
+    background: linear-gradient(90deg,
+        var(--rz-base-800, #2a2a3e) 25%,
+        var(--rz-base-700, #2e2e2e) 50%,
+        var(--rz-base-800, #2a2a3e) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* Prune button spin animation */
+.prune-spinning .rz-button-icon {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Compose editor textarea */
+.docker-compose-editor {
+    width: 100%;
+    min-height: 20rem;
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #c8c8c8);
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 1rem;
+    resize: vertical;
+}
+
+/* Shell terminal */
+.docker-shell-output {
+    min-height: 10rem;
+    max-height: 20rem;
+}
+
+.docker-shell-input {
+    flex: 1;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+/* Blinking cursor for shell input */
+.docker-shell-input::placeholder {
+    animation: blink-cursor 1s step-end infinite;
+}
+
+@keyframes blink-cursor {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* Fade-in for inspect/shell/env/browse panels */
+@keyframes fadeInPanel {
+    from {
+        opacity: 0;
+        transform: translateY(0.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.docker-panel-fadein {
+    animation: fadeInPanel 0.3s ease-out;
+}
+
+/* YAML syntax highlighting (minimal CSS-based) */
+.yaml-editor {
+    width: 100%;
+    min-height: 20rem;
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #c8c8c8);
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 1rem;
+    resize: vertical;
+    tab-size: 2;
+}
+
+/* Env vars table */
+.docker-env-table {
+    width: 100%;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+}
+
+.docker-env-table th {
+    text-align: left;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--rz-base-700, #2e2e2e);
+    color: var(--rz-text-secondary-color, #999);
+}
+
+.docker-env-table td {
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--rz-base-800, #2a2a3e);
+    word-break: break-all;
+}
+
+/* File browser */
+.docker-file-entry {
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--rz-base-800, #2a2a3e);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+}
+
+.docker-file-entry:hover {
+    background: var(--rz-base-800, #2a2a3e);
+}
+
+/* Dockerfile editor */
+.docker-build-editor {
+    width: 100%;
+    min-height: 15rem;
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #c8c8c8);
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 1rem;
+    resize: vertical;
+}
+
+/* Prune summary text */
+.prune-summary {
+    font-size: 0.75rem;
+    color: var(--rz-text-secondary-color, #999);
+}
+
+/* Server configuration YAML */
+.config-yaml-block {
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #c8c8c8);
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 1rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 30rem;
+}
+
+.config-yaml-editor {
+    width: 100%;
+    min-height: 15rem;
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #c8c8c8);
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 1rem;
+    resize: vertical;
+}
+
+/* ==========================================================================
+   Blade Layout — Azure-inspired sidebar navigation
+   ========================================================================== */
+
+.blade-layout {
+    display: flex;
+    gap: 0;
+    min-height: calc(100vh - 14rem);
+}
+
+.blade-sidebar {
+    width: 13rem;
+    min-width: 13rem;
+    border-right: 1px solid var(--rz-base-700, #2e2e2e);
+    padding: 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.blade-sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.625rem 1rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--rz-text-color, #c8c8c8);
+    transition: background-color 0.15s ease;
+    user-select: none;
+}
+
+.blade-sidebar-item:hover {
+    background-color: var(--rz-base-800, #2a2a3e);
+}
+
+.blade-sidebar-item.active {
+    background-color: var(--rz-base-800, #2a2a3e);
+    color: var(--rz-primary, #1b6ec2);
+    font-weight: 600;
+}
+
+.blade-sidebar-item .rzi {
+    font-size: var(--icon-xl);
+}
+
+.blade-content {
+    flex: 1;
+    padding: 0.25rem 0;
+    overflow-x: auto;
+    min-width: 0;
+}
+
+.blade-content-hidden {
+    display: none;
+}
+
+.blade-content-spacer {
+    flex: 1;
+}
+
+/* Responsive: collapse sidebar on small screens */
+@media (max-width: 768px) {
+    .blade-layout {
+        flex-direction: column;
+    }
+
+    .blade-sidebar {
+        width: 100%;
+        min-width: 100%;
+        flex-direction: row;
+        overflow-x: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--rz-base-700, #2e2e2e);
+        padding: 0;
+    }
+
+    .blade-sidebar-item {
+        border-bottom: 3px solid transparent;
+        padding: 0.5rem 0.75rem;
+        white-space: nowrap;
+        font-size: 0.8125rem;
+    }
+
+    .blade-sidebar-item.active {
+        border-bottom-color: var(--rz-primary, #1b6ec2);
+    }
+
+    .blade-content {
+        padding: 0.25rem 0;
+    }
+}
+
+/* ==========================================================================
+   Server List — Toolbar and Grid
+   ========================================================================== */
+
+.server-list-toolbar {
+    margin-bottom: 1rem;
+}
+
+.server-list-spacer {
+    flex: 1;
+}
+
+.server-list-search {
+    min-width: 15rem;
+}
+
+.server-list-grid {
+    margin-top: 0.5rem;
+}
+
+.server-status-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.server-status-online {
+    background-color: var(--rz-success, #28a745);
+}
+
+.server-status-offline {
+    background-color: var(--rz-danger, #dc3545);
+}
+
+/* ==========================================================================
+   Project Cards
+   ========================================================================== */
+
+.project-list-toolbar {
+    margin-bottom: 1rem;
+}
+
+.project-list-spacer {
+    flex: 1;
+}
+
+.project-list-search-wrap {
+    position: relative;
+    min-width: 15rem;
+}
+
+.project-list-search {
+    width: 100%;
+    padding-left: 2.25rem;
+}
+
+.project-list-search-icon {
+    position: absolute;
+    z-index: 1;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.project-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+    gap: 1rem;
+}
+
+.project-card {
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    height: 100%;
+}
+
+.project-card:hover {
+    border-color: var(--rz-primary, #1b6ec2);
+    box-shadow: 0 0.125rem 0.5rem rgba(27, 110, 194, 0.15);
+}
+
+.project-card-icon {
+    font-size: var(--icon-2xl);
+    color: var(--rz-primary, #1b6ec2);
+}
+
+.project-card-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-card-desc {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.project-card-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    height: 100%;
+}
+
+/* Meta footer: a divider-separated row of chips that WRAPS to a second line instead of
+   shrinking each item (which made captions break mid-word over their icon). */
+.project-card-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 1rem;
+    margin-top: 0.25rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--rz-base-700, #2e2e2e);
+}
+
+.project-card-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.project-card-meta-icon {
+    font-size: var(--icon-md);
+}
+
+/* B3KP: chips inside the project card that have their own action (repository link / git history).
+   They intercept the click so the surrounding card link doesn't also fire. */
+.project-card-meta-clickable {
+    cursor: pointer;
+    border-radius: 0.25rem;
+    transition: color 0.15s ease;
+}
+
+.project-card-meta-clickable:hover {
+    color: var(--rz-primary);
+}
+
+/* Project overview: the two info/repository cards stretch to equal height so the row stays tidy
+   regardless of which card holds more fields; long repo URLs wrap instead of overflowing. */
+.overview-info-card {
+    height: 100%;
+}
+
+.project-overview-recent-card {
+    width: 100%;
+    min-width: 0;
+}
+
+.project-overview-recent-card .rz-card-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.project-overview-recent-grid {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.overview-break-anywhere {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+    .project-card-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================================================
+   Pipeline List
+   ========================================================================== */
+
+.pipeline-list-toolbar {
+    margin-bottom: 1rem;
+}
+
+.pipeline-list-spacer {
+    flex: 1;
+}
+
+.pipeline-list-search {
+    min-width: 15rem;
+}
+
+.pipeline-list-grid {
+    margin-top: 0.5rem;
+}
+
+.pipeline-name-link,
+.server-name-link,
+.rz-datatable .rz-data-row a:not(.rz-button) {
+    color: var(--rz-primary, #1b6ec2);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.pipeline-name-link:hover,
+.server-name-link:hover,
+.rz-datatable .rz-data-row a:not(.rz-button):hover {
+    text-decoration: underline;
+}
+
+.pipeline-overview-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 0;
+}
+
+.pipeline-overview-global {
+    height: calc(100dvh - 17rem);
+    min-height: 47rem;
+}
+
+.pipeline-overview-project {
+    height: calc(100dvh - 14rem);
+    min-height: 47rem;
+}
+
+.pipeline-overview-section {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.pipeline-overview-section-fixed {
+    flex: 0 0 auto;
+}
+
+.pipeline-overview-section-recent {
+    flex: 1 1 20rem;
+}
+
+.pipeline-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.4rem;
+}
+
+.pipeline-section-grid {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: visible;
+}
+
+.pipeline-grid-fill {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+}
+
+.pipeline-grid-fill .rz-data-grid-data {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.pipeline-grid-virtualized {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 0;
+}
+
+.pipeline-grid-five-rows {
+    /* 2.625rem Radzen header + five 1.8125rem compact data rows. */
+    height: 11.6875rem;
+}
+
+.pipeline-grid-five-rows .rz-data-grid-data {
+    overflow-y: auto;
+}
+
+.pipeline-grid-five-rows .rz-data-grid-data tr {
+    height: var(--aetheus-grid-row-height);
+}
+
+.pipeline-project-context {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pipeline-project-context .rzi {
+    flex: 0 0 auto;
+}
+
+.pipeline-dependency-grid .rz-group-header,
+.pipeline-runs-grid .rz-group-header {
+    display: none;
+}
+
+.pipeline-current-section .empty-state {
+    gap: 0.25rem;
+    padding: 0.5rem !important;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.pipeline-current-section .empty-state-icon {
+    font-size: 1.75rem;
+}
+
+.pipeline-current-section .empty-state > * {
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.pipeline-dependency-details {
+    padding: 0.75rem;
+    background: var(--rz-panel-background-color, var(--rz-base-background-color));
+    border: 0.0625rem solid var(--rz-base-600, #2e2e2e);
+    border-radius: var(--rz-border-radius);
+}
+
+.pipeline-relation-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+}
+
+.pipeline-relation-header-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 2rem;
+    color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 14%, transparent);
+    border-radius: 50%;
+}
+
+.pipeline-relation-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pipeline-relation-list-execution {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.pipeline-relation-item {
+    min-width: 0;
+}
+
+.pipeline-relation-card {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+    padding: 0.55rem 0.65rem;
+    color: var(--rz-text-color);
+    background: var(--rz-base-background-color);
+    border: 0.0625rem solid var(--rz-base-600, #2e2e2e);
+    border-radius: var(--rz-border-radius);
+    text-decoration: none;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+a.pipeline-relation-card:hover {
+    color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 8%, var(--rz-base-background-color));
+    border-color: color-mix(in srgb, var(--rz-primary) 55%, var(--rz-base-600, #2e2e2e));
+}
+
+.pipeline-relation-card-static {
+    opacity: 0.8;
+}
+
+.pipeline-relation-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    flex: 0 0 1.75rem;
+    color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 14%, transparent);
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.pipeline-relation-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+}
+
+.pipeline-relation-open {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 1rem;
+    opacity: 0.65;
+}
+
+.pipeline-row-actions {
+    white-space: nowrap;
+}
+
+/* Cross-link (git source / linked releases) */
+.cross-link-icon {
+    font-size: 1rem;
+}
+
+.cross-link-sha {
+    font-family: monospace;
+}
+
+.cross-link-release {
+    cursor: pointer;
+}
+
+/* Cross-link tiles (run/release/artifact/commit/branch) */
+.run-tile-icon {
+    font-size: 0.875rem;
+    vertical-align: middle;
+}
+
+.run-tile-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.run-tile-link .run-overview-card {
+    cursor: pointer;
+    transition: box-shadow 0.15s ease;
+}
+
+.run-tile-link:hover .run-overview-card {
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.18);
+}
+
+/* Grouped detail panels (artifact / release detail pages): two labelled columns of
+   label -> value rows, replacing the flat undifferentiated cross-link tile wrap so the
+   reader can scan "where it comes from" vs "where it goes" instead of one uniform grid. */
+.detail-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
+    border-bottom: 0.0625rem solid var(--rz-base-500, #333333);
+}
+
+.detail-row {
+    padding: 0.45rem 0;
+}
+
+.detail-row + .detail-row {
+    border-top: 0.0625rem solid var(--rz-base-600, #2e2e2e);
+}
+
+.detail-value-link {
+    color: var(--rz-primary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.detail-value-link:hover {
+    text-decoration: underline;
+}
+
+.detail-filepath-box {
+    background: var(--rz-base-900, #121212);
+    border: 0.0625rem solid var(--rz-base-500, #333333);
+    border-radius: 0.25rem;
+    padding: 0.5rem 0.75rem;
+}
+
+/* Run history dots */
+.pipeline-run-history {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.25rem;
+    white-space: nowrap;
+}
+
+.pipeline-run-dot {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    transition: transform 0.1s;
+}
+
+.pipeline-run-dot:hover {
+    transform: scale(1.3);
+}
+
+.pipeline-run-dot-success {
+    background-color: var(--rz-success, #28a745);
+}
+
+.pipeline-run-dot-failed {
+    background-color: var(--rz-danger, #dc3545);
+}
+
+.pipeline-run-dot-running {
+    background-color: var(--rz-info, #17a2b8);
+    animation: pulse-dot 1.5s infinite;
+}
+
+.pipeline-run-dot-pending {
+    background-color: var(--rz-base-500, #6c757d);
+}
+
+.pipeline-run-dot-cancelled {
+    background-color: var(--rz-warning, #ffc107);
+}
+
+.pipeline-run-dot-waitingforapproval {
+    background-color: var(--rz-warning, #ffc107);
+    animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* ==========================================================================
+   Pipeline Detail (tabs)
+   ========================================================================== */
+
+.pipeline-detail-toolbar {
+    margin-bottom: 0.5rem;
+}
+
+.pipeline-detail-tabs {
+    min-height: 20rem;
+}
+
+/* The page shell is always present for an existing pipeline, whatever its active tab. This keeps
+   the header, breadcrumbs and tabs in one geometry instead of changing the ancestor layout only
+   when the edit form is mounted. */
+.pipeline-detail-page { min-height: 0; }
+
+/* Pipeline edit tab: compact meta row (name + description inline) + inline toolbar, and the editor
+   flexes to fill the remaining viewport height (full-height chain below, scoped to .pipeline-edit-form). */
+.pipeline-edit-form { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
+.pipeline-edit-meta { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+.pipeline-edit-meta .pipeline-edit-name { flex: 1 1 16rem; }
+.pipeline-edit-meta .pipeline-edit-desc { flex: 2 1 22rem; }
+.pipeline-edit-meta .rz-textbox { width: 100%; }
+.pipeline-edit-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+.pipeline-yaml-editor {
+    width: 100%;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.pipeline-yaml-editor .monaco-editor-container { flex: 1 1 auto; height: auto; min-height: 12rem; }
+
+/* Edit tab body: editor on the left, an optional read-only pipeline-definition peek on the right. */
+.pipeline-edit-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    gap: 1rem;
+}
+.pipeline-edit-body > .pipeline-yaml-editor { flex: 1 1 0; min-width: 0; width: auto; }
+.pipeline-edit-body > .run-yaml-pane { flex: 1 1 0; min-width: 0; }
+
+.monaco-editor-container {
+    width: 100%;
+    height: calc(100vh - 20rem);
+    min-height: 20rem;
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+    overflow: hidden;
+}
+
+.vp-provenance-inherited {
+    opacity: 0.7;
+    filter: grayscale(0.65);
+}
+
+.monaco-editor .monaco-scrollable-element > .scrollbar > .slider {
+    background: rgba(121, 121, 121, 0.4);
+    border-radius: 0.3125rem;
+}
+
+.monaco-editor .monaco-scrollable-element > .scrollbar > .slider:hover {
+    background: rgba(121, 121, 121, 0.7);
+}
+
+.monaco-status-bar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    color: var(--rz-text-secondary-color);
+    background: var(--rz-base-800);
+    border: 0.0625rem solid var(--rz-border-color);
+    border-top: none;
+    border-radius: 0 0 var(--rz-border-radius) var(--rz-border-radius);
+}
+
+/* ==========================================================================
+   Pipeline Run Detail — Stage Flow
+   ========================================================================== */
+
+.pipeline-run-toolbar {
+    margin-bottom: 1rem;
+}
+
+.stage-flow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+    overflow-x: auto;
+}
+
+.stage-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    min-width: 8rem;
+    background-color: var(--rz-base-900, #1e1e2e);
+}
+
+.stage-box-completed {
+    border-color: var(--rz-success, #28a745);
+}
+
+.stage-box-running {
+    border-color: var(--rz-info, #17a2b8);
+    box-shadow: 0 0 0.5rem rgba(23, 162, 184, 0.2);
+}
+
+.stage-box-failed {
+    border-color: var(--rz-danger, #dc3545);
+}
+
+.stage-box-header {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-weight: 600;
+}
+
+.stage-box-icon {
+    font-size: var(--icon-md);
+}
+
+.stage-box-name {
+    font-size: 0.875rem;
+}
+
+.stage-box-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--rz-text-secondary-color, #999);
+}
+
+.stage-flow-arrow {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* Expandable stage/step list */
+.pipeline-run-stages {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.pipeline-run-stage {
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem;
+    overflow: hidden;
+}
+
+.pipeline-run-stage-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    cursor: pointer;
+    background-color: var(--rz-base-800, #2a2a3e);
+    transition: background-color 0.15s;
+}
+
+.pipeline-run-stage-header:hover {
+    background-color: var(--rz-base-700, #2e2e2e);
+}
+
+.pipeline-run-stage-header.active {
+    background-color: var(--rz-base-700, #2e2e2e);
+}
+
+.stage-status-icon {
+    font-size: var(--icon-md);
+}
+
+.pipeline-run-steps {
+    padding: 0.25rem 0;
+}
+
+.pipeline-run-step {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem 0.375rem 2.5rem;
+    border-top: 1px solid var(--rz-base-800, #2a2a3e);
+}
+
+.pipeline-run-step-name {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+}
+
+.pipeline-run-matrix-header {
+    cursor: pointer;
+    background: var(--rz-base-900, #1e1e2e);
+}
+
+.pipeline-run-matrix-header:hover {
+    background: var(--rz-base-800, #2a2a3e);
+}
+
+.matrix-toggle-icon {
+    font-size: var(--icon-sm);
+    flex-shrink: 0;
+}
+
+.pipeline-run-matrix-leg {
+    padding-left: 4rem;
+}
+
+.step-status-icon {
+    font-size: var(--icon-sm);
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .stage-flow {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .stage-flow-arrow {
+        justify-content: center;
+        transform: rotate(90deg);
+    }
+
+    .pipeline-run-step {
+        padding-left: 1.5rem;
+    }
+
+    .pipeline-run-matrix-leg {
+        padding-left: 2.5rem;
+    }
+}
+
+/* Vertical pipeline run timeline — Azure DevOps-style stage/step visualization.
+   Left rail with status dots + connectors, right side with collapsible content. */
+.run-timeline { display: flex; flex-direction: column; }
+.run-timeline-stage { display: flex; gap: 0; min-height: 3rem; }
+
+.run-timeline-rail {
+    display: flex; flex-direction: column; align-items: center;
+    width: 2rem; flex-shrink: 0; padding-top: 0.875rem;
+}
+
+.run-timeline-dot {
+    position: relative; width: 0.875rem; height: 0.875rem;
+    border-radius: 50%; flex-shrink: 0; z-index: 1;
+}
+.run-timeline-dot-success  { background: var(--rz-success); }
+.run-timeline-dot-failed   { background: var(--rz-danger); }
+.run-timeline-dot-running  { background: var(--rz-info); }
+.run-timeline-dot-pending  { background: var(--rz-base-500); }
+
+.run-timeline-pulse {
+    position: absolute; inset: -4px; border-radius: 50%;
+    border: 2px solid var(--rz-info); opacity: 0;
+    animation: timeline-pulse 1.5s ease-out infinite;
+}
+@keyframes timeline-pulse {
+    0%   { transform: scale(0.8); opacity: 0.8; }
+    100% { transform: scale(1.6); opacity: 0; }
+}
+
+.run-timeline-connector {
+    flex: 1; width: 2px; min-height: 0.5rem;
+}
+.run-timeline-connector-success  { background: var(--rz-success); }
+.run-timeline-connector-failed   { background: var(--rz-danger); }
+.run-timeline-connector-running  { background: var(--rz-info); }
+.run-timeline-connector-pending  { background: var(--rz-base-500); }
+/* S-DES-19: gradient connector at a success→failure boundary */
+.run-timeline-connector-success-failed { background: linear-gradient(to bottom, var(--rz-success), var(--rz-danger)); }
+
+.run-timeline-body { flex: 1; min-width: 0; padding-bottom: 0.25rem; }
+
+.run-timeline-stage-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.75rem; cursor: pointer;
+    border-radius: 0.375rem; transition: background-color 0.15s;
+}
+.run-timeline-stage-header:hover { background: var(--rz-base-800, #2a2a3e); }
+.run-timeline-stage-header.active { background: var(--rz-base-800, #2a2a3e); }
+.run-timeline-toggle { font-size: var(--icon-md); color: var(--rz-text-secondary-color); }
+
+.run-timeline-steps {
+    margin-left: 0.75rem; padding: 0.25rem 0;
+    border-left: 1px solid var(--rz-base-700, #2e2e2e);
+}
+
+.run-timeline-step {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+}
+.run-timeline-step-name {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+}
+.run-timeline-step-icon {
+    font-family: 'Material Symbols Outlined', 'Material Icons';
+    font-size: 1.125rem; font-weight: normal; font-style: normal;
+    line-height: 1; flex-shrink: 0;
+}
+.run-timeline-step-success { color: var(--rz-success); }
+.run-timeline-step-running { color: var(--rz-info); }
+.run-timeline-step-failed  { color: var(--rz-danger); }
+.run-timeline-step-pending { color: var(--rz-text-secondary-color); }
+
+.run-timeline-matrix-header { cursor: pointer; }
+.run-timeline-matrix-header:hover { background: var(--rz-base-900, #121212); }
+.run-timeline-matrix-leg { padding-left: 2rem; }
+
+.run-timeline-step.active { background: var(--rz-base-700, #252525); border-radius: 0.25rem; }
+.run-timeline-step:hover { background: var(--rz-base-800, #1e1e1e); border-radius: 0.25rem; }
+
+.run-timeline-duration { white-space: nowrap; }
+
+/* Pipeline step log panel — terminal style */
+.step-log-panel {
+    background: var(--rz-base-900, #121212);
+    color: var(--rz-text-color, #e0e0e0);
+    font-family: 'Cascadia Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 0.75rem 1rem;
+    margin: 0.25rem 0 0.5rem 1.75rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--rz-base-700, #252525);
+    max-height: 25rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.step-log-line {
+    padding: 0.0625rem 0;
+}
+.step-log-line:hover {
+    background: var(--rz-base-800, #1e1e1e);
+}
+.step-log-error {
+    /* S-DES-12: brighter red + faint row tint for stronger contrast on the dark terminal. */
+    color: #ff8a80;
+    background-color: rgba(239, 83, 80, 0.1);
+}
+.step-log-warning {
+    color: var(--rz-warning, #ffa726);
+}
+.step-log-empty {
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-style: italic;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+}
+
+@media (max-width: 768px) {
+    .run-timeline-rail { width: 1.5rem; }
+    .run-timeline-steps { margin-left: 0.25rem; }
+    .run-split-layout { grid-template-columns: 1fr !important; }
+    /* Single column on mobile: no full-height fill (the :has() chain is desktop-only), so the two
+       stacked panels size to content. Cap the log panel at 70vh so its terminal still scrolls
+       internally instead of running the whole page down. */
+    .run-split-logs { min-height: 20rem; max-height: 70vh; }
+}
+
+/* --- Split view: timeline left + logs right --- */
+.run-split-layout {
+    display: grid;
+    grid-template-columns: 22rem 1fr;
+    gap: 1rem;
+    min-height: 28rem;
+}
+
+.run-split-timeline {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+/* Orchestration runs keep the side-by-side split but widen the left column so the run tree's
+   stage label + child-pipeline chip + description fit on one line (logs stay on the right). */
+.run-split-wide { grid-template-columns: 34rem 1fr; }
+
+/* Stage wrapper — rail spans full height of header + sub-steps */
+.run-tl-stage {
+    display: flex;
+}
+.run-tl-content {
+    flex: 1;
+    min-width: 0;
+}
+.run-tl-grouped { padding-left: 1rem; }
+
+/* Group header in logs timeline */
+.run-tl-group-header {
+    display: flex; align-items: center; gap: 0.375rem;
+    padding: 0.375rem 0.25rem 0.125rem;
+    font-weight: 600; font-size: 0.75rem;
+    color: var(--rz-primary, #7c4dff);
+    border-bottom: 1px solid var(--rz-base-700);
+    margin-top: 0.375rem;
+}
+.run-tl-group-header:first-child { margin-top: 0; }
+
+/* Unified timeline row — one line per step/stage */
+.run-tl-row {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.25rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    transition: background 0.15s;
+    position: relative;
+}
+.run-tl-row:hover { background: var(--rz-base-700, #252525); }
+.run-tl-row.selected { background: var(--rz-base-600, #333); }
+.run-tl-stage-header { cursor: default; }
+.run-tl-sub { padding-left: 0.5rem; }
+.run-tl-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 0.75rem;
+    flex-shrink: 0;
+}
+.run-tl-dot {
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 0.375rem;
+    position: relative;
+}
+.run-tl-line {
+    display: none;
+}
+.run-status-badge {
+    min-width: 4.5rem;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+}
+.run-tl-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+.run-tl-bold { font-weight: 600; }
+.run-tl-dur {
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-size: 0.6875rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Progress timeline: duration sits in a fixed left gutter (timers on the left), and the name no
+   longer grows so the trailing badges sit right after the label instead of the far right. */
+.run-progress-timeline .run-tl-dur { min-width: 2.75rem; text-align: right; }
+.run-progress-timeline .run-tl-name { flex: initial; }
+
+.run-split-logs {
+    display: flex;
+    flex-direction: column;
+    background: var(--rz-base-900, #121212);
+    border-radius: 0.5rem;
+    border: 0.0625rem solid var(--rz-base-700, #252525);
+    overflow: hidden;
+    min-height: 20rem;
+    min-width: 0;
+    container-type: inline-size;
+}
+
+/* --- Full-height fill (desktop) ---------------------------------------------------------------
+   The logs panel should fill the viewport so a short log doesn't leave an empty band below it and
+   a long log scrolls inside the terminal (not the page). Rather than guess a `calc(100vh - Nrem)`
+   reserve (fragile magic number), turn the shared layout shell into a real flex column *only on
+   this page*, scoped with :has(.run-split-layout) so every other page is untouched. The chain is
+   .rz-body -> .app-body-wrapper -> .rz-tabview -> .rz-tabview-panels -> .rz-tabview-panel -> split;
+   each link flexes to fill and passes min-height:0 down so the terminal is the single scroll box.
+   Mobile (<=768px, single column) keeps normal document flow — see the max-width media query. */
+@media (min-width: 769px) {
+    .rz-body:has(.run-split-layout, .run-yaml-split) { display: flex; flex-direction: column; }
+    .app-body-wrapper:has(.run-split-layout, .run-yaml-split) {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    .app-body-wrapper:has(.run-split-layout, .run-yaml-split) > .rz-tabview { flex: 1 1 auto; min-height: 0; }
+    .rz-tabview-panels:has(.run-split-layout, .run-yaml-split) { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    .rz-tabview-panel:has(.run-split-layout, .run-yaml-split) { height: 100%; }
+    .run-split-layout:has(.run-split-logs) { height: 100%; min-height: 0; }
+    .run-split-timeline { height: 100%; }
+    .run-split-logs { height: 100%; }
+    /* YAML definition tab fills the same shell; panes take full height, code scrolls internally. */
+    .run-yaml-split { height: 100%; min-height: 0; }
+
+    /* Pipeline edit tab: the Monaco editor fills the viewport below the compact meta + toolbar,
+       with no page scrollbar (same flex-fill shell trick, scoped to the edit form). */
+    .rz-body:has(.pipeline-detail-page) { display: flex; flex-direction: column; }
+    .app-body-wrapper:has(.pipeline-detail-page) {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    .pipeline-detail-page { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .pipeline-detail-page > .rz-tabview { flex: 1 1 auto; min-height: 0; }
+    .rz-tabview-panels:has(.pipeline-edit-form) { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    .rz-tabview-panel:has(.pipeline-edit-form) { height: 100%; }
+    .pipeline-edit-form { height: 100%; }
+}
+
+.run-logs-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 20rem;
+    opacity: 0.5;
+}
+
+.run-logs-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700, #252525);
+    background: var(--rz-base-800, #1e1e1e);
+    flex-shrink: 0;
+}
+
+.run-logs-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    max-width: none;
+}
+
+.run-step-logs-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+
+.run-step-logs-heading,
+.run-step-logs-toolbar,
+.run-step-logs-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+}
+
+.run-step-logs-title {
+    flex: 1 1 auto;
+    min-width: 4rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.run-step-logs-duration,
+.run-step-logs-actions {
+    flex-shrink: 0;
+}
+
+.run-step-logs-toolbar {
+    flex-wrap: wrap;
+}
+
+.run-step-logs-actions {
+    margin-left: auto;
+}
+
+@container (max-width: 32rem) {
+    .run-step-logs-toolbar > .rz-button .rz-button-text,
+    .run-step-logs-actions .rz-button-text {
+        display: none;
+    }
+
+    .run-step-logs-toolbar .run-logs-search {
+        order: 2;
+        flex-basis: 100%;
+        width: 100%;
+    }
+}
+
+/* S-FEAT-27: API reference page */
+.api-ref-search { max-width: 18rem; }
+.api-ref-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4375rem 0.875rem; }
+.api-ref-row + .api-ref-row { border-top: 0.0625rem solid var(--rz-base-700, #252525); }
+.api-ref-method {
+    flex: 0 0 4rem; text-align: center; font-size: 0.6875rem; font-weight: 700;
+    padding: 0.125rem 0.375rem; border-radius: 0.25rem; text-transform: uppercase;
+    color: #fff;
+}
+.api-ref-method-get { background: var(--rz-info, #29b6f6); }
+.api-ref-method-post { background: var(--rz-success, #4caf50); }
+.api-ref-method-put { background: var(--rz-warning, #ffa726); }
+.api-ref-method-patch { background: var(--rz-warning, #ffa726); }
+.api-ref-method-delete { background: var(--rz-danger, #f44336); }
+.api-ref-path { font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.8125rem; }
+.api-ref-summary { font-size: 0.8125rem; margin-left: auto; text-align: right; }
+
+.run-failed-step { padding: 0.375rem 0; }
+.run-failed-step + .run-failed-step { border-top: 0.0625rem solid var(--rz-base-700, #252525); }
+
+/* S-UX-18: executed command banner above the log terminal */
+.run-cmd {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 1rem;
+    background: var(--rz-base-900, #161616);
+    border-bottom: 0.0625rem solid var(--rz-base-700, #252525);
+    flex-shrink: 0;
+}
+.run-cmd-icon { color: var(--rz-success, #4caf50); font-size: 1rem; flex-shrink: 0; }
+.run-cmd-text {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    color: var(--rz-text-color, #ddd);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* S-UX-32 / YAML definition tab: definition left (full-height), clickable `pipeline:` refs open a
+   peek pane on the right (one at a time). Panes fill the viewport; only the code scrolls. */
+.run-yaml-split {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    min-height: 28rem;
+}
+.run-yaml-split:has(.run-yaml-peek) { grid-template-columns: 1fr 1fr; }
+.run-yaml-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--rz-base-900, #161616);
+    border: 0.0625rem solid var(--rz-base-700, #252525);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+.run-yaml-pane .run-logs-header {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700, #252525);
+    flex-shrink: 0;
+}
+.run-yaml-subtitle { font-size: 0.8125rem; }
+.run-yaml-code {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.75rem 1rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--rz-text-color, #e6edf3);
+}
+/* Real trailing spacer so the last line clears the horizontal scrollbar. A plain padding-bottom is
+   ignored at scroll-end for a flex-item scroll container (Chrome), so use an ::after block instead. */
+.run-yaml-code::after { content: ""; display: block; height: 1.5rem; }
+.run-yaml-code .yaml-line { display: block; white-space: pre; min-height: 1.2em; }
+/* Wrap toggle: soft-wrap long lines instead of scrolling horizontally. Independent per pane. */
+.run-yaml-code.run-yaml-wrap .yaml-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-yaml-empty { color: var(--rz-text-secondary-color, #a0a0a0); }
+.yaml-pipeline-link {
+    color: var(--rz-primary, #7c4dff);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+    border-radius: 0.1875rem;
+}
+.yaml-pipeline-link:hover { color: var(--rz-primary-light, #c9b8ff); background: var(--rz-primary-lighter, #241a4d); }
+
+.run-logs-terminal {
+    flex: 1;
+    min-height: 0; /* let the flex child shrink below its content so it scrolls itself instead of overflowing the page */
+    overflow-y: auto;
+    padding: 0.75rem 1rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.run-logs-lines {
+    display: flex;
+    flex-direction: column;
+    min-width: max-content;
+}
+.run-log-line {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.0625rem 0;
+    height: 1.3125rem;
+    min-height: 1.3125rem;
+    line-height: 1.1875rem;
+    white-space: pre;
+    word-break: normal;
+}
+.run-log-line:hover { background: var(--rz-base-800, #1e1e1e); }
+/* S-DES-11: accent known variable names inside log lines */
+.log-var { color: var(--rz-info, #29b6f6); font-weight: 600; }
+.run-log-num {
+    color: var(--rz-text-tertiary-color, #555);
+    min-width: 2rem;
+    text-align: right;
+    flex-shrink: 0;
+    user-select: none;
+    font-size: 0.75rem;
+}
+
+.run-tl-prev-dur {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1875rem;
+    color: var(--rz-text-tertiary-color, #777);
+    font-size: 0.6875rem;
+    white-space: nowrap;
+}
+
+.run-tl-prev-dur .rzi {
+    font-size: 0.75rem;
+}
+
+/* System task styling — grey/muted to distinguish from user tasks */
+.run-timeline-dot-system { background: var(--rz-base-500); border: 1px dashed var(--rz-base-400); }
+.run-timeline-connector-system { background: var(--rz-base-500); }
+.run-tl-system { color: var(--rz-text-tertiary-color, #888); font-style: italic; }
+.run-tl-system-row { opacity: 0.75; }
+.run-system-label { font-size: 0.625rem; }
+.run-empty-icon { font-size: 3rem; opacity: 0.3; }
+.step-log-empty-icon { font-size: 1.5rem; opacity: 0.5; }
+.run-overview-stage { padding: 0.375rem 0.5rem; border-radius: 0.25rem; }
+.run-overview-stage:hover { background: var(--rz-base-800, #1e1e1e); }
+.run-overview-stage-system { border-left: 2px dashed var(--rz-base-500); }
+/* Run overview tiles: a uniform responsive grid so every tile is the same width/height regardless
+   of its content (badge, value, link), instead of flex items that stretched unevenly per row. */
+.run-overview-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    grid-auto-rows: 1fr;
+    gap: 0.75rem;
+}
+.run-overview-tiles > .run-tile-link { height: 100%; }
+/* Keyboard focus ring for the tiles that act as buttons (jump-to-tab), matching the hover affordance. */
+.run-tile-link[role="button"]:focus-visible { outline: 2px solid var(--rz-primary, #7c4dff); outline-offset: 2px; border-radius: 0.25rem; }
+.run-overview-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.run-overview-stage-grouped { margin-left: 1.5rem; }
+.run-overview-stage-sub { padding-left: 1rem; opacity: 0.9; border-left: 1px solid var(--rz-base-600, #444); margin-left: 0.75rem; }
+.run-group-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.25rem 0.25rem;
+    font-weight: 600; font-size: 0.875rem;
+    color: var(--rz-primary, #7c4dff);
+    border-bottom: 1px solid var(--rz-base-700);
+    margin-top: 0.5rem;
+}
+.run-group-header:first-child { margin-top: 0; }
+/* S-DES-20: completed/total + progress bar inside a Build/Deploy group header */
+.run-group-count { font-size: 0.75rem; font-weight: 400; color: var(--rz-text-secondary-color, #aaa); }
+.run-group-progress { flex: 1; max-width: 12rem; height: 0.375rem; }
+
+/* G (Phase 3): RadzenTimeline-based progress view rows */
+.run-progress-timeline .rz-timeline-item-content { padding-bottom: 0.5rem; }
+.run-tl-item-row {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.25rem 0.5rem; border-radius: 0.25rem;
+}
+.run-tl-item-row.clickable-cell:hover { background: var(--rz-base-800, #1e1e1e); }
+.run-tl-item-sub { margin-left: 0.75rem; }
+.run-tl-item-grouped { margin-left: 0.75rem; }
+.run-tl-item-group { padding-left: 0; }
+.run-tl-item-stage { font-weight: 600; }
+.run-icon-spin { animation: run-icon-spin 1.4s linear infinite; }
+@keyframes run-icon-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* G: compact RadzenTimeline inside the Logs split (selectable step rail). LinePosition.Start gives
+   the native left rail (point + connecting line stay aligned) and Radzen itself collapses the empty
+   opposite side (.rz-timeline-start .rz-timeline-content-start { display:none }) and left-aligns the
+   content — so no custom display:none / flex override is needed here (R2HD). */
+.run-logs-timeline .rz-timeline-content-end { text-align: left; }
+.run-logs-timeline .rz-timeline-item-content { padding-bottom: 0.25rem; }
+.run-logs-timeline .run-tl-name-grow { flex: 1 1 auto; min-width: 0; white-space: normal; overflow: visible; text-overflow: clip; }
+.run-logs-timeline .run-tl-row {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;
+}
+.run-logs-timeline .run-tl-row.selected { background: var(--rz-primary-light, #2a2150); }
+.run-logs-timeline .run-tl-row:hover { background: var(--rz-base-800, #1e1e1e); }
+.run-logs-timeline .run-tl-stage-header { cursor: default; }
+.run-logs-timeline .run-tl-sub { margin-left: 0.75rem; }
+.run-logs-timeline .run-tl-grouped { margin-left: 0.75rem; }
+
+/* A1-A4: recursive collapsible run tree (logs-tab left panel). The top-level tree is a bordered,
+   rounded card with row separators (run-timeline mockup); nested child runs stay indented + railed. */
+.run-tree { display: flex; flex-direction: column; gap: 0.125rem; }
+.run-tree:not(.run-tree-nested) {
+    gap: 0;
+    border: 0.0625rem solid var(--rz-base-700, #30363d);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: var(--rz-base-800, #1a1a1a);
+}
+.run-tree:not(.run-tree-nested) > .run-tl-row {
+    padding: 0.625rem 0.875rem;
+    border-radius: 0;
+    border-bottom: 0.0625rem solid var(--rz-base-700, #30363d);
+}
+.run-tree:not(.run-tree-nested) > .run-tl-row:last-child { border-bottom: none; }
+/* Indent sub-tasks (steps within a multi-step stage) under their stage header. */
+.run-tl-substep { padding-left: 2rem; }
+.run-tree:not(.run-tree-nested) > .run-tl-substep { padding-left: 2.25rem; }
+.run-tl-stage-header { padding-left: 0.5rem; }
+.run-tree-nested {
+    margin-left: 1.75rem;
+    padding-left: 0.75rem;
+    border-left: 0.125rem solid var(--rz-base-600, #333);
+}
+.run-tl-trigger { font-weight: 500; }
+/* Stage label column (CI / QA / DEPLOY) + child-pipeline chip on a trigger row */
+.run-tl-stage-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--rz-text-tertiary-color, #8b949e);
+    width: 3.75rem;
+    flex-shrink: 0;
+}
+.run-tl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.5rem;
+    background: var(--rz-primary-lighter, #241a4d);
+    color: var(--rz-primary-light, #c9b8ff);
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-decoration: none;
+    cursor: pointer;
+}
+/* The chip is a link to the triggered child run. */
+.run-tl-chip:hover { background: var(--rz-primary, #7c4dff); color: #fff; }
+.run-tl-chip .run-tl-chip-icon { font-size: 0.875rem; color: inherit; }
+.run-tl-desc { color: var(--rz-text-secondary-color, #c0c6cd); font-weight: 400; }
+.run-tl-caret {
+    font-size: 1.125rem;
+    flex-shrink: 0;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+}
+.run-tl-chip-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+    color: var(--rz-primary, #7c4dff);
+}
+.run-tl-open-link {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+}
+.run-tl-open-link:hover { color: var(--rz-primary, #7c4dff); }
+.run-tl-children { margin-top: 0.125rem; }
+.run-tl-note {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+}
+
+/* S-UX-31: stage duration bars */
+.run-os-icon { font-size: 1rem; flex-shrink: 0; }
+.run-os-icon-linux { color: var(--rz-warning); }
+.run-os-icon-windows { color: var(--rz-info); }
+
+/* Q2BV: lock the connecting rail (thickness + neutral colour) to one value across the four
+   RadzenTimeline instances — project activity, release changelog, pipeline run progress and run
+   logs — so they read as one consistent visual language regardless of theme drift or local
+   overrides. Status colour stays on the points/dots, never the rail. */
+.project-activity-timeline,
+.run-progress-timeline,
+.run-logs-timeline {
+    --rz-timeline-line-width: 0.125rem;
+    --rz-timeline-line-color: var(--rz-base-600);
+}
+
+/* Q2BV: the release changelog now renders through RadzenTimeline (ProjectOverviewSection,
+   reusing the .project-activity-timeline class), so it inherits the shared rail-lock above
+   alongside project activity, run progress and run logs — all four read identically. The old
+   custom .release-cl-* markup CSS was removed as dead leftover of the pre-Radzen changelog. */
+
+/* Clickable grid cell — replaces inline style="cursor:pointer" */
+.clickable-cell { cursor: pointer; }
+.clickable-cell:hover { text-decoration: underline; }
+
+/* Layout utilities */
+.flex-spacer {
+    flex: 1;
+}
+
+.sidebar-width {
+    width: 15.625rem;
+}
+
+/* Auth / Login */
+.login-container {
+    max-width: 400px;
+    margin: 5rem auto;
+}
+
+/* S-DES-07: login page logo */
+.login-logo {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+.login-logo-img {
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 1rem;
+    opacity: 0.9;
+}
+
+.btn-full-width {
+    width: 100%;
+}
+
+/* Dashboard status colors */
+.text-success {
+    color: var(--rz-success);
+}
+
+.text-danger {
+    color: var(--rz-danger);
+}
+
+/* ==========================================================================
+   Flex Spacer
+   ========================================================================== */
+
+.flex-spacer {
+    flex: 1;
+}
+
+/* ==========================================================================
+   Log Viewers (Tasks + Logs pages)
+   ========================================================================== */
+
+.task-log-viewer {
+    max-height: 25rem;
+    overflow-y: auto;
+    background: var(--rz-base-900, #121212);
+    padding: 1rem;
+    border-radius: 0.25rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.85rem;
+}
+
+.live-log-panel {
+    height: calc(100vh - 14rem);
+    overflow-y: auto;
+    /* F20+: keep terminal aesthetic in dark mode; switch to light surface in light mode for parity. */
+    background: var(--rz-content-background-color, #121212);
+    color: var(--rz-text-color, #e0e0e0);
+    padding: 1rem;
+    border: 1px solid var(--rz-border-color, transparent);
+    border-radius: 0.25rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    /* Smooth auto-scroll on batched LogsReceived appends. */
+    scroll-behavior: smooth;
+}
+
+.log-entry {
+    color: var(--rz-text-color, #e0e0e0);
+    line-height: 1.4;
+}
+
+.log-timestamp {
+    color: var(--rz-text-secondary-color, #888);
+}
+
+.log-task-id {
+    color: var(--rz-info, #4fc3f7);
+}
+
+.log-level-error {
+    color: var(--rz-danger, #d83b3b);
+}
+
+.log-level-warning {
+    color: var(--rz-warning-darker, #b6892b);
+}
+
+.log-level-debug {
+    color: var(--rz-text-tertiary-color, #888);
+}
+
+.masked-value {
+    background: color-mix(in srgb, var(--rz-danger) 15%, transparent);
+    color: var(--rz-danger);
+    padding: 0 0.125rem;
+    border-radius: 0.125rem;
+    font-weight: 600;
+}
+
+/* ==========================================================================
+   Token Display (#33 — neutral code color)
+   ========================================================================== */
+
+.token-code {
+    color: var(--rz-text-color, #c8c8c8);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   Visual Pipeline Editor
+   ========================================================================== */
+
+.vp-canvas-outer {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    height: calc(100vh - 24rem);
+    min-height: 20rem;
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+    background-color: var(--rz-base-900, #1e1e2e);
+    background-image:
+        radial-gradient(circle, var(--rz-base-700, #2e2e2e) 0.0625rem, transparent 0.0625rem);
+    background-size: 1.25rem 1.25rem;
+}
+
+.vp-canvas-inner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: 0 0;
+}
+
+.vp-node {
+    position: absolute;
+    width: 13.75rem;
+    border-radius: 0.5rem;
+    border: 0.125rem solid var(--rz-base-600, #4a4a5e);
+    background-color: var(--rz-base-800, #2a2a3e);
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.3);
+    transition: border-color 0.15s, box-shadow 0.15s;
+    z-index: 1;
+}
+
+.vp-node:hover {
+    border-color: var(--rz-base-500, #5a5a6e);
+}
+
+.vp-node.vp-node-selected {
+    border-color: var(--rz-primary, #1e88e5);
+    box-shadow: 0 0 0.75rem rgba(30, 136, 229, 0.3);
+}
+
+.vp-node-header {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.375rem 0.375rem 0 0;
+    background-color: var(--rz-base-700, #2e2e2e);
+    font-weight: 600;
+    font-size: 0.8125rem;
+    user-select: none;
+}
+
+.vp-node-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    min-width: 1.25rem;
+    color: var(--rz-text-secondary-color, #a0a0b0);
+    touch-action: none;
+}
+
+.vp-node-drag-handle:focus-visible {
+    outline: 0.125rem solid var(--rz-primary, #1e88e5);
+    outline-offset: 0.125rem;
+}
+
+.vp-node-header-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vp-node-agent {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--rz-text-secondary-color, #a0a0b0);
+    border-bottom: 0.0625rem solid var(--rz-base-700, #2e2e2e);
+}
+
+.vp-node-steps {
+    padding: 0.25rem 0;
+    max-height: 10rem;
+    overflow-y: auto;
+}
+
+.vp-node-step {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.1875rem 0.75rem;
+    font-size: 0.75rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+.vp-node-step-number {
+    color: var(--rz-text-secondary-color, #a0a0b0);
+    min-width: 1rem;
+    text-align: right;
+}
+
+.vp-node-step-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vp-node-step-edit {
+    opacity: 0;
+    transition: opacity 0.15s;
+    cursor: pointer;
+    color: var(--rz-text-secondary-color, #a0a0b0);
+    font-size: var(--icon-md);
+}
+
+.vp-node-step:hover .vp-node-step-edit {
+    opacity: 1;
+}
+
+.vp-node-footer {
+    padding: 0.375rem 0.75rem;
+    border-top: 0.0625rem solid var(--rz-base-700, #2e2e2e);
+}
+
+.vp-node-action-btn {
+    cursor: pointer;
+    opacity: 0.6;
+    display: flex;
+}
+
+.vp-node-action-btn:hover {
+    opacity: 1;
+}
+
+.vp-editor-guide { margin: 0.5rem 0; }
+
+.inline-text {
+    display: inline;
+}
+
+/* Clickable checkbox/switch + label row (LabeledToggle): the whole row toggles the control. */
+.labeled-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0;
+    cursor: pointer;
+}
+
+.labeled-toggle-text {
+    user-select: none;
+}
+
+/* Full-width variant: text on the left, control on the right (label ....... switch). */
+.labeled-toggle-spread {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+}
+
+/* The inner Radzen control is display-only: it must not intercept clicks, so every click on the
+   row (box or text) reaches the wrapping label's handler and toggles exactly once. */
+.labeled-toggle .rz-chkbox,
+.labeled-toggle .rz-switch {
+    pointer-events: none;
+}
+
+.vp-edge-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ─── Tabs: remove horizontal padding on panels ─── */
+.rz-tabview .rz-tabview-panel {
+    padding-left: 0;
+    padding-right: 0;
+}
+
+/* Shared URL-synchronised tabs keep one stable, single-line navigation rail. When labels no longer
+   fit, the rail remains keyboard/touch scrollable without introducing a horizontal scrollbar that
+   would change its height between renders. Equal flex allocation prevents the selected label or a
+   changing badge from moving neighbouring tab anchors. */
+.url-synced-tabs > .rz-tabview-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    overscroll-behavior-inline: contain;
+}
+
+.url-synced-tabs > .rz-tabview-nav::-webkit-scrollbar {
+    display: none;
+}
+
+.url-synced-tabs > .rz-tabview-nav > li {
+    flex: 1 1 0;
+    min-width: max-content;
+}
+
+.url-synced-tabs > .rz-tabview-nav > li > a,
+.url-synced-tabs > .rz-tabview-nav .rz-tabview-title {
+    white-space: nowrap !important;
+}
+
+/* Every Radzen data grid keeps every column available at every viewport width. Columns without an
+   explicit Width would otherwise collapse to 0px when the fixed-width columns already consume the
+   table width. Give only those unspecified columns a stable default, and contain any overflow in
+   the Radzen grid body so the complete table remains reachable through horizontal scrolling. */
+.rz-data-grid {
+    max-width: 100%;
+}
+
+.rz-data-grid .rz-grid-table > colgroup > col:not([style^="width:"]):not([style*=";width:"]):not([style*="; width:"]) {
+    width: 10rem;
+}
+
+.rz-data-grid .rz-data-grid-data {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+@media (max-width: 767.98px) {
+    /* Every tab rail must remain a single, stable row on phones. Long labels scroll horizontally
+       instead of wrapping and changing the page geometry when the selected tab changes. */
+    .rz-tabview > .rz-tabview-nav {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        overscroll-behavior-inline: contain;
+    }
+
+    .rz-tabview > .rz-tabview-nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .rz-tabview > .rz-tabview-nav > li {
+        flex: 0 0 auto;
+        min-width: max-content;
+    }
+
+    .rz-tabview > .rz-tabview-nav > li > a,
+    .rz-tabview > .rz-tabview-nav .rz-tabview-title {
+        white-space: nowrap !important;
+    }
+
+    .url-synced-tabs > .rz-tabview-nav > li {
+        flex: 0 0 auto;
+    }
+
+    .url-synced-tabs .rz-tabview-nav a,
+    .url-synced-tabs .rz-tabview-title {
+        white-space: nowrap !important;
+    }
+
+    .project-ci-settings-row > .rz-col,
+    .project-ci-settings-row > [class*="rz-col-"] {
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+    }
+
+    .project-ci-settings-row .rz-form-field {
+        width: 100%;
+    }
+
+    .rz-badge {
+        max-inline-size: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: middle;
+    }
+
+    .dashboard-stat-row > .rz-col,
+    .dashboard-stat-row > [class*="rz-col-"] {
+        flex: 0 0 calc(50% - 0.5rem) !important;
+        max-width: calc(50% - 0.5rem) !important;
+        min-width: 0;
+    }
+
+    .dashboard-stat-row .stat-card {
+        min-height: 5.5rem;
+        padding: 0.75rem;
+        gap: 0.5rem;
+    }
+
+    .dashboard-stat-row .stat-card-icon {
+        font-size: 1.5rem;
+    }
+
+    .dashboard-stat-row .stat-card .rz-text-subtitle2 {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .dashboard-tile .rz-stack:has(> .rz-badge) {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+}
+
+/* ─── Wizard ─── */
+.wizard-dialog {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    outline: none;
+}
+
+.wizard-progress-bar {
+    height: 0.25rem;
+    background: var(--rz-base-700, #333);
+}
+.wizard-progress-value {
+    height: 100%;
+    background: var(--rz-primary, #7c4dff);
+    transition: width 0.4s ease;
+}
+
+.wizard-dialog .rz-steps {
+    flex: 1;
+    overflow: visible;
+}
+
+.wizard-dialog .rz-steps > ul {
+    flex-wrap: nowrap;
+    max-width: calc(100% - 21rem);
+}
+
+.wizard-dialog .rz-steps-bar .rz-steps-item {
+    font-size: 0.8rem;
+    padding: 0 0.25rem;
+}
+
+.wizard-dialog .rz-steps-content {
+    padding-top: 0.5rem;
+}
+
+.wizard-step-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.wizard-step-icon {
+    font-size: 1.5rem;
+    color: var(--rz-primary, #4080ff);
+}
+
+.wizard-step-content {
+    opacity: 1;
+}
+
+.wizard-step-exit,
+.wizard-step-enter {
+    /* Transition effect removed for instantaneous step switching. */
+}
+
+@keyframes wizardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.wizard-footer {
+    border-top: 1px solid var(--rz-base-700, #2e2e2e);
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    position: sticky;
+    bottom: 0;
+    background: var(--rz-base-background-color, #121212);
+    z-index: 10;
+}
+
+.wizard-actions {
+    position: absolute;
+    top: 2rem;
+    right: 0;
+    z-index: 5;
+}
+
+/* ─── Add Agent Page ─── */
+.add-agent-page {
+    display: flex;
+    flex-direction: column;
+}
+
+.add-agent-page .wizard-dialog {
+    min-height: unset;
+}
+
+/* Platform cards */
+.wizard-platform-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border: 2px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.wizard-platform-card:hover {
+    border-color: var(--rz-primary-lighter, #5a9aff);
+    background: var(--rz-base-800, #1e1e1e);
+}
+
+.wizard-platform-selected {
+    border-color: var(--rz-primary, #4080ff);
+    background: var(--rz-base-800, #1e1e1e);
+}
+
+.wizard-platform-icon {
+    font-size: 2rem;
+    color: var(--rz-text-color, #c8c8c8);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+}
+
+.wizard-platform-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.wizard-polling-countdown {
+    font-size: 0.85rem;
+    color: var(--rz-text-secondary-color, #9a9aaa);
+}
+
+.wizard-platform-selected .wizard-platform-icon {
+    color: var(--rz-primary, #4080ff);
+}
+
+.wizard-platform-label {
+    font-size: 1.1rem;
+    font-weight: 500;
+    flex: 1;
+}
+
+.wizard-platform-check {
+    font-size: 1.25rem;
+    color: var(--rz-primary, #4080ff);
+}
+
+/* S-DES-25: a capability card forced on by another option (Docker implied by server-management) */
+.wizard-card-locked { cursor: default; opacity: 0.85; }
+.wizard-card-locked:hover { border-color: var(--rz-primary, #4080ff); background: var(--rz-base-800, #1e1e1e); }
+/* S-DES-25: capability label is a stacked title + hint, not the larger single-line platform label */
+.wizard-platform-card .wizard-platform-label > div { font-size: 0.95rem; font-weight: 500; }
+
+.wizard-token-code {
+    flex: 1;
+    min-width: 0;
+    font-family: monospace;
+    font-size: 0.9rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--wizard-code-bg);
+    border-radius: calc(var(--wizard-code-radius) - 0.125rem);
+    word-break: break-all;
+    white-space: normal;
+    user-select: all;
+}
+
+.wizard-code-block {
+    margin-bottom: 0.5rem;
+}
+
+.wizard-pre-wrapper {
+    position: relative;
+}
+
+.wizard-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--wizard-code-header-bg);
+    border: 1px solid var(--wizard-code-border);
+    border-bottom: none;
+    border-radius: var(--wizard-code-radius) var(--wizard-code-radius) 0 0;
+    min-height: 2rem;
+}
+
+.wizard-code-header-label {
+    font-size: 0.8rem;
+    color: var(--wizard-code-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wizard-pre {
+    background: var(--wizard-code-bg);
+    border: 1px solid var(--wizard-code-border);
+    border-radius: var(--wizard-code-radius);
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+/* When a header sits on top, drop the upper rounding/border so the two pieces meld. */
+.wizard-code-header + .wizard-pre {
+    border-top: none;
+    border-radius: 0 0 var(--wizard-code-radius) var(--wizard-code-radius);
+}
+
+.wizard-pre code {
+    color: var(--wizard-code-text);
+    white-space: pre;
+}
+
+.wizard-token-pre code {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* S-DES-14: expandable changelog cell in the releases grid */
+.release-changelog-cell { white-space: pre-wrap; word-break: break-word; font-size: 0.8125rem; }
+
+/* S-DES-15: accent the literal <TOKEN> placeholder so it reads as "replace me" */
+.wizard-token-placeholder {
+    color: var(--rz-warning, #ffa726);
+    font-weight: 600;
+}
+
+/* ---- Console-style output blocks (unified with the wizard code tokens) ----
+   .task-output           — Tasks page: stdout/stderr from agent shells
+   .pipeline-step-output  — Pipelines page: per-step log streamed via SignalR
+   .server-detail-code    — Servers detail: command output / inline scripts
+   Use .is-success / .is-error to tint the block once a state is known. */
+.task-output,
+.pipeline-step-output,
+.server-detail-code {
+    background: var(--wizard-code-bg);
+    border: 1px solid var(--wizard-code-border);
+    border-radius: var(--wizard-code-radius);
+    color: var(--wizard-code-text);
+    font-family: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    padding: 0.75rem 1rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.task-output.is-success,
+.pipeline-step-output.is-success,
+.server-detail-code.is-success,
+.wizard-pre.is-success,
+.wizard-code-block.is-success > .wizard-pre {
+    background: var(--wizard-code-bg-success);
+    border-color: var(--wizard-code-border-success);
+}
+
+.task-output.is-error,
+.pipeline-step-output.is-error,
+.server-detail-code.is-error,
+.wizard-pre.is-error,
+.wizard-code-block.is-error > .wizard-pre {
+    background: var(--wizard-code-bg-error);
+    border-color: var(--wizard-code-border-error);
+}
+
+.wizard-copy-btn {
+    flex-shrink: 0;
+}
+
+/* Verify polling */
+.wizard-polling {
+    padding: 0.75rem;
+    background: var(--rz-base-800, #1e1e1e);
+    border-radius: 0.375rem;
+}
+
+.wizard-verify-success-icon {
+    color: var(--rz-success, #4caf50);
+    vertical-align: middle;
+}
+
+.wizard-verify-list {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.wizard-verify-list li {
+    margin-bottom: 0.5rem;
+}
+
+/* Apache log viewer */
+.apache-log-output {
+    max-height: 32rem;
+    overflow-y: auto;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    padding: 0.75rem;
+    border-radius: var(--rz-border-radius);
+    background: var(--rz-base-900);
+    color: var(--rz-text-color);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.apache-log-follow {
+    scroll-behavior: smooth;
+    overflow-anchor: auto;
+}
+
+.vp-edge {
+    fill: none;
+    /* S-DES-VPEC: brighter stroke than the former base-500 so connectors read clearly on the dark canvas. */
+    stroke: var(--rz-base-300, #9a9aae);
+    stroke-width: 2.5;
+    transition: d 0.3s ease, stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.vp-edge-selected {
+    stroke: var(--rz-primary, #1e88e5);
+    stroke-width: 2.5;
+}
+
+.vp-edge-arrow {
+    fill: var(--rz-base-300, #9a9aae);
+}
+
+.vp-edge-arrow-selected {
+    fill: var(--rz-primary, #1e88e5);
+}
+
+.vp-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+    flex-wrap: wrap;
+}
+
+.vp-settings-panel {
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background-color: var(--rz-base-800, #2a2a3e);
+}
+
+.vp-edit-panel {
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+    padding: 0.75rem;
+    margin-top: 0.75rem;
+    background-color: var(--rz-base-800, #2a2a3e);
+}
+
+.vp-edit-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.vp-empty-canvas {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 1rem;
+    color: var(--rz-text-secondary-color, #a0a0b0);
+}
+
+.vp-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border-radius: var(--rz-border-radius);
+    background-color: var(--rz-danger-lighter, #3d1a1e);
+    border: 0.0625rem solid var(--rz-danger, #dc3545);
+    color: var(--rz-danger, #dc3545);
+    margin-bottom: 0.75rem;
+}
+
+.vp-var-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+@media (max-width: 768px) {
+    .vp-canvas-outer {
+        height: calc(100vh - 28rem);
+        min-height: 15rem;
+    }
+
+    .vp-node {
+        width: 11rem;
+    }
+}
+
+/* ---- Stat cards (Home dashboard) ---- */
+
+.stat-card {
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.9rem;
+    min-height: 7rem;
+}
+
+.stat-card-icon {
+    flex: 0 0 auto;
+    font-size: 2rem;
+}
+
+.dashboard-stat-row > .rz-col,
+.dashboard-stat-row > [class*="rz-col-"] {
+    display: flex;
+}
+
+.dashboard-stat-row .stat-card {
+    width: 100%;
+}
+
+/* ---- Equal-height tiles — uniform height per row ----
+   RadzenRow renders as flex with align-items:stretch by default, but
+   RadzenColumn itself isn't flex — so a card inside it sizes to its
+   content. We force the columns of these rows to be flex containers so
+   their child card can stretch to the tallest sibling's height.
+
+   Usage:
+   - `equal-tile-row` on any RadzenRow → child RadzenCards auto-stretch
+     (works for metric tiles on server overview, etc.)
+   - `dashboard-tile-row` = `equal-tile-row` + 20rem min-height floor
+     (dashboard widgets where short content should still leave breathing room)
+*/
+.equal-tile-row,
+.dashboard-tile-row {
+    align-items: stretch !important;
+}
+
+.equal-tile-row > .rz-col,
+.equal-tile-row > [class*="rz-col-"],
+.dashboard-tile-row > .rz-col,
+.dashboard-tile-row > [class*="rz-col-"] {
+    display: flex;
+    flex-direction: column;
+}
+
+.equal-tile-row > .rz-col > .rz-card,
+.equal-tile-row > [class*="rz-col-"] > .rz-card,
+.dashboard-tile-row > .rz-col > .rz-card,
+.dashboard-tile-row > [class*="rz-col-"] > .rz-card {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    height: auto;
+}
+
+.equal-tile-row .rz-card > .rz-card-body,
+.dashboard-tile-row .rz-card > .rz-card-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Server overview — Pipeline runner / Container isolation posture tiles.
+   The toggle button sinks to the bottom so the two side-by-side tiles align. */
+.overview-feature-card .rz-card-body > .rz-stack {
+    height: 100%;
+}
+
+.overview-feature-card .rz-button {
+    margin-top: auto;
+    align-self: flex-start;
+}
+
+/* Heartbeat pulse: a thick ring that fills over the 30 s beat cadence and resets on
+   each fresh beat. Centre counts the cadence down (30 → 0). Laid out as a tile: the
+   "Heartbeat" label sits at the top like the sibling metric tiles, the ring + meta
+   centre in the remaining space. */
+.heartbeat-pulse-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    height: 100%;
+}
+
+.heartbeat-pulse-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    flex: 1 1 auto;
+    text-align: center;
+}
+
+.heartbeat-pulse {
+    position: relative;
+    width: 4.5rem;
+    height: 4.5rem;
+    flex-shrink: 0;
+}
+
+.heartbeat-pulse-ring {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.heartbeat-pulse-track {
+    fill: none;
+    stroke: var(--rz-base-300, #2a2a2a);
+    stroke-width: 9;
+}
+
+.heartbeat-pulse-progress {
+    fill: none;
+    stroke-width: 9;
+    stroke-linecap: round;
+}
+
+/* Live ring: a single cadence that fills then snaps back to empty and refills.
+   The dash values match the r=42 circumference (2·π·42 ≈ 263.89). The circle element is
+   re-keyed on each beat in the component, which restarts this animation from empty.
+   The cadence is centralised in --heartbeat-cadence (HBSY) — one source of truth shared
+   by the CSS loop and the component's HeartbeatCadenceSeconds constant. The component
+   sets a negative animation-delay on (re)creation so the first cycle after page load is
+   phase-aligned with the real age of the last beat, not just resynced at the next beat. */
+.heartbeat-pulse-progress { --heartbeat-cadence: 30s; }
+
+@keyframes heartbeat-fill {
+    from { stroke-dashoffset: 263.89; }
+    to { stroke-dashoffset: 0; }
+}
+
+/* HB8P: a brief scale flash each time the ring resets (the circle is re-keyed on every
+   beat, so this one-shot animation replays on each fresh beat) — materialises the pulse. */
+@keyframes heartbeat-flash {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.heartbeat-pulse-online .heartbeat-pulse-progress {
+    stroke: var(--rz-success, #22c55e);
+    animation: heartbeat-fill var(--heartbeat-cadence, 30s) linear infinite, heartbeat-flash 0.5s ease-out;
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+.heartbeat-pulse-offline .heartbeat-pulse-progress {
+    stroke: var(--rz-danger, #ef4444);
+}
+
+.heartbeat-pulse-disabled .heartbeat-pulse-progress {
+    stroke: var(--rz-base-500, #6b7280);
+}
+
+.heartbeat-pulse-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1rem;
+    text-align: center;
+}
+
+.heartbeat-pulse-duration {
+    font-size: 1.1rem;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--rz-text-color, #e0e0e0);
+}
+
+.heartbeat-pulse-state {
+    font-size: 0.55rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.heartbeat-pulse-online .heartbeat-pulse-state {
+    color: var(--rz-success, #22c55e);
+}
+
+.heartbeat-pulse-offline .heartbeat-pulse-state {
+    color: var(--rz-danger, #ef4444);
+}
+
+.heartbeat-pulse-disabled .heartbeat-pulse-state {
+    color: var(--rz-text-secondary, #9ca3af);
+}
+
+/* Services capability notice: the "package management disabled" message and the live heartbeat
+   shown as two aligned, equal-height tiles above the services tables (the tables stay tables). */
+.capability-warning-tile {
+    display: flex;
+    align-items: center;
+}
+
+.capability-warning-icon {
+    color: var(--rz-warning, #f59e0b);
+    flex-shrink: 0;
+}
+
+.heartbeat-tile {
+    flex: 0 0 auto;
+    min-width: 11rem;
+}
+
+/* Server overview — Essentials definition grid: icon + label/value pairs, two
+   responsive columns collapsing to one on narrow viewports. */
+.essentials-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem 2rem;
+}
+
+@media (max-width: 768px) {
+    .essentials-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Single-column variant for the narrower half-width overview cards
+   (project Information / Repository) — same icon+label+value treatment. */
+.essentials-grid--stacked {
+    grid-template-columns: 1fr;
+    gap: 0;
+}
+
+/* No trailing divider under the last row in the stacked variant (rows have no
+   column gap there, so the last border would sit flush against the card edge). */
+.essentials-grid--stacked .essential-item:last-child {
+    border-bottom: none;
+}
+
+.essential-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--rz-base-200, #ececec);
+}
+
+.essential-icon {
+    font-size: 1.1rem;
+    color: var(--rz-text-secondary, #9ca3af);
+    margin-top: 0.1rem;
+    flex-shrink: 0;
+}
+
+.essential-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.essential-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--rz-text-secondary, #9ca3af);
+}
+
+.essential-value {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--rz-text-color, #e0e0e0);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    word-break: break-word;
+}
+
+.dashboard-tile-row > .rz-col > .dashboard-tile,
+.dashboard-tile-row > [class*="rz-col-"] > .dashboard-tile {
+    box-sizing: border-box;
+    flex: 0 0 25rem;
+    height: 25rem;
+    min-height: 25rem;
+    overflow: hidden;
+}
+
+.dashboard-tile .dashboard-clickable-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+
+.dashboard-tile-title .rzi {
+    color: var(--rz-primary);
+}
+
+/* The dashboard uses two equal table tiles per row on regular screens. Radzen's
+   responsive columns collapse them to one per row on small screens. A fixed shared
+   card height keeps both rows aligned while the grids scroll internally. */
+
+/* Server overview metrics row: 5 equal-width tiles (Heartbeat, CPU, Memory, Disk,
+   Services) on one line. A 12-col grid can't split into 5, so use a CSS grid with
+   equal fractions. Collapses to 2-up on tablet, 1-up on phones. align-items:stretch
+   gives every tile (incl. the shorter Services card) the same height. */
+.metric-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.metric-tile-grid > .rz-card,
+.metric-tile-grid > .tile-link > .rz-card {
+    height: 100%;
+}
+
+.storage-diagnostic-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.storage-diagnostic-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+@media (max-width: 1280px) {
+    .metric-tile-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .storage-diagnostic-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 576px) {
+    .metric-tile-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .storage-diagnostic-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ---- Clickable metric tile (e.g. Services tile on server overview) ---- */
+.tile-link {
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    height: 100%;
+}
+
+.tile-link .tile-clickable {
+    width: 100%;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.tile-link:hover .tile-clickable {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+    border-color: var(--rz-primary);
+}
+
+/* Project Overview — Recent Activity list flush to the content edges (no L/R padding).
+   Radzen DataList applies padding via three layers: .rz-datalist-data, its >li children
+   (--rz-datalist-item-padding), and the >li margin-inline. Reset all three. */
+.project-activity-flush .rz-datalist-data,
+.project-activity-flush .rz-datalist-content,
+.project-activity-flush .rz-g {
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.project-activity-flush .rz-datalist-data > li {
+    padding-left: 0;
+    padding-right: 0;
+    margin-inline: 0;
+    border-left: 0;
+    border-right: 0;
+}
+
+/* ---- Mobile sidebar backdrop ---- */
+
+.sidebar-backdrop {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 999;
+    }
+
+    /* Mobile drawer (Astraia parity): lift the sidebar out of flow so it OVERLAYS the content
+       instead of shoving RadzenBody sideways and squishing the page into an unreadable sliver.
+       The backdrop above (z 999) sits just under it; tapping it closes the drawer.
+       !important because the Radzen theme pins .rz-sidebar's position with a more specific
+       selector (`.rz-layout .rz-sidebar`) that would otherwise win and keep it in-flow. */
+    .rz-sidebar {
+        position: absolute !important;
+        top: 0;
+        left: 0;
+        z-index: 1000;
+        height: 100%;
+        max-width: 85vw;
+        overflow-x: hidden;
+        transition: transform 0.2s ease;
+    }
+
+    /* Radzen's collapsed class normally reduces the sidebar width. The project-level fixed width
+       intentionally keeps the desktop rail stable, so on phones the collapsed element retained
+       its full 15.625rem width and all navigation links stayed visible over the page. Move the
+       closed drawer entirely outside the viewport while preserving its width for a smooth reopen. */
+    .rz-sidebar.rz-sidebar-collapsed {
+        transform: translateX(-100%);
+        pointer-events: none;
+    }
+
+    .rz-body {
+        margin-left: 0 !important;
+    }
+}
+
+/* ==========================================================================
+   Cron expression live validation
+   ========================================================================== */
+
+.cron-next-run {
+    color: var(--rz-success, #28a745);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.cron-error {
+    color: var(--rz-danger, #dc3545);
+}
+
+/* ==========================================================================
+   Error Boundary Card
+   ========================================================================== */
+
+.error-card {
+    max-width: 32rem;
+    margin-top: 4rem;
+}
+
+.error-icon {
+    font-size: 3rem;
+    color: var(--rz-danger);
+}
+
+/* ==========================================================================
+   Metric Bar / Icon Sizing
+   ========================================================================== */
+
+.metric-bar-thin {
+    height: 0.375rem;
+}
+
+.icon-sm {
+    font-size: var(--icon-lg);
+}
+
+/* ==========================================================================
+   Skip-to-content link (F21)
+   ========================================================================== */
+
+.skip-link {
+    position: absolute;
+    top: -3rem;
+    left: 1rem;
+    z-index: 10000;
+    padding: 0.5rem 1rem;
+    background: var(--rz-primary, #1b6ec2);
+    color: #fff;
+    text-decoration: none;
+    border-radius: 0 0 0.25rem 0.25rem;
+    transition: top 0.2s;
+}
+
+.skip-link:focus {
+    top: 0;
+}
+
+/* ==========================================================================
+   Keyboard focus visibility (F-040, a11y)
+   :focus-visible matches keyboard / programmatic focus only — not mouse clicks —
+   so keyboard users get a clear ring without adding visual noise for pointer users.
+   ========================================================================== */
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid var(--rz-primary, #1b6ec2);
+    outline-offset: 2px;
+}
+
+/* Suppress the focus ring on full-page containers (wizard, dialogs) that carry
+   tabindex="0" for keyboard event capture — the ring spans the entire viewport
+   width and is visually jarring on page load. */
+.wizard-dialog:focus-visible { outline: none; }
+
+/* ==========================================================================
+   Theme toggle contrast fix (F18)
+   ========================================================================== */
+
+.theme-toggle-btn {
+    color: #fff !important;
+}
+
+/* ==========================================================================
+   Utility classes (extracted from inline styles)
+   ========================================================================== */
+
+/* Hidden input file (replaces style="display:none") */
+.input-file-hidden {
+    display: none;
+}
+
+/* Pre-formatted changelog/text block */
+.text-block-pre {
+    white-space: pre-wrap;
+    font-size: 0.8125rem;
+    margin: 0;
+}
+
+/* Mail service status indicator dot */
+.mail-status-dot {
+    background-color: var(--rz-danger);
+}
+
+.mail-status-dot.is-running {
+    background-color: var(--rz-success);
+}
+
+.lang-toggle-wrapper {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+}
+
+.lang-badge {
+    font-size: 0.625rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    background-color: var(--rz-primary);
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+    position: absolute;
+    right: -0.125rem;
+    bottom: 0.125rem;
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   404 Not Found page
+   ========================================================================== */
+
+.not-found-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 60vh;
+    padding: 2rem;
+}
+
+.not-found-illustration {
+    width: 16rem;
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 1.5rem;
+}
+
+/* ==========================================================================
+   Mobile responsive fixes (F02)
+   ========================================================================== */
+
+@media (max-width: 576px) {
+    .rz-datatable {
+        overflow-x: auto;
+    }
+
+    .server-list-search,
+    .pipeline-list-search {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .pipeline-grid-fill {
+        height: 24rem;
+        max-height: 24rem;
+    }
+
+    .pipeline-overview-global,
+    .pipeline-overview-project {
+        height: auto;
+        min-height: 0;
+    }
+
+    .pipeline-overview-section-recent {
+        flex: 0 0 auto;
+    }
+
+    .pipeline-project-column {
+        display: none !important;
+    }
+
+    .pipeline-secondary-column {
+        display: none !important;
+    }
+
+    .pipeline-dependency-grid .rz-button-text,
+    .pipeline-runs-grid .rz-button-text {
+        display: none;
+    }
+
+    .pipeline-dependency-grid th:nth-last-child(1),
+    .pipeline-dependency-grid td:nth-last-child(1) {
+        width: 7rem !important;
+        min-width: 7rem !important;
+    }
+
+    .pipeline-dependency-grid .pipeline-name-link,
+    .pipeline-runs-grid .pipeline-name-link {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .project-list-heading > .project-list-create,
+    .project-list-filters > .project-list-search-wrap,
+    .project-list-filters > .rz-dropdown {
+        flex: 1 0 100%;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .project-list-heading > .project-list-create {
+        min-height: 2.5rem;
+    }
+
+    .project-list-search-wrap {
+        min-width: 0;
+    }
+
+    .stat-card .rz-text-subtitle2 {
+        font-size: 0.75rem;
+    }
+
+    .stat-card .rz-text-h3 {
+        font-size: 1.25rem;
+    }
+
+    .project-repo-url-input,
+    .clone-url-input {
+        min-width: 0;
+    }
+
+    .page-header-actions {
+        flex: 0 1 auto;
+        margin-left: auto;
+        justify-content: flex-end;
+    }
+
+    .page-header-actions > .rz-numeric,
+    .page-header-actions > .rz-textbox,
+    .page-header-actions > .rz-dropdown {
+        flex: 1 1 8rem;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .display-name,
+    .app-title,
+    .dev-env-chip-env:has(+ .dev-env-chip-label) {
+        display: none;
+    }
+
+    .dev-env-banner {
+        max-width: 35%;
+    }
+}
+
+/* Help Center */
+.help-search-box {
+    max-width: 25rem;
+    width: 100%;
+}
+
+.help-card {
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+    height: 100%;
+}
+
+.help-card:hover {
+    box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.15);
+    transform: translateY(-0.125rem);
+}
+
+/* HCF4: visible keyboard-focus state on the help tiles (role="button" + tabindex="0"),
+   mirroring the hover lift so keyboard users get the same affordance as the mouse. */
+.help-card:focus-visible {
+    outline: 0.125rem solid var(--rz-primary, #7c4dff);
+    outline-offset: 0.125rem;
+    box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.help-card-icon {
+    font-size: 1.5rem;
+    opacity: 0.7;
+}
+
+.help-article-icon {
+    font-size: 1.75rem;
+    opacity: 0.7;
+}
+
+/* ==========================================================================
+   Header Bar & User Menu (Astraia-style)
+   ========================================================================== */
+
+.header-bar {
+    width: 100%;
+    position: relative;
+    height: 100%;
+}
+
+.app-home-link {
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.app-header-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.app-title {
+    cursor: pointer;
+}
+
+.header-icon {
+    font-size: 1.125rem;
+}
+
+.header-action-btn {
+    min-height: 2rem;
+    min-width: 2rem;
+    height: 2rem;
+    box-sizing: border-box;
+}
+
+/* Backend connection indicator: wifi glyph coloured by SignalR link state. */
+.header-conn-icon {
+    font-size: 1.25rem;
+    padding: 0 0.25rem;
+    cursor: default;
+}
+
+.header-conn-online {
+    color: var(--rz-success, #22c55e);
+}
+
+.header-conn-warning {
+    color: var(--rz-warning, #f59e0b);
+}
+
+.header-conn-offline {
+    color: var(--rz-danger, #ef4444);
+}
+
+/* Org picker relocated into the user menu — fills the menu section width. */
+.user-menu-org-picker {
+    width: 100%;
+}
+
+.header-user-btn {
+    padding: 0 0.5rem;
+}
+
+.display-name {
+    margin: 0 0.25rem;
+}
+
+/* Dev-only top-bar banner (environment / label / branch) — never shown in prod.
+   Absolutely centred on the header so it stays mid-bar regardless of the differing
+   left (logo) and right (org picker + actions) widths; a single chip lands centred too.
+   The container is click-through (pointer-events:none) so it never blocks header
+   controls underneath; the chips re-enable pointer events for their tooltips. */
+.dev-env-banner {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 60%;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.dev-env-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 18rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: nowrap;
+    pointer-events: auto;
+    border: 1px solid var(--rz-base-600, #3a3a3a);
+    background: var(--rz-base-800, #1e1e1e);
+    color: var(--rz-text-color, #e0e0e0);
+}
+
+.dev-env-chip-icon {
+    font-size: 0.875rem;
+    opacity: 0.85;
+}
+
+.dev-env-chip-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dev-env-chip-env {
+    border-color: var(--rz-info-light, #3b82f6);
+    color: var(--rz-info-light, #3b82f6);
+}
+
+.dev-env-chip-label {
+    border-color: var(--rz-warning, #f59e0b);
+    color: var(--rz-warning, #f59e0b);
+    font-weight: 600;
+}
+
+/* Tight headers drop the long branch chip first; the environment chip always stays. */
+@media (max-width: 992px) {
+    .dev-env-chip-branch {
+        display: none;
+    }
+}
+
+@media (max-width: 576px) {
+    .dev-env-banner {
+        max-width: 35%;
+    }
+}
+
+.user-menu-container {
+    position: relative;
+}
+
+.user-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+}
+
+.user-menu-card {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.25rem);
+    z-index: 1000;
+    min-width: 15rem;
+    max-width: calc(100vw - 1rem);
+    padding: 0;
+}
+
+.user-menu-section {
+    border-bottom: 1px solid var(--rz-base-300);
+}
+
+.user-menu-section-clickable {
+    border-bottom: 1px solid var(--rz-base-300);
+    cursor: pointer;
+}
+
+.user-menu-section-clickable:hover {
+    background-color: var(--rz-base-200);
+}
+
+.theme-switch-readonly {
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   Admin Tile Cards
+   ========================================================================== */
+
+.admin-tile-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    height: 100%;
+}
+
+.admin-tile-card {
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 10rem;
+    height: 100%;
+}
+
+.admin-tile-card:hover {
+    transform: translateY(-0.125rem);
+    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.15);
+}
+
+.admin-tile-icon {
+    font-size: 2.5rem;
+}
+
+.color-primary {
+    color: var(--rz-primary);
+}
+
+.color-success {
+    color: var(--rz-success);
+}
+
+.color-info {
+    color: var(--rz-info);
+}
+
+.color-warning {
+    color: var(--rz-warning);
+}
+
+.color-danger {
+    color: var(--rz-danger);
+}
+
+/* WCAG AA contrast for the Radzen dropdown/select placeholder text. Radzen's default placeholder color
+   is the disabled token (rgba .5 on dark), which axe flags at 3.17:1 (< 4.5:1) on the #1e1e1e surface.
+   The secondary token is theme-aware and AA-compliant in both the light and dark Radzen themes. */
+.rz-dropdown .rz-placeholder,
+.rz-placeholder.rz-dropdown-label {
+    color: var(--rz-text-secondary-color);
+}
+
+/* Inherited-from badge for cross-access resources */
+.inherited-badge {
+    font-size: 0.7rem;
+    opacity: 0.8;
+}
+
+/* Small badge variant for inline use */
+.badge-xs .rz-badge {
+    font-size: 0.6rem;
+    padding: 0.05rem 0.35rem;
+}
+
+/* Column chooser popup (server list) */
+.column-chooser-wrap {
+    position: relative;
+    display: inline-block;
+}
+.column-chooser-popup {
+    position: absolute;
+    top: 2.5rem;
+    right: 0;
+    z-index: 20;
+    min-width: 12rem;
+    padding: 0.75rem;
+    box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.3);
+}
+
+/* Pipeline runner toggle pulse animation */
+@keyframes runner-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.4); }
+    70% { box-shadow: 0 0 0 0.5rem rgba(63, 185, 80, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+}
+.pipeline-runner-icon-on {
+    animation: runner-pulse 1s ease-out;
+}
+
+/* Agent update progress phase chevron */
+.agent-update-phase-active {
+    color: var(--rz-info);
+    animation: phase-spin 1.5s linear infinite;
+}
+.agent-update-phase-done { color: var(--rz-success); }
+.agent-update-phase-failed { color: var(--rz-danger); }
+@keyframes phase-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Focus-visible: exclude Radzen components that already have built-in focus rings */
+.rz-button:focus-visible,
+.rz-textbox:focus-visible,
+.rz-dropdown:focus-visible,
+.rz-inputtext:focus-visible {
+    outline: none;
+}
+
+.color-secondary {
+    color: var(--rz-secondary);
+}
+
+/* Message cell: truncate to a single line; the full text (and any exception) is reachable via the
+   row's "view message" action button. */
+.log-message-cell {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.correlation-id-text {
+    font-size: 0.8rem;
+    font-family: var(--rz-font-family-monospace, monospace);
+    word-break: break-all;
+}
+
+.exception-pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 60vh;
+    overflow: auto;
+    font-size: 0.85rem;
+    font-family: var(--rz-font-family-monospace, monospace);
+    margin: 0;
+}
+
+/* ==========================================================================
+   Alert Badge
+   ========================================================================== */
+
+.alert-badge-dot {
+    font-size: 0.7rem;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    line-height: 1.25rem;
+    padding: 0 0.25rem;
+    border-radius: 0.625rem;
+    animation: pulse-dot 2s infinite;
+}
+
+
+/* ==========================================================================
+   Button Utilities
+   ========================================================================== */
+
+.btn-fit {
+    width: fit-content;
+}
+
+.settings-form {
+    max-width: 30rem;
+}
+
+.about-label {
+    font-weight: 600;
+    min-width: 7rem;
+    color: var(--rz-text-secondary-color);
+}
+
+/* ==========================================================================
+   Monaco Viewer (read-only)
+   ========================================================================== */
+
+.monaco-viewer-container {
+    width: 100%;
+    height: 25rem;
+    border: 1px solid var(--rz-grid-border);
+    border-radius: var(--rz-border-radius);
+}
+
+/* O: SVG commit lane graph (replaces the ASCII .commit-graph <pre>) */
+.commit-graph-svg-wrap {
+    overflow: auto;
+    max-height: 36rem;
+    background: var(--rz-base-background-color);
+    border: 1px solid var(--rz-grid-border);
+    border-radius: var(--rz-border-radius);
+}
+.git-svg-graph { display: flex; align-items: flex-start; min-width: fit-content; }
+.git-svg-lanes { flex: 0 0 auto; }
+.git-svg-rows { flex: 1 1 auto; min-width: 0; }
+.git-svg-row { height: 2.125rem; display: flex; align-items: center; gap: 0.625rem; padding: 0 0.5rem; }
+.git-svg-row:hover { background: var(--rz-base-800, #1e1e1e); }
+.git-graph-sha { font-family: "Cascadia Code", "Fira Code", "Consolas", monospace; font-size: 0.8125rem; color: var(--rz-primary, #7c4dff); flex: 0 0 auto; }
+.git-graph-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.git-graph-meta { font-size: 0.75rem; color: var(--rz-text-secondary-color, #aaa); flex: 0 0 auto; white-space: nowrap; }
+
+.blame-view {
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    padding: 1rem;
+    overflow: auto;
+    max-height: 35rem;
+    background: var(--rz-base-background-color);
+    border: 1px solid var(--rz-grid-border);
+    border-radius: var(--rz-border-radius);
+    white-space: pre;
+    margin: 0;
+}
+/* Commit-detail unified diff viewer. Reuses the blame monospace frame; lines are colour-coded
+   by their leading git-diff marker (+ add, - del, @@ hunk header). */
+.diff-view {
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    padding: 0.5rem 0;
+    overflow-x: auto;
+    max-height: 40rem;
+    overflow-y: auto;
+    background: var(--rz-base-background-color);
+    border: 1px solid var(--rz-grid-border);
+    border-radius: var(--rz-border-radius);
+    margin: 0;
+}
+.diff-line { display: block; white-space: pre; padding: 0 0.75rem; }
+.diff-line-add { background: rgba(46, 160, 67, 0.18); }
+.diff-line-del { background: rgba(248, 81, 73, 0.18); }
+.diff-line-hunk { background: var(--rz-info-lighter); color: var(--rz-text-secondary-color); }
+.diff-file-stat-add { color: var(--rz-success); }
+.diff-file-stat-del { color: var(--rz-danger); }
+
+/* F26: width utility classes (replace inline Style="width:NNNpx") */
+.w-rem-6 { width: 6rem; }      /* ~96px */
+.w-rem-7-5 { width: 7.5rem; }  /* 120px */
+.w-rem-8-75 { width: 8.75rem; }/* 140px */
+.w-rem-10 { width: 10rem; }    /* 160px */
+.w-rem-11 { width: 11.25rem; } /* 180px */
+.w-rem-12-5 { width: 12.5rem; }/* 200px */
+.w-rem-15 { width: 15rem; }    /* 240px */
+.w-rem-15-625 { width: 15.625rem; } /* 250px */
+.w-rem-16 { width: 16.25rem; } /* 260px */
+.w-rem-37-5 { max-width: 37.5rem; } /* 600px */
+.w-rem-34-375 { max-width: 34.375rem; } /* 550px */
+.minw-rem-15 { min-width: 15rem; } /* 240px */
+.h-progress-thin { height: 0.375rem; } /* 6px */
+.fs-13 { font-size: 0.8125rem; }
+
+/* F26: stage node positioning via CSS custom properties */
+.stage-node-positioned {
+    left: var(--node-x, 0);
+    top: var(--node-y, 0);
+}
+
+/* ==========================================================================
+   F-25 utility classes (replace inline Style="font-size:..." etc.)
+   ========================================================================== */
+
+.icon-xxs { font-size: 0.6875rem; vertical-align: middle; }
+.icon-xs-app { font-size: 0.85rem; }
+.icon-sm-app { font-size: 0.875rem; }
+.icon-input-sm { font-size: 0.8125rem; }
+.icon-md-app { font-size: 1rem; }
+.icon-3xl { font-size: 3rem; }
+.icon-3xl-success { font-size: 3rem; color: var(--rz-success); }
+.icon-3xl-secondary { font-size: 3rem; color: var(--rz-secondary); }
+.icon-3xl-disabled { font-size: 3rem; color: var(--rz-text-disabled-color); }
+.icon-warn-sm { font-size: 0.875rem; color: var(--rz-warning); }
+.text-mono { font-family: 'Cascadia Code', 'Fira Code', monospace; }
+.text-mono-sm { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.8125rem; }
+.flex-1 { flex: 1; }
+.text-num-cell { min-width: 1.5rem; text-align: right; }
+.text-input-flex { font-size: 0.8125rem; flex: 1; }
+.font-size-09 { font-size: 0.9rem; }
+
+/* ==========================================================================
+   F-25 utility classes (replace inline Style="font-size:..." etc.)
+   ========================================================================== */
+
+.icon-xxs { font-size: 0.6875rem; vertical-align: middle; }
+.icon-xs-app { font-size: 0.85rem; }
+.icon-sm-app { font-size: 0.875rem; }
+.icon-input-sm { font-size: 0.8125rem; }
+.icon-md-app { font-size: 1rem; }
+.icon-3xl { font-size: 3rem; }
+.icon-3xl-success { font-size: 3rem; color: var(--rz-success); }
+.icon-3xl-secondary { font-size: 3rem; color: var(--rz-secondary); }
+.icon-3xl-disabled { font-size: 3rem; color: var(--rz-text-disabled-color); }
+.icon-warn-sm { font-size: 0.875rem; color: var(--rz-warning); }
+.text-mono { font-family: 'Cascadia Code', 'Fira Code', monospace; }
+.text-mono-sm { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.8125rem; }
+.flex-1 { flex: 1; }
+.text-num-cell { min-width: 1.5rem; text-align: right; }
+.text-input-flex { font-size: 0.8125rem; flex: 1; }
+.font-size-09 { font-size: 0.9rem; }
+
+/* ==========================================================================
+   F-25 utility classes (replace inline Style="font-size:..." etc.)
+   ========================================================================== */
+
+.icon-xxs { font-size: 0.6875rem; vertical-align: middle; }
+.icon-xs-app { font-size: 0.85rem; }
+.icon-sm-app { font-size: 0.875rem; }
+.icon-input-sm { font-size: 0.8125rem; }
+.icon-md-app { font-size: 1rem; }
+.icon-3xl { font-size: 3rem; }
+.icon-3xl-success { font-size: 3rem; color: var(--rz-success); }
+.icon-3xl-secondary { font-size: 3rem; color: var(--rz-secondary); }
+.icon-3xl-disabled { font-size: 3rem; color: var(--rz-text-disabled-color); }
+.icon-warn-sm { font-size: 0.875rem; color: var(--rz-warning); }
+.text-mono { font-family: 'Cascadia Code', 'Fira Code', monospace; }
+.text-mono-sm { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.8125rem; }
+.flex-1 { flex: 1; }
+.text-num-cell { min-width: 1.5rem; text-align: right; }
+.text-input-flex { font-size: 0.8125rem; flex: 1; }
+.font-size-09 { font-size: 0.9rem; }
+
+/* Enforce a consistent, compact baseline height on all Radzen buttons so mixed sizes within
+   the same action row never produce mismatched heights. Lowered from 2.25rem (36px) - which
+   forced even small buttons up to 36px and read as too tall - to 1.75rem (28px); md buttons also
+   get tighter vertical padding so their intrinsic height drops to the same 28px floor.
+   (In-grid action buttons keep their own tighter override above.) */
+/* WCAG 2.5.8 (AA) target-size minimum is 24x24 CSS px; a compact icon-only button with no text
+   label had no floor on its width, so it could shrink below that. min-width mirrors min-height so
+   the square case (icon-only) never drops under the 24px minimum. */
+.rz-button { min-height: 1.75rem; min-width: 1.75rem; }
+.rz-button.rz-button-md { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+
+/* Badge alignment in header title rows (shared PageHeader ChildContent + the run toolbar): a badge
+   is sometimes wrapped in an <a> (click-through) or <span> (tooltip), and that inline wrapper is
+   taller than the badge, leaving it ~1px off the bare badges next to it. Make such wrappers hug the
+   badge so every badge centers identically on the title baseline, wherever this pattern appears. */
+.page-header a:has(> .rz-badge),
+.page-header span:has(> .rz-badge),
+.pipeline-run-toolbar a:has(> .rz-badge),
+.pipeline-run-toolbar span:has(> .rz-badge),
+.detail-page-header a:has(> .rz-badge),
+.detail-page-header span:has(> .rz-badge) {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Non-:has() fallback (Firefox < 121 ignores the whole rule above, since an unsupported selector in
+   a comma-separated list invalidates that list per the CSS spec pre-:has() adoption): vertical-align
+   middle on the badge itself approximates the same centered look against its wrapper's text baseline
+   without needing to select the wrapper at all, so it degrades gracefully in every browser. */
+.rz-badge { vertical-align: middle; }
+
+/* F-48 — Remove forced uppercase styling from Radzen Material buttons and tab titles
+   for a more modern look that respects user-supplied casing. */
+.rz-button .rz-button-text,
+.rz-tabview-nav .rz-tabview-title {
+    text-transform: none;
+}
+
+/* Keep every button label on a single line. Without this, long French labels
+   (e.g. "Contacter l'agent", "Mettre à jour l'agent") wrap to two lines and
+   produce mismatched heights inside the same action row — sibling buttons with
+   shorter labels then look visually crushed between the wrapped ones. */
+.rz-button .rz-button-text {
+    white-space: nowrap;
+}
+
+/* Item #11 — Pipeline runner opt-in card: a glanceable status icon on the overview.
+   Green play when armed, muted pause when locked down. */
+.pipeline-runner-icon-on  { font-size: 2rem; color: var(--rz-success); }
+.pipeline-runner-icon-off { font-size: 2rem; color: var(--rz-text-secondary-color); opacity: 0.7; }
+
+/* Item #3 — Agent self-update progress card: live indicator on the server detail page.
+   Phase-aware coloring so a successful update lands green, a failure lands red, and the
+   in-progress phases stay info-blue without visually alarming the operator. */
+.agent-update-progress-card { transition: opacity 0.4s ease-out; }
+.agent-update-progress-card.is-fading-out { opacity: 0; }
+.agent-update-phase-active  { font-size: 1.25rem; color: var(--rz-info); }
+.agent-update-phase-done    { font-size: 1.25rem; color: var(--rz-success); }
+.agent-update-phase-failed  { font-size: 1.25rem; color: var(--rz-danger); }
+
+/* Item #7 — top-bar task tracker widget. Sits between the help button and the user menu in the
+   header, shows a numeric badge when in-flight tasks exist, opens a fixed-width popover on
+   click. The backdrop covers the viewport so a click anywhere outside closes the popover. */
+.task-tracker-container { position: relative; }
+.task-tracker-btn { position: relative; overflow: visible; }
+.task-tracker-btn.rz-button { overflow: visible; }
+.task-tracker-badge {
+    position: absolute; top: 0; right: 0;
+    transform: translate(30%, -30%);
+    min-width: 1.25rem; height: 1.25rem;
+    padding: 0 0.3rem;
+    border-radius: 0.625rem;
+    background: var(--rz-info); color: white;
+    font-size: 0.7rem; font-weight: 600; line-height: 1.25rem;
+    text-align: center;
+    pointer-events: none;
+}
+.task-tracker-backdrop {
+    position: fixed; inset: 0; z-index: 999; background: transparent;
+}
+.task-tracker-popover {
+    position: absolute; right: 0; top: calc(100% + 0.25rem);
+    width: 22rem; max-height: 30rem;
+    z-index: 1000;
+    display: flex; flex-direction: column;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    border: none;
+    padding: 0;
+}
+.task-tracker-header {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--rz-base-300);
+}
+.task-tracker-list {
+    flex: 1 1 auto; overflow-y: auto; min-height: 4rem;
+}
+.task-tracker-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 2rem 1rem; gap: 0.5rem;
+}
+.task-tracker-empty-icon {
+    font-size: 2rem; color: var(--rz-text-secondary-color); opacity: 0.5;
+}
+.task-tracker-row {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    color: inherit; text-decoration: none;
+    border-bottom: 1px solid var(--rz-base-200);
+}
+.task-tracker-row:last-child { border-bottom: none; }
+.task-tracker-row:hover { background: var(--rz-base-100); }
+.task-tracker-row-body { flex: 1 1 auto; min-width: 0; }
+.task-tracker-row-name {
+    font-size: 0.875rem; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.task-tracker-row-meta {
+    font-size: 0.75rem; color: var(--rz-text-secondary-color);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.task-tracker-icon-running  { color: var(--rz-info); }
+.task-tracker-icon-assigned { color: var(--rz-warning); }
+.task-tracker-icon-pending  { color: var(--rz-text-secondary-color); }
+.task-tracker-footer {
+    border-top: 1px solid var(--rz-base-300);
+    text-align: center;
+}
+.task-tracker-footer a {
+    color: var(--rz-primary); font-size: 0.85rem; text-decoration: none;
+}
+.task-tracker-footer a:hover { text-decoration: underline; }
+
+/* S-UX-08: grouped view when count > 5 */
+.task-tracker-group-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 1rem 0.2rem;
+    background: var(--rz-base-100);
+    border-bottom: 1px solid var(--rz-base-200);
+    position: sticky; top: 0; z-index: 1;
+}
+.task-tracker-group-icon { font-size: 1rem; color: var(--rz-text-secondary-color); }
+.task-tracker-group-name {
+    font-size: 0.8125rem; font-weight: 600;
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.task-tracker-group-badge { font-size: 0.6875rem; }
+.task-tracker-row-grouped { padding-left: 2rem; }
+
+/* Rendered markdown README inside git repository detail pages. */
+.readme-rendered { font-size: 0.9375rem; line-height: 1.7; word-wrap: break-word; }
+.readme-rendered h1,
+.readme-rendered h2,
+.readme-rendered h3,
+.readme-rendered h4 { margin-top: 1.5rem; margin-bottom: 0.5rem; font-weight: 600; }
+.readme-rendered h1 { font-size: 1.5rem; border-bottom: 1px solid var(--rz-base-300); padding-bottom: 0.3rem; }
+.readme-rendered h2 { font-size: 1.25rem; border-bottom: 1px solid var(--rz-base-300); padding-bottom: 0.3rem; }
+.readme-rendered h3 { font-size: 1.1rem; }
+.readme-rendered p { margin: 0.5rem 0; }
+.readme-rendered ul, .readme-rendered ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+.readme-rendered code {
+    background: var(--rz-base-200, #2a2a3e);
+    padding: 0.125rem 0.375rem; border-radius: 0.25rem;
+    font-size: 0.85em;
+}
+.readme-rendered pre {
+    background: var(--rz-base-200, #2a2a3e);
+    padding: 1rem; border-radius: 0.375rem;
+    overflow-x: auto; margin: 0.75rem 0;
+}
+.readme-rendered pre code { background: none; padding: 0; }
+.readme-rendered table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
+.readme-rendered th, .readme-rendered td {
+    border: 1px solid var(--rz-base-300);
+    padding: 0.375rem 0.75rem; text-align: left;
+}
+.readme-rendered th { background: var(--rz-base-200, #2a2a3e); font-weight: 600; }
+.readme-rendered a { color: var(--rz-primary); text-decoration: none; }
+.readme-rendered a:hover { text-decoration: underline; }
+.readme-rendered blockquote {
+    margin: 0.75rem 0; padding: 0.5rem 1rem;
+    color: var(--rz-text-secondary-color);
+}
+.readme-rendered img { max-width: 100%; height: auto; }
+
+/* F-22 — Force dashboard cards to stack on narrow viewports.
+   Radzen's mobile-first grid sometimes leaves Size="3" tiles squeezed on phones; explicitly force full width. */
+@media (max-width: 767.98px) {
+    .stat-card {
+        min-height: auto;
+    }
+    .dashboard-tile-row > .rz-col,
+    .dashboard-tile-row > [class*="rz-col-"] {
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+    }
+}
+
+/* F-38 / MA-3 — Ensure all modal dialogs have a clearly visible darkened backdrop
+   and that the dialog itself has proper z-index isolation. */
+.rz-dialog-mask {
+    background-color: rgba(0, 0, 0, 0.55) !important;
+    backdrop-filter: blur(2px);
+}
+
+.rz-dialog-wrapper {
+    z-index: 1050;
+}
+
+/* F-33: replaces inline indent style on Teamspeak channel rows. */
+.ts-channel-root { padding-left: 0; }
+.ts-channel-child { padding-left: 1.5rem; }
+
+/* Hardening (#37): replaces ad-hoc Style="..." attributes on Radzen components. */
+.empty-state-icon { font-size: 3rem; color: var(--rz-text-secondary-color); }
+.error-state-icon { font-size: 3rem; color: var(--rz-danger); }
+.dlg-summary-pre { max-height: 12rem; overflow: auto; }
+.tpl-select { width: 20rem; }
+.bulk-perm-select { width: 10rem; }
+.role-edit-stack { max-width: 32rem; }
+.role-perm-select { width: 100%; }
+.icon-inherit { font-size: inherit; }
+
+.scan-status-clean { color: var(--rz-success); }
+.scan-status-warning { color: var(--rz-warning); }
+.scan-status-unknown { color: var(--rz-secondary); }
+
+.clone-url-input { width: 100%; min-width: 28rem; max-width: 48rem; flex: 1 1 auto; }
+
+
+/* Diagnostic meta row — small, secondary-colored chips of metadata under the
+   "Why offline?" summary so the eye picks the summary first. */
+.contact-agent-diagnostic-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--rz-text-secondary-color);
+}
+
+/* S-DES-04: token staleness mini-bar */
+.diagnostic-token-row { display: inline-flex; align-items: center; gap: 0.5rem; }
+.diagnostic-token-bar {
+    display: inline-block; width: 4rem; height: 0.375rem;
+    border-radius: 0.1875rem; background: var(--rz-base-300);
+    overflow: hidden; vertical-align: middle;
+}
+.diagnostic-token-bar-fill {
+    display: block; height: 100%; border-radius: 0.1875rem;
+    width: var(--fill-width, 0%);
+    transition: width 0.3s ease;
+}
+.token-bar-ok .diagnostic-token-bar-fill       { background: var(--rz-success); }
+.token-bar-warning .diagnostic-token-bar-fill  { background: var(--rz-warning); }
+.token-bar-critical .diagnostic-token-bar-fill { background: var(--rz-danger); }
+.token-bar-expired .diagnostic-token-bar-fill  { background: var(--rz-danger); width: 0 !important; }
+
+/* 30-minute heartbeat sparkline. One bar per minute slot, color-graded by
+   how many beats hit that slot (~2 expected at 30 s cadence). Bars use flex so
+   the strip stretches to fill the parent without arithmetic. */
+.heartbeat-sparkline { display: flex; flex-direction: column; gap: 0.375rem; }
+.heartbeat-sparkline-header { display: flex; justify-content: space-between; align-items: baseline; }
+.heartbeat-sparkline-loading { height: 1.25rem; }
+.heartbeat-sparkline-row {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 1.5rem;
+}
+.heartbeat-bucket {
+    flex: 1 1 0;
+    min-width: 0;
+    border-radius: 2px;
+}
+.heartbeat-bucket-ok   { background: var(--rz-success); height: 100%; }
+.heartbeat-bucket-low  { background: var(--rz-warning); height: 65%; }
+.heartbeat-bucket-miss { background: var(--rz-base-300); height: 35%; }
+
+/* Audit remediation (front-a/front-b): inline-style removals. */
+.status-dot-warning { background-color: var(--rz-warning); }
+.status-dot-danger { background-color: var(--rz-danger); }
+.status-dot-success { background-color: var(--rz-success); }
+
+.version-alert-bar { display: flex; align-items: center; gap: 0.75rem; }
+.version-alert-bar-text { flex: 1; }
+
+.artifact-detail-label { min-width: 8rem; }
+
+.dashboard-widget-preview { min-height: 6rem; }
+.dashboard-widget-height-1 { min-height: 6rem; }
+.dashboard-widget-height-2 { min-height: 12rem; }
+.dashboard-widget-height-3 { min-height: 18rem; }
+.dashboard-widget-height-4 { min-height: 24rem; }
+
+.org-projects-listbox { width: 100%; height: 20rem; }
+.org-edit-form { max-width: 40rem; }
+
+.coverage-card { min-width: 10rem; }
+.coverage-progress { height: 0.375rem; --rz-progressbar-fill-background-color: var(--coverage-color); }
+.coverage-progress-danger { --coverage-color: var(--rz-danger); }
+.coverage-progress-warning { --coverage-color: var(--rz-warning); }
+.coverage-progress-success { --coverage-color: var(--rz-success); }
+
+/* K: actionable coverage tab — radial gauges, trend chart, per-file grid */
+.coverage-gauge-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+.coverage-gauge { width: 9rem; height: 5.5rem; }
+.coverage-gauge-label { text-align: center; }
+.coverage-trend-chart { width: 28rem; max-width: 100%; height: 12rem; }
+.coverage-file-grid { margin-top: 0.25rem; }
+.coverage-file-name { font-family: "Cascadia Code", "Fira Code", "Consolas", monospace; font-size: 0.8125rem; }
+.coverage-file-bar { display: flex; align-items: center; gap: 0.5rem; }
+.coverage-file-bar .coverage-progress { flex: 1; }
+.coverage-file-pct { font-size: 0.8125rem; min-width: 3rem; text-align: right; }
+.run-logs-terminal-sm { max-height: 20rem; }
+.run-logs-terminal-md { max-height: 25rem; }
+
+.artifact-policy-filter { width: 10rem; }
+.server-empty-icon { font-size: 3rem; opacity: 0.4; }
+.project-repo-url-input { width: 100%; min-width: 22rem; }
+.docker-graph-filter-dropdown { width: 14rem; }
+
+.server-os-icon { font-size: 1.1rem; }
+.server-os-linux { color: #f7a800; }
+.server-os-windows { color: #0078d4; }
+.server-os-macos { color: #6e6e73; }
+.server-os-unknown { color: var(--rz-text-tertiary-color, #9ca3af); }
+
+.labeled-toggle-native-input {
+    position: absolute;
+    width: 0.0625rem;
+    height: 0.0625rem;
+    margin: -0.0625rem;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.labeled-toggle:has(.labeled-toggle-native-input:focus-visible) {
+    outline: 0.125rem solid var(--rz-primary);
+    outline-offset: 0.125rem;
+}
+
+/* P: queue-time run-parameters dialog */
+.run-params-dialog { display: flex; flex-direction: column; gap: 1rem; }
+.run-params-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.run-params-input { width: 100%; }
+.run-params-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+
+.pipeline-branch-dialog-intro {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.875rem;
+    border-radius: 0.5rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 28%, transparent);
+    background: color-mix(in srgb, var(--rz-primary) 8%, var(--rz-base-background-color));
+}
+
+.pipeline-branch-dialog-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 2.5rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    color: var(--rz-primary);
+    background: var(--rz-primary-lighter);
+}
+
+.pipeline-branch-dialog-icon .rzi { font-size: 1.35rem; }
+.pipeline-branch-dialog-hint { color: var(--rz-text-secondary-color, #a0a0b0); }
+.pipeline-branch-dropdown { min-height: 2.75rem; }
+.pipeline-branch-option { width: 100%; min-height: 2rem; }
+.pipeline-branch-name { flex: 1 1 auto; font-weight: 500; }
+
+@media (max-width: 576px) {
+    .pipeline-branch-dialog-intro { align-items: flex-start; }
+}
+
+/* PLAN-005 4.1: work-items kanban board */
+.kanban-board { display: flex; gap: 1rem; overflow-x: auto; padding-bottom: 0.5rem; align-items: flex-start; }
+.kanban-column { flex: 1 1 0; min-width: 15rem; background: var(--rz-base-200, rgba(128,128,128,0.06)); border-radius: 0.5rem; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.kanban-column-header { display: flex; align-items: center; justify-content: space-between; padding: 0.25rem 0.5rem; font-weight: 600; }
+.kanban-column-drop { min-height: 3rem; display: flex; flex-direction: column; gap: 0.5rem; border-radius: 0.375rem; transition: background-color 0.15s ease; }
+.kanban-column-drop.kanban-drop-active { background: var(--rz-primary-lighter, rgba(64,128,255,0.15)); outline: 2px dashed var(--rz-primary, #4080ff); outline-offset: -2px; }
+.kanban-card { cursor: grab; }
+.kanban-card:active { cursor: grabbing; }
+.kanban-card.kanban-card-dragging { opacity: 0.5; }
+.kanban-card-title { font-weight: 600; }
+.kanban-card-meta { display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap; margin-top: 0.375rem; }
+.kanban-filter { min-width: 11rem; }
+
+/* Connection-lost overlay (realtime hub down). Full-screen mask + centered card. */
+.connection-lost-mask { z-index: 2000; display: flex; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0.5); opacity: 1; }
+.connection-lost-card { max-width: 28rem; text-align: center; padding: 2rem; background-color: var(--rz-base-background-color); opacity: 1; }
+.connection-lost-icon { font-size: 3rem; color: var(--rz-danger); }
+
+/* Native radios used by OwnerTypeSelector because Radzen's rendered text is not
+   reliably associated with its input in Chromium and Firefox. */
+.owner-type-options { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; min-height: 2.5rem; }
+.owner-type-options label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; user-select: none; }
+.owner-type-options input[type="radio"] { accent-color: var(--rz-primary); cursor: pointer; }
+
+/* Shared task filters use a real wrapping toolbar rather than relying on inline component sizing. */
+.task-list-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.task-list-search {
+    min-width: 15rem;
+}
+
+@media (max-width: 576px) {
+    .task-list-toolbar > .task-list-search {
+        flex: 1 1 calc(100% - 2rem);
+        min-width: 0;
+    }
+
+    .task-list-toolbar > .rz-dropdown {
+        flex: 1 0 calc(100% - 2rem);
+        margin-left: 2rem;
+        min-width: 0;
+    }
+
+    /* Radzen centres an EmptyTemplate in the complete (potentially scrollable) table width. Keep
+       the message pinned to the visible grid viewport so it is readable before any horizontal scroll. */
+    .rz-data-grid .empty-state {
+        position: sticky;
+        left: 0;
+        box-sizing: border-box;
+        width: calc(100vw - 4rem);
+        max-width: calc(100vw - 4rem);
+        padding: 1rem !important;
+        overflow-wrap: anywhere;
+    }
+
+    .rz-data-grid td:has(.empty-state),
+    .rz-data-grid .rz-cell-data:has(.empty-state) {
+        position: sticky;
+        left: 0;
+        width: calc(100vw - 4rem);
+        max-width: calc(100vw - 4rem);
+        padding: 0;
+    }
+
+    .rz-data-grid .empty-state > :not(.empty-state-icon):not(.empty-state-actions) {
+        align-self: stretch;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        text-align: center;
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+    }
+
+    /* Owner scope has four native choices. Keep the labels associated with their inputs while
+       giving the wrapping group enough room below the floating field legend on narrow screens. */
+    .owner-type-field .owner-type-options {
+        width: 100%;
+        padding-top: 0.625rem;
+        row-gap: 0.5rem;
+    }
+}

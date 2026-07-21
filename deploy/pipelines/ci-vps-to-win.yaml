@@ -1,0 +1,113 @@
+name: ci-vps-to-win
+trigger: manual
+variable_libraries:
+  - deploy-config
+vaults:
+  - ci-secrets
+stages:
+  # ── Build (VPS) ──
+  - name: Compile
+    group: Build
+    os: linux
+    steps:
+      - name: Restore & Build
+        shell: dotnet build $(WORKSPACE)/Aetheus.slnx --configuration Release --nologo -v q
+        working_directory: $(WORKSPACE)
+        timeout_seconds: 300
+
+  - name: Tests
+    group: Build
+    os: linux
+    depends_on:
+      - Compile
+    steps:
+      - name: Run Back Tests
+        shell: dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+        timeout_seconds: 300
+      - name: Run Front Tests
+        shell: dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+        timeout_seconds: 300
+      - name: Run Agent Tests
+        shell: dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+        timeout_seconds: 300
+
+  - name: Coverage
+    group: Build
+    os: linux
+    depends_on:
+      - Tests
+    steps:
+      - name: Collect Coverage
+        shell: >-
+          dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage &&
+          dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage &&
+          dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage
+        timeout_seconds: 300
+      - name: Publish Coverage
+        type: coverage
+
+  - name: Lint
+    group: Build
+    os: linux
+    depends_on:
+      - Compile
+    steps:
+      - name: Check Formatting
+        shell: dotnet format $(WORKSPACE)/Aetheus.slnx --verify-no-changes --no-restore -v diag
+        timeout_seconds: 120
+        continue_on_error: true
+
+  - name: Publish
+    group: Build
+    os: linux
+    depends_on:
+      - Coverage
+      - Lint
+    artifacts:
+      - $(WORKSPACE)/publish/back
+    steps:
+      - name: Publish Back
+        shell: dotnet publish $(WORKSPACE)/src/Aetheus.Back -c Release -o $(WORKSPACE)/publish/back --nologo -v q
+        timeout_seconds: 120
+
+  - name: Release
+    group: Build
+    os: linux
+    depends_on:
+      - Publish
+    steps:
+      - name: Create Release
+        type: release
+        version: "1.0.$(BUILD_BUILDID)"
+        changelog: true
+
+  # ── Deploy (Windows) ──
+  - name: Substitute
+    group: Deploy
+    os: linux
+    depends_on:
+      - Release
+    steps:
+      - name: Variable Substitution
+        type: substitute
+        target_files:
+          - $(WORKSPACE)/publish/back/appsettings.json
+
+  - name: Deploy
+    group: Deploy
+    os: linux
+    depends_on:
+      - Substitute
+    steps:
+      - name: Upload via SCP
+        shell: |
+          set -eu
+          KNOWN="$WORKSPACE/.ssh-known-hosts"; printf '%s\n' "$(TARGET_SSH_HOST_KEY)" > "$KNOWN"; chmod 600 "$KNOWN"
+          sshpass -e scp -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN" -o LogLevel=ERROR -P $(TARGET_SSH_PORT) -r $(WORKSPACE)/publish/back/* $(TARGET_USER)@$(TARGET_HOST):$(TARGET_DIR)/
+        timeout_seconds: 180
+      - name: Restart Service
+        shell: |
+          set -eu
+          KNOWN="$WORKSPACE/.ssh-known-hosts"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN" -o LogLevel=ERROR -p $(TARGET_SSH_PORT) $(TARGET_USER)@$(TARGET_HOST) "net stop AetheusBack & net start AetheusBack"
+        timeout_seconds: 60

@@ -1,0 +1,35 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/organizations/new"
+@page "/admin/organizations/{Id:int}/edit"
+
+<PageTitle>@(_isNew ? L["NewOrganization"] : L["EditOrganization"]) - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@(_isNew ? L["NewOrganization"] : L["EditOrganization"])" Icon="apartment" BackHref="/admin/organizations" />
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenTemplateForm TItem="CreateOrganizationRequest" Data="_model"
+        Submit="@((CreateOrganizationRequest _) => OnSubmit())" class="rz-mt-4 form-narrow">
+        <LocalizedDataAnnotationsValidator />
+        <RadzenStack Gap="1rem">
+            <RadzenFormField Text="@L["Name"]" Variant="Variant.Filled">
+                <RadzenTextBox @bind-Value="_model.Name" />
+            </RadzenFormField>
+            <RadzenFormField Text="@L["Slug"]" Variant="Variant.Filled">
+                <RadzenTextBox @bind-Value="_model.Slug" />
+            </RadzenFormField>
+            <RadzenFormField Text="@L["Description"]" Variant="Variant.Filled">
+                <RadzenTextArea @bind-Value="_model.Description" Rows="3" />
+            </RadzenFormField>
+            <ValidationSummary />
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+                <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Save"]" Icon="save" Disabled="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@(() => Nav.NavigateTo("/admin/organizations"))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            </RadzenStack>
+        </RadzenStack>
+    </RadzenTemplateForm>
+}

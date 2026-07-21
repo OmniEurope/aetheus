@@ -1,0 +1,8 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/{Id:int}/libraries"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["Libraries"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Pages.Servers.ServerDetailSections.ServerLibrariesSection ServerId="@Id" />

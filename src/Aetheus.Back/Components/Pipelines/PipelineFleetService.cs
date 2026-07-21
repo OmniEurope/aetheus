@@ -1,0 +1,385 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Exceptions;
+using Aetheus.Shared.DTOs;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+internal sealed class PipelineFleetService(
+    IPipelineFleetRepository fleetRepository,
+    IPipelineRepository pipelineRepository,
+    IPipelineService pipelineService,
+    IPipelineTemplateService templateService,
+    IPipelineTemplateResolver templateResolver,
+    IAuditService audit) : IPipelineFleetService
+{
+    private static readonly Regex ExtendsLinePattern = new(
+        @"^(?<prefix>\s*extends\s*:\s*)(?<reference>[^#\r\n]+)(?<suffix>\s*(?:#.*)?)$",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    public async Task<PaginatedResult<PipelineFleetItemDto>> GetAsync(
+        PipelineFleetPaginationRequest request,
+        IReadOnlyCollection<int>? organizationIds,
+        IReadOnlyCollection<int>? accessiblePipelineIds,
+        CancellationToken ct = default)
+    {
+        var templates = await pipelineRepository.GetTemplatesAsync(ct).ConfigureAwait(false);
+        var templateIndex = BuildTemplateIndex(templates);
+        var candidates = await fleetRepository.GetCandidatesAsync(
+            organizationIds, accessiblePipelineIds, request.Search, request.ProjectId, ct).ConfigureAwait(false);
+        if (candidates.Count > PipelineFleetRepository.MaxCandidateCount)
+            throw new BadRequestException(
+                $"The fleet query exceeds {PipelineFleetRepository.MaxCandidateCount} pipelines. Narrow the search or project filter.");
+        var filtered = candidates.Select(row => MapFleetItem(row, templateIndex))
+            .Where(item => request.TemplateId is null || item.TemplateId == request.TemplateId)
+            .Where(item => request.Freshness is null || item.Freshness == request.Freshness);
+        var items = Sort(filtered, request.SortBy, request.SortDescending).ToList();
+        var (page, pageSize) = request.Normalize();
+        return new PaginatedResult<PipelineFleetItemDto>
+        {
+            Items = items.Skip((page - 1) * pageSize).Take(pageSize).ToList(),
+            TotalCount = items.Count,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    private static IOrderedEnumerable<PipelineFleetItemDto> Sort(
+        IEnumerable<PipelineFleetItemDto> items, string? sortBy, bool descending)
+    {
+        var key = sortBy?.Trim().ToLowerInvariant();
+        return (key, descending) switch
+        {
+            ("pipelinename", false) => items.OrderBy(item => item.PipelineName, StringComparer.OrdinalIgnoreCase),
+            ("pipelinename", true) => items.OrderByDescending(item => item.PipelineName, StringComparer.OrdinalIgnoreCase),
+            ("ownername", false) => items.OrderBy(item => item.OwnerName, StringComparer.OrdinalIgnoreCase),
+            ("ownername", true) => items.OrderByDescending(item => item.OwnerName, StringComparer.OrdinalIgnoreCase),
+            ("templatename", false) => items.OrderBy(item => item.TemplateName is null)
+                .ThenBy(item => item.TemplateName, StringComparer.OrdinalIgnoreCase),
+            ("templatename", true) => items.OrderByDescending(item => item.TemplateName is not null)
+                .ThenByDescending(item => item.TemplateName, StringComparer.OrdinalIgnoreCase),
+            ("pinnedversion", false) => items.OrderBy(item => item.PinnedVersion),
+            ("pinnedversion", true) => items.OrderByDescending(item => item.PinnedVersion),
+            ("latestversion", false) => items.OrderBy(item => item.LatestVersion),
+            ("latestversion", true) => items.OrderByDescending(item => item.LatestVersion),
+            ("freshness", false) => items.OrderBy(item => item.Freshness),
+            ("freshness", true) => items.OrderByDescending(item => item.Freshness),
+            _ => items.OrderBy(item => item.TemplateName is null)
+                .ThenBy(item => item.TemplateName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.PipelineName, StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    public async Task<PipelineFleetItemDto> GetItemAsync(int pipelineId, CancellationToken ct = default)
+    {
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        var templates = await pipelineRepository.GetTemplatesAsync(ct).ConfigureAwait(false);
+        return MapFleetItem(row, BuildTemplateIndex(templates));
+    }
+
+    public async Task<PipelineFleetUpdatePreviewDto> PreviewUpdateAsync(
+        int pipelineId, int targetVersion, CancellationToken ct = default)
+    {
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        var reference = ParseReference(row.YamlDefinition)
+            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
+        var template = await pipelineRepository.FindTemplateByNameAsync(
+            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
+            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+        var currentVersion = reference.Version ?? template.LatestVersion;
+        var parameters = ExtractDefaultParameters(row.YamlDefinition);
+        var currentYaml = RewriteReference(row.YamlDefinition, reference.Name, currentVersion);
+        var targetYaml = RewriteReference(row.YamlDefinition, reference.Name, targetVersion);
+        var currentResolution = await templateResolver.ResolveAsync(
+            currentYaml, row.OrganizationId, parameters, ct).ConfigureAwait(false);
+        var targetResolution = await templateResolver.ResolveAsync(
+            targetYaml, row.OrganizationId, parameters, ct).ConfigureAwait(false);
+        var currentBaseResolution = await templateResolver.ResolveAsync(
+            BuildTemplateResolutionYaml(template.Name, currentVersion), row.OrganizationId, null, ct)
+            .ConfigureAwait(false);
+        var targetBaseResolution = await templateResolver.ResolveAsync(
+            BuildTemplateResolutionYaml(template.Name, targetVersion), row.OrganizationId, null, ct)
+            .ConfigureAwait(false);
+        var orphans = FindOrphanOverrides(
+            row.YamlDefinition,
+            currentBaseResolution.Yaml,
+            targetBaseResolution.Yaml);
+        return new PipelineFleetUpdatePreviewDto
+        {
+            PipelineId = pipelineId,
+            TemplateName = template.Name,
+            CurrentVersion = currentVersion,
+            TargetVersion = targetVersion,
+            CurrentResolvedYaml = currentResolution.Yaml,
+            TargetResolvedYaml = targetResolution.Yaml,
+            OrphanOverrides = orphans,
+            SourceYamlHash = ComputeYamlHash(row.YamlDefinition)
+        };
+    }
+
+    public async Task<PipelineDto> UpdateAsync(
+        int pipelineId, PipelineFleetUpdateRequest request, CancellationToken ct = default)
+    {
+        var preview = await PreviewUpdateAsync(pipelineId, request.TargetVersion, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(request.ExpectedSourceYamlHash)
+            || !CryptographicOperations.FixedTimeEquals(
+                Encoding.ASCII.GetBytes(preview.SourceYamlHash),
+                Encoding.ASCII.GetBytes(request.ExpectedSourceYamlHash.ToUpperInvariant())))
+            throw new ConflictException(
+                "The pipeline changed after the preview. Reload the diff before applying this template version.");
+        if (preview.RequiresOrphanAcknowledgement && !request.AcknowledgeOrphanOverrides)
+            throw new BadRequestException(
+                "The template update contains orphan overrides that must be explicitly acknowledged.");
+
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        var yaml = RewriteReference(row.YamlDefinition, preview.TemplateName, request.TargetVersion);
+        var updated = await RewritePipelineAsync(row, yaml, ct).ConfigureAwait(false);
+        await audit.LogAsync(
+            "TemplateVersionAdopted",
+            "Pipeline",
+            pipelineId,
+            $"{preview.TemplateName}: v{preview.CurrentVersion} -> v{preview.TargetVersion}; "
+                + $"orphanOverridesAcknowledged={request.AcknowledgeOrphanOverrides}",
+            ct).ConfigureAwait(false);
+        return updated;
+    }
+
+    public async Task<PipelineTemplateDto> ExtractAsync(
+        int pipelineId, ExtractPipelineTemplateRequest request, CancellationToken ct = default)
+    {
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        if (ParseReference(row.YamlDefinition) is not null)
+            throw new BadRequestException("Only an off-catalog pipeline can be extracted as a new template.");
+
+        var template = await templateService.CreateTemplateAsync(new CreatePipelineTemplateRequest
+        {
+            Name = request.TemplateName,
+            Description = request.Description,
+            Category = request.Category,
+            OrganizationId = row.OrganizationId,
+            YamlContent = string.IsNullOrWhiteSpace(request.TemplateYamlContent)
+                ? row.YamlDefinition
+                : request.TemplateYamlContent,
+            ChangelogEntry = $"Extracted from pipeline '{row.PipelineName}'"
+        }, ct).ConfigureAwait(false);
+
+        if (request.RewritePipeline)
+        {
+            var yaml = string.IsNullOrWhiteSpace(request.RewrittenPipelineYaml)
+                ? $"name: {QuoteYaml(row.PipelineName)}\nextends: {QuoteYaml(template.Name + "@1")}\nstages: []\n"
+                : request.RewrittenPipelineYaml;
+            await RewritePipelineAsync(row, yaml, ct).ConfigureAwait(false);
+        }
+        return template;
+    }
+
+    public async Task<PipelineTemplateDto> PromoteAsync(
+        int pipelineId, PromotePipelineTemplateRequest request, CancellationToken ct = default)
+    {
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        var reference = ParseReference(row.YamlDefinition)
+            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
+        var template = await pipelineRepository.FindTemplateByNameAsync(
+            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
+            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+
+        var published = await templateService.UpdateTemplateAsync(template.Id, new UpdatePipelineTemplateRequest
+        {
+            Name = template.Name,
+            Description = template.Description,
+            Category = template.Category,
+            YamlContent = request.YamlContent,
+            ChangelogEntry = request.ChangelogEntry
+        }, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException($"Pipeline template {template.Id} was not found.");
+
+        if (request.RebaseSourcePipeline)
+        {
+            var yaml = $"name: {QuoteYaml(row.PipelineName)}\nextends: {QuoteYaml(template.Name + "@" + published.Version)}\nstages: []\n";
+            await RewritePipelineAsync(row, yaml, ct).ConfigureAwait(false);
+        }
+        return published;
+    }
+
+    public async Task<PipelinePromotePreviewDto> PreviewPromotionAsync(
+        int pipelineId, CancellationToken ct = default)
+    {
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        var reference = ParseReference(row.YamlDefinition)
+            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
+        var template = await pipelineRepository.FindTemplateByNameAsync(
+            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
+            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+        var effective = await templateResolver.ResolveAsync(
+            row.YamlDefinition, row.OrganizationId, ExtractDefaultParameters(row.YamlDefinition), ct)
+            .ConfigureAwait(false);
+        var latest = await GetVersionAsync(template, template.LatestVersion, ct).ConfigureAwait(false);
+        return new PipelinePromotePreviewDto
+        {
+            PipelineId = pipelineId,
+            TemplateId = template.Id,
+            TemplateName = template.Name,
+            LatestVersion = template.LatestVersion,
+            LatestTemplateYaml = latest.YamlContent,
+            EffectivePipelineYaml = effective.Yaml
+        };
+    }
+
+    private async Task<PipelineDto> RewritePipelineAsync(
+        PipelineFleetRow row, string yaml, CancellationToken ct)
+    {
+        return await pipelineService.UpdatePipelineAsync(row.PipelineId, new UpdatePipelineRequest
+        {
+            Name = row.PipelineName,
+            Description = row.Description,
+            YamlDefinition = yaml,
+            ProjectId = row.OwnerProjectId,
+            EnvironmentId = row.EnvironmentId,
+            ProjectServerId = row.ProjectServerId,
+            SourceBranch = row.SourceBranch
+        }, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException($"Pipeline {row.PipelineId} was not found.");
+    }
+
+    private async Task<PipelineFleetRow> GetRowAsync(int pipelineId, CancellationToken ct) =>
+        await fleetRepository.GetAsync(pipelineId, ct).ConfigureAwait(false)
+        ?? throw new NotFoundException($"Pipeline {pipelineId} was not found.");
+
+    private static PipelineFleetItemDto MapFleetItem(
+        PipelineFleetRow row,
+        IReadOnlyDictionary<(int OrganizationId, string Name), Data.Entities.PipelineTemplate> templates)
+    {
+        var reference = ParseReference(row.YamlDefinition);
+        Data.Entities.PipelineTemplate? template = null;
+        if (reference is not null)
+            templates.TryGetValue(
+                (row.OrganizationId, reference.Name.ToUpperInvariant()), out template);
+        var pinnedVersion = reference?.Version;
+        var freshness = reference is null
+            ? PipelineFleetFreshness.OffCatalog
+            : template is not null && (pinnedVersion ?? template.LatestVersion) == template.LatestVersion
+                ? PipelineFleetFreshness.Current
+                : PipelineFleetFreshness.Outdated;
+        return new PipelineFleetItemDto
+        {
+            PipelineId = row.PipelineId,
+            PipelineName = row.PipelineName,
+            ProjectId = row.ProjectId,
+            OwnerName = row.OwnerName,
+            OwnerType = row.OwnerType,
+            OrganizationId = row.OrganizationId,
+            TemplateId = template?.Id,
+            TemplateName = reference?.Name,
+            PinnedVersion = pinnedVersion,
+            LatestVersion = template?.LatestVersion,
+            UsesLegacyReference = reference is { Version: null },
+            Freshness = freshness
+        };
+    }
+
+    private static Dictionary<(int OrganizationId, string Name), Data.Entities.PipelineTemplate>
+        BuildTemplateIndex(IEnumerable<Data.Entities.PipelineTemplate> templates) =>
+        templates.GroupBy(
+                template => (template.OrganizationId, template.Name.ToUpperInvariant()))
+            .ToDictionary(group => group.Key, group => group.First());
+
+    private static TemplateReference? ParseReference(string yaml)
+    {
+        var match = ExtendsLinePattern.Match(yaml);
+        if (!match.Success) return null;
+        var value = match.Groups["reference"].Value.Trim().Trim('\'', '"');
+        var separator = value.LastIndexOf('@');
+        if (separator > 0 && int.TryParse(value[(separator + 1)..], out var version) && version > 0)
+            return new TemplateReference(value[..separator], version);
+        return new TemplateReference(value, null);
+    }
+
+    private static string RewriteReference(string yaml, string name, int version)
+    {
+        if (!ExtendsLinePattern.IsMatch(yaml))
+            throw new BadRequestException("The pipeline does not contain an extends reference.");
+        return ExtendsLinePattern.Replace(yaml,
+            match => match.Groups["prefix"].Value + QuoteYaml($"{name}@{version}") + match.Groups["suffix"].Value,
+            1);
+    }
+
+    private static Dictionary<string, string> ExtractDefaultParameters(string yaml)
+    {
+        var definition = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(yaml)
+            ?? throw new BadRequestException("The pipeline YAML is empty.");
+        return definition.Parameters
+            .Where(parameter => parameter.Default is not null)
+            .ToDictionary(parameter => parameter.Name, parameter => parameter.Default!, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<string> FindOrphanOverrides(string childYaml, string oldBaseYaml, string newBaseYaml)
+    {
+        var child = ParseDefinition(childYaml);
+        var oldBase = ParseDefinition(oldBaseYaml);
+        var newBase = ParseDefinition(newBaseYaml);
+        var orphans = new List<string>();
+        foreach (var childStage in child.Stages)
+        {
+            var oldStage = Find(oldBase.Stages, childStage.Name, stage => stage.Name);
+            var newStage = Find(newBase.Stages, childStage.Name, stage => stage.Name);
+            if (oldStage is not null && newStage is null)
+            {
+                orphans.Add($"stage:{childStage.Name}");
+                continue;
+            }
+            if (oldStage is null || newStage is null) continue;
+            FindNestedOrphans(childStage.Steps, oldStage.Steps, newStage.Steps,
+                $"stage:{childStage.Name}/step", step => step.Name, orphans);
+            foreach (var childJob in childStage.Jobs)
+            {
+                var oldJob = Find(oldStage.Jobs, childJob.Name, job => job.Name);
+                var newJob = Find(newStage.Jobs, childJob.Name, job => job.Name);
+                if (oldJob is not null && newJob is null)
+                {
+                    orphans.Add($"stage:{childStage.Name}/job:{childJob.Name}");
+                    continue;
+                }
+                if (oldJob is not null && newJob is not null)
+                    FindNestedOrphans(childJob.Steps, oldJob.Steps, newJob.Steps,
+                        $"stage:{childStage.Name}/job:{childJob.Name}/step", step => step.Name, orphans);
+            }
+        }
+        return orphans;
+    }
+
+    private static void FindNestedOrphans<T>(
+        IReadOnlyList<T> child, IReadOnlyList<T> oldBase, IReadOnlyList<T> newBase,
+        string prefix, Func<T, string> name, List<string> orphans) where T : class
+    {
+        foreach (var item in child)
+            if (Find(oldBase, name(item), name) is not null && Find(newBase, name(item), name) is null)
+                orphans.Add($"{prefix}:{name(item)}");
+    }
+
+    private static T? Find<T>(IReadOnlyList<T> items, string name, Func<T, string> selector) where T : class =>
+        items.FirstOrDefault(item => string.Equals(selector(item), name, StringComparison.OrdinalIgnoreCase));
+
+    private static PipelineYamlDefinition ParseDefinition(string yaml) =>
+        YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(yaml)
+        ?? throw new BadRequestException("The pipeline YAML is empty.");
+
+    private async Task<Data.Entities.PipelineTemplateVersion> GetVersionAsync(
+        Data.Entities.PipelineTemplate template, int version, CancellationToken ct) =>
+        template.Versions.FirstOrDefault(item => item.Version == version)
+        ?? await pipelineRepository.GetTemplateVersionAsync(template.Id, version, ct).ConfigureAwait(false)
+        ?? throw new BadRequestException(
+            $"Pipeline template version '{template.Name}@{version}' does not exist.");
+
+    private static string QuoteYaml(string value) => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+
+    private static string ComputeYamlHash(string yaml) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(yaml)));
+
+    private static string BuildTemplateResolutionYaml(string name, int version) =>
+        $"name: template-resolution\nextends: {QuoteYaml(name + "@" + version)}\nstages: []\n";
+
+    private sealed record TemplateReference(string Name, int? Version);
+}

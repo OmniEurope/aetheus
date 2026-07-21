@@ -1,0 +1,42 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/help"
+
+<PageTitle>@L["HelpCenter"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@L["HelpCenter"]" Icon="help" />
+
+<RadzenStack Gap="1.5rem">
+    <RadzenTextBox Placeholder="@L["SearchHelp"]" @bind-Value="_search" Change="@(async _ => await FilterAsync())"
+        class="help-search-box" />
+
+    @if (_loading)
+    {
+        <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    }
+    else
+    {
+        <RadzenRow Gap="1rem">
+            @foreach (var article in _filtered)
+            {
+                <RadzenColumn Size="4" SizeMD="6" SizeXS="12">
+                    <RadzenCard class="help-card rz-cursor-pointer" role="button" tabindex="0"
+                        @onclick="@(() => Nav.NavigateTo($"/help/{article.Key}"))"
+                        @onkeydown="@(e => OnCardKeyDown(e, article.Key))">
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem" class="rz-mb-2">
+                            <RadzenIcon Icon="@article.Icon" class="help-card-icon" />
+                            <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@article.Title</RadzenText>
+                        </RadzenStack>
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@article.Description</RadzenText>
+                    </RadzenCard>
+                </RadzenColumn>
+            }
+        </RadzenRow>
+
+        @if (_filtered.Count == 0)
+        {
+            <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary rz-text-align-center">
+                @L["NoHelpResults"]
+            </RadzenText>
+        }
+    }
+</RadzenStack>

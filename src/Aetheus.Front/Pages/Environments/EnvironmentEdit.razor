@@ -1,0 +1,79 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/environments/new"
+@page "/environments/{Id:int}"
+
+<PageTitle>@(_isNew ? L["NewEnvironment"] : _detail?.Name ?? L["Environment"]) - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@(_isNew ? L["NewEnvironment"] : _detail?.Name ?? "")" Icon="layers" BackHref="/environments">
+    <ChildContent>
+        @if (!_isNew && _detail is not null)
+        {
+            <RadzenBadge BadgeStyle="@TypeStyle(_detail.Type)" Text="@L.Localize(_detail.Type)" />
+            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["ServersCount"], _detail.Servers.Count)" />
+        }
+    </ChildContent>
+    <Actions>
+        @if (!_isNew)
+        {
+            <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@OnDelete" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+        }
+    </Actions>
+</Aetheus.Front.Shared.PageHeader>
+
+@if (!_isNew && _detail is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+}
+else
+{
+    <RadzenTemplateForm TItem="EnvironmentModel" Data="@_model" Submit="@OnSubmit">
+        <LocalizedDataAnnotationsValidator />
+        <RadzenRow Gap="1rem">
+            <RadzenColumn Size="12" SizeMD="6">
+                <RadzenStack Gap="1rem">
+                    <RadzenFormField Text="@L["Name"]">
+                        <RadzenTextBox @bind-Value="_model.Name" Name="Name" />
+                        <ValidationMessage For="@(() => _model.Name)" />
+                    </RadzenFormField>
+                    <RadzenFormField Text="@L["Description"]">
+                        <RadzenTextArea @bind-Value="_model.Description" Name="Description" Rows="3" />
+                    </RadzenFormField>
+                    <RadzenFormField Text="@L["Type"]">
+                        <RadzenDropDown TValue="EnvironmentType" Data="@_typeOptions"
+                            TextProperty="Text" ValueProperty="Value" @bind-Value="_model.Type" />
+                    </RadzenFormField>
+                </RadzenStack>
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeMD="6">
+                <RadzenStack Gap="1rem">
+                    <RadzenFormField Text="@L["Project"]">
+                        <RadzenDropDown TValue="int?" Data="@_projects" TextProperty="Name" ValueProperty="Id"
+                            @bind-Value="_model.ProjectId" AllowClear="true" Placeholder="@L["NoProject"]" />
+                    </RadzenFormField>
+                    <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.RequireApproval" Text="@L["RequireApproval"]" />
+
+                    @if (_model.RequireApproval)
+                    {
+                        <RadzenFormField Text="@L["ApprovalTimeoutMinutes"]">
+                            <RadzenNumeric TValue="int" @bind-Value="_model.ApprovalTimeoutMinutes" Min="1" Max="10080" />
+                        </RadzenFormField>
+                        <RadzenFormField Text="@L["ApprovalInstructions"]">
+                            <RadzenTextArea @bind-Value="_model.ApprovalInstructions" Rows="2" />
+                        </RadzenFormField>
+                    }
+                </RadzenStack>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <RadzenText TextStyle="TextStyle.H6" class="rz-mt-4 rz-mb-2">@L["Servers"]</RadzenText>
+        <RadzenDropDown TValue="IEnumerable<int>" Data="@_servers" TextProperty="Name" ValueProperty="Id"
+            @bind-Value="_model.ServerIds" Multiple="true" Chips="true" AllowClear="true"
+            AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+            Placeholder="@L["SelectServers"]" class="rz-w-100" />
+
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-4">
+            <RadzenButton ButtonType="ButtonType.Submit" Text="@(_isNew ? L["Create"] : L["Save"])" Icon="@(_isNew ? "add" : "save")"
+                ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" IsBusy="@_saving" />
+        </RadzenStack>
+    </RadzenTemplateForm>
+}

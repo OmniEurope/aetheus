@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Aetheus",
+  "classifications": ["Aetheus", "Module", "Backend"],
+  "identity": "Aetheus.Module",
+  "name": "Aetheus Backend Module",
+  "shortName": "aetheus-module",
+  "tags": {
+    "language": "C#",
+    "type": "item"
+  },
+  "sourceName": "ModuleName",
+  "preferNameDirectory": false
+}

@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.AgentPools;
+using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using NSubstitute;
+
+namespace Aetheus.Back.Tests;
+
+public class AgentPoolServiceTests
+{
+    private readonly IAgentPoolRepository _repoMock = Substitute.For<IAgentPoolRepository>();
+    private readonly IAuditService _auditMock = Substitute.For<IAuditService>();
+    private readonly AgentPoolService _sut;
+
+    public AgentPoolServiceTests()
+    {
+        _sut = new AgentPoolService(_repoMock, _auditMock, Substitute.For<IEntityChangeNotifier>(), TimeProvider.System);
+    }
+
+    [Fact]
+    public async Task GetPoolsAsync_ReturnsPaginatedResult()
+    {
+        var pools = new List<AgentPool>
+        {
+            new() { Id = 1, Name = "Pool1", Description = "Desc1", MaxConcurrency = 3, Servers = new List<AgentPoolServer>() }
+        };
+        _repoMock.GetPoolsPagedAsync(null, 1, 20, null, Arg.Any<CancellationToken>())
+            .Returns((pools, 1));
+
+        var result = await _sut.GetPoolsAsync(new PaginationRequest { Page = 1, PageSize = 20 }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Single(result.Items);
+        Assert.Equal("Pool1", result.Items[0].Name);
+    }
+
+    [Fact]
+    public async Task GetPoolsAsync_WithAccessibleIds_PassesToRepo()
+    {
+        _repoMock.GetPoolsPagedAsync(null, 1, 20, Arg.Any<List<int>>(), Arg.Any<CancellationToken>())
+            .Returns((new List<AgentPool>(), 0));
+
+        var result = await _sut.GetPoolsAsync(new PaginationRequest { Page = 1, PageSize = 20 }, [1, 2], ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task GetPoolAsync_Found_ReturnsDto()
+    {
+        _repoMock.GetPoolWithServersAsync(1, Arg.Any<CancellationToken>())
+            .Returns(new AgentPool
+            {
+                Id = 1,
+                Name = "Pool1",
+                Description = "Desc1",
+                MaxConcurrency = 3,
+                Servers = new List<AgentPoolServer>
+                {
+                    new() { ServerId = 10, Server = new Server { Name = "srv1", Status = ServerStatus.Online } }
+                }
+            });
+
+        var result = await _sut.GetPoolAsync(1, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("Pool1", result.Name);
+        Assert.Single(result.Servers);
+        Assert.Equal("srv1", result.Servers[0].ServerName);
+    }
+
+    [Fact]
+    public async Task GetPoolAsync_NotFound_ReturnsNull()
+    {
+        _repoMock.GetPoolWithServersAsync(999, Arg.Any<CancellationToken>()).Returns((AgentPool?)null);
+
+        var result = await _sut.GetPoolAsync(999, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task CreatePoolAsync_CreatesPoolAndAudits()
+    {
+        var request = new CreateAgentPoolRequest { Name = "NewPool", Description = "Desc", MaxConcurrency = 5, ServerIds = [10, 20] };
+
+        _repoMock.AddPoolAsync(Arg.Any<AgentPool>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _repoMock.GetPoolWithServersAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new AgentPool { Id = 1, Name = "NewPool", Description = "Desc", MaxConcurrency = 5, Servers = new List<AgentPoolServer>() });
+
+        var result = await _sut.CreatePoolAsync(request, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("NewPool", result.Name);
+        await _repoMock.Received(1).AddPoolAsync(Arg.Is<AgentPool>(p => p.Name == "NewPool" && p.Servers.Count == 2), Arg.Any<CancellationToken>());
+        await _auditMock.Received(1).LogAsync("Created", "AgentPool", Arg.Any<int>(), "NewPool", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdatePoolAsync_Found_UpdatesAndAudits()
+    {
+        var entity = new AgentPool
+        {
+            Id = 1,
+            Name = "Old",
+            Description = "OldDesc",
+            MaxConcurrency = 1,
+            Servers = new List<AgentPoolServer> { new() { ServerId = 10 } }
+        };
+        _repoMock.FindPoolAsync(1, Arg.Any<CancellationToken>()).Returns(entity);
+        _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _repoMock.GetPoolWithServersAsync(1, Arg.Any<CancellationToken>())
+            .Returns(new AgentPool { Id = 1, Name = "Updated", Servers = new List<AgentPoolServer>() });
+
+        var request = new UpdateAgentPoolRequest { Name = "Updated", Description = "NewDesc", MaxConcurrency = 10, ServerIds = [20, 30] };
+        var result = await _sut.UpdatePoolAsync(1, request, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("Updated", entity.Name);
+        Assert.Equal(10, entity.MaxConcurrency);
+        await _auditMock.Received(1).LogAsync("Updated", "AgentPool", 1, Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdatePoolAsync_NotFound_ReturnsNull()
+    {
+        _repoMock.FindPoolAsync(999, Arg.Any<CancellationToken>()).Returns((AgentPool?)null);
+
+        var result = await _sut.UpdatePoolAsync(999, new UpdateAgentPoolRequest { Name = "X", ServerIds = [] }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task DeletePoolAsync_Found_DeletesAndAudits()
+    {
+        var entity = new AgentPool { Id = 1, Name = "Pool1", Servers = new List<AgentPoolServer>() };
+        _repoMock.FindPoolAsync(1, Arg.Any<CancellationToken>()).Returns(entity);
+
+        var result = await _sut.DeletePoolAsync(1, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        await _repoMock.Received(1).RemovePoolAsync(entity, Arg.Any<CancellationToken>());
+        await _auditMock.Received(1).LogAsync("Deleted", "AgentPool", 1, "Pool1", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DeletePoolAsync_NotFound_ReturnsFalse()
+    {
+        _repoMock.FindPoolAsync(999, Arg.Any<CancellationToken>()).Returns((AgentPool?)null);
+
+        var result = await _sut.DeletePoolAsync(999, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+    }
+}

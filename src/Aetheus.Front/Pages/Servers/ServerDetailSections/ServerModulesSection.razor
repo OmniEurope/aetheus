@@ -1,0 +1,68 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_modules is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="1rem">
+        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Modules"]</RadzenText>
+        <RadzenButton Icon="add" Text="@L["Add"]" Click="@(() => _addVisible = true)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+
+    <RadzenDataGrid Data="@_modules" TItem="ServerModuleDto" Density="Density.Compact" EmptyText="@L["NoRecords"]" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+        <Columns>
+            <RadzenDataGridColumn TItem="ServerModuleDto" Property="Name" Title="@L["Name"]" />
+            <RadzenDataGridColumn TItem="ServerModuleDto" Property="Type" Title="@L["Type"]" Width="130px">
+                <Template Context="m">
+                    <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@L.Localize(m.Type)" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="ServerModuleDto" Property="Status" Title="@L["Status"]" Width="120px">
+                <Template Context="m">
+                    <RadzenBadge BadgeStyle="@GetModuleStatusBadge(m.Status)" Text="@L[m.Status.ToString()]" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="ServerModuleDto" Property="Version" Title="@L["Version"]" Width="100px" />
+            <RadzenDataGridColumn TItem="ServerModuleDto" Title="@L["Actions"]" MinWidth="9rem">
+                <Template Context="m">
+                    <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@(() => DeleteModuleAsync(m))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+
+    @if (_addVisible)
+    {
+        <RadzenCard class="rz-mt-4">
+            <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["AddModule"]</RadzenText>
+            <RadzenTemplateForm TItem="AddModuleModel" Data="@_addModel" Submit="@AddModuleAsync">
+            <LocalizedDataAnnotationsValidator />
+            <RadzenRow Gap="1rem">
+                <RadzenColumn SizeMD="4" Size="12">
+                    <RadzenFormField Text="@L["Name"]">
+                        <RadzenTextBox @bind-Value="_addModel.Name" MaxLength="100" />
+                        <ValidationMessage For="@(() => _addModel.Name)" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="3" Size="6">
+                    <RadzenFormField Text="@L["Type"]">
+                        <RadzenDropDown TValue="ServerModuleType" Data="@_moduleTypes" @bind-Value="_addModel.Type" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="3" Size="6">
+                    <RadzenFormField Text="@L["Version"]">
+                        <RadzenTextBox @bind-Value="_addModel.Version" MaxLength="50" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn SizeMD="2" Size="12">
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-5">
+                        <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Add"]" Icon="add" IsBusy="@_addSaving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                        <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@(() => _addVisible = false)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    </RadzenStack>
+                </RadzenColumn>
+            </RadzenRow>
+            </RadzenTemplateForm>
+        </RadzenCard>
+    }
+}

@@ -1,0 +1,74 @@
+# Cross-agent deployment demo (real, not a placeholder).
+#
+# A BUILD agent (any pipeline runner) publishes a self-contained app plus a `run` launcher and
+# collects it as an artifact. A DEPLOY stage then ships that artifact to a DEPLOYMENT-CAPABLE agent
+# (installed with `--module deployment`) via the native `type: deploy` step - the backend dispatches
+# an OperationKind.PipelineDeploy, the deploy agent downloads the artifact, flips the `current`
+# symlink atomically, restarts `aetheus-app@toto` through the root-owned helper, and health-gates
+# on a crash-loop-aware systemd gate plus `/health/ready`. No SCP, no shell deploy - this is
+# scenario 1 (build+deploy in one YAML).
+#
+# Prerequisite: the target agent was installed with `--module deployment` (it then advertises the
+# "Deployment" capability and is the only kind of host this stage will resolve to - fail-closed).
+name: deploy-cross-agent
+trigger: manual
+
+stages:
+  # ── Build on any runner ─────────────────────────────────────────────────────────────────────
+  - name: Publish
+    group: Build
+    # The collected artifact's name is "<stage>-artifacts" → "Publish-artifacts" (referenced below).
+    artifacts:
+      - $(WORKSPACE)/publish/toto
+    steps:
+      - name: Publish self-contained app
+        shell: >-
+          dotnet publish $(WORKSPACE)/src/Aetheus.Back -c Release
+          -o $(WORKSPACE)/publish/toto --nologo -v q
+        timeout_seconds: 300
+
+      # The unit template runs `…/deploy/toto/current/run`, so the launcher MUST ship in the artifact.
+      - name: Write run launcher
+        shell: >-
+          printf '#!/bin/sh\nexec env ASPNETCORE_URLS=http://127.0.0.1:18080 dotnet "$(dirname "$0")/Aetheus.Back.dll"\n'
+          > $(WORKSPACE)/publish/toto/run && chmod +x $(WORKSPACE)/publish/toto/run
+        timeout_seconds: 30
+
+  # ── Deploy on a deployment-capable agent ────────────────────────────────────────────────────
+  - name: Deploy
+    group: Deploy
+    depends_on:
+      - Publish
+    # Target the pool/environment that groups your deployment agents. The scheduler resolves ONLY
+    # deployment-capable online hosts here (no plain-runner fallback). Adjust to your topology.
+    environment: production
+    steps:
+      - name: Deploy toto
+        type: deploy
+        app: toto
+        artifact: Publish-artifacts
+        health_url: http://127.0.0.1:18080/health/ready
+        health_timeout_seconds: 60
+
+# ── Scenario 3 (deploy-only, existing release) - run as its own pipeline ────────────────────────
+# name: deploy-toto-release
+# trigger: manual
+# parameters:
+#   - name: RELEASE
+#     type: string
+#     default: latest
+# stages:
+#   - name: Deploy
+#     environment: production
+#     steps:
+#       - name: Deploy released toto
+#         type: deploy
+#         app: toto
+#         release: $(RELEASE)          # id / version / "latest"
+#
+# ── Container mode - set `compose:` to a compose file path inside the artifact ───────────────────
+#       - name: Deploy toto (container)
+#         type: deploy
+#         app: toto
+#         artifact: Publish-artifacts
+#         compose: docker-compose.yml   # ⇒ docker load + docker compose up -d --wait

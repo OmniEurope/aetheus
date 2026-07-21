@@ -1,0 +1,378 @@
+[
+  {
+    "key": "dashboard",
+    "title": "Tableau de bord",
+    "description": "Vue d'ensemble de votre infrastructure : état des serveurs, activité des pipelines et tâches en attente.",
+    "icon": "dashboard",
+    "sections": [
+      {
+        "title": "Cartes de statut",
+        "content": "La ligne supérieure affiche les métriques clés : total des serveurs, nombre en ligne/hors ligne et tâches en attente. Elles se mettent à jour automatiquement lorsque les agents signalent un changement via la connexion temps réel."
+      },
+      {
+        "title": "Activité récente",
+        "content": "La section inférieure liste vos serveurs avec leur statut et les exécutions de pipelines les plus récentes avec leur résultat. Cliquez sur un élément pour ouvrir sa page de détail."
+      },
+      {
+        "title": "Tableaux de bord personnalisés",
+        "content": "Les administrateurs peuvent construire des tableaux de bord personnalisés avec des widgets et en définir un comme vue d'accueil par défaut. Voir l'article Tableaux de bord personnalisés."
+      }
+    ]
+  },
+  {
+    "key": "servers",
+    "title": "Serveurs",
+    "description": "Gérez votre parc de serveurs - surveillez les statuts, consultez les métriques et configurez les agents.",
+    "icon": "dns",
+    "sections": [
+      {
+        "title": "Liste des serveurs",
+        "content": "Parcourez tous les serveurs enregistrés avec des filtres par type (Normal, Build, Docker) et statut (En ligne, Hors ligne). Utilisez la barre de recherche pour trouver un serveur par nom ou hostname."
+      },
+      {
+        "title": "Détail du serveur",
+        "content": "Ouvrez un serveur pour voir sa vue d'ensemble, ses métriques système (CPU, RAM, Disque), ses services installés, ses conteneurs Docker, ses projets, pipelines, releases, tâches et logs, organisés en sections."
+      },
+      {
+        "title": "Services",
+        "content": "Depuis la section Services, vous gérez les modules détectés - Docker, Apache, Certbot, Mail, TeamSpeak, Portsentry, Rkhunter - et lancez les actions installer, démarrer et arrêter. Les résultats reviennent en temps réel."
+      },
+      {
+        "title": "Enrôlement des agents",
+        "content": "Les serveurs apparaissent automatiquement lorsqu'un agent s'enrôle avec un jeton d'enregistrement. Générez un jeton depuis l'assistant Ajouter un agent, puis exécutez la commande d'installation générée sur la machine cible."
+      }
+    ]
+  },
+  {
+    "key": "projects",
+    "title": "Projets",
+    "description": "Organisez votre travail en projets avec des dépôts Git, des environnements et des pipelines de déploiement.",
+    "icon": "folder",
+    "sections": [
+      {
+        "title": "Création de projets",
+        "content": "Créez un projet en fournissant un nom, une description optionnelle et l'URL du dépôt Git. Les projets peuvent être tagués pour faciliter le filtrage et appartiennent à une organisation."
+      },
+      {
+        "title": "Sections du projet",
+        "content": "Chaque projet regroupe ses pipelines, serveurs cibles, releases, artefacts, bibliothèques de variables, coffres, environnements, tâches, logs et son dépôt Git dans des sections dédiées."
+      },
+      {
+        "title": "Gestion des projets",
+        "content": "Modifiez les paramètres d'un projet ou supprimez les projets dont vous n'avez plus besoin. Chaque projet affiche le nombre de pipelines associés et le statut de leur dernière exécution."
+      }
+    ]
+  },
+  {
+    "key": "git-repositories",
+    "title": "Dépôts Git",
+    "description": "Parcourez les dépôts Git liés à vos projets - branches, commits et historique.",
+    "icon": "commit",
+    "sections": [
+      {
+        "title": "Navigation dans les dépôts",
+        "content": "Inspectez le dépôt d'un projet : listez les branches, consultez les commits récents et ouvrez un commit pour voir ses détails. La vue est en lecture seule, conçue pour vérifier rapidement ce qui a changé."
+      },
+      {
+        "title": "Miroir local",
+        "content": "Les dépôts sont mis en miroir localement : la navigation reste rapide et continue de fonctionner même lorsque l'hôte distant est lent ou temporairement indisponible. Les pipelines clonent depuis le même miroir."
+      }
+    ]
+  },
+  {
+    "key": "environments",
+    "title": "Environnements",
+    "description": "Définissez des environnements de déploiement comme Développement, Staging et Production pour un projet.",
+    "icon": "layers",
+    "sections": [
+      {
+        "title": "Gestion des environnements",
+        "content": "Créez des environnements par projet pour représenter vos cibles de déploiement. Donnez à chacun un nom clair pour savoir d'un coup d'œil où un pipeline déploie."
+      },
+      {
+        "title": "Utilisation des environnements",
+        "content": "Les pipelines référencent un environnement pour cadrer où une release est déployée, ce qui facilite le suivi de la version en cours dans chaque étape de votre flux de livraison."
+      }
+    ]
+  },
+  {
+    "key": "pipelines",
+    "title": "Pipelines",
+    "description": "Définissez et exécutez des pipelines CI/CD avec des étapes, des steps et des variables.",
+    "icon": "account_tree",
+    "sections": [
+      {
+        "title": "Définition de pipeline",
+        "content": "Les pipelines sont définis en YAML avec des étapes et des steps (modèle Azure DevOps : stages > jobs > steps). Utilisez l'éditeur visuel pour concevoir par glisser-déposer, ou modifiez le YAML directement avec validation syntaxique."
+      },
+      {
+        "title": "Exécution des pipelines",
+        "content": "Déclenchez les pipelines manuellement, via des webhooks ou selon un planning. Suivez la progression en temps réel avec le streaming de logs en direct. Chaque exécution montre le statut et la durée étape par étape."
+      },
+      {
+        "title": "Variables et secrets",
+        "content": "Attachez des bibliothèques de variables et des coffres à un pipeline. Les variables sont substituées à l'exécution. Utilisez le dry-run pour prévisualiser les commandes résolues avant l'exécution réelle."
+      }
+    ]
+  },
+  {
+    "key": "templates",
+    "title": "Modèles de pipeline",
+    "description": "Modèles de pipeline réutilisables pour standardiser vos workflows de déploiement.",
+    "icon": "description",
+    "sections": [
+      {
+        "title": "Utilisation des modèles",
+        "content": "Créez des modèles à partir de pipelines existants ou de zéro. Lors de la création d'un nouveau pipeline, choisissez un modèle pour pré-remplir les étapes et les steps. Les modèles sont versionnés avec des entrées de changelog."
+      }
+    ]
+  },
+  {
+    "key": "variable-libraries",
+    "title": "Bibliothèques de variables",
+    "description": "Magasins de clés-valeurs partagés pour les variables de pipeline, réutilisables entre plusieurs pipelines.",
+    "icon": "data_object",
+    "sections": [
+      {
+        "title": "Gestion des entrées",
+        "content": "Ajoutez, modifiez ou supprimez des entrées clé-valeur. Les modifications sont versionnées - consultez l'historique pour voir les valeurs précédentes et leurs auteurs. Une bibliothèque appartient à une organisation ou à un projet."
+      },
+      {
+        "title": "Utilisation dans les pipelines",
+        "content": "Liez une bibliothèque à un pipeline, puis référencez ses valeurs avec la syntaxe $(clé) dans vos steps. Utilisez le bouton copier pour obtenir la référence exacte de la clé."
+      }
+    ]
+  },
+  {
+    "key": "vaults",
+    "title": "Coffres",
+    "description": "Stockage chiffré de secrets pour les valeurs sensibles comme les clés API, mots de passe et jetons.",
+    "icon": "lock",
+    "sections": [
+      {
+        "title": "Gestion des secrets",
+        "content": "Les secrets sont chiffrés avec AES-256 au repos. Ajoutez un secret avec une clé et une valeur - les valeurs sont masquées dans l'interface et dans les logs. Consultez l'historique des versions pour auditer les changements."
+      },
+      {
+        "title": "Utilisation des secrets dans les pipelines",
+        "content": "Liez un coffre à un pipeline et référencez les secrets avec la syntaxe $(secret.clé). Les secrets sont résolus à l'exécution et automatiquement masqués dans la sortie des logs."
+      }
+    ]
+  },
+  {
+    "key": "releases",
+    "title": "Releases",
+    "description": "Suivez les releases logicielles de vos projets avec le statut de build et les workflows de promotion.",
+    "icon": "new_releases",
+    "sections": [
+      {
+        "title": "Détection des releases",
+        "content": "Les releases sont détectées automatiquement à partir des tags Git. Utilisez Synchroniser pour récupérer les nouvelles releases à la demande. Chaque release affiche sa version, sa branche et son statut actuel."
+      },
+      {
+        "title": "Promotion et rollback",
+        "content": "Promouvez une release réussie en production ou effectuez un rollback vers une version précédente. Déclenchez les pipelines de build associés directement depuis la vue des releases."
+      }
+    ]
+  },
+  {
+    "key": "artifacts",
+    "title": "Artefacts",
+    "description": "Parcourez et téléchargez les artefacts de build produits par les pipelines de vos projets.",
+    "icon": "inventory_2",
+    "sections": [
+      {
+        "title": "Stockage des artefacts",
+        "content": "Les steps de pipeline peuvent publier des artefacts comme la sortie de build, des paquets ou des rapports. Chaque artefact est listé avec son nom, sa taille et l'exécution qui l'a produit."
+      },
+      {
+        "title": "Téléchargement des artefacts",
+        "content": "Téléchargez n'importe quel artefact pour l'inspecter localement ou le déployer manuellement. Les artefacts restent rattachés à l'exécution qui les a créés pour une traçabilité complète."
+      }
+    ]
+  },
+  {
+    "key": "tasks",
+    "title": "Tâches",
+    "description": "Consultez et gérez les exécutions de tâches sur tous les serveurs et pipelines.",
+    "icon": "task_alt",
+    "sections": [
+      {
+        "title": "Liste des tâches",
+        "content": "Parcourez toutes les tâches avec des filtres par statut, exécuteur et serveur. Chaque tâche affiche son statut actuel, le step de pipeline associé et sa durée d'exécution."
+      },
+      {
+        "title": "Logs des tâches",
+        "content": "Ouvrez une tâche pour voir sa sortie. Les logs sont diffusés en temps réel pour les tâches en cours ; les logs des tâches terminées sont conservés et restent disponibles pour consultation."
+      }
+    ]
+  },
+  {
+    "key": "logs",
+    "title": "Logs",
+    "description": "Console de logs en temps réel avec filtrage, recherche et niveaux de log colorés.",
+    "icon": "receipt_long",
+    "sections": [
+      {
+        "title": "Streaming en direct",
+        "content": "Les logs sont diffusés en temps réel via la connexion SignalR. La console défile automatiquement pour afficher les nouvelles entrées ; utilisez pause pour figer la vue et examiner des lignes précises."
+      },
+      {
+        "title": "Filtrage",
+        "content": "Filtrez les logs par agent, pipeline ou niveau (Info, Warning, Error). Utilisez la barre de recherche pour trouver du texte spécifique dans les logs affichés."
+      }
+    ]
+  },
+  {
+    "key": "alerts",
+    "title": "Alertes",
+    "description": "Configurez des alertes basées sur les métriques pour être notifié lorsque les seuils sont dépassés.",
+    "icon": "notification_important",
+    "sections": [
+      {
+        "title": "Création d'alertes",
+        "content": "Définissez une alerte en sélectionnant une métrique (CPU, Mémoire, Disque), un seuil en pourcentage, et la durée pendant laquelle la condition doit persister avant déclenchement."
+      },
+      {
+        "title": "Notifications d'alertes",
+        "content": "Lorsqu'une alerte se déclenche, des notifications apparaissent dans l'application et le nombre de non-lues s'affiche dans la barre latérale. Consultez les alertes actives et passées depuis la vue des alertes."
+      }
+    ]
+  },
+  {
+    "key": "dashboards",
+    "title": "Tableaux de bord personnalisés",
+    "description": "Créez des tableaux de bord personnalisés avec des widgets configurables (admin uniquement).",
+    "icon": "space_dashboard",
+    "sections": [
+      {
+        "title": "Configuration des widgets",
+        "content": "Ajoutez des widgets à un tableau de bord et configurez leur type, position et taille. Les types disponibles incluent graphiques, compteurs et indicateurs de statut."
+      },
+      {
+        "title": "Tableau de bord par défaut",
+        "content": "Marquez un tableau de bord comme défaut pour l'afficher sur la page d'accueil, offrant à votre équipe la vue la plus importante dès la connexion."
+      }
+    ]
+  },
+  {
+    "key": "organizations",
+    "title": "Organisations",
+    "description": "Regroupez serveurs, projets et membres dans une organisation avec une propriété cadrée (admin uniquement).",
+    "icon": "apartment",
+    "sections": [
+      {
+        "title": "Membres et rôles",
+        "content": "Chaque organisation a des membres avec des rôles, dont Propriétaire (Owner). Les propriétaires gèrent les membres et les paramètres. Une organisation par défaut est créée au premier démarrage avec l'administrateur initial comme propriétaire."
+      },
+      {
+        "title": "Propriété cadrée",
+        "content": "Les serveurs, projets, enregistrements de plugins et jetons d'enregistrement appartiennent à une organisation. Les membres voient les ressources des organisations auxquelles ils appartiennent. À la création d'une ressource, vous choisissez son organisation, ou laissez la vôtre par défaut."
+      }
+    ]
+  },
+  {
+    "key": "roles",
+    "title": "Rôles",
+    "description": "Définissez des rôles et des permissions par ressource pour contrôler qui peut voir ou modifier chaque ressource (admin uniquement).",
+    "icon": "admin_panel_settings",
+    "sections": [
+      {
+        "title": "Permissions par ressource",
+        "content": "Les permissions sont accordées par ressource (serveur ou projet) et par action, comme lecture ou écriture. Regroupez les permissions en rôles et attribuez les rôles aux utilisateurs."
+      },
+      {
+        "title": "Accès effectif",
+        "content": "L'accès effectif d'un utilisateur est l'union de ses permissions directes sur les ressources et des ressources de ses organisations. Les changements prennent effet immédiatement, dès le rafraîchissement du cache de permissions."
+      }
+    ]
+  },
+  {
+    "key": "users",
+    "title": "Utilisateurs",
+    "description": "Gérez les comptes utilisateurs, les rôles et les permissions d'accès (admin uniquement).",
+    "icon": "group",
+    "sections": [
+      {
+        "title": "Gestion des utilisateurs",
+        "content": "Créez, modifiez et supprimez des comptes utilisateurs. Réinitialisez un mot de passe si nécessaire, et activez ou imposez l'authentification à deux facteurs pour renforcer la sécurité des comptes."
+      },
+      {
+        "title": "Rôles et permissions",
+        "content": "Attribuez des rôles pour contrôler ce à quoi chaque utilisateur accède. L'accès est basé sur les ressources : un utilisateur ne voit que les serveurs et projets qui lui sont accordés, directement ou via ses organisations. Voir l'article Rôles."
+      }
+    ]
+  },
+  {
+    "key": "plugins",
+    "title": "Plugins",
+    "description": "Étendez les fonctionnalités de Aetheus en enregistrant et gérant des plugins (admin uniquement).",
+    "icon": "extension",
+    "sections": [
+      {
+        "title": "Gestion des plugins",
+        "content": "Enregistrez un plugin en fournissant son nom, son auteur, son point d'entrée et son type. Activez ou désactivez les plugins selon vos besoins, et désenregistrez ceux qui ne sont plus nécessaires."
+      }
+    ]
+  },
+  {
+    "key": "audit",
+    "title": "Logs d'audit",
+    "description": "Suivez tous les changements effectués dans le système pour la sécurité et la conformité (admin uniquement).",
+    "icon": "policy",
+    "sections": [
+      {
+        "title": "Consultation des logs d'audit",
+        "content": "Filtrez les entrées d'audit par type d'action (Créé, Modifié, Supprimé), type d'entité, plage de dates et utilisateur. Chaque entrée enregistre un horodatage, l'action, l'entité concernée et l'auteur du changement."
+      }
+    ]
+  },
+  {
+    "key": "system-logs",
+    "title": "Logs système",
+    "description": "Inspectez les logs applicatifs du backend pour le dépannage et le diagnostic (admin uniquement).",
+    "icon": "description",
+    "sections": [
+      {
+        "title": "Consultation des logs système",
+        "content": "Consultez les logs applicatifs côté serveur avec leur niveau, horodatage et message. Utilisez-les pour diagnostiquer les erreurs backend qui ne sont pas liées à une tâche d'agent ou à une exécution de pipeline particulière."
+      }
+    ]
+  },
+  {
+    "key": "api-reference",
+    "title": "Référence API",
+    "description": "Parcourez chaque endpoint de l'API backend exposé par Aetheus, groupé par domaine (admin uniquement).",
+    "icon": "api",
+    "sections": [
+      {
+        "title": "Navigation dans les endpoints",
+        "content": "La référence est générée à partir du document OpenAPI en direct : elle correspond toujours au backend en cours d'exécution. Les endpoints sont groupés par tag et affichent la méthode HTTP, le chemin et le résumé."
+      },
+      {
+        "title": "Trouver un endpoint",
+        "content": "Utilisez la barre de recherche pour filtrer les endpoints par chemin ou description. C'est le moyen le plus rapide de découvrir la route et la méthode exactes pour une intégration."
+      }
+    ]
+  },
+  {
+    "key": "settings",
+    "title": "Paramètres",
+    "description": "Gérez votre profil, l'apparence, les notifications et la sécurité de votre compte.",
+    "icon": "settings",
+    "sections": [
+      {
+        "title": "Profil et apparence",
+        "content": "Définissez votre nom affiché, basculez entre le thème sombre et clair, et choisissez votre langue (français ou anglais). Les préférences d'apparence sont enregistrées dans votre navigateur."
+      },
+      {
+        "title": "Notifications",
+        "content": "Choisissez les alertes que vous souhaitez recevoir - notifications par e-mail, de pipeline et de serveur - pour que l'application ne remonte que ce qui compte pour vous."
+      },
+      {
+        "title": "Sécurité",
+        "content": "Changez votre mot de passe et activez l'authentification à deux facteurs (TOTP) pour une couche de protection supplémentaire sur votre compte."
+      }
+    ]
+  }
+]

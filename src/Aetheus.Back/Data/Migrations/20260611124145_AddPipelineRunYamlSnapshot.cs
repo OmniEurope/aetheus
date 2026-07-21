@@ -1,0 +1,27 @@
+using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Aetheus.Back.Data.Migrations;
+
+/// <inheritdoc />
+public partial class AddPipelineRunYamlSnapshot : Migration
+{
+    /// <inheritdoc />
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.AddColumn<string>(
+            name: "YamlSnapshot",
+            table: "PipelineRuns",
+            type: "text",
+            nullable: true);
+    }
+
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "YamlSnapshot",
+            table: "PipelineRuns");
+    }
+}

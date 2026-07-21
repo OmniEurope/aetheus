@@ -1,0 +1,91 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git-repositories"
+
+<PageTitle>@L["GitRepositories"] - Aetheus</PageTitle>
+
+<div class="pipeline-list-toolbar">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+        <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["GitRepositories"]</RadzenText>
+        <HelpLink PageKey="git-repositories" />
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+        <div class="pipeline-list-spacer"></div>
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small"
+            Click="@LoadData" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        <RadzenButton Icon="add" Text="@L["NewRepository"]"
+            Click="@ShowCreateDialog" Disabled="@(!_projectFilter.HasValue || !_canWrite)"
+            title="@(!_canWrite ? L["InsufficientPermissions"] : "")" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap"
+        class="rz-mt-2">
+        <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+        <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search" Change="@ResetAndReloadAsync"
+            class="pipeline-list-search" />
+        <RadzenDropDown TValue="int?" Data="@_projects" TextProperty="Name" ValueProperty="Id"
+            Placeholder="@L["SelectProject"]" AllowClear="true" @bind-Value="_projectFilter" Change="@OnProjectFilterChanged" />
+        @if (_projectFilter.HasValue)
+        {
+            <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small"
+                Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+    </RadzenStack>
+</div>
+
+@if (_loading && _repos.Count == 0)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+}
+else
+{
+    @* B-bis: no blue placeholder banner - render the grid with a contextual empty state instead. *@
+    <AetheusDataGrid @ref="_grid" TItem="GitLightRepoDto" Data="@_repos"
+        Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync" PageSize="25"
+        EmptyText="@L["NoRepositoriesFound"]" class="pipeline-list-grid" FullHeight="true"
+        RowClick="@(r => Nav.NavigateTo($"git-repositories/{r.Id}?projectId={r.ProjectId}"))">
+        <EmptyTemplate>
+            <EmptyState Icon="commit" Title="@L["NoRepositoriesFound"]" />
+        </EmptyTemplate>
+        <Columns>
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Property="Name" Title="@L["Name"]" Width="auto">
+                <Template Context="r">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                        <RadzenIcon Icon="commit" class="rz-color-secondary" />
+                        <a href="@($"git-repositories/{r.Id}?projectId={r.ProjectId}")" class="pipeline-name-link" @onclick:stopPropagation="true">@r.Name</a>
+                    </RadzenStack>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Property="ProjectName" Title="@L["Project"]" Width="180px">
+                <Template Context="r">
+                    <a href="@($"projects/{r.ProjectId}")" class="pipeline-name-link" @onclick:stopPropagation="true">@r.ProjectName</a>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Property="Description" Title="@L["Description"]" Width="auto" />
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Property="DefaultBranch" Title="@L["DefaultBranch"]" Width="130px">
+                <Template Context="r">
+                    <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@r.DefaultBranch" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Title="@L["Status"]" Width="100px" Sortable="false">
+                <Template Context="r">
+                    @if (r.IsEmpty)
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@L["Empty"]" />
+                    }
+                    else
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L["Active"]" />
+                    }
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" />
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Property="LastPushAt" Title="@L["LastPush"]" FormatString="{0:g}" Width="160px" />
+            <RadzenDataGridColumn TItem="GitLightRepoDto" Title="@L["Actions"]" MinWidth="14rem" Sortable="false" TextAlign="TextAlign.Right">
+                <Template Context="r">
+                    <span @onclick:stopPropagation="true">
+                        <RadzenButton Text="@L["View"]" Icon="visibility" Click="@(() => Nav.NavigateTo($"git-repositories/{r.Id}?projectId={r.ProjectId}"))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@(() => DeleteRepo(r))" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                    </span>
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+}

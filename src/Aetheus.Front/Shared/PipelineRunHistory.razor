@@ -1,0 +1,19 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Shared
+
+@if (DisplayRuns.Count > 0)
+{
+    <div class="pipeline-run-history" aria-label="@L["RecentRunsColumn"]">
+        @foreach (var run in DisplayRuns)
+        {
+            var title = RunTitle(run);
+            <a href="@RunHref(run.Id)"
+               class="pipeline-run-dot pipeline-run-dot-@run.Status.ToString().ToLowerInvariant()"
+               title="@title" aria-label="@title" @onclick:stopPropagation="true"></a>
+        }
+    </div>
+}
+else
+{
+    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["NoRuns"]</RadzenText>
+}

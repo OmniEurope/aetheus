@@ -1,0 +1,161 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/settings"
+@page "/settings/{Tab}"
+
+<PageTitle>@L["Settings"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@L["Settings"]" Icon="settings" />
+
+<RadzenTabs SelectedIndex="@_selectedTabIndex" Change="@OnTabChange">
+    <Tabs>
+        <RadzenTabsItem Text="@L["Profile"]">
+            <RadzenCard class="rz-mt-2">
+                <RadzenStack Gap="1rem" class="settings-form">
+                    <RadzenFormField Text="@L["DisplayName"]">
+                        <RadzenTextBox @bind-Value="_displayName" class="rz-w-100" />
+                    </RadzenFormField>
+                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveProfile"
+                        class="btn-fit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenTabsItem>
+
+        <RadzenTabsItem Text="@L["Appearance"]">
+            <RadzenCard class="rz-mt-2">
+                <RadzenStack Gap="1rem" class="settings-form">
+                    <RadzenFormField Text="@L["Theme"]">
+                        <RadzenDropDown @bind-Value="_theme" Data="@_themes"
+                            TextProperty="Label" ValueProperty="Value" class="rz-w-100" />
+                    </RadzenFormField>
+                    <RadzenFormField Text="@L["Language"]">
+                        <RadzenDropDown @bind-Value="_language" Data="@_languages"
+                            TextProperty="Label" ValueProperty="Value" class="rz-w-100" />
+                    </RadzenFormField>
+                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveAppearance"
+                        class="btn-fit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenTabsItem>
+
+        <RadzenTabsItem Text="@L["NotificationPreferences"]">
+            <RadzenCard class="rz-mt-2">
+                <RadzenStack Gap="0.75rem" class="settings-form">
+                    <LabeledToggle Kind="ToggleKind.Switch" TextFirst="true" Class="labeled-toggle-spread"
+                        @bind-Value="_emailNotifications" Text="@L["EmailNotifications"]" />
+                    <LabeledToggle Kind="ToggleKind.Switch" TextFirst="true" Class="labeled-toggle-spread"
+                        @bind-Value="_pipelineAlerts" Text="@L["PipelineAlerts"]" />
+                    <LabeledToggle Kind="ToggleKind.Switch" TextFirst="true" Class="labeled-toggle-spread"
+                        @bind-Value="_serverAlerts" Text="@L["ServerAlerts"]" />
+                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveNotificationPreferences"
+                        class="btn-fit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenTabsItem>
+
+        <RadzenTabsItem Text="@L["Security"]">
+            <RadzenCard class="rz-mt-2">
+                <RadzenStack Gap="1rem" class="settings-form">
+                    <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["TwoFactorAuth"]</RadzenText>
+
+                    @if (_totpEnabled)
+                    {
+                        <RadzenAlert AlertStyle="AlertStyle.Success" Shade="Shade.Lighter" AllowClose="false">
+                            <RadzenIcon Icon="verified_user" /> @L["TotpEnabled"]
+                        </RadzenAlert>
+                        <RadzenStack Gap="0.5rem">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["TotpDisableHint"]</RadzenText>
+                            <RadzenFormField Text="@L["Password"]">
+                                <RadzenPassword @bind-Value="_disablePassword" class="rz-w-100" />
+                            </RadzenFormField>
+                            <RadzenButton Text="@L["Disable2FA"]" Icon="lock_open" Click="@DisableTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        </RadzenStack>
+                    }
+                    else if (_totpSetup is not null)
+                    {
+                        <RadzenAlert AlertStyle="AlertStyle.Info" Shade="Shade.Lighter" AllowClose="false">
+                            @L["TotpScanQR"]
+                        </RadzenAlert>
+                        <RadzenStack Gap="0.5rem" AlignItems="AlignItems.Start">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["TotpManualKey"]: <span class="rz-text-monospace">@_totpSetup.SharedKey</span></RadzenText>
+                            <RadzenFormField Text="@L["TotpVerifyCode"]">
+                                <RadzenTextBox @bind-Value="_verifyCode" MaxLength="6" class="rz-w-100" />
+                            </RadzenFormField>
+                            <RadzenButton Text="@L["Verify"]" Icon="check" Click="@VerifyTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                        </RadzenStack>
+                        @if (_totpSetup.RecoveryCodes.Count > 0)
+                        {
+                            <RadzenAlert AlertStyle="AlertStyle.Warning" Shade="Shade.Lighter" AllowClose="false">
+                                @L["TotpSaveRecoveryCodes"]
+                            </RadzenAlert>
+                            <RadzenStack Gap="0.25rem" class="recovery-codes">
+                                @foreach (var rc in _totpSetup.RecoveryCodes)
+                                {
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-text-monospace">@rc</RadzenText>
+                                }
+                            </RadzenStack>
+                        }
+                    }
+                    else
+                    {
+                        <RadzenAlert AlertStyle="AlertStyle.Warning" Shade="Shade.Lighter" AllowClose="false">
+                            @L["TotpNotEnabled"]
+                        </RadzenAlert>
+                        <RadzenButton Text="@L["Enable2FA"]" Icon="security" Click="@SetupTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    }
+                </RadzenStack>
+            </RadzenCard>
+
+            <RadzenCard class="rz-mt-2">
+                <RadzenTemplateForm TItem="PasswordChangeModel" Data="@_pwModel" Submit="@ChangePassword">
+                    <LocalizedDataAnnotationsValidator />
+                    <RadzenStack Gap="1rem" class="settings-form">
+                        <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["ChangePassword"]</RadzenText>
+                        <RadzenFormField Text="@L["CurrentPassword"]">
+                            <RadzenPassword @bind-Value="_pwModel.CurrentPassword" Name="CurrentPassword" class="rz-w-100" />
+                            <ValidationMessage For="@(() => _pwModel.CurrentPassword)" />
+                        </RadzenFormField>
+                        <RadzenFormField Text="@L["NewPassword"]">
+                            <RadzenPassword @bind-Value="_pwModel.NewPassword" Name="NewPassword" class="rz-w-100" />
+                            <ValidationMessage For="@(() => _pwModel.NewPassword)" />
+                        </RadzenFormField>
+                        <RadzenFormField Text="@L["ConfirmPassword"]">
+                            <RadzenPassword @bind-Value="_pwModel.ConfirmPassword" Name="ConfirmPassword" class="rz-w-100" />
+                            <ValidationMessage For="@(() => _pwModel.ConfirmPassword)" />
+                        </RadzenFormField>
+                        <RadzenButton ButtonType="ButtonType.Submit" Text="@L["ChangePassword"]" Icon="lock_reset"
+                            class="btn-fit" IsBusy="@_pwBusy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    </RadzenStack>
+                </RadzenTemplateForm>
+            </RadzenCard>
+        </RadzenTabsItem>
+
+        <RadzenTabsItem Text="@L["PersonalAccessTokens"]">
+            @if (_selectedTabIndex == 4)
+            {
+                <RadzenCard class="rz-mt-2">
+                    <PersonalAccessTokens />
+                </RadzenCard>
+            }
+        </RadzenTabsItem>
+
+        <RadzenTabsItem Text="@L["About"]">
+            <RadzenCard class="rz-mt-2">
+                <RadzenStack Gap="0.75rem" class="settings-form">
+                    <RadzenText TextStyle="TextStyle.H5" class="rz-m-0 rz-mb-2">@L["AboutAetheus"]</RadzenText>
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" Wrap="FlexWrap.Wrap">
+                        <RadzenText TextStyle="TextStyle.Body2" class="about-label">@L["Version"]</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2">v@_version</RadzenText>
+                    </RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" Wrap="FlexWrap.Wrap">
+                        <RadzenText TextStyle="TextStyle.Body2" class="about-label">@L["Username"]</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2">@_displayName</RadzenText>
+                    </RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" Wrap="FlexWrap.Wrap">
+                        <RadzenText TextStyle="TextStyle.Body2" class="about-label">@L["Role"]</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2">@_userRole</RadzenText>
+                    </RadzenStack>
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenTabsItem>
+    </Tabs>
+</RadzenTabs>

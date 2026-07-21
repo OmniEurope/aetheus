@@ -1,0 +1,173 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/artifacts/{ArtifactId:int}"
+@using Aetheus.Shared.Enums
+
+<PageTitle>@(_artifact?.Name ?? L["Artifact"]) - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+}
+else if (_artifact is null)
+{
+    <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["ArtifactNotFound"]</RadzenText>
+}
+else
+{
+    <Aetheus.Front.Shared.PageHeader Title="@_artifact.Name" Icon="inventory_2"
+        BackHref="@(_artifact.ProjectId.HasValue ? $"/projects/{_artifact.ProjectId}/artifacts" : $"/pipelines/runs/{_artifact.PipelineRunId}")">
+        <ChildContent>
+            @if (_artifact.ProjectId.HasValue)
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@(_artifact.ProjectName ?? L["Project"])" />
+            }
+            <RadzenBadge BadgeStyle="@GetRetentionBadge(_artifact.RetentionPolicy)" Text="@L.Localize(_artifact.RetentionPolicy)" />
+        </ChildContent>
+        <Actions>
+            <RadzenButton Text="@L["Download"]" Icon="download" Size="ButtonSize.Small"
+                Click="DownloadAsync" IsBusy="_downloading" BusyText="@L["Download"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        </Actions>
+    </Aetheus.Front.Shared.PageHeader>
+
+    @* Key facts *@
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" Wrap="FlexWrap.Wrap" class="rz-mt-4">
+        <RadzenCard class="run-overview-card">
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="sd_storage" class="run-tile-icon" /> @L["Size"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body1">@FormatSize(_artifact.SizeBytes)</RadzenText>
+        </RadzenCard>
+        <RadzenCard class="run-overview-card">
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="schedule" class="run-tile-icon" /> @L["CreatedAt"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body1">@_artifact.CreatedAt.ToString("g")</RadzenText>
+        </RadzenCard>
+        <RadzenCard class="run-overview-card">
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="auto_delete" class="run-tile-icon" /> @L["Retention"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body1" title="@_artifact.RetentionExpiresAt.ToString("F")">@Aetheus.Front.Helpers.RelativeTime.FormatUntil(L, _artifact.RetentionExpiresAt)</RadzenText>
+        </RadzenCard>
+    </RadzenStack>
+
+    @* Provenance (where it comes from) vs Distribution (where it goes) *@
+    <RadzenRow Gap="1rem" class="rz-mt-4">
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenCard>
+                <div class="detail-panel-title">
+                    <RadzenIcon Icon="account_tree" class="run-tile-icon rz-color-primary" />
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Provenance"]</RadzenText>
+                </div>
+                @if (!string.IsNullOrEmpty(_artifact.PipelineName))
+                {
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="account_tree" class="run-tile-icon" /> @L["Pipeline"]</RadzenText>
+                        <a href="/pipelines/@_artifact.PipelineId" class="detail-value-link">@_artifact.PipelineName</a>
+                    </RadzenStack>
+                }
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="play_arrow" class="run-tile-icon" /> @L["PipelineRun"]</RadzenText>
+                    <a href="/pipelines/runs/@_artifact.PipelineRunId" class="detail-value-link">#@_artifact.PipelineRunId</a>
+                </RadzenStack>
+                @if (_artifact.Branches.Count > 0)
+                {
+                    @foreach (var branch in _artifact.Branches)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="call_split" class="run-tile-icon" /> @L["Branch"]</RadzenText>
+                            <a href="/git/branches/@branch.Id" class="detail-value-link">@branch.Name</a>
+                        </RadzenStack>
+                    }
+                }
+                else if (!string.IsNullOrEmpty(_artifact.BranchName))
+                {
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="call_split" class="run-tile-icon" /> @L["Branch"]</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2">@_artifact.BranchName</RadzenText>
+                    </RadzenStack>
+                }
+                @if (_artifact.Commits.Count > 0)
+                {
+                    @foreach (var commit in _artifact.Commits)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
+                            <a href="/git/commits/@commit.Id" class="detail-value-link text-mono" title="@commit.Sha">@ShortSha(commit.Sha)</a>
+                        </RadzenStack>
+                    }
+                }
+                else if (!string.IsNullOrEmpty(_artifact.CommitHash))
+                {
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2" class="text-mono" title="@_artifact.CommitHash">@ShortSha(_artifact.CommitHash)</RadzenText>
+                    </RadzenStack>
+                }
+            </RadzenCard>
+        </RadzenColumn>
+
+        @if (HasDistribution)
+        {
+            <RadzenColumn Size="12" SizeMD="6">
+                <RadzenCard>
+                    <div class="detail-panel-title">
+                        <RadzenIcon Icon="rocket_launch" class="run-tile-icon rz-color-success" />
+                        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Distribution"]</RadzenText>
+                    </div>
+                    @foreach (var release in _artifact.Releases)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="new_releases" class="run-tile-icon" /> @L["Release"]</RadzenText>
+                            <a href="/releases/@release.Id" class="detail-value-link">
+                                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                                    <span>@release.Version</span>
+                                    <RadzenBadge BadgeStyle="@ReleaseHelper.GetReleaseBadge(release.Status)" Text="@L[release.Status.ToString()]" />
+                                </RadzenStack>
+                            </a>
+                        </RadzenStack>
+                    }
+                    @if (!string.IsNullOrEmpty(_artifact.EnvironmentName))
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="cloud" class="run-tile-icon rz-color-warning" /> @L["Environment"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Body2">@_artifact.EnvironmentName</RadzenText>
+                        </RadzenStack>
+                    }
+                    @if (_artifact.ProjectId.HasValue)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="folder" class="run-tile-icon" /> @L["Project"]</RadzenText>
+                            <a href="/projects/@_artifact.ProjectId" class="detail-value-link">@(_artifact.ProjectName ?? L["Project"])</a>
+                        </RadzenStack>
+                    }
+                </RadzenCard>
+            </RadzenColumn>
+        }
+    </RadzenRow>
+
+    @* File details *@
+    <RadzenCard class="rz-mt-4 rz-p-4">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
+            <RadzenIcon Icon="description" class="run-tile-icon" />
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Details"]</RadzenText>
+        </RadzenStack>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Gap="0.5rem" class="detail-filepath-box">
+            <RadzenText TextStyle="TextStyle.Body2" class="text-mono">@_artifact.FilePath</RadzenText>
+            <RadzenButton Icon="content_copy" Size="ButtonSize.Small"
+                Click="CopyPathAsync" title="@L["Copy"]" aria-label="@L["Copy"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Gap="0.5rem" class="detail-filepath-box rz-mt-2">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenIcon Icon="tag" class="run-tile-icon rz-color-secondary" />
+                @if (!string.IsNullOrEmpty(_artifact.Sha256))
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" class="text-mono" title="@L["Checksum"]">@_artifact.Sha256</RadzenText>
+                }
+                else
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["ChecksumUnavailable"]</RadzenText>
+                }
+            </RadzenStack>
+            @if (!string.IsNullOrEmpty(_artifact.Sha256))
+            {
+                <RadzenButton Icon="content_copy" Size="ButtonSize.Small"
+                    Click="CopyChecksumAsync" title="@L["Copy"]" aria-label="@L["Copy"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            }
+        </RadzenStack>
+    </RadzenCard>
+}

@@ -1,0 +1,51 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+
+<RadzenTemplateForm TItem="TemplateFormModel" Data="@_model" Submit="@((TemplateFormModel _) => OnSubmit())">
+    <LocalizedDataAnnotationsValidator />
+
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="@L["Name"]">
+            <RadzenTextBox @bind-Value="_model.Name" Disabled="@IsEdit"
+                           @oninput="@(e => _model.Name = e.Value?.ToString() ?? string.Empty)" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _model.Name)" />
+
+        <RadzenFormField Text="@L["Category"]">
+            <RadzenTextBox @bind-Value="_model.Category"
+                           @oninput="@(e => _model.Category = e.Value?.ToString() ?? string.Empty)" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _model.Category)" />
+
+        <RadzenFormField Text="@L["Description"]">
+            <RadzenTextArea @bind-Value="_model.Description" Rows="2"
+                            @oninput="@(e => _model.Description = e.Value?.ToString() ?? string.Empty)" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["YAML"]">
+            <RadzenTextArea @bind-Value="_model.YamlContent" Rows="10" class="text-mono"
+                            @oninput="@(e => _model.YamlContent = e.Value?.ToString() ?? string.Empty)" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _model.YamlContent)" />
+
+        <RadzenFormField Text="@L["ChangelogEntry"]">
+            <RadzenTextBox @bind-Value="_model.ChangelogEntry" Placeholder="@L["DescribeChanges"]"
+                           @oninput="@(e => _model.ChangelogEntry = e.Value?.ToString() ?? string.Empty)" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _model.ChangelogEntry)" />
+
+        @if (IsEdit)
+        {
+            @if (!string.IsNullOrWhiteSpace(Template?.Changelog))
+            {
+                <RadzenFieldset Text="@L["Changelog"]" AllowCollapse="true" Collapsed="true">
+                    <pre class="text-block-pre">@Template.Changelog</pre>
+                </RadzenFieldset>
+            }
+        }
+
+        <DialogFooter OnCancel="@OnCancel">
+            <RadzenButton Text="@L["Save"]" Icon="save" ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </DialogFooter>
+    </RadzenStack>
+</RadzenTemplateForm>

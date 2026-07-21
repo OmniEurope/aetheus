@@ -1,0 +1,87 @@
+# =============================================================================
+# vpssim.compose.yml - Aetheus disposable local "VPS simulator"
+# =============================================================================
+# Boots a replaceable Ubuntu box (systemd PID 1 + Docker daemon + sshd) so the
+# agent's collectors and the real install script can be tested locally instead
+# of on the production VPS. Container replacement preserves the nested Docker
+# stores and the agent state, matching a VPS reboot without regenerating secrets.
+#
+# STAGE 1: de-risk systemd + dockerd + sshd boot under Docker Desktop (cgroup v2).
+# Requires `privileged` for both systemd cgroup management and the nested Docker
+# daemon (DinD). LOCAL TEST ONLY - never deployed.
+#
+#   docker compose -f deploy/compose/vpssim.compose.yml up -d --build
+#   docker exec -it aetheus-vpssim systemctl status
+#   docker compose -f deploy/compose/vpssim.compose.yml down
+# =============================================================================
+services:
+
+  vpssim:
+    container_name: ${APPNAME:-aetheus}-vpssim
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.vpssim
+      args:
+        # -net10: pre-bake the .NET SDK 10.0 into the image (1) or keep it absent (0, default).
+        INSTALL_DOTNET: ${VPSSIM_DOTNET:-0}
+        # VPW3: throwaway root password - overridable via env, defaults to 'aetheus'.
+        VPSSIM_ROOT_PASSWORD: ${VPSSIM_ROOT_PASSWORD:-aetheus}
+    # systemd needs to manage cgroups; DinD needs device access.
+    privileged: true
+    cgroup: host
+    # Reach the host-side backend (started by ylaunch) for agent enrollment.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "aetheus.localhost:127.0.0.1"
+      - "app.aetheus.localhost:127.0.0.1"
+      - "api.aetheus.localhost:127.0.0.1"
+    # Optional agent auto-install. VPSSIM_AGENT=1 → the box mints a token from the
+    # backend API at boot and self-installs the agent (appears in the dashboard).
+    # Default 0 → blank VPS, no agent. Auto-install requires either AGENT_TOKEN
+    # or an explicitly supplied VPSSIM_ADMIN_PASSWORD; no password is embedded here.
+    environment:
+      - AGENT_AUTOINSTALL=${VPSSIM_AGENT:-0}
+      - BACKEND_URL=${VPSSIM_BACKEND_URL:-https://host.docker.internal:5301}
+      - ADMIN_USER=${VPSSIM_ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${VPSSIM_ADMIN_PASSWORD:-}
+      - AGENT_NAME=${VPSSIM_AGENT_NAME:-vpssim}
+    # systemd expects writable tmpfs for runtime state.
+    tmpfs:
+      - /run
+      - /run/lock
+    volumes:
+      # systemd cgroup hierarchy.
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # Dedicated volumes for the nested daemon's stores. These sit on the Docker
+      # Desktop VM's ext4 (not the container's overlay rootfs), so the nested
+      # overlayfs snapshotter can mount - fixes "overlay ... invalid argument".
+      # Docker 29 routes image layers through containerd, hence both paths.
+      - vpssim-docker:/var/lib/docker
+      - vpssim-containerd:/var/lib/containerd
+      # The deployment state and generated secrets must survive replacement of the outer
+      # simulator container just as they survive a real VPS reboot. Without this volume,
+      # PostgreSQL keeps its old password in the nested Docker volume while the agent creates
+      # a new .env file, making the next migration fail with 28P01.
+      - vpssim-agent-state:/var/lib/aetheus-agent
+      # A real VPS keeps its host-level proxy, certificates and static site across reboots. Preserve
+      # the same state when Docker Compose replaces the outer simulator after an image rebuild.
+      - vpssim-apache:/etc/apache2
+      - vpssim-letsencrypt:/etc/letsencrypt
+      - vpssim-www:/var/www
+    ports:
+      # Bind to loopback only: the box has root:password SSH (Dockerfile.vpssim), so publishing it
+      # on 0.0.0.0 would expose a root-password SSH endpoint to the LAN. Local test access only.
+      - "127.0.0.1:${VPSSIM_SSH_PORT:-2222}:22"
+      - "127.0.0.1:${VPSSIM_HTTP_PORT:-10080}:80"
+      - "127.0.0.1:${VPSSIM_HTTPS_PORT:-10443}:443"
+    # systemd's graceful-shutdown signal.
+    stop_signal: SIGRTMIN+3
+    stop_grace_period: 10s
+
+volumes:
+  vpssim-docker:
+  vpssim-containerd:
+  vpssim-agent-state:
+  vpssim-apache:
+  vpssim-letsencrypt:
+  vpssim-www:

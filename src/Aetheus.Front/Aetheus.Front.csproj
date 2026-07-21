@@ -1,0 +1,105 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <!-- EN + FR are within the EFIGS ICU shard, but Firefox's WASM runtime rejects
+         dynamic CultureInfo changes at startup unless full globalization data is loaded.
+         The extra download (~200 KB gzipped) is the only reliable cross-browser fix.
+         S-TECH-69 investigated <HybridGlobalization> (uses the browser Intl API instead of
+         ICU, ~200 KB lighter): rejected. It is mutually exclusive with LoadAllGlobalizationData,
+         and some CompareInfo/culture-sensitive operations throw PlatformNotSupportedException
+         under it — adopting it needs a real Firefox/Chrome/Safari smoke test of culture switching
+         and sorting that this environment can't run. Revisit only with that smoke test in hand. -->
+    <BlazorWebAssemblyLoadAllGlobalizationData>true</BlazorWebAssemblyLoadAllGlobalizationData>
+    <!-- IL trimming is THE bundle-size lever. It is already the SDK default for
+         a Release WASM publish (prod runs trimmed today, so Radzen/serialization
+         are trim-safe at the default mode) — stated explicitly for intent.
+         TrimMode is left at the SDK default on purpose: do NOT switch to 'full'
+         without a real browser smoke test. AOT is intentionally NOT enabled —
+         it speeds CPU but ENLARGES the download, which is counterproductive for
+         a first-paint/size bottleneck already covered by trimming + Brotli +
+         the ICU fix. Revisit AOT only with the wasm-tools workload + smoke test. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <!-- PRM001 (TimeProvider) is a false positive in WASM: the client runs in the browser
+         where DateTime.Now IS the correct local clock — there is no DI-injectable system
+         clock to inject. Frontend elapsed-time math therefore uses DateTime.Now. -->
+    <NoWarn>$(NoWarn);PRM001</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="PinBrowserRuntimePacks" BeforeTargets="ProcessFrameworkReferences">
+    <ItemGroup>
+      <!-- Workload manifests are machine-global and may drift ahead of global.json. Pin only the
+           browser packs to the production runtime patch; the SDK-bundled linker must keep using
+           its own runtime-compatible version. -->
+      <KnownWebAssemblySdkPack Update="Microsoft.NET.Sdk.WebAssembly.Pack"
+                               WebAssemblySdkPackVersion="$(AetheusRuntimeImageVersion)" />
+      <KnownAspNetCorePack Update="Microsoft.AspNetCore.App.Internal.Assets"
+                           AspNetCorePackVersion="$(AetheusRuntimeImageVersion)" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aetheus.Front.Tests" />
+  </ItemGroup>
+
+  <!-- S-TECH-18: Feed .razor files to PRM002 (NoInlineCodeBlock) via AdditionalFiles -->
+  <ItemGroup>
+    <ProjectReference Include="..\Aetheus.Analyzers\Aetheus.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <AdditionalFiles Include="**\*.razor" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.WebUtilities" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <PackageReference Include="Microsoft.Extensions.Localization" />
+    <PackageReference Include="Radzen.Blazor" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aetheus.Shared\Aetheus.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Firefox does not support the "integrity" key inside importmaps (Chrome 127+/Safari 18.2+ only).
+       Strip it from every generated HTML so the WASM app loads on all browsers.
+       Fingerprinted URLs still provide cache-busting; SRI on individual <script> tags is unaffected.
+       Uses an inline C# task so it works on Linux Docker builds (no pwsh dependency). -->
+  <UsingTask TaskName="StripImportMapIntegrityTask" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+foreach (var item in Files)
+{
+    var path = item.ItemSpec;
+    if (!File.Exists(path)) continue;
+    var content = File.ReadAllText(path);
+    if (!content.Contains("\"integrity\"")) continue;
+    content = Regex.Replace(content, @",\s*""integrity""\s*:\s*\{[^}]*\}", "");
+    content = Regex.Replace(content, @"""integrity""\s*:\s*\{[^}]*\}\s*,?", "");
+    File.WriteAllText(path, content);
+    Log.LogMessage(MessageImportance.Normal, "Stripped importmap integrity from " + path);
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+  <Target Name="StripImportMapIntegrity" AfterTargets="ResolveHtmlAssetPlaceholdersBuildStaticWebAssets;ResolveHtmlAssetPlaceholdersPublishStaticWebAssets">
+    <ItemGroup>
+      <_GeneratedHtml Include="$(IntermediateOutputPath)staticwebassets\htmlassetplaceholders\**\*.html" />
+    </ItemGroup>
+    <StripImportMapIntegrityTask Condition="'@(_GeneratedHtml)' != ''" Files="@(_GeneratedHtml)" />
+  </Target>
+
+</Project>

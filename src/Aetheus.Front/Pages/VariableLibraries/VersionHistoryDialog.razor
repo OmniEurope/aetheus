@@ -1,0 +1,27 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_loadFailed)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" class="rz-mb-2">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenText>@L["LoadFailed"]</RadzenText>
+            <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@RetryAsync"
+                Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    </RadzenAlert>
+}
+<RadzenDataGrid @ref="_grid" Data="@_versions" Count="@_totalCount" TItem="VariableEntryVersionDto"
+    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="true" PageSize="25"
+    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+    <Columns>
+        <RadzenDataGridColumn Property="Version" Title="#" Width="60px" />
+        <RadzenDataGridColumn Property="Key" Title="@L["Key"]" />
+        <RadzenDataGridColumn Property="Value" Title="@L["Value"]" />
+        <RadzenDataGridColumn Property="ChangeType" Title="@L["Type"]" Width="100px">
+            <Template Context="v">
+                <RadzenBadge BadgeStyle="@GetBadge(v.ChangeType)" Text="@L.Localize(v.ChangeType)" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="ChangedAt" Title="@L["Date"]" FormatString="{0:g}" Width="160px" />
+    </Columns>
+</RadzenDataGrid>
+<DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

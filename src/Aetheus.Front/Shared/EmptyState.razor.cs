@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Microsoft.AspNetCore.Components;
+
+namespace Aetheus.Front.Shared;
+
+public partial class EmptyState
+{
+    [Parameter] public string? Icon { get; set; } = "inbox";
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public RenderFragment? ActionContent { get; set; }
+}

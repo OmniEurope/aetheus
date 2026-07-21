@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Data;
+using Microsoft.Extensions.Configuration;
+
+namespace Aetheus.Back.Tests.DataSeed;
+
+public sealed class DesignTimeDbContextFactoryTests
+{
+    [Fact]
+    public void ResolveConnectionString_ConfiguredDefault_ReturnsValue()
+    {
+        var configuration = BuildConfiguration(("ConnectionStrings:Default", "Host=db;Database=aetheus"));
+
+        Assert.Equal("Host=db;Database=aetheus", DesignTimeDbContextFactory.ResolveConnectionString(configuration));
+    }
+
+    [Fact]
+    public void ResolveConnectionString_EnvironmentStyleKey_ReturnsValue()
+    {
+        var configuration = BuildConfiguration(("AETHEUS_DESIGN_CONNECTION", "Host=design;Database=aetheus"));
+
+        Assert.Equal("Host=design;Database=aetheus", DesignTimeDbContextFactory.ResolveConnectionString(configuration));
+    }
+
+    [Fact]
+    public void ResolveConnectionString_MissingConfiguration_FailsWithoutCredentialFallback()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            DesignTimeDbContextFactory.ResolveConnectionString(BuildConfiguration()));
+
+        Assert.Contains("AETHEUS_DESIGN_CONNECTION", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Password=", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(values.ToDictionary(pair => pair.Key, pair => (string?)pair.Value))
+            .Build();
+}

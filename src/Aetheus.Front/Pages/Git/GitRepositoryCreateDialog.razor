@@ -1,0 +1,24 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+
+<RadzenTemplateForm TItem="CreateGitLightRepoRequest" Data="@_request" Submit="@Submit">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="@L["Name"]" Variant="Variant.Filled">
+            <RadzenTextBox @bind-Value="_request.Name" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _request.Name)" />
+
+        <RadzenFormField Text="@L["Description"]" Variant="Variant.Filled">
+            <RadzenTextArea @bind-Value="_request.Description" Rows="3" />
+        </RadzenFormField>
+
+        <RadzenFormField Text="@L["DefaultBranch"]" Variant="Variant.Filled">
+            <RadzenTextBox @bind-Value="_request.DefaultBranch" Placeholder="main" />
+        </RadzenFormField>
+
+        <DialogFooter OnCancel="@Cancel">
+            <RadzenButton Text="@L["Create"]" Icon="add" ButtonType="ButtonType.Submit" IsBusy="@_submitting" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </DialogFooter>
+    </RadzenStack>
+</RadzenTemplateForm>

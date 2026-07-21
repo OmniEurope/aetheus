@@ -1,0 +1,360 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Project is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <UrlSyncedTabs Slugs="@TabSlugs">
+        <Tabs>
+            <RadzenTabsItem Text="@L["Overview"]" Icon="dashboard">
+                @* Two balanced cards: "Information" (description, status, dates, tags) on the left,
+                   "Repository" (git source, branch, last git activity) on the right. *@
+                <RadzenRow Gap="1rem">
+                    <RadzenColumn SizeMD="6" Size="12">
+                        <RadzenCard class="overview-info-card">
+                            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-3">@L["Information"]</RadzenText>
+                            <div class="essentials-grid essentials-grid--stacked">
+                                @if (!string.IsNullOrWhiteSpace(Project.Description))
+                                {
+                                    <div class="essential-item">
+                                        <RadzenIcon Icon="notes" class="essential-icon" />
+                                        <div class="essential-text">
+                                            <span class="essential-label">@L["Description"]</span>
+                                            <span class="essential-value">@Project.Description</span>
+                                        </div>
+                                    </div>
+                                }
+                                <div class="essential-item">
+                                    <RadzenIcon Icon="sensors" class="essential-icon" />
+                                    <div class="essential-text">
+                                        <span class="essential-label">@L["Status"]</span>
+                                        <span class="essential-value">
+                                            <RadzenBadge BadgeStyle="@(Project.Status == ProjectStatus.Active ? BadgeStyle.Success : BadgeStyle.Light)"
+                                                Text="@L[Project.Status.ToString()]" />
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="essential-item">
+                                    <RadzenIcon Icon="event" class="essential-icon" />
+                                    <div class="essential-text">
+                                        <span class="essential-label">@L["Created"]</span>
+                                        <span class="essential-value">@Project.CreatedAt.ToString("g")</span>
+                                    </div>
+                                </div>
+                                <div class="essential-item">
+                                    <RadzenIcon Icon="update" class="essential-icon" />
+                                    <div class="essential-text">
+                                        <span class="essential-label">@L["Updated"]</span>
+                                        <span class="essential-value">@Project.UpdatedAt.ToString("g")</span>
+                                    </div>
+                                </div>
+                                @if (Project.Tags.Count > 0)
+                                {
+                                    <div class="essential-item">
+                                        <RadzenIcon Icon="sell" class="essential-icon" />
+                                        <div class="essential-text">
+                                            <span class="essential-label">@L["Tags"]</span>
+                                            <span class="essential-value">
+                                                @foreach (var tag in Project.Tags)
+                                                {
+                                                    <RadzenBadge Text="@tag" BadgeStyle="BadgeStyle.Light" />
+                                                }
+                                            </span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </RadzenCard>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="6" Size="12">
+                        <RadzenCard class="overview-info-card">
+                            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-3">@L["Repository"]</RadzenText>
+                            @if (string.IsNullOrWhiteSpace(Project.RepositoryUrl))
+                            {
+                                <EmptyState Icon="commit" Description="@L["NoRepository"]" />
+                            }
+                            else
+                            {
+                                <div class="essentials-grid essentials-grid--stacked">
+                                    <div class="essential-item">
+                                        <RadzenIcon Icon="link" class="essential-icon" />
+                                        <div class="essential-text">
+                                            <span class="essential-label">@L["RepositoryUrl"]</span>
+                                            <span class="essential-value overview-break-anywhere">@Project.RepositoryUrl</span>
+                                        </div>
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(Project.DefaultBranch))
+                                    {
+                                        <div class="essential-item">
+                                            <RadzenIcon Icon="account_tree" class="essential-icon" />
+                                            <div class="essential-text">
+                                                <span class="essential-label">@L["DefaultBranch"]</span>
+                                                <span class="essential-value">@Project.DefaultBranch</span>
+                                            </div>
+                                        </div>
+                                    }
+                                    @if (Project.LastGitUpdateAt.HasValue)
+                                    {
+                                        <div class="essential-item">
+                                            <RadzenIcon Icon="history" class="essential-icon" />
+                                            <div class="essential-text">
+                                                <span class="essential-label">@L["LastGitUpdate"]</span>
+                                                <span class="essential-value"
+                                                    title="@Project.LastGitUpdateAt.Value.ToString("F")">@RelativeTime.FormatAgo(L, Project.LastGitUpdateAt.Value)</span>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </RadzenCard>
+                    </RadzenColumn>
+                </RadzenRow>
+
+                <RadzenText TextStyle="TextStyle.H6" class="rz-mt-6 rz-mb-2">@L["ProjectSections"]</RadzenText>
+                <RadzenRow Gap="1rem" class="rz-mb-4 equal-tile-row">
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/pipelines")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                        <RadzenIcon Icon="account_tree" />
+                                        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Pipelines"]</RadzenText>
+                                        @if (LatestRunStatus is { } status)
+                                        {
+                                            <span class="pipeline-run-dot pipeline-run-dot-@status.ToString().ToLowerInvariant()"
+                                                  title="@L.Localize(status)"></span>
+                                        }
+                                    </RadzenStack>
+                                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@Project.Pipelines.Count.ToString()" />
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/servers")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="dns" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Servers"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/releases")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="new_releases" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Releases"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/libraries")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="library_books" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Libraries"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/vaults")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="lock" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Vaults"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/tasks")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="task_alt" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Tasks"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/projects/{Project.Id}/logs")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="article" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Logs"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <a href="@($"/git-repositories?projectId={Project.Id}")" class="tile-link">
+                            <RadzenCard class="tile-clickable project-section-tile">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="commit" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["Git"]</RadzenText>
+                                </RadzenStack>
+                            </RadzenCard>
+                        </a>
+                    </RadzenColumn>
+                </RadzenRow>
+
+                @* F-bis: coverage + LOC of the run behind the most recent release (shown only when real data exists) *@
+                @if (_lastReleaseMetrics is { } metrics)
+                {
+                    <RadzenText TextStyle="TextStyle.H6" class="rz-mt-6 rz-mb-2">@L["LastReleaseMetrics"]</RadzenText>
+                    <RadzenCard class="rz-p-3">
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="2rem" Wrap="FlexWrap.Wrap">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                <RadzenBadge BadgeStyle="BadgeStyle.Light" Icon="new_releases" Text="@metrics.Version" />
+                                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0" title="@metrics.When.ToString("F")">@RelativeTime.FormatAgo(L, metrics.When)</RadzenText>
+                            </RadzenStack>
+                            @if (metrics.CoverageLineRate is { } cov)
+                            {
+                                <RadzenStack Gap="0.125rem">
+                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["Coverage"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.H6" class="@($"{CoverageColorClass(cov)} rz-m-0")">@($"{cov * 100:F1}%")</RadzenText>
+                                </RadzenStack>
+                            }
+                            @if (metrics.LinesOfCode is { } loc)
+                            {
+                                <RadzenStack Gap="0.125rem">
+                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["LinesOfCode"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@loc.ToString("N0")</RadzenText>
+                                </RadzenStack>
+                            }
+                        </RadzenStack>
+                    </RadzenCard>
+                }
+
+                <RadzenRow Gap="1rem" class="rz-mt-6 equal-tile-row project-overview-recent-row">
+                    <RadzenColumn SizeMD="6" Size="12">
+                        <RadzenCard class="project-overview-recent-card">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
+                                <RadzenIcon Icon="commit" />
+                                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["RecentCommits"]</RadzenText>
+                            </RadzenStack>
+                            @if (_loadingRecentCommits)
+                            {
+                                <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" aria-label="@L["Loading"]" />
+                            }
+                            <RadzenDataGrid Data="@_recentCommits" TItem="RecentCommitView" Density="Density.Compact"
+                                AllowPaging="false" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                                IsLoading="@_loadingRecentCommits" EmptyText="@L["NoRecentCommits"]"
+                                RowClick="@OnRecentCommitClick" class="aetheus-clickable-rows project-overview-recent-grid">
+                                <Columns>
+                                    <RadzenDataGridColumn TItem="RecentCommitView" Property="ShortSha" Title="@L["Commit"]" Width="6rem">
+                                        <Template Context="commit">
+                                            <a href="@CommitHref(commit)" title="@commit.RepositoryName" @onclick:stopPropagation="true">@commit.ShortSha</a>
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                    <RadzenDataGridColumn TItem="RecentCommitView" Property="BranchName" Title="@L["Branch"]" Width="5.5rem" />
+                                    <RadzenDataGridColumn TItem="RecentCommitView" Property="Message" Title="@L["Message"]" MinWidth="8rem" />
+                                    <RadzenDataGridColumn TItem="RecentCommitView" Property="AuthorDate" Title="@L["Date"]" Width="6.5rem">
+                                        <Template Context="commit">
+                                            <span title="@commit.AuthorDate.ToString("F")">@RelativeTime.FormatAgo(L, commit.AuthorDate)</span>
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                </Columns>
+                            </RadzenDataGrid>
+                        </RadzenCard>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="6" Size="12">
+                        <RadzenCard class="project-overview-recent-card">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
+                                <RadzenIcon Icon="history" />
+                                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["RecentPipelines"]</RadzenText>
+                            </RadzenStack>
+                            @if (_loadingRecentPipelines)
+                            {
+                                <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" aria-label="@L["Loading"]" />
+                            }
+                            <RadzenDataGrid Data="@_recentPipelineRuns" TItem="PipelineRunDto" Density="Density.Compact"
+                                AllowPaging="false" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                                IsLoading="@_loadingRecentPipelines" EmptyText="@L["NoRecentPipelines"]"
+                                RowClick="@OnRecentPipelineClick" class="aetheus-clickable-rows project-overview-recent-grid">
+                                <Columns>
+                                    <RadzenDataGridColumn TItem="PipelineRunDto" Property="Id" Title="#" Width="4rem">
+                                        <Template Context="run">
+                                            <a href="@PipelineRunHref(run)" @onclick:stopPropagation="true">#@run.Id</a>
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                    <RadzenDataGridColumn TItem="PipelineRunDto" Property="PipelineName" Title="@L["Pipeline"]" MinWidth="8rem">
+                                        <Template Context="run">
+                                            <a href="@PipelineHref(run)" class="pipeline-name-link" @onclick:stopPropagation="true">@run.PipelineName</a>
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                    <RadzenDataGridColumn TItem="PipelineRunDto" Property="Status" Title="@L["Status"]" Width="6rem">
+                                        <Template Context="run">
+                                            <RadzenBadge BadgeStyle="@PipelineHelper.GetRunBadge(run.Status)" Text="@L.Localize(run.Status)" />
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                    <RadzenDataGridColumn TItem="PipelineRunDto" Property="StartedAt" Title="@L["Started"]" Width="6.5rem">
+                                        <Template Context="run">
+                                            <span title="@run.StartedAt.ToString("F")">@RelativeTime.FormatAgo(L, run.StartedAt)</span>
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                </Columns>
+                            </RadzenDataGrid>
+                        </RadzenCard>
+                    </RadzenColumn>
+                </RadzenRow>
+            </RadzenTabsItem>
+
+            @* F-ter: README tab - only present when the project's git repo actually has a rendered README. *@
+            @if (!string.IsNullOrEmpty(_readmeHtml))
+            {
+                <RadzenTabsItem Text="@L["Readme"]" Icon="description">
+                    @if (!string.IsNullOrWhiteSpace(_readmeBranch))
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-3">
+                            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-color-secondary rz-m-0">@L["DefaultBranch"]</RadzenText>
+                            <RadzenBadge Text="@_readmeBranch" BadgeStyle="BadgeStyle.Light" />
+                        </RadzenStack>
+                    }
+                    <div class="readme-rendered">@((MarkupString)_readmeHtml)</div>
+                </RadzenTabsItem>
+            }
+
+            @* F-ter: Changelog tab - only present when releases carry changelog entries. *@
+            @if (_changelog.Count > 0)
+            {
+                <RadzenTabsItem Text="@L["Changelog"]" Icon="history">
+                    <RadzenTimeline Orientation="Orientation.Vertical" AlignItems="AlignItems.Start"
+                        LinePosition="LinePosition.Start" class="rz-mt-2 project-activity-timeline">
+                        <Items>
+                            @foreach (var release in _changelog)
+                            {
+                                var when = release.PublishedAt ?? release.DetectedAt;
+                                <RadzenTimelineItem PointStyle="@ReleasePointStyle(release.Status)">
+                                    <PointContent>
+                                        <RadzenIcon Icon="new_releases" />
+                                    </PointContent>
+                                    <ChildContent>
+                                        <RadzenStack Gap="0.25rem">
+                                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0"
+                                                title="@when.ToString("F")">@RelativeTime.FormatAgo(L, when)</RadzenText>
+                                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+                                                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@release.Version</RadzenText>
+                                                <RadzenBadge Text="@L.Localize(release.Status)" BadgeStyle="BadgeStyle.Light" />
+                                                @if (!string.IsNullOrWhiteSpace(release.TagName))
+                                                {
+                                                    <RadzenBadge Text="@release.TagName" BadgeStyle="BadgeStyle.Light" />
+                                                }
+                                            </RadzenStack>
+                                            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@release.Changelog</RadzenText>
+                                        </RadzenStack>
+                                    </ChildContent>
+                                </RadzenTimelineItem>
+                            }
+                        </Items>
+                    </RadzenTimeline>
+                </RadzenTabsItem>
+            }
+        </Tabs>
+    </UrlSyncedTabs>
+}

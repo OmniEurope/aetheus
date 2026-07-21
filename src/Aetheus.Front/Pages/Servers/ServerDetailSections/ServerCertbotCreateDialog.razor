@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenTemplateForm TItem="CertbotForm" Data="@_model" Submit="@Create">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="0.5rem">
+        <RadzenFormField Text="@L["Domains"]">
+            <RadzenTextBox @bind-Value="_model.Domains" Name="Domains" Placeholder="example.com, www.example.com" />
+            <ValidationMessage For="@(() => _model.Domains)" />
+        </RadzenFormField>
+        <RadzenFormField Text="@L["Email"]">
+            <RadzenTextBox @bind-Value="_model.Email" Name="Email" Placeholder="admin@example.com" />
+            <ValidationMessage For="@(() => _model.Email)" />
+        </RadzenFormField>
+        <LabeledToggle @bind-Value="_webroot" Text="@L["UseWebroot"]" />
+
+        @if (_webroot)
+        {
+            <RadzenFormField Text="@L["WebrootPath"]">
+                <RadzenTextBox @bind-Value="_model.WebrootPath" Name="WebrootPath" Placeholder="/var/www/html" />
+                <ValidationMessage For="@(() => _model.WebrootPath)" />
+            </RadzenFormField>
+        }
+        <Aetheus.Front.Shared.DialogFooter OnCancel="@Cancel">
+            <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Create"]" Icon="add" IsBusy="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </Aetheus.Front.Shared.DialogFooter>
+    </RadzenStack>
+</RadzenTemplateForm>

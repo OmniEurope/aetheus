@@ -1,0 +1,16 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/{Id:int}/firewall"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@implements IDisposable
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["FirewallTitle"] - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Pages.Servers.ServerDetailSections.ServerFirewallSection
+        @ref="_section"
+        ServerId="@Id"
+        FirewallManagementAvailable="@Loader.Server.FirewallManagementAvailable"
+        OnRefreshRequested="StateHasChanged" />
+}

@@ -1,0 +1,598 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Components.Shared;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Exceptions;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.IdentityModel.Tokens;
+
+namespace Aetheus.Back.Components.Auth;
+
+public class AuthService(
+    IAuthRepository repo,
+    IConfiguration config,
+    IAuditService audit,
+    JwtOptions jwtOptions,
+    IMemoryCache cache,
+    Aetheus.Back.Components.Organizations.IOrganizationService orgService,
+    ITotpService totpService,
+    TimeProvider timeProvider,
+    IHttpContextAccessor httpContextAccessor,
+    IAdminChangeNotifier adminNotifier,
+    ILogger<AuthService> logger) : IAuthService
+{
+    private const int MaxFailedAttempts = 5; // F-011
+    private static readonly TimeSpan BaseLockoutDuration = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30); // F-012
+    private static readonly TimeSpan RefreshTokenGrace = TimeSpan.FromMinutes(5);
+    public async Task<bool> IsRegistrationTokenValidAsync(string token, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        var regToken = await repo.FindValidRegistrationTokenAsync(HashToken(token), ct).ConfigureAwait(false);
+        return regToken is not null;
+    }
+
+    public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken ct = default)
+    {
+        // Try DB user first. Username is case- and surrounding-whitespace-insensitive (see
+        // NormalizeLoginName): "Admin", "ADMIN", " admin " all resolve to the stored "admin".
+        var user = await repo.FindUserWithRolesAsync(NormalizeLoginName(request.Username), ct).ConfigureAwait(false);
+        if (user is not null)
+        {
+            // F-011: check lockout before password verification
+            var now = timeProvider.GetUtcNow().UtcDateTime;
+            if (user.LockoutEndUtc is not null && user.LockoutEndUtc > now)
+                return null; // Still locked out - return same response as invalid credentials
+
+            if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            {
+                await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
+                return null;
+            }
+
+            // F-010: TOTP check - if enabled, require a valid code or recovery code
+            if (user.TotpEnabled)
+            {
+                if (string.IsNullOrEmpty(request.TotpCode) && string.IsNullOrEmpty(request.RecoveryCode))
+                    return new LoginResponse { TotpRequired = true };
+
+                if (!string.IsNullOrEmpty(request.TotpCode))
+                {
+                    if (!totpService.ValidateTotpCode(user.TotpSecret!, request.TotpCode))
+                    {
+                        await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
+                        return null;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(request.RecoveryCode))
+                {
+                    if (!await totpService.ConsumeRecoveryCodeAsync(user.Id, request.RecoveryCode, ct).ConfigureAwait(false))
+                    {
+                        await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
+                        return null;
+                    }
+                }
+            }
+
+            // Successful login - reset lockout counters
+            if (user.FailedLoginCount > 0 || user.LockoutEndUtc is not null)
+                await repo.ResetFailedLoginAsync(user.Id, ct).ConfigureAwait(false);
+
+            // F-013: login anomaly detection - log IP/UA and flag new IPs
+            await DetectLoginAnomalyAsync(user.Username, user.Id, ct).ConfigureAwait(false);
+
+            var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+            var claims = BuildUserClaims(user, roles);
+            var response = await GenerateTokenResponseWithRefreshAsync(claims, user.Id, request.RememberMe, ct).ConfigureAwait(false);
+            return response with { MustChangePassword = user.MustChangePassword };
+        }
+
+        // Fallback: config-based admin only when no DB users exist.
+        // In non-Development environments we refuse to authenticate via this fallback unless an
+        // explicit, non-default Auth:AdminPassword has been configured - prevents the well-known
+        // admin/admin pair from ever working in production.
+        var hasDbUsers = await repo.AnyUsersExistAsync(ct).ConfigureAwait(false);
+        if (hasDbUsers) return null;
+
+        var adminUser = config["Auth:AdminUser"] ?? "admin";
+        var adminPass = config["Auth:AdminPassword"];
+
+        if (string.IsNullOrEmpty(adminPass))
+            return null;
+
+        // Bitwise AND so both comparisons always run - no timing oracle.
+        var lengthSafeUser = PadOrTrim(request.Username, adminUser.Length);
+        var lengthSafePass = PadOrTrim(request.Password, adminPass.Length);
+        var userOk = CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(lengthSafeUser),
+            Encoding.UTF8.GetBytes(adminUser));
+        var passOk = CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(lengthSafePass),
+            Encoding.UTF8.GetBytes(adminPass));
+        if (!(userOk & passOk))
+            return null;
+
+        // Bootstrap admin does not support TOTP or refresh tokens - short-lived JWT only.
+        var bootstrapStamp = config["Auth:BootstrapStamp"] ?? "bootstrap";
+        return GenerateTokenResponse([
+            new Claim(ClaimTypes.Name, request.Username),
+            new Claim(ClaimTypes.NameIdentifier, "bootstrap"),
+            new Claim(AetheusClaimTypes.SecurityStamp, bootstrapStamp),
+            new Claim(ClaimTypes.Role, "Admin")
+        ], request.RememberMe);
+    }
+
+    // --- Lockout helpers (F-011) ---
+
+    private async Task HandleFailedLoginAsync(User user, CancellationToken ct)
+    {
+        await repo.IncrementFailedLoginAsync(user.Id, ct).ConfigureAwait(false);
+        var newCount = user.FailedLoginCount + 1; // Optimistic - repo already incremented
+        if (newCount >= MaxFailedAttempts)
+        {
+            // Exponential backoff: 15 min × 2^(lockout_round - 1), capped at 24 h
+            var lockoutRound = newCount / MaxFailedAttempts;
+            var duration = TimeSpan.FromTicks(
+                Math.Min(BaseLockoutDuration.Ticks * (1L << Math.Min(lockoutRound - 1, 6)),
+                          TimeSpan.FromHours(24).Ticks));
+            var lockoutEnd = timeProvider.GetUtcNow().UtcDateTime.Add(duration);
+            await repo.LockoutUserAsync(user.Id, lockoutEnd, ct).ConfigureAwait(false);
+        }
+    }
+
+    // --- Login anomaly detection (F-013) ---
+
+    private async Task DetectLoginAnomalyAsync(string username, int userId, CancellationToken ct)
+    {
+        var httpContext = httpContextAccessor.HttpContext;
+        var clientIp = httpContext?.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var userAgent = SanitizeUserAgent(httpContext?.Request.Headers.UserAgent.ToString());
+
+        // Check if this IP was seen in recent logins for this user. Null-safe: login must never
+        // break because anomaly logging couldn't read history (the pattern handles a null result).
+        var recentIps = await audit.GetRecentLoginIpsAsync(username, 50, ct).ConfigureAwait(false);
+        var isNewIp = recentIps is { Count: > 0 } && !recentIps.Contains(clientIp);
+
+        if (isNewIp)
+        {
+            logger.LogWarning("Login from new IP {Ip} for user {Username} (user-agent: {UserAgent})", clientIp, username, userAgent);
+            await audit.LogAsync("LoginAnomaly", "User", userId, $"New IP: {clientIp}, UA: {userAgent}", ct).ConfigureAwait(false);
+        }
+
+        // Always log the successful login with IP/UA for future anomaly checks
+        await audit.LogAsync("Login", "User", userId, $"IP: {clientIp}, UA: {userAgent}", ct).ConfigureAwait(false);
+    }
+
+    // Strip CR/LF and control characters and truncate to prevent audit-log injection via crafted User-Agent.
+    private static string SanitizeUserAgent(string? userAgent)
+    {
+        if (string.IsNullOrEmpty(userAgent)) return "unknown";
+        var cleaned = new string(userAgent.Where(c => !char.IsControl(c)).ToArray());
+        return cleaned.Length > 200 ? cleaned[..200] : cleaned;
+    }
+
+    public async Task<bool> UnlockUserAsync(int userId, CancellationToken ct = default)
+    {
+        var user = await repo.FindUserByIdWithRolesAsync(userId, ct).ConfigureAwait(false);
+        if (user is null) return false;
+        await repo.ClearLockoutAsync(userId, ct).ConfigureAwait(false);
+        await audit.LogAsync("UnlockedUser", "User", userId, user.Username, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    private static List<Claim> BuildUserClaims(User user, IEnumerable<string> roles)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Name, user.Username),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(AetheusClaimTypes.SecurityStamp, user.SecurityStamp)
+        };
+        // Carries the forced-change state through token renewal/refresh so the Front gate survives
+        // a page reload; a token minted after the password is changed no longer includes it.
+        if (user.MustChangePassword)
+            claims.Add(new Claim(AetheusClaimTypes.MustChangePassword, "true"));
+        foreach (var role in roles)
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        return claims;
+    }
+
+    private LoginResponse GenerateTokenResponse(List<Claim> claims, bool rememberMe = false)
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var lifetime = rememberMe ? jwtOptions.RememberMeLifetime : jwtOptions.DefaultLifetime;
+        var expiration = timeProvider.GetUtcNow().UtcDateTime.Add(lifetime);
+
+        var token = new JwtSecurityToken(
+            issuer: jwtOptions.Issuer,
+            audience: jwtOptions.Audience,
+            claims: claims,
+            expires: expiration,
+            signingCredentials: creds);
+
+        return new LoginResponse
+        {
+            Token = new JwtSecurityTokenHandler().WriteToken(token),
+            ExpiresAt = token.ValidTo
+        };
+    }
+
+    /// <summary>
+    /// Generates a single-use registration token used by an agent to enroll with the server.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Plaintext-once contract (#56):</b> the returned <see cref="RegistrationTokenDto.Token"/>
+    /// contains the plaintext value and is the ONLY chance the caller has to retrieve it.
+    /// The database persists only a SHA-256 hash (mirroring <see cref="ServerToken.TokenHash"/>),
+    /// so subsequent reads via <c>GetRegistrationTokensAsync</c> never expose plaintext again.
+    /// Callers must surface the token to the operator immediately and never log it.</para>
+    /// </remarks>
+    public async Task<RegistrationTokenDto> CreateRegistrationTokenAsync(CreateRegistrationTokenRequest request, CancellationToken ct = default)
+    {
+        // Hardening (High #6): the entity's `Token` column now stores the SHA-256 hash of the
+        // generated secret, mirroring the ServerToken.TokenHash treatment. Plaintext is
+        // returned once in the response and never persisted.
+        var plaintext = GenerateSecureToken();
+        var orgId = request.OrganizationId
+            ?? await orgService.GetDefaultOrganizationIdAsync(ct).ConfigureAwait(false)
+            ?? throw new BadRequestException("No organization available; create an organization first.");
+        var token = new RegistrationToken
+        {
+            Token = HashToken(plaintext),
+            ExpiresAt = timeProvider.GetUtcNow().UtcDateTime.AddHours(request.ExpirationHours > 0 ? request.ExpirationHours : 24),
+            OrganizationId = orgId
+        };
+        repo.AddRegistrationToken(token);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await audit.LogAsync("Created", "RegistrationToken", token.Id, null, ct).ConfigureAwait(false);
+        // S-FEAT-RT2W: push the new token to any open admin token list in realtime.
+        await adminNotifier.BroadcastAsync(AdminEntities.RegistrationToken, token.Id, EntityChangeOps.Created, ct).ConfigureAwait(false);
+
+        return new RegistrationTokenDto
+        {
+            Id = token.Id,
+            Token = plaintext,
+            IsUsed = false,
+            OrganizationId = token.OrganizationId,
+            CreatedAt = token.CreatedAt,
+            ExpiresAt = token.ExpiresAt
+        };
+    }
+
+    public async Task<List<RegistrationTokenDto>> GetRegistrationTokensAsync(CancellationToken ct = default)
+    {
+        var tokens = await repo.GetRegistrationTokensAsync(ct).ConfigureAwait(false);
+        return tokens.Select(MapRegistrationToken).ToList();
+    }
+
+    // RTOK: single-token lookup so the agent-wizard verify step can poll just *its* token's
+    // IsUsed flag instead of re-downloading the full unpaginated list every 3 s.
+    public async Task<RegistrationTokenDto?> GetRegistrationTokenAsync(int id, CancellationToken ct = default)
+    {
+        var token = await repo.FindRegistrationTokenByIdAsync(id, ct).ConfigureAwait(false);
+        return token is null ? null : MapRegistrationToken(token);
+    }
+
+    // F-39: never echo the full plaintext registration token in admin reads; only the creator
+    // received the secret once. Show a short prefix so admins can correlate logs.
+    private static RegistrationTokenDto MapRegistrationToken(RegistrationToken t) => new()
+    {
+        Id = t.Id,
+        Token = TruncateToken(t.Token),
+        IsUsed = t.IsUsed,
+        UsedByServerId = t.UsedByServerId,
+        OrganizationId = t.OrganizationId,
+        CreatedAt = t.CreatedAt,
+        ExpiresAt = t.ExpiresAt
+    };
+
+    private static string TruncateToken(string token)
+    {
+        if (string.IsNullOrEmpty(token)) return string.Empty;
+        return token.Length <= 8 ? "***" : $"{token[..8]}…";
+    }
+
+    public async Task<int?> ValidateServerTokenAsync(string token, CancellationToken ct = default)
+    {
+        var hash = HashToken(token);
+        return await repo.ValidateServerTokenHashAsync(hash, ct).ConfigureAwait(false);
+    }
+
+    public async Task<ServerRegistrationResponse?> RotateAgentTokenAsync(int serverId, CancellationToken ct = default)
+    {
+        if (!await repo.ServerExistsAsync(serverId, ct).ConfigureAwait(false))
+            return null;
+
+        await repo.RevokeServerTokensAsync(serverId, ct).ConfigureAwait(false);
+
+        var bearerToken = GenerateSecureToken();
+        var tokenHash = HashToken(bearerToken);
+        var ttlDays = config.GetValue("AgentToken:TtlDays", 365);
+
+        repo.AddServerToken(new ServerToken
+        {
+            ServerId = serverId,
+            TokenHash = tokenHash,
+            ExpiresAt = timeProvider.GetUtcNow().UtcDateTime.AddDays(ttlDays)
+        });
+
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return new ServerRegistrationResponse
+        {
+            ServerId = serverId,
+            BearerToken = bearerToken
+        };
+    }
+
+    public async Task<ServerHeartbeatResponseDto?> MaybeRenewAgentTokenAsync(int serverId, CancellationToken ct = default)
+    {
+        var latestExpiry = await repo.GetLatestActiveServerTokenExpiryAsync(serverId, ct).ConfigureAwait(false);
+        if (latestExpiry is null) return null; // no active token (cannot happen on an authenticated heartbeat)
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var renewWithinDays = config.GetValue("AgentToken:RenewWithinDays", 30);
+        // Anti-churn: a fresh token already exists (e.g. agent hasn't swapped to
+        // it yet, or another heartbeat just renewed) - don't mint another.
+        if (latestExpiry.Value - now > TimeSpan.FromDays(renewWithinDays)) return null;
+
+        var ttlDays = config.GetValue("AgentToken:TtlDays", 365);
+        var bearerToken = GenerateSecureToken();
+        var expiresAt = now.AddDays(ttlDays);
+
+        // Add alongside the current token - the old one stays valid until its own
+        // ExpiresAt, so a failed agent-side persist cannot lock the agent out.
+        repo.AddServerToken(new ServerToken
+        {
+            ServerId = serverId,
+            TokenHash = HashToken(bearerToken),
+            ExpiresAt = expiresAt
+        });
+        await repo.DeleteExpiredServerTokensAsync(serverId, ct).ConfigureAwait(false);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return new ServerHeartbeatResponseDto
+        {
+            RenewedToken = bearerToken,
+            RenewedTokenExpiresAtUtc = expiresAt
+        };
+    }
+
+    public async Task<LoginResponse?> HandleExternalLoginAsync(string provider, string subjectId, string? displayName, string? email, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
+
+        // Disabled unless explicitly enabled with a provider allow-list + vetted IdP gateway.
+        var enabled = config.GetValue("Auth:ExternalLogin:Enabled", false);
+        if (!enabled) return null;
+
+        var allowed = config.GetSection("Auth:ExternalLogin:AllowedProviders")
+            .Get<string[]>() ?? [];
+        if (allowed.Length == 0 ||
+            !allowed.Contains(provider, StringComparer.OrdinalIgnoreCase))
+            return null;
+
+        var externalLogin = await repo.FindExternalLoginAsync(provider, subjectId, ct).ConfigureAwait(false);
+
+        User user;
+        if (externalLogin is not null)
+        {
+            user = externalLogin.User;
+        }
+        else
+        {
+            var autoProvision = config.GetValue("Auth:ExternalLogin:AutoProvision", false);
+            if (!autoProvision) return null;
+
+            // Canonical username "{provider}_{subjectId}" - never reuse a local account from displayName.
+            var canonicalUsername = $"{provider}_{subjectId}";
+            var existing = await repo.FindUserWithRolesAsync(canonicalUsername, ct).ConfigureAwait(false);
+            if (existing is not null)
+                return null;
+
+            user = new User
+            {
+                Username = canonicalUsername,
+                PasswordHash = string.Empty,
+                Email = email
+            };
+
+            await repo.AddUserAsync(user, ct).ConfigureAwait(false);
+
+            await repo.AddExternalLoginAsync(new ExternalLogin
+            {
+                UserId = user.Id,
+                Provider = provider,
+                ProviderSubjectId = subjectId,
+                DisplayName = displayName
+            }, ct).ConfigureAwait(false);
+
+            user = (await repo.FindUserWithRolesAsync(user.Username, ct).ConfigureAwait(false))!;
+            await audit.LogAsync("ExternalLoginCreated", "User", user.Id, user.Username, ct).ConfigureAwait(false);
+        }
+
+        if (!user.IsActive) return null;
+
+        var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+        var claims = BuildUserClaims(user, roles);
+        claims.Add(new Claim("provider", provider));
+
+        return GenerateTokenResponse(claims);
+    }
+
+    public async Task<bool> IsSecurityStampValidAsync(int userId, string stamp, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(stamp)) return false;
+
+        // Hardening / perf (#26): cache the user's current stamp briefly so each authenticated
+        // request doesn't issue a DB roundtrip. Cache is invalidated explicitly on stamp bumps
+        // (logout, password change, role change) - bounded TTL also bounds staleness.
+        var cacheKey = $"sec-stamp:{userId}";
+        if (!cache.TryGetValue<string>(cacheKey, out var current))
+        {
+            current = await repo.GetSecurityStampAsync(userId, ct).ConfigureAwait(false);
+            if (current is not null)
+                cache.Set(cacheKey, current, TimeSpan.FromSeconds(30));
+        }
+        return current is not null && string.Equals(current, stamp, StringComparison.Ordinal);
+    }
+
+    public async Task BumpSecurityStampAsync(int userId, CancellationToken ct = default)
+    {
+        await repo.BumpSecurityStampAsync(userId, ct).ConfigureAwait(false);
+        cache.Remove($"sec-stamp:{userId}");
+    }
+
+    public async Task<LoginResponse?> RenewTokenAsync(int userId, CancellationToken ct = default)
+    {
+        var user = await repo.FindUserByIdWithRolesAsync(userId, ct).ConfigureAwait(false);
+        if (user is null) return null;
+
+        var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+        var claims = BuildUserClaims(user, roles);
+        return await GenerateTokenResponseWithRefreshAsync(claims, userId, rememberMe: false, ct).ConfigureAwait(false);
+    }
+
+    // --- Refresh Token Rotation (F-012) ---
+
+    public async Task<LoginResponse?> RefreshTokenAsync(string refreshToken, CancellationToken ct = default)
+    {
+        var tokenHash = HashToken(refreshToken);
+        var stored = await repo.FindRefreshTokenByHashAsync(tokenHash, ct).ConfigureAwait(false);
+        if (stored is null) return null;
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+
+        // Revoked token reuse → possible theft: revoke entire chain
+        if (stored.IsRevoked)
+        {
+            // Grace window: allow recently-revoked tokens (concurrent requests in flight)
+            if (stored.RevokedAt is not null && now - stored.RevokedAt.Value <= RefreshTokenGrace)
+            {
+                // Return the replacement token's response (if it exists and is still active)
+                if (stored.ReplacedById is not null)
+                {
+                    var user = stored.User;
+                    if (user is null || !user.IsActive) return null;
+                    var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+                    var claims = BuildUserClaims(user, roles);
+                    // Re-issue a fresh access token but DON'T create a new refresh token
+                    return GenerateTokenResponse(claims);
+                }
+            }
+            // Outside grace → revoke all user tokens (stolen token replay detection)
+            await repo.RevokeAllUserRefreshTokensAsync(stored.UserId, ct).ConfigureAwait(false);
+            return null;
+        }
+
+        if (stored.IsExpired(now)) return null;
+        if (stored.User is null || !stored.User.IsActive) return null;
+
+        // Rotate: mint new refresh token, revoke old one
+        var newPlaintext = GenerateSecureToken();
+        var newHash = HashToken(newPlaintext);
+        var newRefresh = new Data.Entities.RefreshToken
+        {
+            UserId = stored.UserId,
+            TokenHash = newHash,
+            ExpiresAt = now.Add(RefreshTokenLifetime),
+            CreatedAt = now
+        };
+        await repo.AddRefreshTokenAsync(newRefresh, ct).ConfigureAwait(false);
+        await repo.RevokeRefreshTokenAsync(stored.Id, newRefresh.Id, ct).ConfigureAwait(false);
+
+        // Prune dead tokens opportunistically
+        await repo.DeleteExpiredRefreshTokensAsync(stored.UserId, ct).ConfigureAwait(false);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        var u = stored.User;
+        var r = u.UserRoles.Select(ur => ur.Role.Name).ToList();
+        var c = BuildUserClaims(u, r);
+        var response = GenerateTokenResponse(c);
+        return response with { RefreshToken = newPlaintext };
+    }
+
+    private async Task<LoginResponse> GenerateTokenResponseWithRefreshAsync(
+        List<Claim> claims, int userId, bool rememberMe, CancellationToken ct)
+    {
+        var response = GenerateTokenResponse(claims, rememberMe);
+
+        // Issue a refresh token for DB-backed users (not bootstrap admin)
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var plaintext = GenerateSecureToken();
+        var refresh = new Data.Entities.RefreshToken
+        {
+            UserId = userId,
+            TokenHash = HashToken(plaintext),
+            ExpiresAt = now.Add(RefreshTokenLifetime),
+            CreatedAt = now
+        };
+        await repo.AddRefreshTokenAsync(refresh, ct).ConfigureAwait(false);
+
+        return response with { RefreshToken = plaintext };
+    }
+
+    // TOTP methods delegated to ITotpService (injected as totpService)
+    public Task<TotpSetupResponse> SetupTotpAsync(int userId, CancellationToken ct = default)
+        => totpService.SetupTotpAsync(userId, ct);
+
+    public Task<bool> VerifyAndEnableTotpAsync(int userId, string code, CancellationToken ct = default)
+        => totpService.VerifyAndEnableTotpAsync(userId, code, ct);
+
+    public Task<bool> DisableTotpAsync(int userId, string password, CancellationToken ct = default)
+        => totpService.DisableTotpAsync(userId, password, ct);
+
+    /// <summary>
+    /// Git Smart-HTTP Basic-auth verification. Deliberately enforces lockout + BCrypt but NOT TOTP: the
+    /// git CLI cannot present a second factor, so this path is exempt from MFA (same trade-off the
+    /// external-login flow documents). The surface is limited to Git HTTP and is further gated by the
+    /// run-scoped clone token / RBAC downstream. Accounts that must stay MFA-only should not be used for
+    /// Git Basic-auth (use a dedicated access token instead).
+    /// </summary>
+    public async Task<bool> ValidateBasicAuthAsync(string username, string password, CancellationToken ct = default)
+    {
+        // Same case-insensitivity as LoginAsync (git CLI users type their username by hand).
+        var user = await repo.FindUserWithRolesAsync(NormalizeLoginName(username), ct).ConfigureAwait(false);
+        if (user is null) return false;
+
+        if (user.LockoutEndUtc.HasValue && user.LockoutEndUtc.Value > timeProvider.GetUtcNow().UtcDateTime)
+            return false;
+
+        if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+        {
+            await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
+            return false;
+        }
+
+        // Align with LoginAsync: also clear a now-expired LockoutEndUtc, not just a non-zero fail count.
+        if (user.FailedLoginCount > 0 || user.LockoutEndUtc is not null)
+            await repo.ResetFailedLoginAsync(user.Id, ct).ConfigureAwait(false);
+
+        return true;
+    }
+
+    // Human-login username normalisation, mirroring how usernames are stored on write (F-24:
+    // UserService trim + ToLowerInvariant, and the seeded "admin"). Applied only to the interactive
+    // login paths (LoginAsync, ValidateBasicAuthAsync); the external-login flow keeps its canonical
+    // provider_subjectId verbatim.
+    private static string NormalizeLoginName(string? username) => (username ?? string.Empty).Trim().ToLowerInvariant();
+
+    private static string GenerateSecureToken() => AuthTokenHelper.GenerateSecureToken();
+
+    private string HashToken(string token) => AuthTokenHelper.HashToken(jwtOptions.SigningKey, token);
+
+    private static string PadOrTrim(string input, int targetLength)
+    {
+        input ??= string.Empty;
+        if (input.Length == targetLength) return input;
+        return input.PadRight(targetLength, '\0');
+    }
+}

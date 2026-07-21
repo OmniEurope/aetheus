@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.ComponentModel.DataAnnotations;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+
+namespace Aetheus.Back.Tests;
+
+public class DtoValidationTests
+{
+    private static IReadOnlyList<ValidationResult> Validate(object dto)
+    {
+        var results = new List<ValidationResult>();
+        Validator.TryValidateObject(dto, new ValidationContext(dto), results, validateAllProperties: true);
+        return results;
+    }
+
+    // Real DataAnnotations behaviour (not a set-then-get tautology): the security-critical registration
+    // request must reject a blank required field and an over-length one.
+    [Fact]
+    public void ServerRegistrationRequest_Valid_PassesValidation()
+    {
+        var dto = new ServerRegistrationRequest { RegistrationToken = "tok", Hostname = "host-1" };
+        Assert.Empty(Validate(dto));
+    }
+
+    [Fact]
+    public void ServerRegistrationRequest_MissingRequired_FailsValidation()
+    {
+        // RegistrationToken and Hostname are [Required]; both blank must produce validation errors.
+        var dto = new ServerRegistrationRequest { RegistrationToken = "", Hostname = "" };
+        var errors = Validate(dto);
+        Assert.Contains(errors, e => e.MemberNames.Contains(nameof(ServerRegistrationRequest.RegistrationToken)));
+        Assert.Contains(errors, e => e.MemberNames.Contains(nameof(ServerRegistrationRequest.Hostname)));
+    }
+
+    [Fact]
+    public void ServerRegistrationRequest_OverLengthHostname_FailsValidation()
+    {
+        // Hostname is [StringLength(200)]; 201 chars must be rejected.
+        var dto = new ServerRegistrationRequest { RegistrationToken = "tok", Hostname = new string('h', 201) };
+        Assert.Contains(Validate(dto), e => e.MemberNames.Contains(nameof(ServerRegistrationRequest.Hostname)));
+    }
+
+    [Theory]
+    [InlineData("https://git.example.com/team/repo.git", true)]
+    [InlineData("http://git.example.com/team/repo.git", false)]
+    [InlineData("ssh://git@git.example.com/team/repo.git", false)]
+    [InlineData("not-a-url", false)]
+    public void ProjectRepositoryUrl_RequiresHttps(string url, bool valid)
+    {
+        var errors = Validate(new CreateProjectRequest { Name = "Project", RepositoryUrl = url });
+
+        Assert.Equal(valid, !errors.Any(e => e.MemberNames.Contains(nameof(CreateProjectRequest.RepositoryUrl))));
+    }
+
+    [Theory]
+    [InlineData("elevenchars", false)]
+    [InlineData("twelve-chars", true)]
+    public void CreateUserRequest_EnforcesSharedPasswordMinimum(string password, bool valid)
+    {
+        var errors = Validate(new CreateUserRequest { Username = "operator", Password = password });
+
+        Assert.Equal(valid, !errors.Any(e => e.MemberNames.Contains(nameof(CreateUserRequest.Password))));
+    }
+
+    [Theory]
+    [InlineData("elevenchars", false)]
+    [InlineData("twelve-chars", true)]
+    public void ChangeUserPasswordRequest_EnforcesSharedPasswordMinimum(string password, bool valid)
+    {
+        var errors = Validate(new ChangeUserPasswordRequest { NewPassword = password });
+
+        Assert.Equal(valid, !errors.Any(e => e.MemberNames.Contains(nameof(ChangeUserPasswordRequest.NewPassword))));
+    }
+
+    [Fact]
+    public void ServerDto_DefaultValues_AreCorrect()
+    {
+        var dto = new ServerDto();
+        Assert.Equal(string.Empty, dto.Name);
+        Assert.Equal(string.Empty, dto.Hostname);
+        Assert.Equal(ServerStatus.Online, dto.Status);
+        Assert.Empty(dto.Tags);
+    }
+
+    [Fact]
+    public void PaginatedResult_EmptyResult_HasCorrectDefaults()
+    {
+        var result = new PaginatedResult<ServerDto>
+        {
+            Items = [],
+            TotalCount = 0,
+            Page = 1,
+            PageSize = 20
+        };
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public void TaskResultDto_CanBeCreated()
+    {
+        var result = new TaskResultDto
+        {
+            TaskId = 1,
+            Status = TaskExecutionStatus.Success,
+            ExitCode = 0
+        };
+        Assert.Equal(1, result.TaskId);
+        Assert.Equal(TaskExecutionStatus.Success, result.Status);
+    }
+
+    [Fact]
+    public void AgentPoolRequests_RejectMoreThanTwoHundredServers()
+    {
+        var serverIds = Enumerable.Range(1, 201).ToList();
+
+        Assert.Contains(Validate(new CreateAgentPoolRequest { Name = "pool", ServerIds = serverIds }),
+            error => error.MemberNames.Contains(nameof(CreateAgentPoolRequest.ServerIds)));
+        Assert.Contains(Validate(new UpdateAgentPoolRequest { Name = "pool", ServerIds = serverIds }),
+            error => error.MemberNames.Contains(nameof(UpdateAgentPoolRequest.ServerIds)));
+    }
+
+    [Fact]
+    public void BackupPolicyRequests_RejectUnboundedFilePathCollections()
+    {
+        var tooManyPaths = Enumerable.Range(1, 201).Select(index => $"/data/{index}").ToList();
+        var tooLongPath = new List<string> { new('/', 4097) };
+
+        Assert.Contains(Validate(new CreateBackupPolicyRequest
+        {
+            Name = "backup",
+            ProjectId = 1,
+            ServerId = 1,
+            ScheduleCron = "0 0 * * *",
+            FilePaths = tooManyPaths
+        }), error => error.MemberNames.Contains(nameof(CreateBackupPolicyRequest.FilePaths)));
+        Assert.Contains(Validate(new UpdateBackupPolicyRequest
+        {
+            Name = "backup",
+            ScheduleCron = "0 0 * * *",
+            FilePaths = tooLongPath
+        }), error => error.MemberNames.Contains(nameof(UpdateBackupPolicyRequest.FilePaths)));
+    }
+
+    [Fact]
+    public void PipelineRunRequest_RejectsMoreThanSixtyFourParameters()
+    {
+        var request = new PipelineRunRequest
+        {
+            Parameters = Enumerable.Range(1, PipelineRunRequest.MaxParameterCount + 1)
+                .ToDictionary(index => $"KEY_{index}", _ => "value")
+        };
+
+        Assert.Contains(Validate(request),
+            error => error.MemberNames.Contains(nameof(PipelineRunRequest.Parameters)));
+    }
+
+    [Fact]
+    public void BoundedSnapshotCollections_RejectOversizedPayloads()
+    {
+        var services = Enumerable.Range(0, 2049)
+            .Select(index => new ServiceInfoDto { Name = $"service-{index}" }).ToList();
+        var certificates = Enumerable.Range(0, 2049)
+            .Select(index => new CertbotCertificateDto { Name = $"cert-{index}" }).ToList();
+        var cronJobs = Enumerable.Range(0, 2049)
+            .Select(index => new CronJobDto { Id = index.ToString() }).ToList();
+
+        Assert.Contains(Validate(new ServerDetailDto { Services = services }),
+            error => error.MemberNames.Contains(nameof(ServerDetailDto.Services)));
+        Assert.Contains(Validate(new CertbotDataDto { Certificates = certificates }),
+            error => error.MemberNames.Contains(nameof(CertbotDataDto.Certificates)));
+        Assert.Contains(Validate(new CronDataDto { Jobs = cronJobs }),
+            error => error.MemberNames.Contains(nameof(CronDataDto.Jobs)));
+    }
+
+    [Fact]
+    public void ModuleLinkPageRequest_RejectsOversizedResourceSet()
+    {
+        var request = new ModuleLinkPageRequest
+        {
+            ResourceIdentifiers = Enumerable.Range(0, 2049).Select(index => $"resource-{index}").ToList()
+        };
+
+        Assert.Contains(Validate(request),
+            error => error.MemberNames.Contains(nameof(ModuleLinkPageRequest.ResourceIdentifiers)));
+    }
+}

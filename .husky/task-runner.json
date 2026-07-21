@@ -1,0 +1,23 @@
+{
+   "$schema": "https://alirezanet.github.io/Husky.Net/schema.json",
+   "tasks": [
+      {
+         "name": "build",
+         "group": "pre-commit",
+         "command": "dotnet",
+         "args": ["build", "-c", "Release", "--warnaserror", "-v", "q"]
+      },
+      {
+         "name": "spdx-check",
+         "group": "pre-commit",
+         "command": "pwsh",
+         "args": ["-NoProfile", "-Command", "& { $marker = 'SPDX-License-Identifier: EUPL-1.2'; $missing = 0; Get-ChildItem -Path src,tests -Include '*.cs','*.razor' -Recurse -File | Where-Object { $_.FullName -notmatch '[\\\\/](obj|bin|Migrations)[\\\\/]' } | ForEach-Object { $head = Get-Content $_.FullName -TotalCount 5 -ErrorAction SilentlyContinue; if (-not ($head -match [regex]::Escape($marker))) { Write-Host \"Missing SPDX: $($_.FullName)\"; $script:missing++ } }; if ($missing -gt 0) { Write-Error \"$missing file(s) missing SPDX header. Run: pwsh scripts/add-spdx-header.ps1\"; exit 1 } }"]
+      },
+      {
+         "name": "credential-ban",
+         "group": "pre-commit",
+         "command": "pwsh",
+         "args": ["-NoProfile", "-Command", "& { $files = @('src/Aetheus.Back/appsettings.json', 'src/Aetheus.Back/appsettings.Development.json'); $bad = 0; foreach ($f in $files) { if (Test-Path $f) { $json = Get-Content $f -Raw; if ($json -match '\"(Password|Secret|Key|Token)\"\\s*:\\s*\"(?!\\s*\")[^\"]+\"') { Write-Host \"Credential detected in $f\"; $bad++ } } }; if ($bad -gt 0) { Write-Error 'Potential credentials in appsettings - remove before committing'; exit 1 } }"]
+      }
+   ]
+}

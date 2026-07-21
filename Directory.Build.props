@@ -1,0 +1,26 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Central version for production runtime images and the browser runtime packs.
+         Server-side test hosts keep the runtime bundled with the pinned SDK. -->
+    <AetheusRuntimeImageVersion>10.0.10</AetheusRuntimeImageVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- The SDK adds Hot Reload packages only to Debug Blazor restores. Keep those disposable
+         development graphs under obj/ so a local ylaunch build cannot rewrite the tracked,
+         Release-canonical packages.lock.json files and make CI locked mode fail with NU1004. -->
+    <NuGetLockFilePath Condition="'$(Configuration)' != 'Release'">$(MSBuildProjectDirectory)\obj\packages.$(Configuration).lock.json</NuGetLockFilePath>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+
+  <!-- Husky.NET: auto-install git hooks on restore (skipped in CI / Docker) -->
+  <Target Name="HuskyInstall" BeforeTargets="Restore;CollectPackageReferences"
+          Condition="'$(HUSKY)' != '0' and '$(CI)' != 'true' and '$(DOTNET_RUNNING_IN_CONTAINER)' != 'true'">
+    <Exec Command="dotnet tool restore" StandardOutputImportance="Low" StandardErrorImportance="High" />
+    <Exec Command="dotnet husky install" StandardOutputImportance="Low" StandardErrorImportance="High"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" />
+  </Target>
+
+</Project>

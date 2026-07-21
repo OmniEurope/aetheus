@@ -1,0 +1,16 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/{Id:int}/updates"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@implements IDisposable
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["PatchTitle"] - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Pages.Servers.ServerDetailSections.ServerPatchSection
+        @ref="_section"
+        ServerId="@Id"
+        PatchManagementAvailable="@Loader.Server.PatchManagementAvailable"
+        OnRefreshRequested="StateHasChanged" />
+}

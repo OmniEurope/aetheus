@@ -1,0 +1,41 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-001 phases 2-4: OTLP telemetry (metrics/logs/errors/ingestion) for the project's monitored apps. *@
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+}
+else if (_apps.Count == 0)
+{
+    <EmptyState Icon="insights" Title="@L["NoMonitoredApps"]" />
+}
+else
+{
+    <RadzenStack Gap="0.25rem" class="rz-mb-3">
+        <RadzenLabel Text="@L["Application"]" />
+        <RadzenDropDown @bind-Value="_selectedAppId" Data="@_apps" TextProperty="Name" ValueProperty="Id"
+                        Change="@(_ => OnAppChanged())" class="w-rem-20" />
+    </RadzenStack>
+
+    @if (_selectedApp is not null)
+    {
+        @* Plain RadzenTabs (local state): the section-level Availability/Telemetry tabs already own the
+           ?tab= query, so nesting a second UrlSyncedTabs would collide on it. *@
+        <RadzenTabs>
+            <Tabs>
+                <RadzenTabsItem Text="@L["Metrics"]" Icon="show_chart">
+                    <AppMetricsView AppId="_selectedApp.Id" />
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="@L["Logs"]" Icon="terminal">
+                    <AppLogsView AppId="_selectedApp.Id" />
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="@L["Errors"]" Icon="bug_report">
+                    <AppErrorsView AppId="_selectedApp.Id" />
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="@L["Ingestion"]" Icon="settings_input_antenna">
+                    <AppIngestionSettings AppId="_selectedApp.Id" App="_selectedApp" CanWrite="_canWrite"
+                                          OnChanged="@OnTelemetryChangedAsync" />
+                </RadzenTabsItem>
+            </Tabs>
+        </RadzenTabs>
+    }
+}

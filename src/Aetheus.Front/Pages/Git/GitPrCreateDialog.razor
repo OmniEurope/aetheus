@@ -1,0 +1,30 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+
+<RadzenTemplateForm TItem="CreateInternalPullRequestRequest" Data="@_request" Submit="@Submit">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="@L["Title"]" Variant="Variant.Filled">
+            <RadzenTextBox @bind-Value="_request.Title" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _request.Title)" />
+
+        <RadzenFormField Text="@L["SourceBranch"]" Variant="Variant.Filled">
+            <RadzenDropDown TValue="string" Data="@Branches.Select(b => b.Name)" @bind-Value="_request.SourceBranch" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _request.SourceBranch)" />
+
+        <RadzenFormField Text="@L["TargetBranch"]" Variant="Variant.Filled">
+            <RadzenDropDown TValue="string" Data="@Branches.Select(b => b.Name)" @bind-Value="_request.TargetBranch" />
+        </RadzenFormField>
+        <ValidationMessage For="@(() => _request.TargetBranch)" />
+
+        <RadzenFormField Text="@L["Description"]" Variant="Variant.Filled">
+            <RadzenTextArea @bind-Value="_request.Description" Rows="4" />
+        </RadzenFormField>
+
+        <DialogFooter OnCancel="@Cancel">
+            <RadzenButton Text="@L["Create"]" Icon="add" ButtonType="ButtonType.Submit" IsBusy="@_submitting" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </DialogFooter>
+    </RadzenStack>
+</RadzenTemplateForm>

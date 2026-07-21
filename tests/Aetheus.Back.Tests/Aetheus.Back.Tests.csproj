@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <!-- xunit.v3 ships Xunit.TestResult, which collides with the domain entity under the global
+         `using Xunit`. Alias the unqualified name back to the entity (no test uses Xunit.TestResult). -->
+    <Using Include="Aetheus.Back.Data.Entities.TestResult" Alias="TestResult" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aetheus.Back\Aetheus.Back.csproj" />
+    <ProjectReference Include="..\..\src\Aetheus.Agent.Core\Aetheus.Agent.Core.csproj" />
+  </ItemGroup>
+
+</Project>

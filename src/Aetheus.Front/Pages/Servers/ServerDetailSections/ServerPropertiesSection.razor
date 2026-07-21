@@ -1,0 +1,68 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Properties"]</RadzenText>
+<RadzenCard>
+    <RadzenStack Gap="0.75rem">
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["ServerId"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.Id</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Name"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.Name</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Hostname"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.Hostname</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["IpAddress"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.IpAddress</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["OperatingSystem"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.OsDescription</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["AgentVersion"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@(string.IsNullOrWhiteSpace(Server.AgentVersion) ? "-" : $"v{Server.AgentVersion}")</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Type"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                    <RadzenIcon Icon="@ServerTypeHelper.GetIcon(Server.Type)" class="icon-sm" />
+                    <RadzenBadge BadgeStyle="@ServerTypeHelper.GetBadgeStyle(Server.Type)" Text="@L.Localize(Server.Type)" />
+                </RadzenStack>
+            </RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Status"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8">
+                <RadzenBadge BadgeStyle="@(Server.Status == ServerStatus.Online ? BadgeStyle.Success : BadgeStyle.Danger)"
+                    Text="@L.Localize(Server.Status)" />
+            </RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Created"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.CreatedAt.ToString("g")</RadzenText></RadzenColumn>
+        </RadzenRow>
+        <RadzenRow>
+            <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["LastHeartbeat"]</RadzenText></RadzenColumn>
+            <RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body2">@Server.LastHeartbeat.ToString("g")</RadzenText></RadzenColumn>
+        </RadzenRow>
+        @if (Server.Tags.Count > 0)
+        {
+            <RadzenRow>
+                <RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Tags"]</RadzenText></RadzenColumn>
+                <RadzenColumn Size="8">
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" Wrap="FlexWrap.Wrap">
+                        @foreach (var tag in Server.Tags)
+                        {
+                            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@tag" />
+                        }
+                    </RadzenStack>
+                </RadzenColumn>
+            </RadzenRow>
+        }
+    </RadzenStack>
+</RadzenCard>

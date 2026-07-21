@@ -1,0 +1,149 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenPanelMenu>
+    <RadzenPanelMenuItem Text="@L["Dashboard"]" Icon="dashboard" Path="" />
+    @if (Permissions.CanReadAny(ResourceType.Server))
+    {
+    <RadzenPanelMenuItem Text="@L["Servers"]" Icon="dns" Path="servers" Expanded="true" Selected="@IsOnSection("servers")" class="nav-group">
+        @if (IsOnSection("servers"))
+        {
+            var serverId = GetSpecificServerId();
+            @if (serverId is not null)
+            {
+                @* Item #1 - migrated from legacy `?section=` query strings to real routes. *@
+                <RadzenPanelMenuItem Text="@L["Overview"]" Icon="dashboard" Path="@($"servers/{serverId}/overview")" />
+                <RadzenPanelMenuItem Text="@L["Services"]" Icon="engineering" Path="@($"servers/{serverId}/services")" />
+                @* Docker / Apache / Certbot / Mail / TeamSpeak / Portsentry / Rkhunter are listed in the Services tab as manageable modules. *@
+                <RadzenPanelMenuItem Text="@L["Projects"]" Icon="folder" Path="@($"servers/{serverId}/projects")" />
+                <RadzenPanelMenuItem Text="@L["Pipelines"]" Icon="account_tree" Path="@($"servers/{serverId}/pipelines")" />
+                <RadzenPanelMenuItem Text="@L["Libraries"]" Icon="library_books" Path="@($"servers/{serverId}/libraries")" />
+                <RadzenPanelMenuItem Text="@L["Vaults"]" Icon="lock" Path="@($"servers/{serverId}/vaults")" />
+                <RadzenPanelMenuItem Text="@L["Releases"]" Icon="new_releases" Path="@($"servers/{serverId}/releases")" />
+                <RadzenPanelMenuItem Text="@L["Tasks"]" Icon="task_alt" Path="@($"servers/{serverId}/tasks")" />
+                <RadzenPanelMenuItem Text="@L["Logs"]" Icon="receipt_long" Path="@($"servers/{serverId}/logs")" />
+            }
+            else
+            {
+                <RadzenPanelMenuItem Text="@L["Tasks"]" Icon="task_alt" Path="tasks" />
+                <RadzenPanelMenuItem Text="@L["Logs"]" Icon="receipt_long" Path="logs" />
+                <RadzenPanelMenuItem Text="@L["Alerts"]" Icon="notification_important" Path="alerts">
+                    <Template>
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                            <span>@L["Alerts"]</span>
+                            @if (AlertNotify.UnreadCount > 0)
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="@AlertNotify.UnreadCount.ToString()" class="alert-badge-dot" />
+                            }
+                        </RadzenStack>
+                    </Template>
+                </RadzenPanelMenuItem>
+            }
+        }
+    </RadzenPanelMenuItem>
+    }
+
+    @if (CanReadProjectArea())
+    {
+    <RadzenPanelMenuItem Text="@L["Projects"]" Icon="folder" Path="projects" Expanded="true" Selected="@IsOnSection("projects")" class="nav-group">
+        @if (IsOnSection("projects"))
+        {
+            var projectId = GetSpecificProjectId();
+            @if (projectId is not null)
+            {
+                <RadzenPanelMenuItem Text="@L["Overview"]" Icon="dashboard" Path="@($"projects/{projectId}/overview")" />
+                <RadzenPanelMenuItem Text="@L["Board"]" Icon="view_kanban" Path="@($"projects/{projectId}/board")" />
+                @if (Permissions.CanReadAny(ResourceType.Pipeline))
+                {
+                    <RadzenPanelMenuItem Text="@L["Pipelines"]" Icon="account_tree" Path="@($"projects/{projectId}/pipelines")" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Server))
+                {
+                    <RadzenPanelMenuItem Text="@L["Servers"]" Icon="dns" Path="@($"projects/{projectId}/servers")" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Release))
+                {
+                    <RadzenPanelMenuItem Text="@L["Releases"]" Icon="new_releases" Path="@($"projects/{projectId}/releases")" />
+                }
+                <RadzenPanelMenuItem Text="@L["Artifacts"]" Icon="inventory_2" Path="@($"projects/{projectId}/artifacts")" />
+                <RadzenPanelMenuItem Text="@L["Quality"]" Icon="insights" Path="@($"projects/{projectId}/quality")" />
+                @if (Permissions.CanReadAny(ResourceType.VariableLibrary))
+                {
+                    <RadzenPanelMenuItem Text="@L["Libraries"]" Icon="library_books" Path="@($"projects/{projectId}/libraries")" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Vault))
+                {
+                    <RadzenPanelMenuItem Text="@L["Vaults"]" Icon="lock" Path="@($"projects/{projectId}/vaults")" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Environment))
+                {
+                    <RadzenPanelMenuItem Text="@L["Environments"]" Icon="layers" Path="@($"projects/{projectId}/environments")" />
+                }
+                <RadzenPanelMenuItem Text="@L["Monitoring"]" Icon="monitor_heart" Path="@($"projects/{projectId}/monitoring")" />
+                <RadzenPanelMenuItem Text="@L["Tasks"]" Icon="task_alt" Path="@($"projects/{projectId}/tasks")" />
+                <RadzenPanelMenuItem Text="@L["Logs"]" Icon="article" Path="@($"projects/{projectId}/logs")" />
+                <RadzenPanelMenuItem Text="@L["Git"]" Icon="commit" Path="@($"git-repositories?projectId={projectId}")" />
+                <RadzenPanelMenuItem Text="@L["ExternalRepo"]" Icon="cable" Path="@($"projects/{projectId}/external-repo")" />
+                @if (Permissions.CanWrite(ResourceType.Project, projectId))
+                {
+                    <RadzenPanelMenuItem Text="@L["Edit"]" Icon="settings" Path="@($"projects/{projectId}/edit")" />
+                }
+            }
+            else
+            {
+                @if (Permissions.CanReadAny(ResourceType.Pipeline))
+                {
+                    <RadzenPanelMenuItem Text="@L["Pipelines"]" Icon="account_tree" Path="pipelines" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.PipelineTemplate))
+                {
+                    <RadzenPanelMenuItem Text="@L["PipelineFleet"]" Icon="view_list" Path="pipelines/fleet" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Release))
+                {
+                    <RadzenPanelMenuItem Text="@L["Releases"]" Icon="new_releases" Path="releases" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.VariableLibrary))
+                {
+                    <RadzenPanelMenuItem Text="@L["VariableLibraries"]" Icon="data_object" Path="variable-libraries" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Vault))
+                {
+                    <RadzenPanelMenuItem Text="@L["Vaults"]" Icon="lock" Path="vaults" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.Environment))
+                {
+                    <RadzenPanelMenuItem Text="@L["Environments"]" Icon="layers" Path="environments" />
+                }
+                @if (Permissions.CanReadAny(ResourceType.ServiceConnection))
+                {
+                    <RadzenPanelMenuItem Text="@L["ServiceConnections"]" Icon="hub" Path="service-connections" />
+                }
+            }
+        }
+    </RadzenPanelMenuItem>
+    }
+    @if (Permissions.CanReadAny(ResourceType.Project))
+    {
+        <RadzenPanelMenuItem Text="@L["Backups"]" Icon="backup" Path="backups" />
+    }
+    <RadzenPanelMenuItem Text="@L["Settings"]" Icon="settings" Path="settings" />
+    <RadzenPanelMenuItem Text="@L["HelpCenter"]" Icon="help" Path="help" />
+    @if (Auth.IsAdmin)
+    {
+        <RadzenPanelMenuItem Text="@L["Administration"]" Icon="admin_panel_settings" Path="admin" Expanded="@IsOnSection("admin")" Selected="@IsOnSection("admin")">
+            @if (IsOnSection("admin"))
+            {
+                <RadzenPanelMenuItem Text="@L["Users"]" Icon="group" Path="admin/users" />
+                <RadzenPanelMenuItem Text="@L["Organizations"]" Icon="apartment" Path="admin/organizations" />
+                <RadzenPanelMenuItem Text="@L["Roles"]" Icon="admin_panel_settings" Path="admin/roles" />
+                <RadzenPanelMenuItem Text="@L["AuditLogs"]" Icon="policy" Path="admin/audit" />
+                <RadzenPanelMenuItem Text="@L["NotificationRules"]" Icon="notifications_active" Path="admin/notifications" />
+                <RadzenPanelMenuItem Text="@L["PackageFeeds"]" Icon="inventory" Path="admin/package-feeds" />
+                <RadzenPanelMenuItem Text="@L["SystemLogs"]" Icon="description" Path="admin/system-logs" />
+                <RadzenPanelMenuItem Text="@L["Plugins"]" Icon="extension" Path="admin/plugins" />
+                <RadzenPanelMenuItem Text="@L["Dashboards"]" Icon="space_dashboard" Path="admin/dashboards" />
+                <RadzenPanelMenuItem Text="@L["PlatformSettings"]" Icon="tune" Path="admin/settings" />
+                <RadzenPanelMenuItem Text="@L["ApiReference"]" Icon="api" Path="admin/api-reference" />
+            }
+        </RadzenPanelMenuItem>
+    }
+</RadzenPanelMenu>

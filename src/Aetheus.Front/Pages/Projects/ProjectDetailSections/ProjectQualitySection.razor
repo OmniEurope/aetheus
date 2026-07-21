@@ -1,0 +1,84 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-3">@L["QualityTrend"]</RadzenText>
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+}
+else if (!HasAny)
+{
+    <EmptyState Icon="insights" Title="@L["NoQualityData"]" Description="@L["NoQualityDataDescription"]" />
+}
+else
+{
+    <RadzenRow Gap="1rem">
+        @if (_coverage.Count >= 2)
+        {
+            <RadzenColumn Size="12" SizeLG="6">
+                <RadzenCard>
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["CoverageTrend"]</RadzenText>
+                    <RadzenChart>
+                        <RadzenLineSeries Data="@_coverage" CategoryProperty="Label" ValueProperty="LinePct" Title="@L["LineCoverage"]" Smooth="true">
+                            <RadzenMarkers MarkerType="MarkerType.Circle" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Data="@_coverage" CategoryProperty="Label" ValueProperty="BranchPct" Title="@L["BranchCoverage"]" Smooth="true" />
+                        <RadzenValueAxis Min="0" Max="100" Step="25"><RadzenAxisTitle Text="%" /></RadzenValueAxis>
+                        <RadzenCategoryAxis />
+                        <RadzenLegend Position="LegendPosition.Bottom" />
+                    </RadzenChart>
+                </RadzenCard>
+            </RadzenColumn>
+        }
+        @if (_tests.Count >= 2)
+        {
+            <RadzenColumn Size="12" SizeLG="6">
+                <RadzenCard>
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["TestTrend"]</RadzenText>
+                    <RadzenChart>
+                        <RadzenLineSeries Data="@_tests" CategoryProperty="Label" ValueProperty="Passed" Title="@L["Passed"]" Smooth="true">
+                            <RadzenMarkers MarkerType="MarkerType.Circle" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Data="@_tests" CategoryProperty="Label" ValueProperty="Failed" Title="@L["Failed"]" Smooth="true" />
+                        <RadzenValueAxis /><RadzenCategoryAxis />
+                        <RadzenLegend Position="LegendPosition.Bottom" />
+                    </RadzenChart>
+                </RadzenCard>
+            </RadzenColumn>
+        }
+        @if (_complexity.Count >= 2)
+        {
+            <RadzenColumn Size="12" SizeLG="6">
+                <RadzenCard>
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["ComplexityTrend"]</RadzenText>
+                    <RadzenChart>
+                        <RadzenLineSeries Data="@_complexity" CategoryProperty="Label" ValueProperty="Crap" Title="CRAP" Smooth="true">
+                            <RadzenMarkers MarkerType="MarkerType.Circle" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Data="@_complexity" CategoryProperty="Label" ValueProperty="AvgCc" Title="@L["AvgCyclomatic"]" Smooth="true" />
+                        <RadzenValueAxis /><RadzenCategoryAxis />
+                        <RadzenLegend Position="LegendPosition.Bottom" />
+                    </RadzenChart>
+                </RadzenCard>
+            </RadzenColumn>
+        }
+    </RadzenRow>
+
+    @* Numeric table backing the charts (latest run last). *@
+    <RadzenCard class="rz-mt-4">
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["Runs"]</RadzenText>
+        <RadzenDataGrid Data="@_coverage" TItem="CoveragePoint" Density="Density.Compact"
+            AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+            AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+            <Columns>
+                <RadzenDataGridColumn TItem="CoveragePoint" Property="Label" Title="@L["PipelineRun"]" Width="120px" />
+                <RadzenDataGridColumn TItem="CoveragePoint" Property="LinePct" Title="@L["LineCoverage"]">
+                    <Template Context="p">@p.LinePct %</Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CoveragePoint" Property="BranchPct" Title="@L["BranchCoverage"]">
+                    <Template Context="p">@p.BranchPct %</Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+    </RadzenCard>
+}

@@ -1,0 +1,65 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/users"
+@page "/users"
+
+<PageTitle>@L["Users"] - Aetheus</PageTitle>
+
+<div class="pipeline-list-toolbar">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+        <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["Users"]</RadzenText>
+        <HelpLink PageKey="users" />
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+        <div class="pipeline-list-spacer"></div>
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small"
+            Click="@ResetAndReload" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        <RadzenButton Text="@L["NewUser"]" Icon="person_add" Click="@OnCreate" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap"
+        class="rz-mt-2">
+        <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+        <RadzenTextBox Placeholder="@L["SearchUsers"]" @bind-Value="_search" Change="@ResetAndReload"
+            class="pipeline-list-search" />
+        @if (!string.IsNullOrEmpty(_search))
+        {
+            <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small"
+                Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+    </RadzenStack>
+</div>
+
+<AetheusDataGrid @ref="_grid" Data="@_users" TItem="UserDto"
+    Count="@_totalCount" PageSize="50" IsLoading="@_loading" LoadData="@OnLoadData" Density="Density.Compact"
+    FullHeight="true" RowClick="@(user => Nav.NavigateTo($"/users/{user.Id}"))">
+    <Columns>
+        <RadzenDataGridColumn TItem="UserDto" Property="Username" Title="@L["Username"]" MinWidth="150px">
+            <Template Context="user">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenIcon Icon="person" class="icon-md-app" />
+                    <a href="/users/@user.Id" class="server-name-link" @onclick:stopPropagation="true">@user.Username</a>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="UserDto" Property="Email" Title="@L["Email"]" MinWidth="180px" />
+        <RadzenDataGridColumn TItem="UserDto" Title="@L["Roles"]" Width="200px" Sortable="false">
+            <Template Context="user">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem" Wrap="FlexWrap.Wrap" AlignItems="AlignItems.Center">
+                    @foreach (var role in user.Roles)
+                    {
+                        <RadzenBadge BadgeStyle="@GetRoleBadgeStyle(role)" Text="@role" />
+                    }
+                    <span @onclick:stopPropagation="true">
+                        <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall"
+                            Click="@(() => Nav.NavigateTo($"/users/{user.Id}"))" title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    </span>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="UserDto" Property="IsActive" Title="@L["Active"]" Width="130px">
+            <Template Context="user">
+                <RadzenBadge BadgeStyle="@(user.IsActive ? BadgeStyle.Success : BadgeStyle.Danger)"
+                    Text="@(user.IsActive ? L["Yes"] : L["No"])" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="UserDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" />
+    </Columns>
+</AetheusDataGrid>

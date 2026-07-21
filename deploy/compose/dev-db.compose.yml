@@ -1,0 +1,39 @@
+# =============================================================================
+# dev-db.compose.yml - Aetheus Local DEV PostgreSQL only
+# =============================================================================
+# Runs ONLY the PostgreSQL database, exposed on host port 15432 to avoid clash
+# with other local Postgres instances (e.g. Lexaidos on 5432).
+#
+# Backend + Frontend are run on the host via `dotnet run` (ylaunch.ps1 / ybaunch.sh).
+# They connect to: Host=localhost;Port=15432;Database=aetheus;Username=postgres;Password=postgres
+#
+# Usage:
+#   docker compose -f deploy/compose/dev-db.compose.yml up -d
+#   docker compose -f deploy/compose/dev-db.compose.yml down -v   # wipes data
+# =============================================================================
+
+name: aetheus-local
+
+services:
+  database:
+    container_name: aetheus-local-database
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    ports:
+      # Local-only binding: the convenience development credentials are never exposed on the LAN.
+      - "127.0.0.1:15432:5432"
+    environment:
+      - POSTGRES_DB=aetheus
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - aetheus-local-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aetheus"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  aetheus-local-db-data:

@@ -1,0 +1,34 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.Enums
+
+<RadzenTemplateForm TItem="EditModel" Data="@_model" Submit="@SubmitAsync">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenRow Gap="1rem">
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="@L["Name"]" class="rz-w-100">
+                <RadzenTextBox @bind-Value="_model.Name" />
+            </RadzenFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="@L["Type"]" class="rz-w-100">
+                <RadzenDropDown @bind-Value="_model.FeedType" Data="@_types" TextProperty="Text" ValueProperty="Value" Change="@OnTypeChanged" />
+            </RadzenFormField>
+        </RadzenColumn>
+        <RadzenColumn Size="12">
+            <RadzenFormField Text="@L["UpstreamUrl"]" class="rz-w-100">
+                <RadzenTextBox @bind-Value="_model.UpstreamUrl" />
+            </RadzenFormField>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["PackageFeedUpstreamHint"]</RadzenText>
+            <ValidationMessage For="@(() => _model.UpstreamUrl)" />
+        </RadzenColumn>
+        <RadzenColumn Size="12">
+            <RadzenFormField Text="@L["Description"]" class="rz-w-100">
+                <RadzenTextBox @bind-Value="_model.Description" />
+            </RadzenFormField>
+        </RadzenColumn>
+    </RadzenRow>
+    <DialogFooter OnCancel="@Cancel">
+        <RadzenButton Text="@L["Create"]" Icon="add" ButtonType="ButtonType.Submit" IsBusy="@_busy" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </DialogFooter>
+</RadzenTemplateForm>

@@ -1,0 +1,32 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["CoverageByAssembly"]</RadzenText>
+@if (_loadFailed)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" class="rz-mb-2">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenText>@L["LoadFailed"]</RadzenText>
+            <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@RetryAsync"
+                Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    </RadzenAlert>
+}
+<RadzenDataGrid @ref="_grid" TItem="CoverageAssemblyDto" Data="@_assemblies" Count="@_totalCount"
+    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="true" PageSize="12"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    Density="Density.Compact" class="coverage-file-grid rz-mb-4">
+    <Columns>
+        <RadzenDataGridColumn TItem="CoverageAssemblyDto" Property="Name" Title="@L["Assembly"]" />
+        <RadzenDataGridColumn TItem="CoverageAssemblyDto" Property="LineRate" Title="@L["LineCoverage"]" Width="16rem">
+            <Template Context="assembly">
+                <div class="coverage-file-bar">
+                    <RadzenProgressBar Value="@(assembly.LineRate * 100)" Max="100" ShowValue="false" class="coverage-progress" />
+                    <span class="coverage-file-pct">@FormatPercent(assembly.LineRate)</span>
+                </div>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="CoverageAssemblyDto" Property="LinesValid" Title="@L["Lines"]" Width="9rem">
+            <Template Context="assembly">@assembly.LinesCovered / @assembly.LinesValid</Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>

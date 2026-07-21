@@ -1,0 +1,73 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Verify step: SignalR-driven detection UI. *@
+<RadzenStack Gap="1rem">
+    <p>@L["WizardVerifyDescription"]</p>
+
+    @if (AgentFound)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Success" Variant="Variant.Flat" AllowClose="false">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem" Wrap="FlexWrap.Wrap">
+                <span class="rzi wizard-verify-success-icon">check_circle</span>
+                <strong>@string.Format(L["WizardAgentDetected"].Value, AgentName ?? string.Empty)</strong>
+                @if (DetectedServerId.HasValue)
+                {
+                    <a href="@($"/servers/{DetectedServerId.Value}/overview")">
+                        <RadzenButton Text="@L["ViewServer"]" Icon="open_in_new" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    </a>
+                }
+            </RadzenStack>
+        </RadzenAlert>
+    }
+    else if (Listening)
+    {
+        <RadzenStack Orientation="Orientation.Horizontal"
+                     AlignItems="AlignItems.Center"
+                     Gap="0.75rem"
+                     class="wizard-polling">
+            <RadzenProgressBarCircular Value="@Percent"
+                                       ShowValue="false"
+                                       Mode="ProgressBarMode.Determinate"
+                                       Size="ProgressBarCircularSize.Medium" />
+            <RadzenStack Gap="0.1rem">
+                <span>@L["WizardPolling"]</span>
+                <span class="wizard-polling-countdown">
+                    @string.Format(L["WizardPollingRemaining"].Value, RemainingSeconds, MaxSeconds)
+                </span>
+            </RadzenStack>
+            <RadzenButton Text="@L["WizardCancelCheck"].Value"
+                          Icon="close"
+                          Size="ButtonSize.Small"
+                          Click="@OnCancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    }
+    else if (TimedOut)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" AllowClose="false">
+            @L["WizardVerifyTimeout"]
+        </RadzenAlert>
+        <RadzenButton Text="@L["WizardCheckConnection"].Value"
+                      Icon="refresh"
+                      Click="@OnStart" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    }
+    else
+    {
+        <RadzenButton Text="@L["WizardCheckConnection"].Value"
+                      Icon="refresh"
+                      Click="@OnStart" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    }
+
+    @if (HubError is not null)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" AllowClose="false">
+            @L["WizardHubError"]
+        </RadzenAlert>
+    }
+
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" AllowClose="false">
+        <ol class="wizard-verify-list">
+            <li>@L["WizardVerifyStep1"]</li>
+            <li>@L["WizardVerifyStep2"]</li>
+            <li>@L["WizardVerifyStep3"]</li>
+        </ol>
+    </RadzenAlert>
+</RadzenStack>

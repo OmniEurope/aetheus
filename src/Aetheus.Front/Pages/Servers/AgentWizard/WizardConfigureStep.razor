@@ -1,0 +1,34 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Configure step: token + verify-service code lines. *@
+<RadzenStack Gap="1rem">
+    <p>@L["WizardConfigureDescription"]</p>
+    @if (IsLinux)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" AllowClose="false">
+            <p class="rz-m-0">@L["WizardConfigureLinuxAutomated"]</p>
+        </RadzenAlert>
+        <p class="rz-mb-1">@L["WizardConfigurePromptTokenLabel"]</p>
+        <WizardTokenBlock Token="@Token" />
+        <div class="wizard-code-block">
+            <pre class="wizard-pre"><code>RegistrationToken=<span class="@(IsPlaceholderToken ? "wizard-token-placeholder" : "")">@Token</span></code></pre>
+        </div>
+        <div class="rz-mt-4">
+            <p class="rz-text-body2 rz-font-bold rz-mb-2">@L["WizardConfigureVerifyLabel"]</p>
+            <WizardCodeBlock Code="sudo systemctl start aetheus-agent" InlineLine="true" />
+            <WizardCodeBlock Code="sudo systemctl status aetheus-agent" InlineLine="true" />
+        </div>
+    }
+    else
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" AllowClose="false">
+            <p class="rz-m-0">@L["WizardConfigureWindowsAutomated"]</p>
+        </RadzenAlert>
+        <p class="rz-mb-1">@L["WizardConfigurePromptTokenLabel"]</p>
+        <WizardTokenBlock Token="@Token" />
+        <div class="rz-mt-4">
+            <p class="rz-text-body2 rz-font-bold rz-mb-2">@L["WizardConfigureVerifyLabel"]</p>
+            <WizardCodeBlock Code="Start-Service AetheusAgent" InlineLine="true" />
+            <WizardCodeBlock Code="Get-Service -Name AetheusAgent | Select-Object Status" InlineLine="true" />
+        </div>
+    }
+</RadzenStack>

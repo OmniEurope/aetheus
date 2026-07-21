@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Exceptions;
+using Aetheus.Shared.DTOs;
+using Microsoft.Extensions.Options;
+
+namespace Aetheus.Back.Components.Git;
+
+public sealed class GitBranchProtectionService(
+    IGitLightRepository repository,
+    IGitLightCliService cli,
+    IAuditService audit,
+    IOptions<GitLightOptions> options)
+{
+    private readonly GitLightOptions _options = options.Value;
+
+    public async Task<List<BranchProtectionRuleDto>> GetRulesAsync(
+        int repoId, CancellationToken ct = default)
+    {
+        var rules = await repository.GetBranchProtectionRulesAsync(repoId, ct).ConfigureAwait(false);
+        return rules.Select(GitLightMapper.MapProtectionRuleToDto).ToList();
+    }
+
+    public async Task<BranchProtectionRuleDto> CreateRuleAsync(
+        int repoId, CreateBranchProtectionRuleRequest request, CancellationToken ct = default)
+    {
+        var rule = new BranchProtectionRule
+        {
+            GitInternalRepoId = repoId,
+            Pattern = request.Pattern,
+            PreventDeletion = request.PreventDeletion,
+            PreventForcePush = request.PreventForcePush,
+            RequirePullRequest = request.RequirePullRequest
+        };
+
+        await repository.AddBranchProtectionRuleAsync(rule, ct).ConfigureAwait(false);
+        await audit.LogAsync(
+            "Created", "BranchProtectionRule", rule.Id,
+            $"{request.Pattern} (repo {repoId})", ct).ConfigureAwait(false);
+        await SyncConfigAsync(repoId, ct).ConfigureAwait(false);
+        return GitLightMapper.MapProtectionRuleToDto(rule);
+    }
+
+    public async Task<BranchProtectionRuleDto?> UpdateRuleAsync(
+        int repoId, int ruleId, UpdateBranchProtectionRuleRequest request,
+        CancellationToken ct = default)
+    {
+        var rule = await repository.FindBranchProtectionRuleAsync(ruleId, ct).ConfigureAwait(false);
+        if (rule is null || rule.GitInternalRepoId != repoId) return null;
+
+        rule.PreventDeletion = request.PreventDeletion;
+        rule.PreventForcePush = request.PreventForcePush;
+        rule.RequirePullRequest = request.RequirePullRequest;
+        await repository.SaveChangesAsync(ct).ConfigureAwait(false);
+        await audit.LogAsync(
+            "Updated", "BranchProtectionRule", ruleId, rule.Pattern, ct).ConfigureAwait(false);
+        await SyncConfigAsync(rule.GitInternalRepoId, ct).ConfigureAwait(false);
+        return GitLightMapper.MapProtectionRuleToDto(rule);
+    }
+
+    public async Task<bool> DeleteRuleAsync(int ruleId, CancellationToken ct = default)
+    {
+        var rule = await repository.FindBranchProtectionRuleAsync(ruleId, ct).ConfigureAwait(false);
+        if (rule is null) return false;
+
+        await repository.RemoveBranchProtectionRuleAsync(rule, ct).ConfigureAwait(false);
+        await audit.LogAsync(
+            "Deleted", "BranchProtectionRule", ruleId, rule.Pattern, ct).ConfigureAwait(false);
+        await SyncConfigAsync(rule.GitInternalRepoId, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<bool> IsProtectedAsync(
+        int repoId, string branchName, CancellationToken ct = default)
+    {
+        var rules = await repository.GetBranchProtectionRulesAsync(repoId, ct).ConfigureAwait(false);
+        return rules.Any(rule => GitBranchPatternMatcher.Matches(branchName, rule.Pattern));
+    }
+
+    private async Task SyncConfigAsync(int repoId, CancellationToken ct)
+    {
+        var entity = await repository.FindByIdAsync(repoId, ct).ConfigureAwait(false);
+        if (entity is null) return;
+
+        var diskPath = GitRepoPathResolver.TryResolve(
+            _options.RepositoriesPath, entity.ProjectId, entity.Slug)
+            ?? throw new BadRequestException("Invalid repository path.");
+        var rules = await repository.GetBranchProtectionRulesAsync(repoId, ct).ConfigureAwait(false);
+        var data = rules
+            .Select(rule => (rule.Pattern, rule.PreventDeletion, rule.PreventForcePush))
+            .ToList();
+        await cli.WriteProtectionConfigAsync(diskPath, data, ct).ConfigureAwait(false);
+    }
+}

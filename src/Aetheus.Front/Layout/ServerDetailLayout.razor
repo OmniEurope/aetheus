@@ -1,0 +1,108 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@*  Item #1 of the plan - shared chrome for every server-detail section page.
+
+    Replaces the monolithic ServerDetail.razor that switched 21 sections on `?section=`.
+    Each section page (Overview, Services, Projects, …) sets `@layout ServerDetailLayout`
+    and only renders its own body: the header bar, status badge, and action buttons live
+    here once. (The "Dernière mise à jour" caption moved into the Overview heartbeat tile.)
+
+    The page's `[Parameter] public int Id` flows in through `BodyContext` (a cascading
+    value) so child pages can grab the id without reaching for the route directly. The
+    loader is shared (scoped DI) so all sections see the same `_server` and SignalR
+    heartbeats.
+
+    IMPORTANT: @Body is always rendered (hidden when loading) so child pages can trigger
+    the data load via their OnParametersSetAsync → EnsureLoadedAsync. Gating @Body behind
+    an if-block creates a deadlock: the layout waits for data, but the child (which triggers
+    the load) never mounts. *@
+
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject Aetheus.Front.Services.ServerDetailLoader Loader
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+@inject Microsoft.AspNetCore.Components.NavigationManager Nav
+
+@using Aetheus.Front.Helpers
+@using Aetheus.Front.Pages.Servers
+@using Aetheus.Shared.Enums
+
+<CascadingValue Value="Loader" Name="ServerLoader">
+    @if (Loader.Server is null && !Loader.InitialLoadCompleted)
+    {
+        <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate"
+            Size="ProgressBarCircularSize.Large" />
+    }
+    else if (Loader.Server is null)
+    {
+        <RadzenStack AlignItems="AlignItems.Center" Gap="1rem" class="rz-p-8">
+            <RadzenIcon Icon="error" class="error-state-icon" />
+            <RadzenText TextStyle="TextStyle.H5">@L["ServerNotFound"]</RadzenText>
+            <Aetheus.Front.Shared.BrowserBackButton Text="@L["BackToServers"]" Title="@L["GoBack"]" />
+        </RadzenStack>
+    }
+    else
+    {
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
+            class="rz-mb-4 detail-page-header" Gap="1rem">
+            <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
+            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@Loader.Server.Name</RadzenText>
+            @if (Loader.Server.Status == ServerStatus.Online)
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L.Localize(Loader.Server.Status)" />
+            }
+            else
+            {
+                <span title="@ServerHeartbeatHelper.OfflineReason(L, Loader.Server.LastHeartbeat)">
+                    <RadzenBadge BadgeStyle="@ServerHeartbeatHelper.Severity(Loader.Server.LastHeartbeat)"
+                        Text="@L.Localize(Loader.Server.Status)" />
+                </span>
+            }
+            <div class="flex-spacer"></div>
+            @if (_canWrite)
+            {
+                <RadzenButton Icon="cell_tower" Text="@L["ContactAgent"]" Click="@OpenContactAgentDialog" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Icon="system_update_alt" Text="@L["UpdateAgent"]" Click="@UpdateAgentAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Icon="edit" Text="@L["Edit"]" Click="@OpenEditDialog" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                <RadzenButton Icon="delete" Text="@L["Delete"]" Click="@OnDeleteServer" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+            }
+        </RadzenStack>
+
+        @if (_editVisible)
+        {
+            <RadzenCard class="rz-mb-4 edit-panel">
+                <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["EditServer"]</RadzenText>
+                <RadzenRow Gap="1rem">
+                    <RadzenColumn SizeMD="6" Size="12">
+                        <RadzenStack Gap="0.25rem">
+                            <RadzenLabel Text="@L["Name"]" />
+                            <RadzenTextBox @bind-Value="_editName" MaxLength="100" />
+                        </RadzenStack>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <RadzenStack Gap="0.25rem">
+                            <RadzenLabel Text="@L["Type"]" />
+                            <RadzenDropDown TValue="ServerType" Data="@_serverTypes" @bind-Value="_editType" />
+                        </RadzenStack>
+                    </RadzenColumn>
+                    <RadzenColumn SizeMD="3" Size="6">
+                        <RadzenStack Gap="0.25rem">
+                            <RadzenLabel Text="@L["TagsCommaSeparated"]" />
+                            <RadzenTextBox @bind-Value="_editTags" />
+                        </RadzenStack>
+                    </RadzenColumn>
+                </RadzenRow>
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-3">
+                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveEditAsync" IsBusy="@_editSaving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                    <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@(() => _editVisible = false)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                </RadzenStack>
+            </RadzenCard>
+        }
+
+        <AgentUpdateProgressCard @ref="_agentUpdateProgress" ServerId="Loader.Server.Id" Hub="Loader.Hub"
+            CurrentAgentVersion="@Loader.Server.AgentVersion" OnRetry="@UpdateAgentAsync" />
+    }
+
+    <div class="blade-content" style="@(Loader.Server is null ? "display:none" : null)">
+        @Body
+    </div>
+</CascadingValue>

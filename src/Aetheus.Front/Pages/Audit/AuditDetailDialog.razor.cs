@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
+using Aetheus.Front.Resources;
+using Aetheus.Front.Services;
+using Aetheus.Shared.DTOs;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Localization;
+using Radzen;
+
+namespace Aetheus.Front.Pages.Audit;
+
+public partial class AuditDetailDialog : ComponentBase
+{
+    [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private ClipboardService Clipboard { get; set; } = default!;
+    [Inject] private DialogService Dialog { get; set; } = default!;
+
+    [Parameter] public AuditLogDto Log { get; set; } = default!;
+
+    private bool _verifying = true;
+    private AuditChainVerificationResult? _verification;
+
+    private BadgeStyle ActionBadge => Log.Action switch
+    {
+        "Created" => BadgeStyle.Success,
+        "Updated" => BadgeStyle.Info,
+        "Deleted" => BadgeStyle.Danger,
+        _ => BadgeStyle.Light
+    };
+
+    // Pretty-print JSON details so before/after payloads are readable; fall back to the raw string.
+    private string FormattedDetails
+    {
+        get
+        {
+            var details = Log.Details ?? string.Empty;
+            var trimmed = details.TrimStart();
+            if (trimmed.StartsWith('{') || trimmed.StartsWith('['))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(details);
+                    return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+                }
+                catch (JsonException) { /* not JSON - show as-is */ }
+            }
+            return details;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _verification = await Api.VerifyAuditEntryAsync(Log.Id);
+        }
+        catch (HttpRequestException)
+        {
+            // Honest "unavailable" rather than an optimistic green.
+            _verification = null;
+        }
+        finally
+        {
+            _verifying = false;
+        }
+    }
+
+    private Task CopyAsync() => Clipboard.CopyAsync(Log.Details, L["MessageCopied"]);
+
+    private void Close() => Dialog.Close();
+}

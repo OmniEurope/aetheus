@@ -1,0 +1,11 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/{Id:int}/tasks"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["Tasks"] - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Pages.Servers.ServerDetailSections.ServerTasksSection Server="@Loader.Server" />
+}

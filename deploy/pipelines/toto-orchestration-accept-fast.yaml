@@ -1,0 +1,19 @@
+# =============================================================================
+# toto-orchestration-accept-fast - local fast-release mirror for Toto
+# =============================================================================
+# This is the intentionally short counterpart to toto-orchestration-accept:
+# no CI and no QA, one pinned checkout, Docker Compose health and local readiness.
+# It exists to exercise the Aetheus fast-release execution path against the
+# disposable VPS-sim/accept environment before a production push.
+name: toto-orchestration-accept-fast
+trigger: manual
+
+stages:
+  - name: Deploy
+    os: linux
+    group: Deploy
+    steps:
+      - name: Fast acceptance deploy (toto-accept-deploy-fast)
+        type: trigger
+        pipeline: toto-accept-deploy-fast
+        timeout_seconds: 2400

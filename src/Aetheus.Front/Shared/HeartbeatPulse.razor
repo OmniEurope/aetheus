@@ -1,0 +1,28 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Microsoft.Extensions.Localization
+@using Aetheus.Front.Resources
+@using Aetheus.Shared.DTOs
+@using Aetheus.Shared.Enums
+
+<div class="heartbeat-pulse-card">
+    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-color-secondary">@L["Heartbeat"]</RadzenText>
+    <div class="heartbeat-pulse-body">
+        <div class="heartbeat-pulse @_stateClass" title="@_tooltip" role="img" aria-label="@_ariaLabel">
+            <svg viewBox="0 0 100 100" class="heartbeat-pulse-ring" aria-hidden="true">
+                <circle class="heartbeat-pulse-track" cx="50" cy="50" r="42" />
+                <circle @ref="_progressRef" @key="_beatKey" class="heartbeat-pulse-progress" cx="50" cy="50" r="42"
+                        stroke-dasharray="@_dashArray" stroke-dashoffset="@_dashOffset" />
+            </svg>
+            <div class="heartbeat-pulse-center">
+                <span class="heartbeat-pulse-duration">@_centerText</span>
+                <span class="heartbeat-pulse-state">@_stateLabel</span>
+            </div>
+        </div>
+        @if (LastUpdated.HasValue)
+        {
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">
+                @L["LastUpdated", LastUpdated.Value.ToString("T")]
+            </RadzenText>
+        }
+    </div>
+</div>

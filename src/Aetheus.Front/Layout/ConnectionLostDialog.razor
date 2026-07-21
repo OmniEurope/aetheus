@@ -1,0 +1,31 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Front.Resources
+@inject IStringLocalizer<AppStrings> L
+
+@if (Visible)
+{
+    <div class="rz-dialog-mask connection-lost-mask" role="alertdialog" aria-modal="true"
+         aria-labelledby="connection-lost-title" aria-describedby="connection-lost-description">
+        <RadzenCard class="connection-lost-card">
+            <RadzenIcon Icon="cloud_off" class="connection-lost-icon" />
+            <RadzenText id="connection-lost-title" TextStyle="TextStyle.H5" class="rz-mt-3 rz-mb-2">@L["ConnectionLost"]</RadzenText>
+            <RadzenText id="connection-lost-description" TextStyle="TextStyle.Body2" class="rz-color-secondary">
+                @L["ConnectionLostDescription"]
+            </RadzenText>
+            @if (ReconnectCountdown > 0)
+            {
+                <RadzenText TextStyle="TextStyle.Body2" class="rz-mt-2">
+                    @(string.Format(L["ReconnectIn"], ReconnectCountdown))
+                </RadzenText>
+            }
+            <RadzenStack AlignItems="AlignItems.Center" class="rz-mt-4" Gap="0.75rem">
+                @if (!ManualReconnecting)
+                {
+                    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+                }
+                <RadzenButton Text="@L["ManualReconnect"]" Icon="refresh" Size="ButtonSize.Small" Click="@OnManualReconnect"
+                              IsBusy="@ManualReconnecting" Disabled="@ManualReconnecting" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            </RadzenStack>
+        </RadzenCard>
+    </div>
+}

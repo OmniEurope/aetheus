@@ -1,0 +1,20 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.Enums
+
+<RadzenStack Gap="0.5rem">
+    <RadzenStack Gap="0.25rem">
+        <RadzenLabel Text="@L["TargetType"]" />
+        <RadzenDropDown TValue="ModuleLinkType" Data="@TargetTypes" @bind-Value="_targetType" />
+    </RadzenStack>
+    <RadzenStack Gap="0.25rem">
+        <RadzenLabel Text="@L["TargetIdentifier"]" />
+        <RadzenTextBox @bind-Value="_targetIdentifier" Placeholder="@L["ResourceName"]" />
+    </RadzenStack>
+    <RadzenStack Gap="0.25rem">
+        <RadzenLabel Text="@L["SourceResource"]" />
+        <RadzenDropDown TValue="string" Data="@Resources" @bind-Value="_sourceIdentifier" />
+    </RadzenStack>
+    <Aetheus.Front.Shared.DialogFooter OnCancel="@(() => Dialog.Close())">
+        <RadzenButton Text="@L["Add"]" Icon="add" Click="@Save" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </Aetheus.Front.Shared.DialogFooter>
+</RadzenStack>

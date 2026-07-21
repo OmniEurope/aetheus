@@ -1,0 +1,66 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Front.Helpers
+
+@if (Items.Count == 0)
+{
+    <EmptyState Icon="hourglass_empty" Title="@L[EmptyTitleKey]" Description="@L[EmptyDescriptionKey]" />
+}
+else
+{
+    <RadzenDataGrid Data="@DisplayItems" TItem="PipelineRunTableItem" Density="Density.Compact"
+        AllowPaging="@(!Virtualize && !FillHeight)" PageSize="@PageSize" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+        AllowVirtualization="@Virtualize" VirtualizationOverscanCount="3"
+        RowClick="@OnRowClick" class="@GridCssClass">
+        <Columns>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Property="ProjectName" Title="@L["Project"]" Width="10rem"
+                Visible="@GroupByProject" CssClass="pipeline-project-column" HeaderCssClass="pipeline-project-column">
+                <Template Context="run">
+                    <span class="pipeline-project-context"><RadzenIcon Icon="folder" /> @(run.ProjectName ?? L["Unassigned"])</span>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Property="RunId" Title="#" Width="4.5rem">
+                <Template Context="run">
+                    <a href="@RunHref(run)" @onclick:stopPropagation="true">#@run.RunId</a>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Property="PipelineName" Title="@L["Pipeline"]" MinWidth="10rem">
+                <Template Context="run">
+                    <a href="@PipelineHref(run)" class="pipeline-name-link" @onclick:stopPropagation="true">@run.PipelineName</a>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Property="Status" Title="@L["Status"]" Width="7rem"
+                CssClass="pipeline-secondary-column" HeaderCssClass="pipeline-secondary-column">
+                <Template Context="run"><RadzenBadge BadgeStyle="@PipelineHelper.GetRunBadge(run.Status)" Text="@L.Localize(run.Status)" /></Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Title="@L["CurrentStep"]" MinWidth="11rem" Sortable="false">
+                <Template Context="run">
+                    @if (!string.IsNullOrWhiteSpace(run.CurrentStep))
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.4rem">
+                            <div class="run-tl-dot run-timeline-dot-running"><span class="run-timeline-pulse"></span></div>
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@run.CurrentStep</RadzenText>
+                        </RadzenStack>
+                    }
+                    else
+                    {
+                        <span class="rz-color-secondary">-</span>
+                    }
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Title="@L["Server"]" Width="9rem" Sortable="false"
+                CssClass="pipeline-secondary-column" HeaderCssClass="pipeline-secondary-column">
+                <Template Context="run">
+                    @if (run.ServerName is not null)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                            <RadzenIcon Icon="@(IsWindows(run.ServerOs) ? "desktop_windows" : "computer")" />
+                            <span>@run.ServerName</span>
+                        </RadzenStack>
+                    }
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineRunTableItem" Property="StartedAt" Title="@L["Started"]" FormatString="{0:g}" Width="9rem"
+                CssClass="pipeline-secondary-column" HeaderCssClass="pipeline-secondary-column" />
+        </Columns>
+    </RadzenDataGrid>
+}

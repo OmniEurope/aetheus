@@ -1,0 +1,113 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (IsGlobal)
+{
+    <div class="pipeline-list-toolbar">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["Pipelines"]</RadzenText>
+            <HelpLink PageKey="pipelines" />
+            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
+            <div class="pipeline-list-spacer"></div>
+            <RadzenButton Icon="refresh" Size="ButtonSize.Small" Click="@ReloadGrid" aria-label="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            <RadzenButton Text="@L["Import"]" Icon="upload_file" Click="@OnImportPipelineClick" Disabled="@(!_canWrite)"
+                title="@(!_canWrite ? L["InsufficientPermissions"] : L["ImportPipelineFromYaml"])" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            <InputFile @ref="_pipelineFileInput" OnChange="@OnPipelineFileSelected" class="input-file-hidden" accept=".yaml,.yml" />
+            <RadzenButton Text="@L["NewPipeline"]" Icon="add" Click="@NewPipeline"
+                aria-label="@L["NewPipeline"]" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenStack>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap" class="rz-mt-2">
+            <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+            <RadzenTextBox Placeholder="@L["SearchPipelines"]" @bind-Value="_search" Change="@ApplyFilters" class="pipeline-list-search" />
+            <RadzenDropDown TValue="PipelineTriggerType?" Data="@_triggerOptions" TextProperty="Text" ValueProperty="Value"
+                Placeholder="@L["AllTriggers"]" AllowClear="true" @bind-Value="_triggerFilter" Change="@(_ => ApplyFilters())" />
+            @if (_triggerFilter.HasValue || !string.IsNullOrEmpty(_search))
+            {
+                <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small" Click="@ClearFilters" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            }
+        </RadzenStack>
+    </div>
+}
+
+@if (_loading)
+{
+    <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" aria-label="@L["Loading"]" />
+}
+else if (IsServerScope)
+{
+    <AetheusDataGrid @ref="_grid" TItem="PipelineDependencyDto" Data="@_dependencyPage" Count="@_totalCount"
+        IsLoading="@_loading" LoadData="@OnLoadData" RowClick="@(pipeline => NavigateToPipeline(pipeline.Id))"
+        class="pipeline-dependency-grid">
+        <EmptyTemplate><EmptyState Icon="account_tree" Title="@L["NoPipelinesFound"]" Description="@L["EmptyPipelinesHint"]" /></EmptyTemplate>
+        <Columns>
+            <RadzenDataGridColumn TItem="PipelineDependencyDto" Property="Name" Title="@L["Pipeline"]">
+                <Template Context="pipeline"><a href="@PipelineHref(pipeline.Id)" class="pipeline-name-link" @onclick:stopPropagation="true">@pipeline.Name</a></Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineDependencyDto" Title="@L["RecentRunsColumn"]" Width="6rem" Sortable="false">
+                <Template Context="pipeline">
+                    <PipelineRunHistory Runs="@pipeline.RecentRuns" ProjectId="@pipeline.ProjectId" ServerId="@ServerId" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineDependencyDto" Property="TriggerType" Title="@L["Trigger"]" Width="10rem">
+                <Template Context="pipeline">@L.Localize(pipeline.TriggerType)</Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PipelineDependencyDto" Title="" Width="13rem" Sortable="false" TextAlign="TextAlign.Right">
+                <Template Context="pipeline">
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.35rem" JustifyContent="JustifyContent.End" @onclick:stopPropagation="true">
+                        <RadzenButton Text="@L["Edit"]" Icon="edit" Size="ButtonSize.Small" Click="@(() => EditPipeline(pipeline.Id))" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                        <RadzenSplitButton Text="@L["Run"]" Icon="play_arrow" Size="ButtonSize.Small" Click="@(item => RunPipelineClick(pipeline.Id, item))"
+                            Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled">
+                            <RadzenSplitButtonItem Text="@L["ChooseBranch"]" Value="branch" Icon="account_tree" />
+                        </RadzenSplitButton>
+                    </RadzenStack>
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+}
+else
+{
+    <div class="pipeline-overview-layout @(IsGlobal ? "pipeline-overview-global" : "pipeline-overview-project")">
+        @if (FilteredParents.Count > 0)
+        {
+            <section class="pipeline-overview-section pipeline-overview-section-fixed">
+                <RadzenText TextStyle="TextStyle.H5" class="pipeline-section-title">
+                    <RadzenIcon Icon="account_tree" /> @L["PipelinesWithChildren"]
+                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@FilteredParents.Count.ToString()" />
+                </RadzenText>
+                <div class="pipeline-section-grid">
+                    <PipelineDependencyGrid Items="@FilteredParents" PipelineHref="@PipelineHref" RunPipeline="@RunPipelineClick"
+                        ShowsChildren="true" GroupByProject="@IsGlobal" Virtualize="true" CanWrite="@_canWrite" />
+                </div>
+            </section>
+        }
+
+        <section class="pipeline-overview-section pipeline-overview-section-fixed">
+            <RadzenText TextStyle="TextStyle.H5" class="pipeline-section-title">
+                <RadzenIcon Icon="linear_scale" /> @L["PipelinesWithoutChildren"]
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@FilteredLeaves.Count.ToString()" />
+            </RadzenText>
+            <div class="pipeline-section-grid">
+                @if (FilteredLeaves.Count == 0)
+                {
+                    <EmptyState Icon="account_tree" Title="@L["NoPipelinesFound"]" Description="@L["EmptyPipelinesHint"]" />
+                }
+                else
+                {
+                    <PipelineDependencyGrid Items="@FilteredLeaves" PipelineHref="@PipelineHref" RunPipeline="@RunPipelineClick"
+                        ShowsChildren="false" GroupByProject="@IsGlobal" Virtualize="true" CanWrite="@_canWrite" />
+                }
+            </div>
+        </section>
+
+        <section class="pipeline-overview-section pipeline-overview-section-recent">
+            <RadzenText TextStyle="TextStyle.H5" class="pipeline-section-title">
+                <RadzenIcon Icon="history" /> @L["RecentRuns"]
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_recentRuns.Count.ToString()" />
+            </RadzenText>
+            <div class="pipeline-section-grid">
+                <PipelineRunsGrid Items="@_recentRuns" GroupByProject="@IsGlobal" FillHeight="true" Virtualize="true"
+                    EmptyTitleKey="NoRecentRuns" EmptyDescriptionKey="NoRecentRuns" />
+            </div>
+        </section>
+    </div>
+}

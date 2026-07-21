@@ -1,0 +1,108 @@
+name: ci-gittoto
+trigger: webhook
+variable_libraries:
+  - deploy-config
+vaults:
+  - ci-secrets
+stages:
+  # ── Build ──
+  - name: Build
+    group: Build
+    os: linux
+    steps:
+      - name: Compile Solution
+        shell: dotnet build $(WORKSPACE)/Aetheus.slnx --configuration Release --nologo -v q
+        working_directory: $(WORKSPACE)
+        timeout_seconds: 300
+
+  - name: Tests
+    group: Build
+    os: linux
+    depends_on:
+      - Build
+    steps:
+      - name: Run All Tests
+        shell: >-
+          dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed" &&
+          dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed" &&
+          dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+        timeout_seconds: 300
+
+  - name: Coverage
+    group: Build
+    os: linux
+    depends_on:
+      - Tests
+    steps:
+      - name: Collect Coverage
+        shell: >-
+          dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage &&
+          dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage &&
+          dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage
+        timeout_seconds: 300
+
+  - name: Publish
+    group: Build
+    os: linux
+    depends_on:
+      - Coverage
+    artifacts:
+      - $(WORKSPACE)/publish/back
+    steps:
+      - name: Publish Back
+        shell: dotnet publish $(WORKSPACE)/src/Aetheus.Back -c Release -o $(WORKSPACE)/publish/back --nologo -v q
+        timeout_seconds: 120
+
+  - name: Release
+    group: Build
+    os: linux
+    depends_on:
+      - Publish
+    steps:
+      - name: Create Release
+        type: release
+        version: "1.0.$(BUILD_BUILDID)"
+        changelog: true
+
+  # ── Deploy ──
+  - name: Substitute
+    group: Deploy
+    os: linux
+    depends_on:
+      - Release
+    steps:
+      - name: Variable Substitution
+        type: substitute
+        target_files:
+          - $(WORKSPACE)/publish/back/appsettings.json
+
+  - name: Deploy
+    group: Deploy
+    os: linux
+    depends_on:
+      - Substitute
+    steps:
+      - name: Upload via SCP
+        shell: |
+          set -eu
+          KNOWN="$WORKSPACE/.ssh-known-hosts"; printf '%s\n' "$(TARGET_SSH_HOST_KEY)" > "$KNOWN"; chmod 600 "$KNOWN"
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN -o LogLevel=ERROR -p $(TARGET_SSH_PORT)"
+          SCP="sshpass -e scp -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN -o LogLevel=ERROR -P $(TARGET_SSH_PORT)"
+          INCOMING="$(TARGET_DIR).incoming.$(BUILD_BUILDID)"
+          $SSH $(TARGET_USER)@$(TARGET_HOST) "rm -rf '$INCOMING' && mkdir -p '$INCOMING'"
+          $SCP -r $(WORKSPACE)/publish/back/* $(TARGET_USER)@$(TARGET_HOST):"$INCOMING/"
+          $SSH $(TARGET_USER)@$(TARGET_HOST) sh -s -- "$(TARGET_DIR)" "$INCOMING" <<'REMOTE'
+          set -eu
+          CURRENT="$1"; INCOMING="$2"; BACKUP="${CURRENT}.previous"
+          test -s "$INCOMING/Aetheus.Back.dll"
+          rm -rf "$BACKUP"
+          [ ! -d "$CURRENT" ] || mv "$CURRENT" "$BACKUP"
+          if ! mv "$INCOMING" "$CURRENT" || ! sudo systemctl restart aetheus-back \
+             || ! curl -fsS --retry 20 --retry-delay 2 http://127.0.0.1:8080/health/ready >/dev/null; then
+            rm -rf "$CURRENT"; [ ! -d "$BACKUP" ] || mv "$BACKUP" "$CURRENT"
+            sudo systemctl restart aetheus-back || true
+            echo "Deploy failed readiness; previous release restored." >&2; exit 1
+          fi
+          rm -rf "$BACKUP"
+          REMOTE
+        timeout_seconds: 180

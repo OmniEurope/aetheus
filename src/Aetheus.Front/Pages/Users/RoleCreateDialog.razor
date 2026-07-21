@@ -1,0 +1,31 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<EditForm Model="_model" OnValidSubmit="OnSubmit">
+    <LocalizedDataAnnotationsValidator />
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Text="@L["Name"]">
+            <ChildContent>
+                <RadzenTextBox @bind-Value="_model.Name" MaxLength="50" aria-label="@L["Name"]" />
+            </ChildContent>
+            <Helper>
+                <ValidationMessage For="@(() => _model.Name)" />
+            </Helper>
+        </RadzenFormField>
+        <RadzenFormField Text="@L["Description"]">
+            <ChildContent>
+                <RadzenTextArea @bind-Value="_model.Description" MaxLength="200" Rows="3" aria-label="@L["Description"]" />
+            </ChildContent>
+        </RadzenFormField>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" ShowIcon="true">@_error</RadzenAlert>
+        }
+
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End" class="rz-mt-2">
+            <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Create"]"
+                          Icon="add" IsBusy="@_saving" BusyText="@L["Saving"]" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenStack>
+    </RadzenStack>
+</EditForm>

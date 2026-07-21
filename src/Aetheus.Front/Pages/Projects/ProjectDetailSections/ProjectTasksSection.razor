@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_result is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Tasks"]</RadzenText>
+    <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search" Change="@OnSearchChangedAsync"
+        class="pipeline-list-search rz-mb-2" />
+    <AetheusDataGrid @ref="_grid" Data="@_result.Items" TItem="ServerTaskDto"
+        Count="@_result.TotalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
+        PageSize="25" EmptyText="@L["NoRecords"]">
+        <Columns>
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="Name" Title="@L["Task"]" />
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="ServerName" Title="@L["Server"]" Width="150px" />
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="120px">
+                <Template Context="task">
+                    <RadzenBadge Text="@L[task.Status.ToString()]" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" />
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="ExitCode" Title="@L["Exit"]" Width="80px" />
+        </Columns>
+    </AetheusDataGrid>
+}

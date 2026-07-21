@@ -1,0 +1,136 @@
+# =============================================================================
+# remote-bluegreen.compose.yml - Aetheus blue-green self-deploy (prod)
+# =============================================================================
+# One project (aetheus-prod), ONE shared database + two app colors (blue/green).
+# The database and the named volumes (db-data/git-repos/dp-keys/artifacts) are
+# SHARED across colors, so the DB, the migrated internal git mirror, the data-
+# protection keys and artifacts are preserved on every colour switch.
+#
+# Colours are Compose PROFILES: `--profile blue up` brings up the database (no
+# profile -> always started) + back-blue + front-blue only, leaving the live
+# colour untouched. deploy-prod deploys the IDLE colour, readiness-checks it, flips
+# the Apache upstream, then stops the OLD colour.
+#
+# Ports (host side, distinct per colour so both can run during the overlap):
+#   blue : front 10025 / back 10026     green : front 10027 / back 10028
+# QA keeps using remote.compose.yml (single front/back) - do NOT merge the two.
+services:
+
+  database:
+    container_name: ${APPNAME}-${ENV}-database
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      - POSTGRES_DB=${APPNAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${APPNAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+    restart: unless-stopped
+
+  back-blue:
+    <<: &back-common
+      image: ${AETHEUS_BACK_IMAGE:-aetheus-back:local}
+      build:
+        context: ../..
+        dockerfile: deploy/docker/Dockerfile.back
+        args:
+          - APP_VERSION=${APP_VERSION}
+          - BUILD_AGENTS=${BUILD_AGENTS:-1}
+      environment:
+        - ASPNETCORE_ENVIRONMENT=Production
+        - DataProtection__KeyPath=/app/data/dp-keys
+        - Database__SkipMigrations=true
+        - AETHEUS_RUN_MIGRATIONS=false
+        - ConnectionStrings__Default=Host=${APPNAME}-${ENV}-database;Port=5432;Database=${APPNAME};Username=${DB_USER};Password=${DB_PASSWORD}
+        - Auth__JwtKey=${JWT_KEY}
+        - Auth__AdminPassword=${ADMIN_PASSWORD}
+        - Auth__EncryptionKey=${ENCRYPTION_KEY}
+        - Auth__EncryptionSalt=${ENCRYPTION_SALT}
+        - Cors__Origins__0=${FRONT_URL}
+        - Cors__Origins__1=${FRONT_URL_ACCEPT}
+        - Cors__Origins__2=${FRONT_URL_PROD}
+        - App__Version=${APP_VERSION}
+        - Aetheus__PublicApiBaseUrl=${API_BASE_URL}
+        - ArtifactStorage__ProjectQuotaBytes=${ARTIFACT_PROJECT_QUOTA_BYTES:-21474836480}
+        - RateLimiting__Disabled=${RATE_LIMITING_DISABLED:-false}
+      volumes:
+        - git-repos:/app/data/git-repos
+        - dp-keys:/app/data/dp-keys
+        - artifacts:/app/data/artifacts
+      depends_on:
+        database:
+          condition: service_healthy
+      healthcheck:
+        # Readiness includes PostgreSQL. Liveness alone can stay green while the shared database is stopped.
+        test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health/ready"]
+        interval: 30s
+        timeout: 5s
+        retries: 3
+        start_period: 120s
+      mem_limit: ${BACK_MEM_LIMIT:-1g}
+      networks:
+        - default
+        - backend
+      restart: unless-stopped
+    container_name: ${APPNAME}-${ENV}-blue-back
+    ports:
+      - "127.0.0.1:${PORT_BACK_BLUE:-10026}:8080"
+    profiles: ["blue"]
+
+  back-green:
+    <<: *back-common
+    container_name: ${APPNAME}-${ENV}-green-back
+    ports:
+      - "127.0.0.1:${PORT_BACK_GREEN:-10028}:8080"
+    profiles: ["green"]
+
+  front-blue:
+    <<: &front-common
+      image: ${AETHEUS_FRONT_IMAGE:-aetheus-front:local}
+      build:
+        context: ../..
+        dockerfile: deploy/docker/Dockerfile.front
+      environment:
+        - API_BASE_URL=${API_BASE_URL}
+        - APP_VERSION=${APP_VERSION}
+      mem_limit: ${FRONT_MEM_LIMIT:-256m}
+      restart: unless-stopped
+    container_name: ${APPNAME}-${ENV}-blue-front
+    ports:
+      - "127.0.0.1:${PORT_FRONT_BLUE:-10025}:8080"
+    depends_on:
+      back-blue:
+        condition: service_healthy
+    profiles: ["blue"]
+
+  front-green:
+    <<: *front-common
+    container_name: ${APPNAME}-${ENV}-green-front
+    ports:
+      - "127.0.0.1:${PORT_FRONT_GREEN:-10027}:8080"
+    depends_on:
+      back-green:
+        condition: service_healthy
+    profiles: ["green"]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  db-data:
+    name: ${APPNAME}-${ENV}-db-data
+  git-repos:
+    name: ${APPNAME}-${ENV}-git-repos
+  dp-keys:
+    name: ${APPNAME}-${ENV}-dp-keys
+  artifacts:
+    name: ${APPNAME}-${ENV}-artifacts

@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Aetheus.Back.Components.Vaults;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class VaultsController(IVaultService service, IResourceAuthorizationService authz) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<PaginatedResult<VaultDto>>> GetVaults(
+        [FromQuery] int? projectId, [FromQuery] int? environmentId, [FromQuery] int? projectServerId,
+        [FromQuery] PaginationRequest request, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Vault, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<VaultDto>());
+        return Ok(await service.GetVaultsAsync(projectId, environmentId, projectServerId, request, accessibleIds, ct));
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<VaultDetailDto>> GetVault(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Read, ct))
+            return Forbid();
+
+        var vault = await service.GetVaultDetailAsync(id, ct);
+        if (vault is null) return NotFound();
+        return Ok(vault);
+    }
+
+    [HttpGet("names")]
+    public async Task<ActionResult<List<string>>> GetVaultNames([FromQuery] int? projectId, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Vault, Permission.Read, ct);
+        return Ok(await service.GetVaultNamesAsync(projectId, accessibleIds, ct));
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<VaultDto>> CreateVault([FromBody] CreateVaultRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, null, Permission.Write, ct))
+            return Forbid();
+
+        var vault = await service.CreateVaultAsync(request, ct);
+        return CreatedAtAction(nameof(GetVault), new { id = vault.Id }, vault);
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<VaultDto>> UpdateVault(int id, [FromBody] UpdateVaultRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        var vault = await service.UpdateVaultAsync(id, request, ct);
+        if (vault is null) return NotFound();
+        return Ok(vault);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeleteVault(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Admin, ct))
+            return Forbid();
+
+        var deleted = await service.DeleteVaultAsync(id, ct);
+        if (!deleted) return NotFound();
+        return NoContent();
+    }
+
+    [HttpPost("{id:int}/secrets")]
+    public async Task<ActionResult<VaultSecretDto>> CreateSecret(int id, [FromBody] CreateVaultSecretRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        var secret = await service.CreateSecretAsync(id, request, ct);
+        return Created($"api/vaults/{id}/secrets/{secret.Id}", secret);
+    }
+
+    [HttpPut("{id:int}/secrets/{secretId:int}")]
+    public async Task<ActionResult<VaultSecretDto>> UpdateSecret(int id, int secretId, [FromBody] UpdateVaultSecretRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        var secret = await service.UpdateSecretAsync(id, secretId, request, ct);
+        if (secret is null) return NotFound();
+        return Ok(secret);
+    }
+
+    [HttpPost("{id:int}/secrets/{secretId:int}/rotate")]
+    public async Task<ActionResult<VaultSecretDto>> RotateSecret(int id, int secretId, [FromBody] RotateVaultSecretRequest request, CancellationToken ct)
+    {
+        // Rotation == new value + new versioned audit entry tagged Rotated. Same RBAC as Write.
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        var secret = await service.RotateSecretAsync(id, secretId, request, ct);
+        if (secret is null) return NotFound();
+        return Ok(secret);
+    }
+
+    [HttpDelete("{id:int}/secrets/{secretId:int}")]
+    public async Task<IActionResult> DeleteSecret(int id, int secretId, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        var deleted = await service.DeleteSecretAsync(id, secretId, ct);
+        if (!deleted) return NotFound();
+        return NoContent();
+    }
+
+    [HttpGet("{id:int}/secrets/{secretId:int}/versions")]
+    public async Task<ActionResult<List<VaultSecretVersionDto>>> GetSecretVersions(int id, int secretId, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await service.GetSecretVersionsAsync(id, secretId, ct));
+    }
+
+    [HttpGet("{id:int}/export-keys")]
+    public async Task<ActionResult<List<string>>> ExportSecretKeys(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await service.ExportSecretKeysAsync(id, ct));
+    }
+
+    [HttpPost("{id:int}/import")]
+    public async Task<ActionResult<ImportResultDto>> ImportSecrets(int id, [FromBody] List<CreateVaultSecretRequest> secrets, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        // Hardening (#17): cap bulk import to prevent DoS via outsized payloads.
+        const int maxImportEntries = 200;
+        if (secrets is null || secrets.Count == 0)
+            return BadRequest(new { error = "Empty", message = "No secrets supplied." });
+        if (secrets.Count > maxImportEntries)
+            return BadRequest(new { error = "TooMany", message = $"At most {maxImportEntries} secrets per import." });
+
+        var count = await service.ImportSecretsAsync(id, secrets, ct);
+        return Ok(new ImportResultDto { ImportedCount = count });
+    }
+}

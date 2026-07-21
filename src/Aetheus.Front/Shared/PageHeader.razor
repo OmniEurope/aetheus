@@ -1,0 +1,37 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Shared
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+@*
+    C / F-06: shared page header. One consistent title row across pages - optional back button,
+    section icon, title (+ inline badges/help via ChildContent), a spacer, then right-aligned
+    Actions. Pages stop hand-rolling RadzenStack header markup; the look stays uniform.
+*@
+<div class="page-header @Class">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+        @if (!string.IsNullOrWhiteSpace(BackHref))
+        {
+            <BrowserBackButton Size="ButtonSize.Small" Title="@L["GoBack"]" />
+        }
+        @if (!string.IsNullOrWhiteSpace(Icon))
+        {
+            <RadzenIcon Icon="@Icon" class="rz-color-primary page-header-icon" />
+        }
+        <RadzenText TextStyle="@TitleStyle" class="rz-m-0">@Title</RadzenText>
+        @ChildContent
+        @if (Actions is not null)
+        {
+            <div class="page-header-spacer"></div>
+            <div class="page-header-actions">
+                @Actions
+            </div>
+        }
+    </RadzenStack>
+    @if (Filters is not null)
+    {
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"
+            Wrap="FlexWrap.Wrap" class="rz-mt-2">
+            @Filters
+        </RadzenStack>
+    }
+</div>

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aetheus</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="_content/Radzen.Blazor/css/material-dark-base.css?v=11.1.6" id="radzen-theme" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/svg+xml" href="aetheus-icon.svg" />
+    <script type="importmap"></script>
+    <script>
+        (function() {
+            var t = localStorage.getItem('aetheus_theme');
+            if (t === 'light') {
+                var link = document.getElementById('radzen-theme');
+                if (link) link.href = '_content/Radzen.Blazor/css/material-base.css?v=11.1.6';
+            }
+            // Align <html lang> with the effective boot culture: the saved preference if any,
+            // otherwise the browser's own language (which is what Blazor.start falls back to).
+            // Without this, a French-browser user with no saved preference kept lang="en",
+            // mislabelling the document for screen readers and SEO.
+            var lang = localStorage.getItem('aetheus_lang') || navigator.language || 'en';
+            if (lang) document.documentElement.lang = lang.substring(0, 2);
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app"></div>
+
+    <!-- Boot splash lives OUTSIDE #app so Blazor's first render into #app never replaces it:
+         the same DOM node animates continuously from first paint until JS fades it out
+         (Aetheus.hideSplash) once the app is ready - no node-swap animation flash.
+         The plane svg is INLINED (not an <img>) so its internal loops can be held paused on the
+         neutral start frame during the WASM boot (which stalls the main thread and would otherwise
+         stutter the animation); JS removes `is-paused` once the runtime is up, and the loop begins
+         exactly where the static frame sat - no size/position/tilt jump. -->
+    <div id="app-splash" class="app-splash is-paused">
+        <svg class="app-splash-logo" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+            <style>
+                @keyframes p-bob { 0%,100% { transform: translate(0,0); } 50% { transform: translate(4px,-4px); } }
+                /* Reordered vs. the old standalone svg so 0% (the paused start frame) is the NEUTRAL
+                   resting pose; the loop keeps the same range/character, only its phase shifts. */
+                @keyframes p-drift { 0%,50%,100% { transform: translate(0,0); } 25% { transform: translate(2.5px,2.5px); } 75% { transform: translate(-2.5px,-2.5px); } }
+                @keyframes p-roll {
+                    0%, 50%, 100% { transform: rotate(0deg) scaleX(1) skewY(0deg); }
+                    25%           { transform: rotate(3deg) scaleX(0.55) skewY(9deg); }
+                    75%           { transform: rotate(-3deg) scaleX(0.55) skewY(-9deg); }
+                }
+                @keyframes p-flow { to { stroke-dashoffset: -24; } }
+                .p-ship { animation: p-bob 3.4s ease-in-out infinite; }
+                .p-drift { animation: p-drift 4.4s ease-in-out infinite; }
+                .p-roll { animation: p-roll 5.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+                .p-jet { stroke-dasharray: 8 16; animation: p-flow 1.1s linear infinite; }
+                .app-splash.is-paused .p-ship,
+                .app-splash.is-paused .p-drift,
+                .app-splash.is-paused .p-roll,
+                .app-splash.is-paused .p-jet { animation-play-state: paused; }
+                @media (prefers-reduced-motion: reduce) {
+                    .p-ship, .p-drift, .p-roll, .p-jet { animation: none; }
+                }
+            </style>
+            <g class="p-ship">
+                <g class="p-drift">
+                    <g transform="translate(80,80) scale(0.92) translate(-80,-80)">
+                        <g transform="translate(102,58) rotate(45)">
+                            <g class="p-roll">
+                                <path d="M0,-69 L62,69 L0,22 L-62,69 Z" fill="#1D4ED8"/>
+                                <path d="M0,-44 L0,14" stroke="#93C5FD" stroke-width="5" stroke-linecap="round" fill="none"/>
+                                <g stroke="#60A5FA" stroke-width="5" stroke-linecap="round" fill="none">
+                                    <line class="p-jet" x1="0" y1="36" x2="0" y2="100"/>
+                                    <line class="p-jet" style="animation-delay:-0.35s" x1="-31" y1="48" x2="-44" y2="88"/>
+                                    <line class="p-jet" style="animation-delay:-0.7s" x1="31" y1="48" x2="44" y2="88"/>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_content/Radzen.Blazor/Radzen.Blazor.js?v=11.1.6"></script>
+    <!-- Cache-bust the hand-written scripts: they are NOT fingerprinted like the WASM assets, so a
+         changed layout.js would otherwise stay stale in the browser (a new function like
+         Aetheus.scrollToBottom would be "undefined" and its buttons silently no-op). Bump ?v= on any
+         edit to these files. -->
+    <script src="js/layout.js?v=3"></script>
+    <script src="js/button-stable-width.js?v=2"></script>
+    <script src="js/docker-interop.js?v=2"></script>
+    <script src="js/monaco-yaml.js?v=2"></script>
+    <script src="lib/dagre/dagre.min.js"></script>
+    <script src="js/visual-pipeline.js?v=2"></script>
+    <script src="js/a11y-radzen.js?v=3"></script>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js" autostart="false"></script>
+    <script>
+        // Boot the runtime with the saved UI culture so its satellite resource assembly
+        // (e.g. fr-FR/Aetheus.Front.resources) is downloaded AT BOOT. Setting the culture
+        // later from Program.cs is too late: the framework has already loaded resources for the
+        // browser-default culture, so a saved language that differs from the browser locale would
+        // silently fall back to the base (English) strings. Omit the option when nothing is saved
+        // so the browser's own language is used.
+        (function () {
+            var lang = localStorage.getItem('aetheus_lang');
+            // Only forward a well-formed culture name (e.g. "en", "fr-FR"). A malformed or legacy
+            // localStorage value must never reach Blazor.start, or it could fail the whole boot
+            // (white screen). An unknown-but-well-formed culture is handled gracefully by .NET.
+            var valid = lang && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(lang);
+            Blazor.start(valid ? { applicationCulture: lang } : {}).then(function () {
+                // Boot-splash start-jank fix: the plane's loops are held paused on their neutral start
+                // frame (see #app-splash svg) while the WASM runtime instantiates and stalls the main
+                // thread. Un-pause now that the runtime is up, so the animation begins on a free main
+                // thread, from exactly the frame the static plane was showing - clean start, no jump.
+                var splash = document.getElementById('app-splash');
+                if (splash) splash.classList.remove('is-paused');
+            });
+        })();
+    </script>
+</body>
+
+</html>

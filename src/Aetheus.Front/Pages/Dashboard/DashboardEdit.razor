@@ -1,0 +1,119 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/dashboards/{Id:int}"
+
+<PageTitle>@L["EditDashboard"] - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+}
+else if (_dashboard is not null)
+{
+    <Aetheus.Front.Shared.PageHeader Title="@($"{L["EditDashboard"]} - {_dashboard.Name}")" Icon="space_dashboard" BackHref="/dashboards" />
+
+    <RadzenCard class="rz-p-4 rz-mb-4">
+        <RadzenRow Gap="1rem" AlignItems="AlignItems.End">
+            <RadzenColumn Size="4" SizeSM="6" SizeXS="12">
+                <RadzenFormField Text="@L["DashboardName"]" class="rz-w-100">
+                    <RadzenTextBox @bind-Value="_name" />
+                </RadzenFormField>
+            </RadzenColumn>
+            <RadzenColumn Size="2" SizeSM="6" SizeXS="12">
+                <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_isDefault" Text="@L["IsDefault"]" />
+            </RadzenColumn>
+            <RadzenColumn Size="6" SizeSM="12" SizeXS="12">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+                    <RadzenButton Text="@L["AddWidget"]" Icon="add" Click="@AddWidget" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["SaveDashboard"]" Icon="save" Click="@SaveDashboard" IsBusy="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                </RadzenStack>
+            </RadzenColumn>
+        </RadzenRow>
+    </RadzenCard>
+
+    @if (_widgets.Count == 0)
+    {
+        @* B-bis: no blue Info banner - use the shared empty state. *@
+        <EmptyState Icon="widgets" Title="@L["NoRecords"]" />
+    }
+    else
+    {
+        <div role="list" aria-label="@L["Widgets"]">
+        @for (var i = 0; i < _widgets.Count; i++)
+        {
+            var index = i;
+            var widget = _widgets[index];
+            <div role="listitem" @ondragover:preventDefault="true" @ondrop="@(() => OnDrop(index))" @ondrop:preventDefault="true">
+            <RadzenCard class="@($"rz-p-3 rz-mb-2{(_dragIndex == index ? " rz-border-primary" : "")}")"
+                draggable="true"
+                @ondragstart="@(() => OnDragStart(index))"
+                @ondragend="OnDragEnd">
+                <RadzenRow Gap="0.5rem" AlignItems="AlignItems.Center">
+                    <RadzenColumn Size="1" SizeSM="1" SizeXS="1">
+                        <RadzenIcon Icon="drag_indicator" class="rz-color-secondary" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="1" SizeSM="1" SizeXS="1">
+                        <RadzenIcon Icon="@GetWidgetIcon(widget.WidgetType)" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="2" SizeSM="6" SizeXS="12">
+                        <RadzenTextBox @bind-Value="widget.Title" Placeholder="@L["WidgetTitle"]" class="rz-w-100" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="2" SizeSM="6" SizeXS="12">
+                        <RadzenDropDown @bind-Value="widget.WidgetType" Data="@WidgetTypeOptions"
+                            TextProperty="Text" ValueProperty="Value" class="rz-w-100" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="1" SizeSM="3" SizeXS="6">
+                        <RadzenNumeric @bind-Value="widget.Column" Min="0" Max="11" class="rz-w-100" aria-label="@L["Column"]" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="1" SizeSM="3" SizeXS="6">
+                        <RadzenNumeric @bind-Value="widget.Width" Min="1" Max="12" class="rz-w-100" aria-label="@L["Width"]" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="1" SizeSM="3" SizeXS="6">
+                        <RadzenNumeric @bind-Value="widget.Height" Min="1" Max="4" class="rz-w-100" aria-label="@L["Height"]" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="1" SizeSM="3" SizeXS="6">
+                        <LabeledToggle Kind="ToggleKind.Switch" Value="@widget.IsVisible"
+                            ValueChanged="@(value => widget.IsVisible = value)" Text="@L["Visible"]" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="2" SizeSM="12" SizeXS="12">
+                        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                            <RadzenButton Text="@L["MoveUp"]" Icon="arrow_upward" Click="@(() => MoveUp(widget))" Disabled="@(index == 0)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                            <RadzenButton Text="@L["MoveDown"]" Icon="arrow_downward" Click="@(() => MoveDown(widget))" Disabled="@(index == _widgets.Count - 1)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                            <RadzenButton Text="@L["Settings"]" Icon="settings" Click="@(() => ToggleConfig(widget))" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                            <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@(() => RemoveWidget(widget))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                        </RadzenStack>
+                    </RadzenColumn>
+                </RadzenRow>
+                @if (widget.ShowConfig)
+                {
+                    <RadzenRow class="rz-mt-2">
+                        <RadzenColumn Size="12">
+                            <RadzenFormField Text="@L["Configuration"]" class="rz-w-100">
+                                <RadzenTextArea @bind-Value="widget.ConfigurationJson" Rows="4" class="rz-w-100" Placeholder="{}" />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+                }
+            </RadzenCard>
+            </div>
+        }
+        </div>
+    }
+
+    <RadzenText TextStyle="TextStyle.H5" class="rz-mt-6 rz-mb-3">@L["Preview"]</RadzenText>
+    <RadzenRow Gap="0.5rem">
+        @foreach (var widget in _widgets.Where(w => w.IsVisible).OrderBy(w => w.Row).ThenBy(w => w.Column))
+        {
+            <RadzenColumn Size="@widget.Width" SizeSM="6" SizeXS="12">
+                <RadzenCard class="@($"rz-p-3 dashboard-widget-preview dashboard-widget-height-{Math.Clamp(widget.Height, 1, 4)}")">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                        <RadzenIcon Icon="@GetWidgetIcon(widget.WidgetType)" />
+                        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@widget.Title</RadzenText>
+                    </RadzenStack>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2">
+                        @widget.WidgetType - @widget.Width×@widget.Height
+                    </RadzenText>
+                </RadzenCard>
+            </RadzenColumn>
+        }
+    </RadzenRow>
+}

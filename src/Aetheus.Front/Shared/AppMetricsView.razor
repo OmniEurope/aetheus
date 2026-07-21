@@ -1,0 +1,47 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-001 phase 2: OTLP metric time-series chart for a monitored app. *@
+@if (_names.Count == 0)
+{
+    <EmptyState Icon="show_chart" Title="@L["NoMetricsYet"]" />
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" AlignItems="AlignItems.End" class="rz-mb-3">
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["Metric"]" />
+            <RadzenDropDown @bind-Value="_selectedMetric" Data="@_names" Change="@(_ => OnFilterChanged())"
+                            AllowFiltering="true" class="w-rem-20" />
+        </RadzenStack>
+        <RadzenStack Gap="0.25rem">
+            <RadzenLabel Text="@L["Period"]" />
+            <RadzenDropDown @bind-Value="_hours" Data="@_periods" TextProperty="Label" ValueProperty="Hours"
+                            Change="@(_ => OnFilterChanged())" class="w-rem-10" />
+        </RadzenStack>
+    </RadzenStack>
+
+    @if (_loading)
+    {
+        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+    }
+    else if (_points.Count >= 2)
+    {
+        <RadzenChart>
+            <RadzenLineSeries Data="@_points" CategoryProperty="Label" ValueProperty="Value" Title="@_selectedMetric" Smooth="true">
+                <RadzenMarkers MarkerType="MarkerType.Circle" />
+            </RadzenLineSeries>
+            @if (_hasP95)
+            {
+                <RadzenLineSeries Data="@_points" CategoryProperty="Label" ValueProperty="P95" Title="@L["P95"]" Smooth="true" />
+            }
+            <RadzenValueAxis Min="0">
+                <RadzenAxisTitle Text="@AxisTitle" />
+            </RadzenValueAxis>
+            <RadzenCategoryAxis />
+            <RadzenLegend Position="LegendPosition.Bottom" />
+        </RadzenChart>
+    }
+    else
+    {
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NotEnoughDataPoints"]</RadzenText>
+    }
+}

@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Reflection;
+using Aetheus.Front.Pages.Auth;
+using Aetheus.Front.Services;
+using Bunit;
+using Bunit.TestDoubles;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Aetheus.Front.Tests.Pages.Auth;
+
+public class ChangePasswordRequiredTests : BunitContext
+{
+    private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    public ChangePasswordRequiredTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+    }
+
+    private static void SetModel(IRenderedComponent<ChangePasswordRequired> cut, string current, string next)
+    {
+        var model = typeof(ChangePasswordRequired).GetField("_model", Priv)!.GetValue(cut.Instance)!;
+        var mt = model.GetType();
+        mt.GetProperty("CurrentPassword")!.SetValue(model, current);
+        mt.GetProperty("NewPassword")!.SetValue(model, next);
+        mt.GetProperty("ConfirmPassword")!.SetValue(model, next);
+    }
+
+    private static Task InvokeSubmit(IRenderedComponent<ChangePasswordRequired> cut) =>
+        cut.InvokeAsync(async () =>
+            await (Task)typeof(ChangePasswordRequired).GetMethod("OnSubmit", Priv)!.Invoke(cut.Instance, [])!);
+
+    [Fact]
+    public void Renders_PasswordChangeForm()
+    {
+        var cut = Render<ChangePasswordRequired>();
+
+        // The forced-change screen renders password inputs.
+        Assert.NotEmpty(cut.FindAll("input"));
+    }
+
+    [Fact]
+    public async Task OnSubmit_Success_LogsOutAndRedirectsToLogin()
+    {
+        // 200 on the change endpoint ⇒ ApiStatus.Success ⇒ logout + redirect.
+        _handler.SetResponse(HttpMethod.Post, "api/users/me/change-password", System.Net.HttpStatusCode.OK);
+        var auth = Services.GetRequiredService<AuthStateProvider>();
+        var nav = Services.GetRequiredService<BunitNavigationManager>();
+
+        var cut = Render<ChangePasswordRequired>();
+        SetModel(cut, "OldPass1!", "NewPass2!");
+        await InvokeSubmit(cut);
+
+        // The change endpoint was hit…
+        Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/users/me/change-password"));
+        // …logout cleared the in-memory token…
+        Assert.Null(auth.Token);
+        // …and the user was redirected to the login screen.
+        Assert.EndsWith("/login", nav.Uri);
+    }
+
+    [Fact]
+    public async Task OnSubmit_Failure_SetsError_NoRedirect()
+    {
+        // 400 ⇒ ApiStatus failure ⇒ error shown, stay on the page.
+        _handler.SetResponse(HttpMethod.Post, "api/users/me/change-password", System.Net.HttpStatusCode.BadRequest);
+        var auth = Services.GetRequiredService<AuthStateProvider>();
+        var nav = Services.GetRequiredService<BunitNavigationManager>();
+        var startUri = nav.Uri;
+
+        var cut = Render<ChangePasswordRequired>();
+        SetModel(cut, "OldPass1!", "NewPass2!");
+        await InvokeSubmit(cut);
+
+        var error = (string?)typeof(ChangePasswordRequired).GetField("_error", Priv)!.GetValue(cut.Instance);
+        Assert.False(string.IsNullOrEmpty(error));
+        // Token still present (no logout) and no navigation away from the page.
+        Assert.NotNull(auth.Token);
+        Assert.Equal(startUri, nav.Uri);
+    }
+
+    [Fact]
+    public async Task LogoutButton_LogsOutAndRedirectsToLogin()
+    {
+        var auth = Services.GetRequiredService<AuthStateProvider>();
+        var nav = Services.GetRequiredService<BunitNavigationManager>();
+
+        var cut = Render<ChangePasswordRequired>();
+        await cut.InvokeAsync(async () =>
+            await (Task)typeof(ChangePasswordRequired).GetMethod("LogoutAsync", Priv)!.Invoke(cut.Instance, [])!);
+
+        Assert.Null(auth.Token);
+        Assert.EndsWith("/login", nav.Uri);
+    }
+}

@@ -1,0 +1,62 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Cron"]</RadzenText>
+
+@* --- Status bar --- *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+    <RadzenBadge BadgeStyle="@(Cron.IsInstalled ? BadgeStyle.Success : BadgeStyle.Light)"
+        Text="@(Cron.IsInstalled ? L["Installed"] : L["NotInstalled"])" />
+    <RadzenBadge BadgeStyle="BadgeStyle.Info"
+        Text="@string.Format(L["CronJobCount"], Cron.Jobs.Count)" />
+    <div class="blade-content-spacer"></div>
+
+    <RadzenButton Icon="add_circle" Text="@L["NewCronJob"]" Size="ButtonSize.Small"
+        Disabled="@(!Cron.IsInstalled || _actionRunning)"
+        Click="@(() => OpenCreateDialog())" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+</RadzenStack>
+
+<RadzenTabs>
+    <Tabs>
+        <RadzenTabsItem Text="@L["CronJobs"]">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                <RadzenBadge Text="@FilteredJobs.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+                <RadzenTextBox @bind-Value="_jobSearch" Placeholder="@L["FilterCronJobs"]" />
+            </RadzenStack>
+            <RadzenDataGrid Data="@FilteredJobs" TItem="CronJobDto" Density="Density.Compact"
+                AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                AllowGrouping="true" ShowGroupPanel="true" AllowPaging="true" PageSize="25"
+                PagerHorizontalAlign="HorizontalAlign.Center">
+                <Columns>
+                    <RadzenDataGridColumn TItem="CronJobDto" Property="User" Title="@L["User"]" Width="140px" />
+                    <RadzenDataGridColumn TItem="CronJobDto" Property="Schedule" Title="@L["Schedule"]" Width="160px">
+                        <Template Context="j">
+                            <code>@j.Schedule</code>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="CronJobDto" Property="Command" Title="@L["Command"]">
+                        <Template Context="j">
+                            <code>@j.Command</code>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="CronJobDto" Property="Source" Title="@L["Source"]" Width="180px" />
+                    <RadzenDataGridColumn TItem="CronJobDto" Title="@L["Actions"]" Width="160px" Sortable="false" Filterable="false">
+                        <Template Context="j">
+                            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                                <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall"
+                                    Disabled="@j.IsSystem"
+                                    Click="@(() => OpenEditDialog(j))" Title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                                <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall"
+                                    Disabled="@j.IsSystem"
+                                    Click="@(() => ShowConfirm(L["DeleteCronJob"], string.Format(L["ConfirmDeleteCronJob"], j.Id),
+                                        () => DeleteJobAsync(j)))" Title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                            </RadzenStack>
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenTabsItem>
+    </Tabs>
+</RadzenTabs>
+
+@* --- Confirmation dialog --- *@
+<ConfirmDialog Visible="_confirmVisible" Title="@_confirmTitle" Message="@_confirmMessage"
+    OnConfirm="ConfirmAccepted" OnCancel="@(() => _confirmVisible = false)" />

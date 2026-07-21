@@ -1,0 +1,18 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/edit"
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader.Project?.Name ?? L["Project"]) - @L["Edit"] - Aetheus</PageTitle>
+
+@* Standalone edit page (not wrapped in the tabbed ProjectDetailLayout): its own header + back link. *@
+@if (Loader.Project is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <Aetheus.Front.Shared.PageHeader Title="@Loader.Project.Name" Icon="folder"
+        BackHref="@($"/projects/{Id}/overview")" />
+    <Aetheus.Front.Pages.Projects.ProjectDetailSections.ProjectEditSection
+        Project="@Loader.Project" OnSaved="@OnSaved" />
+}

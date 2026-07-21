@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Front.Helpers;
+using Aetheus.Front.Resources;
+using Aetheus.Front.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Localization;
+using Radzen;
+
+namespace Aetheus.Front.Shared;
+
+/// <summary>
+/// PLAN-001 phase 1: monitored-apps list for a project (availability). Self-loading; the <c>entities</c>
+/// hub keeps statuses live (the backend broadcasts a Project "Updated" on every app status transition).
+/// </summary>
+public partial class MonitoredAppsList : IAsyncDisposable
+{
+    [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
+    [Inject] private UiActions Ui { get; set; } = default!;
+    [Inject] private DialogService Dialog { get; set; } = default!;
+    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private PermissionService Permissions { get; set; } = default!;
+    [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
+    [Inject] private ListCacheService Cache { get; set; } = default!;
+
+    [Parameter] public int ProjectId { get; set; }
+
+    private List<MonitoredAppDto> _apps = [];
+    // S-UX-SPKL: 24 h availability samples per app, for the inline sparkline.
+    private Dictionary<int, IReadOnlyList<AppHealthSampleDto>> _samples = [];
+    private bool _loading = true;
+    private bool _canWrite;
+    private HubConnection? _hubConnection;
+    private string CacheKey => $"monitored-apps:{ProjectId}";
+    private sealed record CachedMonitoringData(
+        List<MonitoredAppDto> Apps,
+        Dictionary<int, IReadOnlyList<AppHealthSampleDto>> Samples);
+    // Challenge (Élevé): the backend emits one Project "Updated" broadcast PER app status transition, so a
+    // fleet-wide blip fires N broadcasts; each reload also fans out N sample fetches. Coalesce the burst
+    // into a single trailing-edge reload (same pattern as Servers/Pipelines/Releases lists).
+    private const int ReloadDebounceMs = 400;
+    private readonly TrailingReloadCoalescer _reloadCoalescer = new(ReloadDebounceMs);
+
+    private Task RequestReloadAsync() =>
+        _reloadCoalescer.RequestAsync(() => InvokeAsync(async () => { await LoadAppsAsync(); StateHasChanged(); }));
+
+    private IReadOnlyList<AppHealthSampleDto> SamplesFor(int appId) =>
+        _samples.TryGetValue(appId, out var s) ? s : [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Permissions.OnPermissionsChanged += OnPermissionsChanged;
+        RefreshCanWrite();
+        if (Cache.TryGet<CachedMonitoringData>(CacheKey, out var cached) && cached is not null)
+        {
+            _apps = cached.Apps;
+            _samples = cached.Samples;
+            _loading = false;
+        }
+        await LoadAppsAsync();
+        _loading = false;
+        await StartHubAsync();
+    }
+
+    private void OnPermissionsChanged()
+    {
+        RefreshCanWrite();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshCanWrite() => _canWrite = Permissions.CanWrite(ResourceType.Project);
+
+    private async Task LoadAppsAsync()
+    {
+        try
+        {
+            _apps = await Api.GetMonitoredAppsAsync(ProjectId);
+            await LoadSamplesAsync();
+            Cache.Set(CacheKey, new CachedMonitoringData(_apps, _samples));
+        }
+        catch (HttpRequestException)
+        {
+            // expired JWT / transient - AuthProvider handles redirect; keep the last known list.
+        }
+    }
+
+    // Fetch the 24 h availability samples for every listed app in parallel (few apps per project). Best
+    // effort: a failure just leaves the sparkline empty, the list still renders.
+    private async Task LoadSamplesAsync()
+    {
+        try
+        {
+            var loaded = await Task.WhenAll(_apps.Select(async a =>
+                (a.Id, Samples: (IReadOnlyList<AppHealthSampleDto>)await Api.GetMonitoredAppSamplesAsync(a.Id))));
+            _samples = loaded.ToDictionary(x => x.Id, x => x.Samples);
+        }
+        catch (HttpRequestException)
+        {
+            // keep the last known samples
+        }
+    }
+
+    private Task OpenCreateDialogAsync() => OpenEditDialogAsync(null);
+
+    private async Task OpenEditDialogAsync(MonitoredAppDto? app)
+    {
+        var result = await Dialog.OpenAsync<MonitoredAppFormDialog>(
+            app is null ? L["AddMonitoredApp"] : L["Edit"],
+            new Dictionary<string, object?> { ["ProjectId"] = ProjectId, ["App"] = app },
+            new DialogOptions { Width = "760px", CloseDialogOnOverlayClick = true });
+
+        if (result is true)
+        {
+            await LoadAppsAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteAppAsync(MonitoredAppDto app)
+    {
+        var confirmed = await Dialog.Confirm(
+            L["DeleteMonitoredAppConfirm"].Value, L["Delete"].Value,
+            new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
+        if (confirmed != true)
+            return;
+
+        await Ui.RunAsync(
+            () => Api.DeleteMonitoredAppAsync(app.Id),
+            "MonitoredAppDeleted",
+            async () => await LoadAppsAsync(),
+            errorKey: "DeleteFailed",
+            successTitleKey: "Deleted");
+    }
+
+    private async Task StartHubAsync()
+    {
+        try
+        {
+            _hubConnection = HubFactory.Create("entities");
+            _hubConnection.On<ResourceType, int, string>("EntityChanged", (type, id, _) =>
+                type == ResourceType.Project && id == ProjectId ? RequestReloadAsync() : Task.CompletedTask);
+            _hubConnection.RejoinOnReconnect(() => InvokeAsync(async () =>
+            {
+                await _hubConnection.InvokeAsync("JoinEntityUpdates", ResourceType.Project);
+                await LoadAppsAsync();
+                StateHasChanged();
+            }));
+            await _hubConnection.StartAsync();
+            await _hubConnection.InvokeAsync("JoinEntityUpdates", ResourceType.Project);
+        }
+        catch { /* Hub unavailable - degrade to static */ }
+    }
+
+    private string StatusLabel(AppHealthStatus status) => L[$"AppHealth{status}"];
+
+    private static BadgeStyle StatusBadge(AppHealthStatus status) => status switch
+    {
+        AppHealthStatus.Up => BadgeStyle.Success,
+        AppHealthStatus.Down => BadgeStyle.Danger,
+        AppHealthStatus.Degraded => BadgeStyle.Warning,
+        _ => BadgeStyle.Light
+    };
+
+    private string FormatUptime(double? ratio) =>
+        ratio is null ? L["NotAvailable"].Value : (ratio.Value * 100).ToString("0.0") + "%";
+
+    private string FormatServer(MonitoredAppDto app) =>
+        app.ServerId is null ? L["OffFleetBackendProbe"] : app.ServerName ?? $"#{app.ServerId}";
+
+    public async ValueTask DisposeAsync()
+    {
+        Permissions.OnPermissionsChanged -= OnPermissionsChanged;
+        if (_hubConnection is not null)
+        {
+            try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.Project); } catch { /* best-effort */ }
+            await _hubConnection.DisposeAsync();
+            _hubConnection = null;
+        }
+    }
+}

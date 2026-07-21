@@ -1,0 +1,252 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">TeamSpeak</RadzenText>
+
+@* --- Status bar --- *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+    <RadzenBadge BadgeStyle="@(Ts.IsInstalled ? BadgeStyle.Success : BadgeStyle.Light)"
+        Text="@(Ts.IsInstalled ? L["Installed"] : L["NotInstalled"])" />
+    @if (Ts.IsInstalled)
+    {
+        <RadzenBadge BadgeStyle="@(Ts.IsRunning ? BadgeStyle.Success : BadgeStyle.Danger)"
+            Text="@(Ts.IsRunning ? L["Running"] : L["Stopped"])" />
+        @if (!string.IsNullOrEmpty(Ts.Version))
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">v@(Ts.Version)</RadzenText>
+        }
+        @if (!string.IsNullOrEmpty(Ts.ServerName))
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.ServerName</RadzenText>
+        }
+        <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@($"{Ts.OnlineClients}/{Ts.MaxClients} {L["OnlineClients"]}")" />
+        <RadzenBadge BadgeStyle="BadgeStyle.Secondary" Text="@($"{Ts.ChannelCount} {L["Channels"]}")" />
+        @if (Ts.UptimeSeconds > 0)
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@L["Uptime"]: @FormatUptime(Ts.UptimeSeconds)</RadzenText>
+        }
+    }
+    <div class="blade-content-spacer"></div>
+
+    @if (!Ts.IsInstalled)
+    {
+        <RadzenButton Icon="rocket_launch" Text="@L["TeamspeakSetup"]" Size="ButtonSize.Small"
+            Click="@OpenSetupDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+    }
+    else
+    {
+        <RadzenSplitButton Icon="play_arrow" Text="@L["TeamSpeak"]" Size="ButtonSize.Small"
+            Disabled="@_actionRunning" Click="@(() => ExecuteActionAsync(TeamspeakAction.Restart))">
+            <ChildContent>
+                <RadzenSplitButtonItem Text="@L["Start"]" Value="start" Icon="play_arrow" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                <RadzenSplitButtonItem Text="@L["Stop"]" Value="stop" Icon="stop" />
+                <RadzenSplitButtonItem Text="@L["Restart"]" Value="restart" Icon="refresh" />
+            </ChildContent>
+        </RadzenSplitButton>
+        <RadzenButton Icon="settings" Text="@L["EditServer"]" Size="ButtonSize.Small"
+            Click="@OpenEditServerDialogAsync" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+        <RadzenButton Icon="message" Text="@L["SendMessage"]" Size="ButtonSize.Small"
+            Click="@OpenMessageDialogAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Icon="content_copy" Text="@L["CopyCredentials"]" Size="ButtonSize.Small"
+            Click="@(() => CopyToClipboardAsync($"serveradmin / QueryPort: {Ts.QueryPort}"))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        @* Item #9 tier-2: ops buttons (results land in the task tracker). *@
+        <RadzenButton Icon="restart_alt" Text="@L["GracefulRestart"]" Size="ButtonSize.Small"
+            Click="@OpenGracefulRestartDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+        <RadzenButton Icon="bar_chart" Text="@L["TeamspeakStats"]" Size="ButtonSize.Small"
+            Click="@FetchServerInfoAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Icon="cloud_download" Text="@L["SnapshotCreate"]" Size="ButtonSize.Small"
+            Click="@CreateSnapshotAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Icon="cloud_upload" Text="@L["SnapshotDeploy"]" Size="ButtonSize.Small"
+            Click="@OpenSnapshotDeployDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+        <RadzenButton Icon="group" Text="@L["TeamspeakServerGroups"]" Size="ButtonSize.Small"
+            Click="@ListServerGroupsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Icon="key" Text="@L["TeamspeakTokens"]" Size="ButtonSize.Small"
+            Click="@ListTokensAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Icon="report_problem" Text="@L["TeamspeakComplaints"]" Size="ButtonSize.Small"
+            Click="@ListComplaintsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Icon="link" Text="@L["QuickConnect"]" Size="ButtonSize.Small"
+            Click="@(() => CopyToClipboardAsync(BuildConnectionLink(Server.Hostname, Ts.VoicePort)))"
+            title="@BuildConnectionLink(Server.Hostname, Ts.VoicePort)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+    }
+</RadzenStack>
+
+@if (Ts.IsInstalled)
+{
+    <UrlSyncedTabs Slugs="@(new[] { "clients", "channels", "stats", "bans", "logs", "relations" })">
+        <Tabs>
+            @* --- Clients tab --- *@
+            <RadzenTabsItem Text="@L["Clients"]" Icon="people">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                    <RadzenBadge Text="@_data.ClientsCount.ToString()" BadgeStyle="BadgeStyle.Info" />
+                </RadzenStack>
+                <RadzenDataGrid Data="@_data.Clients" Count="@_data.ClientsCount" TItem="TeamspeakClientDto"
+                    LoadData="@LoadClientsDataAsync" IsLoading="@_data.ClientsLoading" AllowPaging="true" PageSize="25"
+                    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    <Columns>
+                        <RadzenDataGridColumn TItem="TeamspeakClientDto" Property="Nickname" Title="@L["Nickname"]" Width="200px" />
+                        <RadzenDataGridColumn TItem="TeamspeakClientDto" Title="@L["Channel"]" Width="200px">
+                            <Template Context="c">
+                                @(string.IsNullOrEmpty(c.ChannelName) ? c.ChannelId.ToString() : c.ChannelName)
+                            </Template>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TeamspeakClientDto" Property="Platform" Title="@L["Platform"]" Width="120px" />
+                        <RadzenDataGridColumn TItem="TeamspeakClientDto" Title="" Width="220px" TextAlign="TextAlign.End">
+                            <Template Context="c">
+                                <RadzenButton Icon="info" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => FetchClientInfoAsync(c))" title="@L["ClientInfo"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                                <RadzenButton Icon="swap_horiz" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowMoveDialog(c))" title="@L["Move"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                                <RadzenButton Icon="campaign" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowPokeDialog(c))" title="@L["Poke"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                <RadzenButton Icon="logout" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowKickDialog(c))" title="@L["Kick"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                                <RadzenButton Icon="block" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowBanDialog(c))" title="@L["Ban"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            </RadzenTabsItem>
+
+            @* --- Channels tab --- *@
+            <RadzenTabsItem Text="@L["Channels"]" Icon="forum">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                    <RadzenBadge Text="@_data.ChannelsCount.ToString()" BadgeStyle="BadgeStyle.Info" />
+                    <div class="blade-content-spacer"></div>
+                    <RadzenButton Icon="add_circle" Text="@L["CreateChannel"]" Size="ButtonSize.Small"
+                        Click="@OpenCreateChannelDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                </RadzenStack>
+                <RadzenDataGrid Data="@_data.Channels" Count="@_data.ChannelsCount" TItem="TeamspeakChannelDto"
+                    LoadData="@LoadChannelsDataAsync" IsLoading="@_data.ChannelsLoading" AllowPaging="true" PageSize="25"
+                    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                    RowRender="@((RowRenderEventArgs<TeamspeakChannelDto> args) => {
+                        if (args.Data is null) return;
+                        if (args.Data.IsPermanent) args.Attributes["class"] = "rz-background-color-primary-lighter";
+                        else if (args.Data.HasPassword) args.Attributes["class"] = "rz-background-color-warning-lighter";
+                    })">
+                    <Columns>
+                        <RadzenDataGridColumn TItem="TeamspeakChannelDto" Title="@L["ChannelName"]" Width="250px">
+                            <Template Context="ch">
+                                <span class="@(ch.ParentId > 0 ? "ts-channel-child" : "ts-channel-root")">
+                                    @if (ch.ParentId > 0) { <RadzenIcon Icon="subdirectory_arrow_right" class="rz-color-base-400 font-size-09" /> }
+                                    @ch.Name
+                                </span>
+                            </Template>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TeamspeakChannelDto" Title="@L["Clients"]" Width="100px">
+                            <Template Context="ch">
+                                @ch.TotalClients / @(ch.MaxClients == -1 ? "∞" : ch.MaxClients.ToString())
+                            </Template>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TeamspeakChannelDto" Title="@L["Flags"]" Width="180px">
+                            <Template Context="ch">
+                                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                                    @if (ch.IsDefault) { <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@L["Default"]" /> }
+                                    @if (ch.IsPermanent) { <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@L["Perm"]" /> }
+                                    @if (ch.HasPassword) { <RadzenBadge BadgeStyle="BadgeStyle.Warning"><RadzenIcon Icon="lock" /></RadzenBadge> }
+                                </RadzenStack>
+                            </Template>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TeamspeakChannelDto" Title="" Width="120px" TextAlign="TextAlign.End">
+                            <Template Context="ch">
+                                <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowEditChannelDialog(ch))" title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                                <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowDeleteChannelConfirm(ch))" title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            </RadzenTabsItem>
+
+            @* --- Stats card tab (S-UX-11): structured presentation of the heartbeat data --- *@
+            <RadzenTabsItem Text="@L["TeamspeakStats"]" Icon="bar_chart">
+                <RadzenRow Gap="1rem" class="rz-mt-2">
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenCard>
+                            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["TeamspeakSlots"]</RadzenText>
+                            <RadzenProgressBar Value="@Ts.OnlineClients" Max="@(Ts.MaxClients > 0 ? Ts.MaxClients : 1)"
+                                ProgressBarStyle="@(Ts.OnlineClients >= Ts.MaxClients ? ProgressBarStyle.Danger : ProgressBarStyle.Info)"
+                                class="rz-mb-2" Unit="@($"/ {Ts.MaxClients}")" />
+                            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["OnlineClients"]</RadzenText>
+                                <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.OnlineClients / @Ts.MaxClients</RadzenText>
+                            </RadzenStack>
+                        </RadzenCard>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenCard>
+                            <RadzenStack Gap="0.5rem">
+                                @if (!string.IsNullOrEmpty(Ts.ServerName))
+                                {
+                                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                        <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["ServerName"]</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.ServerName</RadzenText>
+                                    </RadzenStack>
+                                }
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["Version"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.Version (@Ts.Platform)</RadzenText>
+                                </RadzenStack>
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["Channels"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.ChannelCount</RadzenText>
+                                </RadzenStack>
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["Uptime"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@(Ts.UptimeSeconds > 0 ? FormatUptime(Ts.UptimeSeconds) : "-")</RadzenText>
+                                </RadzenStack>
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["Ports"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.VoicePort / @Ts.QueryPort</RadzenText>
+                                </RadzenStack>
+                            </RadzenStack>
+                        </RadzenCard>
+                    </RadzenColumn>
+                </RadzenRow>
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mt-2 rz-display-block">@L["TeamspeakAdvancedStatsHint"]</RadzenText>
+            </RadzenTabsItem>
+
+            @* --- Bans tab --- *@
+            <RadzenTabsItem Text="@L["Bans"]" Icon="gavel">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                    <RadzenBadge Text="@_data.BansCount.ToString()" BadgeStyle="BadgeStyle.Danger" />
+                    <div class="blade-content-spacer"></div>
+                    <RadzenButton Icon="refresh" Text="@L["RefreshBans"]" Size="ButtonSize.Small"
+                        IsBusy="@_data.BansLoading" Click="@RefreshBansInlineAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                </RadzenStack>
+                    <RadzenDataGrid Data="@_data.Bans" Count="@_data.BansCount" TItem="TeamspeakBanDto"
+                        LoadData="@LoadBansDataAsync" IsLoading="@_data.BansLoading" AllowPaging="true" PageSize="25"
+                        Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                        <EmptyTemplate>
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["NoRecords"]</RadzenText>
+                        </EmptyTemplate>
+                        <Columns>
+                            <RadzenDataGridColumn TItem="TeamspeakBanDto" Property="BanId" Title="ID" Width="60px" />
+                            <RadzenDataGridColumn TItem="TeamspeakBanDto" Property="Nickname" Title="@L["Nickname"]" Width="150px" />
+                            <RadzenDataGridColumn TItem="TeamspeakBanDto" Property="UniqueId" Title="UID" Width="180px" />
+                            <RadzenDataGridColumn TItem="TeamspeakBanDto" Property="Reason" Title="@L["BanReason"]" Width="200px" />
+                            <RadzenDataGridColumn TItem="TeamspeakBanDto" Title="" Width="80px" TextAlign="TextAlign.End">
+                                <Template Context="ban">
+                                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall"
+                                        Click="@(() => UnbanInlineAsync(ban.BanId))" title="@L["Unban"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                        </Columns>
+                    </RadzenDataGrid>
+            </RadzenTabsItem>
+
+            @* --- Logs tab --- *@
+            <RadzenTabsItem Text="@L["Logs"]" Icon="article">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                    <RadzenNumeric TValue="int" @bind-Value="_logLines" Min="1" Max="5000" class="w-rem-7-5" />
+                    <RadzenButton Icon="search" Text="@L["LoadLogs"]" Size="ButtonSize.Small"
+                        Click="@LoadLogsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                </RadzenStack>
+            </RadzenTabsItem>
+
+            @* --- Relations tab --- *@
+            <RadzenTabsItem Text="@L["Relations"]" Icon="link">
+                <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["TeamspeakRelationsInfo"]</RadzenText>
+            </RadzenTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

@@ -1,0 +1,11 @@
+@Aetheus.Back_HostAddress = https://localhost:5301
+
+GET {{Aetheus.Back_HostAddress}}/health/live
+Accept: application/json
+
+###
+
+GET {{Aetheus.Back_HostAddress}}/health/ready
+Accept: application/json
+
+###

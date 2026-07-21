@@ -1,0 +1,77 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Certbot"]</RadzenText>
+
+@* --- Status bar --- *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+    <RadzenBadge BadgeStyle="@(Certbot.IsInstalled ? BadgeStyle.Success : BadgeStyle.Light)"
+        Text="@(Certbot.IsInstalled ? L["Installed"] : L["NotInstalled"])" />
+    @if (!string.IsNullOrEmpty(Certbot.Version))
+    {
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">v@(Certbot.Version)</RadzenText>
+    }
+    <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@string.Format(L["CertificateCount"], Certbot.Certificates.Count)" />
+    <div class="blade-content-spacer"></div>
+
+    <RadzenButton Icon="refresh" Text="@L["RenewAll"]" Size="ButtonSize.Small"
+        Disabled="@(!Certbot.IsInstalled || _actionRunning)"
+        Click="@(() => ShowConfirm(L["RenewAllCerts"], L["ConfirmRenewAllCerts"], () => ExecuteActionAsync(CertbotAction.RenewAll)))"
+        IsBusy="@_actionRunning" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    <RadzenButton Icon="add_circle" Text="@L["NewCertificate"]" Size="ButtonSize.Small"
+        Disabled="@(!Certbot.IsInstalled || _actionRunning)"
+        Click="@OpenCreateDialog" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+</RadzenStack>
+
+<UrlSyncedTabs Slugs="@(new[] { "certificates", "relations" })">
+    <Tabs>
+        @* --- Certificates tab --- *@
+        <RadzenTabsItem Text="@L["Certificates"]">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                <RadzenBadge Text="@FilteredCertificates.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+                <RadzenTextBox @bind-Value="_certSearch" Placeholder="@L["FilterCertificates"]" />
+            </RadzenStack>
+            <RadzenDataGrid Data="@FilteredCertificates" TItem="CertbotCertificateDto" Density="Density.Compact"
+                AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                <Columns>
+                    <RadzenDataGridColumn TItem="CertbotCertificateDto" Property="Name" Title="@L["CertName"]" Width="200px" />
+                    <RadzenDataGridColumn TItem="CertbotCertificateDto" Title="@L["Domains"]">
+                        <Template Context="c">
+                            @string.Join(", ", c.Domains)
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="CertbotCertificateDto" Title="@L["Expiry"]" Width="180px">
+                        <Template Context="c">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                                <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@c.ExpiryDate.ToString("yyyy-MM-dd")</RadzenText>
+                                @if (IsExpiringSoon(c))
+                                {
+                                    <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@L["ExpiringSoon"]" />
+                                }
+                            </RadzenStack>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="CertbotCertificateDto" Title="@L["Actions"]" Width="240px">
+                        <Template Context="c">
+                            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                                <RadzenButton Icon="refresh" Text="@L["Renew"]" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ExecuteActionAsync(CertbotAction.Renew, c.Name))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                                <RadzenButton Icon="delete" Text="@L["Revoke"]" Size="ButtonSize.ExtraSmall"
+                                    Click="@(() => ShowConfirm(L["RevokeCert"], string.Format(L["ConfirmRevokeCert"], c.Name),
+                                        () => ExecuteActionAsync(CertbotAction.RevokeAndDelete, c.Name)))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                            </RadzenStack>
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenTabsItem>
+
+        @* --- Relations tab --- *@
+        <RadzenTabsItem Text="@L["Relations"]">
+            <ModuleLinksTab ServerId="ServerId" SourceType="ModuleLinkType.Certbot" Resources="@CertbotResourceNames" />
+        </RadzenTabsItem>
+    </Tabs>
+</UrlSyncedTabs>
+
+@* --- Confirmation dialog --- *@
+<ConfirmDialog Visible="_confirmVisible" Title="@_confirmTitle" Message="@_confirmMessage"
+    OnConfirm="ConfirmAccepted" OnCancel="ConfirmCancelled" />

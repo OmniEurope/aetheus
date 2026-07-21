@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: EUPL-1.2
+namespace Aetheus.Back.Tests.Architecture;
+
+/// <summary>
+/// Architectural guard: entities with the exactly-one-owner pattern (ProjectId / EnvironmentId /
+/// ProjectServerId) must have the <c>[ExactlyOneOwner]</c> validation attribute on their
+/// corresponding Create and Update request DTOs. This prevents regressions where a new DTO
+/// is introduced without the ownership constraint.
+/// </summary>
+public class OwnershipValidationAuditTests
+{
+    private static readonly string[] OwnedEntityNames = ["VariableLibrary", "Vault", "Pipeline"];
+
+    [Fact]
+    public void AllOwnedEntityDtos_HaveExactlyOneOwnerAttribute()
+    {
+        var sharedAssembly = typeof(Aetheus.Shared.DTOs.PaginatedResult<>).Assembly;
+        var attributeType = typeof(Aetheus.Shared.Validation.ExactlyOneOwnerAttribute);
+        var offenders = new List<string>();
+
+        foreach (var entityName in OwnedEntityNames)
+        {
+            var createDtoName = $"Create{entityName}Request";
+            var updateDtoName = $"Update{entityName}Request";
+
+            var createType = sharedAssembly.GetTypes().FirstOrDefault(t => t.Name == createDtoName);
+            var updateType = sharedAssembly.GetTypes().FirstOrDefault(t => t.Name == updateDtoName);
+
+            if (createType is null)
+            {
+                offenders.Add($"{createDtoName} - DTO not found");
+                continue;
+            }
+            if (updateType is null)
+            {
+                offenders.Add($"{updateDtoName} - DTO not found");
+                continue;
+            }
+
+            if (!Attribute.IsDefined(createType, attributeType))
+                offenders.Add($"{createDtoName} - missing [ExactlyOneOwner]");
+            if (!Attribute.IsDefined(updateType, attributeType))
+                offenders.Add($"{updateDtoName} - missing [ExactlyOneOwner]");
+        }
+
+        Assert.True(offenders.Count == 0,
+            "These DTOs for owned entities are missing the [ExactlyOneOwner] validation attribute. " +
+            "Add it to enforce the exactly-one-owner constraint (ProjectId | EnvironmentId | ProjectServerId):" +
+            System.Environment.NewLine +
+            string.Join(System.Environment.NewLine, offenders.Select(o => $"  - {o}")));
+    }
+
+    [Fact]
+    public void ExactlyOneOwnerAttribute_AcceptsZeroOwners()
+    {
+        var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
+        {
+            Name = "test",
+            Description = "test"
+        };
+
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+        var ctx = new System.ComponentModel.DataAnnotations.ValidationContext(dto);
+        var isValid = System.ComponentModel.DataAnnotations.Validator.TryValidateObject(dto, ctx, results, true);
+
+        Assert.True(isValid, "Should accept when no owner is set (global entity)");
+    }
+
+    [Fact]
+    public void ExactlyOneOwnerAttribute_RejectsMultipleOwners()
+    {
+        var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
+        {
+            Name = "test",
+            Description = "test",
+            ProjectId = 1,
+            EnvironmentId = 2
+        };
+
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+        var ctx = new System.ComponentModel.DataAnnotations.ValidationContext(dto);
+        var isValid = System.ComponentModel.DataAnnotations.Validator.TryValidateObject(dto, ctx, results, true);
+
+        Assert.False(isValid, "Should reject when multiple owners are set");
+    }
+
+    [Fact]
+    public void ExactlyOneOwnerAttribute_AcceptsSingleOwner()
+    {
+        var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
+        {
+            Name = "test",
+            Description = "test",
+            ProjectId = 1
+        };
+
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+        var ctx = new System.ComponentModel.DataAnnotations.ValidationContext(dto);
+        var isValid = System.ComponentModel.DataAnnotations.Validator.TryValidateObject(dto, ctx, results, true);
+
+        Assert.True(isValid, "Should accept when exactly one owner is set");
+    }
+}

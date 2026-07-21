@@ -1,0 +1,84 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Mode == MailDialogMode.DnsRecords)
+{
+    @if (DnsRecords is not null)
+    {
+        <RadzenStack Gap="0.75rem">
+            @foreach (var record in DnsRecordList)
+            {
+                <RadzenStack Gap="0.25rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                        <RadzenLabel Text="@record.Label" />
+                        <RadzenButton Icon="content_copy" Title="@L["Copy"]" Click="@(() => Clipboard.CopyAsync(record.Value, L["CopiedToClipboard"]))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    </RadzenStack>
+                    @if (record.Multiline) { <RadzenTextArea Value="@record.Value" ReadOnly="true" Rows="4" /> } else { <RadzenTextBox Value="@record.Value" ReadOnly="true" /> }
+                </RadzenStack>
+            }
+        </RadzenStack>
+    }
+    <DialogFooter><Aetheus.Front.Shared.DialogCloseButton /></DialogFooter>
+}
+else
+{
+    <RadzenTemplateForm TItem="MailDialogModel" Data="@_model" Submit="@Submit">
+        <LocalizedDataAnnotationsValidator />
+        @if (Mode == MailDialogMode.Setup)
+        {
+            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.Center" class="rz-mb-4" Gap="0.5rem">
+                @for (var index = 1; index <= 3; index++)
+                {
+                    <RadzenBadge BadgeStyle="@(_setupStep == index ? BadgeStyle.Primary : (_setupStep > index ? BadgeStyle.Success : BadgeStyle.Light))" Text="@index.ToString()" />
+                    @if (index < 3) { <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-on-surface-variant">-</RadzenText> }
+                }
+            </RadzenStack>
+        }
+        <RadzenStack Gap="0.75rem">
+            @if (Mode == MailDialogMode.AddDomain)
+            {
+                <RadzenFormField Text="@L["DomainName"]"><RadzenTextBox @bind-Value="_model.Domain" Placeholder="example.com" /></RadzenFormField><ValidationMessage For="@(() => _model.Domain)" />
+                <RadzenFormField Text="@L["DkimSelector"]"><RadzenTextBox @bind-Value="_model.DkimSelector" Placeholder="default" /></RadzenFormField>
+            }
+            else if (Mode == MailDialogMode.AddAccount)
+            {
+                <RadzenFormField Text="@L["Email"]"><RadzenTextBox @bind-Value="_model.Email" Placeholder="user@example.com" /></RadzenFormField><ValidationMessage For="@(() => _model.Email)" />
+                <RadzenFormField Text="@L["Password"]"><RadzenPassword @bind-Value="_model.Password" /></RadzenFormField><ValidationMessage For="@(() => _model.Password)" />
+                <RadzenFormField Text="@($"{L["Quota"]} (MB)")"><RadzenNumeric @bind-Value="_model.QuotaMb" Min="10" Max="102400" /></RadzenFormField>
+            }
+            else if (Mode == MailDialogMode.AddAlias)
+            {
+                <RadzenFormField Text="@L["Source"]"><RadzenTextBox @bind-Value="_model.Source" Placeholder="alias@example.com" /></RadzenFormField><ValidationMessage For="@(() => _model.Source)" />
+                <RadzenFormField Text="@L["Destination"]"><RadzenTextBox @bind-Value="_model.Destination" Placeholder="user@example.com" /></RadzenFormField><ValidationMessage For="@(() => _model.Destination)" />
+                <RadzenFormField Text="@L["DomainName"]"><RadzenDropDown Data="@Domains" @bind-Value="_model.DomainId" TextProperty="Name" ValueProperty="Id" TValue="int" /></RadzenFormField>
+            }
+            else if (Mode == MailDialogMode.RotateDkim)
+            {
+                <RadzenAlert AlertStyle="AlertStyle.Warning" Shade="Shade.Lighter" Size="AlertSize.Small">@L["DkimRotationWarning"]</RadzenAlert>
+                <RadzenFormField Text="@L["DomainName"]"><RadzenTextBox Value="@_model.Domain" ReadOnly="true" /></RadzenFormField>
+                <RadzenFormField Text="@L["CurrentSelector"]"><RadzenTextBox Value="@_model.CurrentSelector" ReadOnly="true" /></RadzenFormField>
+                <RadzenFormField Text="@L["NewSelector"]"><RadzenTextBox @bind-Value="_model.NewSelector" Placeholder="mail2025" /></RadzenFormField><ValidationMessage For="@(() => _model.NewSelector)" />
+            }
+            else if (Mode == MailDialogMode.Setup && _setupStep == 1)
+            {
+                <RadzenFormField Text="@L["Hostname"]"><RadzenTextBox @bind-Value="_model.Hostname" Placeholder="mail.example.com" /></RadzenFormField>
+                <RadzenFormField Text="@L["DomainName"]"><RadzenTextBox @bind-Value="_model.Domain" Placeholder="example.com" /></RadzenFormField>
+                <RadzenFormField Text="@L["DkimSelector"]"><RadzenTextBox @bind-Value="_model.DkimSelector" Placeholder="default" /></RadzenFormField>
+            }
+            else if (Mode == MailDialogMode.Setup && _setupStep == 2)
+            {
+                <RadzenFormField Text="@L["AdminEmail"]"><RadzenTextBox @bind-Value="_model.Email" Placeholder="admin@example.com" /></RadzenFormField>
+                <RadzenFormField Text="@L["AdminPassword"]"><RadzenPassword @bind-Value="_model.Password" /></RadzenFormField>
+            }
+            else if (Mode == MailDialogMode.Setup)
+            {
+                <RadzenFormField Text="@($"{L["Quota"]} (MB)")"><RadzenNumeric @bind-Value="_model.QuotaMb" Min="10" Max="102400" /></RadzenFormField>
+                <RadzenAlert AlertStyle="AlertStyle.Info" Shade="Shade.Lighter" Size="AlertSize.Small">@L["MailSetupSummary"]: @_model.Hostname / @_model.Domain / @_model.Email</RadzenAlert>
+            }
+        </RadzenStack>
+        <DialogFooter>
+            <Aetheus.Front.Shared.DialogCloseButton Text="@L["Cancel"]" />
+            @if (Mode == MailDialogMode.Setup && _setupStep > 1) { <RadzenButton Icon="arrow_back" Text="@L["Previous"]" Click="@(() => _setupStep--)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" /> }
+            @if (Mode == MailDialogMode.Setup && _setupStep < 3) { <RadzenButton Icon="arrow_forward" Text="@L["Next"]" Click="@(() => _setupStep++)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" /> }
+            else { <RadzenButton ButtonType="ButtonType.Submit" Icon="check" Text="@SubmitText" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" /> }
+        </DialogFooter>
+    </RadzenTemplateForm>
+}

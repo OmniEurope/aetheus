@@ -1,0 +1,229 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits LayoutComponentBase
+
+@if (!AppReady)
+{
+    @* Chantier I: gate the WHOLE chrome (not just @Body) behind boot readiness so the
+       top bar never flashes half-rendered before auth/orgs/permissions resolve.
+       The boot splash itself is the single #app-splash node from index.html (outside #app),
+       faded out by Aetheus.hideSplash on ready - see OnAfterRenderAsync. No node-swap flash. *@
+    return;
+}
+
+<a href="#main-content" class="skip-link">@L["SkipToContent"]</a>
+
+<RadzenLayout data-testid="blazor-ready">
+    <RadzenHeader>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0" class="rz-px-2 rz-px-sm-4 header-bar">
+            @if (Auth.IsAuthenticated)
+            {
+                <RadzenSidebarToggle Click="@(() => _sidebarExpanded = !_sidebarExpanded)" aria-label="@L["ToggleSidebar"]" />
+            }
+            <a href="/" class="app-home-link">
+                <img src="aetheus-icon.svg" alt="" class="app-header-icon" />
+                <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0 app-title">@L["Aetheus"]</RadzenText>
+            </a>
+            <div class="flex-spacer"></div>
+            @if (!_isProduction)
+            {
+                @* Dev banner: absolutely centred on the whole header (see .dev-env-banner in
+                   app.css) so it stays mid-bar whatever the left/right content widths are -
+                   a single chip lands dead-centre too. Order: environment, then label, then
+                   branch; each chip shows only when its value is present. *@
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.375rem" class="dev-env-banner">
+                    <span class="dev-env-chip dev-env-chip-env" title="@L["DevBannerEnvTooltip"]">
+                        <RadzenIcon Icon="dns" class="dev-env-chip-icon" />
+                        <span class="dev-env-chip-text">@_envName</span>
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(_devLabel))
+                    {
+                        <span class="dev-env-chip dev-env-chip-label" title="@L["DevBannerLabelTooltip"]">
+                            <RadzenIcon Icon="label" class="dev-env-chip-icon" />
+                            <span class="dev-env-chip-text">@_devLabel</span>
+                        </span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_devBranch))
+                    {
+                        <span class="dev-env-chip dev-env-chip-branch" title="@L["DevBannerBranchTooltip"]">
+                            <RadzenIcon Icon="account_tree" class="dev-env-chip-icon" />
+                            <span class="dev-env-chip-text">@_devBranch</span>
+                        </span>
+                    }
+                </RadzenStack>
+            }
+            @if (Auth.IsAuthenticated)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                    @{
+                        var connected = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
+                        var reconnecting = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Reconnecting;
+                        var connClass = connected ? "header-conn-online" : reconnecting ? "header-conn-warning" : "header-conn-offline";
+                    }
+                    <RadzenIcon Icon="@(connected ? "wifi" : "wifi_off")"
+                                title="@(connected ? L["ConnectedToBackend"] : L["NotConnectedToBackend"])"
+                                aria-label="@(connected ? L["ConnectedToBackend"] : L["NotConnectedToBackend"])"
+                                class="@($"header-conn-icon {connClass}")" />
+                    @* Global search is not wired yet: the field and its mobile overlay were removed rather
+                       than ship a dead control (SR7M). Reinstate the input here once search is implemented. *@
+                    <RadzenButton Icon="help" Size="ButtonSize.Small"
+                        Click="@NavigateToHelp" title="@L["Help"]" aria-label="@L["Help"]" class="header-action-btn" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    <TaskTrackerWidget />
+                    <div class="user-menu-container">
+                        <RadzenButton Size="ButtonSize.Small"
+                            Click="@ToggleUserMenu"
+                            title="@Auth.Username"
+                            aria-label="@Auth.Username"
+                            aria-haspopup="menu"
+                            aria-controls="user-menu-popover"
+                            aria-expanded="@_userMenuOpen"
+                            class="header-action-btn header-user-btn">
+                            <RadzenIcon Icon="person" class="header-icon" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            <span class="display-name">@Auth.Username</span>
+                            <RadzenIcon Icon="@(_userMenuOpen ? "expand_less" : "expand_more")" class="header-icon" />
+                        </RadzenButton>
+                        @if (_userMenuOpen)
+                        {
+                            <div @onclick="CloseUserMenu" class="user-menu-backdrop"></div>
+                            <RadzenCard id="user-menu-popover" role="menu" @onkeydown="HandleUserMenuKeyDown" class="user-menu-card">
+                                <div class="rz-px-4 rz-py-3 user-menu-section">
+                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Role"]</RadzenText>
+                                    <RadzenBadge Text="@(Auth.IsAdmin ? L["Admin"] : L["User"])" BadgeStyle="BadgeStyle.Info" class="rz-mt-1" />
+                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mt-1">Aetheus v@_version</RadzenText>
+                                </div>
+                                @if (Orgs.IsLoaded && Orgs.Available.Count > 0)
+                                {
+                                    <div class="rz-px-4 rz-py-3 user-menu-section">
+                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mb-2">@L["ActiveOrganization"]</RadzenText>
+                                        <RadzenDropDown TValue="int"
+                                                        Data="@Orgs.Available"
+                                                        TextProperty="Name"
+                                                        ValueProperty="Id"
+                                                        Value="@(Orgs.Active?.Id ?? 0)"
+                                                        Change="@OnActiveOrgChanged"
+                                                        AllowClear="false"
+                                                        aria-label="@L["ActiveOrganization"]"
+                                                        class="user-menu-org-picker" />
+                                    </div>
+                                }
+                                else if (Auth.IsAdmin && Orgs.IsLoaded)
+                                {
+                                    <div class="rz-px-4 rz-py-3 user-menu-section">
+                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["ActiveOrganization"]</RadzenText>
+                                        <RadzenBadge Text="@L["AllOrganizations"]" BadgeStyle="BadgeStyle.Light" class="rz-mt-1" />
+                                    </div>
+                                }
+                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="ToggleLanguage" @onkeydown="@(e => ActivateOnKey(e, ToggleLanguage))" role="menuitem" tabindex="0">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                        <RadzenIcon Icon="translate" />
+                                        <RadzenText TextStyle="TextStyle.Body2">@L["Language"]</RadzenText>
+                                        <div class="flex-spacer"></div>
+                                        <RadzenBadge Text="@_currentLangLabel" BadgeStyle="BadgeStyle.Light" />
+                                    </RadzenStack>
+                                </div>
+                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="ToggleDarkMode" @onkeydown="@(e => ActivateOnKey(e, ToggleDarkMode))" role="menuitem" tabindex="0">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                            <RadzenIcon Icon="@(_darkMode ? "dark_mode" : "light_mode")" />
+                                            <RadzenText TextStyle="TextStyle.Body2">@(_darkMode ? L["DarkMode"] : L["LightMode"])</RadzenText>
+                                        </RadzenStack>
+                                        <RadzenSwitch Value="@_darkMode" class="theme-switch-readonly" aria-hidden="true" />
+                                    </RadzenStack>
+                                </div>
+                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="OnSettingsMenuClick" @onkeydown="@(e => ActivateOnKey(e, OnSettingsMenuClick))" role="menuitem" tabindex="0">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                        <RadzenIcon Icon="settings" />
+                                        <RadzenText TextStyle="TextStyle.Body2">@L["Settings"]</RadzenText>
+                                    </RadzenStack>
+                                </div>
+                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="OnLogoutMenuClick" @onkeydown="@(e => ActivateOnKey(e, OnLogoutMenuClick))" role="menuitem" tabindex="0">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                        <RadzenIcon Icon="logout" />
+                                        <RadzenText TextStyle="TextStyle.Body2">@L["Logout"]</RadzenText>
+                                    </RadzenStack>
+                                </div>
+                            </RadzenCard>
+                        }
+                    </div>
+                </RadzenStack>
+            }
+        </RadzenStack>
+    </RadzenHeader>
+
+    @if (Auth.IsAuthenticated && !Auth.MustChangePassword)
+    {
+        <RadzenSidebar @bind-Expanded="@_sidebarExpanded" Responsive="false" class="sidebar-width" role="navigation" aria-label="@L["MainNavigation"]">
+            <NavMenu />
+        </RadzenSidebar>
+        @if (_sidebarExpanded)
+        {
+            <div class="sidebar-backdrop" @onclick="@(() => _sidebarExpanded = false)"></div>
+        }
+    }
+
+    <RadzenBody role="main" id="main-content">
+        <div class="rz-px-3 rz-py-3 app-body-wrapper">
+            @if (_newVersionAvailable)
+            {
+                <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" AllowClose="false" class="rz-mb-3 version-alert-bar">
+                    <RadzenIcon Icon="system_update" />
+                    <RadzenText TextStyle="TextStyle.Body1" class="version-alert-bar-text">@L["NewVersionAvailable"]</RadzenText>
+                    <RadzenButton Text="@L["ReloadNow"]" Icon="refresh" Click="@OnReloadClick" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                </RadzenAlert>
+            }
+            @if (Auth.IsAuthenticated && !Auth.MustChangePassword && Breadcrumb.Items.Count > 0)
+            {
+                <RadzenBreadCrumb class="rz-mb-3">
+                    @foreach (var item in Breadcrumb.Items)
+                    {
+                        @if (item.Href is not null)
+                        {
+                            <RadzenBreadCrumbItem Text="@item.Text" Path="@item.Href" />
+                        }
+                        else
+                        {
+                            <RadzenBreadCrumbItem Text="@item.Text" />
+                        }
+                    }
+                </RadzenBreadCrumb>
+            }
+            @if (_initialized)
+            {
+                @if (CanAccessCurrentRoute)
+                {
+                    <ErrorBoundary @ref="_errorBoundary">
+                        <ChildContent>
+                            @Body
+                        </ChildContent>
+                        <ErrorContent Context="exception">
+                            <RadzenCard class="rz-mx-auto error-card">
+                                <RadzenStack AlignItems="AlignItems.Center" Gap="1rem">
+                                    <RadzenIcon Icon="error" class="error-icon" />
+                                    <RadzenText TextStyle="TextStyle.H5">@L["ErrorOccurred"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["ErrorMessage"]</RadzenText>
+                                    @if (HostEnv.Environment == "Development")
+                                    {
+                                        <pre class="dev-exception-pre">@exception.ToString()</pre>
+                                    }
+                                    <RadzenButton Text="@L["Recover"]" Icon="refresh" Click="@RecoverError" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                                </RadzenStack>
+                            </RadzenCard>
+                        </ErrorContent>
+                    </ErrorBoundary>
+                }
+                else if (Auth.IsAuthenticated && !Auth.MustChangePassword)
+                {
+                    <EmptyState Icon="lock" Title="@L["AccessDenied"]" />
+                }
+            }
+        </div>
+    </RadzenBody>
+</RadzenLayout>
+
+<ConnectionLostDialog Visible="@_showOfflineDialog"
+                      ReconnectCountdown="@_reconnectCountdown"
+                      ManualReconnecting="@_manualReconnecting"
+                      OnManualReconnect="@OnManualReconnect" />
+
+<RadzenDialog />
+<RadzenNotification />
+<RadzenTooltip />

@@ -1,0 +1,124 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Aetheus.Agent.Core.Collectors;
+using Aetheus.Agent.Core.Configuration;
+using Aetheus.Agent.Core.Executors;
+using Aetheus.Shared.Constants;
+using Aetheus.Shared.Enums;
+using Microsoft.Extensions.Options;
+
+namespace Aetheus.Agent.Core.Operations;
+
+/// <summary>
+/// PLAN-006 4.1: applies pending OS updates via the controlled-sudo recipe. Two modes ride in
+/// <see cref="PatchingConstants.DryRunEnvVar"/>. In BOTH modes the executor first runs the non-mutating
+/// <c>apt-get -s upgrade</c> simulation and reports exactly what would change; it then ABORTS honestly
+/// (exit 1, real log) if any <see cref="CriticalPackages"/> - or a per-server override - would be
+/// upgraded. Only when nothing is blocked (and not a dry-run) does it apply via
+/// <c>sudo -n /usr/bin/apt-get upgrade -y</c> against the argv-exact <c>aetheus-patch</c> drop-in.
+/// Never a fake success: a blocked or failed run is red with the real output.
+/// </summary>
+public sealed class SystemPackageUpgradeExecutor(
+    IOptions<AetheusAgentOptions> options,
+    IShellRunner shell,
+    ILogger<SystemPackageUpgradeExecutor> logger) : IOperationExecutor
+{
+    private readonly AetheusAgentOptions _options = options.Value;
+
+    public bool CanHandle(OperationKind kind) => kind == OperationKind.SystemPackageUpgrade;
+
+    public Task<ExecutorResult> ExecuteAsync(
+        OperationKind kind, string target, int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
+        => ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
+
+    public async Task<ExecutorResult> ExecuteAsync(
+        OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
+        int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            await onOutput("System package upgrade is only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
+
+        var dryRun = envVars.TryGetValue(PatchingConstants.DryRunEnvVar, out var d) && d == "1";
+        var extraBlocklist = envVars.TryGetValue(PatchingConstants.BlocklistEnvVar, out var b) && !string.IsNullOrWhiteSpace(b)
+            ? b.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+        timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
+
+        await AptLock.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // 1) Non-mutating simulation (no sudo). Capture stdout so we can parse + gate on it.
+            var sim = await shell.RunExecAsync("apt-get", ["-s", "upgrade"], cancellationToken).ConfigureAwait(false);
+            if (sim.ExitCode != 0)
+            {
+                await onOutput("apt-get simulation failed; aborting (no changes made)", TaskLogLevel.Error).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(sim.StdErr))
+                    await onOutput(sim.StdErr.Trim(), TaskLogLevel.Error).ConfigureAwait(false);
+                return new ExecutorResult(sim.ExitCode == 0 ? 1 : sim.ExitCode, false);
+            }
+
+            var pending = AptSimulateParser.Parse(sim.StdOut);
+            var securityCount = pending.Count(p => p.IsSecurity);
+            await onOutput($"{pending.Count} package(s) would be upgraded ({securityCount} security).", TaskLogLevel.Info).ConfigureAwait(false);
+            foreach (var p in pending)
+                await onOutput($"  {p.Package} {p.CurrentVersion} -> {p.CandidateVersion}{(p.IsSecurity ? " [security]" : "")}", TaskLogLevel.Info).ConfigureAwait(false);
+
+            // 2) Critical-package abort (honest, before any change).
+            var blocked = AptSimulateParser.BlockedPackages(pending, extraBlocklist);
+            if (blocked.Count > 0)
+            {
+                await onOutput(
+                    $"Aborting: the upgrade would touch blocked critical package(s): {string.Join(", ", blocked)}. "
+                    + "Upgrade these manually in a maintenance window.", TaskLogLevel.Error).ConfigureAwait(false);
+                return new ExecutorResult(1, false);
+            }
+
+            if (dryRun)
+            {
+                await onOutput("Dry-run complete; no changes applied.", TaskLogLevel.Info).ConfigureAwait(false);
+                return new ExecutorResult(0, false);
+            }
+
+            if (pending.Count == 0)
+            {
+                await onOutput("Nothing to upgrade; system is up to date.", TaskLogLevel.Info).ConfigureAwait(false);
+                return new ExecutorResult(0, false);
+            }
+
+            // 3) Apply via controlled-sudo (argv-exact against the aetheus-patch drop-in).
+            return await RunSudoAsync(BuildAptUpgradeArgv(), timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            AptLock.Gate.Release();
+        }
+    }
+
+    private async Task<ExecutorResult> RunSudoAsync(
+        IReadOnlyList<string> argv, int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "sudo",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.Environment["DEBIAN_FRONTEND"] = "noninteractive";
+        foreach (var arg in argv)
+            psi.ArgumentList.Add(arg);
+
+        return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    // `sudo -n /usr/bin/apt-get upgrade -y` - argv-exact, matches the aetheus-patch allow-list one-to-one.
+    internal static IReadOnlyList<string> BuildAptUpgradeArgv() =>
+        ["-n", "/usr/bin/apt-get", "upgrade", "-y"];
+}

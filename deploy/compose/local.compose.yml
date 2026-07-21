@@ -1,0 +1,75 @@
+# =============================================================================
+# local.compose.yml - Aetheus Local Deployment
+# =============================================================================
+services:
+
+  front:
+    container_name: ${APPNAME}-local-front
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.front
+    ports:
+      - "${PORT_FRONT}:8080"
+    environment:
+      - API_BASE_URL=http://localhost:${PORT_BACK}
+      - APP_VERSION=${APP_VERSION:-local}
+    depends_on:
+      - back
+    restart: unless-stopped
+
+  back:
+    container_name: ${APPNAME}-local-back
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.back
+    ports:
+      - "${PORT_BACK}:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Default=Host=${APPNAME}-local-database;Port=5432;Database=${APPNAME};Username=${DB_USER};Password=${DB_PASSWORD}
+      - Auth__JwtKey=${JWT_KEY}
+      - Cors__FrontendUrl=http://localhost:${PORT_FRONT}
+      # Pin Data Protection keys to the mounted volume so DP keys + the generated cert survive a
+      # container recreate (otherwise Development defaults to the ephemeral rootfs and every recreate
+      # invalidates issued tokens/cookies).
+      - DataProtection__KeyPath=/app/data/dp-keys
+    volumes:
+      - git-repos:/app/data/git-repos
+      - artifacts:/app/data/artifacts
+      - dp-keys:/app/data/dp-keys
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - default
+      - backend
+    restart: unless-stopped
+
+  database:
+    container_name: ${APPNAME}-local-database
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      - POSTGRES_DB=${APPNAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${APPNAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+    restart: unless-stopped
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  db-data:
+  git-repos:
+  artifacts:
+  dp-keys:

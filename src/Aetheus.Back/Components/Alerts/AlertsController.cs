@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Shared.DTOs;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Aetheus.Back.Components.Alerts;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize(Roles = "Admin")]
+public class AlertsController(IAlertService alertService) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<AlertRuleDto>>> GetAlertRules(CancellationToken ct)
+    {
+        return Ok(await alertService.GetAlertRulesAsync(ct));
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<AlertRuleDto>> GetAlertRule(int id, CancellationToken ct)
+    {
+        var rule = await alertService.GetAlertRuleAsync(id, ct);
+        if (rule is null) return NotFound();
+        return Ok(rule);
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<AlertRuleDto>> CreateAlertRule(
+        [FromBody] CreateAlertRuleRequest request, CancellationToken ct)
+    {
+        var rule = await alertService.CreateAlertRuleAsync(request, ct);
+        return CreatedAtAction(nameof(GetAlertRule), new { id = rule.Id }, rule);
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<AlertRuleDto>> UpdateAlertRule(
+        int id, [FromBody] UpdateAlertRuleRequest request, CancellationToken ct)
+    {
+        var rule = await alertService.UpdateAlertRuleAsync(id, request, ct);
+        if (rule is null) return NotFound();
+        return Ok(rule);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeleteAlertRule(int id, CancellationToken ct)
+    {
+        var deleted = await alertService.DeleteAlertRuleAsync(id, ct);
+        if (!deleted) return NotFound();
+        return NoContent();
+    }
+}

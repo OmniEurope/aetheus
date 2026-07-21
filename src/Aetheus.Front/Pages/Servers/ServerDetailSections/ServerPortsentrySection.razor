@@ -1,0 +1,131 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+@using Aetheus.Shared.Enums
+
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">PortSentry</RadzenText>
+
+@* --- Status bar --- *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-4" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+    <RadzenBadge BadgeStyle="@(Ps.IsInstalled ? BadgeStyle.Success : BadgeStyle.Light)"
+        Text="@(Ps.IsInstalled ? L["Installed"] : L["NotInstalled"])" />
+    @if (Ps.IsInstalled)
+    {
+        <RadzenBadge BadgeStyle="@(Ps.IsRunning ? BadgeStyle.Success : BadgeStyle.Danger)"
+            Text="@(Ps.IsRunning ? L["Running"] : L["Stopped"])" />
+        @if (!string.IsNullOrEmpty(Ps.Version))
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">v@(Ps.Version)</RadzenText>
+        }
+        @if (!string.IsNullOrEmpty(Ps.Mode))
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@($"{L["Mode"]}: {Ps.Mode}")" />
+        }
+        <RadzenBadge BadgeStyle="@GetBlockedCountBadgeStyle(Ps.BlockedCount)"
+            Text="@($"{Ps.BlockedCount} {L["BlockedIps"]}")" />
+    }
+    <div class="blade-content-spacer"></div>
+
+    @if (!Ps.IsInstalled)
+    {
+        <RadzenButton Icon="rocket_launch" Text="@L["PortsentrySetup"]" Size="ButtonSize.Small"
+            Click="@OpenSetupDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+    }
+    else
+    {
+        <RadzenSplitButton Icon="play_arrow" Text="@L["PortSentry"]" Size="ButtonSize.Small"
+            Disabled="@_actionRunning" Click="@OnActionSelectedAsync">
+            <ChildContent>
+                <RadzenSplitButtonItem Text="@L["Start"]" Value="start" Icon="play_arrow" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                <RadzenSplitButtonItem Text="@L["Stop"]" Value="stop" Icon="stop" />
+                <RadzenSplitButtonItem Text="@L["Restart"]" Value="restart" Icon="refresh" />
+            </ChildContent>
+        </RadzenSplitButton>
+        <RadzenButton Icon="description" Text="@L["ViewLogs"]" Size="ButtonSize.Small"
+            Click="@GetLogsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+    }
+</RadzenStack>
+
+@if (Ps.IsInstalled)
+{
+    <UrlSyncedTabs Slugs="@(new[] { "blocked", "whitelist", "config" })">
+        <Tabs>
+            @* --- Blocked IPs tab --- *@
+            <RadzenTabsItem Text="@L["BlockedIps"]" Icon="block">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+                    <RadzenBadge Text="@_blockedCount.ToString()" BadgeStyle="@GetBlockedCountBadgeStyle(_blockedCount)" />
+                </RadzenStack>
+                <AetheusDataGrid @ref="_blockedGrid" Data="@_blockedIps" Count="@_blockedCount"
+                    TItem="PortsentryBlockedIpDto" IsLoading="@_blockedLoading" LoadData="@LoadBlockedAsync"
+                    PageSize="25" Density="Density.Compact" AllowSorting="true" EmptyText="@L["NoBlockedIps"]">
+                    <Columns>
+                            <RadzenDataGridColumn TItem="PortsentryBlockedIpDto" Property="IpAddress" Title="@L["IpAddress"]" Width="180px" />
+                            <RadzenDataGridColumn TItem="PortsentryBlockedIpDto" Property="Protocol" Title="@L["Protocol"]" Width="100px" />
+                            <RadzenDataGridColumn TItem="PortsentryBlockedIpDto" Title="@L["BlockedAt"]" Width="180px">
+                                <Template Context="b">
+                                    @b.BlockedAt.ToString("g")
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PortsentryBlockedIpDto" Property="Reason" Title="@L["Reason"]" />
+                            <RadzenDataGridColumn TItem="PortsentryBlockedIpDto" Title="" Width="80px" TextAlign="TextAlign.End">
+                                <Template Context="b">
+                                    <RadzenButton Icon="lock_open" Size="ButtonSize.ExtraSmall"
+                                        Click="@(() => UnblockIpAsync(b.IpAddress))" title="@L["Unblock"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </RadzenTabsItem>
+
+            @* --- Whitelist tab --- *@
+            <RadzenTabsItem Text="@L["Whitelist"]" Icon="shield">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.End" class="rz-mb-3" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+                    <div>
+                        <RadzenLabel Text="@L["IpAddress"]" Component="WlIp" />
+                        <RadzenTextBox @bind-Value="_whitelistIp" Name="WlIp" Placeholder="192.168.1.1" class="w-rem-11" />
+                    </div>
+                    <div>
+                        <RadzenLabel Text="@L["Description"]" Component="WlDesc" />
+                        <RadzenTextBox @bind-Value="_whitelistDesc" Name="WlDesc" Placeholder="@L["WhitelistDescription"]" class="w-rem-15-625" />
+                    </div>
+                    <RadzenButton Icon="add" Text="@L["Add"]" Size="ButtonSize.Small"
+                        Click="@AddWhitelistIpAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                </RadzenStack>
+                <AetheusDataGrid @ref="_whitelistGrid" Data="@_whitelist" Count="@_whitelistCount"
+                    TItem="PortsentryWhitelistIpDto" IsLoading="@_whitelistLoading" LoadData="@LoadWhitelistAsync"
+                    PageSize="25" Density="Density.Compact" AllowSorting="true" EmptyText="@L["NoWhitelistEntries"]">
+                    <Columns>
+                            <RadzenDataGridColumn TItem="PortsentryWhitelistIpDto" Property="IpAddress" Title="@L["IpAddress"]" Width="180px" />
+                            <RadzenDataGridColumn TItem="PortsentryWhitelistIpDto" Property="Description" Title="@L["Description"]" />
+                            <RadzenDataGridColumn TItem="PortsentryWhitelistIpDto" Title="@L["CreatedAt"]" Width="180px">
+                                <Template Context="w">
+                                    @w.CreatedAt.ToString("g")
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PortsentryWhitelistIpDto" Title="" Width="80px" TextAlign="TextAlign.End">
+                                <Template Context="w">
+                                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall"
+                                        Click="@(() => RemoveWhitelistIpAsync(w))" title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </RadzenTabsItem>
+
+            @* --- Configuration tab --- *@
+            <RadzenTabsItem Text="@L["Configuration"]" Icon="settings">
+                <RadzenRow Gap="1rem" class="rz-mb-4">
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenFieldset Text="@L["TcpPorts"]">
+                            <RadzenText TextStyle="TextStyle.Body2">@(string.IsNullOrEmpty(Ps.TcpPorts) ? "-" : Ps.TcpPorts)</RadzenText>
+                        </RadzenFieldset>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenFieldset Text="@L["UdpPorts"]">
+                            <RadzenText TextStyle="TextStyle.Body2">@(string.IsNullOrEmpty(Ps.UdpPorts) ? "-" : Ps.UdpPorts)</RadzenText>
+                        </RadzenFieldset>
+                    </RadzenColumn>
+                </RadzenRow>
+            </RadzenTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

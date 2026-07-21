@@ -1,0 +1,90 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
+    <RadzenIcon Icon="key" />
+    <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["PersonalAccessTokens"]</RadzenText>
+</RadzenStack>
+<RadzenText TextStyle="TextStyle.Body2" class="rz-mb-4">@L["PatPageDescription"]</RadzenText>
+
+@if (_revealedToken is not null)
+{
+    <RadzenCard class="rz-mb-4">
+        <RadzenStack Gap="0.75rem">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenIcon Icon="warning" />
+                <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["PatRevealTitle"]</RadzenText>
+            </RadzenStack>
+            <RadzenText TextStyle="TextStyle.Body2">@L["PatRevealWarning"]</RadzenText>
+            <RadzenTextBox Value="@_revealedToken" ReadOnly="true" class="rz-w-100" aria-label="@L["PersonalAccessTokens"]" />
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+                <RadzenButton Text="@L["Copy"]" Icon="content_copy" Size="ButtonSize.Small" Click="@CopyRevealedAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                <RadzenButton Text="@L["Done"]" Icon="check" Size="ButtonSize.Small" Click="@DismissReveal" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+            </RadzenStack>
+        </RadzenStack>
+    </RadzenCard>
+}
+
+<RadzenCard class="rz-mb-4">
+    <RadzenTemplateForm TItem="NewTokenModel" Data="@_form" Submit="@(async (NewTokenModel _) => await CreateAsync())">
+        <DataAnnotationsValidator />
+        <RadzenStack Orientation="Orientation.Horizontal" Wrap="FlexWrap.Wrap" AlignItems="AlignItems.End" Gap="1rem">
+            <RadzenFormField Text="@L["PatName"]" Variant="Variant.Outlined">
+                <RadzenTextBox @bind-Value="_form.Name" Name="Name" MaxLength="64" />
+                <ValidationMessage For="@(() => _form.Name)" />
+            </RadzenFormField>
+            <RadzenFormField Text="@L["PatScope"]" Variant="Variant.Outlined">
+                <RadzenDropDown TValue="PatScope" @bind-Value="_form.Scope" Data="@Scopes">
+                    <Template Context="s">@ScopeLabel((PatScope)s)</Template>
+                </RadzenDropDown>
+            </RadzenFormField>
+            <RadzenFormField Text="@L["PatExpirationDays"]" Variant="Variant.Outlined">
+                <RadzenNumeric TValue="int" @bind-Value="_form.ExpirationDays" Min="1" Max="365" />
+            </RadzenFormField>
+            <RadzenButton ButtonType="ButtonType.Submit" Text="@L["PatCreate"]" Icon="add" Busy="@_creating" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenStack>
+    </RadzenTemplateForm>
+</RadzenCard>
+
+<RadzenDataGrid @ref="_grid" Data="@_tokens" Count="@_totalCount" TItem="PersonalAccessTokenDto"
+    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="true" PageSize="25"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    Density="Density.Compact" class="aetheus-grid-fullheight">
+    <EmptyTemplate>
+        <EmptyState Icon="key_off" Title="@L["PatEmptyTitle"]" Description="@L["PatEmptyDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Property="Name" Title="@L["PatName"]" />
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Property="Scope" Title="@L["PatScope"]" Width="150px">
+            <Template Context="t">
+                <RadzenBadge BadgeStyle="@(t.Scope == PatScope.ReadOnly ? BadgeStyle.Info : BadgeStyle.Warning)" Text="@ScopeLabel(t.Scope)" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Property="TokenPrefix" Title="@L["PatTokenPrefix"]" Width="160px" />
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Property="CreatedAt" Title="@L["PatCreatedAt"]" Width="160px" FormatString="{0:g}" />
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Property="ExpiresAt" Title="@L["PatExpires"]" Width="160px" FormatString="{0:g}" />
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Property="LastUsedAt" Title="@L["PatLastUsed"]" Width="160px">
+            <Template Context="t">
+                @if (t.LastUsedAt.HasValue)
+                {
+                    @t.LastUsedAt.Value.ToString("g")
+                }
+                else
+                {
+                    <RadzenText TextStyle="TextStyle.Caption">@L["PatNever"]</RadzenText>
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Title="@L["PatStatus"]" Width="120px" Sortable="false">
+            <Template Context="t">
+                <RadzenBadge BadgeStyle="@StatusStyle(t)" Text="@StatusLabel(t)" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PersonalAccessTokenDto" Title="@L["Actions"]" Width="90px" Sortable="false">
+            <Template Context="t">
+                @if (IsRevocable(t))
+                {
+                    <RadzenButton Icon="block" Size="ButtonSize.Small" Click="@(() => RevokeAsync(t))" Title="@L["PatRevoke"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>

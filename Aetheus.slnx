@@ -1,0 +1,16 @@
+<Solution>
+  <Project Path="src/Aetheus.Agent.Core/Aetheus.Agent.Core.csproj" />
+  <Project Path="src/Aetheus.Agent.Windows/Aetheus.Agent.Windows.csproj" />
+  <Project Path="src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj" />
+  <Project Path="src/Aetheus.Back/Aetheus.Back.csproj" />
+  <Project Path="src/Aetheus.Front/Aetheus.Front.csproj" />
+  <Project Path="src/Aetheus.Shared/Aetheus.Shared.csproj" />
+  <Project Path="tests/Aetheus.Agent.Core.Tests/Aetheus.Agent.Core.Tests.csproj" />
+  <Project Path="tests/Aetheus.Back.Tests/Aetheus.Back.Tests.csproj" />
+  <Project Path="tests/Aetheus.Back.IntegrationTests/Aetheus.Back.IntegrationTests.csproj" />
+  <Project Path="tests/Aetheus.Front.Tests/Aetheus.Front.Tests.csproj" />
+  <Project Path="src/Aetheus.Cli/Aetheus.Cli.csproj" />
+  <Project Path="src/Aetheus.Analyzers/Aetheus.Analyzers.csproj" />
+  <Project Path="tests/Aetheus.E2E/Aetheus.E2E.csproj" />
+  <Project Path="tests/Aetheus.Analyzers.Tests/Aetheus.Analyzers.Tests.csproj" />
+</Solution>

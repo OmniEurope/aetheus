@@ -1,0 +1,305 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Reflection;
+using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+using Bunit;
+using Radzen;
+
+namespace Aetheus.Front.Tests.Pages.Servers;
+
+public class ServerRkhunterSectionRenderTests : BunitContext
+{
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
+    private static readonly BindingFlags StaticPriv = BindingFlags.NonPublic | BindingFlags.Static;
+
+    public ServerRkhunterSectionRenderTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+    }
+
+    private void StubRkhunterApi(
+        int serverId = 50,
+        List<RkhunterWarningDto>? warnings = null,
+        List<RkhunterScanResultDto>? scanHistory = null)
+    {
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/warnings", warnings ?? []);
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/history", scanHistory ?? []);
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/action", true);
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/setup", true);
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/schedule", true);
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/logs", true);
+    }
+
+    private IRenderedComponent<ServerRkhunterSection> RenderInstalled(
+        RkhunterDataDto? rk = null,
+        int serverId = 50)
+    {
+        StubRkhunterApi(serverId);
+        var data = rk ?? new RkhunterDataDto
+        {
+            IsInstalled = true,
+            Version = "1.4.6",
+            WarningCount = 0,
+            ScanScheduleCron = "0 3 * * *"
+        };
+        return Render<ServerRkhunterSection>(p => p
+            .Add(x => x.ServerId, serverId)
+            .Add(x => x.Rk, data));
+    }
+
+    private IRenderedComponent<ServerRkhunterSection> RenderNotInstalled(int serverId = 50)
+    {
+        _handler.SetJsonResponse($"api/servers/{serverId}/rkhunter/warnings", new List<RkhunterWarningDto>());
+        return Render<ServerRkhunterSection>(p => p
+            .Add(x => x.ServerId, serverId)
+            .Add(x => x.Rk, new RkhunterDataDto { IsInstalled = false }));
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Renders_InstalledState_ShowsRkhunterHeading()
+    {
+        var cut = RenderInstalled();
+        Assert.Contains("RKHunter", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_InstalledState_ShowsVersion()
+    {
+        var cut = RenderInstalled();
+        Assert.Contains("1.4.6", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_NotInstalled_ShowsHeading()
+    {
+        var cut = RenderNotInstalled();
+        Assert.Contains("RKHunter", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_WithWarnings_ShowsWarningCount()
+    {
+        StubRkhunterApi(50, warnings:
+        [
+            new RkhunterWarningDto
+            {
+                Id       = 1,
+                Category = "rootkit",
+                Detail   = "suspicious file",
+                Severity = "warning",
+                FoundAt  = DateTime.UtcNow
+            }
+        ]);
+        var rk = new RkhunterDataDto { IsInstalled = true, Version = "1.4.6", WarningCount = 1 };
+        var cut = Render<ServerRkhunterSection>(p => p
+            .Add(x => x.ServerId, 50)
+            .Add(x => x.Rk, rk));
+
+        Assert.Contains("1", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_WithScanSchedule_ShowsCronExpression()
+    {
+        var rk = new RkhunterDataDto
+        {
+            IsInstalled = true,
+            Version = "1.4.6",
+            ScanScheduleCron = "0 4 * * *"
+        };
+        var cut = RenderInstalled(rk);
+        Assert.Contains("0 4 * * *", cut.Markup);
+    }
+
+    // ── ExecuteActionAsync ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteActionAsync_RunScan_CompletesAndClearsRunning()
+    {
+        var cut = RenderInstalled();
+        var method = typeof(ServerRkhunterSection).GetMethod("ExecuteActionAsync", Priv)!;
+
+        await cut.InvokeAsync(async () =>
+            await (Task)method.Invoke(cut.Instance, [RkhunterAction.RunScan])!);
+
+        var running = (bool)typeof(ServerRkhunterSection)
+            .GetField("_actionRunning", Priv)!
+            .GetValue(cut.Instance)!;
+        Assert.False(running);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_UpdateDatabase_CompletesWithoutThrowing()
+    {
+        var cut = RenderInstalled();
+        var method = typeof(ServerRkhunterSection).GetMethod("ExecuteActionAsync", Priv)!;
+
+        var ex = await Record.ExceptionAsync(async () =>
+            await cut.InvokeAsync(async () =>
+                await (Task)method.Invoke(cut.Instance, [RkhunterAction.UpdateDatabase])!));
+
+        Assert.Null(ex);
+    }
+
+    // ── LoadWarningsAsync ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LoadWarningsAsync_PopulatesWarningsList()
+    {
+        StubRkhunterApi(50, warnings:
+        [
+            new RkhunterWarningDto { Id = 1, Category = "rootkit", Detail = "test", Severity = "medium", FoundAt = DateTime.UtcNow },
+            new RkhunterWarningDto { Id = 2, Category = "network", Detail = "port", Severity = "low",    FoundAt = DateTime.UtcNow }
+        ]);
+        var rk = new RkhunterDataDto { IsInstalled = true, Version = "1.4.6" };
+        var cut = Render<ServerRkhunterSection>(p => p
+            .Add(x => x.ServerId, 50)
+            .Add(x => x.Rk, rk));
+
+        var method = typeof(ServerRkhunterSection).GetMethod("LoadWarningsAsync", Priv)!;
+        await cut.InvokeAsync(async () =>
+            await (Task)method.Invoke(cut.Instance, [])!);
+
+        var warnings = (List<RkhunterWarningDto>)typeof(ServerRkhunterSection)
+            .GetField("_warnings", Priv)!
+            .GetValue(cut.Instance)!;
+        Assert.Equal(2, warnings.Count);
+    }
+
+    // ── LoadScanHistoryAsync ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LoadScanHistoryAsync_PopulatesScanHistory()
+    {
+        var cut = RenderInstalled();
+
+        // Override the history stub AFTER render so the component is already initialized
+        _handler.SetJsonResponse("api/servers/50/rkhunter/history",
+            new List<RkhunterScanResultDto>
+            {
+                new() { Id = 1, Status = "clean",   ScanTime = DateTime.UtcNow.AddHours(-1), WarningCount = 0 },
+                new() { Id = 2, Status = "warning",  ScanTime = DateTime.UtcNow.AddHours(-2), WarningCount = 3 }
+            });
+
+        var method = typeof(ServerRkhunterSection).GetMethod("LoadScanHistoryAsync", Priv)!;
+
+        await cut.InvokeAsync(async () =>
+            await (Task)method.Invoke(cut.Instance, [])!);
+
+        var history = (List<RkhunterScanResultDto>)typeof(ServerRkhunterSection)
+            .GetField("_scanHistory", Priv)!
+            .GetValue(cut.Instance)!;
+        Assert.Equal(2, history.Count);
+    }
+
+    // ── SaveScheduleAsync ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SaveScheduleAsync_WithCron_CompletesAndClearsSaving()
+    {
+        var cut = RenderInstalled();
+        typeof(ServerRkhunterSection).GetField("_scheduleCron", Priv)!.SetValue(cut.Instance, "0 4 * * *");
+
+        var method = typeof(ServerRkhunterSection).GetMethod("SaveScheduleAsync", Priv)!;
+        await cut.InvokeAsync(async () =>
+            await (Task)method.Invoke(cut.Instance, [])!);
+
+        var saving = (bool)typeof(ServerRkhunterSection)
+            .GetField("_savingSchedule", Priv)!
+            .GetValue(cut.Instance)!;
+        Assert.False(saving);
+    }
+
+    [Fact]
+    public async Task SaveScheduleAsync_EmptyCron_SendsNullExpression()
+    {
+        var cut = RenderInstalled();
+        typeof(ServerRkhunterSection).GetField("_scheduleCron", Priv)!.SetValue(cut.Instance, "");
+
+        var method = typeof(ServerRkhunterSection).GetMethod("SaveScheduleAsync", Priv)!;
+        var ex = await Record.ExceptionAsync(async () =>
+            await cut.InvokeAsync(async () =>
+                await (Task)method.Invoke(cut.Instance, [])!));
+
+        Assert.Null(ex);
+    }
+
+    // ── GetLogsAsync ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetLogsAsync_CompletesWithoutThrowing()
+    {
+        var cut = RenderInstalled();
+        var method = typeof(ServerRkhunterSection).GetMethod("GetLogsAsync", Priv)!;
+
+        var ex = await Record.ExceptionAsync(async () =>
+            await cut.InvokeAsync(async () =>
+                await (Task)method.Invoke(cut.Instance, [])!));
+
+        Assert.Null(ex);
+    }
+
+    // ── HandleTaskCompletedAsync ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task HandleTaskCompletedAsync_RkhunterTask_RefreshesData()
+    {
+        var cut = RenderInstalled();
+        // Ensure the history endpoint returns a valid list (override the stub after render)
+        _handler.SetJsonResponse("api/servers/50/rkhunter/history", new List<RkhunterScanResultDto>());
+        var notification = new TaskCompletedNotification { TaskName = "Run RKHunter Scan", ServerId = 50 };
+
+        await cut.Instance.HandleTaskCompletedAsync(notification);
+
+        // The RKHunter task name matches, so the handler refreshes scan history via the history GET.
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/servers/50/rkhunter/history"));
+    }
+
+    [Fact]
+    public async Task HandleTaskCompletedAsync_UnrelatedTask_SkipsRefresh()
+    {
+        var cut = RenderInstalled();
+        var notification = new TaskCompletedNotification { TaskName = "Deploy Application", ServerId = 50 };
+
+        // Should return early without refreshing
+        var ex = await Record.ExceptionAsync(() => cut.Instance.HandleTaskCompletedAsync(notification));
+        Assert.Null(ex);
+    }
+
+    // ── Static helpers ────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("clean", "check_circle")]
+    [InlineData("warning", "warning")]
+    [InlineData("unknown", "help_outline")]
+    public void GetScanStatusIcon_ReturnsCorrectIcon(string status, string expected)
+    {
+        var method = typeof(ServerRkhunterSection).GetMethod("GetScanStatusIcon", StaticPriv)!;
+        Assert.Equal(expected, method.Invoke(null, [status]));
+    }
+
+    [Theory]
+    [InlineData("clean", "scan-status-clean")]
+    [InlineData("warning", "scan-status-warning")]
+    [InlineData("other", "scan-status-unknown")]
+    public void GetScanStatusColor_ReturnsCorrectCssClass(string status, string expected)
+    {
+        var method = typeof(ServerRkhunterSection).GetMethod("GetScanStatusColor", StaticPriv)!;
+        Assert.Equal(expected, method.Invoke(null, [status]));
+    }
+
+    [Theory]
+    [InlineData("clean", BadgeStyle.Success)]
+    [InlineData("warning", BadgeStyle.Warning)]
+    [InlineData("other", BadgeStyle.Secondary)]
+    public void GetScanBadgeStyle_ReturnsCorrectStyle(string status, BadgeStyle expected)
+    {
+        var method = typeof(ServerRkhunterSection).GetMethod("GetScanBadgeStyle", StaticPriv)!;
+        Assert.Equal(expected, (BadgeStyle)method.Invoke(null, [status])!);
+    }
+}

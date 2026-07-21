@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Pipelines is null)
+{
+    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-3">
+        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Pipelines"]</RadzenText>
+        <RadzenButton Icon="add" Text="@L["NewPipeline"]" Size="ButtonSize.Small" Click="@NewPipeline" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+    <PipelinesList ProjectId="ProjectId" />
+}

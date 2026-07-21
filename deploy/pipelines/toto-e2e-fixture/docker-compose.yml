@@ -1,0 +1,11 @@
+services:
+  toto-api:
+    image: "${TOTO_IMAGE:-toto-accept:current}"
+    ports:
+      - "127.0.0.1:8090:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/todos >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s

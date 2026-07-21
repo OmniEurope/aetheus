@@ -1,0 +1,10 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Reusable RadzenTabs wrapper that mirrors the active tab in the URL (?tab=slug) so the browser
+   back/forward buttons navigate between tabs, and a tab is shareable/bookmarkable. Near drop-in for
+   RadzenTabs: swap the tag and add Slugs (the ordered slugs of the rendered tabs); keep the inner
+   <Tabs> content unchanged. Supports optional @bind-SelectedIndex and a Change passthrough. *@
+<RadzenTabs class="@CssClass" SelectedIndex="@_index" Change="@OnChangeAsync">
+    <Tabs>
+        @Tabs
+    </Tabs>
+</RadzenTabs>

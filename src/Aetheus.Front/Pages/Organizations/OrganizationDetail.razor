@@ -1,0 +1,116 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/organizations/{Id:int}"
+
+<PageTitle>@(_org?.Name ?? L["Organization"]) - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+}
+else if (_loadError)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem">
+            <RadzenText class="rz-m-0">@L["LoadFailed"]</RadzenText>
+            <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@LoadAsync"
+                ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    </RadzenAlert>
+}
+else if (_org is null)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Warning">@L["NotFound"]</RadzenAlert>
+}
+else
+{
+    <Aetheus.Front.Shared.PageHeader Title="@_org.Name" Icon="apartment" BackHref="/admin/organizations">
+        <ChildContent>
+            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_org.Slug" />
+        </ChildContent>
+    </Aetheus.Front.Shared.PageHeader>
+
+    @if (!string.IsNullOrEmpty(_org.Description))
+    {
+        <RadzenText class="rz-mt-2 rz-color-secondary">@_org.Description</RadzenText>
+    }
+
+    <UrlSyncedTabs class="rz-mt-4" Slugs="@(new[] { "general", "members", "projects" })">
+        <Tabs>
+            <RadzenTabsItem Text="@L["General"]">
+                <RadzenTemplateForm TItem="OrgGeneralModel" Data="@_general" Submit="@OnSaveGeneral" class="rz-mt-2 form-narrow">
+                    <LocalizedDataAnnotationsValidator />
+                    <RadzenStack Gap="1rem">
+                        <RadzenFormField Text="@L["Name"]">
+                            <RadzenTextBox @bind-Value="_general.Name" Name="Name" MaxLength="100" />
+                            <ValidationMessage For="@(() => _general.Name)" />
+                        </RadzenFormField>
+                        <RadzenFormField Text="@L["Slug"]">
+                            <RadzenTextBox @bind-Value="_general.Slug" Name="Slug" MaxLength="100" />
+                            <ValidationMessage For="@(() => _general.Slug)" />
+                        </RadzenFormField>
+                        <RadzenFormField Text="@L["Description"]">
+                            <RadzenTextArea @bind-Value="_general.Description" Name="Description" MaxLength="500" Rows="3" />
+                            <ValidationMessage For="@(() => _general.Description)" />
+                        </RadzenFormField>
+                    </RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-4">
+                        <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Save"]" Icon="save" IsBusy="@_savingGeneral" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["DeleteOrganization"]" Icon="delete" Click="@OnDeleteOrganization" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                    </RadzenStack>
+                </RadzenTemplateForm>
+            </RadzenTabsItem>
+            <RadzenTabsItem Text="@L["Members"]">
+                <RadzenStack Gap="0.75rem" class="rz-mt-2">
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
+                        <RadzenFormField Text="@L["User"]" Variant="Variant.Filled">
+                            <RadzenDropDown TValue="int?" Data="@_users" TextProperty="Username" ValueProperty="Id"
+                                AllowFiltering="true" @bind-Value="_newUserId" Placeholder="@L["SelectUser"]" />
+                        </RadzenFormField>
+                        <RadzenFormField Text="@L["Role"]" Variant="Variant.Filled">
+                            <RadzenDropDown TValue="OrganizationRole" Data="@_roleOptions" TextProperty="Text"
+                                ValueProperty="Value" @bind-Value="_newUserRole" />
+                        </RadzenFormField>
+                        <RadzenButton Icon="person_add" Text="@L["AddMember"]" Click="@OnAddMember"
+                            Disabled="@(_newUserId is null)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                    </RadzenStack>
+
+                    <RadzenDataGrid TItem="OrganizationMemberDto" Data="@_org.Members" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                        RowClick="@(args => { if (args.Data is { } member) Nav.NavigateTo($"/users/{member.UserId}"); })" class="aetheus-clickable-rows">
+                        <Columns>
+                            <RadzenDataGridColumn TItem="OrganizationMemberDto" Property="Username" Title="@L["Username"]">
+                                <Template Context="m">
+                                    <RadzenLink Path="@($"/users/{m.UserId}")" Text="@m.Username" @onclick:stopPropagation="true" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="OrganizationMemberDto" Property="Email" Title="@L["Email"]" />
+                            <RadzenDataGridColumn TItem="OrganizationMemberDto" Title="@L["Role"]" Width="180px">
+                                <Template Context="m">
+                                    <RadzenDropDown TValue="OrganizationRole" Value="@m.Role" Data="@_roleOptions"
+                                        TextProperty="Text" ValueProperty="Value"
+                                        Change="@(args => OnChangeMemberRole(m, (OrganizationRole)args!))" @onclick:stopPropagation="true" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="OrganizationMemberDto" Title="@L["Actions"]" MinWidth="9rem">
+                                <Template Context="m">
+                                    <RadzenButton Text="@L["Remove"]" Icon="delete" Click="@(() => OnRemoveMember(m))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" @onclick:stopPropagation="true" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                        </Columns>
+                    </RadzenDataGrid>
+                </RadzenStack>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["Projects"]">
+                <RadzenStack Gap="0.75rem" class="rz-mt-2">
+                    <RadzenText class="rz-color-secondary">@L["AssignProjectsHelp"]</RadzenText>
+                    <RadzenListBox TValue="IEnumerable<int>" Data="@_allProjects" TextProperty="Name" ValueProperty="Id"
+                        Multiple="true" AllowFiltering="true" class="org-projects-listbox"
+                        @bind-Value="_selectedProjectIds" />
+                    <div>
+                        <RadzenButton Icon="save" Text="@L["Save"]" Click="@OnSaveProjects" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                    </div>
+                </RadzenStack>
+            </RadzenTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

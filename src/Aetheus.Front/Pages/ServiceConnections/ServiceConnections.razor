@@ -1,0 +1,67 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/service-connections"
+@using Aetheus.Shared.Enums
+
+<PageTitle>@L["ServiceConnections"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Shared.PageHeader Title="@L["ServiceConnections"]" Icon="hub">
+    <ChildContent>
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _count)" />
+    </ChildContent>
+    <Actions>
+        @if (_canWrite)
+        {
+            <RadzenButton Text="@L["Create"]" Icon="add" Size="ButtonSize.Small" Click="@OpenCreateDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        }
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small" Click="@ReloadData" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </Actions>
+    <Filters>
+        <RadzenIcon Icon="filter_list" class="rz-color-secondary" />
+        <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search" Change="@(async (_) => await ReloadData())" class="pipeline-list-search" />
+    </Filters>
+</Aetheus.Front.Shared.PageHeader>
+
+<AetheusDataGrid TItem="ServiceConnectionDto" Data="@_items" Count="@_count" LoadData="@LoadData"
+    PageSize="20" AllowSorting="true" IsLoading="@_loading" Density="Density.Compact" FullHeight="true">
+    <EmptyTemplate>
+        <EmptyState Icon="hub" Title="@L["NoServiceConnections"]" Description="@L["NoServiceConnectionsDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="ServiceConnectionDto" Property="Name" Title="@L["Name"]" MinWidth="10rem" />
+        <RadzenDataGridColumn TItem="ServiceConnectionDto" Property="Type" Title="@L["Type"]" Width="150px">
+            <Template Context="c">
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@c.Type.ToString()" />
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServiceConnectionDto" Property="Url" Title="@L["Url"]">
+            <Template Context="c">
+                <span class="text-mono">@(string.IsNullOrEmpty(c.Url) ? "-" : c.Url)</span>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServiceConnectionDto" Property="ProjectName" Title="@L["Project"]" Width="160px">
+            <Template Context="c">@(c.ProjectName ?? "-")</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServiceConnectionDto" Title="@L["ConnectionStatus"]" Width="230px" Sortable="false">
+            <Template Context="c">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenButton Icon="wifi_tethering" Size="ButtonSize.ExtraSmall" Text="@L["TestConnection"]" IsBusy="@(_testing.Contains(c.Id))" Disabled="@(_testing.Contains(c.Id))"
+                        Click="@(() => TestAsync(c.Id))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    @if (_testResults.TryGetValue(c.Id, out var result))
+                    {
+                        <RadzenBadge BadgeStyle="@StatusBadge(result.Status)" Text="@L.Localize(result.Status)"
+                            title="@result.Message" />
+                    }
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ServiceConnectionDto" Title="@L["Actions"]" Width="120px" Sortable="false" TextAlign="TextAlign.Center">
+            <Template Context="c">
+                @if (_canWrite)
+                {
+                    <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall" Click="@(() => OpenEditDialogAsync(c))" title="@L["Edit"]" aria-label="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => DeleteAsync(c))" title="@L["Delete"]" aria-label="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
