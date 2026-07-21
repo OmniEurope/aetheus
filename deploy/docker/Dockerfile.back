@@ -98,8 +98,11 @@ RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
         echo ">>> BUILD_AGENTS=0 — skipping Windows agent publish" ; \
     fi
 
+# dotnet-ef starts a separate design-time process. Keep this non-routable placeholder in
+# the build stage environment so every child process can resolve it. The runtime stage
+# starts from a new FROM below, so this value is not present in the production image.
+ENV AETHEUS_DESIGN_CONNECTION="Host=localhost;Database=aetheus_design;Username=build"
 RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    AETHEUS_DESIGN_CONNECTION="Host=localhost;Database=aetheus_design;Username=postgres;Password=postgres" \
     dotnet-ef migrations bundle \
         --project Aetheus.Back/Aetheus.Back.csproj \
         --startup-project Aetheus.Back/Aetheus.Back.csproj \
