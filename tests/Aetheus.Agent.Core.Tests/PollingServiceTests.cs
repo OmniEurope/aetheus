@@ -750,8 +750,10 @@ public class PollingServiceTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        for (var attempt = 0; attempt < 10_000 && !condition(); attempt++)
-            await Task.Yield();
+        var timeout = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && timeout.Elapsed < TimeSpan.FromSeconds(5))
+            await Task.Delay(TimeSpan.FromMilliseconds(10), TestContext.Current.CancellationToken);
+
         Assert.True(condition(), "The asynchronous polling state did not reach the expected condition.");
     }
 

@@ -3,7 +3,6 @@ using Aetheus.Back.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.Tests;
@@ -14,23 +13,20 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureAppConfiguration((_, config) =>
-        {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                // Placeholder so Program.cs's connection-string guard passes; the
-                // Npgsql-bound DbContext is removed below and replaced with InMemory.
-                ["ConnectionStrings:Default"] = "Host=test;Database=test;Username=test;Password=test",
-                ["Auth:JwtKey"] = "aetheus-dev-key-minimum-32-bytes!!",
-                ["Auth:EncryptionKey"] = "aetheus-encryption-key-32ch!",
-                ["Auth:AdminPassword"] = "admin",
-                ["RateLimiting:Disabled"] = "true",
-                // Every factory owns an isolated in-memory database, but demo Git repositories live
-                // on disk. Disable opt-in startup seeders so parallel controller fixtures never race
-                // on the same Toto bare repository; dedicated seeder tests invoke them explicitly.
-                ["Seed:Demo"] = "false",
-            });
-        });
+        builder.UseEnvironment("Development");
+        // UseSetting is visible while Program.cs executes its top-level statements. A later
+        // ConfigureAppConfiguration callback cannot satisfy the startup guards in a clean clone.
+        builder.UseSetting(
+            "ConnectionStrings:Default",
+            "Host=test;Database=test;Username=test;Password=test");
+        builder.UseSetting("Auth:JwtKey", "aetheus-dev-key-minimum-32-bytes!!");
+        builder.UseSetting("Auth:EncryptionKey", "aetheus-encryption-key-32ch!");
+        builder.UseSetting("Auth:AdminPassword", "admin");
+        builder.UseSetting("RateLimiting:Disabled", "true");
+        // Every factory owns an isolated in-memory database, but demo Git repositories live
+        // on disk. Disable opt-in startup seeders so parallel controller fixtures never race
+        // on the same Toto bare repository; dedicated seeder tests invoke them explicitly.
+        builder.UseSetting("Seed:Demo", "false");
         builder.ConfigureServices(services =>
         {
             var toRemove = services.Where(d =>

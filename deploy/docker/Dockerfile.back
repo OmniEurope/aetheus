@@ -99,6 +99,7 @@ RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
     fi
 
 RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+    AETHEUS_DESIGN_CONNECTION="Host=localhost;Database=aetheus_design;Username=postgres;Password=postgres" \
     dotnet-ef migrations bundle \
         --project Aetheus.Back/Aetheus.Back.csproj \
         --startup-project Aetheus.Back/Aetheus.Back.csproj \

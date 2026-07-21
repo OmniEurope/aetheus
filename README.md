@@ -64,6 +64,26 @@ Aetheus.slnx
 .\ylaunch.ps1 -hl                 # Show detailed help with examples
 ```
 
+### Validate GitHub Actions locally
+
+Run the same product checks before pushing:
+
+```powershell
+.\ylaunch.ps1 -t                  # Unit and analyzer tests
+.\ylaunch.ps1 -ti                 # PostgreSQL integration tests
+.\ylaunch.ps1 -c                  # Product coverage with the 75% gate
+
+docker build --file deploy/docker/Dockerfile.back --tag aetheus-back:cve-scan --build-arg BUILD_AGENTS=0 .
+docker build --file deploy/docker/Dockerfile.front --tag aetheus-front:cve-scan .
+
+# If Trivy is installed locally:
+trivy image --scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed=false --timeout 15m aetheus-back:cve-scan
+trivy image --scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed=false --timeout 15m aetheus-front:cve-scan
+```
+
+The launchers keep local test databases isolated. The backend Docker build uses a non-routable
+design-time connection only to compile the EF migration bundle; runtime credentials are still required.
+
 > Run a second worktree's stack alongside another one with `ylaunch.ps1 -w`
 > (`-Worktree`) - it picks a free, non-default port triplet, writes a gitignored
 > `.ylaunch.local` (`BACK_HTTPS_PORT` / `BACK_HTTP_PORT` / `FRONT_PORT` + `LABEL`

@@ -95,6 +95,24 @@ public sealed class DeploymentSafetyAuditTests
     }
 
     [Fact]
+    public void CleanCloneBuildsProvideRequiredDatabaseSettingsBeforeStartup()
+    {
+        var testFactory = Read(
+            "tests",
+            "Aetheus.Back.Tests",
+            "Shared",
+            "CustomWebApplicationFactory.cs");
+        Assert.Contains("builder.UseEnvironment(\"Development\")", testFactory, StringComparison.Ordinal);
+        Assert.Contains("builder.UseSetting(\n            \"ConnectionStrings:Default\"", testFactory.Replace("\r\n", "\n"), StringComparison.Ordinal);
+
+        var dockerfile = Read("deploy", "docker", "Dockerfile.back");
+        var designConnection = dockerfile.IndexOf("AETHEUS_DESIGN_CONNECTION=", StringComparison.Ordinal);
+        var migrationBundle = dockerfile.IndexOf("dotnet-ef migrations bundle", StringComparison.Ordinal);
+        Assert.True(designConnection >= 0, "The EF bundle build requires an explicit design-time connection.");
+        Assert.True(designConnection < migrationBundle, "The design-time connection must precede the EF bundle command.");
+    }
+
+    [Fact]
     public void BuildSdkAndRemoteHostTrustArePinned()
     {
         var globalJson = Read("global.json");
