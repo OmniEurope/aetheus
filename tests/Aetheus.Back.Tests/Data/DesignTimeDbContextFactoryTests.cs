@@ -23,6 +23,27 @@ public sealed class DesignTimeDbContextFactoryTests
     }
 
     [Fact]
+    public void ResolveConnectionString_DesignArgument_ReturnsValueWithoutConfiguration()
+    {
+        var args = new[] { "--design-connection", "Host=design;Database=aetheus_bundle;Username=build" };
+
+        var connectionString = DesignTimeDbContextFactory.ResolveConnectionString(BuildConfiguration(), args);
+
+        Assert.Equal("Host=design;Database=aetheus_bundle;Username=build", connectionString);
+    }
+
+    [Fact]
+    public void ResolveConnectionString_DesignArgument_TakesPrecedenceOverConfiguration()
+    {
+        var configuration = BuildConfiguration(("ConnectionStrings:Default", "Host=config;Database=aetheus"));
+        var args = new[] { "--design-connection=Host=design;Database=aetheus_bundle;Username=build" };
+
+        var connectionString = DesignTimeDbContextFactory.ResolveConnectionString(configuration, args);
+
+        Assert.Equal("Host=design;Database=aetheus_bundle;Username=build", connectionString);
+    }
+
+    [Fact]
     public void ResolveConnectionString_MissingConfiguration_FailsWithoutCredentialFallback()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>

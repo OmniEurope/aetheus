@@ -98,10 +98,9 @@ RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
         echo ">>> BUILD_AGENTS=0 — skipping Windows agent publish" ; \
     fi
 
-# dotnet-ef starts a separate design-time process. Keep this non-routable placeholder in
-# the build stage environment so every child process can resolve it. The runtime stage
-# starts from a new FROM below, so this value is not present in the production image.
-ENV AETHEUS_DESIGN_CONNECTION="Host=localhost;Database=aetheus_design;Username=build"
+# Pass the non-routable placeholder directly to the design-time factory. Arguments after
+# `--` are forwarded by dotnet-ef to IDesignTimeDbContextFactory, avoiding environment
+# propagation differences between Docker engines. This value is never used at runtime.
 RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
     dotnet-ef migrations bundle \
         --project Aetheus.Back/Aetheus.Back.csproj \
@@ -109,7 +108,9 @@ RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
         --runtime linux-x64 \
         --self-contained \
         --force \
-        -o /app/efbundle
+        -o /app/efbundle \
+        -- \
+        --design-connection "Host=localhost;Database=aetheus_design;Username=build"
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
 WORKDIR /app

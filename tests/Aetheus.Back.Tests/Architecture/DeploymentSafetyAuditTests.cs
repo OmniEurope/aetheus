@@ -106,10 +106,11 @@ public sealed class DeploymentSafetyAuditTests
         Assert.Contains("builder.UseSetting(\n            \"ConnectionStrings:Default\"", testFactory.Replace("\r\n", "\n"), StringComparison.Ordinal);
 
         var dockerfile = Read("deploy", "docker", "Dockerfile.back");
-        var designConnection = dockerfile.IndexOf("ENV AETHEUS_DESIGN_CONNECTION=", StringComparison.Ordinal);
         var migrationBundle = dockerfile.IndexOf("dotnet-ef migrations bundle", StringComparison.Ordinal);
-        Assert.True(designConnection >= 0, "The EF child process requires a build-stage design-time connection.");
-        Assert.True(designConnection < migrationBundle, "The design-time connection must precede the EF bundle command.");
+        Assert.True(migrationBundle >= 0, "The backend image must build an EF migration bundle.");
+        var designConnection = dockerfile.IndexOf("--design-connection", migrationBundle, StringComparison.Ordinal);
+        Assert.True(designConnection > migrationBundle, "The EF bundle command must pass its design-time connection explicitly.");
+        Assert.DoesNotContain("ENV AETHEUS_DESIGN_CONNECTION=", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
