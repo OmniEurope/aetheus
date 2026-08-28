@@ -1258,7 +1258,7 @@ if [[ -n "$REMOTE_AGENT" ]]; then
 
     printf '%s' "$RA_TARGET" > "$RA_FILE"
 
-    # Parse host:port (e.g. root@5.199.143.16:6875)
+    # Parse host:port (e.g. root@example.com:2222)
     SSH_HOST="$RA_TARGET"
     SSH_PORT=""
     if [[ "$RA_TARGET" =~ ^(.+):([0-9]+)$ ]]; then

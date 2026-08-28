@@ -48,6 +48,9 @@ Boundary last reviewed on 2026-08-28.
 
 - The Apache vhost templates and the default Git remote of `deploy/scripts/deploy.sh` use
   `example.com` and this repository instead of the private infrastructure host names.
+- The remote-agent example in `launch-linux.sh` uses `root@example.com:2222` instead of the private
+  server address. Re-apply this on every synchronisation: the private launcher still carries the real
+  one, and rule 4 covers IP addresses as well as host names.
 - The launchers are named `launch-windows.ps1` and `launch-linux.sh` here, with
   `scripts/launch-core.ps1` as their shared core.
 - Public CI names each test suite explicitly instead of filtering by category. A `--filter`
