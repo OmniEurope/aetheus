@@ -24,6 +24,15 @@ internal static class PlaywrightConfig
     public static readonly string AdminPassword =
         Environment.GetEnvironmentVariable("E2E_ADMIN_PASSWORD") ?? "aetheus-dev-admin-pwd";
 
+    // The QA container and production static host must emit CSP. ylaunch deliberately uses the
+    // Blazor development server, which cannot reproduce headers owned by StaticServer.Program.cs;
+    // it opts out explicitly instead of silently weakening the production default.
+    public static readonly bool RequireFrontendSecurityHeaders =
+        !bool.TryParse(
+            Environment.GetEnvironmentVariable("E2E_REQUIRE_FRONTEND_SECURITY_HEADERS"),
+            out var requireFrontendSecurityHeaders)
+        || requireFrontendSecurityHeaders;
+
     /// <summary>
     /// Generous default for the Blazor WASM cold boot. The dev Kestrel + WASM runtime
     /// can take several seconds to JIT and render the first protected route after a

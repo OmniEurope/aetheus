@@ -4,6 +4,11 @@
 
 @* W3PN: explicit, retryable error state when a fetch fails - replaces the perpetual refresh spinner
    the grid would otherwise show forever when LoadData throws / the caller never resets IsLoading. *@
+
+@* Responsive="false" is deliberate and product-wide: on a narrow screen a table scrolls sideways, it
+   never collapses columns into stacked cards and never drops any. A run row is read by comparing its
+   columns (status against duration against commit), and Radzen's responsive mode destroys exactly
+   that by turning one row into a list. The horizontal scrollbar is the intended affordance. *@
 @if (_loadFailed)
 {
     <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter"
@@ -19,10 +24,11 @@
 
 @if (EmptyTemplate is not null)
 {
-    <RadzenDataGrid @ref="Grid" TItem="TItem" Data="@Data" Count="@Count"
+    <RadzenDataGrid Responsive="false" @ref="Grid" TItem="TItem" Data="@Data" Count="@Count"
         AllowSorting="@AllowSorting" AllowFiltering="@AllowFiltering" FilterMode="@FilterMode"
         AllowColumnResize="@AllowColumnResize"
-        AllowPaging="true" PageSize="@PageSize"
+        AllowVirtualization="@Virtualize" VirtualizationOverscanCount="@VirtualizationOverscanCount"
+        AllowPaging="@(!Virtualize)" PageSize="@PageSize"
         IsLoading="@(IsLoading && !_loadFailed)" LoadData="@OnLoadData" EmptyText="@(EmptyText ?? L["NoRecords"])"
         PagerHorizontalAlign="HorizontalAlign.Center" Density="@Density"
         RowClick="@OnRowClick" class="@GridCssClass" @attributes="OtherAttributes">
@@ -32,10 +38,11 @@
 }
 else
 {
-    <RadzenDataGrid @ref="Grid" TItem="TItem" Data="@Data" Count="@Count"
+    <RadzenDataGrid Responsive="false" @ref="Grid" TItem="TItem" Data="@Data" Count="@Count"
         AllowSorting="@AllowSorting" AllowFiltering="@AllowFiltering" FilterMode="@FilterMode"
         AllowColumnResize="@AllowColumnResize"
-        AllowPaging="true" PageSize="@PageSize"
+        AllowVirtualization="@Virtualize" VirtualizationOverscanCount="@VirtualizationOverscanCount"
+        AllowPaging="@(!Virtualize)" PageSize="@PageSize"
         IsLoading="@(IsLoading && !_loadFailed)" LoadData="@OnLoadData" EmptyText="@(EmptyText ?? L["NoRecords"])"
         PagerHorizontalAlign="HorizontalAlign.Center" Density="@Density"
         RowClick="@OnRowClick" class="@GridCssClass" @attributes="OtherAttributes">

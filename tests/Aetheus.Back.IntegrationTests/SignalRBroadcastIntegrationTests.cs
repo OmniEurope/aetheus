@@ -6,6 +6,7 @@ using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.IntegrationTests;
@@ -108,5 +109,85 @@ public sealed class SignalRBroadcastIntegrationTests(PostgresFixture fixture)
         Assert.Equal(serverId, await removalTcs.Task);
 
         await hub.StopAsync(cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ServerRegistered_ReachesNonAdminMemberAlreadyJoinedToOrganizationGroup()
+    {
+        await using var factory = new AetheusWebApplicationFactory(fixture.ConnectionString);
+        using var client = factory.CreateClient();
+        var adminToken = await LoginAsAdminAsync(client);
+        IntegrationAuth.SetBearer(client, adminToken);
+
+        int organizationId;
+        var username = $"hub-member-{Guid.NewGuid():N}";
+        const string password = "Hub-Member-Pwd-2026!";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            organizationId = await db.Organizations
+                .Where(organization => organization.Slug == "aetheus")
+                .Select(organization => organization.Id)
+                .SingleAsync(TestContext.Current.CancellationToken);
+            var contributorRoleId = await db.Roles
+                .Where(role => role.Name == "Contributor")
+                .Select(role => role.Id)
+                .SingleAsync(TestContext.Current.CancellationToken);
+            var member = new User
+            {
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+                IsActive = true
+            };
+            db.Users.Add(member);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            db.UserRoles.Add(new UserRole { UserId = member.Id, RoleId = contributorRoleId });
+            db.OrganizationMembers.Add(new OrganizationMember
+            {
+                OrganizationId = organizationId,
+                UserId = member.Id,
+                Role = OrganizationRole.Member
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var memberToken = await IntegrationAuth.LoginAsync(
+            client,
+            username,
+            password,
+            TestContext.Current.CancellationToken);
+        await using var hub = BuildHubConnection(factory, "hubs/servers", memberToken);
+        var registered = new TaskCompletionSource<ServerDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        hub.On<ServerDto>("ServerRegistered", dto => registered.TrySetResult(dto));
+        await hub.StartAsync(TestContext.Current.CancellationToken);
+        await hub.InvokeAsync("JoinAllServers", cancellationToken: TestContext.Current.CancellationToken);
+
+        IntegrationAuth.SetBearer(client, adminToken);
+        var tokenResponse = await client.PostAsJsonAsync(
+            "/api/auth/registration-tokens",
+            new CreateRegistrationTokenRequest { OrganizationId = organizationId, ExpirationHours = 1 },
+            TestContext.Current.CancellationToken);
+        tokenResponse.EnsureSuccessStatusCode();
+        var registrationToken = await tokenResponse.Content.ReadFromJsonAsync<RegistrationTokenDto>(
+            IntegrationJsonOptions.Default,
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(registrationToken);
+
+        IntegrationAuth.SetBearer(client, null);
+        var registerResponse = await client.PostAsJsonAsync(
+            "/api/auth/register",
+            new ServerRegistrationRequest
+            {
+                RegistrationToken = registrationToken.Token,
+                Hostname = $"new-org-server-{Guid.NewGuid():N}",
+                OsDescription = "Linux"
+            },
+            TestContext.Current.CancellationToken);
+        registerResponse.EnsureSuccessStatusCode();
+
+        var received = await registered.Task.WaitAsync(
+            TimeSpan.FromSeconds(10),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(organizationId, received.OrganizationId);
     }
 }

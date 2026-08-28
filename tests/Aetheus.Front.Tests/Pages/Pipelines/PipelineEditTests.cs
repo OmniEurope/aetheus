@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Layout;
 using Aetheus.Front.Pages;
 using Aetheus.Front.Pages.Pipelines;
 using Aetheus.Front.Services;
@@ -75,6 +76,35 @@ public class PipelineEditTests : BunitContext
         var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, 5));
         cut.WaitForState(() => cut.Markup.Contains("Deploy Prod"), TimeSpan.FromSeconds(2));
         Assert.Contains("Deploy Prod", cut.Markup);
+    }
+
+    [Fact]
+    public void ProjectPipeline_Breadcrumb_Includes_Project_And_ProjectSection()
+    {
+        SetupEditPipelineMocks();
+        _handler.SetJsonResponse("api/pipelines/5", new PipelineDto
+        {
+            Id = 5,
+            Name = "Deploy Prod",
+            Description = "Production deploy",
+            YamlDefinition = "name: deploy\ntrigger: manual\nstages: []",
+            TriggerType = PipelineTriggerType.Manual,
+            ProjectId = 2,
+            ProjectName = "Toto"
+        });
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items = [new ProjectDto { Id = 2, Name = "Toto" }],
+            TotalCount = 1
+        });
+
+        var cut = Render<PipelineEdit>(parameters => parameters.Add(component => component.Id, 5));
+        var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Projects", "Toto", "Pipelines", "Deploy Prod"],
+            breadcrumb.Items.Select(item => item.Text)));
+        Assert.Equal("/projects/2/pipelines", breadcrumb.Items[2].Href);
     }
 
     [Fact]
@@ -436,6 +466,16 @@ public class PipelineEditTests : BunitContext
     }
 
     [Fact]
+    public void FormatDuration_CompletionBeforeStartNeverShowsNegativeTime()
+    {
+        var started = DateTime.UtcNow;
+
+        var result = PipelineRunPresentation.FormatDuration(started, started.AddSeconds(-5));
+
+        Assert.Equal("0s", result);
+    }
+
+    [Fact]
     public void TemplateReference_ParseLegacyQuotedName_ReturnsUnpinnedReference()
     {
         var reference = PipelineTemplateReferenceHelper.Parse("extends: 'Shared CI template' # legacy");
@@ -543,7 +583,7 @@ public class PipelineEditTests : BunitContext
     }
 
     [Fact]
-    public async Task OnValidateYaml_EmptyYaml_DoesNothing()
+    public async Task OnValidateYaml_EmptyYaml_LeavesTheFlagOff()
     {
         SetupNewPipelineMocks();
         var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, null));
@@ -642,7 +682,7 @@ public class PipelineEditTests : BunitContext
     }
 
     [Fact]
-    public async Task OnFormatYaml_WithNoEditor_DoesNotThrow()
+    public async Task OnFormatYaml_WithNoEditor_LeavesTheStateUnchanged()
     {
         SetupNewPipelineMocks();
         var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, null));

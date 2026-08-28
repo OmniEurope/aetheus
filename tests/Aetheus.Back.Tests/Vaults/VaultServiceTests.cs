@@ -560,3 +560,4 @@ public class VaultServiceTests
         await Assert.ThrowsAsync<NotFoundException>(() => _sut.GetSecretVersionsAsync(5, 1, ct: TestContext.Current.CancellationToken));
     }
 }
+

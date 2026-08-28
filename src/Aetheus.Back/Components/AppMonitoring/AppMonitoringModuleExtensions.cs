@@ -2,7 +2,6 @@
 using System.Net;
 using System.Net.Sockets;
 using Aetheus.Back.Components.AppMonitoring.Ingest;
-using Aetheus.Back.Components.Shared;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -18,10 +17,16 @@ public static class AppMonitoringModuleExtensions
         services.AddScoped<IAppMetricRepository, AppMetricRepository>();
         services.AddScoped<IAppLogRepository, AppLogRepository>();
         services.AddScoped<IAppErrorRepository, AppErrorRepository>();
+        services.AddScoped<IAppVisitorRepository, AppVisitorRepository>();
+        services.AddScoped<IAppWebAnalyticsRepository, AppWebAnalyticsRepository>();
+        services.AddScoped<IAppWebAnalyticsService, AppWebAnalyticsService>();
+        services.AddScoped<IAppWebAnalyticsConfigurationService, AppWebAnalyticsConfigurationService>();
         services.AddScoped<IIngestService, IngestService>();
+        services.AddScoped<IVisitorIngestService, VisitorIngestService>();
         services.AddScoped<IAppTelemetryService, AppTelemetryService>();
         services.AddScoped<IAppDeployEnvProvider, AppDeployEnvProvider>();
         services.AddSingleton<IngestKeyHasher>();
+        services.AddSingleton<AppAnalyticsSiteRateLimiter>();
         // Singleton so the per-app metric-ingest lock is shared across request scopes.
         services.AddSingleton<AppIngestGate>();
         services.AddHostedService<AppProbeService>();

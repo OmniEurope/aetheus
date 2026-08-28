@@ -83,14 +83,21 @@ public class TaskTrackerServiceTests : BunitContext
     }
 
     [Fact]
-    public void RemoveOnTerminal_RemovesTask()
+    public void HandleTerminal_RemovesTaskAndRaisesCompletion()
     {
         var sut = CreateService();
+        TaskCompletedNotification? observed = null;
+        sut.OnTaskCompleted += notification => observed = notification;
         Invoke(sut, "Upsert", Task(1, TaskExecutionStatus.Running));
 
-        Invoke(sut, "RemoveOnTerminal", 1);
+        Invoke(sut, "HandleTerminal", new TaskCompletedNotification
+        {
+            TaskId = 1,
+            Status = TaskExecutionStatus.Success
+        });
 
         Assert.Equal(0, sut.Count);
+        Assert.Equal(1, observed?.TaskId);
     }
 
     [Fact]

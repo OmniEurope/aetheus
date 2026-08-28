@@ -47,6 +47,13 @@ public sealed class OperationalDefaultsTests
         Assert.True(BackendRuntimeDefaults.InfrastructureCacheDuration > TimeSpan.Zero);
         Assert.True(BackendRuntimeDefaults.ReferenceDataCacheDuration > BackendRuntimeDefaults.InfrastructureCacheDuration);
         Assert.True(BackendRuntimeDefaults.GitWriteTimeout >= BackendRuntimeDefaults.GitProcessTimeout);
+        Assert.True(
+            BackendRuntimeDefaults.AuthenticatedAgentRateLimit
+            > BackendRuntimeDefaults.AuthenticatedUserRateLimit);
+        Assert.InRange(
+            BackendRuntimeDefaults.TaskRecoveryCheckInterval,
+            TimeSpan.FromSeconds(1),
+            BackendRuntimeDefaults.SchedulerCheckInterval - TimeSpan.FromTicks(1));
         Assert.True(BackendRuntimeDefaults.MaintenanceInterval > BackendRuntimeDefaults.SchedulerCheckInterval);
     }
 }

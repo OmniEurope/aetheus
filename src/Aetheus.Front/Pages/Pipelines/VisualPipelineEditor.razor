@@ -75,7 +75,7 @@ else
         <RadzenButton Icon="redo" Size="ButtonSize.Small" Click="@OnRedo" Disabled="@(!CanRedo)"
                       title="@L["Redo"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
         <RadzenButton Text="@L["AutoLayout"]" Icon="auto_fix_high" Size="ButtonSize.Small"
-                      Click="@OnAutoLayout" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                      Click="@OnAutoLayout" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="zoom_in" Size="ButtonSize.Small" Click="@OnZoomIn" Title="@L["ZoomIn"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
         <RadzenButton Icon="zoom_out" Size="ButtonSize.Small" Click="@OnZoomOut" Title="@L["ZoomOut"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
         <RadzenButton Icon="fit_screen" Size="ButtonSize.Small" Click="@OnFitView" Title="@L["FitScreen"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
@@ -102,7 +102,13 @@ else
 
     @* Canvas *@
     <div id="@_canvasId" class="vp-canvas-outer" tabindex="0" @onkeydown="OnCanvasKeyDown">
-        <div class="vp-canvas-inner">
+        @if (!_positionsLoaded && DisplayStages.Count > 0)
+        {
+            <div class="vp-empty-canvas">
+                <AetheusLoader Size="AetheusLoaderSize.Small" />
+            </div>
+        }
+        <div class="@($"vp-canvas-inner{(_positionsLoaded ? string.Empty : " vp-canvas-inner-loading")}")">
             @* SVG edge layer *@
             <svg class="vp-edge-layer" xmlns="http://www.w3.org/2000/svg">
                 <defs>

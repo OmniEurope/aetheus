@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Layout;
 
@@ -21,6 +14,8 @@ public partial class NavMenu : IDisposable
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
+
+    [Parameter] public EventCallback OnNavigate { get; set; }
 
     private string _currentPath = string.Empty;
     private bool _permDialogOpen;
@@ -54,13 +49,11 @@ public partial class NavMenu : IDisposable
                     null,
                     // STD-DIALOG exception: a permissions change invalidates the current UI contract;
                     // the user must acknowledge it and reload instead of dismissing the warning.
-                    new DialogOptions
-                    {
+                    new DialogOptions {
                         Width = "440px",
                         ShowClose = false,
                         CloseDialogOnOverlayClick = false,
-                        CloseDialogOnEsc = false
-                    });
+                        CloseDialogOnEsc = false, AutoFocusFirstElement = false });
             }
             finally
             {
@@ -89,7 +82,7 @@ public partial class NavMenu : IDisposable
         // lives under the top-level git-repositories route. Keeping it in the
         // projects section preserves the submenu when navigating from a project
         // tile to its Git tab.
-        ["projects"] = ["projects", "pipelines", "releases", "variable-libraries", "vaults", "environments", "git-repositories", "artifacts", "service-connections"],
+        ["projects"] = ["projects", "pipelines", "analysis", "backups", "templates", "releases", "variable-libraries", "vaults", "environments", "git-repositories", "artifacts", "service-connections", "ai-tasks"],
         ["settings"] = ["settings"],
         ["admin"] = ["admin", "users", "audit", "plugins", "dashboards", "api-reference"],
     };

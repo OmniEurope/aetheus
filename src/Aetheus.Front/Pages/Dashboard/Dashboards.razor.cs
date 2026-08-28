@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Dashboard;
 
@@ -31,7 +24,7 @@ public partial class Dashboards
         }
 
         Breadcrumb.Set(new BreadcrumbItem(L["Administration"], "/admin"), new BreadcrumbItem(L["Dashboards"]));
-        try { _dashboards = await Api.GetDashboardsAsync(); }
+        try { _dashboards = await Api.Monitoring.GetDashboardsAsync(); }
         catch (HttpRequestException) { _dashboards = []; }
         _loading = false;
     }
@@ -43,18 +36,18 @@ public partial class Dashboards
         var dialogResult = await Dialog.OpenAsync<DashboardNameDialog>(
             L["NewDashboardNamePrompt"].Value,
             new Dictionary<string, object?> { { "InitialName", defaultName } },
-            new DialogOptions { Width = "400px" });
+            new DialogOptions { Width = "400px", AutoFocusFirstElement = false });
 
         if (dialogResult is not string name || string.IsNullOrWhiteSpace(name)) return;
 
-        var result = await Api.CreateDashboardAsync(new CreateDashboardRequest
+        var result = await Api.Monitoring.CreateDashboardAsync(new CreateDashboardRequest
         {
             Name = name.Trim(),
             Widgets = []
         });
         if (result is not null)
         {
-            _dashboards = await Api.GetDashboardsAsync();
+            _dashboards = await Api.Monitoring.GetDashboardsAsync();
             Toast.Success("Created", "DashboardCreated");
         }
     }
@@ -70,10 +63,10 @@ public partial class Dashboards
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.DeleteDashboardAsync(id);
+        var success = await Api.Monitoring.DeleteDashboardAsync(id);
         if (success)
         {
-            _dashboards = await Api.GetDashboardsAsync();
+            _dashboards = await Api.Monitoring.GetDashboardsAsync();
             Toast.Success("Deleted", "Deleted");
         }
         else

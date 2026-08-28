@@ -60,52 +60,42 @@ public record UserOrganizationDto(
     string Slug,
     OrganizationRole Role);
 
-public class CreateOrganizationRequest
+public abstract record OrganizationMutationRequest
 {
     [Required, StringLength(100, MinimumLength = 2)]
-    public string Name { get; set; } = string.Empty;
-
-    [Required, StringLength(100, MinimumLength = 2)]
-    [RegularExpression("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-        ErrorMessage = "Slug must be lowercase alphanumeric with optional hyphens.")]
-    public string Slug { get; set; } = string.Empty;
-
-    [StringLength(500)]
-    public string Description { get; set; } = string.Empty;
-}
-
-public class UpdateOrganizationRequest
-{
-    [Required, StringLength(100, MinimumLength = 2)]
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
 
     [Required, StringLength(100, MinimumLength = 2)]
     [RegularExpression("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
         ErrorMessage = "Slug must be lowercase alphanumeric with optional hyphens.")]
-    public string Slug { get; set; } = string.Empty;
+    public string Slug { get; init; } = string.Empty;
 
     [StringLength(500)]
-    public string Description { get; set; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
 }
 
-public class AddOrganizationMemberRequest
+public sealed record CreateOrganizationRequest : OrganizationMutationRequest;
+
+public sealed record UpdateOrganizationRequest : OrganizationMutationRequest;
+
+public sealed record AddOrganizationMemberRequest
 {
     [Required]
-    public int UserId { get; set; }
+    public int UserId { get; init; }
 
     [Required]
-    public OrganizationRole Role { get; set; } = OrganizationRole.Member;
+    public OrganizationRole Role { get; init; } = OrganizationRole.Member;
 }
 
-public class UpdateOrganizationMemberRequest
+public sealed record UpdateOrganizationMemberRequest
 {
     [Required]
-    public OrganizationRole Role { get; set; }
+    public OrganizationRole Role { get; init; }
 }
 
-public class AssignProjectsRequest
+public sealed record AssignProjectsRequest
 {
     [Required]
     [MaxLength(1000)]
-    public List<int> ProjectIds { get; set; } = [];
+    public List<int> ProjectIds { get; init; } = [];
 }

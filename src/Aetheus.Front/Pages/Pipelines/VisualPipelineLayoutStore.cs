@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Pages.Pipelines;
 

@@ -42,6 +42,10 @@ bld/
 !**/DTOs/Logs/
 !**/Enums/Logs/
 !tests/**/Logs/
+!src/Aetheus.Back/Protos/opentelemetry/proto/collector/logs/
+!src/Aetheus.Back/Protos/opentelemetry/proto/collector/logs/**
+!src/Aetheus.Back/Protos/opentelemetry/proto/logs/
+!src/Aetheus.Back/Protos/opentelemetry/proto/logs/**
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
@@ -209,6 +213,9 @@ PublishScripts/
 **/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+!packages/
+!packages/aetheus-web-analytics/
+!packages/aetheus-web-analytics/**
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files
@@ -293,6 +300,13 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+/.nyc_output/
+/coverage/
+/.analysis-coverage/
+/.analysis-duplication/
+/.analysis-duplication-batch*/
+/coverage-quality/
+/coverage-quality-merged/
 
 # Visual Studio 6 build log
 *.plg
@@ -310,7 +324,7 @@ node_modules/
 *.dsw
 *.dsp
 
-# Visual Studio 6 technical files
+# Visual Studio 6 technical files 
 *.ncb
 *.aps
 
@@ -445,11 +459,27 @@ src/Aetheus.Back/Data/artifacts/
 
 **/git-repos/**
 **/git-reposcopie/**
+src/Aetheus.Back/Data/git-repos/1/jiji.git/config
 
-# Local AI-agent state and worktrees are never public project content.
-.claude/
-.codex/
-.agents/
+# Claude Code agent worktrees (embedded git repos — must never be committed)
+.claude/worktrees/
+# Codex/local agent worktrees (embedded git repos — must never be committed)
+.worktrees/
+# Claude Code transient harness locks (never project content)
+.claude/*.lock
+# Transient marker for the relaunch-on-code-change Stop hook
+.claude/.needs-relaunch
+# Transient output captured by local UI launcher checks
+/.ui-launch-pwsh.out
+/.ui-launch-pwsh.err
+# Transient guard: suppresses the backend relaunch during long self-deploy pipeline runs (per-checkout, local only)
+.claude/.pipelines-running
+.claude/.next-progress
+
+# Generated dashboards are disposable renderings; dated Markdown audit sources are canonical.
+/.claude/audit-report.html
+/.claude/backlog-report.html
+/.claude/plan-report.html
 
 *.lscache
 
@@ -473,7 +503,8 @@ src/Aetheus.Front/wwwroot/appsettings.Development.json
 src/Aetheus.Back/appsettings.Development.json
 src/Aetheus.Agent.Windows/appsettings.Development.json
 
-# Scratch verification screenshots; real app assets belong under src/.
+# Scratch verification screenshots — keep deliberate ones under .claude/screenshots/ and real
+# app assets under src/. Root-level captures and the E2E capture/ grid are transient.
 /*.png
 /*.jpeg
 /*.jpg
@@ -481,3 +512,6 @@ src/Aetheus.Agent.Windows/appsettings.Development.json
 
 # Local pinned SDK installed for repository verification; never publish the runtime payload.
 /.dotnet/
+
+# Per-checkout process markers created by local Codex/launcher verification.
+/.codex-runtime/

@@ -20,6 +20,11 @@ public sealed class Prm004Tests
                     Task.FromResult(new List<T>());
                 public static Task<T[]> ToArrayAsync<T>(this IQueryable<T> source) =>
                     Task.FromResult(Array.Empty<T>());
+                public static Task<Dictionary<TKey, T>> ToDictionaryAsync<T, TKey>(
+                    this IQueryable<T> source, Func<T, TKey> keySelector) where TKey : notnull =>
+                    Task.FromResult(new Dictionary<TKey, T>());
+                public static Task<HashSet<T>> ToHashSetAsync<T>(this IQueryable<T> source) =>
+                    Task.FromResult(new HashSet<T>());
             }
         }
         public sealed class Row { public int Id { get; set; } }
@@ -34,7 +39,7 @@ public sealed class Prm004Tests
     {
         var source = Query($".{method}()");
 
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync(
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync(
             "FooRepository.cs", source, ExpectMethod(source, "FooRepository.cs", method));
     }
 
@@ -46,14 +51,14 @@ public sealed class Prm004Tests
     public async Task TakeBeforeEfMaterialization_NoDiagnostic(string method)
     {
         var source = Query($".Take(100).{method}()");
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync("FooRepository.cs", source);
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync("FooRepository.cs", source);
     }
 
     [Fact]
     public async Task WhereBeforeToListAsync_RemainsUnboundedAndReportsDiagnostic()
     {
         var source = Query(".Where(row => row.Id > 0).ToListAsync()");
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync(
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync(
             "FooRepository.cs", source, ExpectMethod(source, "FooRepository.cs", "ToListAsync"));
     }
 
@@ -68,7 +73,7 @@ public sealed class Prm004Tests
                     new[] { new Row() }.AsQueryable());
             }
             """;
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync(
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync(
             "FooRepository.cs", source, ExpectMethod(source, "FooRepository.cs", "ToListAsync"));
     }
 
@@ -87,23 +92,44 @@ public sealed class Prm004Tests
                 public object Get() => new Q().ToListAsync();
             }
             """;
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync("FooRepository.cs", source);
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync("FooRepository.cs", source);
     }
 
     [Fact]
-    public async Task UnguardedEfMaterialization_InPartialRepositoryFile_ReportsDiagnostic()
+    public async Task RepositoryTypeIsDetectedSemanticallyRegardlessOfFileName()
     {
         var source = Query(".ToListAsync()", "PipelineRepository");
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync(
-            "PipelineRepository.Coverage.cs", source,
-            ExpectMethod(source, "PipelineRepository.Coverage.cs", "ToListAsync"));
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync(
+            "UnexpectedName.cs", source,
+            ExpectMethod(source, "UnexpectedName.cs", "ToListAsync"));
     }
 
     [Fact]
     public async Task EfMaterialization_InService_NoDiagnostic()
     {
         var source = Query(".ToListAsync()", "FooService");
-        await Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.VerifyAsync("FooService.cs", source);
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync("FooService.cs", source);
+    }
+
+    [Theory]
+    [InlineData("ToDictionary(row => row.Id)", "ToDictionary")]
+    [InlineData("ToHashSet()", "ToHashSet")]
+    [InlineData("ToLookup(row => row.Id)", "ToLookup")]
+    [InlineData("ToDictionaryAsync(row => row.Id)", "ToDictionaryAsync")]
+    [InlineData("ToHashSetAsync()", "ToHashSetAsync")]
+    public async Task CollectionMaterializers_ReportDiagnostic(string call, string method)
+    {
+        var source = Query($".{call}");
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync(
+            "FooRepository.cs", source, ExpectMethod(source, "FooRepository.cs", method));
+    }
+
+    [Fact]
+    public async Task AsEnumerableDoesNotHideQueryableOrigin()
+    {
+        var source = Query(".AsEnumerable().ToList()");
+        await Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.VerifyAsync(
+            "FooRepository.cs", source, ExpectMethod(source, "FooRepository.cs", "ToList"));
     }
 
     private static string Query(string chain, string className = "FooRepository") => EfStub + $$"""
@@ -124,7 +150,7 @@ public sealed class Prm004Tests
         var line = prefix.Count(character => character == '\n') + 1;
         var lastLineBreak = source.LastIndexOf('\n', dotIndex);
         var column = dotIndex - lastLineBreak + 1;
-        return Verifier<PRM004_NoToListOnLargeTablesAnalyzer>.Expect(
+        return Verifier<PRM004_NoUnboundedMaterializationAnalyzer>.Expect(
             "PRM004", DiagnosticSeverity.Info, filePath, line, column, line, column + method.Length, method);
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http;
 using Aetheus.Front.Services;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Time.Testing;
 
@@ -63,6 +65,33 @@ public class UserNotificationServiceTests
         time.Advance(TimeSpan.FromMilliseconds(25));
 
         Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void EffectivePermissionsChanged_IgnoresRoleSourceForIdenticalEffectiveGrant()
+    {
+        var current = new[]
+        {
+            new EffectivePermissionDto
+            {
+                ResourceType = ResourceType.Project,
+                ResourceId = 7,
+                Permission = Permission.Write,
+                GrantedByRole = "Developers"
+            }
+        };
+        var latest = new[]
+        {
+            new EffectivePermissionDto
+            {
+                ResourceType = ResourceType.Project,
+                ResourceId = 7,
+                Permission = Permission.Write,
+                GrantedByRole = "Maintainers"
+            }
+        };
+
+        Assert.False(UserNotificationService.EffectivePermissionsChanged(current, latest));
     }
 
     private static (UserNotificationService Svc, FakeTimeProvider Time) CreateService(bool authenticated = false, string token = "")

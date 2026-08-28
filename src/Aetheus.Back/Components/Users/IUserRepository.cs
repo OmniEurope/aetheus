@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Users;
 
@@ -14,7 +13,8 @@ public interface IUserRepository
     /// directly via a <c>.Select()</c> projection, avoiding loading full entity graphs.
     /// </summary>
     Task<(List<UserDto> Items, int TotalCount)> GetUsersPagedProjectedAsync(
-        string? search, int page, int pageSize, CancellationToken ct = default);
+        string? search, int page, int pageSize, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false);
 
     Task<User?> GetUserDetailAsync(int id, CancellationToken ct = default);
 

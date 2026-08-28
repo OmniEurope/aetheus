@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +25,13 @@ public interface IEntityChangeNotifier
     /// non-org-scoped types or when the org is unknown.
     /// </param>
     Task BroadcastAsync(ResourceType type, int id, string op, CancellationToken ct = default, int? organizationId = null);
+    /// <summary>Broadcasts a domain-specific event without masquerading as an entity CRUD change.</summary>
+    Task BroadcastOperationalAsync(
+        ResourceType type,
+        int id,
+        string eventName,
+        CancellationToken ct = default,
+        int? organizationId = null);
 }
 
 /// <summary>
@@ -39,7 +45,8 @@ public sealed class EntityChangeNotifier(IHubContext<EntityHub> hub, ILogger<Ent
     // Types whose change events must also fan out to the per-org aggregate group. Keep in lockstep with
     // the HubGroups.EntityOrg routing: a caller that omits organizationId for one of these silently
     // strands org members who have not joined the per-resource group yet (the F-05 regression class).
-    private static readonly HashSet<ResourceType> OrgScopedTypes = [ResourceType.Project, ResourceType.Pipeline];
+    private static readonly HashSet<ResourceType> OrgScopedTypes =
+        [ResourceType.Project, ResourceType.Pipeline, ResourceType.PipelineTemplate];
 
     public Task BroadcastAsync(ResourceType type, int id, string op, CancellationToken ct = default, int? organizationId = null)
     {
@@ -54,5 +61,25 @@ public sealed class EntityChangeNotifier(IHubContext<EntityHub> hub, ILogger<Ent
             ? new[] { HubGroups.EntityAll(type), HubGroups.Entity(type, id), HubGroups.EntityOrg(type, orgId) }
             : [HubGroups.EntityAll(type), HubGroups.Entity(type, id)];
         return hub.Clients.Groups(groups).SendAsync("EntityChanged", type, id, op, ct);
+    }
+
+    public Task BroadcastOperationalAsync(
+        ResourceType type,
+        int id,
+        string eventName,
+        CancellationToken ct = default,
+        int? organizationId = null)
+    {
+        if (organizationId is null && OrgScopedTypes.Contains(type))
+        {
+            logger.LogWarning(
+                "Operational broadcast {EventName} for org-scoped {Type} {Id} omitted organizationId; org members may miss it",
+                eventName, type, id);
+        }
+
+        var groups = organizationId is { } orgId
+            ? new[] { HubGroups.EntityAll(type), HubGroups.Entity(type, id), HubGroups.EntityOrg(type, orgId) }
+            : [HubGroups.EntityAll(type), HubGroups.Entity(type, id)];
+        return hub.Clients.Groups(groups).SendAsync(eventName, id, ct);
     }
 }

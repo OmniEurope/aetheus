@@ -120,6 +120,48 @@ public class PipelineCommandBuilderTests
         Assert.Contains("dotnet build && dotnet test", result);
     }
 
+    [Fact]
+    public void BuildStepCommand_SecretVariable_PersistsOnlyOpaquePlaceholder()
+    {
+        var step = new Aetheus.Shared.DTOs.PipelineStepDefinition
+        {
+            Name = "deploy",
+            Shell = "deploy --token '$(DEPLOY_TOKEN)'"
+        };
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["DEPLOY_TOKEN"] = "super-secret-value"
+        };
+
+        var result = PipelineCommandBuilder.BuildStepCommand(
+            step, variables, isWindows: false, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "DEPLOY_TOKEN" });
+
+        Assert.DoesNotContain("super-secret-value", result, StringComparison.Ordinal);
+        Assert.Contains("__AETHEUS_SECRET_", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildStepCommand_SecretInRejectedWorkingDirectory_IsNotPersisted()
+    {
+        var step = new Aetheus.Shared.DTOs.PipelineStepDefinition
+        {
+            Name = "deploy",
+            Shell = "deploy",
+            WorkingDirectory = "$(SECRET_PATH)"
+        };
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["WORKSPACE"] = "/srv/aetheus/workspace",
+            ["SECRET_PATH"] = "/outside/super-secret-value"
+        };
+
+        var result = PipelineCommandBuilder.BuildStepCommand(
+            step, variables, isWindows: false, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SECRET_PATH" });
+
+        Assert.DoesNotContain("super-secret-value", result, StringComparison.Ordinal);
+        Assert.Contains("working_directory is outside", result, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("/tmp/work/s", "/tmp/work/s", false)]
     [InlineData("/tmp/work/s/src", "/tmp/work/s", false)]
@@ -177,6 +219,8 @@ public class PipelineCommandBuilderTests
 
         var result = PipelineCommandBuilder.BuildStepCommand(step, vars, isWindows: true);
 
+        Assert.Contains(@"New-Item -ItemType Directory -Force -Path 'C:\w\s'", result);
+        Assert.DoesNotContain("-LiteralPath", result);
         Assert.Contains(@"Set-Location 'C:\w\s'", result);
         Assert.Contains("dotnet build", result);
         Assert.DoesNotContain("git clone", result);
@@ -199,8 +243,75 @@ public class PipelineCommandBuilderTests
 
         var result = PipelineCommandBuilder.BuildStepCommand(step, vars, isWindows: false);
 
-        Assert.StartsWith("set -e\ncd \"/tmp/aetheus/runs/42/s\"\n", result, StringComparison.Ordinal);
+        Assert.StartsWith(
+            "set -e\nmkdir -p -- \"/tmp/aetheus/runs/42/s\"\ncd \"/tmp/aetheus/runs/42/s\"\n",
+            result,
+            StringComparison.Ordinal);
         Assert.Contains("dotnet test", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildStepCommand_Linux_RecreatesValidatedWorkspaceBeforeAlwaysTeardown()
+    {
+        var step = new Aetheus.Shared.DTOs.PipelineStepDefinition
+        {
+            Name = "Destroy QA stack",
+            Shell = "docker ps --filter label=com.docker.compose.project=aetheus-qa-42",
+            WorkingDirectory = "$(WORKSPACE)"
+        };
+        var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["WORKSPACE"] = "/tmp/aetheus/runs/42/s"
+        };
+
+        var result = PipelineCommandBuilder.BuildStepCommand(step, vars, isWindows: false);
+
+        Assert.Contains(
+            "mkdir -p -- \"/tmp/aetheus/runs/42/s\"\ncd \"/tmp/aetheus/runs/42/s\"\n",
+            result,
+            StringComparison.Ordinal);
+        Assert.True(
+            result.IndexOf("mkdir -p --", StringComparison.Ordinal)
+            < result.IndexOf("docker ps --filter", StringComparison.Ordinal));
+        Assert.DoesNotContain("cd \"/\"", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildStepCommand_Linux_ExecutesAfterWorkspaceWasCompletelyRemoved()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+
+        var root = Path.Combine(Path.GetTempPath(), $"aetheus-command-builder-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(root, "s");
+        var proof = Path.Combine(workspace, "teardown-reached");
+        var step = new Aetheus.Shared.DTOs.PipelineStepDefinition
+        {
+            Name = "Destroy QA stack",
+            Shell = $"test -d \"{workspace}\" && printf reached > \"{proof}\"",
+            WorkingDirectory = "$(WORKSPACE)"
+        };
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["WORKSPACE"] = workspace
+        };
+
+        try
+        {
+            var command = PipelineCommandBuilder.BuildStepCommand(step, variables, isWindows: false);
+            var startInfo = new System.Diagnostics.ProcessStartInfo("/bin/bash");
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add(command);
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            Assert.NotNull(process);
+            process.WaitForExit();
+
+            Assert.Equal(0, process.ExitCode);
+            Assert.Equal("reached", File.ReadAllText(proof));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -219,7 +330,10 @@ public class PipelineCommandBuilderTests
 
         var result = PipelineCommandBuilder.BuildStepCommand(step, vars, isWindows: false);
 
-        Assert.StartsWith("set -e\ncd \"/tmp/aetheus/runs/43/s/src/App\"\n", result, StringComparison.Ordinal);
+        Assert.StartsWith(
+            "set -e\nmkdir -p -- \"/tmp/aetheus/runs/43/s/src/App\"\ncd \"/tmp/aetheus/runs/43/s/src/App\"\n",
+            result,
+            StringComparison.Ordinal);
     }
 
     // --- S-TECH-V6QN: ${{ parameters.X }} namespace ---
@@ -253,5 +367,18 @@ public class PipelineCommandBuilderTests
     {
         var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["x"] = "y" };
         Assert.Equal("${{ parameters.missing }}", PipelineCommandBuilder.Substitute("${{ parameters.missing }}", vars));
+    }
+
+    [Fact]
+    public void Substitute_QualifiedStepOutput_ResolvesDottedVariableName()
+    {
+        var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["NoneCandidate.None.CANDIDATE_VERSION"] = "c-deadbeef"
+        };
+
+        Assert.Equal(
+            "c-deadbeef",
+            PipelineCommandBuilder.Substitute("$(NoneCandidate.None.CANDIDATE_VERSION)", vars));
     }
 }

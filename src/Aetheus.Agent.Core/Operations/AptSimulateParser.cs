@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Operations;
 
 /// <summary>
-/// Parses <c>apt-get -s upgrade</c> output (PLAN-006 4.1). apt emits one machine-readable
+/// Parses <c>apt-get -s upgrade</c> output (ADR-024 4.1). apt emits one machine-readable
 /// <c>Inst &lt;pkg&gt; [&lt;current&gt;] (&lt;candidate&gt; &lt;origin...&gt;)</c> line per package that WOULD be
 /// upgraded; the origin carries the archive suite (e.g. <c>noble-security</c>), which flags security
 /// updates. Pure and shell-free so both the collector and the upgrade executor can reuse it and it is

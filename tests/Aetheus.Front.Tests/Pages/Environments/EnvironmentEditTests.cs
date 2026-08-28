@@ -6,6 +6,7 @@ using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests;
 
@@ -30,6 +31,7 @@ public class EnvironmentEditTests : BunitContext
             Items = [new ServerDto { Id = 1, Name = "web-01" }],
             TotalCount = 1
         });
+        _handler.SetJsonResponse("api/environments", new PaginatedResult<EnvironmentDto>());
     }
 
     [Fact]
@@ -74,6 +76,39 @@ public class EnvironmentEditTests : BunitContext
     }
 
     [Fact]
+    public void InputEvents_AreSentByTheCreateForm()
+    {
+        SetupDefaultResponses();
+        _handler.SetJsonResponse(HttpMethod.Post, "api/environments", new EnvironmentDto
+        {
+            Id = 9,
+            Name = "portfolio-test",
+            Type = EnvironmentType.Testing,
+            ProjectId = 1,
+            Servers = []
+        });
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/environments/new?projectId=1");
+        var cut = Render<EnvironmentEdit>();
+
+        cut.Find("input[name='Name']").Input("portfolio-test");
+        cut.Find("textarea[name='Description']").Input("Local Portfolio validation environment.");
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() => Assert.Contains(
+            _handler.Requests,
+            request => request.Method == "POST" && request.Url.EndsWith("api/environments", StringComparison.Ordinal)));
+        var body = _handler.RequestDetails.Last(request =>
+            request.Method == "POST" && request.Url.EndsWith("api/environments", StringComparison.Ordinal)).Body;
+        var request = System.Text.Json.JsonSerializer.Deserialize<CreateEnvironmentRequest>(
+            body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        Assert.Equal("portfolio-test", request!.Name);
+        Assert.Equal("Local Portfolio validation environment.", request.Description);
+        Assert.Equal(1, request.ProjectId);
+    }
+
+    [Fact]
     public void Renders_DeleteButton_InEditMode()
     {
         SetupDefaultResponses();
@@ -110,6 +145,7 @@ public class EnvironmentEditTests : BunitContext
             TotalCount = 2
         });
         _handler.SetJsonResponse("api/servers", new PaginatedResult<ServerDto> { Items = [], TotalCount = 0 });
+        _handler.SetJsonResponse("api/environments", new PaginatedResult<EnvironmentDto>());
         Services.GetRequiredService<NavigationManager>().NavigateTo("http://test/environments/new?projectId=1");
         var cut = Render<EnvironmentEdit>();
 
@@ -121,5 +157,84 @@ public class EnvironmentEditTests : BunitContext
         var model = typeof(EnvironmentEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
         Assert.Equal(2, model.GetType().GetProperty("ProjectId")!.GetValue(model));
+    }
+
+    [Fact]
+    public async Task NewEnvironment_SourceFromAnotherProject_PrefillsAndCreatesDeepCopy()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items =
+            [
+                new ProjectDto { Id = 3, Name = "Atlas" },
+                new ProjectDto { Id = 8, Name = "Shared platform" }
+            ],
+            TotalCount = 2
+        });
+        _handler.SetJsonResponse("api/servers", new PaginatedResult<ServerDto>
+        {
+            Items = [new ServerDto { Id = 5, Name = "shared-01" }],
+            TotalCount = 1
+        });
+        _handler.SetJsonResponse("api/environments", new PaginatedResult<EnvironmentDto>
+        {
+            Items =
+            [
+                new EnvironmentDto
+                {
+                    Id = 77,
+                    Name = "Reference staging",
+                    Description = "Reusable settings",
+                    Type = EnvironmentType.Staging,
+                    ProjectId = 8,
+                    ProjectName = "Shared platform",
+                    RequireApproval = true,
+                    ApprovalTimeoutMinutes = 90,
+                    Servers = [new EnvironmentServerDto { ServerId = 5, ServerName = "shared-01" }]
+                }
+            ],
+            TotalCount = 1
+        });
+        _handler.SetJsonResponse(HttpMethod.Post, "api/environments", new EnvironmentDto
+        {
+            Id = 90,
+            Name = "Reference staging",
+            ProjectId = 3
+        });
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/environments/new?projectId=3");
+        var cut = Render<EnvironmentEdit>();
+        cut.WaitForAssertion(() => Assert.Contains("StartFromExistingEnvironment", cut.Markup));
+
+        var nullableDropdowns = cut.FindComponents<RadzenDropDown<int?>>();
+        var sourceDropdown = nullableDropdowns.Single(dropdown =>
+            dropdown.Instance.Placeholder == "CreateEnvironmentFromScratch");
+        var sourceOptions = sourceDropdown.Instance.Data!;
+        Assert.Contains(
+            "Reference staging · Shared platform",
+            sourceOptions.Cast<object>().Single().ToString());
+
+        await cut.InvokeAsync(() => sourceDropdown.Instance.Change.InvokeAsync(77));
+
+        Assert.Equal("Reference staging", cut.Find("input[name='Name']").GetAttribute("value"));
+        var description = cut.FindComponents<RadzenTextArea>()
+            .Single(textArea => textArea.Instance.Name == "Description");
+        Assert.Equal("Reusable settings", description.Instance.Value);
+        var projectDropdown = cut.FindComponents<RadzenDropDown<int?>>()
+            .Single(dropdown => dropdown.Instance.Placeholder == "NoProject");
+        Assert.Equal(3, projectDropdown.Instance.Value);
+        var serversDropdown = Assert.Single(cut.FindComponents<RadzenDropDown<IEnumerable<int>>>());
+        Assert.Equal([5], serversDropdown.Instance.Value);
+
+        cut.Find("button[type='submit']").Click();
+        cut.WaitForAssertion(() => Assert.Contains(
+            _handler.RequestDetails,
+            requestDetail => requestDetail.Method == "POST"));
+        var body = _handler.RequestDetails.Last(request => request.Method == "POST").Body;
+        var request = System.Text.Json.JsonSerializer.Deserialize<CreateEnvironmentRequest>(
+            body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        Assert.Equal(77, request!.SourceEnvironmentId);
+        Assert.Equal(3, request.ProjectId);
     }
 }

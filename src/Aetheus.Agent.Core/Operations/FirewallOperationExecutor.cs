@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Agent.Core.Operations;
 
 /// <summary>
-/// PLAN-006 4.2: firewall (ufw) control via the root-owned <c>aetheus-firewall</c> helper. The helper is
+/// ADR-024 4.2: firewall (ufw) control via the root-owned <c>aetheus-firewall</c> helper. The helper is
 /// the security boundary (root-owned, agent-non-writable, re-validates every argument AND re-enforces
 /// anti-lockout with the real SSH port); the sudoers grant is path-only. This executor is defence in
 /// depth: it re-validates port/protocol/source and refuses an anti-lockout deny BEFORE calling the helper.
@@ -100,14 +96,7 @@ public sealed class FirewallOperationExecutor(ILogger<FirewallOperationExecutor>
         IReadOnlyList<string> argv, int timeoutSeconds,
         Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         foreach (var arg in argv)
             psi.ArgumentList.Add(arg);
 

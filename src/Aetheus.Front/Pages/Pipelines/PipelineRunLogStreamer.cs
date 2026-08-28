@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -72,14 +68,17 @@ internal sealed class PipelineRunLogStreamer(
         await _pollGate.WaitAsync(ct);
         try
         {
-            var logs = await api.GetTaskLogsAsync(taskId, ct) ?? [];
+            var logs = await api.Monitoring.GetTaskLogsAsync(taskId, ct) ?? [];
             if (_disposed || generation != _selectionGeneration || _streamingTaskId != taskId) return;
             await invokeAsync(() =>
             {
                 if (_disposed || generation != _selectionGeneration || _streamingTaskId != taskId)
                     return Task.CompletedTask;
-                logsCache[taskId] = logs;
-                stateHasChanged();
+                if (!logsCache.TryGetValue(taskId, out var current) || !SnapshotsEqual(current, logs))
+                {
+                    logsCache[taskId] = logs;
+                    stateHasChanged();
+                }
                 return Task.CompletedTask;
             });
         }
@@ -88,6 +87,14 @@ internal sealed class PipelineRunLogStreamer(
         {
             _pollGate.Release();
         }
+    }
+
+    private static bool SnapshotsEqual(IReadOnlyList<TaskLogDto> current, IReadOnlyList<TaskLogDto> next)
+    {
+        if (current.Count != next.Count) return false;
+        for (var i = 0; i < current.Count; i++)
+            if (current[i] != next[i]) return false;
+        return true;
     }
 
     private async Task StopPollingAsync()
@@ -108,10 +115,7 @@ internal sealed class PipelineRunLogStreamer(
         var generation = Interlocked.Increment(ref _selectionGeneration);
         await StopPollingAsync();
 
-        if (_streamingTaskId is { } prev && _logHub is { State: HubConnectionState.Connected })
-        {
-            try { await _logHub.InvokeAsync("LeaveTaskGroup", prev); } catch (Exception ex) { logger.LogDebug(ex, "[PipelineRun] Leave log group failed"); }
-        }
+        await LeaveCurrentTaskGroupAsync();
         _streamingTaskId = runningTaskId;
 
         if (runningTaskId is not { } taskId)
@@ -119,20 +123,8 @@ internal sealed class PipelineRunLogStreamer(
 
         try
         {
-            if (_logHub is null)
-            {
-                _logHub = hubFactory.Create("logs");
-                _logHub.On<TaskLogDto>("LogReceived", log => invokeAsync(() => AppendStreamedLogsAsync([log])));
-                _logHub.On<List<TaskLogDto>>("LogsReceived", logs => invokeAsync(() => AppendStreamedLogsAsync(logs)));
-                // Group membership is per-connection and lost on auto-reconnect - re-join the
-                // currently-streaming task so log lines keep arriving after a transient drop.
-                _logHub.RejoinOnReconnect(async () =>
-                {
-                    if (!_disposed && _streamingTaskId is { } t)
-                        await _logHub.InvokeAsync("JoinTaskGroup", t);
-                });
-            }
-            if (_logHub.State != HubConnectionState.Connected)
+            EnsureLogHub();
+            if (_logHub!.State != HubConnectionState.Connected)
                 await _logHub.StartAsync();
             if (_disposed || generation != _selectionGeneration || _streamingTaskId != taskId) return;
             await _logHub.InvokeAsync("JoinTaskGroup", taskId);
@@ -143,6 +135,26 @@ internal sealed class PipelineRunLogStreamer(
             if (!_disposed && generation == _selectionGeneration && _streamingTaskId == taskId)
                 StartPolling(taskId, generation);
         }
+    }
+
+    private async Task LeaveCurrentTaskGroupAsync()
+    {
+        if (_streamingTaskId is not { } taskId || _logHub is not { State: HubConnectionState.Connected }) return;
+        try { await _logHub.InvokeAsync("LeaveTaskGroup", taskId); }
+        catch (Exception ex) { logger.LogDebug(ex, "[PipelineRun] Leave log group failed"); }
+    }
+
+    private void EnsureLogHub()
+    {
+        if (_logHub is not null) return;
+        _logHub = hubFactory.Create("logs");
+        _logHub.On<TaskLogDto>("LogReceived", log => invokeAsync(() => AppendStreamedLogsAsync([log])));
+        _logHub.On<List<TaskLogDto>>("LogsReceived", logs => invokeAsync(() => AppendStreamedLogsAsync(logs)));
+        _logHub.RejoinOnReconnect(async () =>
+        {
+            if (!_disposed && _streamingTaskId is { } taskId)
+                await _logHub.InvokeAsync("JoinTaskGroup", taskId);
+        });
     }
 
     private Task AppendStreamedLogsAsync(IEnumerable<TaskLogDto> logs)

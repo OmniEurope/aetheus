@@ -1,10 +1,12 @@
 # =============================================================================
-# remote-bluegreen.compose.yml - Aetheus blue-green self-deploy (prod)
+# remote-bluegreen.compose.yml - Aetheus persistent blue-green base
 # =============================================================================
-# One project (aetheus-prod), ONE shared database + two app colors (blue/green).
-# The database and the named volumes (db-data/git-repos/dp-keys/artifacts) are
+# One explicitly validated project, ONE shared database + two app colors (blue/green).
+# Production uses aetheus-prod and the scheduled demo layers demo-bluegreen.override.yml
+# over this base with its own project, database and ports.
+# The database and the named volumes (db-data/git-repos/dp-keys/artifacts/packages) are
 # SHARED across colors, so the DB, the migrated internal git mirror, the data-
-# protection keys and artifacts are preserved on every colour switch.
+# protection keys, artifacts and packages are preserved on every colour switch.
 #
 # Colours are Compose PROFILES: `--profile blue up` brings up the database (no
 # profile -> always started) + back-blue + front-blue only, leaving the live
@@ -13,21 +15,21 @@
 #
 # Ports (host side, distinct per colour so both can run during the overlap):
 #   blue : front 10025 / back 10026     green : front 10027 / back 10028
-# QA keeps using remote.compose.yml (single front/back) - do NOT merge the two.
+# Ephemeral Candidate QA keeps using remote.compose.yml (single front/back) - do NOT merge the two.
 services:
 
   database:
     container_name: ${APPNAME}-${ENV}-database
     image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     environment:
-      - POSTGRES_DB=${APPNAME}
+      - POSTGRES_DB=${DB_NAME:-aetheus}
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - PGDATA=/var/lib/postgresql/data
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${APPNAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME:-aetheus}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -43,28 +45,59 @@ services:
         dockerfile: deploy/docker/Dockerfile.back
         args:
           - APP_VERSION=${APP_VERSION}
-          - BUILD_AGENTS=${BUILD_AGENTS:-1}
+          - SOURCE_COMMIT=${SOURCE_COMMIT}
       environment:
         - ASPNETCORE_ENVIRONMENT=Production
         - DataProtection__KeyPath=/app/data/dp-keys
         - Database__SkipMigrations=true
         - AETHEUS_RUN_MIGRATIONS=false
-        - ConnectionStrings__Default=Host=${APPNAME}-${ENV}-database;Port=5432;Database=${APPNAME};Username=${DB_USER};Password=${DB_PASSWORD}
+        - ConnectionStrings__Default=Host=${APPNAME}-${ENV}-database;Port=5432;Database=${DB_NAME:-aetheus};Username=${DB_USER};Password=${DB_PASSWORD}
         - Auth__JwtKey=${JWT_KEY}
+        # The persistent administrator, from the environment file and nowhere else. DbInitializer
+        # hashes this into the seeded `admin` user on a first run, so it must be the durable secret:
+        # when the deployment's throwaway identity arrived under these names instead, a new
+        # environment got a permanent administrator nobody could ever log in as.
+        - Auth__AdminUser=${ADMIN_USER:-admin}
         - Auth__AdminPassword=${ADMIN_PASSWORD}
+        # The run-scoped, self-expiring identity the deployment smoke authenticates with. Separate
+        # names so it can never be mistaken for the pair above.
+        - Auth__DeploymentBootstrapUser=${DEPLOYMENT_BOOTSTRAP_USER:-}
+        - Auth__DeploymentBootstrapPassword=${DEPLOYMENT_BOOTSTRAP_PASSWORD:-}
+        - Auth__BootstrapStamp=${BOOTSTRAP_STAMP:-bootstrap}
+        - Auth__DeploymentBootstrapExpiresAtUtc=${DEPLOYMENT_BOOTSTRAP_EXPIRES_AT_UTC:-}
         - Auth__EncryptionKey=${ENCRYPTION_KEY}
         - Auth__EncryptionSalt=${ENCRYPTION_SALT}
+        # The key the control plane derives the deployment smoke identity from. Dedicated, because
+        # production refuses the Auth__EncryptionKey fallback: sharing the data key would turn one
+        # leak into two. Provisioned by prod-deploy-prepare.sh, which back-fills it when an older
+        # environment file predates the requirement.
+        - Deployment__BootstrapIdentityKey=${DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY}
         - Cors__Origins__0=${FRONT_URL}
         - Cors__Origins__1=${FRONT_URL_ACCEPT}
         - Cors__Origins__2=${FRONT_URL_PROD}
         - App__Version=${APP_VERSION}
         - Aetheus__PublicApiBaseUrl=${API_BASE_URL}
+        # Where a deployed application pushes its telemetry. Without it the control plane skips the
+        # whole OTEL injection and every deployment ran with telemetry disabled, which is why
+        # Supervision showed a live application and no metrics at all. Ingestion is served by the API
+        # itself, so it is the same base URL.
+        - AppMonitoring__IngestBaseUrl=${API_BASE_URL}
+        - AETHEUS_TELEMETRY_ENABLED=${AETHEUS_TELEMETRY_ENABLED:-false}
+        - AETHEUS_TELEMETRY_LOGS_ENABLED=${AETHEUS_TELEMETRY_LOGS_ENABLED:-false}
+        - AETHEUS_TELEMETRY_APPLICATION_ID=${AETHEUS_TELEMETRY_APPLICATION_ID:-0}
+        - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-Aetheus}
+        - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
+        - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}
+        - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+        - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+        - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
         - ArtifactStorage__ProjectQuotaBytes=${ARTIFACT_PROJECT_QUOTA_BYTES:-21474836480}
         - RateLimiting__Disabled=${RATE_LIMITING_DISABLED:-false}
       volumes:
         - git-repos:/app/data/git-repos
         - dp-keys:/app/data/dp-keys
         - artifacts:/app/data/artifacts
+        - packages:/app/data/packages
       depends_on:
         database:
           condition: service_healthy
@@ -99,8 +132,16 @@ services:
         context: ../..
         dockerfile: deploy/docker/Dockerfile.front
       environment:
+        - ASPNETCORE_ENVIRONMENT=Production
         - API_BASE_URL=${API_BASE_URL}
         - APP_VERSION=${APP_VERSION}
+        - AETHEUS_WEB_ANALYTICS_ENABLED=${AETHEUS_WEB_ANALYTICS_ENABLED:-false}
+        - AETHEUS_WEB_ANALYTICS_APPLICATION_ID=${AETHEUS_WEB_ANALYTICS_APPLICATION_ID:-0}
+        - AETHEUS_WEB_ANALYTICS_SITE_ID=${AETHEUS_WEB_ANALYTICS_SITE_ID:-}
+        - AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT=${AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT:-}
+        - AETHEUS_WEB_ANALYTICS_INGEST_KEY=${AETHEUS_WEB_ANALYTICS_INGEST_KEY:-}
+        - AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY=${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY:-}
+        - AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION=${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION:-1}
       mem_limit: ${FRONT_MEM_LIMIT:-256m}
       restart: unless-stopped
     container_name: ${APPNAME}-${ENV}-blue-front
@@ -134,3 +175,5 @@ volumes:
     name: ${APPNAME}-${ENV}-dp-keys
   artifacts:
     name: ${APPNAME}-${ENV}-artifacts
+  packages:
+    name: ${APPNAME}-${ENV}-packages

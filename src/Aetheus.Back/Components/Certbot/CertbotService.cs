@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Certbot;
 
 public class CertbotService(ICertbotRepository repo, IAuditService audit, ITaskService taskService) : ICertbotService
 {
-    // Persist a queued task AND push the "TaskQueued" SignalR event so the top-bar tracker shows it
-    // live (and can later flip it Running/Completed). Mirrors ServerServiceManager (see ITaskService).
-    private async Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
-    {
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await taskService.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
-    }
+    private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+        => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
 
     public async Task<List<CertbotCertificateDto>> GetCertificatesAsync(int serverId, CancellationToken ct = default)
     {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
 using System.Security.Claims;
 using Aetheus.Back.Services;
 using Aetheus.Shared.Enums;
@@ -208,6 +209,40 @@ public class ResourceAuthorizationServiceTests
         Assert.Equal(3, result.Count);
     }
 
+    [Theory]
+    [InlineData(Permission.Read, true)]
+    [InlineData(Permission.Write, false)]
+    [InlineData(Permission.Admin, false)]
+    public async Task GetAccessibleResourceIdsAsync_ServerOrganizationMembership_GrantsReadOnly(
+        Permission required,
+        bool includesOrganizationServer)
+    {
+        _permissionRepoMock.GetRoleIdsForUserAsync("member", Arg.Any<CancellationToken>())
+            .Returns([1]);
+        _permissionRepoMock.GetAccessibleResourceIdsAsync(
+                Arg.Any<List<int>>(), ResourceType.Server, required, Arg.Any<CancellationToken>())
+            .Returns([10]);
+        _permissionRepoMock.GetOrganizationIdsForUsernameAsync("member", Arg.Any<CancellationToken>())
+            .Returns([4]);
+        _permissionRepoMock.GetResourceIdsByOrganizationsAsync(
+                ResourceType.Server, Arg.Is<List<int>>(ids => ids.SequenceEqual(new[] { 4 })),
+                Arg.Any<CancellationToken>())
+            .Returns([20]);
+
+        var result = await _sut.GetAccessibleResourceIdsAsync(
+            CreateUser("member"), ResourceType.Server, required,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Contains(10, result);
+        Assert.Equal(includesOrganizationServer, result.Contains(20));
+        if (!includesOrganizationServer)
+        {
+            await _permissionRepoMock.DidNotReceive().GetResourceIdsByOrganizationsAsync(
+                ResourceType.Server, Arg.Any<List<int>>(), Arg.Any<CancellationToken>());
+        }
+    }
+
     [Fact]
     public async Task GetAccessibleResourceIdsAsync_TemplateWildcard_IsRestrictedToMemberOrganizations()
     {
@@ -304,5 +339,23 @@ public class ResourceAuthorizationServiceTests
         await reader.HasPermissionAsync(user, ResourceType.Server, 5, Permission.Read, ct: TestContext.Current.CancellationToken);
         await _permissionRepoMock.Received(2)
             .IsUserInResourceOrganizationAsync("member", ResourceType.Server, 5, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AuthzCacheEvictor_Expiration_RemovesDormantUsername()
+    {
+        var evictor = new AuthzCacheEvictor();
+        var token = evictor.TokenFor("one-shot-user", TimeSpan.FromMilliseconds(20));
+
+        Assert.Equal(1, evictor.TrackedUserCount);
+        // Cancellation and registered callbacks are observed on separate thread-pool turns. A fixed
+        // sleep races on a loaded CI runner: HasChanged can already be true while the dictionary-removal
+        // callback is still queued. Wait for the behavior under test with a strict upper bound instead.
+        var wait = Stopwatch.StartNew();
+        while (evictor.TrackedUserCount != 0 && wait.Elapsed < TimeSpan.FromSeconds(5))
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+
+        Assert.True(token.HasChanged);
+        Assert.Equal(0, evictor.TrackedUserCount);
     }
 }

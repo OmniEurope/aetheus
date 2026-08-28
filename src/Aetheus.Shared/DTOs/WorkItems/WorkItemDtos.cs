@@ -33,10 +33,8 @@ public sealed record WorkItemDetailDto : WorkItemDto
     public List<WorkItemDto> Children { get; init; } = [];
 }
 
-public sealed record CreateWorkItemRequest
+public abstract record WorkItemMutationRequest
 {
-    public int ProjectId { get; init; }
-
     public WorkItemType Type { get; init; }
 
     [Required]
@@ -55,6 +53,11 @@ public sealed record CreateWorkItemRequest
     [MaxItemStringLength(50)]
     public List<string> Tags { get; init; } = [];
     public int? LinkedPipelineRunId { get; init; }
+}
+
+public sealed record CreateWorkItemRequest : WorkItemMutationRequest
+{
+    public int ProjectId { get; init; }
 
     [StringLength(200)]
     public string? ExternalId { get; init; }
@@ -63,27 +66,9 @@ public sealed record CreateWorkItemRequest
     public string? ExternalUrl { get; init; }
 }
 
-public sealed record UpdateWorkItemRequest
+public sealed record UpdateWorkItemRequest : WorkItemMutationRequest
 {
-    public WorkItemType Type { get; init; }
-
-    [Required]
-    [StringLength(300)]
-    public string Title { get; init; } = string.Empty;
-
-    [StringLength(4000)]
-    public string? Description { get; init; }
-
-    public WorkItemStatus Status { get; init; }
-    public int? AssigneeUserId { get; init; }
-    public int? ParentId { get; init; }
-    public int Priority { get; init; }
     public int Order { get; init; }
-
-    [MaxLength(20)]
-    [MaxItemStringLength(50)]
-    public List<string> Tags { get; init; } = [];
-    public int? LinkedPipelineRunId { get; init; }
 }
 
 public sealed record WorkItemPaginationRequest : PaginationRequest

@@ -1,0 +1,15 @@
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  reporter: [['junit', { outputFile: 'artifacts/playwright.xml' }]],
+  use: {
+    baseURL: 'http://127.0.0.1:4173',
+    headless: true
+  },
+  webServer: {
+    command: 'npx --no-install http-server dist/toto-angular/browser -p 4173 -a 127.0.0.1',
+    port: 4173,
+    reuseExistingServer: false
+  }
+});

@@ -2,7 +2,7 @@
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// PLAN-006 4.1: a server's last reported OS-patch status (upserted from the heartbeat). Only written
+/// ADR-024 4.1: a server's last reported OS-patch status (upserted from the heartbeat). Only written
 /// when the server actually runs an apt package manager; <see cref="Probed"/> distinguishes a trustworthy
 /// count from an UNKNOWN state (probe failed) so the UI never shows a fake "up to date".
 /// </summary>

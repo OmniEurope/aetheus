@@ -167,7 +167,7 @@ public class VaultEditTemplateCoverageTests : BunitContext
     /// spinner renders instead of the form.
     /// </summary>
     [Fact]
-    public void Template_ExistingVault_Loading_ShowsSpinner()
+    public void Template_ExistingVault_Loading_ShowsAetheusLoader()
     {
         _handler.SetResponse("api/vaults/3", System.Net.HttpStatusCode.OK);
 
@@ -185,7 +185,7 @@ public class VaultEditTemplateCoverageTests : BunitContext
         // screen and the edit form (its Save/Create button) is not yet rendered.
         var isNew = (bool)typeof(VaultEdit).GetProperty("_isNew", priv)!.GetValue(cut.Instance)!;
         Assert.False(isNew);
-        Assert.Contains("rz-progressbar-circular", cut.Markup);
+        Assert.Contains("aetheus-loader-logo", cut.Markup);
     }
 
     // ── AddSecret method ──────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ public class VaultEditTemplateCoverageTests : BunitContext
     /// Covers: AddSecret with empty key → returns early (line 141).
     /// </summary>
     [Fact]
-    public async Task AddSecret_EmptyKey_DoesNothing()
+    public async Task AddSecret_EmptyKey_MakesNoRequest()
     {
         _handler.SetJsonResponse(
             HttpMethod.Get,

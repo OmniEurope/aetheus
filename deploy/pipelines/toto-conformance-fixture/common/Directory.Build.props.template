@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <Import Project=".aetheus-injection/Directory.Build.injected.props"
+          Condition="Exists('.aetheus-injection/Directory.Build.injected.props')" />
+</Project>

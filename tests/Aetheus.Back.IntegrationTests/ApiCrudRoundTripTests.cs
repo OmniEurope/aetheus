@@ -171,7 +171,7 @@ public sealed class ApiCrudRoundTripTests(ApiSmokeFixture fixture)
 
     /// <summary>
     /// Vault carries the real business risk the simple non-owned entities don't: it is
-    /// <c>[ExactlyOneOwner]</c>, org-scoped, secret-masking, and FK Restrict-on-delete. This
+    /// <c>[AtMostOneOwner]</c>, org-scoped, secret-masking, and FK Restrict-on-delete. This
     /// round-trip exercises that whole owned-entity create → read → delete path end-to-end over
     /// HTTP, owning the vault by the seeded project (S-FEAT-OWN5).
     /// </summary>
@@ -206,7 +206,7 @@ public sealed class ApiCrudRoundTripTests(ApiSmokeFixture fixture)
     }
 
     /// <summary>
-    /// Variable library is the second <c>[ExactlyOneOwner]</c>, org-scoped, FK Restrict-on-delete
+    /// Variable library is the second <c>[AtMostOneOwner]</c>, org-scoped, FK Restrict-on-delete
     /// owned entity (S-FEAT-OWN5). Same create → read → delete → confirm-gone lifecycle as the vault
     /// round-trip, owning the library by the seeded project so the org-scoped ownership path and the
     /// Restrict-on-delete FK are exercised end-to-end over HTTP.
@@ -242,7 +242,7 @@ public sealed class ApiCrudRoundTripTests(ApiSmokeFixture fixture)
     }
 
     /// <summary>
-    /// Pipeline is the third <c>[ExactlyOneOwner]</c>, org-scoped, FK Restrict-on-delete owned entity
+    /// Pipeline is the third <c>[AtMostOneOwner]</c>, org-scoped, FK Restrict-on-delete owned entity
     /// (S-FEAT-OWN5). Unlike vault/variable-library, create additionally runs strict YAML validation,
     /// so the payload carries a minimal valid one-stage/one-step definition; an invalid one would 400.
     /// Same create → read → delete → confirm-gone lifecycle, owned by the seeded project.

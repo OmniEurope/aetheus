@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Microsoft.AspNetCore.Components;
 
 namespace Aetheus.Front.Pages.Projects.Sections;
 

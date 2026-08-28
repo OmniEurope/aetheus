@@ -72,6 +72,7 @@ public sealed record ApacheActionRequest
 public sealed record ApacheLogRequest
 {
     [Required]
+    [StringLength(20)]
     [RegularExpression("^(error|access)$")]
     public string LogType { get; init; } = "error";
 

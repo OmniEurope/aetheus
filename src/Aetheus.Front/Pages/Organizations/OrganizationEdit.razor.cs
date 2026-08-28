@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
 using Aetheus.Shared.DTOs.Organizations;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Organizations;
 
@@ -21,7 +16,7 @@ public partial class OrganizationEdit
     private bool _isNew => Id is null or 0;
     private bool _loading = true;
     private bool _saving;
-    private CreateOrganizationRequest _model = new();
+    private OrganizationFormModel _model = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -53,7 +48,7 @@ public partial class OrganizationEdit
         _saving = true;
         try
         {
-            var created = await Api.CreateOrganizationAsync(_model);
+            var created = await Api.Servers.CreateOrganizationAsync(_model.ToCreateRequest());
             if (created is not null)
             {
                 Notify.Success(L["Saved"]);

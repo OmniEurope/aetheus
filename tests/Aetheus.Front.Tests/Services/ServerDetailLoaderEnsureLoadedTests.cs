@@ -90,6 +90,28 @@ public class ServerDetailLoaderEnsureLoadedTests : BunitContext
         Assert.True(sut.InitialLoadCompleted);
     }
 
+    [Fact]
+    public async Task EnsureLoadedAsync_DoesNotWaitForRealtimeNegotiation()
+    {
+        var server = MakeServer(11);
+        _handler.SetJsonResponse("api/servers/11", server);
+        var blockingHubFactory = new BunitTestHelper.BlockingHubConnectionFactory(
+            Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+            Services.GetRequiredService<AuthStateProvider>());
+        var sut = new ServerDetailLoader(
+            Services.GetRequiredService<ApiClient>(),
+            blockingHubFactory,
+            Services.GetRequiredService<NavigationManager>(),
+            NullLogger<ServerDetailLoader>.Instance);
+
+        await sut.EnsureLoadedAsync(11, Xunit.TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(1), Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Equal(11, sut.Server?.Id);
+        Assert.True(sut.InitialLoadCompleted);
+        await sut.DisposeAsync();
+    }
+
     // ── Server with memory sets MetricsReceived and LastUpdated ──────────────
 
     [Fact]

@@ -1,25 +1,33 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Shared;
+using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 /// <summary>
-/// <see cref="IPipelineRepository"/> facade. Its surface is implemented by five focused
-/// collaborators - core data access, server resolution, coverage/quality, lifecycle, and dependency graph queries -
+/// <see cref="IPipelineRepository"/> facade. Its surface is implemented by focused
+/// collaborators for core data access, server resolution, coverage/quality, lifecycle, run lineage, and dependency graph queries,
 /// composed here from the shared <see cref="AppDbContext"/> (replaces the former partial split).
 /// Registered as the single <see cref="IPipelineRepository"/> in DI; callers are unaffected.
 /// </summary>
-public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvider, ILogger<PipelineRepository> logger) : IPipelineRepository
+public sealed class PipelineRepository(
+    AppDbContext db,
+    TimeProvider timeProvider,
+    ILogger<PipelineRepository> logger,
+    IPipelineTaskLifecycle taskLifecycle,
+    IPipelineRunLineageReader runLineage) : IPipelineRepository
 {
-    private readonly PipelineCoreRepository _core = new(db, timeProvider, logger);
+    private readonly PipelineCoreRepository _core = new(
+        db, timeProvider, logger, taskLifecycle);
     private readonly PipelineServerResolver _resolver = new(db);
     private readonly PipelineCoverageRepository _coverage = new(db);
     private readonly PipelineLifecycleRepository _lifecycle = new(db, timeProvider);
+    private readonly IPipelineRunLineageReader _runLineage = runLineage;
     private readonly PipelineDependencyGraphRepository _dependencyGraph = new(db);
     private readonly PipelineTemplateRepository _templates = new(db);
+    private readonly PipelineTaskQueueRepository _taskQueue = new(db);
 
     // --- Core: pipelines, runs, steps, templates, artifacts, approvals ---
     public Task<(List<Pipeline> Items, int TotalCount)> GetPipelinesPagedAsync(string? search, PipelineTriggerType? triggerType, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
@@ -28,8 +36,8 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
     public Task<(List<PipelineDto> Items, int TotalCount)> GetPipelinesPagedProjectedAsync(string? search, PipelineTriggerType? triggerType, int? environmentId, int? projectServerId, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
         => _core.GetPipelinesPagedProjectedAsync(search, triggerType, environmentId, projectServerId, projectId, page, pageSize, accessibleIds, ct);
 
-    public Task<List<PipelineDto>> GetPipelinesForDependencyGraphAsync(List<int>? accessibleIds = null, CancellationToken ct = default)
-        => _dependencyGraph.GetAsync(accessibleIds, ct);
+    public Task<List<PipelineDto>> GetPipelinesForDependencyGraphAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default)
+        => _dependencyGraph.GetAsync(accessibleIds, serverId, ct);
 
     public Task<(List<PipelineDto> Items, List<PipelineDto> Identities, int TotalCount)> GetPipelineDependencyPageAsync(
         PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default)
@@ -53,6 +61,13 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
     public Task AddPipelineRunAsync(PipelineRun run, CancellationToken ct = default)
         => _core.AddPipelineRunAsync(run, ct);
 
+    public Task<(PipelineRun Run, bool Created)> GetOrAddPipelineRunAsync(
+        PipelineRun run, CancellationToken ct = default)
+        => _core.GetOrAddPipelineRunAsync(run, ct);
+
+    public Task<int> ReserveNextBuildNumberAsync(int pipelineId, CancellationToken ct = default)
+        => _core.ReserveNextBuildNumberAsync(pipelineId, ct);
+
     public void TrackPipelineStepRun(PipelineStepRun stepRun)
         => _core.TrackPipelineStepRun(stepRun);
 
@@ -62,20 +77,31 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
     public void TrackTask(ServerTask task)
         => _core.TrackTask(task);
 
+    public void TrackDastExecutionLease(DastExecutionLease lease)
+        => _core.TrackDastExecutionLease(lease);
+
     public Task<List<PipelineRun>> GetRunsAsync(int pipelineId, int count, CancellationToken ct = default)
         => _core.GetRunsAsync(pipelineId, count, ct);
 
-    public Task<(List<PipelineRunDto> Items, int TotalCount)> GetRunsPagedAsync(int pipelineId, int page, int pageSize, CancellationToken ct = default)
-        => _core.GetRunsPagedAsync(pipelineId, page, pageSize, ct);
+    public Task<(List<PipelineRunDto> Items, int TotalCount)> GetRunsPagedAsync(int pipelineId, int page, int pageSize, PipelineRunPaginationRequest? request = null, CancellationToken ct = default)
+        => _core.GetRunsPagedAsync(pipelineId, page, pageSize, request, ct);
 
     public Task<List<PipelineRunDto>> GetActiveRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default)
         => _lifecycle.GetActiveRunsAsync(accessiblePipelineIds, projectId, ct);
 
-    public Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default)
-        => _lifecycle.GetRecentRunsAsync(accessiblePipelineIds, projectId, ct);
+    public Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, int? serverId = null, CancellationToken ct = default)
+        => _lifecycle.GetRecentRunsAsync(accessiblePipelineIds, projectId, serverId, ct);
 
     public Task<PipelineRun?> GetRunDetailAsync(int runId, CancellationToken ct = default)
         => _core.GetRunDetailAsync(runId, ct);
+
+    public Task<Dictionary<int, TaskQueuePosition>> GetTaskQueuePositionsAsync(
+        IReadOnlyCollection<int> taskIds, CancellationToken ct = default)
+        => _taskQueue.GetPositionsAsync(taskIds, ct);
+
+    public Task<List<PipelineRunQueueReference>> GetRunQueueReferencesAsync(
+        int runId, CancellationToken ct = default)
+        => _taskQueue.GetRunReferencesAsync(runId, ct);
 
     public Task<List<StepOutputProjection>> GetSuccessfulStepOutputsAsync(int runId, CancellationToken ct = default)
         => _core.GetSuccessfulStepOutputsAsync(runId, ct);
@@ -83,11 +109,26 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
     public Task<PipelineRun?> GetPipelineRunWithPipelineAsync(int runId, CancellationToken ct = default)
         => _core.GetPipelineRunWithPipelineAsync(runId, ct);
 
+    public Task<Dictionary<int, PipelineRunRootReference>> GetRootRunReferencesAsync(
+        IReadOnlyCollection<int> runIds, CancellationToken ct = default)
+        => _runLineage.GetRootRunReferencesAsync(runIds, ct);
+
     public Task<bool> AreAllStepsInStageCompletedAsync(int runId, string stageName, CancellationToken ct = default)
         => _core.AreAllStepsInStageCompletedAsync(runId, stageName, ct);
 
     public Task<List<PipelineStepRun>> FindStepRunsByTriggeredRunIdAsync(int triggeredRunId, CancellationToken ct = default)
         => _core.FindStepRunsByTriggeredRunIdAsync(triggeredRunId, ct);
+    public Task<bool> TryResolveTriggeredStepAsync(
+        int stepId,
+        TaskExecutionStatus status,
+        int exitCode,
+        string? outputVariablesJson,
+        string? failureCode,
+        string? failureReason,
+        DateTime completedAt,
+        CancellationToken ct = default) =>
+        _core.TryResolveTriggeredStepAsync(
+            stepId, status, exitCode, outputVariablesJson, failureCode, failureReason, completedAt, ct);
 
     public Task<List<int>> GetTriggeredChildRunIdsAsync(int parentRunId, CancellationToken ct = default)
         => _core.GetTriggeredChildRunIdsAsync(parentRunId, ct);
@@ -103,6 +144,9 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
 
     public Task<List<int>> GetStalledSchedulableRunIdsAsync(DateTime startedBefore, CancellationToken ct = default)
         => _lifecycle.GetStalledSchedulableRunIdsAsync(startedBefore, ct);
+
+    public Task<List<int>> GetStalledCancellationRunIdsAsync(DateTime startedBefore, CancellationToken ct = default)
+        => _lifecycle.GetStalledCancellationRunIdsAsync(startedBefore, ct);
 
     public Task<List<int>> GetStuckRunningRunIdsAsync(DateTime startedBefore, CancellationToken ct = default)
         => _lifecycle.GetStuckRunningRunIdsAsync(startedBefore, ct);
@@ -122,6 +166,9 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
     public Task<List<string>> GetTerminalStageNamesAsync(int runId, CancellationToken ct = default)
         => _core.GetTerminalStageNamesAsync(runId, ct);
 
+    public Task<bool> HasActiveArtifactCollectionAsync(int runId, CancellationToken ct = default)
+        => _core.HasActiveArtifactCollectionAsync(runId, ct);
+
     public Task<bool> IsRunStillRunningAsync(int runId, CancellationToken ct = default)
         => _core.IsRunStillRunningAsync(runId, ct);
 
@@ -136,6 +183,9 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
 
     public Task<List<PipelineTemplate>> GetTemplatesAsync(CancellationToken ct = default)
         => _templates.GetTemplatesAsync(ct);
+
+    public Task<List<PipelineTemplateSummaryDto>> GetTemplateSummariesAsync(CancellationToken ct = default)
+        => _templates.GetTemplateSummariesAsync(ct);
 
     public Task<List<string>> GetTemplateVersionYamlDefinitionsByOrganizationAsync(
         int organizationId, int excludedTemplateId, CancellationToken ct = default)
@@ -154,11 +204,29 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
     public Task RemoveTemplateAsync(PipelineTemplate template, CancellationToken ct = default)
         => _templates.RemoveTemplateAsync(template, ct);
 
+    public Task CancelActiveStepRunsAndTasksAsync(int runId, CancellationToken ct = default)
+        => _core.CancelActiveStepRunsAndTasksAsync(runId, ct);
+
     public Task CancelPendingStepRunsAsync(int runId, CancellationToken ct = default)
         => _core.CancelPendingStepRunsAsync(runId, ct);
 
+    public Task RequestPipelineRunCancellationAsync(int runId, CancellationToken ct = default)
+        => _core.RequestPipelineRunCancellationAsync(runId, ct);
+
+    public Task CancelPendingStepRunsExceptStagesAsync(
+        int runId,
+        IReadOnlyCollection<string> preservedStages,
+        CancellationToken ct = default)
+        => _core.CancelPendingStepRunsExceptStagesAsync(runId, preservedStages, ct);
+
+    public Task CancelOrphanedRunningStepRunsExceptStagesAsync(
+        int runId,
+        IReadOnlyCollection<string> preservedStages,
+        CancellationToken ct = default)
+        => _core.CancelOrphanedRunningStepRunsExceptStagesAsync(runId, preservedStages, ct);
+
     public Task<int> ResetFailedStepRunsAsync(int runId, CancellationToken ct = default)
-        => _core.ResetFailedStepRunsAsync(runId, ct);
+        => _lifecycle.ResetFailedStepRunsAsync(runId, ct);
 
     public Task<List<PipelineArtifact>> GetArtifactsAsync(int runId, CancellationToken ct = default)
         => _core.GetArtifactsAsync(runId, ct);
@@ -181,6 +249,9 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
 
     public Task<Data.Entities.Environment?> FindEnvironmentByNameAsync(string name, CancellationToken ct = default)
         => _core.FindEnvironmentByNameAsync(name, ct);
+
+    public Task<Data.Entities.Environment?> FindEnvironmentByNameForProjectAsync(string name, int projectId, CancellationToken ct = default)
+        => _core.FindEnvironmentByNameForProjectAsync(name, projectId, ct);
 
     public Task<PipelineTemplate?> FindTemplateByNameAsync(string name, CancellationToken ct = default)
         => _templates.FindTemplateByNameAsync(name, ct);
@@ -212,6 +283,9 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
 
     public Task<List<EnvironmentCheck>> GetEnvironmentChecksAsync(int environmentId, CancellationToken ct = default)
         => _core.GetEnvironmentChecksAsync(environmentId, ct);
+
+    public Task<bool> IsStepRetryEligibleAsync(int pipelineRunId, int stepRunId, CancellationToken ct = default)
+        => _lifecycle.IsStepRetryEligibleAsync(pipelineRunId, stepRunId, ct);
 
     public Task<int?> GetPipelineIdForRunAsync(int runId, CancellationToken ct = default)
         => _core.GetPipelineIdForRunAsync(runId, ct);
@@ -264,6 +338,9 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
 
     public Task<Server?> FindOnlineServerByIdAsync(int serverId, OsType requiredOs = OsType.Unknown, CancellationToken ct = default)
         => _resolver.FindOnlineServerByIdAsync(serverId, requiredOs, ct);
+
+    public Task<Server?> FindServerByIdAsync(int serverId, CancellationToken ct = default)
+        => _resolver.FindServerByIdAsync(serverId, ct);
 
     public Task<int?> GetRunAffinityServerIdAsync(int runId, CancellationToken ct = default)
         => _resolver.GetRunAffinityServerIdAsync(runId, ct);
@@ -354,6 +431,12 @@ public sealed class PipelineRepository(AppDbContext db, TimeProvider timeProvide
 
     public Task<bool> HasActiveRunAsync(int pipelineId, CancellationToken ct = default)
         => _lifecycle.HasActiveRunAsync(pipelineId, ct);
+
+    public Task<bool> LockPipelineForWebhookAsync(int pipelineId, CancellationToken ct = default)
+        => _lifecycle.LockPipelineForWebhookAsync(pipelineId, ct);
+
+    public Task<List<int>> GetActiveRunIdsAsync(int pipelineId, CancellationToken ct = default)
+        => _lifecycle.GetActiveRunIdsAsync(pipelineId, ct);
 
     public Task<HashSet<int>> GetPipelineIdsWithActiveRunsAsync(CancellationToken ct = default)
         => _lifecycle.GetPipelineIdsWithActiveRunsAsync(ct);

@@ -30,4 +30,9 @@ public interface IGitLightRepository
     Task<BranchProtectionRule?> FindBranchProtectionRuleAsync(int id, CancellationToken ct = default);
     Task AddBranchProtectionRuleAsync(BranchProtectionRule rule, CancellationToken ct = default);
     Task RemoveBranchProtectionRuleAsync(BranchProtectionRule rule, CancellationToken ct = default);
+
+    // Own-reads over PipelineRun: obtaining them by injecting IPipelineRepository is what kept Git
+    // inside the cycle with Pipelines.
+    Task<bool> IsRunActiveAsync(int runId, CancellationToken ct = default);
+    Task<int?> GetRunProjectIdAsync(int pipelineRunId, CancellationToken ct = default);
 }

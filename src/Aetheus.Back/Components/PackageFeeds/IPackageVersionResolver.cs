@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.PackageFeeds;
 
@@ -9,11 +8,15 @@ public enum PackageResolveOutcome
     Resolved,
     NotFound,
     Unsupported,
+    RateLimited,
     Error
 }
 
 public readonly record struct PackageResolveResult(
-    PackageResolveOutcome Outcome, string? LatestVersion, DateTime? PublishedAt);
+    PackageResolveOutcome Outcome,
+    string? LatestVersion,
+    DateTime? PublishedAt,
+    TimeSpan? RetryAfter = null);
 
 public interface IPackageVersionResolver
 {

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Configuration;
+using Aetheus.Agent.Core.Extensions;
 using Aetheus.Agent.Core.Services;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -17,7 +20,89 @@ public sealed class DockerStorageMaintenanceServiceTests
         Assert.True(options.Enabled);
         Assert.False(options.DryRun);
         Assert.False(options.AllowBuildsOnDeploymentTarget);
+        Assert.Equal(DockerStorageMaintenanceOptions.CurrentPolicyVersion, options.PolicyVersion);
+        Assert.Equal(5, options.ReservedSpaceGiB);
+        Assert.Equal(15, options.MaxCacheGiB);
         Assert.True(options.NuGetCacheRetentionDays > 0);
+    }
+
+    [Fact]
+    public void AddAgentCore_PreviousStoragePolicy_IsCappedWithoutRewritingInstalledConfiguration()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Aetheus:ServerUrl"] = "http://localhost:5301",
+                ["Aetheus:DockerStorageMaintenance:PolicyVersion"] = "2",
+                ["Aetheus:DockerStorageMaintenance:ReservedSpaceGiB"] = "20",
+                ["Aetheus:DockerStorageMaintenance:MaxCacheGiB"] = "80"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentCore(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var storage = provider.GetRequiredService<IOptions<AetheusAgentOptions>>()
+            .Value.DockerStorageMaintenance;
+
+        Assert.Equal(DockerStorageMaintenanceOptions.CurrentPolicyVersion, storage.PolicyVersion);
+        Assert.Equal(5, storage.ReservedSpaceGiB);
+        Assert.Equal(15, storage.MaxCacheGiB);
+    }
+
+    [Fact]
+    public void AddAgentCore_CurrentStoragePolicy_CannotExceedRuntimeCacheCap()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Aetheus:ServerUrl"] = "http://localhost:5301",
+                ["Aetheus:DockerStorageMaintenance:PolicyVersion"] = "3",
+                ["Aetheus:DockerStorageMaintenance:ReservedSpaceGiB"] = "20",
+                ["Aetheus:DockerStorageMaintenance:MaxCacheGiB"] = "80"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentCore(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var storage = provider.GetRequiredService<IOptions<AetheusAgentOptions>>()
+            .Value.DockerStorageMaintenance;
+
+        Assert.Equal(15, storage.ReservedSpaceGiB);
+        Assert.Equal(15, storage.MaxCacheGiB);
+    }
+
+    [Fact]
+    public async Task MeasureManagedPathSize_LimitReturnsPartialBytesInsteadOfZero()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"storage-measure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllBytesAsync(
+                Path.Combine(root, "first.bin"),
+                new byte[17],
+                TestContext.Current.CancellationToken);
+            await File.WriteAllBytesAsync(
+                Path.Combine(root, "second.bin"),
+                new byte[29],
+                TestContext.Current.CancellationToken);
+
+            var result = DockerStorageMaintenanceService.MeasureManagedPathSize(
+                root,
+                fileLimit: 1,
+                TestContext.Current.CancellationToken);
+
+            Assert.Contains(result.Bytes, new long[] { 17, 29 });
+            Assert.False(result.IsComplete);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Theory]
@@ -72,6 +157,37 @@ public sealed class DockerStorageMaintenanceServiceTests
     }
 
     [Theory]
+    [InlineData("sh -c 'sh -c \"sh -c \\\"docker build -t app .\\\"\"'")]
+    [InlineData("sh -c 'sh -c \"sh -c \\\"sh -c \\\\\\\"docker build -t app .\\\\\\\"\\\"\"'")]
+    public void IsBuildCommand_DeepShellWrappers_CannotBypassDeploymentGuard(string command)
+    {
+        var service = Build(Substitute.For<IShellRunner>(), new DockerStorageMaintenanceOptions
+        {
+            DeploymentOnly = true,
+            AllowBuildsOnDeploymentTarget = false
+        });
+
+        Assert.True(service.IsBuildCommand(command));
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(17)]
+    public void IsBuildCommand_AtAndBeyondWrapperCeiling_FailsClosed(int wrapperCount)
+    {
+        var service = Build(Substitute.For<IShellRunner>(), new DockerStorageMaintenanceOptions
+        {
+            DeploymentOnly = true,
+            AllowBuildsOnDeploymentTarget = false
+        });
+        var command = "docker build -t app .";
+        for (var depth = 0; depth < wrapperCount; depth++)
+            command = $"sh -c \"{command.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+
+        Assert.True(service.IsBuildCommand(command));
+    }
+
+    [Theory]
     [InlineData("echo docker build")]
     [InlineData("printf 'docker build'")]
     [InlineData("sudo docker load -i app.tar")]
@@ -81,6 +197,26 @@ public sealed class DockerStorageMaintenanceServiceTests
         var service = Build(Substitute.For<IShellRunner>());
 
         Assert.False(service.IsBuildCommand(command));
+    }
+
+    [Fact]
+    public void IsBuildCommand_LargeMultilinePipelineScript_DetectsLateDockerBuild()
+    {
+        var service = Build(Substitute.For<IShellRunner>());
+        var preamble = string.Join('\n', Enumerable.Repeat(
+            "echo \"$WORKSPACE/$AGENT_WORK_DIRECTORY/$COMPOSE_PROJECT_NAME\" >/dev/null", 250));
+        var command = $"{preamble}\ndocker build -f deploy/docker/Dockerfile.e2e -t aetheus-e2e .";
+
+        Assert.True(service.IsBuildCommand(command));
+    }
+
+    [Fact]
+    public void IsBuildCommand_RegexTimeout_FailsClosedAsBuild()
+    {
+        var service = Build(Substitute.For<IShellRunner>());
+        var command = string.Concat(Enumerable.Repeat("env X=1 ", 50_000)) + "not-a-docker-command";
+
+        Assert.True(service.IsBuildCommand(command));
     }
 
     [Theory]
@@ -315,6 +451,26 @@ public sealed class DockerStorageMaintenanceServiceTests
         await service.PrepareBuildAsync(new Dictionary<string, string>(), TestContext.Current.CancellationToken)
             .WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
         await service.CompleteBuildAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ReadPendingCompletionMarkerAsync_WhenRemovedConcurrently_ReturnsMissing()
+    {
+        var root = Directory.CreateTempSubdirectory("aetheus-maintenance-marker-");
+        try
+        {
+            var marker = Path.Combine(root.FullName, ".docker-maintenance-pending");
+
+            var result = await DockerStorageMaintenanceService.ReadPendingCompletionMarkerAsync(
+                marker,
+                TestContext.Current.CancellationToken);
+
+            Assert.Null(result);
+        }
+        finally
+        {
+            if (root.Exists) root.Delete(recursive: true);
+        }
     }
 
     [Fact]

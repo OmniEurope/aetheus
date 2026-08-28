@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Globalization;
 using System.Text.RegularExpressions;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -69,7 +64,7 @@ internal static class PipelineRunLogView
         foreach (var step in failedSteps)
         {
             if (step.TaskId is not { } taskId || stepLogsCache.ContainsKey(taskId)) continue;
-            try { stepLogsCache[taskId] = await api.GetTaskLogsAsync(taskId) ?? []; }
+            try { stepLogsCache[taskId] = await api.Monitoring.GetTaskLogsAsync(taskId) ?? []; }
             catch (HttpRequestException) { stepLogsCache[taskId] = []; }
         }
     }
@@ -77,8 +72,34 @@ internal static class PipelineRunLogView
     // N8FJ: an empty log panel has three distinct causes - spell out which one instead of a flat "No logs".
     public static string GetEmptyLogsReason(PipelineStepRunDto step, IStringLocalizer<AppStrings> l)
     {
+        if (!string.IsNullOrWhiteSpace(step.FailureReason))
+            return l["LogsFailureDiagnostic",
+                string.IsNullOrWhiteSpace(step.FailureCode) ? "Unclassified" : step.FailureCode,
+                step.FailureReason];
+
         if (step.TaskId.HasValue)
-            return l["NoOutputLogs"];          // a task ran but emitted zero log lines
+        {
+            var exitCode = step.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? "?";
+            return step.Status switch
+            {
+                TaskExecutionStatus.Success => l["LogsSuccessfulNoOutput", exitCode],
+                TaskExecutionStatus.Failed => l["LogsFailedNoOutput", exitCode],
+                TaskExecutionStatus.Timeout => l["LogsTimeoutNoOutput"],
+                TaskExecutionStatus.Cancelled => l["LogsCancelledNoOutput"],
+                _ => l["LogsAwaitingOutput"]
+            };
+        }
+
+        if (step.Status == TaskExecutionStatus.Cancelled &&
+            !string.IsNullOrWhiteSpace(step.SkippedCondition))
+        {
+            var values = step.SkippedConditionVariables.Count == 0
+                ? l["ConditionHadNoVariables"].Value
+                : string.Join(", ", step.SkippedConditionVariables
+                    .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(item => $"{item.Key} = '{item.Value}'"));
+            return l["LogsConditionNotMet", step.SkippedCondition, values];
+        }
 
         return step.Status switch
         {
@@ -88,6 +109,18 @@ internal static class PipelineRunLogView
             // Never executed (cancelled / never assigned) - there is nothing to show.
             _ => l["LogsNeverProduced"],
         };
+    }
+
+    public static string GetQueueReason(
+        PipelineStepRunDto step,
+        IStringLocalizer<AppStrings> l)
+    {
+        var runner = string.IsNullOrWhiteSpace(step.ServerName)
+            ? l["Server"].Value
+            : step.ServerName;
+        return step.QueuePosition is { } position && step.QueueDepth is { } depth
+            ? l["TaskQueuePositionLive", runner, position, depth]
+            : l["TaskQueuePositionPending", runner];
     }
 
     public static string GetPendingReason(

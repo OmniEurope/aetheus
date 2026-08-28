@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -14,6 +7,7 @@ public partial class TemplateEditDialog
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
 
     [Parameter] public PipelineTemplateDto? Template { get; set; }
 
@@ -37,9 +31,10 @@ public partial class TemplateEditDialog
 
     private async Task OnSubmit()
     {
+        PipelineTemplateDto? saved;
         if (IsEdit)
         {
-            await Api.UpdatePipelineTemplateAsync(Template!.Id, new UpdatePipelineTemplateRequest
+            saved = await Api.PipelineTemplates.UpdatePipelineTemplateAsync(Template!.Id, new UpdatePipelineTemplateRequest
             {
                 Name = _model.Name,
                 Description = _model.Description,
@@ -50,7 +45,7 @@ public partial class TemplateEditDialog
         }
         else
         {
-            await Api.CreatePipelineTemplateAsync(new CreatePipelineTemplateRequest
+            saved = await Api.PipelineTemplates.CreatePipelineTemplateAsync(new CreatePipelineTemplateRequest
             {
                 Name = _model.Name,
                 Description = _model.Description,
@@ -59,7 +54,15 @@ public partial class TemplateEditDialog
                 ChangelogEntry = _model.ChangelogEntry
             });
         }
-        Dialog.Close(true);
+        if (saved is not null)
+        {
+            Toast.Success(IsEdit ? "Saved" : "Created", "Saved");
+            Dialog.Close(true);
+        }
+        else
+        {
+            Toast.Error("Error", "SaveFailed");
+        }
     }
 
     private void OnCancel() => Dialog.Close(false);

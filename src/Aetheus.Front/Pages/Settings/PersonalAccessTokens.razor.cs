@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Settings;
 
@@ -45,9 +36,11 @@ public partial class PersonalAccessTokens
 
         public PatScope Scope { get; set; } = PatScope.ReadOnly;
 
-        [Range(1, 365)]
+        [Range(1, 90)]
         public int ExpirationDays { get; set; } = 30;
     }
+
+    protected override Task OnInitializedAsync() => LoadPageAsync();
 
     private async Task LoadDataAsync(LoadDataArgs args)
     {
@@ -62,7 +55,7 @@ public partial class PersonalAccessTokens
         _loading = true;
         try
         {
-            var result = await Api.GetPersonalAccessTokensAsync(
+            var result = await Api.Auth.GetPersonalAccessTokensAsync(
                 _page, _pageSize, sortBy: _sortBy, sortDescending: _sortDescending);
             _tokens = result.Items;
             _totalCount = result.TotalCount;
@@ -98,7 +91,7 @@ public partial class PersonalAccessTokens
         _creating = true;
         try
         {
-            var created = await Api.CreatePersonalAccessTokenAsync(new CreatePersonalAccessTokenRequest
+            var created = await Api.Auth.CreatePersonalAccessTokenAsync(new CreatePersonalAccessTokenRequest
             {
                 Name = _form.Name,
                 Scope = _form.Scope,
@@ -136,7 +129,7 @@ public partial class PersonalAccessTokens
             new ConfirmOptions { OkButtonText = L["PatRevoke"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var status = await Api.RevokePersonalAccessTokenAsync(token.Id);
+        var status = await Api.Auth.RevokePersonalAccessTokenAsync(token.Id);
         if (status.Success)
         {
             Toast.Success("PatRevoked", "PatRevoked");

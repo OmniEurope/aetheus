@@ -32,7 +32,7 @@ services:
       dockerfile: deploy/docker/Dockerfile.back
       args:
         - APP_VERSION=${APP_VERSION}
-        - BUILD_AGENTS=${BUILD_AGENTS:-1}
+        - SOURCE_COMMIT=${SOURCE_COMMIT}
     ports:
       # Loopback-only (see front): Apache proxies from 127.0.0.1; never expose the API on 0.0.0.0.
       - "127.0.0.1:${PORT_BACK}:8080"
@@ -57,8 +57,10 @@ services:
       - Aetheus__PublicApiBaseUrl=${API_BASE_URL}
       - ArtifactStorage__ProjectQuotaBytes=${ARTIFACT_PROJECT_QUOTA_BYTES:-21474836480}
       - Aetheus__EnvironmentTier=${AETHEUS_ENVIRONMENT_TIER:-production}
+      - Aetheus__PublicDemo=${AETHEUS_PUBLIC_DEMO:-false}
       - Seed__Demo=${SEED_DEMO:-false}
       - Seed__DemoDate=${SEED_DEMO_DATE:-2026-07-14}
+      - Seed__ConformanceToto=${SEED_CONFORMANCE_TOTO:-false}
       # QA/local browser suites use virtual demo agents and explicitly extend this window so their
       # presence cannot expire midway through a long suite. Production keeps the real 2-minute default.
       - BackgroundServices__ServerHeartbeatTimeout=${SERVER_HEARTBEAT_TIMEOUT:-00:02:00}
@@ -69,6 +71,7 @@ services:
       - git-repos:/app/data/git-repos
       - dp-keys:/app/data/dp-keys
       - artifacts:/app/data/artifacts
+      - packages:/app/data/packages
     depends_on:
       database:
         condition: service_healthy
@@ -117,3 +120,5 @@ volumes:
     name: ${APPNAME}-${ENV}-dp-keys
   artifacts:
     name: ${APPNAME}-${ENV}-artifacts
+  packages:
+    name: ${APPNAME}-${ENV}-packages

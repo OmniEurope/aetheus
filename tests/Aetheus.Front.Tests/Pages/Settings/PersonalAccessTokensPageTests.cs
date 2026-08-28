@@ -32,22 +32,26 @@ public class PersonalAccessTokensPageTests : BunitContext
     };
 
     [Fact]
-    public async Task Renders_TokenRows_WithStatusAndRevokeOnlyForActive()
+    public void InitialRender_LoadsTokenRows_WithStatusAndRevokeOnlyForActive()
     {
         var handler = BunitTestHelper.RegisterServices(this);
         handler.SetPaginatedJsonResponse(HttpMethod.Get, "personal-access-tokens",
             new[] { Active(1, "ci"), Revoked(2, "old") });
 
         var cut = Render<PersonalAccessTokens>();
-        var grid = cut.FindComponent<RadzenDataGrid<PersonalAccessTokenDto>>();
-        await cut.InvokeAsync(grid.Instance.Reload);
 
-        Assert.Contains("ci", cut.Markup);
-        Assert.Contains("old", cut.Markup);
-        Assert.Contains("PatStatusActive", cut.Markup);
-        Assert.Contains("PatStatusRevoked", cut.Markup);
-        // Exactly one revoke button (only the active token is revocable).
-        Assert.Single(cut.FindAll("button[title=\"PatRevoke\"]"));
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.Contains("ci", cut.Markup);
+            Assert.Contains("old", cut.Markup);
+            Assert.Contains("PatStatusActive", cut.Markup);
+            Assert.Contains("PatStatusRevoked", cut.Markup);
+            Assert.DoesNotContain("rz-data-grid-loading", cut.Markup);
+            Assert.Contains(handler.Requests, request =>
+                request.Method == "GET" && request.Url.Contains("personal-access-tokens", StringComparison.Ordinal));
+            // Exactly one revoke button (only the active token is revocable).
+            Assert.Single(cut.FindAll("button[title=\"PatRevoke\"]"));
+        }));
     }
 
     [Fact]
@@ -76,12 +80,16 @@ public class PersonalAccessTokensPageTests : BunitContext
 
         var cut = Render<PersonalAccessTokens>();
 
-        // Fill the name and submit the create form.
-        cut.FindAll("input")[0].Change("deploy");
+        cut.Find("input[name='Name']").Input("deploy");
         cut.Find("button[type=\"submit\"]").Click();
 
         Assert.Contains("aeth_pat_SUPERSECRETVALUE1234567890", cut.Markup);
         Assert.Contains("PatRevealTitle", cut.Markup);
         Assert.Contains(handler.Requests, r => r.Method == "POST" && r.Url.Contains("personal-access-tokens"));
+        var body = handler.RequestDetails.Last(request =>
+            request.Method == "POST" && request.Url.EndsWith("api/personal-access-tokens", StringComparison.Ordinal)).Body;
+        var request = System.Text.Json.JsonSerializer.Deserialize<CreatePersonalAccessTokenRequest>(
+            body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Equal("deploy", request!.Name);
     }
 }

@@ -42,6 +42,68 @@ public class PipelineParameterResolverTests
         Assert.False(effective.ContainsKey("ENV"));
     }
 
+    /// <summary>
+    /// Saving a pipeline and launching one ask different questions, and only one of them is about
+    /// values. A required parameter with no default is a perfectly storable declaration - it is what
+    /// .pipeline/aetheus-deploy-prod.yaml ships - but running the launch check against an empty value
+    /// set at save time made that shape impossible to write through the API or the editor, while the
+    /// repository-sync path stored it happily. These two pin the split so the paths cannot drift back
+    /// together.
+    /// </summary>
+    [Fact]
+    public void ValidateDeclarations_AcceptsARequiredParameterWithNoDefault()
+    {
+        var errors = PipelineParameterResolver.ValidateDeclarations([Param("candidateVersion", required: true)]);
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void ARequiredParameterWithNoValue_IsStillRefusedAtRunTime()
+    {
+        var declared = new[] { Param("candidateVersion", required: true) };
+
+        // Storable...
+        Assert.Empty(PipelineParameterResolver.ValidateDeclarations(declared));
+
+        // ...and still unlaunchable without a value, which is where the requirement belongs.
+        var ok = PipelineParameterResolver.TryResolve(declared, null, out _, out var errors);
+        Assert.False(ok);
+        Assert.Contains(errors, error =>
+            error.Contains("candidateVersion", StringComparison.Ordinal)
+            && error.Contains("required", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("AETHEUS_THING")]
+    [InlineData("BUILD_THING")]
+    [InlineData("SYSTEM_THING")]
+    public void ValidateDeclarations_StillRejectsAReservedName(string name)
+    {
+        var errors = PipelineParameterResolver.ValidateDeclarations([Param(name)]);
+
+        // Relaxing the value check must not relax the checks that are genuinely about the definition.
+        Assert.Contains(errors, error => error.Contains("reserved", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateDeclarations_RejectsADefaultThatContradictsItsOwnType()
+    {
+        var errors = PipelineParameterResolver.ValidateDeclarations([Param("retries", type: "number", def: "abc")]);
+
+        Assert.Contains(errors, error => error.Contains("number", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateDeclarations_RejectsADuplicateName()
+    {
+        var errors = PipelineParameterResolver.ValidateDeclarations([Param("env"), Param("ENV")]);
+
+        // Case-insensitive: the resolver matches supplied values that way, so two declarations
+        // differing only in case would make the effective value depend on declaration order.
+        Assert.Contains(errors, error => error.Contains("more than once", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void TryResolve_RequiredWithDefault_UsesDefault()
     {

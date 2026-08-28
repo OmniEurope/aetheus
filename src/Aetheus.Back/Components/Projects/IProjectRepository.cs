@@ -1,8 +1,34 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Projects;
+
+/// <summary>
+/// Read port owned by Projects and implemented by Analysis. It keeps the project-list projection
+/// independent from Analysis repository internals while preserving the domain-grade contract.
+/// </summary>
+public interface IProjectAnalysisGradeReader
+{
+    Task<Dictionary<int, AnalysisGradeSummaryDto>> GetGradesAsync(
+        IReadOnlyCollection<int> projectIds,
+        CancellationToken ct = default);
+}
+
+public sealed record ProjectListInsight(
+    int ProjectId,
+    int? LastCommitId,
+    string? LastCommitSha,
+    string? LastCommitMessage,
+    DateTime? LastCommitAt,
+    int? LastRunId,
+    string? LastRunName,
+    PipelineStatus? LastRunStatus,
+    DateTime? LastRunAt,
+    int? ParentRunId,
+    string? ParentRunName,
+    AnalysisGrade? LatestGateGrade,
+    ProjectProductionStatus ProductionStatus,
+    int? OnlineUserCount);
 
 public interface IProjectRepository
 {
@@ -14,6 +40,11 @@ public interface IProjectRepository
     /// batched by id so the projects list stays a single extra query rather than N+1.</summary>
     Task<Dictionary<int, DateTime?>> GetLastGitUpdatesAsync(
         IReadOnlyCollection<int> projectIds, CancellationToken ct = default);
+
+    Task<Dictionary<int, int>> GetInternalRepositoryIdsAsync(
+        IReadOnlyCollection<int> projectIds, CancellationToken ct = default);
+    Task<Dictionary<int, ProjectListInsight>> GetProjectListInsightsAsync(
+        IReadOnlyCollection<int> projectIds, DateTime activeSessionCutoffUtc, CancellationToken ct = default);
 
     Task<Project?> GetProjectDetailAsync(int id, CancellationToken ct = default);
 

@@ -31,7 +31,7 @@
                               title="@(_showPassword ? L["HidePassword"] : L["ShowPassword"])"
                               aria-label="@(_showPassword ? L["HidePassword"] : L["ShowPassword"])" />
                 <RadzenButton ButtonType="ButtonType.Button" Icon="autorenew" Click="@GeneratePassword" Size="ButtonSize.Small"
-                              title="@L["GeneratePassword"]" aria-label="@L["GeneratePassword"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                              title="@L["GeneratePassword"]" aria-label="@L["GeneratePassword"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
             </End>
             <Helper>
                 <ValidationMessage For="@(() => _model.Password)" />
@@ -39,11 +39,7 @@
         </RadzenFormField>
 
         <div>
-            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-1">@L["Roles"]</RadzenText>
-            @foreach (var role in AvailableRoles)
-            {
-                <LabeledToggle Value="@_model.Roles.Contains(role)" ValueChanged="@(v => OnRoleToggled(role, v))" Text="@role" />
-            }
+            <RoleAssignmentPicker @bind-SelectedRoles="_model.Roles" InitialRoles="@AvailableRoles" />
         </div>
 
         <LabeledToggle @bind-Value="_model.MustChangePassword" Text="@L["MustChangePassword"]" />

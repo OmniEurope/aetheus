@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Constants;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -58,7 +56,9 @@ public class HubConnectionFactory(IConfiguration config, AuthStateProvider auth,
                 .Cast<HubConnection>()
                 .Distinct()
                 .ToArray();
-            _connections.RemoveAll(reference => !reference.TryGetTarget(out _));
+            // This is a session boundary. Forget every captured connection immediately so a later
+            // logout cannot revisit disposed transports from the previous authenticated user.
+            _connections.Clear();
         }
 
         await Task.WhenAll(connections.Select(StopSafelyAsync));

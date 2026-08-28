@@ -23,6 +23,7 @@ public class TaskTimeoutServiceTests
         repo.GetStaleRunningTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns([]);
         repo.GetStaleAssignedTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns([]);
         repo.GetStalePendingTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns([]);
+        repo.GetTasksFromSupersededAgentSessionsAsync(Arg.Any<CancellationToken>()).Returns([]);
 
         var sp = new ServiceCollection().AddScoped(_ => repo).BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
@@ -63,6 +64,7 @@ public class TaskTimeoutServiceTests
         // The apache2-install regression: a Pending task no agent ever claimed.
         var pending = new ServerTask { Id = 9, ServerId = 3, Name = "Install - apache2", Status = TaskExecutionStatus.Pending };
         repo.GetStalePendingTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns([pending]);
+        repo.GetServerStatusAsync(3, Arg.Any<CancellationToken>()).Returns(ServerStatus.Offline);
 
         await sut.CheckStaleTasksAsync(TestContext.Current.CancellationToken);
 
@@ -71,6 +73,118 @@ public class TaskTimeoutServiceTests
         await repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
         // Per-server group + all-servers group => two TaskCompleted sends.
         await proxy.Received(2).SendCoreAsync("TaskCompleted", Arg.Any<object?[]>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckStaleTasksAsync_AgentSessionChanged_ReconcilesRunningTaskImmediately()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 25, 18, 0, 0, TimeSpan.Zero));
+        var (sut, repo, _) = BuildSut(clock);
+        var orphaned = new ServerTask
+        {
+            Id = 17,
+            ServerId = 4,
+            Name = "DAST active",
+            Status = TaskExecutionStatus.Running,
+            StartedAt = clock.GetUtcNow().UtcDateTime.AddMinutes(-2),
+            AssignedAgentSessionId = "11111111111111111111111111111111"
+        };
+        repo.GetTasksFromSupersededAgentSessionsAsync(Arg.Any<CancellationToken>())
+            .Returns([orphaned]);
+
+        await sut.CheckStaleTasksAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskExecutionStatus.Timeout, orphaned.Status);
+        Assert.Equal(clock.GetUtcNow().UtcDateTime, orphaned.CompletedAt);
+        await repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckStaleTasksAsync_DeferredCleanupLosesLease_RequeuesInsteadOfTimingOut()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 25, 18, 0, 0, TimeSpan.Zero));
+        var (sut, repo, proxy) = BuildSut(clock);
+        var cleanup = new ServerTask
+        {
+            Id = 18,
+            ServerId = 4,
+            Name = "Cleanup",
+            Status = TaskExecutionStatus.Assigned,
+            AssignedAt = clock.GetUtcNow().UtcDateTime.AddMinutes(-5),
+            AssignedAgentSessionId = "old-session",
+            IsDeferredCleanup = true
+        };
+        repo.GetStaleAssignedTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns([cleanup]);
+
+        await sut.CheckStaleTasksAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskExecutionStatus.Pending, cleanup.Status);
+        Assert.Null(cleanup.AssignedAt);
+        Assert.Null(cleanup.AssignedAgentSessionId);
+        Assert.Null(cleanup.CompletedAt);
+        await repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        await proxy.DidNotReceive().SendCoreAsync(
+            "TaskCompleted",
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckStaleTasksAsync_RechecksPollingLeaseAndKeepsOldPendingTaskForActiveRunner()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 24, 10, 15, 0, TimeSpan.Zero));
+        var (sut, repo, proxy) = BuildSut(clock);
+        var pending = new ServerTask
+        {
+            Id = 2638,
+            ServerId = 11,
+            Name = "Scan source with OpenGrep",
+            Status = TaskExecutionStatus.Pending,
+            CreatedAt = clock.GetUtcNow().UtcDateTime.AddMinutes(-10)
+        };
+        repo.GetStalePendingTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns([pending]);
+        repo.IsServerTaskPollingActiveAsync(11, Arg.Any<CancellationToken>()).Returns(true);
+
+        await sut.CheckStaleTasksAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskExecutionStatus.Pending, pending.Status);
+        Assert.Null(pending.CompletedAt);
+        await repo.Received(1).IsServerTaskPollingActiveAsync(11, Arg.Any<CancellationToken>());
+        await repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await proxy.DidNotReceive().SendCoreAsync(
+            Arg.Any<string>(),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckStaleTasksAsync_HeartbeatingRunnerWithoutTaskPolling_TimesOutQueue()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 24, 10, 15, 0, TimeSpan.Zero));
+        var (sut, repo, proxy) = BuildSut(clock);
+        var pending = new ServerTask
+        {
+            Id = 2639,
+            ServerId = 12,
+            Name = "Blocked behind dead task poller",
+            Status = TaskExecutionStatus.Pending,
+            CreatedAt = clock.GetUtcNow().UtcDateTime.AddMinutes(-10)
+        };
+        repo.GetStalePendingTasksAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns([pending]);
+        repo.GetServerStatusAsync(12, Arg.Any<CancellationToken>()).Returns(ServerStatus.Online);
+        repo.IsServerTaskPollingActiveAsync(12, Arg.Any<CancellationToken>()).Returns(false);
+
+        await sut.CheckStaleTasksAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskExecutionStatus.Timeout, pending.Status);
+        Assert.Equal(clock.GetUtcNow().UtcDateTime, pending.CompletedAt);
+        await repo.Received(1).IsServerTaskPollingActiveAsync(12, Arg.Any<CancellationToken>());
+        await repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        await proxy.Received(2).SendCoreAsync(
+            "TaskCompleted",
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

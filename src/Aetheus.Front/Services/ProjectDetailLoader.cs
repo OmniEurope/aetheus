@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Services;
 
@@ -66,8 +63,8 @@ public sealed class ProjectDetailLoader : IAsyncDisposable
             _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var token = _loadCts.Token;
 
-            var projectTask = _api.GetProjectDetailAsync(id, token);
-            var releasesTask = _api.GetReleasesAsync(projectId: id);
+            var projectTask = _api.Projects.GetProjectDetailAsync(id, token);
+            var releasesTask = _api.Projects.GetReleasesAsync(projectId: id);
 
             await Task.WhenAll(projectTask, releasesTask).ConfigureAwait(false);
 
@@ -78,7 +75,9 @@ public sealed class ProjectDetailLoader : IAsyncDisposable
             Releases = releases;
             InitialLoadCompleted = true;
             OnChanged?.Invoke();
-            await StartReleaseHubAsync(id).ConfigureAwait(false);
+            // Real-time enrichment is best effort and must not keep the initial project page
+            // behind a loader while SignalR negotiates or retries.
+            _ = StartReleaseHubAsync(id, token);
         }
         catch (HttpRequestException ex)
         {
@@ -120,8 +119,8 @@ public sealed class ProjectDetailLoader : IAsyncDisposable
     /// </summary>
     public async Task SyncReleasesAsync(int projectId, CancellationToken ct = default)
     {
-        await _api.SyncReleasesAsync(projectId, ct).ConfigureAwait(false);
-        var result = await _api.GetReleasesAsync(projectId: projectId).ConfigureAwait(false);
+        await _api.Projects.SyncReleasesAsync(projectId, ct).ConfigureAwait(false);
+        var result = await _api.Projects.GetReleasesAsync(projectId: projectId).ConfigureAwait(false);
         Releases = result.Items;
         OnChanged?.Invoke();
     }
@@ -139,25 +138,52 @@ public sealed class ProjectDetailLoader : IAsyncDisposable
     /// (ReleaseStatusChanged) refreshes the section without a manual reload. Best-effort:
     /// a hub failure silently degrades to static (the page still works via manual sync).
     /// </summary>
-    private async Task StartReleaseHubAsync(int projectId)
+    private async Task StartReleaseHubAsync(int projectId, CancellationToken ct)
     {
+        var hub = _hubFactory.Create("releases");
         try
         {
-            _releaseHub = _hubFactory.Create("releases");
-            _releaseHub.On<ReleaseDto>("ReleaseCreated", _ => ReloadReleasesAsync(projectId));
-            _releaseHub.On<ReleaseDto>("ReleaseStatusChanged", _ => ReloadReleasesAsync(projectId));
-            _releaseHub.On<int, List<ReleaseDto>>("ReleasesUpdated", (pid, _) =>
+            hub.On<ReleaseDto>("ReleaseCreated", _ => ReloadReleasesAsync(projectId));
+            hub.On<ReleaseDto>("ReleaseStatusChanged", _ => ReloadReleasesAsync(projectId));
+            hub.On<int, List<ReleaseDto>>("ReleasesUpdated", (pid, _) =>
                 pid == projectId ? ReloadReleasesAsync(projectId) : Task.CompletedTask);
             // Group membership is per-connection and lost on auto-reconnect - re-join + reload.
-            _releaseHub.RejoinOnReconnect(async () =>
+            hub.RejoinOnReconnect(async () =>
             {
-                await _releaseHub.InvokeAsync("JoinProjectGroup", projectId).ConfigureAwait(false);
+                await hub.InvokeAsync("JoinProjectGroup", projectId).ConfigureAwait(false);
                 await ReloadReleasesAsync(projectId).ConfigureAwait(false);
             });
-            await _releaseHub.StartAsync().ConfigureAwait(false);
-            await _releaseHub.InvokeAsync("JoinProjectGroup", projectId).ConfigureAwait(false);
+            await hub.StartAsync(ct).ConfigureAwait(false);
+            await hub.InvokeAsync("JoinProjectGroup", projectId, ct).ConfigureAwait(false);
+
+            if (ct.IsCancellationRequested || _disposing || _currentId != projectId) return;
+            var previous = Interlocked.Exchange(ref _releaseHub, hub);
+            if (previous is not null && !ReferenceEquals(previous, hub))
+                await previous.DisposeAsync().ConfigureAwait(false);
+
+            // Teardown may have raced the exchange. Remove and dispose this connection if the
+            // project stopped being current between the two checks.
+            if (ct.IsCancellationRequested || _disposing || _currentId != projectId)
+                Interlocked.CompareExchange(ref _releaseHub, null, hub);
+            else
+                hub = null!;
         }
-        catch { /* Hub unavailable - degrade to static */ }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Navigation cancelled a best-effort connection attempt.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Release hub unavailable for project {ProjectId}", projectId);
+        }
+        finally
+        {
+            if (hub is not null)
+            {
+                try { await hub.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Release hub dispose failed for project {ProjectId}", projectId); }
+            }
+        }
     }
 
     private async Task ReloadReleasesAsync(int projectId)
@@ -165,7 +191,7 @@ public sealed class ProjectDetailLoader : IAsyncDisposable
         if (_disposing || _currentId != projectId) return;
         try
         {
-            var result = await _api.GetReleasesAsync(projectId: projectId).ConfigureAwait(false);
+            var result = await _api.Projects.GetReleasesAsync(projectId: projectId).ConfigureAwait(false);
             // Teardown may have raced the fetch - don't resurrect state on a cleaned-up loader.
             if (_disposing || _currentId != projectId) return;
             Releases = result.Items;
@@ -185,11 +211,10 @@ public sealed class ProjectDetailLoader : IAsyncDisposable
         catch (ObjectDisposedException) { /* already disposed */ }
         _loadCts?.Dispose();
         _loadCts = null;
-
-        if (_releaseHub is not null)
+        var releaseHub = Interlocked.Exchange(ref _releaseHub, null);
+        if (releaseHub is not null)
         {
-            try { await _releaseHub.DisposeAsync().ConfigureAwait(false); } catch { /* best-effort */ }
-            _releaseHub = null;
+            try { await releaseHub.DisposeAsync().ConfigureAwait(false); } catch { /* best-effort */ }
         }
 
         Project = null;

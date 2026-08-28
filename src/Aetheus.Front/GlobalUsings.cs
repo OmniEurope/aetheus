@@ -1,2 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
+global using System.ComponentModel.DataAnnotations;
 global using Aetheus.Front.Helpers;
+global using Aetheus.Front.Layout;
+global using Aetheus.Front.Resources;
+global using Aetheus.Front.Services;
+global using Aetheus.Front.Shared;
+global using Aetheus.Shared.Constants;
+global using Aetheus.Shared.DTOs;
+global using Aetheus.Shared.Enums;
+global using Microsoft.AspNetCore.Components;
+global using Microsoft.AspNetCore.SignalR.Client;
+global using Microsoft.Extensions.Localization;
+global using Microsoft.JSInterop;
+global using Radzen;
+global using Radzen.Blazor;

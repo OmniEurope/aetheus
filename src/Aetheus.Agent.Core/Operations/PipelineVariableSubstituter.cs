@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Text.Json;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-
 namespace Aetheus.Agent.Core.Operations;
 
 internal static class PipelineVariableSubstituter
@@ -13,12 +9,7 @@ internal static class PipelineVariableSubstituter
     {
         envVars.TryGetValue("AETHEUS_WORKING_DIR", out var workingDirectory);
         var baseDirectory = !string.IsNullOrEmpty(workingDirectory) ? workingDirectory : Directory.GetCurrentDirectory();
-        List<string>? patterns = null;
-        if (!string.IsNullOrWhiteSpace(target))
-        {
-            try { patterns = JsonSerializer.Deserialize<List<string>>(target); }
-            catch (JsonException) { patterns = [target]; }
-        }
+        var patterns = PipelineTargetPatterns.ParseOptional(target);
         if (patterns is null or { Count: 0 })
         {
             await onOutput("Variable substitution failed: no target files were specified", TaskLogLevel.Error).ConfigureAwait(false);

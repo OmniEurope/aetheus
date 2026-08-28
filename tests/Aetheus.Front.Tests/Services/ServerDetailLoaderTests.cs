@@ -166,7 +166,22 @@ public class ServerDetailLoaderTests : BunitContext
         Assert.True(metric.DockerInventoryAvailable);
         Assert.Equal(123, metric.BuildCacheBytes);
         Assert.Equal(collectedAt.AddMinutes(-5), metric.LastBuildAttemptAtUtc);
-        Assert.Equal(collectedAt, metric.Timestamp);
+        Assert.Equal(collectedAt.ToLocalTime(), metric.Timestamp);
+    }
+
+    [Fact]
+    public void ToLocalClock_ConvertsUtcToExplicitNegativeOffset()
+    {
+        var utc = new DateTime(2026, 7, 17, 2, 0, 0, DateTimeKind.Utc);
+        var utcMinusSeven = TimeZoneInfo.CreateCustomTimeZone(
+            "UTC-07-test",
+            TimeSpan.FromHours(-7),
+            "UTC-07-test",
+            "UTC-07-test");
+
+        var local = ServerDetailLoader.ToLocalClock(utc, utcMinusSeven);
+
+        Assert.Equal(new DateTime(2026, 7, 16, 19, 0, 0), local);
     }
 
     [Fact]

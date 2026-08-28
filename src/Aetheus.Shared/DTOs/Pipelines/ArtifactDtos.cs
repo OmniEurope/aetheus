@@ -27,6 +27,7 @@ public sealed record PipelineArtifactDto
     public string? BranchName { get; init; }
     public string? CommitHash { get; init; }
     public string? RepositoryUrl { get; init; }
+    public int? SourceRepositoryId { get; init; }
 
     // Cross-linking (many-to-many): an artifact can belong to several releases and relate to
     // several commits / branches.

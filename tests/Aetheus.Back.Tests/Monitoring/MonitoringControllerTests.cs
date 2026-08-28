@@ -96,3 +96,4 @@ public class MonitoringControllerTests
         await _serviceMock.Received(1).GetServerMetricsAsync(1, 24, Arg.Any<CancellationToken>());
     }
 }
+

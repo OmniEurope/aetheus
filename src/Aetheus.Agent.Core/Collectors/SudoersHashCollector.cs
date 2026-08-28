@@ -31,10 +31,10 @@ public sealed class SudoersHashCollector(
         "/etc/sudoers.d/aetheus-service-enable",
         // S-FEAT-W8KN - argv-exact apt-get install/remove allow-list (package-manage capability).
         "/etc/sudoers.d/aetheus-package",
-        // PLAN-006 4.1 - argv-exact apt-get upgrade grant (patch-manage capability). Its presence
+        // ADR-024 4.1 - argv-exact apt-get upgrade grant (patch-manage capability). Its presence
         // is what derives Server.PatchManagementAvailable backend-side.
         "/etc/sudoers.d/aetheus-patch",
-        // PLAN-006 4.2 - path-only grant for the root-owned aetheus-firewall helper (firewall-manage
+        // ADR-024 4.2 - path-only grant for the root-owned aetheus-firewall helper (firewall-manage
         // capability). Its presence is what derives Server.FirewallManagementAvailable backend-side.
         "/etc/sudoers.d/aetheus-firewall",
         // S-FEAT-W8KN - argv-exact grant for the root-owned mail-setup helper (mail-setup capability).
@@ -45,6 +45,12 @@ public sealed class SudoersHashCollector(
         // Deployment module - argv-exact grant for the root-owned deploy-restart helper (cross-agent
         // deploy capability). Its presence is what derives Server.DeploymentTargetAvailable backend-side.
         "/etc/sudoers.d/aetheus-deploy",
+        // argv-exact grant for the root-owned certbot issue/manage helpers (certbot-manage capability).
+        // Missing from this list until 2026-08-23, which made certbot.manage UNREACHABLE: the installer
+        // writes the drop-in and BuildEffectiveCapabilities looks for its hash, but nothing ever hashed
+        // it, so the capability could never light up and no certificate could be issued by the platform.
+        // EveryInstalledSudoersDropin_IsHashed now guards the list against exactly that omission.
+        "/etc/sudoers.d/aetheus-certbot",
     ];
 
     public async Task<Dictionary<string, string>> CollectAsync(CancellationToken ct = default)

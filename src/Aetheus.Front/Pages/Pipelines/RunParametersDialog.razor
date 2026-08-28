@@ -3,47 +3,7 @@
 
 <RadzenTemplateForm TItem="object" Data="@(new object())" Submit="@OnSubmit">
     <div class="run-params-dialog">
-        @foreach (var p in Parameters)
-        {
-            <div class="run-params-field">
-                @if (string.Equals(p.Type, "boolean", StringComparison.OrdinalIgnoreCase))
-                {
-                    <LabeledToggle Kind="ToggleKind.Switch" Value="@BoolValue(p.Name)"
-                        ValueChanged="@(value => _bools[p.Name] = value)"
-                        Text="@($"{p.DisplayName}{(p.Required ? " *" : "")}")" />
-                }
-                else
-                {
-                    <RadzenLabel Component="@p.Name" class="rz-mb-1 run-params-label"
-                        Text="@($"{p.DisplayName}{(p.Required ? " *" : "")}")" />
-
-                    switch (p.Type?.ToLowerInvariant())
-                    {
-                        case "choice":
-                            <RadzenDropDown TValue="string" Value="@StringValue(p.Name)"
-                                            ValueChanged="@(value => _strings[p.Name] = value)"
-                                            Data="@p.AllowedValues" Name="@p.Name"
-                                            AllowClear="!p.Required" class="run-params-input" />
-                            break;
-                        case "number":
-                            <RadzenNumeric TValue="decimal?" Value="@NumberValue(p.Name)"
-                                           ValueChanged="@(value => _numbers[p.Name] = value)"
-                                           Name="@p.Name" class="run-params-input" />
-                            break;
-                        default:
-                            <RadzenTextBox Value="@StringValue(p.Name)"
-                                           ValueChanged="@(value => _strings[p.Name] = value)"
-                                           Name="@p.Name" class="run-params-input" />
-                            break;
-                    }
-                }
-
-                @if (!string.IsNullOrWhiteSpace(p.Description))
-                {
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-base-600">@p.Description</RadzenText>
-                }
-            </div>
-        }
+        <RunParameterFields @ref="_fields" Parameters="@Parameters" Prefill="@Prefill" AvailableReleases="@AvailableReleases" />
 
         @if (!string.IsNullOrEmpty(_error))
         {

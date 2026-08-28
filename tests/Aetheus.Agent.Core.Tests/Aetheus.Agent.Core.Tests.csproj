@@ -1,8 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- S-TECH-FKY3: run this assembly's collections serially. A process-spawning test raced under
-       xUnit's default parallelism (intermittent CI failure). The suite is small/fast, so serial
-       execution costs little. -->
+  <!-- Run ordinary collections in parallel. Tests that start real OS processes remain grouped in
+       ProcessSpawningTestCollection, which is explicitly non-parallel to preserve CI stability. -->
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
@@ -24,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aetheus.Agent.Core\Aetheus.Agent.Core.csproj" />
+    <ProjectReference Include="..\..\src\Aetheus.Agent.Linux\Aetheus.Agent.Linux.csproj" />
   </ItemGroup>
 
 </Project>

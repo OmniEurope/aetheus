@@ -20,9 +20,11 @@ External git connections (GitHub/GitLab), internal hosted repositories (GitLight
 | `/api/git/branch-policies/{id}` | DELETE | Admin | Delete branch policy |
 | `/api/git/status-report` | POST | User | Record pipeline status locally (returns `{ recorded, forwardedToProvider }`; provider forwarding not yet wired, so `forwardedToProvider` is always `false`) |
 | `/api/git/repos` | GET | User | List internal repos; optional `?projectId=` filter (omitted = every repo across the projects the caller can read) |
-| `/api/git/repos/{id}` | GET/POST/PUT/DELETE | User/Admin | CRUD internal repo |
+| `/api/git/repos` | POST | User | Create internal repo |
+| `/api/git/repos/{id}` | GET/PUT/DELETE | User/Admin | Read, update, or delete internal repo |
 | `/api/git/repos/{id}/commits` | GET | User | Commit log (paginated) |
 | `/api/git/repos/{id}/commits/{sha}` | GET | User | Single commit detail + file-level diff (against the first parent, or the empty tree for a root commit) |
+| `/api/git/repos/{id}/commit-messages` | POST | User | Resolve 1 to 200 commit SHAs into their messages in one request |
 | `/api/git/repos/{id}/branches` | GET/POST | User | List/create branches |
 | `/api/git/repos/{id}/branches/{name}` | DELETE | User | Delete branch |
 | `/api/git/repos/{id}/tags` | GET/POST | User | List/create tags |
@@ -38,7 +40,8 @@ External git connections (GitHub/GitLab), internal hosted repositories (GitLight
 | `/api/git/repos/{id}/pull-requests/{n}/merge` | POST | User | Merge PR |
 | `/api/git/repos/{id}/pull-requests/{n}/close` | POST | User | Close PR |
 | `/api/git/repos/{id}/pull-requests/{n}/diff` | GET | User | PR diff |
-| `/api/git/repos/{id}/branch-protection` | GET/POST/PUT/DELETE | User/Admin | Protection rules |
+| `/api/git/repos/{id}/branch-protection` | GET/POST | User/Admin | List or create protection rules |
+| `/api/git/repos/{id}/branch-protection/{ruleId}` | PUT/DELETE | User/Admin | Update or delete one protection rule |
 | `/git/{projectId}/{slug}.git/*` | GET/POST | BasicAuth | Smart HTTP clone/push with account credentials, owner-bound PATs, or run-scoped clone tokens |
 
 ## Key Classes
@@ -54,7 +57,7 @@ External git connections (GitHub/GitLab), internal hosted repositories (GitLight
 - `IGitRepository` / `GitRepository` -- external connection EF access
 - `IGitLightRepository` / `GitLightRepository` -- internal repo EF access
 - `GitBasicAuthenticationHandler` -- HTTP basic auth for smart HTTP via account credentials, owner-bound personal access tokens, or project-scoped pipeline-run clone tokens. `PatScopeEnforcementMiddleware` explicitly permits POST `git-upload-pack` for read-only PAT clone/fetch while denying `git-receive-pack` and unrelated writes.
-- `GitLightMaintenanceService` -- background: `git gc`, housekeeping
+- `GitLightMaintenanceService` (in `Services/`, outside this module) -- background: `git gc`, housekeeping
 - `GitRepoPathResolver` -- single source of truth for resolving an internal repo's on-disk path from `(projectId, slug)` with the path-traversal guard (OS-aware comparator: case-insensitive on Windows, case-sensitive on Linux). Replaces the three drifted copies in `GitLightService` / `GitSmartHttpService` / `ExternalRepoMirrorService` (M-git-6)
 
 ## Cross-Module Dependencies

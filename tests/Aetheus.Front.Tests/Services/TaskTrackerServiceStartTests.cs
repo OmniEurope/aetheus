@@ -118,13 +118,12 @@ public class TaskTrackerServiceStartTests : BunitContext
         Assert.Equal(0, sut.Count);
     }
 
-    // ── StopAsync - with no hub, early return (does not throw) ────────────────
+    // ── StopAsync - with no hub, remains safe and resets session state ───────
 
     [Fact]
-    public async Task StopAsync_NoHub_DoesNotThrow()
+    public async Task StopAsync_NoHub_ProducesNothing()
     {
         var sut = CreateService();
-        // StopAsync early-returns when _hub is null - no state change
         await sut.StopAsync();
         Assert.Empty(sut.Tasks);
         Assert.Equal(0, sut.Count);
@@ -142,10 +141,10 @@ public class TaskTrackerServiceStartTests : BunitContext
         Assert.Equal(0, sut.Count);
     }
 
-    // ── StopAsync - no hub means no OnChanged ────────────────────────────────
+    // ── StopAsync - no hub still clears and notifies session observers ───────
 
     [Fact]
-    public async Task StopAsync_NoHubNoOnChanged()
+    public async Task StopAsync_NoHub_ClearsAndNotifies()
     {
         var sut = CreateService();
         CallUpsert(sut, MakeTask(10));
@@ -153,10 +152,9 @@ public class TaskTrackerServiceStartTests : BunitContext
         var fired = false;
         sut.OnChanged += () => fired = true;
 
-        // Without a hub, StopAsync returns early - OnChanged NOT fired
         await sut.StopAsync();
-        Assert.False(fired);
-        Assert.Equal(1, sut.Count); // tasks still there
+        Assert.True(fired);
+        Assert.Equal(0, sut.Count);
     }
 
     // ── DisposeAsync - delegates to StopAsync ─────────────────────────────────
@@ -165,7 +163,6 @@ public class TaskTrackerServiceStartTests : BunitContext
     public async Task DisposeAsync_CallsStop()
     {
         var sut = CreateService();
-        // With no hub, DisposeAsync -> StopAsync -> early return
         await sut.DisposeAsync();
         Assert.Empty(sut.Tasks);
         Assert.Equal(0, sut.Count);

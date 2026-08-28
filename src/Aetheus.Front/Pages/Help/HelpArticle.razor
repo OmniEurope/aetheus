@@ -5,7 +5,7 @@
 
 @if (_article is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else
 {
@@ -17,8 +17,8 @@ else
         @foreach (var helpSection in _article.Sections)
         {
             <RadzenCard>
-                <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@helpSection.Title</RadzenText>
-                <RadzenText TextStyle="TextStyle.Body2">@helpSection.Content</RadzenText>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@helpSection.Title</RadzenText>
+                <div class="markdown-content help-section-content">@((MarkupString)RenderContent(helpSection.Content))</div>
             </RadzenCard>
         }
 
@@ -26,7 +26,7 @@ else
             <Aetheus.Front.Shared.BrowserBackButton Text="@L["BackToHelp"]" Title="@L["GoBack"]" />
             @if (_pageRoute is not null)
             {
-                <RadzenButton Text="@L["GoToPage"]" Icon="open_in_new" Click="@(() => Nav.NavigateTo(_pageRoute))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["GoToPage"]" Icon="open_in_new" Click="@(() => Nav.NavigateTo(_pageRoute))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
             }
         </RadzenStack>
     </RadzenStack>

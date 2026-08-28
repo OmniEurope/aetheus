@@ -124,8 +124,8 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void FilteredCompose_ReturnsAllStacks()
     {
-        var cut = RenderSection();
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredCompose", Priv)!;
+        var cut = RenderSection().FindComponent<DockerComposeTab>();
+        var prop = typeof(DockerComposeTab).GetProperty("FilteredCompose", Priv)!;
         var stacks = (List<DockerComposeStackDto>)prop.GetValue(cut.Instance)!;
         Assert.Equal(2, stacks.Count);
         Assert.Contains(stacks, s => s.Name == "monitoring");
@@ -141,7 +141,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [InlineData("created", BadgeStyle.Light)]
     public void GetContainerBadge_ReturnsExpected(string state, BadgeStyle expected)
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetContainerBadge", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("GetContainerBadge", PrivStatic)!;
         var result = (BadgeStyle)method.Invoke(null, [state])!;
         Assert.Equal(expected, result);
     }
@@ -151,7 +151,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void GetMemoryBarClass_HighUsage_ReturnsRedClass()
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetMemoryBarClass", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("GetMemoryBarClass", PrivStatic)!;
         // 950/1000 = 95% >= 90
         var c = new DockerContainerDto { MemoryUsageMb = 950, MemoryLimitMb = 1000 };
         var cls = (string)method.Invoke(null, [c])!;
@@ -161,7 +161,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void GetMemoryBarClass_MediumUsage_ReturnsYellowClass()
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetMemoryBarClass", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("GetMemoryBarClass", PrivStatic)!;
         var c = new DockerContainerDto { MemoryUsageMb = 750, MemoryLimitMb = 1024 };
         var cls = (string)method.Invoke(null, [c])!;
         Assert.Contains("yellow", cls);
@@ -170,7 +170,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void GetMemoryBarClass_LowUsage_ReturnsGreenClass()
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetMemoryBarClass", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("GetMemoryBarClass", PrivStatic)!;
         var c = new DockerContainerDto { MemoryUsageMb = 200, MemoryLimitMb = 1024 };
         var cls = (string)method.Invoke(null, [c])!;
         Assert.Contains("green", cls);
@@ -179,7 +179,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void GetMemoryBarClass_NoLimit_ReturnsBaseClass()
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetMemoryBarClass", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("GetMemoryBarClass", PrivStatic)!;
         var c = new DockerContainerDto { MemoryUsageMb = 500, MemoryLimitMb = 0 };
         var cls = (string)method.Invoke(null, [c])!;
         Assert.Equal("docker-mem-bar", cls);
@@ -190,22 +190,22 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void GetProjectAccentClass_EmptyProject_ReturnsEmpty()
     {
-        var cls = ServerDockerSection.GetProjectAccentClass(null);
+        var cls = DockerContainersTab.GetProjectAccentClass(null);
         Assert.Equal(string.Empty, cls);
     }
 
     [Fact]
     public void GetProjectAccentClass_NonEmpty_ReturnsAccentClass()
     {
-        var cls = ServerDockerSection.GetProjectAccentClass("webapp");
+        var cls = DockerContainersTab.GetProjectAccentClass("webapp");
         Assert.StartsWith("docker-project-accent-", cls);
     }
 
     [Fact]
     public void GetProjectAccentClass_SameProjectName_ReturnsSameClass()
     {
-        var cls1 = ServerDockerSection.GetProjectAccentClass("webapp");
-        var cls2 = ServerDockerSection.GetProjectAccentClass("webapp");
+        var cls1 = DockerContainersTab.GetProjectAccentClass("webapp");
+        var cls2 = DockerContainersTab.GetProjectAccentClass("webapp");
         Assert.Equal(cls1, cls2);
     }
 
@@ -215,8 +215,9 @@ public class ServerDockerSectionFinalTests : BunitContext
     public void FilteredContainers_NoSearch_ReturnsAll()
     {
         var cut = RenderSection();
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredContainers", Priv)!;
-        var containers = (List<DockerContainerDto>)prop.GetValue(cut.Instance)!;
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var prop = typeof(DockerContainersTab).GetProperty("FilteredContainers", Priv)!;
+        var containers = (List<DockerContainerDto>)prop.GetValue(tab.Instance)!;
         Assert.Equal(5, containers.Count);
     }
 
@@ -224,9 +225,10 @@ public class ServerDockerSectionFinalTests : BunitContext
     public void FilteredContainers_ByState_FiltersRunning()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_containerSearch", Priv)!.SetValue(cut.Instance, "running");
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredContainers", Priv)!;
-        var containers = (List<DockerContainerDto>)prop.GetValue(cut.Instance)!;
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_containerSearch", Priv)!.SetValue(tab.Instance, "running");
+        var prop = typeof(DockerContainersTab).GetProperty("FilteredContainers", Priv)!;
+        var containers = (List<DockerContainerDto>)prop.GetValue(tab.Instance)!;
         Assert.Equal(2, containers.Count);
     }
 
@@ -236,8 +238,9 @@ public class ServerDockerSectionFinalTests : BunitContext
     public void ContainersForProject_ReturnsProjectContainers()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection).GetMethod("ContainersForProject", Priv)!;
-        var result = (List<DockerContainerDto>)method.Invoke(cut.Instance, ["webapp"])!;
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("ContainersForProject", Priv)!;
+        var result = (List<DockerContainerDto>)method.Invoke(tab.Instance, ["webapp"])!;
         Assert.Equal(3, result.Count); // web, db, worker
     }
 
@@ -245,8 +248,9 @@ public class ServerDockerSectionFinalTests : BunitContext
     public void ContainersForProject_Empty_ReturnsEmptyOrphanSlot()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection).GetMethod("ContainersForProject", Priv)!;
-        var result = (List<DockerContainerDto>)method.Invoke(cut.Instance, [""])!;
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("ContainersForProject", Priv)!;
+        var result = (List<DockerContainerDto>)method.Invoke(tab.Instance, [""])!;
         Assert.Single(result); // orphan
     }
 
@@ -255,7 +259,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void ParseEnvVars_ValidJson_ParsesKeyValue()
     {
-        var method = typeof(ServerDockerSection).GetMethod("ParseEnvVars", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("ParseEnvVars", PrivStatic)!;
         var result = (List<DockerEnvVarDto>)method.Invoke(null, ["[\"KEY1=value1\",\"KEY2=val=ue2\"]"])!;
         Assert.Equal(2, result.Count);
         Assert.Equal("KEY1", result[0].Key);
@@ -267,7 +271,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public void ParseEnvVars_Empty_ReturnsEmpty()
     {
-        var method = typeof(ServerDockerSection).GetMethod("ParseEnvVars", PrivStatic)!;
+        var method = typeof(DockerContainersTab).GetMethod("ParseEnvVars", PrivStatic)!;
         var result = (List<DockerEnvVarDto>)method.Invoke(null, ["[]"])!;
         Assert.Empty(result);
     }
@@ -298,15 +302,30 @@ public class ServerDockerSectionFinalTests : BunitContext
         Assert.False(model.Volumes);
     }
 
+    [Fact]
+    public void PruneSelectAllToggle_ThroughRenderedControl_ClearsEverySelection()
+    {
+        var cut = Render<DockerPruneDialog>();
+
+        cut.Find(".labeled-toggle-native-input").Change(false);
+
+        var model = cut.Instance.Model;
+        Assert.False(model.Containers);
+        Assert.False(model.Images);
+        Assert.False(model.Volumes);
+        Assert.Contains("PruneSummary", cut.Markup, StringComparison.Ordinal);
+    }
+
     // === OpenProjectZoom / CloseProjectZoom ===
 
     [Fact]
     public async Task OpenProjectZoom_OpensProjectDialog()
     {
         var cut = RenderSection();
+        var tab = cut.FindComponent<DockerContainersTab>();
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
-        var method = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["webapp"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["webapp"])!);
 
         Assert.Equal(typeof(DockerProjectDialog), dialog.LastComponent);
         Assert.Equal("webapp", dialog.LastParameters!["Project"]);
@@ -316,10 +335,11 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task OpenProjectZoom_ActionResult_AppliesToProjectContainers()
     {
         var cut = RenderSection();
+        var tab = cut.FindComponent<DockerContainersTab>();
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         dialog.OpenResult = DockerContainerAction.Restart;
-        var method = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["webapp"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["webapp"])!);
 
         Assert.Contains(_handler.Requests, request => request.Method == "POST" && request.Url.Contains("docker/action"));
     }
@@ -330,9 +350,10 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task ToggleLogsAsync_OpensLogsPanel()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection).GetMethod("ToggleLogsAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["aaaaaaaaaaaa1111"])!);
-        var logsId = (string?)typeof(ServerDockerSection).GetField("_logsContainerId", Priv)!.GetValue(cut.Instance);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("ToggleLogsAsync", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["aaaaaaaaaaaa1111"])!);
+        var logsId = (string?)typeof(DockerContainersTab).GetField("_logsContainerId", Priv)!.GetValue(tab.Instance);
         Assert.Equal("aaaaaaaaaaaa1111", logsId);
     }
 
@@ -340,10 +361,11 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task ToggleLogsAsync_ToggleSameId_ClosesPanel()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_logsContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
-        var method = typeof(ServerDockerSection).GetMethod("ToggleLogsAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["aaaaaaaaaaaa1111"])!);
-        var logsId = (string?)typeof(ServerDockerSection).GetField("_logsContainerId", Priv)!.GetValue(cut.Instance);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_logsContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
+        var method = typeof(DockerContainersTab).GetMethod("ToggleLogsAsync", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["aaaaaaaaaaaa1111"])!);
+        var logsId = (string?)typeof(DockerContainersTab).GetField("_logsContainerId", Priv)!.GetValue(tab.Instance);
         Assert.Null(logsId);
     }
 
@@ -351,8 +373,9 @@ public class ServerDockerSectionFinalTests : BunitContext
     public void OpenShell_SetsShellContainerId()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetMethod("OpenShell", Priv)!.Invoke(cut.Instance, ["aaaaaaaaaaaa1111", "web"]);
-        var shellId = (string?)typeof(ServerDockerSection).GetField("_shellContainerId", Priv)!.GetValue(cut.Instance);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetMethod("OpenShell", Priv)!.Invoke(tab.Instance, ["aaaaaaaaaaaa1111", "web"]);
+        var shellId = (string?)typeof(DockerContainersTab).GetField("_shellContainerId", Priv)!.GetValue(tab.Instance);
         Assert.Equal("aaaaaaaaaaaa1111", shellId);
     }
 
@@ -360,9 +383,10 @@ public class ServerDockerSectionFinalTests : BunitContext
     public void OpenShell_ToggleSameId_ClosesShell()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_shellContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
-        typeof(ServerDockerSection).GetMethod("OpenShell", Priv)!.Invoke(cut.Instance, ["aaaaaaaaaaaa1111", "web"]);
-        var shellId = (string?)typeof(ServerDockerSection).GetField("_shellContainerId", Priv)!.GetValue(cut.Instance);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_shellContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
+        typeof(DockerContainersTab).GetMethod("OpenShell", Priv)!.Invoke(tab.Instance, ["aaaaaaaaaaaa1111", "web"]);
+        var shellId = (string?)typeof(DockerContainersTab).GetField("_shellContainerId", Priv)!.GetValue(tab.Instance);
         Assert.Null(shellId);
     }
 
@@ -372,7 +396,8 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task HandleTaskCompleted_InspectOutput_SetsInspectContent()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_inspectContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_inspectContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
             TaskId = 1,
@@ -381,7 +406,7 @@ public class ServerDockerSectionFinalTests : BunitContext
             Status = TaskExecutionStatus.Success,
             Output = "{\"Id\":\"aaa\"}"
         }));
-        var content = (string?)typeof(ServerDockerSection).GetField("_inspectContent", Priv)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_inspectContent", Priv)!.GetValue(tab.Instance);
         Assert.Contains("aaa", content!);
     }
 
@@ -389,8 +414,9 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task HandleTaskCompleted_ComposeFile_SetsEditorContent()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_composeEditorVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerDockerSection).GetField("_composeFileLoading", Priv)!.SetValue(cut.Instance, true);
+        var composeTab = cut.FindComponent<DockerComposeTab>();
+        typeof(DockerComposeTab).GetField("_composeEditorVisible", Priv)!.SetValue(composeTab.Instance, true);
+        typeof(DockerComposeTab).GetField("_composeFileLoading", Priv)!.SetValue(composeTab.Instance, true);
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
             TaskId = 2,
@@ -399,7 +425,7 @@ public class ServerDockerSectionFinalTests : BunitContext
             Status = TaskExecutionStatus.Success,
             Output = "version: '3'"
         }));
-        var content = (string)typeof(ServerDockerSection).GetField("_composeEditorContent", Priv)!.GetValue(cut.Instance)!;
+        var content = (string)typeof(DockerComposeTab).GetField("_composeEditorContent", Priv)!.GetValue(composeTab.Instance)!;
         Assert.Equal("version: '3'", content);
     }
 
@@ -409,9 +435,10 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task OpenResourceLimitsDialog_SetsContainerAndMemory()
     {
         var cut = RenderSection();
+        var tab = cut.FindComponent<DockerContainersTab>();
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
-        var method = typeof(ServerDockerSection).GetMethod("OpenResourceLimitsDialog", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["aaaaaaaaaaaa1111"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", Priv)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["aaaaaaaaaaaa1111"])!);
 
         Assert.Equal(typeof(DockerResourceLimitsDialog), dialog.LastComponent);
         Assert.Equal("aaaaaaaaaaaa1111", dialog.LastParameters!["ContainerId"]);
@@ -440,8 +467,9 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task ConfirmRemoveContainerAsync_OpensNativeConfirmation()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection).GetMethod("ConfirmRemoveContainerAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["cccccccccccc3333", "redis"])!);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["cccccccccccc3333", "redis"])!);
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         Assert.Equal("RemoveContainer", dialog.LastTitle);
@@ -451,11 +479,14 @@ public class ServerDockerSectionFinalTests : BunitContext
     [Fact]
     public async Task ConfirmRemoveImageAsync_RequiresConfirmationBeforeDelete()
     {
-        var cut = RenderSection();
+        var server = MakeDockerServer();
+        var cut = Render<DockerImagesTab>(p => p
+            .Add(x => x.ServerId, server.Id)
+            .Add(x => x.Images, server.Docker.Images));
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         dialog.ConfirmResult = false;
-        var image = MakeDockerServer().Docker.Images[0];
-        var method = typeof(ServerDockerSection).GetMethod("ConfirmRemoveImageAsync", Priv)!;
+        var image = server.Docker.Images[0];
+        var method = typeof(DockerImagesTab).GetMethod("ConfirmRemoveImageAsync", Priv)!;
 
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [image])!);
 
@@ -470,12 +501,13 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task BrowseParentAsync_AtRoot_Returns()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_browsePath", Priv)!.SetValue(cut.Instance, "/");
-        typeof(ServerDockerSection).GetField("_browseContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_browsePath", Priv)!.SetValue(tab.Instance, "/");
+        typeof(DockerContainersTab).GetField("_browseContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
 
-        var method = typeof(ServerDockerSection).GetMethod("BrowseParentAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        var path = (string)typeof(ServerDockerSection).GetField("_browsePath", Priv)!.GetValue(cut.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("BrowseParentAsync", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, [])!);
+        var path = (string)typeof(DockerContainersTab).GetField("_browsePath", Priv)!.GetValue(tab.Instance)!;
         Assert.Equal("/", path);
     }
 
@@ -483,12 +515,13 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task BrowseParentAsync_FromSubDir_GoesUp()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_browsePath", Priv)!.SetValue(cut.Instance, "/var/www/html");
-        typeof(ServerDockerSection).GetField("_browseContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_browsePath", Priv)!.SetValue(tab.Instance, "/var/www/html");
+        typeof(DockerContainersTab).GetField("_browseContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
 
-        var method = typeof(ServerDockerSection).GetMethod("BrowseParentAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        var path = (string)typeof(ServerDockerSection).GetField("_browsePath", Priv)!.GetValue(cut.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("BrowseParentAsync", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, [])!);
+        var path = (string)typeof(DockerContainersTab).GetField("_browsePath", Priv)!.GetValue(tab.Instance)!;
         Assert.Equal("/var/www", path);
     }
 
@@ -502,11 +535,12 @@ public class ServerDockerSectionFinalTests : BunitContext
             "api/servers/20/docker/exec",
             System.Net.HttpStatusCode.NoContent);
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_shellContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
-        typeof(ServerDockerSection).GetField("_shellCommand", Priv)!.SetValue(cut.Instance, "ls -la");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_shellContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
+        typeof(DockerContainersTab).GetField("_shellCommand", Priv)!.SetValue(tab.Instance, "ls -la");
 
-        var method = typeof(ServerDockerSection).GetMethod("OnShellKeyDown", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [new KeyboardEventArgs { Key = "Enter" }])!);
+        var method = typeof(DockerContainersTab).GetMethod("OnShellKeyDown", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, [new KeyboardEventArgs { Key = "Enter" }])!);
         // Enter triggers SendShellCommandAsync, which POSTs the command to the docker/exec endpoint.
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/20/docker/exec"));
     }
@@ -515,13 +549,14 @@ public class ServerDockerSectionFinalTests : BunitContext
     public async Task OnShellKeyDown_OtherKey_NoOp()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_shellContainerId", Priv)!.SetValue(cut.Instance, "aaaaaaaaaaaa1111");
-        typeof(ServerDockerSection).GetField("_shellCommand", Priv)!.SetValue(cut.Instance, "ls");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_shellContainerId", Priv)!.SetValue(tab.Instance, "aaaaaaaaaaaa1111");
+        typeof(DockerContainersTab).GetField("_shellCommand", Priv)!.SetValue(tab.Instance, "ls");
 
-        var method = typeof(ServerDockerSection).GetMethod("OnShellKeyDown", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [new KeyboardEventArgs { Key = "Shift" }])!);
+        var method = typeof(DockerContainersTab).GetMethod("OnShellKeyDown", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, [new KeyboardEventArgs { Key = "Shift" }])!);
         // Command still set since not sent
-        var cmd = (string)typeof(ServerDockerSection).GetField("_shellCommand", Priv)!.GetValue(cut.Instance)!;
+        var cmd = (string)typeof(DockerContainersTab).GetField("_shellCommand", Priv)!.GetValue(tab.Instance)!;
         Assert.Equal("ls", cmd);
     }
 }

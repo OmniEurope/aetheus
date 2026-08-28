@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -33,58 +32,95 @@ public static class PipelineParameterResolver
 
         // Reject inputs that don't correspond to a declared parameter (typo / stale dialog).
         foreach (var key in supplied.Keys)
-        {
             if (!declaredNames.Contains(key))
                 errors.Add($"Unknown parameter '{key}'.");
-        }
-
         foreach (var param in declared)
+            ResolveParameter(param, supplied, effective, errors);
+        return errors.Count == 0;
+    }
+
+    private static void ResolveParameter(
+        PipelineTemplateParameterDefinition parameter,
+        IReadOnlyDictionary<string, string> supplied,
+        IDictionary<string, string> effective,
+        ICollection<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(parameter.Name)) return;
+        if (IsReservedName(parameter.Name))
         {
-            if (string.IsNullOrWhiteSpace(param.Name)) continue;
-            if (IsReservedName(param.Name))
+            errors.Add($"Parameter '{parameter.Name}' uses a reserved system variable name.");
+            return;
+        }
+        var hasSupplied = supplied.TryGetValue(parameter.Name, out var rawValue)
+            && !string.IsNullOrWhiteSpace(rawValue);
+        var value = hasSupplied ? rawValue! : parameter.Default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            if (parameter.Required) errors.Add($"Parameter '{parameter.Name}' is required.");
+            return;
+        }
+        ValidateParameterType(parameter, value, errors);
+        effective[parameter.Name] = value;
+    }
+
+    private static void ValidateParameterType(
+        PipelineTemplateParameterDefinition parameter,
+        string value,
+        ICollection<string> errors)
+    {
+        var type = (parameter.Type ?? "string").Trim().ToLowerInvariant();
+        if (type == "number"
+            && !decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _))
+            errors.Add($"Parameter '{parameter.Name}' must be a number (got '{value}').");
+        else if (type == "boolean" && !bool.TryParse(value, out _))
+            errors.Add($"Parameter '{parameter.Name}' must be 'true' or 'false' (got '{value}').");
+        else if (type == "choice" && parameter.AllowedValues.Count > 0
+                 && !parameter.AllowedValues.Any(item => string.Equals(item, value, StringComparison.Ordinal)))
+            errors.Add($"Parameter '{parameter.Name}' must be one of: {string.Join(", ", parameter.AllowedValues)} (got '{value}').");
+    }
+
+    /// <summary>
+    /// Validates the <c>parameters:</c> block itself, with no queue-time values in hand: reserved
+    /// names, and defaults that contradict their own declared type.
+    ///
+    /// This exists because saving a pipeline and launching one ask different questions.
+    /// <see cref="TryResolve"/> answers "can this run start with these values", and a required
+    /// parameter with no value is rightly fatal there. Saving asks only "is this definition
+    /// well-formed", and running the launch check against an empty value set made a required
+    /// parameter without a default impossible to store at all: CreatePipeline rejected the exact
+    /// shape aetheus-deploy-prod ships, which only existed because the repository-sync path skips
+    /// the check. Missing values stay a launch-time concern, enforced where the launch happens.
+    /// </summary>
+    public static List<string> ValidateDeclarations(
+        IReadOnlyList<PipelineTemplateParameterDefinition> declared)
+    {
+        var errors = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var parameter in declared)
+        {
+            if (string.IsNullOrWhiteSpace(parameter.Name)) continue;
+            if (IsReservedName(parameter.Name))
             {
-                errors.Add($"Parameter '{param.Name}' uses a reserved system variable name.");
+                errors.Add($"Parameter '{parameter.Name}' uses a reserved system variable name.");
                 continue;
             }
-
-            var hasSupplied = supplied.TryGetValue(param.Name, out var rawValue) && !string.IsNullOrWhiteSpace(rawValue);
-            var value = hasSupplied ? rawValue! : param.Default;
-
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                if (param.Required)
-                    errors.Add($"Parameter '{param.Name}' is required.");
-                continue; // optional + no value → not injected
-            }
-
-            var type = (param.Type ?? "string").Trim().ToLowerInvariant();
-            switch (type)
-            {
-                case "number":
-                    if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _))
-                        errors.Add($"Parameter '{param.Name}' must be a number (got '{value}').");
-                    break;
-                case "boolean":
-                    if (!bool.TryParse(value, out _))
-                        errors.Add($"Parameter '{param.Name}' must be 'true' or 'false' (got '{value}').");
-                    break;
-                case "choice":
-                    if (param.AllowedValues.Count > 0 &&
-                        !param.AllowedValues.Any(v => string.Equals(v, value, StringComparison.Ordinal)))
-                        errors.Add($"Parameter '{param.Name}' must be one of: {string.Join(", ", param.AllowedValues)} (got '{value}').");
-                    break;
-            }
-
-            effective[param.Name] = value;
+            if (!seen.Add(parameter.Name))
+                errors.Add($"Parameter '{parameter.Name}' is declared more than once.");
+            if (!string.IsNullOrWhiteSpace(parameter.Default))
+                ValidateParameterType(parameter, parameter.Default!, errors);
         }
-
-        return errors.Count == 0;
+        return errors;
     }
 
     internal static bool IsReservedName(string name)
         => name.StartsWith("AETHEUS_", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("BUILD_", StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("SYSTEM_", StringComparison.OrdinalIgnoreCase);
+            || name.StartsWith("SYSTEM_", StringComparison.OrdinalIgnoreCase)
+            // The deployment bootstrap credential opens an Admin JWT on the freshly deployed target.
+            // Leaving its names unreserved let a pipeline parameter declare one and carry a chosen
+            // administrator password through the run, so the prefix is reserved like the others.
+            || name.StartsWith("DEPLOYMENT_BOOTSTRAP_", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("BOOTSTRAP_STAMP", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The declared defaults (name→default) for parameters that declare one - injected at the
     /// lowest precedence so an explicit YAML <c>variables:</c> entry of the same name still wins.</summary>

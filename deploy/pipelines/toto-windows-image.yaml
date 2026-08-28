@@ -1,0 +1,226 @@
+# Windows-only Toto image delivery. Every stage runs on the same Windows pipeline
+# runner through run affinity; Docker Desktop must use Linux containers because the
+# shipped Toto runtime image is Linux-based.
+name: toto-windows-image
+trigger: manual
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  TOTO_WINDOWS_PORT: "10092"
+  TOTO_WINDOWS_COMPOSE_PROJECT: "toto-windows-image"
+  TOTO_WINDOWS_DB_PASSWORD: "toto-windows-local-only"
+
+stages:
+  - name: WindowsPreflight
+    group: Build
+    execution_role: build
+    os: windows
+    steps:
+      - name: Verify Windows image runner
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          $ErrorActionPreference = "Stop"
+          if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+            throw "This image delivery requires a Windows runner."
+          }
+          $commit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -ne "$(BUILD_SOURCEVERSION)") {
+            throw "The checked-out Toto revision does not match BUILD_SOURCEVERSION."
+          }
+          if (-not (Test-Path -LiteralPath "Toto.slnx" -PathType Leaf)) {
+            throw "Toto.slnx is missing from the pipeline workspace."
+          }
+          docker version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker is unavailable on the Windows runner."
+          }
+          $engineOs = (docker info --format '{{.OSType}}').Trim()
+          if ($LASTEXITCODE -ne 0 -or $engineOs -ne "linux") {
+            throw "Docker must use Linux containers to build the Toto runtime image."
+          }
+          docker compose version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker Compose is unavailable on the Windows runner."
+          }
+          $builder = $env:BUILDX_BUILDER
+          if ([string]::IsNullOrWhiteSpace($builder)) {
+            throw "The Windows runner did not provide its dedicated Buildx builder name."
+          }
+          docker buildx inspect $builder *> $null
+          if ($LASTEXITCODE -ne 0) {
+            docker buildx create --name $builder --driver docker-container
+            if ($LASTEXITCODE -ne 0) {
+              throw "The dedicated Buildx builder could not be created."
+            }
+          }
+          docker buildx inspect --bootstrap $builder
+          if ($LASTEXITCODE -ne 0) {
+            throw "The dedicated Buildx builder is unavailable."
+          }
+          Write-Host "Windows image runner verified at $commit."
+        timeout_seconds: 180
+
+  - name: Build
+    group: Build
+    execution_role: build
+    os: windows
+    depends_on: [WindowsPreflight]
+    steps:
+      - name: Build Toto on Windows
+        working_directory: "$(WORKSPACE)"
+        shell: dotnet build Toto.slnx --configuration Release --verbosity minimal
+        timeout_seconds: 900
+
+  - name: Test
+    group: Build
+    execution_role: build
+    os: windows
+    depends_on: [Build]
+    steps:
+      - name: Test Toto on Windows
+        working_directory: "$(WORKSPACE)"
+        shell: dotnet test Toto.slnx --configuration Release --no-build --verbosity minimal
+        timeout_seconds: 900
+
+  - name: BuildImage
+    group: Build
+    execution_role: build
+    os: windows
+    depends_on: [Test]
+    artifacts:
+      - ".pipeline-artifacts/toto-windows-image.tar"
+      - ".pipeline-artifacts/source-commit"
+      - ".pipeline-artifacts/image-id"
+      - ".pipeline-artifacts/image-sha256"
+      - "deploy/docker-compose.yml"
+    steps:
+      - name: Build and export immutable Toto image
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          $ErrorActionPreference = "Stop"
+          $commit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -ne "$(BUILD_SOURCEVERSION)") {
+            throw "The Toto image source does not match BUILD_SOURCEVERSION."
+          }
+          $artifactDirectory = Join-Path $PWD ".pipeline-artifacts"
+          $injectionDirectory = Join-Path $PWD ".aetheus-injection"
+          if (Test-Path -LiteralPath $artifactDirectory) {
+            Remove-Item -LiteralPath $artifactDirectory -Recurse -Force
+          }
+          if (Test-Path -LiteralPath $injectionDirectory) {
+            Remove-Item -LiteralPath $injectionDirectory -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $artifactDirectory | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $injectionDirectory "feed") | Out-Null
+          Copy-Item -LiteralPath "NuGet.config" -Destination (Join-Path $injectionDirectory "NuGet.config")
+
+          $imageTag = "toto-windows:$commit"
+          $builder = $env:BUILDX_BUILDER
+          if ([string]::IsNullOrWhiteSpace($builder)) {
+            throw "The Windows runner did not provide its dedicated Buildx builder name."
+          }
+          docker buildx build --builder $builder --load --label "org.opencontainers.image.revision=$commit" -f deploy/Dockerfile -t $imageTag .
+          if ($LASTEXITCODE -ne 0) {
+            throw "The immutable Toto image build failed."
+          }
+          $imageId = (docker image inspect --format '{{.Id}}' $imageTag).Trim()
+          $imageCommit = (docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' $imageTag).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($imageId) -or $imageCommit -ne $commit) {
+            throw "The built image identity or source label is invalid."
+          }
+
+          $archivePath = Join-Path $artifactDirectory "toto-windows-image.tar"
+          docker save --output $archivePath $imageTag
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+            throw "The immutable Toto image archive was not produced."
+          }
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [IO.File]::WriteAllText((Join-Path $artifactDirectory "source-commit"), "$commit`n", $utf8)
+          [IO.File]::WriteAllText((Join-Path $artifactDirectory "image-id"), "$imageId`n", $utf8)
+          $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $artifactDirectory "image-sha256"), "$archiveHash`n", $utf8)
+        timeout_seconds: 1800
+
+  - name: DeployImage
+    group: Deploy
+    execution_role: build
+    os: windows
+    depends_on: [BuildImage]
+    steps:
+      - name: Deploy exact image without rebuild
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          $ErrorActionPreference = "Stop"
+          $artifactDirectory = Join-Path $PWD ".pipeline-artifacts"
+          $archivePath = Join-Path $artifactDirectory "toto-windows-image.tar"
+          $commit = (Get-Content -LiteralPath (Join-Path $artifactDirectory "source-commit") -Raw).Trim()
+          if ($commit -ne "$(BUILD_SOURCEVERSION)") {
+            throw "The image artifact does not match BUILD_SOURCEVERSION."
+          }
+          $expectedHash = (Get-Content -LiteralPath (Join-Path $artifactDirectory "image-sha256") -Raw).Trim()
+          $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "The Toto image archive digest changed before deployment."
+          }
+
+          docker load --input $archivePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "The immutable Toto image archive could not be loaded."
+          }
+          $imageTag = "toto-windows:$commit"
+          $expectedImageId = (Get-Content -LiteralPath (Join-Path $artifactDirectory "image-id") -Raw).Trim()
+          $loadedImageId = (docker image inspect --format '{{.Id}}' $imageTag).Trim()
+          if ($LASTEXITCODE -ne 0 -or $loadedImageId -ne $expectedImageId) {
+            throw "The loaded Toto image differs from the built image."
+          }
+
+          $env:TOTO_IMAGE = $imageTag
+          $env:TOTO_PORT = "$(TOTO_WINDOWS_PORT)"
+          $env:TOTO_DB_PASSWORD = "$(TOTO_WINDOWS_DB_PASSWORD)"
+          docker compose -p "$(TOTO_WINDOWS_COMPOSE_PROJECT)" -f deploy/docker-compose.yml up -d --wait --no-build
+          if ($LASTEXITCODE -ne 0) {
+            throw "The Toto Windows image deployment failed."
+          }
+        timeout_seconds: 1800
+
+  - name: Smoke
+    group: Smoke
+    execution_role: build
+    os: windows
+    depends_on: [DeployImage]
+    steps:
+      - name: Verify deployed image and API
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          $ErrorActionPreference = "Stop"
+          $artifactDirectory = Join-Path $PWD ".pipeline-artifacts"
+          $commit = (Get-Content -LiteralPath (Join-Path $artifactDirectory "source-commit") -Raw).Trim()
+          $expectedImageId = (Get-Content -LiteralPath (Join-Path $artifactDirectory "image-id") -Raw).Trim()
+          $env:TOTO_IMAGE = "toto-windows:$commit"
+          $env:TOTO_PORT = "$(TOTO_WINDOWS_PORT)"
+          $env:TOTO_DB_PASSWORD = "$(TOTO_WINDOWS_DB_PASSWORD)"
+          $containerId = (docker compose -p "$(TOTO_WINDOWS_COMPOSE_PROJECT)" -f deploy/docker-compose.yml ps -q api).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
+            throw "The deployed Toto API container is unavailable."
+          }
+          $activeImageId = (docker inspect --format '{{.Image}}' $containerId).Trim()
+          if ($LASTEXITCODE -ne 0 -or $activeImageId -ne $expectedImageId) {
+            throw "The running Toto container does not use the immutable built image."
+          }
+
+          $baseUri = "http://127.0.0.1:$(TOTO_WINDOWS_PORT)"
+          $ready = Invoke-RestMethod -Uri "$baseUri/health/ready" -Method Get -TimeoutSec 30
+          if ($ready.version -notin 1, 2) {
+            throw "The deployed Toto readiness endpoint returned an unsupported version."
+          }
+          $todosResponse = Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/api/todos" -Method Get -TimeoutSec 30
+          if ($todosResponse.StatusCode -ne 200) {
+            throw "The deployed Toto API did not return HTTP 200 for its todo collection."
+          }
+          $todos = ConvertFrom-Json -InputObject $todosResponse.Content
+          if ($todosResponse.Content.TrimStart()[0] -ne '[') {
+            throw "The deployed Toto API response is not a JSON array."
+          }
+          Write-Host "Toto image $expectedImageId is deployed and serving version $($ready.version)."
+        timeout_seconds: 180

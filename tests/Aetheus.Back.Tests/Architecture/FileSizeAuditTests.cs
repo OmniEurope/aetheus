@@ -18,7 +18,7 @@ namespace Aetheus.Back.Tests.Architecture;
 /// </list>
 /// Do NOT split a class across <c>Foo.X.cs</c> <c>partial</c> files purely to dodge this budget:
 /// <c>partial</c> is reserved for framework/generator needs (EF, Blazor code-behind, source
-/// generators, and the integration-test <c>Program</c> shim).
+/// generators, the integration-test <c>Program</c> shim). See CLAUDE.md "Interdictions".
 /// </summary>
 public class FileSizeAuditTests
 {
@@ -27,25 +27,14 @@ public class FileSizeAuditTests
     /// <summary>
     /// Files that may legitimately exceed <see cref="MaxLines"/>. Justify every entry.
     /// Paths are repo-relative, forward slashes, case-insensitive.
+    ///
+    /// EMPTY, and meant to stay that way. The last entry was PipelineRunService, exempted in 2026-06
+    /// on the grounds that its trigger → stage-advancement → task-creation cycle could not be split
+    /// without "a callback redesign that risks the core CI/CD path". That redesign was done in
+    /// 2026-08: the recursion is closed by passing IPipelineChildRunLauncher as a method parameter
+    /// instead of injecting it, and the engine is now sixteen collaborators, all under budget.
     /// </summary>
-    private static readonly HashSet<string> Whitelist = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // TODO: large Razor section, can be split per-tab (containers / images / volumes / networks).
-        "src/Aetheus.Front/Pages/Servers/ServerDetailSections/ServerDockerSection.razor.cs",
-        // 9 Replace*Async methods carry IsRelational() guards - extract a heartbeat collaborator.
-        "src/Aetheus.Back/Components/Servers/ServerRepository.cs",
-        // Cohesive pipeline-execution engine: trigger → stage-advancement → task-creation are mutually
-        // recursive (Execution↔Tasks call each other's private members), so a partial-free split into
-        // <600-line collaborators would require a callback redesign that risks the core CI/CD path. The
-        // stateless helpers ARE extracted (PipelineRunHelpers); the recursive engine is kept as one
-        // non-partial class rather than a 4-file partial split (anti-partial pass 2026-06-25).
-        "src/Aetheus.Back/Components/Pipelines/PipelineRunService.cs",
-        // Single injected HTTP client fronting ~24 independent backend API domains. Consolidated from
-        // 24 partial files into one non-partial class; a per-domain split would churn every front
-        // injection/call site (`@inject ApiClient Api` → `Api.X`). Transport helpers + ApiResults
-        // records are factored alongside (anti-partial pass 2026-06-25).
-        "src/Aetheus.Front/Services/ApiClient.cs",
-    };
+    private static readonly HashSet<string> Whitelist = new(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public void NoProductionFile_ExceedsLineBudget()
@@ -64,9 +53,15 @@ public class FileSizeAuditTests
 
         var offenders = new List<(string RelPath, int Lines)>();
 
+        // A360-75: .razor used to be outside this guard, which is how PipelineRun.razor reached 608
+        // lines with nothing turning red. The budget applies to a component exactly as it does to a
+        // class - a 600-line page is a god file whatever its extension - so the scan now covers both.
+        // Closing it required extracting PipelineRunAiResultsCard from that page first; the whitelist
+        // stays empty.
         foreach (var dir in projectDirs.Where(Directory.Exists))
         {
-            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            foreach (var file in RepositoryScan.Enumerate(dir, "*.cs")
+                         .Concat(EnumerateRazorFiles(dir)))
             {
                 // Skip build outputs and tooling artefacts.
                 if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)) continue;
@@ -90,14 +85,15 @@ public class FileSizeAuditTests
             string.Join(Environment.NewLine, offenders.OrderByDescending(o => o.Lines).Select(o => $"  - {o.RelPath} ({o.Lines} lines)")));
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(FileSizeAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    /// <summary>
+    /// Razor components, where present. Unlike the .cs scan this tolerates an empty result on purpose:
+    /// only the front project has .razor files, so demanding a floor here would fail on every backend
+    /// project for the wrong reason.
+    /// </summary>
+    private static IEnumerable<string> EnumerateRazorFiles(string directory) =>
+        Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, "*.razor", SearchOption.AllDirectories)
+            : [];
+
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

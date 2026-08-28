@@ -1,4 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerActionSectionBase
 <RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Apache"]</RadzenText>
 
 @* --- Status bar --- *@
@@ -29,7 +30,7 @@
         Click="@(() => ExecuteActionAsync(ApacheAction.Reload))" IsBusy="@_actionRunning" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
     <RadzenButton Icon="check_circle" Text="@L["TestConfig"]" Size="ButtonSize.Small"
         Disabled="@_actionRunning"
-        Click="@(() => ExecuteActionAsync(ApacheAction.TestConfig))" IsBusy="@_actionRunning" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        Click="@(() => ExecuteActionAsync(ApacheAction.TestConfig))" IsBusy="@_actionRunning" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
 </RadzenStack>
 
 @if (Apache.CollectionDegraded)
@@ -59,12 +60,12 @@
                domain serves. A `:80` + `:443` pair that share the same .conf - the common case -
                collapses from 2 rows to 1. Per-port action buttons disable/edit the matching
                config file. *@
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mt-3 rz-mb-2">
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mt-3 rz-mb-2">
                 @L["SitesEnabled"] (@EnabledVirtualHostGroups.Count)
             </RadzenText>
-            <RadzenDataGrid Data="@EnabledVirtualHostGroups" TItem="ApacheVirtualHostGroup" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@EnabledVirtualHostGroups" TItem="ApacheVirtualHostGroup" Density="Density.Compact"
                 AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                 <Columns>
                     <RadzenDataGridColumn TItem="ApacheVirtualHostGroup" Property="ServerName" Title="@L["ServerName"]" Width="260px">
                         <Template Context="g">
@@ -107,12 +108,12 @@
                 </Columns>
             </RadzenDataGrid>
 
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mt-4 rz-mb-2">
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mt-4 rz-mb-2">
                 @L["SitesDisabled"] (@DisabledVirtualHostGroups.Count)
             </RadzenText>
-            <RadzenDataGrid Data="@DisabledVirtualHostGroups" TItem="ApacheVirtualHostGroup" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@DisabledVirtualHostGroups" TItem="ApacheVirtualHostGroup" Density="Density.Compact"
                 AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                 <Columns>
                     <RadzenDataGridColumn TItem="ApacheVirtualHostGroup" Property="ServerName" Title="@L["ServerName"]" Width="260px">
                         <Template Context="g">
@@ -160,9 +161,9 @@
                 <RadzenBadge Text="@FilteredModules.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
                 <RadzenTextBox @bind-Value="_moduleSearch" Placeholder="@L["FilterModules"]" />
             </RadzenStack>
-            <RadzenDataGrid Data="@FilteredModules" TItem="ApacheModuleDto" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@FilteredModules" TItem="ApacheModuleDto" Density="Density.Compact"
                 AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                 <Columns>
                     <RadzenDataGridColumn TItem="ApacheModuleDto" Property="Name" Title="@L["Module"]" />
                     <RadzenDataGridColumn TItem="ApacheModuleDto" Property="Type" Title="@L["Type"]" Width="120px">
@@ -202,7 +203,7 @@
                 <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@L["Lines"]</RadzenText>
                 <RadzenButton Icon="download" Text="@L["FetchLogs"]" Size="ButtonSize.Small"
                     Click="@FetchLogsAsync"
-                    IsBusy="@_logLoading" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    IsBusy="@_logLoading" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 <RadzenButton Icon="@(_logFollowing ? "stop" : "play_arrow")"
                     Text="@(_logFollowing ? L["StopFollow"] : L["FollowLogs"])"
                     Size="ButtonSize.Small"

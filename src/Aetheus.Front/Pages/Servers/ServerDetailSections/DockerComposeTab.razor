@@ -1,0 +1,59 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Compose tab of the Docker section: the stack grid and the inline compose-file editor. The editor
+   content arrives asynchronously over SignalR, so the parent forwards task output here. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-3" Gap="0.5rem">
+    <RadzenBadge Text="@FilteredCompose.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+    <RadzenTextBox @bind-Value="_composeSearch" Placeholder="@L["FilterStacks"]" class="docker-search" />
+</RadzenStack>
+<RadzenDataGrid Responsive="false" Data="@FilteredCompose" TItem="DockerComposeStackDto" Density="Density.Compact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+    <Columns>
+        <RadzenDataGridColumn TItem="DockerComposeStackDto" Property="Name" Title="@L["Stack"]" />
+        <RadzenDataGridColumn TItem="DockerComposeStackDto" Property="Status" Title="@L["Status"]" Width="120px" />
+        <RadzenDataGridColumn TItem="DockerComposeStackDto" Title="@L["Services"]" Width="120px">
+            <Template Context="s">
+                @s.RunningCount / @s.TotalCount
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="DockerComposeStackDto" Property="ConfigFile" Title="@L["Config"]" />
+        <RadzenDataGridColumn TItem="DockerComposeStackDto" Title="@L["Actions"]" MinWidth="28rem" Sortable="false" Filterable="false">
+            <Template Context="s">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                    <RadzenButton Text="@L["Start"]" Icon="play_arrow" Click="@(() => ComposeActionAsync(s.Name, DockerComposeAction.Up))" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["Stop"]" Icon="stop" Click="@(() => ComposeActionAsync(s.Name, DockerComposeAction.Down))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["Restart"]" Icon="restart_alt" Click="@(() => ComposeActionAsync(s.Name, DockerComposeAction.Restart))" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["EditCompose"]" Icon="edit" MouseEnter="@(args => TooltipService.Open(args, L["EditCompose"].Value))"
+                        MouseLeave="@(TooltipService.Close)"
+                        Click="@(() => OpenComposeEditorAsync(s.Name))" Title="@L["EditCompose"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@if (_composeEditorVisible)
+{
+    <RadzenCard class="rz-mt-3">
+        <RadzenStack Gap="0.5rem">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center">
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["DockerCompose"] - @_composeEditorStack</RadzenText>
+                <div class="flex-spacer"></div>
+                <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@CloseComposeEditor" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            </RadzenStack>
+            @if (_composeFileLoading)
+            {
+                <AetheusLoader Size="AetheusLoaderSize.Small" />
+                <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["RequestingCompose"]</RadzenText>
+            }
+            else
+            {
+                <textarea @bind="_composeEditorContent" class="yaml-editor" rows="20" spellcheck="false" />
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+                    <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@CloseComposeEditor" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    <RadzenButton Text="@L["Deploy"]" Icon="rocket_launch" Click="@SaveComposeFileAsync" IsBusy="@_composeDeploying"
+                        Disabled="@string.IsNullOrWhiteSpace(_composeEditorContent)" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                </RadzenStack>
+            }
+        </RadzenStack>
+    </RadzenCard>
+}

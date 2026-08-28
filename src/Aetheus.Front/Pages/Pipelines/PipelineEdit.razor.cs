@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
 using Aetheus.Front.Pages.Shared;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -19,6 +10,7 @@ public partial class PipelineEdit : IAsyncDisposable
     [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
+    [Inject] private IJSRuntime Js { get; set; } = default!;
     [Inject] private PipelineRunGate RunGate { get; set; } = default!;
     [Inject] private PipelineRunDialogCoordinator RunDialogs { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
@@ -35,6 +27,7 @@ public partial class PipelineEdit : IAsyncDisposable
     [SupplyParameterFromQuery] public int? ServerId { get; set; }
     [SupplyParameterFromQuery] public int? EnvironmentId { get; set; }
     [SupplyParameterFromQuery] public int? ProjectServerId { get; set; }
+    [SupplyParameterFromQuery(Name = "templateId")] public int? TemplateId { get; set; }
 
     private PipelineDto? _pipeline;
     private PipelineSourceDto? _source;
@@ -45,6 +38,14 @@ public partial class PipelineEdit : IAsyncDisposable
     private int _runsTotalCount;
     private int _runsPage = 1;
     private int _runsPageSize = 25;
+
+    /// <summary>Figures behind the Runs tab summary tiles, from the loaded page of runs.</summary>
+    private PipelineRunsSummary RunsSummary => PipelineRunsSummary.Create(_runs);
+
+
+    /// <summary>Sort and column filters currently applied to the runs grid. Held across reloads so a
+    /// refresh, a live update or a launch re-fetches the page the reader is actually looking at.</summary>
+    private PipelineRunPaginationRequest? _runsQuery;
 
     private PipelineRunsLiveConnection? _liveRuns;
     private List<ProjectDto> _projects = [];
@@ -65,6 +66,7 @@ public partial class PipelineEdit : IAsyncDisposable
     private List<PipelineTemplateSummaryDto> _templates = [];
     private string? _baseTemplateYaml;
     private int? _selectedTemplateId;
+    private readonly PipelineTemplateParameterState _templateParameters = new();
     private List<string> _serverNames = [];
     private List<string> _libraryNames = [];
     private List<string> _vaultNames = [];
@@ -76,7 +78,7 @@ public partial class PipelineEdit : IAsyncDisposable
     private bool HasTemplateReference => PipelineTemplateReferenceHelper.Parse(_model.YamlDefinition) is not null;
     private bool HasLegacyTemplateReference =>
         PipelineTemplateReferenceHelper.Parse(_model.YamlDefinition) is { Version: null };
-    private PipelineTemplateEditorWorkflow TemplateEditor => new(Api, Dialog, L);
+    private PipelineTemplateEditorCoordinator TemplateEditor => new(Api);
     private PipelineYamlEditorCoordinator YamlEditor => new(Api, L);
 
     protected override void OnInitialized()
@@ -113,33 +115,32 @@ public partial class PipelineEdit : IAsyncDisposable
     {
         if (value is not int templateId) return;
         var selection = await TemplateEditor.SelectAsync(templateId, _model.Name);
-        if (selection is not { } application)
+        if (selection is null)
         {
             _selectedTemplateId = null;
+            _templateParameters.Clear();
             return;
         }
-        _model.YamlDefinition = application.Yaml;
-        _baseTemplateYaml = application.BaseYaml;
+        _model.YamlDefinition = _templateParameters.Select(selection);
+        _baseTemplateYaml = selection.BaseYaml;
         _suggestionsNeeded = true;
         StateHasChanged();
     }
 
-    private async Task OnExtractTemplate()
+    private void OnTemplateParameterChanged(string name, string? value)
     {
-        if (await TemplateEditor.ExtractAsync(Id!.Value, _model.Name, _model.YamlDefinition))
-            await OnRefresh();
+        _model.YamlDefinition = _templateParameters.Update(name, value);
+        _suggestionsNeeded = true;
     }
 
-    private async Task OnPromoteTemplate()
-    {
-        if (await TemplateEditor.PromoteAsync(Id!.Value)) await OnRefresh();
-    }
+    private string TemplateParameterValue(string name) => _templateParameters.GetValue(name);
 
-    private async Task OnUpdateTemplate()
+    private void OnExtractTemplate() => Nav.NavigateTo($"/pipelines/{Id}/template/extract");
+    private void OnPromoteTemplate() => Nav.NavigateTo($"/pipelines/{Id}/template/promote");
+    private void OnUpdateTemplate()
     {
-        if (Id is null || _fleetItem?.LatestVersion is null) return;
-        if (await TemplateEditor.UpdateAsync(Id.Value, _fleetItem.LatestVersion.Value))
-            await OnRefresh();
+        if (Id is not null && _fleetItem?.LatestVersion is { } version)
+            Nav.NavigateTo($"/pipelines/{Id}/template/update/{version}");
     }
 
     private async Task LoadFleetItemAsync()
@@ -165,12 +166,18 @@ public partial class PipelineEdit : IAsyncDisposable
         }
         _previousId = Id;
         var generation = Interlocked.Increment(ref _loadGeneration);
+        await ResetEditorStateAsync();
+        if (_isNew)
+            await LoadNewPipelineAsync(generation);
+        else
+            await LoadExistingPipelineAsync(generation);
+        if (generation == _loadGeneration) ReassertNavContext();
+    }
 
-        if (_liveRuns is not null)
-        {
-            await _liveRuns.DisposeAsync();
-            _liveRuns = null;
-        }
+    private async Task ResetEditorStateAsync()
+    {
+        if (_liveRuns is not null) await _liveRuns.DisposeAsync();
+        _liveRuns = null;
         _pipeline = null;
         _source = null;
         _sourceBranches = [];
@@ -181,6 +188,7 @@ public partial class PipelineEdit : IAsyncDisposable
         _templates = [];
         _baseTemplateYaml = null;
         _selectedTemplateId = null;
+        _templateParameters.Clear();
         _serverNames = [];
         _libraryNames = [];
         _vaultNames = [];
@@ -189,111 +197,99 @@ public partial class PipelineEdit : IAsyncDisposable
         _savedYaml = string.Empty;
         _yamlValid = null;
         _showDiff = false;
+    }
 
-        if (!_isNew)
+    private async Task LoadExistingPipelineAsync(int generation)
+    {
+        _loading = true;
+        var pipelineTask = Api.Pipelines.GetPipelineAsync(Id!.Value);
+        var runsTask = Api.Pipelines.GetPipelineRunsPagedAsync(Id.Value, 1, _runsPageSize);
+        var projectsTask = Api.Projects.GetAllProjectsAsync();
+        var sourceTask = Api.Pipelines.GetPipelineSourceAsync(Id.Value);
+        var templatesTask = LoadTemplatesSafeAsync();
+        await Task.WhenAll(pipelineTask, runsTask, projectsTask, sourceTask, templatesTask);
+        if (generation != _loadGeneration) return;
+        _pipeline = await pipelineTask;
+        ApplyRunsPage(await runsTask, 1, _runsPageSize);
+        _projects = await projectsTask;
+        _templates = await templatesTask;
+        _source = await sourceTask;
+        if (_source is { RepositoryId: > 0 })
         {
-            _loading = true;
-            var pipelineTask = Api.GetPipelineAsync(Id!.Value);
-            var runsTask = Api.GetPipelineRunsPagedAsync(Id!.Value, 1, _runsPageSize);
-            var projectsTask = Api.GetAllProjectsAsync();
-            var sourceTask = Api.GetPipelineSourceAsync(Id.Value);
-            var templatesTask = LoadTemplatesSafeAsync();
-
-            await Task.WhenAll(pipelineTask, runsTask, projectsTask, sourceTask, templatesTask);
+            var branches = await Api.Git.GetGitBranchesAsync(_source.RepositoryId);
             if (generation != _loadGeneration) return;
-
-            _pipeline = await pipelineTask;
-            var runsPage = await runsTask;
-            ApplyRunsPage(runsPage, 1, _runsPageSize);
-            _projects = await projectsTask;
-            _templates = await templatesTask;
-            _source = await sourceTask;
-            if (_source is { RepositoryId: > 0 })
-            {
-                var branches = await Api.GetGitBranchesAsync(_source.RepositoryId);
-                if (generation != _loadGeneration) return;
-                _sourceBranches = branches.Select(branch => branch.Name).ToList();
-            }
-
-            if (_pipeline is not null)
-            {
-                _model = new PipelineModel
-                {
-                    Name = _pipeline.Name,
-                    Description = _pipeline.Description,
-                    YamlDefinition = _pipeline.YamlDefinition,
-                    ProjectId = _pipeline.ProjectId,
-                    SourceBranch = _pipeline.SourceBranch ?? _source?.Branch,
-                    EnvironmentId = _pipeline.EnvironmentId,
-                    ProjectServerId = _pipeline.ProjectServerId
-                };
-                _savedYaml = _pipeline.YamlDefinition;
-                await LoadBaseTemplateYamlAsync();
-                await LoadFleetItemAsync();
-                if (generation != _loadGeneration) return;
-            }
-            _loading = false;
-            _suggestionsNeeded = true;
-
-            await EnsureHubAsync();
-            await _liveRuns!.SyncGroupsAsync();
+            _sourceBranches = branches.Select(branch => branch.Name).ToList();
         }
-        else
+        if (_pipeline is not null)
         {
-            var projectsTask = Api.GetAllProjectsAsync();
-            var templatesTask = Api.GetPipelineTemplatesAsync();
-            await Task.WhenAll(projectsTask, templatesTask);
+            ApplyPipelineModel(_pipeline);
+            await LoadBaseTemplateYamlAsync();
+            await LoadFleetItemAsync();
             if (generation != _loadGeneration) return;
-            _projects = await projectsTask;
-            _templates = await templatesTask;
+        }
+        _loading = false;
+        _suggestionsNeeded = true;
+        await EnsureHubAsync();
+        await _liveRuns!.SyncGroupsAsync();
+    }
 
-            // Pre-select the project when navigated from a project detail page (?projectId=NN).
-            if (ProjectId is > 0 && _projects.Any(p => p.Id == ProjectId.Value))
-                _model.ProjectId = ProjectId;
-            else if (EnvironmentId is > 0)
-                _model.EnvironmentId = EnvironmentId;
-            else if (ProjectServerId is > 0)
-                _model.ProjectServerId = ProjectServerId;
+    private void ApplyPipelineModel(PipelineDto pipeline)
+    {
+        _model = new PipelineModel
+        {
+            Name = pipeline.Name,
+            Description = pipeline.Description,
+            YamlDefinition = pipeline.YamlDefinition,
+            ProjectId = pipeline.ProjectId,
+            SourceBranch = pipeline.SourceBranch ?? _source?.Branch,
+            EnvironmentId = pipeline.EnvironmentId,
+            ProjectServerId = pipeline.ProjectServerId
+        };
+        _savedYaml = pipeline.YamlDefinition;
+    }
 
-            _model.YamlDefinition = """
+    private async Task LoadNewPipelineAsync(int generation)
+    {
+        var projectsTask = Api.Projects.GetAllProjectsAsync();
+        var templatesTask = Api.PipelineTemplates.GetPipelineTemplatesAsync();
+        await Task.WhenAll(projectsTask, templatesTask);
+        if (generation != _loadGeneration) return;
+        _projects = await projectsTask;
+        _templates = await templatesTask;
+        SelectInitialOwner();
+        _model.YamlDefinition = """
                 name: my-pipeline
                 trigger: manual
-                variable_libraries:
-                  - shared-config
-                vaults:
-                  - project-secrets
-                variables:
-                  APP_NAME: my-app
                 stages:
-                  - name: Build
+                  - name: Validate
                     jobs:
-                      - name: build
+                      - name: validate
                         agent: default
                         steps:
-                          - name: Build
-                            shell: echo "Building..."
-                  - name: Deploy
-                    depends_on: [Build]
-                    jobs:
-                      - name: deploy
-                        agent: default
-                        steps:
-                          - name: Deploy
-                            shell: echo "Deploying..."
-                """;
-            _suggestionsNeeded = true;
-
-            // S-FEAT-17: a pipeline imported from a YAML file on the list page overrides the default
-            // template; the user still picks an owner here before saving (ExactlyOneOwner).
-            if (ImportState.Consume() is { } import)
-            {
-                _model.YamlDefinition = import.Yaml;
-                if (!string.IsNullOrWhiteSpace(import.Name))
-                    _model.Name = import.Name;
-            }
+                          - name: Check repository
+                            shell: git status --short
+            """;
+        _suggestionsNeeded = true;
+        if (ImportState.Consume() is { } import)
+        {
+            _model.YamlDefinition = import.Yaml;
+            if (!string.IsNullOrWhiteSpace(import.Name)) _model.Name = import.Name;
         }
+        if (TemplateId is > 0 && _templates.Any(template => template.Id == TemplateId.Value))
+        {
+            _selectedTemplateId = TemplateId;
+            await OnTemplateSelected(TemplateId.Value);
+        }
+    }
 
-        ReassertNavContext();
+    private void SelectInitialOwner()
+    {
+        if (ProjectId is > 0 && _projects.Any(project => project.Id == ProjectId.Value))
+            _model.ProjectId = ProjectId;
+        else if (EnvironmentId is > 0)
+            _model.EnvironmentId = EnvironmentId;
+        else if (ProjectServerId is > 0)
+            _model.ProjectServerId = ProjectServerId;
     }
 
     // Publish the parent project so the NavMenu keeps the project's submenu open while we're editing
@@ -303,9 +299,21 @@ public partial class PipelineEdit : IAsyncDisposable
     private void ReassertNavContext()
     {
         ProjectNav.Set(_model.ProjectId);
-        Breadcrumb.Set(
-            new BreadcrumbItem(L["Pipelines"], "/pipelines"),
-            new BreadcrumbItem(_isNew ? L["NewPipeline"] : _pipeline?.Name ?? L["Pipeline"]));
+        var current = new BreadcrumbItem(_isNew ? L["NewPipeline"] : _pipeline?.Name ?? L["Pipeline"]);
+        if (_model.ProjectId is { } projectId)
+        {
+            var projectName = _pipeline?.ProjectName
+                ?? _projects.FirstOrDefault(project => project.Id == projectId)?.Name
+                ?? $"{L["Project"]} #{projectId}";
+            Breadcrumb.Set(
+                new BreadcrumbItem(L["Projects"], "/projects"),
+                new BreadcrumbItem(projectName, $"/projects/{projectId}/overview"),
+                new BreadcrumbItem(L["Pipelines"], $"/projects/{projectId}/pipelines"),
+                current);
+            return;
+        }
+
+        Breadcrumb.Set(new BreadcrumbItem(L["Pipelines"], "/pipelines"), current);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -326,31 +334,13 @@ public partial class PipelineEdit : IAsyncDisposable
         {
             if (_isNew)
             {
-                var outcome = await Api.CreatePipelineAsync(new CreatePipelineRequest
-                {
-                    Name = _model.Name,
-                    Description = _model.Description,
-                    YamlDefinition = _model.YamlDefinition,
-                    ProjectId = _model.ProjectId,
-                    SourceBranch = _model.SourceBranch,
-                    EnvironmentId = _model.EnvironmentId,
-                    ProjectServerId = _model.ProjectServerId
-                });
+                var outcome = await Api.Pipelines.CreatePipelineAsync(_model.ToCreateRequest());
                 HandleSaveOutcome(outcome, "PipelineCreated", "Created",
                     created => Nav.NavigateTo($"/pipelines/{created.Id}"));
             }
             else
             {
-                var outcome = await Api.UpdatePipelineAsync(Id!.Value, new UpdatePipelineRequest
-                {
-                    Name = _model.Name,
-                    Description = _model.Description,
-                    YamlDefinition = _model.YamlDefinition,
-                    ProjectId = _model.ProjectId,
-                    SourceBranch = _model.SourceBranch,
-                    EnvironmentId = _model.EnvironmentId,
-                    ProjectServerId = _model.ProjectServerId
-                });
+                var outcome = await Api.Pipelines.UpdatePipelineAsync(Id!.Value, _model.ToUpdateRequest());
                 HandleSaveOutcome(outcome, "PipelineSaved", "Saved", updated =>
                 {
                     _pipeline = updated;
@@ -376,7 +366,7 @@ public partial class PipelineEdit : IAsyncDisposable
                 { "Branches", _sourceBranches },
                 { "SourceBranch", _model.SourceBranch }
             },
-            new DialogOptions { Width = "900px", Height = "720px" });
+            new DialogOptions { Width = "900px", Height = "720px", AutoFocusFirstElement = false });
 
         if (result is not PipelineSaveDecision decision) return false;
         _model.SourceBranch = decision.SourceBranch;
@@ -386,9 +376,9 @@ public partial class PipelineEdit : IAsyncDisposable
     private async Task RefreshSourceAsync()
     {
         if (Id is not { } id) return;
-        _source = await Api.GetPipelineSourceAsync(id);
+        _source = await Api.Pipelines.GetPipelineSourceAsync(id);
         if (_source is { RepositoryId: > 0 })
-            _sourceBranches = (await Api.GetGitBranchesAsync(_source.RepositoryId)).Select(branch => branch.Name).ToList();
+            _sourceBranches = (await Api.Git.GetGitBranchesAsync(_source.RepositoryId)).Select(branch => branch.Name).ToList();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -466,7 +456,7 @@ public partial class PipelineEdit : IAsyncDisposable
     {
         if (_isNew || Id is null) return;
         await LoadRunsPageAsync(_runsPage, _runsPageSize);
-        _pipeline = await Api.GetPipelineAsync(Id.Value);
+        _pipeline = await Api.Pipelines.GetPipelineAsync(Id.Value);
         if (_pipeline is not null)
         {
             _model.Name = _pipeline.Name;
@@ -486,6 +476,7 @@ public partial class PipelineEdit : IAsyncDisposable
     private async Task OnRunsLoadDataAsync(LoadDataArgs args)
     {
         var (page, pageSize) = args.ToPageRequest();
+        _runsQuery = PipelineRunsGridQuery.From(args);
         await LoadRunsPageAsync(page, pageSize);
         if (_liveRuns is not null) await _liveRuns.SyncGroupsAsync();
     }
@@ -494,7 +485,7 @@ public partial class PipelineEdit : IAsyncDisposable
     {
         if (Id is null) return;
         var pipelineId = Id.Value;
-        var result = await Api.GetPipelineRunsPagedAsync(pipelineId, page, pageSize);
+        var result = await Api.Pipelines.GetPipelineRunsPagedAsync(pipelineId, page, pageSize, _runsQuery);
         if (Id == pipelineId) ApplyRunsPage(result, page, pageSize);
     }
 
@@ -528,7 +519,7 @@ public partial class PipelineEdit : IAsyncDisposable
     {
         if (Id is null) return;
         await LoadRunsPageAsync(_runsPage, _runsPageSize);
-        _pipeline = await Api.GetPipelineAsync(Id.Value);
+        _pipeline = await Api.Pipelines.GetPipelineAsync(Id.Value);
         if (_liveRuns is not null) await _liveRuns.SyncGroupsAsync();
         StateHasChanged();
     }
@@ -538,63 +529,67 @@ public partial class PipelineEdit : IAsyncDisposable
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_liveRuns is not null) await _liveRuns.DisposeAsync();
     }
-
-    private Task OnRun() => OnRunAsync(null);
-
-    private async Task OnRunClick(RadzenSplitButtonItem? item)
+    /// <summary>Cancels the run from the run table. Reuses the run view's coordinator so the confirm
+    /// wording, the toasts and the forbidden case behave identically wherever a run is cancelled.</summary>
+    private async Task OnCancelRunAsync(PipelineRunDto run)
     {
-        var sourceBranch = item?.Value == "branch"
-            ? await RunDialogs.ChooseBranchAsync(Id!.Value)
-            : null;
-        if (item?.Value == "branch" && sourceBranch is null) return;
-        await OnRunAsync(sourceBranch);
+        var coordinator = new PipelineRunCommandCoordinator(Api, Dialog, Toast, L, Js);
+        if (!await coordinator.ConfirmCancellationAsync()) return;
+        await coordinator.CancelAsync(run);
+        await ReloadRunsAsync();
     }
 
-    private async Task OnRunAsync(string? sourceBranch)
+    private Task OnRun() => OnRunAsync(null);
+    private async Task OnRunClick(RadzenSplitButtonItem? item)
+    {
+        if (item?.Value != "options")
+        {
+            await OnRunAsync(sourceBranch: null);
+            return;
+        }
+
+        var choice = await RunDialogs.ConfigureLaunchAsync(Id!.Value);
+        if (choice is null) return;
+        await OnConfiguredRunAsync(choice);
+    }
+
+    private Task OnRunAsync(string? sourceBranch) =>
+        RunAsync(launcher => launcher.LaunchAsync(Id!.Value, sourceBranch));
+
+    private Task OnConfiguredRunAsync(PipelineLaunchChoice choice) =>
+        RunAsync(launcher => launcher.LaunchAsync(Id!.Value, choice));
+
+    private async Task RunAsync(Func<PipelineRunLauncher, Task<PipelineRunLaunchResult?>> launch)
     {
         if (_running) return;
         _running = true;
         try
         {
             var launcher = new PipelineRunLauncher(Api, RunGate, RunDialogs, Nav, Toast, L);
-            var result = await launcher.LaunchAsync(Id!.Value, sourceBranch);
-            if (result is not null)
-            {
-                if (result.RunsPage is not null)
-                    ApplyRunsPage(result.RunsPage, 1, 25);
-                else if (_runs.All(run => run.Id != result.TriggeredRun.Id))
-                    _runs.Insert(0, result.TriggeredRun);
-                if (result.Pipeline is not null)
-                    _pipeline = result.Pipeline;
-            }
+            var result = await launch(launcher);
+            if (result?.RunsPage is not null) ApplyRunsPage(result.RunsPage, 1, 25);
+            else if (result is not null && _runs.All(run => run.Id != result.TriggeredRun.Id)) _runs.Insert(0, result.TriggeredRun);
+            if (result?.Pipeline is not null) _pipeline = result.Pipeline;
         }
-        finally
-        {
-            _running = false;
-        }
+        finally { _running = false; }
     }
-
     private async Task OnDryRun()
     {
-        var result = await Api.DryRunPipelineAsync(Id!.Value);
+        var result = await Api.Pipelines.DryRunPipelineAsync(Id!.Value);
         if (result is null) return;
-
-        await Dialog.OpenAsync<DryRunResultDialog>(
-            L["DryRunResult"].Value,
+        await Dialog.OpenAsync<DryRunResultDialog>(L["DryRunResult"].Value,
             new Dictionary<string, object?> { { "Result", result } },
-            new DialogOptions { Width = "800px", Height = "600px" });
+            new DialogOptions { Width = "800px", Height = "600px", AutoFocusFirstElement = false });
     }
-
     private async Task OnDelete()
     {
         var confirmed = await Dialog.Confirm(L["DeletePipelineConfirm"].Value, L["DeletePipeline"].Value,
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
-        if (confirmed == true)
-        {
-            await Api.DeletePipelineAsync(Id!.Value);
-            Cache.InvalidatePrefix("pipelines:"); // S-TECH-SWIV
-            Nav.NavigateTo("/pipelines");
-        }
+        if (confirmed != true) return;
+        var status = await Api.Pipelines.DeletePipelineAsync(Id!.Value);
+        if (!status.Success) { Toast.Error("Error", "DeleteFailed"); return; }
+        Cache.InvalidatePrefix("pipelines:");
+        Toast.Success("Deleted", "Deleted");
+        Nav.NavigateTo("/pipelines");
     }
-
 }

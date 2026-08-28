@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -41,14 +37,7 @@ public sealed class RkhunterOperationExecutor(
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         var argv = BuildSudoArgv(kind);
         if (argv is null) return new ExecutorResult(-1, false);
         foreach (var arg in argv) psi.ArgumentList.Add(arg);

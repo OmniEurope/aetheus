@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Services;
 
@@ -80,7 +78,7 @@ public sealed class AlertNotificationService : IAsyncDisposable
 
     public void ClearUnread()
     {
-        _unreadCount = 0;
+        Interlocked.Exchange(ref _unreadCount, 0);
         OnChange?.Invoke();
     }
 
@@ -89,16 +87,26 @@ public sealed class AlertNotificationService : IAsyncDisposable
     public void ClearRecent()
     {
         lock (_recentGate) _recent.Clear();
-        _unreadCount = 0;
+        Interlocked.Exchange(ref _unreadCount, 0);
         OnChange?.Invoke();
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>Ends the current user's subscription and clears its in-memory alert projection.</summary>
+    public async Task StopAsync()
     {
-        if (_hub is not null)
+        var hub = _hub;
+        _hub = null;
+        if (hub is not null)
         {
-            await _hub.DisposeAsync().ConfigureAwait(false);
-            _hub = null;
+            try { await hub.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AlertNotification] Hub dispose failed: {ex.Message}");
+            }
         }
+
+        ClearRecent();
     }
+
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 }

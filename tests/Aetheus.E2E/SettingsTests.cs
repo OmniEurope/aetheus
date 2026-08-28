@@ -77,6 +77,33 @@ public class SettingsTests : E2ETestBase
     }
 
     [Test]
+    public async Task Settings_QualityGates_ExplainsOptionalYamlAndFitsMobileViewport()
+    {
+        await Page.SetViewportSizeAsync(375, 812);
+        await NavigateToAsync("admin/settings");
+        await Page.GetByRole(AriaRole.Tab, new() { Name = "Quality gates" }).ClickAsync();
+
+        var card = Page.Locator(".quality-gate-activation-card");
+        await Expect(card).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(card.GetByText("Optional", new() { Exact = true })).ToBeVisibleAsync();
+        await Expect(card.GetByText("YAML", new() { Exact = true })).ToBeVisibleAsync();
+        await Expect(card.GetByRole(AriaRole.Heading, new()
+        {
+            Name = "Activate a gate only where it matters"
+        })).ToBeVisibleAsync();
+        await Expect(card.Locator("code")).ToContainTextAsync("type: analysis-gate");
+        await Expect(card.Locator("code")).ToContainTextAsync("analysis_preset: recommended");
+        await Expect(card.Locator("code")).ToContainTextAsync("analysis_rules:");
+        await Expect(card.GetByRole(AriaRole.Button, new() { Name = "Copy YAML" }))
+            .ToBeVisibleAsync();
+
+        var bounds = await card.BoundingBoxAsync();
+        Assert.That(bounds, Is.Not.Null);
+        Assert.That(bounds!.X, Is.GreaterThanOrEqualTo(0));
+        Assert.That(bounds.X + bounds.Width, Is.LessThanOrEqualTo(375));
+    }
+
+    [Test]
     public async Task Settings_NavigateFromSidebar_Works()
     {
         // The top-level "Settings" nav item points at the per-user /settings page.

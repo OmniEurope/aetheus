@@ -120,7 +120,7 @@ public class VaultEditMethodTests : BunitContext
     }
 
     [Fact]
-    public async Task AddSecret_EmptyKey_DoesNothing()
+    public async Task AddSecret_EmptyKey_MakesNoRequest()
     {
         var cut = RenderExisting();
 

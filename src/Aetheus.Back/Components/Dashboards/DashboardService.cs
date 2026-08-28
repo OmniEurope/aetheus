@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Dashboards;
 
@@ -35,17 +31,7 @@ public class DashboardService(IDashboardRepository repo, IAuditService audit, Ti
             UserId = userId,
             Name = request.Name,
             IsDefault = request.IsDefault,
-            Widgets = request.Widgets.Select(w => new DashboardWidget
-            {
-                WidgetType = w.WidgetType,
-                Title = w.Title,
-                Column = w.Column,
-                Row = w.Row,
-                Width = w.Width,
-                Height = w.Height,
-                ConfigurationJson = w.ConfigurationJson,
-                IsVisible = w.IsVisible
-            }).ToList()
+            Widgets = request.Widgets.Select(MapWidget).ToList()
         };
 
         await repo.AddAsync(entity, ct).ConfigureAwait(false);
@@ -75,17 +61,7 @@ public class DashboardService(IDashboardRepository repo, IAuditService audit, Ti
         entity.Widgets.Clear();
         foreach (var w in request.Widgets)
         {
-            entity.Widgets.Add(new DashboardWidget
-            {
-                WidgetType = w.WidgetType,
-                Title = w.Title,
-                Column = w.Column,
-                Row = w.Row,
-                Width = w.Width,
-                Height = w.Height,
-                ConfigurationJson = w.ConfigurationJson,
-                IsVisible = w.IsVisible
-            });
+            entity.Widgets.Add(MapWidget(w));
         }
 
         try
@@ -132,5 +108,17 @@ public class DashboardService(IDashboardRepository repo, IAuditService audit, Ti
         }).ToList(),
         CreatedAt = d.CreatedAt,
         RowVersion = d.RowVersion
+    };
+
+    private static DashboardWidget MapWidget(CreateDashboardWidgetRequest widget) => new()
+    {
+        WidgetType = widget.WidgetType,
+        Title = widget.Title,
+        Column = widget.Column,
+        Row = widget.Row,
+        Width = widget.Width,
+        Height = widget.Height,
+        ConfigurationJson = widget.ConfigurationJson,
+        IsVisible = widget.IsVisible
     };
 }

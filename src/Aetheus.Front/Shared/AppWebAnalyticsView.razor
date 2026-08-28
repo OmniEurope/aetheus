@@ -1,0 +1,85 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Front.Resources
+@using Aetheus.Front.Services
+@using Microsoft.Extensions.Localization
+
+@if (_loading)
+{
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
+}
+else if (_loadFailed)
+{
+    <RadzenStack Gap="0.75rem" AlignItems="AlignItems.Start">
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">@L["LoadFailed"]</RadzenAlert>
+        <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@RetryAsync"
+                      ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </RadzenStack>
+}
+else if (_summary is null)
+{
+    <EmptyState Icon="groups" Title="@L["NoWebAnalyticsDataYet"]" />
+}
+else
+{
+    <RadzenStack Gap="1rem">
+        <RadzenRow Gap="1rem">
+            @foreach (var tile in SummaryTiles)
+            {
+                <RadzenColumn Size="12" SizeSM="6" SizeLG="3">
+                    <RadzenCard class="h-100">
+                        <RadzenText TextStyle="TextStyle.Overline">@tile.Label</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4">@tile.Value</RadzenText>
+                    </RadzenCard>
+                </RadzenColumn>
+            }
+        </RadzenRow>
+
+        <RadzenCard>
+            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween"
+                         AlignItems="AlignItems.Center" Wrap="FlexWrap.Wrap" Gap="0.5rem">
+                <RadzenStack Gap="0.15rem">
+                    <RadzenText TextStyle="TextStyle.H5">@L["AnalyticsIngestionHealth"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                        @LastIngestText
+                    </RadzenText>
+                </RadzenStack>
+                <RadzenBadge BadgeStyle="@QuotaBadgeStyle" Text="@QuotaText" />
+            </RadzenStack>
+            <RadzenProgressBar Value="@_summary.StorageUsagePercent" ShowValue="true"
+                               class="rz-mt-3" ProgressBarStyle="@QuotaProgressStyle" />
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2 rz-color-secondary">
+                @StorageText · @string.Format(L["RejectedAnalyticsEvents"], _summary.RejectedEvents)
+            </RadzenText>
+        </RadzenCard>
+
+        @if (_summary.Daily.Count > 0)
+        {
+            <RadzenCard>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["AudienceLast30Days"]</RadzenText>
+                <RadzenChart>
+                    <RadzenLineSeries Data="@DailyPoints" CategoryProperty="Label" ValueProperty="UniqueVisitors"
+                                      Title="@L["UniqueVisitors"]" Smooth="false" />
+                    <RadzenColumnSeries Data="@DailyPoints" CategoryProperty="Label" ValueProperty="PageViews"
+                                        Title="@L["PageViews"]" />
+                    <RadzenValueAxis Min="0" />
+                    <RadzenCategoryAxis />
+                </RadzenChart>
+            </RadzenCard>
+        }
+
+        <RadzenCard>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["TopPagesThisMonth"]</RadzenText>
+            <RadzenDataGrid Responsive="false" Data="@_summary.TopPages" TItem="Aetheus.Shared.DTOs.AppWebAnalyticsPageDto"
+                            Density="Density.Compact" EmptyText="@L["NoWebAnalyticsDataYet"]"
+                            AllowSorting="true" AllowFiltering="true"
+                            FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+                <Columns>
+                    <RadzenDataGridColumn TItem="Aetheus.Shared.DTOs.AppWebAnalyticsPageDto"
+                                          Property="Route" Title="@L["Route"]" />
+                    <RadzenDataGridColumn TItem="Aetheus.Shared.DTOs.AppWebAnalyticsPageDto"
+                                          Property="PageViews" Title="@L["PageViews"]" Width="10rem" />
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenCard>
+    </RadzenStack>
+}

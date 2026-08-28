@@ -4,9 +4,6 @@ using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Data;
 
@@ -36,7 +33,8 @@ public sealed class DemoContentSeeder(
     private async Task SeedTotoRepositoryAsync(int projectId, CancellationToken ct)
     {
         var repositories = await git.GetRepositoriesAsync(projectId, ct).ConfigureAwait(false);
-        var repository = repositories.FirstOrDefault();
+        var repository = repositories.SingleOrDefault(candidate =>
+            string.Equals(candidate.Slug, "toto", StringComparison.OrdinalIgnoreCase));
         if (repository is null)
         {
             repository = await git.CreateRepositoryAsync(new CreateGitLightRepoRequest
@@ -48,15 +46,16 @@ public sealed class DemoContentSeeder(
             }, ct).ConfigureAwait(false);
         }
 
+        await git.EnsureRepositoryInitializedAsync(repository.Id, ct).ConfigureAwait(false);
         foreach (var (pipelineName, yaml) in DemoDataSeeder.TotoPipelineDefinitions())
         {
             var existing = await pipelineGit.ReadProjectPipelineYamlAsync(
-                projectId, pipelineName, ct, repository.DefaultBranch).ConfigureAwait(false);
+                projectId, pipelineName, ct, repository.DefaultBranch, repository.Id).ConfigureAwait(false);
             if (string.Equals(existing, yaml, StringComparison.Ordinal))
                 continue;
 
             var (outcome, error) = await pipelineGit.WriteProjectPipelineYamlAsync(
-                projectId, pipelineName, yaml, SeedActor, ct, repository.DefaultBranch).ConfigureAwait(false);
+                projectId, pipelineName, yaml, SeedActor, ct, repository.DefaultBranch, repository.Id).ConfigureAwait(false);
             if (outcome != GitWriteOutcome.Committed)
                 throw new InvalidOperationException($"Could not seed Toto pipeline '{pipelineName}' in Git: {error ?? outcome.ToString()}.");
         }

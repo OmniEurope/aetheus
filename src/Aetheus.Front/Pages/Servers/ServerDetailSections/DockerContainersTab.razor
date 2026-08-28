@@ -1,0 +1,234 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Containers tab of the Docker section: the grid, the per-project bulk actions, and the five
+   detail panels (logs, inspect, shell, env, file browser). Markup moved verbatim from the parent. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+    <RadzenBadge Text="@FilteredContainers.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+    <RadzenTextBox @bind-Value="_containerSearch" Placeholder="@L["FilterContainers"]" class="docker-search" />
+</RadzenStack>
+@if (!InitialLoaded && FilteredContainers.Count == 0)
+{
+    <div class="docker-skeleton">
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+    </div>
+}
+else
+{
+<RadzenDataGrid Responsive="false" Data="@FilteredContainers" TItem="DockerContainerDto" Density="Density.Compact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    AllowGrouping="true" ShowGroupPanel="true" Groups="@_containerGroups"
+    @bind-AllGroupsExpanded="_allContainerGroupsExpanded"
+    RowRender="@OnContainerRowRender" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+    <GroupHeaderTemplate Context="g">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">
+                <strong>@(string.IsNullOrEmpty(g.Data.Key?.ToString()) ? L["NoProject"] : g.Data.Key)</strong>
+                (@g.Data.Count)
+            </RadzenText>
+            @{
+                var projectName = g.Data.Key?.ToString() ?? string.Empty;
+                var groupContainers = ContainersForProject(projectName);
+                var groupBusy = _projectActionTarget == projectName;
+            }
+            <RadzenButton Text="@L["StartAll"]" Icon="play_arrow" MouseEnter="@(args => TooltipService.Open(args, L["StartAll"].Value))"
+                MouseLeave="@(TooltipService.Close)"
+                Click="@(() => ProjectBulkActionAsync(projectName, DockerContainerAction.Start))"
+                IsBusy="@groupBusy" Title="@L["StartAll"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["StopAll"]" Icon="stop" MouseEnter="@(args => TooltipService.Open(args, L["StopAll"].Value))"
+                MouseLeave="@(TooltipService.Close)"
+                Click="@(() => ProjectBulkActionAsync(projectName, DockerContainerAction.Stop))"
+                IsBusy="@groupBusy" Title="@L["StopAll"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["RestartAll"]" Icon="restart_alt" MouseEnter="@(args => TooltipService.Open(args, L["RestartAll"].Value))"
+                MouseLeave="@(TooltipService.Close)"
+                Click="@(() => ProjectBulkActionAsync(projectName, DockerContainerAction.Restart))"
+                IsBusy="@groupBusy" Title="@L["RestartAll"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["ZoomProject"]" Icon="zoom_in" MouseEnter="@(args => TooltipService.Open(args, L["ZoomProject"].Value))"
+                MouseLeave="@(TooltipService.Close)"
+                Click="@(() => OpenProjectZoom(projectName))" Title="@L["ZoomProject"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+    </GroupHeaderTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="DockerContainerDto" Property="Project" Title="@L["Project"]" Width="140px" />
+        <RadzenDataGridColumn TItem="DockerContainerDto" Title="@L["Name"]" Width="180px">
+            <Template Context="c">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                    <RadzenBadge BadgeStyle="@GetContainerBadge(c.State)" Text="@c.State" />
+                    <span title="@c.ContainerId">
+                        <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@c.Name</RadzenText>
+                    </span>
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="DockerContainerDto" Property="Image" Title="@L["Image"]" />
+        <RadzenDataGridColumn TItem="DockerContainerDto" Property="Status" Title="@L["Status"]" Width="180px" />
+        <RadzenDataGridColumn TItem="DockerContainerDto" Title="@L["CPU"]" Width="80px">
+            <Template Context="c">
+                @(c.CpuPercent.ToString("F1"))%
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="DockerContainerDto" Title="@L["Memory"]" Width="160px">
+            <Template Context="c">
+                <RadzenStack Gap="0.1rem">
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@(c.MemoryUsageMb.ToString("F0")) / @(c.MemoryLimitMb.ToString("F0")) MB</RadzenText>
+                    <RadzenProgressBar Value="@c.MemoryUsageMb" Max="@(c.MemoryLimitMb > 0 ? c.MemoryLimitMb : 1)"
+                        ShowValue="false" class="@GetMemoryBarClass(c)" />
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="DockerContainerDto" Property="Ports" Title="@L["Ports"]" Width="200px" />
+        <RadzenDataGridColumn TItem="DockerContainerDto" Title="@L["Actions"]" MinWidth="56rem" Sortable="false" Filterable="false">
+            <Template Context="c">
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                    @if (c.State == "running")
+                    {
+                        <RadzenButton Text="@L["Stop"]" Icon="stop" Click="@(() => DockerActionAsync(c.ContainerId, DockerContainerAction.Stop))"
+                            IsBusy="@(_dockerActionTarget == c.ContainerId)" Title="@L["Stop"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["Restart"]" Icon="restart_alt" Click="@(() => DockerActionAsync(c.ContainerId, DockerContainerAction.Restart))"
+                            IsBusy="@(_dockerActionTarget == c.ContainerId)" Title="@L["Restart"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                    }
+                    else
+                    {
+                        <RadzenButton Text="@L["Start"]" Icon="play_arrow" Click="@(() => DockerActionAsync(c.ContainerId, DockerContainerAction.Start))"
+                            IsBusy="@(_dockerActionTarget == c.ContainerId)" Title="@L["Start"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@(() => ConfirmRemoveContainerAsync(c.ContainerId, c.Name))"
+                            IsBusy="@(_dockerActionTarget == c.ContainerId)" Title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                    }
+                    <RadzenButton Text="@L["ViewLogs"]" Icon="article" Click="@(() => ToggleLogsAsync(c.ContainerId))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["ResourceLimits"]" Icon="tune" MouseEnter="@(args => TooltipService.Open(args, L["ResourceLimits"].Value))"
+                        MouseLeave="@(TooltipService.Close)"
+                        Click="@(() => OpenResourceLimitsDialog(c.ContainerId))" Title="@L["ResourceLimits"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["DockerInspect"]" Icon="info" MouseEnter="@(args => TooltipService.Open(args, L["DockerInspect"].Value))"
+                        MouseLeave="@(TooltipService.Close)"
+                        Click="@(() => RequestInspectAsync(c.ContainerId))" Title="@L["DockerInspect"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    @if (c.State == "running")
+                    {
+                        <RadzenButton Text="@L["DockerShell"]" Icon="terminal" MouseEnter="@(args => TooltipService.Open(args, L["DockerShell"].Value))"
+                            MouseLeave="@(TooltipService.Close)"
+                            Click="@(() => OpenShell(c.ContainerId, c.Name))" Title="@L["DockerShell"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["DockerEnvVars"]" Icon="vpn_key" MouseEnter="@(args => TooltipService.Open(args, L["DockerEnvVars"].Value))"
+                            MouseLeave="@(TooltipService.Close)"
+                            Click="@(() => RequestEnvVarsAsync(c.ContainerId, c.Name))" Title="@L["DockerEnvVars"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["DockerFileBrowser"]" Icon="folder_open" MouseEnter="@(args => TooltipService.Open(args, L["DockerFileBrowser"].Value))"
+                            MouseLeave="@(TooltipService.Close)"
+                            Click="@(() => OpenFileBrowserAsync(c.ContainerId, c.Name))" Title="@L["DockerFileBrowser"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                    }
+                </RadzenStack>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+}
+
+@if (_logsContainerId is not null)
+{
+    <RadzenCard class="rz-mt-3">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["DockerLogs"] - @_logsContainerId[..Math.Min(12, _logsContainerId.Length)]</RadzenText>
+            <div class="flex-spacer"></div>
+            <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@(() => { _logsContainerId = null; _logsContent = null; })" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+        @if (_logsContent is null)
+        {
+            <AetheusLoader Size="AetheusLoaderSize.Small" />
+        }
+        else
+        {
+            <pre class="docker-logs">@_logsContent</pre>
+        }
+    </RadzenCard>
+}
+
+@if (_inspectContainerId is not null)
+{
+    <RadzenCard class="rz-mt-3 docker-panel-fadein">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["DockerInspect"] - @_inspectContainerId[..Math.Min(12, _inspectContainerId.Length)]</RadzenText>
+            <div class="flex-spacer"></div>
+            @if (_inspectContent is not null)
+            {
+                <RadzenButton Icon="content_copy" Size="ButtonSize.Small" MouseEnter="@(args => TooltipService.Open(args, L["CopyToClipboard"].Value))"
+                    MouseLeave="@(TooltipService.Close)"
+                    Click="@CopyInspectToClipboardAsync" Title="@L["CopyToClipboard"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            }
+            <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@(() => { _inspectContainerId = null; _inspectContent = null; })" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+        @if (_inspectContent is null)
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["WaitingResult"]</RadzenText>
+        }
+        else
+        {
+            <pre class="docker-logs">@_inspectContent</pre>
+        }
+    </RadzenCard>
+}
+
+@if (_shellContainerId is not null)
+{
+    <RadzenCard class="rz-mt-3 docker-panel-fadein">
+        <RadzenStack Gap="0.5rem">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center">
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["DockerShell"] - @_shellContainerName</RadzenText>
+                <div class="flex-spacer"></div>
+                <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@(() => { _shellContainerId = null; _shellOutput = string.Empty; })" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            </RadzenStack>
+            <pre class="docker-logs docker-shell-output">@_shellOutput</pre>
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                <RadzenTextBox @bind-Value="_shellCommand" Placeholder="@L["EnterCommand"]"
+                    class="docker-shell-input" @onkeydown="OnShellKeyDown" />
+                <RadzenButton Icon="send" Size="ButtonSize.Small" Click="@SendShellCommandAsync"
+                    Disabled="@string.IsNullOrWhiteSpace(_shellCommand)" Title="@L["Send"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+            </RadzenStack>
+        </RadzenStack>
+    </RadzenCard>
+}
+
+@if (_envContainerId is not null)
+{
+    <RadzenCard class="rz-mt-3 docker-panel-fadein">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["DockerEnvVars"] - @_envContainerName</RadzenText>
+            <div class="flex-spacer"></div>
+            <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@(() => { _envContainerId = null; _envContent = null; })" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+        @if (_envContent is null)
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["WaitingResult"]</RadzenText>
+        }
+        else
+        {
+            <RadzenDataGrid Responsive="false" Data="@ParseEnvVars(_envContent)" TItem="DockerEnvVarDto"
+                Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+                <Columns>
+                    <RadzenDataGridColumn TItem="DockerEnvVarDto" Property="Key" Title="@L["Key"]" />
+                    <RadzenDataGridColumn TItem="DockerEnvVarDto" Property="Value" Title="@L["Value"]" />
+                </Columns>
+            </RadzenDataGrid>
+        }
+    </RadzenCard>
+}
+
+@if (_browseContainerId is not null)
+{
+    <RadzenCard class="rz-mt-3 docker-panel-fadein">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["DockerFileBrowser"] - @_browseContainerName</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@_browsePath</RadzenText>
+            <div class="flex-spacer"></div>
+            @if (_browsePath != "/")
+            {
+                <RadzenButton Icon="arrow_upward" Size="ButtonSize.Small" Click="@BrowseParentAsync" Title="@L["MoveUp"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            }
+            <RadzenButton Icon="close" Size="ButtonSize.Small" Click="@(() => { _browseContainerId = null; _browseContent = null; })" Title="@L["Close"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        </RadzenStack>
+        @if (_browseContent is null)
+        {
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["WaitingResult"]</RadzenText>
+        }
+        else
+        {
+            <pre class="docker-logs">@_browseContent</pre>
+        }
+    </RadzenCard>
+}

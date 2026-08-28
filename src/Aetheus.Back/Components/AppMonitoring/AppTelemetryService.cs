@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.AppMonitoring.Ingest;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -11,8 +9,11 @@ public sealed class AppTelemetryService(
     IAppMetricRepository metricRepo,
     IAppLogRepository logRepo,
     IAppErrorRepository errorRepo,
+    IAppVisitorRepository visitorRepo,
     IngestKeyHasher hasher,
     IIngestService ingestService,
+    IAuditService audit,
+    IConfiguration configuration,
     TimeProvider timeProvider) : IAppTelemetryService
 {
     public async Task<IngestKeyResponse?> GenerateIngestKeyAsync(int appId, CancellationToken ct = default)
@@ -21,18 +22,21 @@ public sealed class AppTelemetryService(
         if (app is null)
             return null;
 
-        var previousHash = app.IngestKeyHash;
         var plaintext = hasher.Generate();
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        var newHash = hasher.Hash(plaintext);
-        app.IngestKeyHash = newHash;
-        app.IngestKeyCreatedAt = now;
+        var (previousHash, newHash, now) = IngestKeyRotation.Apply(
+            app, plaintext, hasher, configuration, timeProvider);
         await appRepo.SaveChangesAsync(ct).ConfigureAwait(false);
         // Evict the rotated-out key so it stops resolving at once, and the new key's hash in case a probe
         // negatively cached it (miss) just before it was assigned - otherwise the new key would 401 for the TTL.
         if (previousHash is not null)
             ingestService.InvalidateKeyCache(previousHash);
         ingestService.InvalidateKeyCache(newHash);
+        await audit.LogAsync(
+            previousHash is null ? "CreatedIngestKey" : "RotatedIngestKey",
+            "MonitoredApp",
+            app.Id,
+            $"Version {app.IngestKeyVersion}; previous valid until {app.PreviousIngestKeyValidUntil:O}",
+            ct).ConfigureAwait(false);
         return new IngestKeyResponse { Key = plaintext, CreatedAt = now };
     }
 
@@ -43,12 +47,24 @@ public sealed class AppTelemetryService(
             return false;
 
         var revokedHash = app.IngestKeyHash;
+        var previousHash = app.PreviousIngestKeyHash;
         app.IngestKeyHash = null;
         app.IngestKeyCreatedAt = null;
+        app.IngestKeyExpiresAt = null;
+        app.PreviousIngestKeyHash = null;
+        app.PreviousIngestKeyValidUntil = null;
         await appRepo.SaveChangesAsync(ct).ConfigureAwait(false);
         // A revoked key must stop ingesting immediately, not linger for the resolver cache TTL.
         if (revokedHash is not null)
             ingestService.InvalidateKeyCache(revokedHash);
+        if (previousHash is not null)
+            ingestService.InvalidateKeyCache(previousHash);
+        await audit.LogAsync(
+            "RevokedIngestKey",
+            "MonitoredApp",
+            app.Id,
+            $"Version {app.IngestKeyVersion}",
+            ct).ConfigureAwait(false);
         return true;
     }
 
@@ -94,6 +110,30 @@ public sealed class AppTelemetryService(
             MetricName = metricName,
             Unit = tailRaw.Count > 0 ? tailRaw[^1].Unit : null,
             Points = Decimate(points)
+        };
+    }
+
+    public async Task<AppVisitorSeriesDto> GetVisitorSeriesAsync(
+        int appId, int days, CancellationToken ct = default)
+    {
+        days = Math.Clamp(days, 1, AppMonitoringDefaults.MaximumVisitorHistoryDays);
+        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var since = today.AddDays(-(days - 1));
+        var counts = await visitorRepo.GetDailyCountsAsync(appId, since, ct).ConfigureAwait(false);
+        var byDay = counts.ToDictionary(point => point.DayUtc, point => point.UniqueVisitors);
+        var points = Enumerable.Range(0, days)
+            .Select(offset => since.AddDays(offset))
+            .Select(day => new AppVisitorPointDto
+            {
+                DayUtc = day,
+                UniqueVisitors = byDay.GetValueOrDefault(day)
+            })
+            .ToList();
+
+        return new AppVisitorSeriesDto
+        {
+            Today = byDay.GetValueOrDefault(today),
+            Points = points
         };
     }
 

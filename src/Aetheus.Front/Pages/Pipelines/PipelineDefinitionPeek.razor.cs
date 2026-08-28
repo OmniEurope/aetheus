@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -60,13 +54,13 @@ public partial class PipelineDefinitionPeek
         try
         {
             // Resolve by name within the same project, then fetch the full definition (list DTO may omit YAML).
-            var page = await Api.GetPipelinesAsync(pageSize: 100, search: name, projectId: ProjectId);
+            var page = await Api.Pipelines.GetPipelinesAsync(pageSize: 100, search: name, projectId: ProjectId);
             if (generation != _requestGeneration) return;
             var match = page.Items.FirstOrDefault(p =>
                 string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
             if (match is not null)
             {
-                var full = await Api.GetPipelineAsync(match.Id) ?? match;
+                var full = await Api.Pipelines.GetPipelineAsync(match.Id) ?? match;
                 if (generation == _requestGeneration) _current = full;
             }
         }

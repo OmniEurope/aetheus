@@ -33,13 +33,10 @@ public class TaskTrackerServiceCoverageTests : BunitContext
         typeof(TaskTrackerService).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(sut, args);
 
-    // ── StopAsync: no hub → early return, state untouched, OnChanged silent ──
-    // StopAsync's first line is `if (_hub is null) return;` so without a hub it must NOT
-    // clear the tracked tasks and must NOT fire OnChanged. We invoke the real method and
-    // assert that observable no-op (rather than the prior mislabelled "clears state").
+    // ── StopAsync: session state is cleared even when no hub was established ──
 
     [Fact]
-    public async Task StopAsync_NoHub_IsNoOp_KeepsTasksAndStaysSilent()
+    public async Task StopAsync_NoHub_ClearsTasksAndNotifies()
     {
         var sut = CreateService();
         Invoke(sut, "Upsert", MakeTask(1));
@@ -50,8 +47,8 @@ public class TaskTrackerServiceCoverageTests : BunitContext
 
         await sut.StopAsync();
 
-        Assert.Equal(1, sut.Count); // no hub → tasks preserved
-        Assert.Equal(0, fired);     // no hub → OnChanged not fired
+        Assert.Equal(0, sut.Count);
+        Assert.Equal(1, fired);
     }
 
     // ── DisposeAsync (with an established hub) clears all tasks and fires OnChanged ──
@@ -137,7 +134,7 @@ public class TaskTrackerServiceCoverageTests : BunitContext
         Assert.Null(hub);
     }
 
-    // ── Upsert, MarkRunning, RemoveOnTerminal interaction ────────────────────
+    // ── Upsert, MarkRunning, HandleTerminal interaction ──────────────────────
 
     [Fact]
     public void FullLifecycle_PendingToRunningToRemoved()
@@ -151,20 +148,28 @@ public class TaskTrackerServiceCoverageTests : BunitContext
         Invoke(sut, "MarkRunning", 50, (DateTime?)new DateTime(2026, 6, 1));
         Assert.Equal(TaskExecutionStatus.Running, sut.Tasks[0].Status);
 
-        Invoke(sut, "RemoveOnTerminal", 50);
+        Invoke(sut, "HandleTerminal", new TaskCompletedNotification
+        {
+            TaskId = 50,
+            Status = TaskExecutionStatus.Success
+        });
         Assert.Equal(0, sut.Count);
     }
 
-    // ── RemoveOnTerminal: id not in dict → no OnChanged ──────────────────────
+    // ── HandleTerminal: id not in dict → no OnChanged ────────────────────────
 
     [Fact]
-    public void RemoveOnTerminal_MissingId_DoesNotFireOnChanged()
+    public void HandleTerminal_MissingId_DoesNotFireOnChanged()
     {
         var sut = CreateService();
         var fired = 0;
         sut.OnChanged += () => fired++;
 
-        Invoke(sut, "RemoveOnTerminal", 999);
+        Invoke(sut, "HandleTerminal", new TaskCompletedNotification
+        {
+            TaskId = 999,
+            Status = TaskExecutionStatus.Success
+        });
 
         Assert.Equal(0, fired);
     }
@@ -172,7 +177,7 @@ public class TaskTrackerServiceCoverageTests : BunitContext
     // ── MarkRunning: id not in dict → does nothing ───────────────────────────
 
     [Fact]
-    public void MarkRunning_MissingId_DoesNothing()
+    public void MarkRunning_MissingId_LeavesTheValueUnchanged()
     {
         var sut = CreateService();
         Invoke(sut, "MarkRunning", 12345, (DateTime?)null);

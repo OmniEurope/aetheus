@@ -16,7 +16,7 @@
             ValueChanged="@(v => { _kindFilter[kind.Key] = v; return RebuildAndLoad(); })" Text="@kind.Label" />
     }
     <div class="flex-spacer"></div>
-    <RadzenButton Icon="center_focus_strong" Size="ButtonSize.Small" Text="@L["ResetView"]" Click="@ResetViewAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+    <RadzenButton Icon="center_focus_strong" Size="ButtonSize.Small" Text="@L["ResetView"]" Click="@ResetViewAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
 </RadzenStack>
 
 <svg id="@_svgId" class="docker-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg>

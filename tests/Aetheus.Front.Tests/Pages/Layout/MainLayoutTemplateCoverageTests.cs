@@ -223,6 +223,8 @@ public class MainLayoutTemplateCoverageTests : BunitContext
         Assert.Contains("user-menu-card", cut.Markup);
 
         cut.Find(".user-menu-backdrop").Click();
-        Assert.DoesNotContain("user-menu-card", cut.Markup);
+        cut.WaitForAssertion(
+            () => Assert.DoesNotContain("user-menu-card", cut.Markup),
+            TimeSpan.FromSeconds(10));
     }
 }

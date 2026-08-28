@@ -31,6 +31,18 @@ public sealed class DomainEventDispatcher(
         }
     }
 
+    public async Task DispatchStrictAsync<TEvent>(TEvent domainEvent, CancellationToken ct = default)
+        where TEvent : IDomainEvent
+    {
+        ArgumentNullException.ThrowIfNull(domainEvent);
+
+        // No catch, deliberately. This overload exists for events that replaced a direct method call:
+        // the caller used to see the exception, and swallowing it here would turn a broken state
+        // machine into a silent success - the caller would believe the work happened.
+        foreach (var handler in services.GetServices<IDomainEventHandler<TEvent>>())
+            await handler.HandleAsync(domainEvent, ct).ConfigureAwait(false);
+    }
+
     public void Publish<TEvent>(TEvent domainEvent) where TEvent : IDomainEvent
     {
         ArgumentNullException.ThrowIfNull(domainEvent);

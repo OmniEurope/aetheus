@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
+using System.Text.Json;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Tasks;
 
 public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskRepository
 {
+    private readonly TaskLeaseRepository _leases = new(db, timeProvider);
+
     public Task<(List<ServerTask> Items, int TotalCount)> GetTasksPagedAsync(
         string? search, int page, int pageSize, TaskExecutionStatus? status = null, CancellationToken ct = default)
         => GetTasksPagedAsync(search, page, pageSize, status, null, null, ct);
 
     public async Task<(List<ServerTask> Items, int TotalCount)> GetTasksPagedAsync(
-        string? search, int page, int pageSize, TaskExecutionStatus? status = null, List<int>? accessibleServerIds = null, int? serverId = null, CancellationToken ct = default)
+        string? search, int page, int pageSize, TaskExecutionStatus? status = null, List<int>? accessibleServerIds = null, int? serverId = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true)
     {
         var query = db.Tasks.AsNoTracking().AsQueryable();
 
@@ -29,16 +30,7 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         if (status.HasValue)
             query = query.Where(t => t.Status == status.Value);
 
-        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-
-        var items = await query
-            .Include(t => t.Server)
-            .OrderByDescending(t => t.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        return (items, totalCount);
+        return await PageTasksAsync(query, page, pageSize, ct, sortBy, sortDescending).ConfigureAwait(false);
     }
 
     public async Task<(List<ServerTask> Items, int TotalCount)> GetTasksByStatusesPagedAsync(
@@ -55,11 +47,21 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         if (statuses.Count > 0)
             query = query.Where(t => statuses.Contains(t.Status));
 
-        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
+        return await PageTasksAsync(query, page, pageSize, ct).ConfigureAwait(false);
+    }
 
+    private static async Task<(List<ServerTask> Items, int TotalCount)> PageTasksAsync(
+        IQueryable<ServerTask> query,
+        int page,
+        int pageSize,
+        CancellationToken ct,
+        string? sortBy = null,
+        bool sortDescending = true)
+    {
+        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         var items = await query
             .Include(t => t.Server)
-            .OrderByDescending(t => t.CreatedAt)
+            .OrderByProperty(sortBy, sortDescending, t => t.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -78,12 +80,30 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         return await db.Tasks.FindAsync([id], ct).ConfigureAwait(false);
     }
 
+    public Task<string?> GetServerAgentVersionAsync(int serverId, CancellationToken ct = default) =>
+        db.Servers.AsNoTracking()
+            .Where(server => server.Id == serverId)
+            .Select(server => server.AgentVersion)
+            .SingleOrDefaultAsync(ct);
+
     public async Task<ServerStatus?> GetServerStatusAsync(int serverId, CancellationToken ct = default)
     {
         return await db.Servers.AsNoTracking()
             .Where(s => s.Id == serverId)
             .Select(s => (ServerStatus?)s.Status)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> IsServerTaskPollingActiveAsync(int serverId, CancellationToken ct = default)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        return await db.Servers.AsNoTracking()
+            .AnyAsync(
+                server => server.Id == serverId
+                    && server.Status == ServerStatus.Online
+                    && server.AgentSessionLeaseExpiresAt > now,
+                ct)
+            .ConfigureAwait(false);
     }
 
     public async Task<Dictionary<int, int>> GetServerIdsForTasksAsync(IReadOnlyCollection<int> taskIds, CancellationToken ct = default)
@@ -98,21 +118,67 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
     public async Task<List<ServerTask>> GetPendingTasksAsync(int serverId, CancellationToken ct = default)
     {
         return await db.Tasks
-            .Where(t => t.ServerId == serverId && t.Status == TaskExecutionStatus.Pending)
+            .Where(t => t.ServerId == serverId
+                && t.Status == TaskExecutionStatus.Pending
+                && (!t.Server.AgentUpdateReserved
+                    || t.Operation == OperationKind.AgentSelfUpdate
+                    || (t.Server.AgentUpdateReservedAt != null
+                        && t.CreatedAt <= t.Server.AgentUpdateReservedAt)))
             .OrderBy(t => t.CreatedAt)
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task<List<ServerTask>> ClaimPendingTasksAsync(int serverId, int? take = null, CancellationToken ct = default)
+    public async Task<List<ServerTask>> ClaimPendingTasksAsync(
+        int serverId,
+        int? take = null,
+        string? agentSessionId = null,
+        CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(agentSessionId))
+            return [];
+
+        var fencingToken = await _leases.AcquireAgentSessionLeaseAsync(serverId, agentSessionId, ct).ConfigureAwait(false);
+        if (!fencingToken.HasValue)
+            return [];
+
         // Claim Pending work only. An Assigned task may already be executing locally even if its
         // StartTask RPC has not reached the backend yet; redispatching it risks duplicate side effects.
         // TaskTimeoutService handles a claim that genuinely never starts.
         var candidates = await db.Tasks
             .Where(t => t.ServerId == serverId && t.Status == TaskExecutionStatus.Pending)
             .OrderBy(t => t.CreatedAt)
-            .Select(t => new { t.Id, t.Operation })
+            .Select(t => new { t.Id, t.Operation, t.CreatedAt })
             .ToListAsync(ct).ConfigureAwait(false);
+
+        var serverContract = await db.Servers.AsNoTracking()
+            .Where(server => server.Id == serverId)
+            .Select(server => new
+            {
+                server.AgentProtocolVersion,
+                server.AgentCapabilitiesJson,
+                server.AgentVersion,
+                server.ScannerCapabilitiesJson,
+                server.AgentUpdateReserved,
+                server.AgentUpdateReservedAt
+            })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (serverContract is null)
+            return [];
+
+        var protocolSupported = serverContract.AgentProtocolVersion is { } protocol
+            && AgentProtocol.IsSupported(protocol);
+        var declaredCapabilities = serverContract.AgentCapabilitiesJson ?? "[]";
+        var scannerManifestSha256 = ExtractScannerManifestSha256(serverContract.ScannerCapabilitiesJson);
+        candidates = candidates
+            .Where(candidate =>
+                candidate.Operation == OperationKind.AgentSelfUpdate
+                || (!serverContract.AgentUpdateReserved
+                    || (serverContract.AgentUpdateReservedAt is { } reservedAt
+                        && candidate.CreatedAt <= reservedAt))
+                    && (protocolSupported
+                    && AgentCapabilities.RequiredFor(candidate.Operation) is { } capability
+                    && declaredCapabilities.Contains($"\"{capability}\"", StringComparison.Ordinal)))
+            .ToList();
 
         // A self-update is exclusive and takes priority over normal work. Claiming it alongside an
         // older unsupported task lets that task reach the agent first and can wedge the very poller
@@ -133,10 +199,18 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
             var assignedAt = timeProvider.GetUtcNow().UtcDateTime;
             // Batch atomic compare-and-set: claim all candidates in a single round-trip.
             var updatedRows = await db.Tasks
-                .Where(t => candidateIds.Contains(t.Id) && t.Status == TaskExecutionStatus.Pending)
+                .Where(t => candidateIds.Contains(t.Id)
+                    && t.Status == TaskExecutionStatus.Pending
+                    && t.Server.AgentSessionId == agentSessionId
+                    && t.Server.AgentSessionFencingToken == fencingToken.Value
+                    && t.Server.AgentSessionLeaseExpiresAt > assignedAt)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(t => t.Status, TaskExecutionStatus.Assigned)
-                    .SetProperty(t => t.AssignedAt, assignedAt), ct)
+                    .SetProperty(t => t.AssignedAt, assignedAt)
+                    .SetProperty(t => t.AssignedAgentSessionId, agentSessionId)
+                    .SetProperty(t => t.AssignedAgentSessionFencingToken, fencingToken.Value)
+                    .SetProperty(t => t.AssignedAgentVersion, serverContract.AgentVersion)
+                    .SetProperty(t => t.AssignedScannerManifestSha256, scannerManifestSha256), ct)
                 .ConfigureAwait(false);
 
             if (updatedRows == 0)
@@ -152,6 +226,10 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
             {
                 task.Status = TaskExecutionStatus.Assigned;
                 task.AssignedAt = timeProvider.GetUtcNow().UtcDateTime;
+                task.AssignedAgentSessionId = agentSessionId;
+                task.AssignedAgentSessionFencingToken = fencingToken.Value;
+                task.AssignedAgentVersion = serverContract.AgentVersion;
+                task.AssignedScannerManifestSha256 = scannerManifestSha256;
             }
             if (tasks.Count > 0)
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -160,11 +238,85 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         }
 
         return await db.Tasks
-            .Where(t => candidateIds.Contains(t.Id) && t.Status == TaskExecutionStatus.Assigned)
+            .Where(t => candidateIds.Contains(t.Id)
+                && t.Status == TaskExecutionStatus.Assigned
+                && t.AssignedAgentSessionId == agentSessionId
+                && t.AssignedAgentSessionFencingToken == fencingToken.Value
+                && t.Server.AgentSessionId == agentSessionId
+                && t.Server.AgentSessionFencingToken == fencingToken.Value)
             .Include(t => t.PipelineStepRun)
+            .Include(t => t.PipelineRun)
+                .ThenInclude(run => run!.Pipeline)
+                    .ThenInclude(pipeline => pipeline.Project)
             .OrderBy(t => t.CreatedAt)
             .ToListAsync(ct).ConfigureAwait(false);
     }
+
+    internal static string? ExtractScannerManifestSha256(string? capabilitiesJson)
+    {
+        if (string.IsNullOrWhiteSpace(capabilitiesJson)) return null;
+        try
+        {
+            var values = JsonSerializer.Deserialize<string[]>(capabilitiesJson) ?? [];
+            const string prefix = "scanner-manifest:sha256:";
+            var value = values.FirstOrDefault(item => item.StartsWith(prefix, StringComparison.Ordinal));
+            var hash = value?[prefix.Length..];
+            return hash is { Length: 64 } && hash.All(Uri.IsHexDigit) ? hash.ToLowerInvariant() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public Task<bool> HasCurrentAgentLeaseAsync(
+        int taskId,
+        int serverId,
+        string agentSessionId,
+        long fencingToken,
+        CancellationToken ct = default) =>
+        _leases.HasCurrentAgentLeaseAsync(taskId, serverId, agentSessionId, fencingToken, ct);
+
+    public Task<bool> HaveCurrentAgentLeasesAsync(
+        IReadOnlyCollection<int> taskIds,
+        int serverId,
+        string agentSessionId,
+        long fencingToken,
+        CancellationToken ct = default) =>
+        _leases.HaveCurrentAgentLeasesAsync(taskIds, serverId, agentSessionId, fencingToken, ct);
+
+    public Task<bool> TryStartTaskWithLeaseAsync(
+        ServerTask task,
+        string agentSessionId,
+        long fencingToken,
+        DateTime startedAt,
+        CancellationToken ct = default) =>
+        _leases.TryStartTaskWithLeaseAsync(task, agentSessionId, fencingToken, startedAt, ct);
+
+    public Task<bool> TryReleaseAssignedTaskWithLeaseAsync(
+        ServerTask task,
+        string agentSessionId,
+        long fencingToken,
+        CancellationToken ct = default) =>
+        _leases.TryReleaseAssignedTaskWithLeaseAsync(task, agentSessionId, fencingToken, ct);
+
+    public Task<bool> TryStartTaskAsync(
+        ServerTask task,
+        DateTime startedAt,
+        CancellationToken ct = default) =>
+        _leases.TryStartTaskAsync(task, startedAt, ct);
+
+    public Task<bool> TryCompleteTaskWithLeaseAsync(
+        ServerTask task,
+        string agentSessionId,
+        long fencingToken,
+        TaskExecutionStatus status,
+        int exitCode,
+        DateTime completedAt,
+        string environmentVariables,
+        CancellationToken ct = default) =>
+        _leases.TryCompleteTaskWithLeaseAsync(
+            task, agentSessionId, fencingToken, status, exitCode, completedAt, environmentVariables, ct);
 
     public async Task<ServerTask> AddTaskAsync(ServerTask task, CancellationToken ct = default)
     {
@@ -195,22 +347,21 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
     public async Task<List<ServerTask>> GetStaleRunningTasksAsync(TimeSpan threshold, CancellationToken ct = default)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var cutoff = now - threshold;
-        var candidates = await db.Tasks
-            .Where(t => t.Status == TaskExecutionStatus.Running && t.StartedAt < cutoff)
-            .ToListAsync(ct).ConfigureAwait(false);
+        var fallbackCutoff = now - threshold;
 
-        // The configured threshold is the safety-net minimum, not a ceiling for legitimate long tasks.
-        // Pipeline steps carry their own timeout and the agent is allowed to run for that duration. Filter
-        // the small set of globally-old Running tasks in memory so provider-specific date arithmetic is not
-        // required and the watchdog cannot pre-empt a task whose declared timeout is longer than the global
-        // fallback.
-        return candidates
-            .Where(task => task.StartedAt.HasValue
-                && now - task.StartedAt.Value > Max(threshold, TimeSpan.FromSeconds(Math.Max(0, task.TimeoutSeconds))))
-            .ToList();
-
-        static TimeSpan Max(TimeSpan left, TimeSpan right) => left >= right ? left : right;
+        // Keep timeout evaluation in SQL and cap every watchdog sweep. Explicit per-task budgets
+        // remain authoritative; only legacy rows without a positive timeout use the global fallback.
+        return await db.Tasks
+            .Where(task => task.Status == TaskExecutionStatus.Running
+                && task.StartedAt != null
+                && ((task.TimeoutSeconds > 0
+                        && task.StartedAt.Value.AddSeconds(task.TimeoutSeconds) < now)
+                    || (task.TimeoutSeconds <= 0 && task.StartedAt.Value < fallbackCutoff)))
+            .OrderBy(task => task.StartedAt)
+            .ThenBy(task => task.Id)
+            .Take(1000)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
     }
 
     public async Task<List<ServerTask>> GetStaleAssignedTasksAsync(TimeSpan threshold, CancellationToken ct = default)
@@ -224,22 +375,57 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
 
     public async Task<List<ServerTask>> GetStalePendingTasksAsync(TimeSpan threshold, CancellationToken ct = default)
     {
-        // Pending tasks an agent never claimed (offline/crashed before polling) - they never reach
-        // Assigned/Running, so the other sweeps miss them and they stay in-flight forever.
-        var cutoff = timeProvider.GetUtcNow().UtcDateTime - threshold;
+        // Heartbeat liveness and task-poller liveness are independent. A runner that still sends
+        // monitoring heartbeats but no longer calls /tasks/claim must not keep its queue forever.
+        // AcquireAgentSessionLeaseAsync renews this dedicated polling lease on every claim request,
+        // including empty polls, so an active busy runner retains its queued work.
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var cutoff = now - threshold;
         return await db.Tasks
-            .Where(t => t.Status == TaskExecutionStatus.Pending && t.CreatedAt < cutoff)
+            .Where(t => t.Status == TaskExecutionStatus.Pending
+                && !t.IsDeferredCleanup
+                && t.CreatedAt < cutoff
+                && db.Servers.Any(server =>
+                    server.Id == t.ServerId
+                    && (server.Status != ServerStatus.Online
+                        || server.AgentSessionLeaseExpiresAt == null
+                        || server.AgentSessionLeaseExpiresAt <= now)))
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task<int> DeleteCompletedTasksOlderThanAsync(DateTime cutoff, CancellationToken ct = default)
+    public async Task<List<ServerTask>> GetTasksFromSupersededAgentSessionsAsync(CancellationToken ct = default)
     {
-        // Terminal tasks that are NOT linked to a still-present run (PipelineRunId == null): either
-        // standalone ops (service/cron/package) or pipeline tasks whose run was already purged
-        // (the run FK is SetNull on delete, so a purged run orphans its tasks). A pipeline task
-        // still pointing at a live run is KEPT - the run-detail view sources each step's Command
-        // from step.Task.Command and its logs cascade from the task, so purging by task-age alone
-        // would blank the Command + logs of a run still inside its own retention window.
+        return await db.Tasks
+            .Where(task =>
+                (task.Status == TaskExecutionStatus.Assigned || task.Status == TaskExecutionStatus.Running)
+                // Replacing the agent session is the expected completion path for self-update.
+                // AgentUpdateRepository owns that task until the new heartbeat confirms the
+                // requested release or its dedicated confirmation deadline expires.
+                && task.Operation != OperationKind.AgentSelfUpdate
+                && task.AssignedAgentSessionId != null
+                // Supersession is a REPLACED session, nothing else - that is the only conclusive
+                // evidence the claiming process is gone. A lease that merely lapsed while its own
+                // session is still the one on the server proves nothing: the agent may be mid-build
+                // with its poll loop starved, and parking its running task there is what killed
+                // BuildPayloads on a runner shared by two pipelines. An agent that lapses and never
+                // returns is still settled, by the Running/Assigned timeouts and the offline parking.
+                && (task.Server.AgentSessionId == null
+                    || task.AssignedAgentSessionId != task.Server.AgentSessionId
+                    || task.AssignedAgentSessionFencingToken != task.Server.AgentSessionFencingToken))
+            .OrderBy(task => task.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<int> DeleteCompletedTasksOlderThanAsync(
+        DateTime taskCutoff,
+        DateTime pipelineRunCutoff,
+        CancellationToken ct = default)
+    {
+        // Standalone terminal tasks follow TaskDays directly. Pipeline tasks are deleted only when
+        // both their own completion and the parent run are outside their respective retention
+        // windows. This bounds the Tasks table even when an expired run remains temporarily
+        // present (for example while deferred cleanup is pending), without blanking a retained run.
         // Set-based on relational (the table grows forever otherwise); InMemory fallback for tests.
         var terminalStatuses = new[]
         {
@@ -250,12 +436,18 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         if (db.Database.IsRelational())
         {
             return await db.Tasks
-                .Where(t => t.PipelineRunId == null && terminalStatuses.Contains(t.Status) && t.CompletedAt != null && t.CompletedAt < cutoff)
+                .Where(t => terminalStatuses.Contains(t.Status)
+                    && t.CompletedAt != null
+                    && t.CompletedAt < taskCutoff
+                    && (t.PipelineRunId == null || t.PipelineRun!.StartedAt < pipelineRunCutoff))
                 .ExecuteDeleteAsync(ct).ConfigureAwait(false);
         }
 
         var old = await db.Tasks
-            .Where(t => t.PipelineRunId == null && terminalStatuses.Contains(t.Status) && t.CompletedAt != null && t.CompletedAt < cutoff)
+            .Where(t => terminalStatuses.Contains(t.Status)
+                && t.CompletedAt != null
+                && t.CompletedAt < taskCutoff
+                && (t.PipelineRunId == null || t.PipelineRun!.StartedAt < pipelineRunCutoff))
             .ToListAsync(ct).ConfigureAwait(false);
         db.Tasks.RemoveRange(old);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

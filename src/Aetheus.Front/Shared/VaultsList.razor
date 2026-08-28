@@ -38,7 +38,15 @@ else
     RowClick="@(v => Nav.NavigateTo($"/vaults/{v.Id}"))"
     EmptyText="@L["NoVaultsFound"]" FullHeight="@IsGlobal">
     <EmptyTemplate>
-        <EmptyState Icon="lock" Title="@L["NoVaultsFound"]" Description="@L["EmptyVaultsHint"]" />
+        <EmptyState Icon="lock" Title="@L["NoVaultsFound"]" Description="@L["EmptyVaultsHint"]">
+            <ActionContent>
+                @if (_canWrite && (IsGlobal || IsProjectScope))
+                {
+                    <RadzenButton Text="@L["NewVault"]" Icon="add" Click="@NewVault"
+                        ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                }
+            </ActionContent>
+        </EmptyState>
     </EmptyTemplate>
     <Columns>
         <RadzenDataGridColumn TItem="VaultDto" Property="Name" Title="@L["Name"]" MinWidth="10rem">

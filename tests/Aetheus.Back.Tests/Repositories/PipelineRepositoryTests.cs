@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +21,12 @@ public class PipelineRepositoryTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _db = new AppDbContext(options);
-        _repo = new PipelineRepository(_db, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<Aetheus.Back.Components.Pipelines.PipelineRepository>.Instance);
+        _repo = new PipelineRepository(
+            _db,
+            TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Aetheus.Back.Components.Pipelines.PipelineRepository>.Instance,
+            new PipelineTaskLifecycleRepository(_db, TimeProvider.System),
+            new PipelineRunLineageRepository(_db));
     }
 
     public void Dispose() => _db.Dispose();
@@ -52,6 +59,56 @@ public class PipelineRepositoryTests : IDisposable
         var run = Assert.Single(runs);
         Assert.Equal("Allowed", run.PipelineName);
         Assert.Equal(PipelineStatus.Running, run.Status);
+    }
+
+    [Fact]
+    public async Task IsStepRetryEligibleAsync_TransientScannerDownloadFailure_IsRetryable()
+    {
+        var pipeline = new Pipeline { Name = "Security" };
+        _db.Pipelines.Add(pipeline);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun
+        {
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Running,
+            StartedAt = DateTime.UtcNow
+        };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var step = new PipelineStepRun
+        {
+            PipelineRunId = run.Id,
+            StageName = "SAST",
+            StepName = "OpenGrep"
+        };
+        _db.PipelineStepRuns.Add(step);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.Tasks.Add(new ServerTask
+        {
+            ServerId = 1,
+            Name = "OpenGrep",
+            Command = "opengrep",
+            Operation = OperationKind.PipelineRunScanner,
+            PipelineRunId = run.Id,
+            PipelineStepRunId = step.Id
+        });
+        _db.AnalysisReports.Add(new AnalysisReport
+        {
+            PipelineRunId = run.Id,
+            ScannerKey = "opengrep",
+            ScannerName = "OpenGrep",
+            ScannerVersion = "1.22.0",
+            Status = AnalysisReportStatus.Unavailable,
+            ErrorMessage = "Scanner runtime download failed because of a transient network error."
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var eligible = await _repo.IsStepRetryEligibleAsync(
+            run.Id,
+            step.Id,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(eligible);
     }
 
     [Fact]
@@ -450,6 +507,45 @@ public class PipelineRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdatePipelineRunStatusAsync_FailedArtifactCollection_CannotBeRequalifiedAsSuccess()
+    {
+        var pipeline = new Pipeline { Name = "P" };
+        var server = new Server { Name = "linux-01" };
+        _db.Pipelines.Add(pipeline);
+        _db.Servers.Add(server);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Running };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.Add(new PipelineStepRun
+        {
+            PipelineRunId = run.Id,
+            StageName = "ApplicationPayload",
+            StepName = "Verify deploy payload completeness",
+            Status = TaskExecutionStatus.Success
+        });
+        _db.Tasks.Add(new ServerTask
+        {
+            ServerId = server.Id,
+            PipelineRunId = run.Id,
+            Name = "Collect Artifacts (ApplicationPayload)",
+            Command = "[]",
+            Operation = OperationKind.PipelineCollectArtifacts,
+            Status = TaskExecutionStatus.Failed
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await _repo.UpdatePipelineRunStatusAsync(
+            run.Id,
+            PipelineStatus.Failed,
+            TestContext.Current.CancellationToken);
+
+        var updated = await _db.PipelineRuns.FindAsync([run.Id], TestContext.Current.CancellationToken);
+        Assert.Equal(PipelineStatus.Failed, updated!.Status);
+        Assert.NotNull(updated.CompletedAt);
+    }
+
+    [Fact]
     public async Task UpdatePipelineRunStatusAsync_DoesNothing_WhenRunNotFound()
     {
         await _repo.UpdatePipelineRunStatusAsync(999, PipelineStatus.Failed, ct: TestContext.Current.CancellationToken);
@@ -471,6 +567,82 @@ public class PipelineRepositoryTests : IDisposable
         Assert.Equal(3, templates.Count);
         Assert.Equal("Build", templates[0].Category);
         Assert.Equal("A", templates[0].Name);
+    }
+
+    [Fact]
+    public async Task GetTemplateSummariesAsync_AggregatesPipelinesAndLatestRunWithinOrganization()
+    {
+        var updatedAt = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+        _db.PipelineTemplates.AddRange(
+            new PipelineTemplate
+            {
+                Name = "shared-ci",
+                Category = "CI",
+                OrganizationId = 1,
+                LatestVersion = 4,
+                UpdatedAt = updatedAt
+            },
+            new PipelineTemplate
+            {
+                Name = "shared-ci",
+                Category = "CI",
+                OrganizationId = 2,
+                LatestVersion = 1,
+                UpdatedAt = updatedAt.AddDays(-1)
+            });
+        var organizationOneProject = new Project { Name = "First", OrganizationId = 1 };
+        var organizationTwoProject = new Project { Name = "Second", OrganizationId = 2 };
+        var usedOne = new Pipeline
+        {
+            Name = "Pipeline A",
+            TemplateReferenceName = "shared-ci",
+            Project = organizationOneProject
+        };
+        var usedTwo = new Pipeline
+        {
+            Name = "Pipeline B",
+            TemplateReferenceName = "SHARED-CI",
+            Project = organizationOneProject
+        };
+        var otherOrganization = new Pipeline
+        {
+            Name = "Pipeline C",
+            TemplateReferenceName = "shared-ci",
+            Project = organizationTwoProject
+        };
+        var unrelated = new Pipeline
+        {
+            Name = "Pipeline D",
+            TemplateReferenceName = "another-template",
+            Project = organizationOneProject
+        };
+        _db.Pipelines.AddRange(usedOne, usedTwo, otherOrganization, unrelated);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var persistedUpdatedAt = await _db.PipelineTemplates
+            .Where(template => template.OrganizationId == 1)
+            .Select(template => template.UpdatedAt)
+            .SingleAsync(TestContext.Current.CancellationToken);
+
+        var olderRun = new DateTime(2026, 8, 9, 8, 0, 0, DateTimeKind.Utc);
+        var newestRun = new DateTime(2026, 8, 10, 11, 0, 0, DateTimeKind.Utc);
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { PipelineId = usedOne.Id, StartedAt = olderRun },
+            new PipelineRun { PipelineId = usedTwo.Id, StartedAt = newestRun },
+            new PipelineRun { PipelineId = otherOrganization.Id, StartedAt = newestRun.AddHours(2) },
+            new PipelineRun { PipelineId = unrelated.Id, StartedAt = newestRun.AddHours(3) });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var summaries = await _repo.GetTemplateSummariesAsync(TestContext.Current.CancellationToken);
+
+        var organizationOne = summaries.Single(summary => summary.OrganizationId == 1);
+        Assert.Equal(4, organizationOne.Version);
+        Assert.Equal(persistedUpdatedAt, organizationOne.UpdatedAt);
+        Assert.Equal(2, organizationOne.PipelineCount);
+        Assert.Equal(newestRun, organizationOne.LatestRunAt);
+
+        var organizationTwo = summaries.Single(summary => summary.OrganizationId == 2);
+        Assert.Equal(1, organizationTwo.PipelineCount);
+        Assert.Equal(newestRun.AddHours(2), organizationTwo.LatestRunAt);
     }
 
     [Fact]
@@ -566,10 +738,10 @@ public class PipelineRepositoryTests : IDisposable
         Assert.Equal(0, await _db.PipelineTemplates.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
-    // --- CancelPendingStepRunsAsync ---
+    // --- CancelActiveStepRunsAndTasksAsync ---
 
     [Fact]
-    public async Task CancelPendingStepRunsAsync_CancelsPendingAndAssigned()
+    public async Task CancelActiveStepRunsAndTasksAsync_CancelsAllNonTerminalWork()
     {
         var pipeline = new Pipeline { Name = "P" };
         _db.Pipelines.Add(pipeline);
@@ -580,14 +752,112 @@ public class PipelineRepositoryTests : IDisposable
         _db.PipelineStepRuns.AddRange(
             new PipelineStepRun { PipelineRunId = run.Id, StageName = "s", StepName = "a", Order = 1, Status = TaskExecutionStatus.Pending },
             new PipelineStepRun { PipelineRunId = run.Id, StageName = "s", StepName = "b", Order = 2, Status = TaskExecutionStatus.Assigned },
-            new PipelineStepRun { PipelineRunId = run.Id, StageName = "s", StepName = "c", Order = 3, Status = TaskExecutionStatus.Success });
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = "s", StepName = "c", Order = 3, Status = TaskExecutionStatus.Running },
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = "s", StepName = "d", Order = 4, Status = TaskExecutionStatus.Success });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.Tasks.AddRange(
+            new ServerTask
+            {
+                ServerId = 1,
+                Name = "pending",
+                Command = "pending",
+                PipelineRunId = run.Id,
+                Status = TaskExecutionStatus.Pending,
+                EnvironmentVariables = "encrypted-pending"
+            },
+            new ServerTask
+            {
+                ServerId = 1,
+                Name = "assigned",
+                Command = "assigned",
+                PipelineRunId = run.Id,
+                Status = TaskExecutionStatus.Assigned,
+                EnvironmentVariables = "encrypted-assigned"
+            },
+            new ServerTask
+            {
+                ServerId = 1,
+                Name = "running",
+                Command = "running",
+                PipelineRunId = run.Id,
+                Status = TaskExecutionStatus.Running,
+                EnvironmentVariables = "encrypted-running"
+            },
+            new ServerTask
+            {
+                ServerId = 1,
+                Name = "success",
+                Command = "success",
+                PipelineRunId = run.Id,
+                Status = TaskExecutionStatus.Success,
+                EnvironmentVariables = "{}"
+            });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.CancelPendingStepRunsAsync(run.Id, ct: TestContext.Current.CancellationToken);
+        await _repo.CancelActiveStepRunsAndTasksAsync(run.Id, ct: TestContext.Current.CancellationToken);
 
         var steps = await _db.PipelineStepRuns.Where(s => s.PipelineRunId == run.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(2, steps.Count(s => s.Status == TaskExecutionStatus.Cancelled));
+        Assert.Equal(3, steps.Count(s => s.Status == TaskExecutionStatus.Cancelled));
         Assert.Equal(1, steps.Count(s => s.Status == TaskExecutionStatus.Success));
+        Assert.All(steps.Where(s => s.Status == TaskExecutionStatus.Cancelled), step => Assert.NotNull(step.CompletedAt));
+
+        var tasks = await _db.Tasks.Where(t => t.PipelineRunId == run.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(3, tasks.Count(t => t.Status == TaskExecutionStatus.Cancelled));
+        Assert.Equal(1, tasks.Count(t => t.Status == TaskExecutionStatus.Success));
+        Assert.All(tasks.Where(t => t.Status == TaskExecutionStatus.Cancelled), task =>
+        {
+            Assert.NotNull(task.CompletedAt);
+            Assert.Equal("{}", task.EnvironmentVariables);
+        });
+    }
+
+    [Fact]
+    public async Task GetTaskQueuePositionsAsync_UsesLivePerRunnerOrder()
+    {
+        var createdAt = new DateTime(2026, 8, 3, 10, 0, 0, DateTimeKind.Utc);
+        var first = new ServerTask
+        {
+            ServerId = 7,
+            Name = "first",
+            Command = "first",
+            Status = TaskExecutionStatus.Pending,
+            CreatedAt = createdAt
+        };
+        var second = new ServerTask
+        {
+            ServerId = 7,
+            Name = "second",
+            Command = "second",
+            Status = TaskExecutionStatus.Assigned,
+            CreatedAt = createdAt.AddSeconds(1)
+        };
+        var completed = new ServerTask
+        {
+            ServerId = 7,
+            Name = "completed",
+            Command = "completed",
+            Status = TaskExecutionStatus.Success,
+            CreatedAt = createdAt.AddSeconds(-1)
+        };
+        var otherRunner = new ServerTask
+        {
+            ServerId = 8,
+            Name = "other",
+            Command = "other",
+            Status = TaskExecutionStatus.Pending,
+            CreatedAt = createdAt.AddSeconds(-2)
+        };
+        _db.Tasks.AddRange(first, second, completed, otherRunner);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var positions = await _repo.GetTaskQueuePositionsAsync(
+            [first.Id, second.Id, completed.Id, otherRunner.Id],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TaskQueuePosition(1, 2), positions[first.Id]);
+        Assert.Equal(new TaskQueuePosition(2, 2), positions[second.Id]);
+        Assert.False(positions.ContainsKey(completed.Id));
+        Assert.Equal(new TaskQueuePosition(1, 1), positions[otherRunner.Id]);
     }
 
     // --- Artifact operations ---
@@ -718,6 +988,37 @@ public class PipelineRepositoryTests : IDisposable
 
         var deleted = await _repo.DeleteRunsOlderThanAsync(DateTime.UtcNow.AddDays(-7), ct: TestContext.Current.CancellationToken);
         Assert.Equal(0, deleted);
+    }
+
+    [Fact]
+    public async Task DeleteRunsOlderThanAsync_PreservesRunWithPendingDeferredCleanup()
+    {
+        var server = new Server { Name = "offline", Hostname = "offline", Status = ServerStatus.Offline };
+        var pipeline = new Pipeline { Name = "P" };
+        var run = new PipelineRun
+        {
+            Pipeline = pipeline,
+            StartedAt = DateTime.UtcNow.AddDays(-31)
+        };
+        run.Tasks.Add(new ServerTask
+        {
+            Server = server,
+            Name = "deferred cleanup",
+            Command = "cleanup",
+            Status = TaskExecutionStatus.Pending,
+            IsDeferredCleanup = true,
+            CreatedAt = DateTime.UtcNow.AddDays(-31)
+        });
+        _db.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var deleted = await _repo.DeleteRunsOlderThanAsync(
+            DateTime.UtcNow.AddDays(-7),
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, deleted);
+        Assert.Equal(1, await _db.PipelineRuns.CountAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
     }
 
     // --- Webhook / Scheduled queries ---
@@ -866,7 +1167,15 @@ public class PipelineRepositoryTests : IDisposable
         _db.AgentPools.Add(pool);
         // Item #11: PipelineRunnerEnabled is secure-by-default OFF. Tests asserting that a
         // matching online server IS returned must explicitly opt the server in.
-        var server = new Server { Name = "srv", Hostname = "h", Status = ServerStatus.Online, PipelineRunnerEnabled = true };
+        var server = new Server
+        {
+            Name = "srv",
+            Hostname = "h",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilitiesJson = "[\"pipeline.build\"]"
+        };
         _db.Servers.Add(server);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -898,7 +1207,15 @@ public class PipelineRepositoryTests : IDisposable
         var env = new Data.Entities.Environment { Name = "prod" };
         _db.Environments.Add(env);
         // Item #11: opt-in PipelineRunnerEnabled for the matching-server test case.
-        var server = new Server { Name = "srv", Hostname = "h", Status = ServerStatus.Online, PipelineRunnerEnabled = true };
+        var server = new Server
+        {
+            Name = "srv",
+            Hostname = "h",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilitiesJson = "[\"pipeline.build\"]"
+        };
         _db.Servers.Add(server);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 

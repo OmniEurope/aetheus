@@ -1,6 +1,6 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 
-<RadzenTemplateForm TItem="CreateOrganizationRequest" Data="_model" Submit="@((CreateOrganizationRequest _) => OnSubmit())">
+<RadzenTemplateForm TItem="OrganizationFormModel" Data="_model" Submit="@((OrganizationFormModel _) => OnSubmit())">
     <LocalizedDataAnnotationsValidator />
     <RadzenStack Gap="1rem">
         <RadzenFormField Text="@L["Name"]" Variant="Variant.Filled">

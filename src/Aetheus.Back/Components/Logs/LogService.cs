@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Logs;
@@ -13,14 +11,7 @@ public class LogService(ILogRepository repo, IHubContext<LogHub> logHub, ISecret
     {
         var boundedMaxLines = maxLines.HasValue ? Math.Clamp(maxLines.Value, 1, 20000) : (int?)null;
         var logs = await repo.GetTaskLogsAsync(taskId, boundedMaxLines, ct).ConfigureAwait(false);
-        return logs.Select(l => new TaskLogDto
-        {
-            Id = l.Id,
-            TaskId = l.TaskId,
-            Level = l.Level,
-            Message = l.Message,
-            Timestamp = l.Timestamp
-        }).ToList();
+        return MapLogs(logs, static log => log.Message);
     }
 
     public Task<List<string>> GetTaskOutputVariableLinesAsync(int taskId, CancellationToken ct = default) =>
@@ -30,17 +21,22 @@ public class LogService(ILogRepository repo, IHubContext<LogHub> logHub, ISecret
     {
         var boundedMaxLines = maxLines.HasValue ? Math.Clamp(maxLines.Value, 1, 20000) : (int?)null;
         var logs = await repo.GetTaskLogsAsync(taskId, boundedMaxLines, ct).ConfigureAwait(false);
-        return logs.Select(l => new TaskLogDto
-        {
-            Id = l.Id,
-            TaskId = l.TaskId,
-            Level = l.Level,
-            Message = string.IsNullOrEmpty(l.OriginalMessage)
-                ? l.Message
-                : encryption.DecryptValue(l.OriginalMessage),
-            Timestamp = l.Timestamp
-        }).ToList();
+        return MapLogs(logs, log => string.IsNullOrEmpty(log.OriginalMessage)
+            ? log.Message
+            : encryption.DecryptValue(log.OriginalMessage));
     }
+
+    private static List<TaskLogDto> MapLogs(
+        IEnumerable<TaskLog> logs,
+        Func<TaskLog, string> getMessage) =>
+        logs.Select(log => new TaskLogDto
+        {
+            Id = log.Id,
+            TaskId = log.TaskId,
+            Level = log.Level,
+            Message = getMessage(log),
+            Timestamp = log.Timestamp
+        }).ToList();
 
     public async Task AppendLogAsync(AppendLogRequest request, CancellationToken ct = default)
     {

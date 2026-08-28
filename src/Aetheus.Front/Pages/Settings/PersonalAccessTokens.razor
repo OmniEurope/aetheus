@@ -28,7 +28,9 @@
         <DataAnnotationsValidator />
         <RadzenStack Orientation="Orientation.Horizontal" Wrap="FlexWrap.Wrap" AlignItems="AlignItems.End" Gap="1rem">
             <RadzenFormField Text="@L["PatName"]" Variant="Variant.Outlined">
-                <RadzenTextBox @bind-Value="_form.Name" Name="Name" MaxLength="64" />
+                <RadzenTextBox @bind-Value="_form.Name"
+                    @oninput="@(e => _form.Name = e.Value?.ToString() ?? string.Empty)"
+                    Name="Name" MaxLength="64" />
                 <ValidationMessage For="@(() => _form.Name)" />
             </RadzenFormField>
             <RadzenFormField Text="@L["PatScope"]" Variant="Variant.Outlined">
@@ -37,17 +39,17 @@
                 </RadzenDropDown>
             </RadzenFormField>
             <RadzenFormField Text="@L["PatExpirationDays"]" Variant="Variant.Outlined">
-                <RadzenNumeric TValue="int" @bind-Value="_form.ExpirationDays" Min="1" Max="365" />
+                <RadzenNumeric TValue="int" @bind-Value="_form.ExpirationDays" Min="1" Max="90" />
             </RadzenFormField>
             <RadzenButton ButtonType="ButtonType.Submit" Text="@L["PatCreate"]" Icon="add" Busy="@_creating" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
         </RadzenStack>
     </RadzenTemplateForm>
 </RadzenCard>
 
-<RadzenDataGrid @ref="_grid" Data="@_tokens" Count="@_totalCount" TItem="PersonalAccessTokenDto"
-    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="true" PageSize="25"
+<RadzenDataGrid Responsive="false" @ref="_grid" Data="@_tokens" Count="@_totalCount" TItem="PersonalAccessTokenDto"
+    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
     AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-    Density="Density.Compact" class="aetheus-grid-fullheight">
+    Density="Density.Compact" class="aetheus-grid-fullheight" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
     <EmptyTemplate>
         <EmptyState Icon="key_off" Title="@L["PatEmptyTitle"]" Description="@L["PatEmptyDescription"]" />
     </EmptyTemplate>

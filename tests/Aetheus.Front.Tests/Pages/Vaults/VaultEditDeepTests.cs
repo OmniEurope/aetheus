@@ -221,7 +221,7 @@ public class VaultEditDeepTests : BunitContext
     // ── AddSecret - empty key does nothing ──────────────────────────────────
 
     [Fact]
-    public async Task AddSecret_EmptyKey_DoesNothing()
+    public async Task AddSecret_EmptyKey_LeavesTheValueUnchanged()
     {
         SetupProjects();
         SetupVault(1);

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Net.Sockets;
-using Aetheus.Back.Components.Shared;
-using Aetheus.Back.Data;
-using Aetheus.Back.Services;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -14,8 +11,13 @@ public static class PipelinesModuleExtensions
     public static IServiceCollection AddPipelinesModule(this IServiceCollection services)
     {
         services.AddScoped<IPipelineRepository, PipelineRepository>();
+        services.AddScoped<IPipelineRunLineageReader, PipelineRunLineageRepository>();
+        services.AddScoped<IPipelineFavoriteRepository, PipelineFavoriteRepository>();
+        services.AddScoped<IPipelineFavoriteService, PipelineFavoriteService>();
         services.AddScoped<IPipelineGitService, PipelineGitService>();
         services.AddScoped<DemoContentSeeder>();
+        services.AddScoped<TotoConformanceSeeder>();
+        services.AddScoped<DeliveryPipelineTemplateSeeder>();
         services.AddScoped<IPipelineVariableResolver, PipelineVariableResolver>();
         services.AddScoped<IPipelineService, PipelineService>();
         services.AddScoped<IPipelineRunService, PipelineRunService>();
@@ -25,6 +27,30 @@ public static class PipelinesModuleExtensions
         services.AddScoped<IPipelineFleetRepository, PipelineFleetRepository>();
         services.AddScoped<IPipelineFleetService, PipelineFleetService>();
         services.AddScoped<IPipelineTemplateResolver, PipelineTemplateResolver>();
+        services.AddScoped<IPipelineEnvironmentCheckGuard, PipelineEnvironmentCheckGuard>();
+        services.AddScoped<IPipelineDispatchServerResolver, PipelineDispatchServerResolver>();
+        services.AddScoped<IPipelineStepTaskBuilder, PipelineStepTaskBuilder>();
+        services.AddScoped<IPipelineAnalysisTaskFactory, PipelineAnalysisTaskFactory>();
+        services.AddScoped<IPipelineDeploymentTaskFactory, PipelineDeploymentTaskFactory>();
+        services.AddScoped<IPipelineHostOperationTaskFactory, PipelineHostOperationTaskFactory>();
+        services.AddScoped<IPipelineArtifactTaskFactory, PipelineArtifactTaskFactory>();
+        services.AddScoped<IPipelineScannerTaskFactory, PipelineScannerTaskFactory>();
+        services.AddScoped<IPipelineRunFinalizer, PipelineRunFinalizer>();
+        services.AddScoped<IPipelineRunParameterResolver, PipelineRunParameterResolver>();
+        services.AddScoped<IPipelineCheckpointReuseService, PipelineCheckpointReuseService>();
+        services.AddScoped<IPipelineRunPreparationService, PipelineRunPreparationService>();
+        services.AddScoped<IPipelineRunPreflightService, PipelineRunPreflightService>();
+        services.AddScoped<IPipelineRunDefinitionParser, PipelineRunDefinitionParser>();
+        services.AddScoped<IPipelineRunControlService, PipelineRunControlService>();
+        services.AddScoped<IPipelineSystemTaskFactory, PipelineSystemTaskFactory>();
+        services.AddScoped<IPipelineTriggerStepCoordinator, PipelineTriggerStepCoordinator>();
+        services.AddScoped<IPipelineStepTaskDispatcher, PipelineStepTaskDispatcher>();
+        services.AddScoped<IPipelineRunReader, PipelineRunReader>();
+        services.AddScoped<IPipelineStageDispatchPlanner, PipelineStageDispatchPlanner>();
+        services.AddScoped<IPipelineRunScheduler, PipelineRunScheduler>();
+        // Launcher -> scheduler is an injected edge; scheduler -> launcher travels as a method
+        // parameter (IPipelineChildRunLauncher), so the recursion closes without a DI cycle.
+        services.AddScoped<IPipelineRunLauncher, PipelineRunLauncher>();
         services.AddScoped<IPipelineTemplateService, PipelineTemplateService>();
         services.AddScoped<IPipelineWebhookService, PipelineWebhookService>();
         services.AddSingleton<IPostgresLeaderLease, PostgresLeaderLease>();
@@ -32,7 +58,21 @@ public static class PipelinesModuleExtensions
         services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineRunCompletedEvent>, PipelineRunCompletedDownstreamHandler>();
         // Orchestration: complete a waiting `type: trigger` step when its child run finishes.
         services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineRunCompletedEvent>, PipelineRunCompletedTriggerHandler>();
-        // SSRF hardening: the string-level IsSafeOutboundUrl guard in PipelineRunService can be
+        // Git announces a push; this module decides what it means for pipelines. Observer dispatch:
+        // a push already written to disk must not be reported as failed because a trigger did not fire.
+        services.AddScoped<
+            Services.DomainEvents.IDomainEventHandler<Git.Events.GitPushProcessedEvent>,
+            GitPushPipelineTriggerHandler>();
+        // Orchestration, inverted: Tasks announces that a pipeline-owned task settled, and this side
+        // decides what the run does next. Both are dispatched strictly, so a failure here reaches the
+        // Tasks caller exactly as the direct call it replaced did.
+        services.AddScoped<
+            Services.DomainEvents.IDomainEventHandler<Tasks.Events.PipelineStepTaskCompletedEvent>,
+            PipelineStepTaskCompletedHandler>();
+        services.AddScoped<
+            Services.DomainEvents.IDomainEventHandler<Tasks.Events.PipelineStepTaskMetricsCollectedEvent>,
+            PipelineStepTaskMetricsHandler>();
+        // SSRF hardening: the string-level IsSafeOutboundUrl guard in PipelineEnvironmentCheckGuard can be
         // bypassed by DNS-rebinding (TOCTOU between the check and the request). Re-validate the
         // resolved IP at connect time via SocketsHttpHandler.ConnectCallback, mirroring the
         // "webhooks" client, so a short-TTL host that resolves to a forbidden address is rejected.

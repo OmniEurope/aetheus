@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -11,23 +9,7 @@ public class PipelineArtifactService(IPipelineRepository repo, TimeProvider time
     public async Task<List<PipelineArtifactDto>> GetArtifactsAsync(int runId, CancellationToken ct = default)
     {
         var artifacts = await repo.GetArtifactsAsync(runId, ct).ConfigureAwait(false);
-        return artifacts.Select(a => new PipelineArtifactDto
-        {
-            Id = a.Id,
-            PipelineRunId = a.PipelineRunId,
-            PipelineId = a.PipelineId,
-            ProjectId = a.ProjectId,
-            Name = a.Name,
-            FilePath = a.FilePath,
-            SizeBytes = a.SizeBytes,
-            Sha256 = a.Sha256,
-            StageName = a.StageName,
-            StepName = a.StepName,
-            CreatedAt = a.CreatedAt,
-            RetentionPolicy = a.RetentionPolicy,
-            RetentionExpiresAt = a.RetentionExpiresAt,
-            EnvironmentName = a.EnvironmentName
-        }).ToList();
+        return artifacts.Select(PipelineArtifactMapper.ToStandaloneDto).ToList();
     }
 
     public async Task<PipelineArtifactDto?> PublishArtifactAsync(int runId, PublishArtifactRequest request, CancellationToken ct = default)

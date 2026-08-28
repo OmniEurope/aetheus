@@ -1,80 +1,563 @@
-# =============================================================================
-# toto-qa - runtime QA for the local Toto pipeline harness
-# =============================================================================
-# Toto intentionally contains its unit suite under tests/ but no separate
-# qa-tests or Playwright project. CI owns the unit suite; this pipeline proves
-# the actual container image starts and serves its API on an isolated QA port.
-# It always tears the stack down and fails honestly if the runtime probe failed.
+# One disposable QA lifecycle: V-1 -> V -> dynamic checks -> V-1 rollback -> teardown.
 name: toto-qa
 trigger: manual
 variables:
-  QA_PORT: "8091"
+  TOTO_QA_PORT: "$(BUILD_RUN_PORT)"
+  TOTO_DAST_ENABLED: "true"
+  TOTO_DAST_TARGET_URL: "http://127.0.0.1:$(TOTO_QA_PORT)"
+  TOTO_CONFORMANCE_FAIL_AFTER_DEPLOY: "false"
+  TOTO_CONFORMANCE_HOLD_SECONDS: "0"
 
 stages:
-  - name: DeployQA
-    os: linux
+  - name: RestoreCurrent
     group: QA
-    environment: QA
+    execution_role: build
+    os: linux
+    environment: qa
     steps:
-      - name: Build image and start QA stack
-        checkout: true
+      - name: Restore exact V artifact
+        type: restore-artifacts
+        artifact: Package-artifacts
+        artifact_source_pipeline: toto-ci
+        timeout_seconds: 1200
+
+  - name: RestorePrevious
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [RestoreCurrent]
+    steps:
+      - name: Restore exact deployed V-1 artifact
+        type: restore-artifacts
+        release: current-deployed
+        target_directory: .previous
+        allow_missing: true
+        timeout_seconds: 1200
+
+  - name: Prepare
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [RestorePrevious]
+    steps:
+      - name: Verify provenance and prepare run-scoped environment
         working_directory: "$(WORKSPACE)"
-        timeout_seconds: 1800
         shell: |
           set -eu
-          QA_PROJ="toto-qa-${AETHEUS_RUN_ID:-manual}"
-          rm -f "$WORKSPACE/.qa-failed"
-          cleanup() { docker compose -p "$QA_PROJ" -f deploy/docker-compose.qa.yml down -v --remove-orphans || true; }
-          trap 'rc=$?; if [ $rc -ne 0 ]; then cleanup; fi' EXIT
-          docker build -f deploy/Dockerfile -t "toto-qa:${AETHEUS_RUN_ID:-current}" .
-          docker compose -p "$QA_PROJ" -f deploy/docker-compose.qa.yml up -d --wait
-
-  - name: Integration
-    os: linux
-    group: QA
-    environment: QA
-    depends_on:
-      - DeployQA
-    steps:
-      - name: Probe live Todo API
-        working_directory: "$(WORKSPACE)"
-        timeout_seconds: 120
-        continue_on_error: true
-        shell: |
-          set +e
-          if ! curl -fsS "http://127.0.0.1:$(QA_PORT)/api/todos" >/dev/null; then
-            echo "QA runtime probe failed."
-            touch "$WORKSPACE/.qa-failed"
+          RUN="${BUILD_BUILDID:-}"
+          case "$RUN" in ''|*[!0-9]*) echo "Invalid BUILD_BUILDID."; exit 1 ;; esac
+          CURRENT="$(tr -d '\r\n' < .pipeline-artifacts/source-commit)"
+          test "$CURRENT" = "${BUILD_SOURCEVERSION}" || {
+            echo "Current Toto artifact does not match the QA revision."
             exit 1
+          }
+          test "$(tr -d '\r\n' < .pipeline-artifacts/qa-rollback-contract)" = 1
+          PREVIOUS=""
+          BOOTSTRAP=1
+          if test -s .previous/.pipeline-artifacts/toto-image.tar; then
+            PREVIOUS="$(tr -d '\r\n' < .previous/.pipeline-artifacts/source-commit)"
+            test "$(tr -d '\r\n' < .previous/.pipeline-artifacts/qa-rollback-contract)" = 1
+            BOOTSTRAP=0
           fi
-          echo "QA runtime probe passed."
+          docker load -i .pipeline-artifacts/toto-image.tar
+          CURRENT_IMAGE="toto:qa-current-$RUN"
+          docker image tag "toto:$CURRENT" "$CURRENT_IMAGE"
+          if test "$BOOTSTRAP" = 0; then
+            docker load -i .previous/.pipeline-artifacts/toto-image.tar
+            PREVIOUS_IMAGE="toto:qa-previous-$RUN"
+            docker image tag "toto:$PREVIOUS" "$PREVIOUS_IMAGE"
+            printf '%s\n' "$PREVIOUS_IMAGE" > .qa-previous-image
+          fi
+          printf '%s\n' "$CURRENT_IMAGE" > .qa-current-image
+          printf '%s\n' "$CURRENT" > .qa-current
+          printf '%s\n' "$PREVIOUS" > .qa-previous
+          printf '%s\n' "$BOOTSTRAP" > .qa-bootstrap
+          printf '%s\n' "toto-qa-$RUN" > .qa-project
+          printf '%s\n' "$(openssl rand -hex 16)" > .qa-db-password
+          docker network inspect bridge \
+            --format '{{(index .IPAM.Config 0).Gateway}}' > .qa-bind-address
+          test -s .qa-bind-address
+          rm -f .qa-failed
+        timeout_seconds: 600
 
-  - name: TeardownQA
-    os: linux
+  - name: DeployPrevious
     group: QA
-    environment: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [Prepare]
+    steps:
+      - name: Deploy V-1 and create sentinel data
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          if test "$(cat .qa-bootstrap)" = 1; then
+            echo "Honest bootstrap mode: no deployed V-1 artifact exists yet."
+            exit 0
+          fi
+          export TOTO_IMAGE="$(cat .qa-previous-image)"
+          export TOTO_PORT="$(TOTO_QA_PORT)"
+          export TOTO_DB_PASSWORD="$(cat .qa-db-password)"
+          export TOTO_BIND_ADDRESS="$(cat .qa-bind-address)"
+          QA_PROJECT="$(cat .qa-project)"
+          docker compose -p "$QA_PROJECT" -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.qa-bridge.yml up -d --wait || {
+            touch .qa-failed
+            exit 1
+          }
+          curl -fsS -X POST -H "Content-Type: application/json" \
+            -d '{"title":"rollback sentinel"}' \
+            "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos" >/dev/null || {
+              touch .qa-failed
+              exit 1
+            }
+          curl -fsS "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos" \
+            | grep -q "rollback sentinel" || {
+              touch .qa-failed
+              exit 1
+            }
+        timeout_seconds: 1200
+
+  - name: DeployCurrent
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [DeployPrevious]
+    steps:
+      - name: Deploy V and apply forward-only migration
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          export TOTO_IMAGE="$(cat .qa-current-image)"
+          export TOTO_PORT="$(TOTO_QA_PORT)"
+          export TOTO_DB_PASSWORD="$(cat .qa-db-password)"
+          export TOTO_BIND_ADDRESS="$(cat .qa-bind-address)"
+          QA_PROJECT="$(cat .qa-project)"
+          docker compose -p "$QA_PROJECT" -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.qa-bridge.yml up -d --wait || {
+            touch .qa-failed
+            exit 1
+          }
+          READY_JSON="$(curl -fsS "http://127.0.0.1:$(TOTO_QA_PORT)/health/ready")" || {
+            touch .qa-failed
+            exit 1
+          }
+          case "$READY_JSON" in
+            *'"version":1'*) CURRENT_VERSION=1 ;;
+            *'"version":2'*) CURRENT_VERSION=2 ;;
+            *)
+              echo "The deployed Toto runtime did not report a supported version."
+              touch .qa-failed
+              exit 1
+              ;;
+          esac
+          printf '%s\n' "$CURRENT_VERSION" > .qa-current-version
+          docker compose -p "$QA_PROJECT" -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.qa-bridge.yml exec -T database \
+            psql -U toto -d toto -Atc \
+            "SELECT version FROM schema_versions ORDER BY version" > .qa-schema-v || {
+              touch .qa-failed
+              exit 1
+            }
+          EXPECTED_SCHEMA="$(cat .qa-current-version)"
+          grep -qx "$EXPECTED_SCHEMA" .qa-schema-v || {
+            echo "Expected schema version $EXPECTED_SCHEMA was not recorded."
+            touch .qa-failed
+            exit 1
+          }
+        timeout_seconds: 1200
+
+  - name: CancellationWindow
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [DeployCurrent]
+    condition: "ne(variables['TOTO_CONFORMANCE_HOLD_SECONDS'], '0')"
+    steps:
+      - name: Hold a bounded window for a real recursive cancellation request
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          SECONDS="$(TOTO_CONFORMANCE_HOLD_SECONDS)"
+          case "$SECONDS" in ''|*[!0-9]*) echo "Invalid cancellation window."; exit 1 ;; esac
+          test "$SECONDS" -le 300
+          sleep "$SECONDS"
+        timeout_seconds: 360
+
+  - name: FailureInjection
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    condition: "eq(variables['TOTO_CONFORMANCE_FAIL_AFTER_DEPLOY'], 'true')"
+    depends_on: [CancellationWindow]
+    steps:
+      - name: Inject an expected post-deploy conformance failure
+        shell: |
+          touch .qa-failed
+          echo "Expected Toto failure injected after V deployment." >&2
+          exit 42
+
+  - name: ValidateCurrent
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [FailureInjection]
+    steps:
+      - name: Run V integration checks and preserve data evidence
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          if test "$(cat .qa-bootstrap)" != 1; then
+            curl -fsS "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos" \
+              | grep -q "rollback sentinel" || {
+                touch .qa-failed
+                exit 1
+              }
+          else
+            echo "Bootstrap mode: no V-1 data sentinel exists yet."
+          fi
+          if test "$(cat .qa-current-version)" = 1; then
+            curl -fsS -X POST -H "Content-Type: application/json" \
+              -d '{"title":"created by v1"}' \
+              "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos" >/dev/null || {
+                touch .qa-failed
+                exit 1
+              }
+          else
+            curl -fsS -X POST -H "Content-Type: application/json" \
+              -d '{"title":"created by v2","priority":7}' \
+              "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos" >/dev/null || {
+                touch .qa-failed
+                exit 1
+              }
+          fi
+          CURRENT_JSON="$(curl -fsS "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos")"
+          if test "$(cat .qa-current-version)" = 1; then
+            printf '%s' "$CURRENT_JSON" | grep -q "created by v1" || {
+              touch .qa-failed
+              exit 1
+            }
+          else
+            printf '%s' "$CURRENT_JSON" | grep -q "created by v2"
+            printf '%s' "$CURRENT_JSON" | grep -q '"priority":7' || {
+              touch .qa-failed
+              exit 1
+            }
+          fi
+          # Only reachable once every assertion above held: any earlier exit leaves the file
+          # absent, which the assurance summary reads as a failure rather than a missing gate.
+          printf '%s\n' 0 > .qa-current-e2e-gate-status
+        timeout_seconds: 300
+
+  - name: ValidateIntegrations
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [ValidateCurrent]
+    isolation:
+      mode: container
+      toolchain: node
+      network: bridge
+    steps:
+      - name: Prove every injected package is active in V
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          node - .pipeline-artifacts/integration-manifest.json \
+            "http://runner.host.internal:$(TOTO_QA_PORT)/api/integrations" <<'NODE' || {
+          import fs from "node:fs";
+          const [manifestPath, responseUrl] = process.argv.slice(2);
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          const httpResponse = await fetch(responseUrl);
+          if (!httpResponse.ok)
+            throw new Error(`Integration endpoint returned HTTP ${httpResponse.status}.`);
+          const response = await httpResponse.json();
+          const expected = new Map(manifest.packages.map(item => [item.id, item.enabled === true]));
+          if (response.telemetry.enabled !== (expected.get("Aetheus.Telemetry") ?? false))
+            throw new Error("Telemetry runtime state differs from the injected manifest.");
+          if (response.webAnalytics.enabled !== (expected.get("Aetheus.WebAnalytics") ?? false))
+            throw new Error("Web Analytics runtime state differs from the injected manifest.");
+          NODE
+            touch .qa-failed
+            exit 1
+          }
+          printf '%s\n' 0 > .qa-current-integration-gate-status
+        timeout_seconds: 300
+
+  - name: DastProducer
+    group: Security
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [ValidateIntegrations]
+    condition: "eq(variables['TOTO_DAST_ENABLED'], 'true')"
+    steps:
+      - name: Produce passive DAST evidence against V
+        type: scanner
+        scanner: zap-passive
+        target_url: "$(TOTO_DAST_TARGET_URL)"
+        continue_on_error: true
+        timeout_seconds: 900
+
+  - name: PerformanceSmoke
+    group: Performance
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [DastProducer]
+    steps:
+      - name: Run bounded performance smoke
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          START="$(date +%s)"
+          INDEX=0
+          while test "$INDEX" -lt 50; do
+            curl -fsS "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos" >/dev/null || {
+              touch .qa-failed
+              exit 1
+            }
+            INDEX=$((INDEX + 1))
+          done
+          ELAPSED=$(($(date +%s) - START))
+          test "$ELAPSED" -le 30 || {
+            echo "Performance smoke exceeded 30 seconds."
+            touch .qa-failed
+            exit 1
+          }
+          printf '%s\n' "$ELAPSED" > .qa-performance-seconds
+          printf '%s\n' 0 > .qa-performance-gate-status
+        timeout_seconds: 120
+
+  - name: RollbackPrevious
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [PerformanceSmoke]
+    steps:
+      - name: Restore V-1 binaries on schema V and verify data
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          if test "$(cat .qa-bootstrap)" = 1; then
+            echo "Bootstrap mode: rollback is inapplicable until the first candidate is deployed."
+            printf '%s\n' 0 > .qa-previous-e2e-gate-status
+            exit 0
+          fi
+          export TOTO_IMAGE="$(cat .qa-previous-image)"
+          export TOTO_PORT="$(TOTO_QA_PORT)"
+          export TOTO_DB_PASSWORD="$(cat .qa-db-password)"
+          export TOTO_BIND_ADDRESS="$(cat .qa-bind-address)"
+          QA_PROJECT="$(cat .qa-project)"
+          docker compose -p "$QA_PROJECT" -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.qa-bridge.yml up -d --wait || {
+            touch .qa-failed
+            exit 1
+          }
+          ROLLBACK_JSON="$(curl -fsS "http://127.0.0.1:$(TOTO_QA_PORT)/api/todos")"
+          printf '%s' "$ROLLBACK_JSON" | grep -q "rollback sentinel"
+          printf '%s' "$ROLLBACK_JSON" | grep -q "created by v$(cat .qa-current-version)" || {
+            touch .qa-failed
+            exit 1
+          }
+          docker compose -p "$QA_PROJECT" -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.qa-bridge.yml exec -T database \
+            psql -U toto -d toto -Atc \
+            "SELECT version FROM schema_versions ORDER BY version" > .qa-schema-after-rollback
+          cmp .qa-schema-v .qa-schema-after-rollback || {
+            echo "Rollback changed the forward-migrated schema."
+            touch .qa-failed
+            exit 1
+          }
+          printf '%s\n' 0 > .qa-previous-e2e-gate-status
+        timeout_seconds: 1200
+
+  - name: ValidateRollbackIntegrations
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [RollbackPrevious]
+    isolation:
+      mode: container
+      toolchain: node
+      network: bridge
+    steps:
+      - name: Prove rollback runtime matches the V-1 integration manifest
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          if test "$(cat .qa-bootstrap)" = 1; then
+            printf '%s\n' 0 > .qa-previous-integration-gate-status
+            exit 0
+          fi
+          node - .previous/.pipeline-artifacts/integration-manifest.json \
+            "http://runner.host.internal:$(TOTO_QA_PORT)/api/integrations" <<'NODE' || {
+          import fs from "node:fs";
+          const [manifestPath, responseUrl] = process.argv.slice(2);
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          const httpResponse = await fetch(responseUrl);
+          if (!httpResponse.ok)
+            throw new Error(`Rollback integration endpoint returned HTTP ${httpResponse.status}.`);
+          const response = await httpResponse.json();
+          const expected = new Map(manifest.packages.map(item => [item.id, item.enabled === true]));
+          if (response.telemetry.enabled !== (expected.get("Aetheus.Telemetry") ?? false)
+              || response.webAnalytics.enabled !== (expected.get("Aetheus.WebAnalytics") ?? false))
+            throw new Error("Rollback integration state differs from the V-1 manifest.");
+          NODE
+            touch .qa-failed
+            exit 1
+          }
+          printf '%s\n' 0 > .qa-previous-integration-gate-status
+        timeout_seconds: 300
+
+  - name: Teardown
+    group: QA
+    execution_role: build
+    os: linux
+    environment: qa
     condition: always()
     depends_on:
-      - Integration
+      - DeployPrevious
+      - DeployCurrent
+      - CancellationWindow
+      - FailureInjection
+      - ValidateCurrent
+      - ValidateIntegrations
+      - DastProducer
+      - PerformanceSmoke
+      - RollbackPrevious
+      - ValidateRollbackIntegrations
     steps:
-      - name: Destroy QA stack
+      - name: Destroy QA and prove zero run-scoped resources
         working_directory: "$(WORKSPACE)"
-        timeout_seconds: 300
         shell: |
           set -eu
-          QA_PROJ="toto-qa-${AETHEUS_RUN_ID:-manual}"
-          docker compose -p "$QA_PROJ" -f deploy/docker-compose.qa.yml down -v --remove-orphans
+          if test -s .qa-project; then
+            QA_PROJECT="$(cat .qa-project)"
+            export TOTO_PORT="$(TOTO_QA_PORT)"
+            export TOTO_DB_PASSWORD="$(cat .qa-db-password)"
+            export TOTO_IMAGE="$(cat .qa-current-image)"
+            export TOTO_BIND_ADDRESS="$(cat .qa-bind-address)"
+            docker compose -p "$QA_PROJECT" -f deploy/docker-compose.yml \
+              -f deploy/docker-compose.qa-bridge.yml down -v --remove-orphans
+            test -z "$(docker ps -aq --filter "label=com.docker.compose.project=$QA_PROJECT")"
+            test -z "$(docker network ls -q --filter "label=com.docker.compose.project=$QA_PROJECT")"
+            test -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$QA_PROJECT")"
+            docker image rm "$(cat .qa-current-image)" >/dev/null 2>&1 || true
+            if test -s .qa-previous-image; then
+              docker image rm "$(cat .qa-previous-image)" >/dev/null 2>&1 || true
+            fi
+          fi
+        timeout_seconds: 600
+
+  - name: DastGateBoundary
+    group: Security
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [Teardown]
+    condition: "eq(variables['TOTO_DAST_ENABLED'], 'true')"
+    steps:
+      - name: Publish the configured DAST grade
+        type: analysis-gate
+        analysis_scope: security
+        analysis_grading:
+          version: 1
+          minimum_grade: F
+          required_domains:
+            - security
+          rules:
+            - key: grade.security.critical
+              domain: security
+              severity: critical
+              direction: lower-is-better
+              a: 0
+              b: 0
+              c: 0
+              d: 0
+              e: 0
+            - key: grade.security.high
+              domain: security
+              severity: high
+              direction: lower-is-better
+              a: 0
+              b: 1
+              c: 3
+              d: 5
+              e: 10
+            - key: grade.security.medium
+              domain: security
+              severity: medium
+              required: false
+              direction: lower-is-better
+              a: 0
+              b: 5
+              c: 15
+              d: 30
+              e: 60
+        continue_on_error: true
+        timeout_seconds: 300
 
   - name: QAGate
-    os: linux
     group: QA
-    environment: QA
-    depends_on:
-      - TeardownQA
+    execution_role: build
+    os: linux
+    environment: qa
+    depends_on: [DastGateBoundary]
     steps:
-      - name: Verify QA runtime probe
+      - name: Refuse any hidden dynamic failure
         working_directory: "$(WORKSPACE)"
-        timeout_seconds: 60
         shell: |
-          test ! -f "$WORKSPACE/.qa-failed"
-          echo "QA validation passed."
+          set -u
+          # A gate file exists only where its stage reached the end of its assertions, so an
+          # absent file means failed-or-never-ran and is reported as 1 rather than assumed clean.
+          read_status() {
+            if test -s "$1"; then tr -d '\r\n' < "$1"; else printf '%s' 1; fi
+          }
+          CURRENT_E2E="$(read_status .qa-current-e2e-gate-status)"
+          CURRENT_INTEGRATION="$(read_status .qa-current-integration-gate-status)"
+          PREVIOUS_E2E="$(read_status .qa-previous-e2e-gate-status)"
+          PREVIOUS_INTEGRATION="$(read_status .qa-previous-integration-gate-status)"
+          PERFORMANCE="$(read_status .qa-performance-gate-status)"
+          echo "##aetheus[setvariable name=QA_CURRENT_E2E_GATE_STATUS]$CURRENT_E2E"
+          echo "##aetheus[setvariable name=QA_CURRENT_INTEGRATION_GATE_STATUS]$CURRENT_INTEGRATION"
+          echo "##aetheus[setvariable name=QA_PREVIOUS_E2E_GATE_STATUS]$PREVIOUS_E2E"
+          echo "##aetheus[setvariable name=QA_PREVIOUS_INTEGRATION_GATE_STATUS]$PREVIOUS_INTEGRATION"
+          echo "##aetheus[setvariable name=QA_PERFORMANCE_GATE_STATUS]$PERFORMANCE"
+          if test "$(tr -d '\r\n' < .qa-bootstrap)" = 1; then
+            echo "##aetheus[setvariable name=CompatibilityMode]Bootstrap"
+            echo "##aetheus[setvariable name=PreviousVersionTested]false"
+          else
+            PREVIOUS="$(tr -d '\r\n' < .qa-previous)"
+            test -n "$PREVIOUS"
+            echo "##aetheus[setvariable name=CompatibilityMode]NMinusOne"
+            echo "##aetheus[setvariable name=PreviousVersionTested]$PREVIOUS"
+          fi
+          if test ! -f .qa-failed; then
+            echo "Toto QA, rollback and teardown evidence is complete."
+            exit 0
+          fi
+          # Unchanged for every existing consumer: a hidden dynamic failure still fails toto-qa.
+          # Only a caller that seals these statuses into a graded assurance contract may opt out.
+          if test "${TOTO_TOLERATE_TEST_FAILURE:-false}" = true; then
+            echo "Dynamic evidence failed; the caller grades it into its assurance contract."
+            exit 0
+          fi
+          echo "Toto QA recorded a dynamic failure." >&2
+          exit 1

@@ -1,99 +1,16 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @page "/git/branches/{BranchId:int}"
-@using Aetheus.Shared.Enums
+@page "/git-repositories/branches/{BranchId:int}"
 
-<PageTitle>@(_branch?.Name ?? L["Branch"]) - Aetheus</PageTitle>
+<PageTitle>@L["Branch"] - Aetheus</PageTitle>
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
-}
-else if (_branch is null)
-{
-    <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["BranchNotFound"]</RadzenText>
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else
 {
-    <Aetheus.Front.Shared.PageHeader Title="@_branch.Name" Icon="account_tree"
-        BackHref="@($"/projects/{_branch.ProjectId}")">
-        <ChildContent>
-            @if (!string.IsNullOrEmpty(_branch.ProjectName))
-            {
-                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_branch.ProjectName" />
-            }
-        </ChildContent>
-        <Actions>
-            @if (BranchUrl is not null)
-            {
-                <a href="@BranchUrl" target="_blank" rel="noopener noreferrer" class="external-action-link">
-                    <RadzenIcon Icon="open_in_new" />
-                    <span>@L["OpenInRepository"]</span>
-                </a>
-            }
-        </Actions>
-    </Aetheus.Front.Shared.PageHeader>
-
-    @* Cross-linked commits / releases / artifacts as a RadzenTimeline (consistent with the run-progress view). *@
-    <RadzenCard class="rz-mt-4 rz-p-3">
-        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-3">@L["History"]</RadzenText>
-        @if (_branch.Commits.Count == 0 && _branch.Releases.Count == 0 && _branch.Artifacts.Count == 0)
-        {
-            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoLinkedItems"]</RadzenText>
-        }
-        else
-        {
-            <RadzenTimeline Orientation="Orientation.Vertical" AlignItems="AlignItems.Start" LinePosition="LinePosition.Start" class="run-progress-timeline">
-                <Items>
-                    @foreach (var commit in _branch.Commits)
-                    {
-                        <RadzenTimelineItem PointStyle="PointStyle.Primary">
-                            <PointContent><RadzenIcon Icon="commit" /></PointContent>
-                            <ChildContent>
-                                <a href="/git/commits/@commit.Id" class="pipeline-name-link">
-                                    <span class="run-tl-item-row">
-                                        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@L["Commit"]" Icon="commit" class="run-status-badge" />
-                                        <span class="cross-link-sha">@ShortSha(commit.Sha)</span>
-                                        @if (!string.IsNullOrEmpty(commit.Message))
-                                        {
-                                            <span class="run-tl-name">@commit.Message</span>
-                                        }
-                                    </span>
-                                </a>
-                            </ChildContent>
-                        </RadzenTimelineItem>
-                    }
-                    @foreach (var release in _branch.Releases)
-                    {
-                        <RadzenTimelineItem PointStyle="PointStyle.Success">
-                            <PointContent><RadzenIcon Icon="new_releases" /></PointContent>
-                            <ChildContent>
-                                <a href="/releases/@release.Id" class="pipeline-name-link">
-                                    <span class="run-tl-item-row">
-                                        <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L["Release"]" Icon="new_releases" class="run-status-badge" />
-                                        <span class="run-tl-name run-tl-bold">@release.Version</span>
-                                        <RadzenBadge BadgeStyle="@ReleaseHelper.GetReleaseBadge(release.Status)" Text="@L[release.Status.ToString()]" class="run-status-badge" />
-                                    </span>
-                                </a>
-                            </ChildContent>
-                        </RadzenTimelineItem>
-                    }
-                    @foreach (var artifact in _branch.Artifacts)
-                    {
-                        <RadzenTimelineItem PointStyle="PointStyle.Info">
-                            <PointContent><RadzenIcon Icon="inventory_2" /></PointContent>
-                            <ChildContent>
-                                <a href="/artifacts/@artifact.Id" class="pipeline-name-link">
-                                    <span class="run-tl-item-row">
-                                        <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@L["Artifact"]" Icon="inventory_2" class="run-status-badge" />
-                                        <span class="run-tl-name">@artifact.Name</span>
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@FormatSize(artifact.SizeBytes)</RadzenText>
-                                    </span>
-                                </a>
-                            </ChildContent>
-                        </RadzenTimelineItem>
-                    }
-                </Items>
-            </RadzenTimeline>
-        }
-    </RadzenCard>
+    <Aetheus.Front.Shared.PageHeader Title="@L["Branch"]" Icon="account_tree"
+        BackHref="@($"/git-repositories?projectId={_projectId}")" />
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat">@L["NotFound"]</RadzenAlert>
 }

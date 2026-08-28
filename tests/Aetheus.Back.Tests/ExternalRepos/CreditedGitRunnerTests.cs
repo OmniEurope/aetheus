@@ -49,7 +49,7 @@ public sealed class CreditedGitRunnerTests
         var credential = new GitCredentialPayload
         {
             AuthType = GitAuthType.Ssh,
-            PrivateKeyPem = "not-a-real-private-key-fixture",
+            PrivateKeyPem = "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----",
             KnownHosts = "example.invalid ssh-ed25519 AAAATEST",
             Passphrase = "do-not-log"
         };

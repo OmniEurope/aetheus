@@ -15,6 +15,7 @@ public class PostgresLeaderLeaseSqlAuditTests
 
         var expected = new HashSet<string>(StringComparer.Ordinal)
         {
+            "SELECT pg_advisory_lock(hashtextextended(@name, 0))",
             "SELECT pg_try_advisory_lock(hashtextextended(@name, 0))",
             "SELECT 1",
             "SELECT pg_advisory_unlock(hashtextextended(@name, 0))"
@@ -24,14 +25,5 @@ public class PostgresLeaderLeaseSqlAuditTests
         Assert.DoesNotContain("$\"SELECT", source, StringComparison.Ordinal);
     }
 
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(PostgresLeaderLeaseSqlAuditTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

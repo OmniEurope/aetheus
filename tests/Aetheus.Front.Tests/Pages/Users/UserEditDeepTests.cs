@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages.Users;
+using Aetheus.Front.Services;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Users;
@@ -18,9 +20,18 @@ public class UserEditDeepTests : BunitContext
         _handler = BunitTestHelper.RegisterServices(this, isAdmin: true);
     }
 
+    private void SetupRoles(params string[] roles) =>
+        _handler.SetPaginatedJsonResponse("api/roles",
+            roles.Select((role, index) => new RoleDto
+            {
+                Id = index + 1,
+                Name = role,
+                Description = $"{role} description"
+            }));
+
     private void SetupExistingUser(int id = 5)
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "Contributor", "Reader" });
+        SetupRoles("Admin", "Contributor", "Reader");
         _handler.SetJsonResponse($"api/users/{id}", new UserDto
         {
             Id = id,
@@ -39,7 +50,7 @@ public class UserEditDeepTests : BunitContext
 
     private void SetupNewUser()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "Contributor", "Reader" });
+        SetupRoles("Admin", "Contributor", "Reader");
     }
 
     [Fact]
@@ -63,8 +74,8 @@ public class UserEditDeepTests : BunitContext
         var cut = Render<UserEdit>(p => p.Add(x => x.Id, (int?)null));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"));
 
-        // New-user mode loads the available roles but never fetches a user detail.
-        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/users/roles"));
+        // New-user mode pages through available roles but never fetches a user detail.
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/roles"));
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("/effective-permissions"));
     }
 
@@ -121,6 +132,75 @@ public class UserEditDeepTests : BunitContext
     }
 
     [Fact]
+    public async Task OnSubmit_CurrentUser_RefreshesLivePermissionService()
+    {
+        SetupExistingUser();
+        _handler.SetJsonResponse("api/users/5", new UserDto
+        {
+            Id = 5,
+            Username = "tester",
+            IsActive = true,
+            Roles = ["Contributor"]
+        });
+        _handler.SetJsonResponse(
+            HttpMethod.Get,
+            "api/users/5/effective-permissions",
+            new UserPermissionSummaryDto
+            {
+                EffectivePermissions =
+                [
+                    new EffectivePermissionDto
+                    {
+                        ResourceType = ResourceType.Server,
+                        Permission = Permission.Read
+                    }
+                ]
+            });
+        var auth = Services.GetRequiredService<AuthStateProvider>();
+        await auth.LoginAsync(CreateJwt("tester"));
+        Assert.Equal("tester", auth.Username);
+        var permissions = Services.GetRequiredService<PermissionService>();
+        permissions.SetPermissions([], false);
+        var roundTrip = await Services.GetRequiredService<ApiClient>()
+            .Auth.GetUserEffectivePermissionsAsync(5, Xunit.TestContext.Current.CancellationToken);
+        Assert.NotEmpty(roundTrip!.EffectivePermissions);
+
+        var cut = Render<UserEdit>(p => p.Add(x => x.Id, 5));
+        cut.WaitForState(() => cut.Instance.EditedUsername is not null, TimeSpan.FromSeconds(2));
+        Assert.Equal("tester", cut.Instance.EditedUsername);
+        Assert.True(cut.Instance.IsEditingCurrentUser);
+        Assert.Equal("tester", auth.Username);
+        _handler.Requests.Clear();
+
+        await cut.InvokeAsync(cut.Instance.OnSubmit);
+
+        Assert.Contains(
+            _handler.Requests,
+            request => request.Method == "GET"
+                && request.Url.Contains("api/users/5/effective-permissions", StringComparison.Ordinal));
+        Assert.Contains(
+            permissions.GetPermissions(),
+            permission => permission.ResourceType == ResourceType.Server
+                && permission.Permission == Permission.Read);
+        Assert.True(permissions.CanReadAny(ResourceType.Server));
+    }
+
+    private static string CreateJwt(string username)
+    {
+        var header = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"alg\":\"HS256\"}"))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var payload = Convert.ToBase64String(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            sub = username,
+            role = "Admin",
+            unique_name = username,
+            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
+        }))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return $"{header}.{payload}.sig";
+    }
+
+    [Fact]
     public async Task OnChangePassword_EmptyPassword_Returns()
     {
         SetupExistingUser();
@@ -147,26 +227,6 @@ public class UserEditDeepTests : BunitContext
 
         // A valid password triggers the change-password POST to api/users/5/change-password.
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/users/5/change-password"));
-    }
-
-    [Fact]
-    public void OnRoleToggled_AddsAndRemovesRole()
-    {
-        SetupNewUser();
-        var cut = Render<UserEdit>(p => p.Add(x => x.Id, (int?)null));
-        cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"));
-
-        var method = typeof(UserEdit).GetMethod("OnRoleToggled", Priv)!;
-        // Add role
-        method.Invoke(cut.Instance, ["Admin", true]);
-        var modelField = typeof(UserEdit).GetField("_model", Priv)!;
-        var model = modelField.GetValue(cut.Instance)!;
-        var roles = (List<string>)model.GetType().GetProperty("Roles")!.GetValue(model)!;
-        Assert.Contains("Admin", roles);
-
-        // Remove role
-        method.Invoke(cut.Instance, ["Admin", false]);
-        Assert.DoesNotContain("Admin", roles);
     }
 
     [Theory]

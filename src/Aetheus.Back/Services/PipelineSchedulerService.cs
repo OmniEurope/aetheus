@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Configuration;
-using Aetheus.Shared.DTOs;
 using Cronos;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -95,6 +94,14 @@ public sealed class PipelineSchedulerService(
             catch (CronFormatException ex)
             {
                 logger.LogWarning(ex, "Invalid cron expression in pipeline {PipelineId}", pipeline.Id);
+            }
+            catch (BadRequestException ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Scheduled pipeline {PipelineId} ({PipelineName}) was refused by configuration validation",
+                    pipeline.Id,
+                    pipeline.Name);
             }
         }
     }

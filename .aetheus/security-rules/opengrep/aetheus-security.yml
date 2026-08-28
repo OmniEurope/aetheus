@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: EUPL-1.2
+rules:
+  - id: aetheus.csharp.raw-sql-interpolation
+    languages: [csharp]
+    severity: ERROR
+    message: Interpolated data reaches a raw SQL API; use parameters or an interpolated-safe API.
+    metadata:
+      cwe: CWE-89
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: $DB.Database.ExecuteSqlRaw($SQL, ...)
+          - pattern: $DB.Database.ExecuteSqlRawAsync($SQL, ...)
+      - metavariable-pattern:
+          metavariable: $SQL
+          pattern: $"..."
+
+  - id: aetheus.javascript.dynamic-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Dynamic code evaluation can turn untrusted data into executable code.
+    metadata:
+      cwe: CWE-95
+      category: security
+    pattern-either:
+      - pattern: eval($EXPR)
+      - pattern: new Function(...)
+
+  - id: aetheus.python.subprocess-shell
+    languages: [python]
+    severity: ERROR
+    message: subprocess with shell=True can enable command injection.
+    metadata:
+      cwe: CWE-78
+      category: security
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+
+  - id: aetheus.java.runtime-exec
+    languages: [java]
+    severity: ERROR
+    message: Runtime.exec should not receive dynamically constructed commands.
+    metadata:
+      cwe: CWE-78
+      category: security
+    patterns:
+      - pattern: Runtime.getRuntime().exec($COMMAND)
+      - pattern-not: Runtime.getRuntime().exec("...")

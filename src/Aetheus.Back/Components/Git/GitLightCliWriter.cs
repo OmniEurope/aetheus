@@ -34,90 +34,16 @@ public class GitLightCliWriter(GitProcessRunner git, ILogger<GitLightCliWriter> 
         string commitMessage, string authorName, string authorEmail, CancellationToken ct = default)
     {
         if (upserts.Count == 0 && deletions.Count == 0) return (true, null, null);
-
-        // F-038: the branch name reaches git argv (checkout / push refspec) - reject anything
-        // that is not a plausible refname before any process is spawned.
         if (!IsValidRefName(branch))
             return (false, null, "invalid branch name");
-
-        // F-037: validate paths BEFORE the clone (no wasted work on rejection). Segment-wise
-        // ".." check - "a..b.yaml" is a legitimate file name, a "..\" segment is traversal.
-        var safeUpserts = new List<string>(upserts.Count);
-        foreach (var (relativePath, _) in upserts)
-        {
-            if (!TryNormalizeRelativePath(relativePath, out var safeRel))
-                return (false, null, $"invalid relative path: {relativePath}");
-            safeUpserts.Add(safeRel);
-        }
-        var safeDeletions = new List<string>(deletions.Count);
-        foreach (var relativePath in deletions)
-        {
-            if (!TryNormalizeRelativePath(relativePath, out var safeRel))
-                return (false, null, $"invalid relative path: {relativePath}");
-            if (!safeUpserts.Contains(safeRel, StringComparer.Ordinal))
-                safeDeletions.Add(safeRel);
-        }
-
-        // Temp clone of the (local, bare) repo - no auth, fast. Works for empty repos too:
-        // the first push creates the branch. A worktree would choke on an empty repo (no HEAD).
+        if (!TryNormalizeChanges(upserts, deletions, out var paths, out var pathError))
+            return (false, null, pathError);
         var tmp = Path.Combine(Path.GetTempPath(), $"aetheus-commit-{Guid.NewGuid():N}");
         try
         {
-            // F-018: shallow single-branch clone - the repo can be large, we only commit on top.
-            // Falls back to a full clone when the branch doesn't exist yet (empty/new repo).
-            var (exitClone, _, _) = await git.RunGitAsync(diskPath,
-                ["clone", "--depth", "1", "--single-branch", "--no-tags", "--branch", branch, diskPath, tmp],
-                ct, timeout: BackendRuntimeDefaults.GitWriteTimeout, ignoreExitCode: true).ConfigureAwait(false);
-            if (exitClone != 0)
-            {
-                var (exitFull, _, errFull) = await git.RunGitAsync(diskPath, ["clone", diskPath, tmp], ct, timeout: BackendRuntimeDefaults.GitWriteTimeout).ConfigureAwait(false);
-                if (exitFull != 0) return (false, null, $"clone failed: {errFull}");
-
-                // Position on the target branch (existing branch → checkout; empty/new → create).
-                var (exitCo, _, _) = await git.RunGitAsync(tmp, ["checkout", branch], ct, ignoreExitCode: true).ConfigureAwait(false);
-                if (exitCo != 0)
-                    await git.RunGitAsync(tmp, ["checkout", "-b", branch], ct, ignoreExitCode: true).ConfigureAwait(false);
-            }
-
-            await git.RunGitAsync(tmp, ["config", "user.name", authorName], ct).ConfigureAwait(false);
-            await git.RunGitAsync(tmp, ["config", "user.email", authorEmail], ct).ConfigureAwait(false);
-
-            for (var i = 0; i < upserts.Count; i++)
-            {
-                // Belt-and-braces canonical check now that the clone root exists.
-                var target = Path.GetFullPath(Path.Combine(tmp, safeUpserts[i]));
-                if (!target.StartsWith(Path.GetFullPath(tmp) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                    return (false, null, $"invalid relative path: {upserts[i].RelativePath}");
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                await File.WriteAllTextAsync(target, upserts[i].Content, ct).ConfigureAwait(false);
-                await git.RunGitAsync(tmp, ["add", "--", safeUpserts[i]], ct).ConfigureAwait(false);
-            }
-            foreach (var safeRel in safeDeletions.Distinct(StringComparer.Ordinal))
-            {
-                await git.RunGitAsync(
-                    tmp, ["rm", "--ignore-unmatch", "--", safeRel], ct, ignoreExitCode: true)
-                    .ConfigureAwait(false);
-            }
-
-            var (exitCommit, _, errCommit) = await git.RunGitAsync(tmp, ["commit", "-m", commitMessage], ct, ignoreExitCode: true).ConfigureAwait(false);
-            if (exitCommit != 0)
-            {
-                // Non-zero commit is EITHER "nothing to commit" (identical content → no-op success)
-                // OR a real failure (e.g. a commit hook rejected it). Distinguish via the work tree:
-                // a clean tree means the content was already there; a dirty tree means the commit failed.
-                var (_, statusOut, _) = await git.RunGitAsync(tmp, ["status", "--porcelain"], ct, ignoreExitCode: true).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(statusOut))
-                    return (false, null, $"commit failed: {errCommit}");
-
-                var (_, headSha, _) = await git.RunGitAsync(tmp, ["rev-parse", "HEAD"], ct, ignoreExitCode: true).ConfigureAwait(false);
-                return (true, headSha.Trim(), null); // no-op: nothing changed, nothing to push
-            }
-
-            var (_, sha, _) = await git.RunGitAsync(tmp, ["rev-parse", "HEAD"], ct, ignoreExitCode: true).ConfigureAwait(false);
-            var (exitPush, _, errPush) = await git.RunGitAsync(tmp, ["push", "origin", $"HEAD:{branch}"], ct, timeout: BackendRuntimeDefaults.GitWriteTimeout).ConfigureAwait(false);
-            if (exitPush != 0) return (false, null, $"push failed: {errPush}");
-
-            return (true, sha.Trim(), null);
+            return await CommitChangesCoreAsync(
+                diskPath, branch, upserts, paths, tmp, commitMessage, authorName, authorEmail, ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -128,6 +54,193 @@ public class GitLightCliWriter(GitProcessRunner git, ILogger<GitLightCliWriter> 
             if (Directory.Exists(tmp))
                 try { GitProcessRunner.ClearReadOnlyAttributes(tmp); Directory.Delete(tmp, true); }
                 catch (Exception ex) { logger.LogDebug(ex, "Best-effort commit temp cleanup failed: {Dir}", tmp); }
+        }
+    }
+
+    private static bool TryNormalizeChanges(
+        IReadOnlyList<(string RelativePath, string Content)> upserts,
+        IReadOnlyList<string> deletions,
+        out NormalizedChanges changes,
+        out string? error)
+    {
+        var safeUpserts = new List<string>(upserts.Count);
+        foreach (var (relativePath, _) in upserts)
+        {
+            if (!TryNormalizeRelativePath(relativePath, out var safeRel))
+            {
+                changes = new([], []);
+                error = $"invalid relative path: {relativePath}";
+                return false;
+            }
+            safeUpserts.Add(safeRel);
+        }
+        var safeDeletions = new List<string>(deletions.Count);
+        foreach (var relativePath in deletions)
+        {
+            if (!TryNormalizeRelativePath(relativePath, out var safeRel))
+            {
+                changes = new([], []);
+                error = $"invalid relative path: {relativePath}";
+                return false;
+            }
+            if (!safeUpserts.Contains(safeRel, StringComparer.Ordinal)) safeDeletions.Add(safeRel);
+        }
+        changes = new(safeUpserts, safeDeletions);
+        error = null;
+        return true;
+    }
+
+    private async Task<(bool Success, string? CommitSha, string? Error)> CommitChangesCoreAsync(
+        string diskPath,
+        string branch,
+        IReadOnlyList<(string RelativePath, string Content)> upserts,
+        NormalizedChanges paths,
+        string tmp,
+        string commitMessage,
+        string authorName,
+        string authorEmail,
+        CancellationToken ct)
+    {
+        var cloneError = await CloneTargetBranchAsync(diskPath, branch, tmp, ct).ConfigureAwait(false);
+        if (cloneError is not null) return (false, null, cloneError);
+        await git.RunGitAsync(tmp, ["config", "user.name", authorName], ct).ConfigureAwait(false);
+        await git.RunGitAsync(tmp, ["config", "user.email", authorEmail], ct).ConfigureAwait(false);
+        var changeError = await ApplyChangesAsync(tmp, upserts, paths, ct).ConfigureAwait(false);
+        if (changeError is not null) return (false, null, changeError);
+        return await CommitAndPushAsync(tmp, branch, commitMessage, ct).ConfigureAwait(false);
+    }
+
+    private async Task<string?> CloneTargetBranchAsync(
+        string diskPath, string branch, string tmp, CancellationToken ct)
+    {
+        var (exitClone, _, _) = await git.RunGitAsync(diskPath,
+            ["clone", "--depth", "1", "--single-branch", "--no-tags", "--branch", branch, diskPath, tmp],
+            ct, timeout: BackendRuntimeDefaults.GitWriteTimeout, ignoreExitCode: true).ConfigureAwait(false);
+        if (exitClone == 0) return null;
+        var (exitFull, _, errFull) = await git.RunGitAsync(
+            diskPath, ["clone", diskPath, tmp], ct, timeout: BackendRuntimeDefaults.GitWriteTimeout)
+            .ConfigureAwait(false);
+        if (exitFull != 0) return $"clone failed: {errFull}";
+        var (exitCheckout, _, _) = await git.RunGitAsync(
+            tmp, ["checkout", branch], ct, ignoreExitCode: true).ConfigureAwait(false);
+        if (exitCheckout != 0)
+            await git.RunGitAsync(tmp, ["checkout", "-b", branch], ct, ignoreExitCode: true).ConfigureAwait(false);
+        return null;
+    }
+
+    private async Task<string?> ApplyChangesAsync(
+        string tmp,
+        IReadOnlyList<(string RelativePath, string Content)> upserts,
+        NormalizedChanges paths,
+        CancellationToken ct)
+    {
+        for (var i = 0; i < upserts.Count; i++)
+        {
+            var target = Path.GetFullPath(Path.Combine(tmp, paths.Upserts[i]));
+            if (!target.StartsWith(Path.GetFullPath(tmp) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                return $"invalid relative path: {upserts[i].RelativePath}";
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            await File.WriteAllTextAsync(target, upserts[i].Content, ct).ConfigureAwait(false);
+            await git.RunGitAsync(tmp, ["add", "--", paths.Upserts[i]], ct).ConfigureAwait(false);
+        }
+        foreach (var safeRel in paths.Deletions.Distinct(StringComparer.Ordinal))
+            await git.RunGitAsync(
+                tmp, ["rm", "--ignore-unmatch", "--", safeRel], ct, ignoreExitCode: true)
+                .ConfigureAwait(false);
+        return null;
+    }
+
+    private async Task<(bool Success, string? CommitSha, string? Error)> CommitAndPushAsync(
+        string tmp, string branch, string commitMessage, CancellationToken ct)
+    {
+        var (exitCommit, _, errCommit) = await git.RunGitAsync(
+            tmp, ["commit", "-m", commitMessage], ct, ignoreExitCode: true).ConfigureAwait(false);
+        if (exitCommit != 0)
+        {
+            var (_, statusOut, _) = await git.RunGitAsync(
+                tmp, ["status", "--porcelain"], ct, ignoreExitCode: true).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(statusOut)) return (false, null, $"commit failed: {errCommit}");
+            var (_, headSha, _) = await git.RunGitAsync(
+                tmp, ["rev-parse", "HEAD"], ct, ignoreExitCode: true).ConfigureAwait(false);
+            return (true, headSha.Trim(), null);
+        }
+        var (_, sha, _) = await git.RunGitAsync(
+            tmp, ["rev-parse", "HEAD"], ct, ignoreExitCode: true).ConfigureAwait(false);
+        var (exitPush, _, errPush) = await git.RunGitAsync(
+            tmp, ["push", "origin", $"HEAD:{branch}"], ct,
+            timeout: BackendRuntimeDefaults.GitWriteTimeout).ConfigureAwait(false);
+        return exitPush == 0
+            ? (true, sha.Trim(), null)
+            : (false, null, $"push failed: {errPush}");
+    }
+
+    private sealed record NormalizedChanges(List<string> Upserts, List<string> Deletions);
+
+    public async Task<(bool Success, string? CommitSha, string? Error)> ApplyPatchAsync(
+        string diskPath, string branch, string patch,
+        string commitMessage, string authorName, string authorEmail, CancellationToken ct = default)
+    {
+        if (!IsValidRefName(branch))
+            return (false, null, "invalid branch name");
+        if (string.IsNullOrWhiteSpace(patch)
+            || patch.Length > 1_000_000
+            || !patch.Contains("diff --git ", StringComparison.Ordinal))
+            return (false, null, "invalid or empty patch");
+
+        var tmp = Path.Combine(Path.GetTempPath(), $"aetheus-ai-patch-{Guid.NewGuid():N}");
+        try
+        {
+            var (cloneCode, _, cloneError) = await git.RunGitAsync(
+                diskPath,
+                ["clone", "--depth", "1", "--single-branch", "--no-tags", "--branch", branch, diskPath, tmp],
+                ct,
+                timeout: BackendRuntimeDefaults.GitWriteTimeout,
+                ignoreExitCode: true).ConfigureAwait(false);
+            if (cloneCode != 0)
+                return (false, null, $"clone failed: {cloneError}");
+
+            await git.RunGitAsync(tmp, ["config", "user.name", authorName], ct).ConfigureAwait(false);
+            await git.RunGitAsync(tmp, ["config", "user.email", authorEmail], ct).ConfigureAwait(false);
+            var patchPath = Path.Combine(tmp, ".aetheus-ai-proposed.patch");
+            await File.WriteAllTextAsync(patchPath, patch, ct).ConfigureAwait(false);
+            var (applyCode, _, applyError) = await git.RunGitAsync(
+                tmp, ["apply", "--index", "--whitespace=nowarn", "--", patchPath],
+                ct, timeout: BackendRuntimeDefaults.GitWriteTimeout, ignoreExitCode: true).ConfigureAwait(false);
+            File.Delete(patchPath);
+            if (applyCode != 0)
+                return (false, null, $"patch apply failed: {applyError}");
+
+            var (commitCode, _, commitError) = await git.RunGitAsync(
+                tmp, ["commit", "-m", commitMessage], ct, ignoreExitCode: true).ConfigureAwait(false);
+            if (commitCode != 0)
+                return (false, null, $"commit failed: {commitError}");
+            var (_, sha, _) = await git.RunGitAsync(
+                tmp, ["rev-parse", "HEAD"], ct, ignoreExitCode: true).ConfigureAwait(false);
+            var (pushCode, _, pushError) = await git.RunGitAsync(
+                tmp, ["push", "origin", $"HEAD:{branch}"], ct,
+                timeout: BackendRuntimeDefaults.GitWriteTimeout, ignoreExitCode: true).ConfigureAwait(false);
+            return pushCode == 0
+                ? (true, sha.Trim(), null)
+                : (false, null, $"push failed: {pushError}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (false, null, ex.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tmp))
+            {
+                try
+                {
+                    GitProcessRunner.ClearReadOnlyAttributes(tmp);
+                    Directory.Delete(tmp, true);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Best-effort AI patch temp cleanup failed: {Dir}", tmp);
+                }
+            }
         }
     }
 

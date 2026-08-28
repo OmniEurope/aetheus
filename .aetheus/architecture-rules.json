@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "forbiddenDependencies": [
+    { "source": "Aetheus.Shared", "target": "Aetheus.Back" },
+    { "source": "Aetheus.Shared", "target": "Aetheus.Front" },
+    { "source": "Aetheus.Shared", "target": "Aetheus.Agent" }
+  ]
+}

@@ -15,6 +15,7 @@ public class EnvironmentEditRenderTests : BunitContext
     public EnvironmentEditRenderTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        _handler.SetJsonResponse("api/environments", new PaginatedResult<EnvironmentDto>());
     }
 
     private static EnvironmentDto BuildEnvironment() => new()

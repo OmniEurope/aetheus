@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Services;
 
@@ -10,9 +9,13 @@ public interface IServerApiClient
     Task<ServerHeartbeatResponseDto?> SendHeartbeatAsync(int serverId, ServerHeartbeatDto heartbeat, CancellationToken ct = default);
     Task<List<PendingTaskDto>> GetPendingTasksAsync(int serverId, int freeSlots, CancellationToken ct = default);
     Task StartTaskAsync(int taskId, CancellationToken ct = default);
+    Task ReleaseTaskAsync(int taskId, CancellationToken ct = default);
     Task CompleteTaskAsync(int taskId, TaskResultDto result, CancellationToken ct = default);
+    Task ReportDeploymentBuildRefusalAsync(
+        DeploymentBuildRefusalReport report,
+        CancellationToken ct = default);
 
-    // PLAN-006 4.3: backup result callbacks.
+    // ADR-024 4.3: backup result callbacks.
     Task ReportBackupResultAsync(int runId, BackupExecuteResultDto result, CancellationToken ct = default);
     Task ReportRestoreCheckResultAsync(int runId, RestoreCheckResultDto result, CancellationToken ct = default);
 
@@ -20,7 +23,7 @@ public interface IServerApiClient
     Task AppendLogBatchAsync(List<AppendLogRequest> logs, CancellationToken ct = default);
     Task<Dictionary<int, string>> GetTaskStatusesAsync(List<int> taskIds, CancellationToken ct = default);
 
-    /// <summary>Pulls this server's app-availability probe configs (PLAN-001). ServerId is taken from the token claim.</summary>
+    /// <summary>Pulls this server's app-availability probe configs (ADR-021). ServerId is taken from the token claim.</summary>
     Task<List<AppProbeConfigDto>> GetAppProbesAsync(CancellationToken ct = default);
 
     /// <summary>Reports a batch of app-availability probe results. Best-effort; caller re-queues on failure.</summary>
@@ -34,7 +37,7 @@ public interface IServerApiClient
     /// </summary>
     Task ReportUpdateProgressAsync(int serverId, AgentUpdateProgressReport report, CancellationToken ct = default);
 
-    Task UploadArtifactAsync(int runId, string name, string? stageName, Stream zipContent, CancellationToken ct = default);
+    Task<PipelineArtifactDto?> UploadArtifactAsync(int runId, string name, string? stageName, Stream zipContent, CancellationToken ct = default);
 
     /// <summary>Cross-agent deploy: download a build artifact zip from the backend's IDOR-safe
     /// agent endpoint. <paramref name="deployRunId"/> is the deploy run this agent is executing (used
@@ -46,4 +49,9 @@ public interface IServerApiClient
     Task PublishCoverageAsync(int runId, string xmlContent, string? stageName, string? stepName, CancellationToken ct = default);
     Task PublishLintAsync(int runId, string sarifContent, string? stageName, string? stepName, CancellationToken ct = default);
     Task PublishComplexityAsync(int runId, double avgCyclomatic, int maxCyclomatic, int totalMethods, int highComplexityMethods, int totalLinesOfCode, string? stageName, CancellationToken ct = default);
+    Task<AnalysisReportDto?> PublishAnalysisReportAsync(int runId, PublishAnalysisReportRequest request, CancellationToken ct = default);
+    Task<AnalysisRunGateDto?> GetAnalysisRunGateAsync(
+        int runId, string scope, CancellationToken ct = default);
+    Task<AiRunResultDto?> PublishAiRunResultAsync(
+        PublishAiRunResultRequest request, CancellationToken ct = default);
 }

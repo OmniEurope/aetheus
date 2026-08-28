@@ -107,6 +107,21 @@ public class RbacUiTests : E2ETestBase
         await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
         await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToHaveCountAsync(0);
         await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+
+        foreach (var viewport in new[] { (Width: 390, Height: 812), (Width: 812, Height: 390) })
+        {
+            await Page.SetViewportSizeAsync(viewport.Width, viewport.Height);
+            await Page.GotoAsync($"{FrontendUrl}/servers");
+            await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
+            var widths = await Page.EvaluateAsync<int[]>(
+                "() => [document.documentElement.scrollWidth, window.innerWidth]");
+            Assert.That(
+                widths[0],
+                Is.LessThanOrEqualTo(widths[1]),
+                $"The non-admin server-reader view must fit {viewport.Width}x{viewport.Height}.");
+            await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToHaveCountAsync(0);
+            await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+        }
     }
 
     private async Task<HttpClient> CreateAdminClientAsync()

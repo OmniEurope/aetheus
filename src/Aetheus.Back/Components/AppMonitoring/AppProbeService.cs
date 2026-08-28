@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -126,17 +124,8 @@ public sealed class AppProbeService(
             var reason = timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested
                 ? "Probe timed out"
                 : ex.Message;
-            return new AppProbeResultDto
-            {
-                MonitoredAppId = appId,
-                Timestamp = timestamp,
-                IsUp = false,
-                ResponseTimeMs = (int)sw.ElapsedMilliseconds,
-                StatusCode = null,
-                Error = reason.Length > AppMonitoringDefaults.MaximumErrorLength
-                    ? reason[..AppMonitoringDefaults.MaximumErrorLength]
-                    : reason
-            };
+            return AppProbeResultDto.Failure(
+                appId, timestamp, (int)sw.ElapsedMilliseconds, reason);
         }
     }
 }

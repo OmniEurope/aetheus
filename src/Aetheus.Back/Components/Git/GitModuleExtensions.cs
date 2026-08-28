@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -18,6 +17,7 @@ public static class GitModuleExtensions
         services.AddScoped<GitLightCliWriter>();
         services.AddScoped<IGitLightCliService, GitLightCliService>();
         services.AddScoped<GitBranchProtectionService>();
+        services.AddScoped<GitAiPatchService>();
         services.AddScoped<IGitLightService, GitLightService>();
         services.AddScoped<IGitSmartHttpService, GitSmartHttpService>();
         services.AddHostedService<GitLightMaintenanceService>();

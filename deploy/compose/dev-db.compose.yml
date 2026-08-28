@@ -4,7 +4,7 @@
 # Runs ONLY the PostgreSQL database, exposed on host port 15432 to avoid clash
 # with other local Postgres instances (e.g. Lexaidos on 5432).
 #
-# Backend + Frontend are run on the host via `dotnet run` (ylaunch.ps1 / ybaunch.sh).
+# Backend + Frontend are run on the host via `dotnet run` (launch-windows.ps1 / launch-linux.sh).
 # They connect to: Host=localhost;Port=15432;Database=aetheus;Username=postgres;Password=postgres
 #
 # Usage:

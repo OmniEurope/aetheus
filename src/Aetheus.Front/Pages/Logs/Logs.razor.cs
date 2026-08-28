@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Logs;
 
@@ -71,7 +63,7 @@ public partial class Logs : IAsyncDisposable
 
         ResetWatchState(nextWatchId);
         await _hubConnection.InvokeAsync("JoinTaskGroup", nextWatchId);
-        var snapshot = await Api.GetTaskLogsAsync(nextWatchId);
+        var snapshot = await Api.Monitoring.GetTaskLogsAsync(nextWatchId);
         if (_currentWatchId != nextWatchId) return;
 
         // Join first so no live line can fall into the gap between the snapshot and subscription,
@@ -109,8 +101,8 @@ public partial class Logs : IAsyncDisposable
         var showUnmasked = !_showUnmasked;
 
         var logs = showUnmasked
-            ? await Api.GetTaskLogsUnmaskedAsync(watchId)
-            : await Api.GetTaskLogsAsync(watchId);
+            ? await Api.Monitoring.GetTaskLogsUnmaskedAsync(watchId)
+            : await Api.Monitoring.GetTaskLogsAsync(watchId);
         if (_currentWatchId != watchId) return;
 
         _showUnmasked = showUnmasked;

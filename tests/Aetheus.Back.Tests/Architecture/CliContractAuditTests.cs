@@ -12,36 +12,55 @@ public class CliContractAuditTests
     }
 
     [Fact]
-    public void CliWarnsAboutCommandLineTokensAndInsecureTransport()
+    public void CliKeepsTokensOutOfArgvAndRestrictsInsecureTransport()
     {
         var root = FindRepoRoot();
         var program = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "Program.cs"));
         var client = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "AetheusApiClient.cs"));
+        var runtime = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "CliRuntime.cs"));
 
-        Assert.Contains("--token can be exposed", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("new(\"--token\")", program, StringComparison.Ordinal);
+        Assert.Contains("new(\"--token-stdin\")", program, StringComparison.Ordinal);
+        Assert.Contains("AETHEUS_TOKEN", runtime, StringComparison.Ordinal);
+        Assert.Contains("IsPrivateIpLiteral", client, StringComparison.Ordinal);
         Assert.Contains("AETHEUS_INSECURE=1 is sending a bearer token over plaintext HTTP", client, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void CliMachineCommands_ReturnNonZeroOnHttpFailure()
+    public void CliNetworkActionsAreCancellableTimedAndReturnNonZeroOnFailure()
     {
-        var program = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Aetheus.Cli", "Program.cs"));
-        var pipelineRun = program[program.IndexOf("pipelineRunCommand.SetAction", StringComparison.Ordinal)..program.IndexOf("// --- task list ---", StringComparison.Ordinal)];
-        var health = program[program.IndexOf("healthCommand.SetAction", StringComparison.Ordinal)..program.IndexOf("return await rootCommand", StringComparison.Ordinal)];
+        var root = FindRepoRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "Program.cs"));
+        var client = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "AetheusApiClient.cs"));
+        var runtime = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "CliRuntime.cs"));
 
-        Assert.Contains("Console.Error.WriteLine($\"Error: {response.StatusCode}", pipelineRun, StringComparison.Ordinal);
-        Assert.Contains("return 1;", pipelineRun, StringComparison.Ordinal);
-        Assert.Contains("return response.IsSuccessStatusCode ? 0 : 1;", health, StringComparison.Ordinal);
+        Assert.Equal(5, Count(program, "CliRuntime.ExecuteAsync"));
+        Assert.Equal(5, Count(program, "}, cancellationToken));"));
+        Assert.Contains("TimeSpan.FromSeconds(30)", client, StringComparison.Ordinal);
+        Assert.Contains("return 130;", runtime, StringComparison.Ordinal);
+        Assert.Contains("return 1;", runtime, StringComparison.Ordinal);
     }
 
-    private static string FindRepoRoot()
+    [Fact]
+    public void CliUsesValidatedCentralInvocationAndStableOutputContracts()
     {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(CliContractAuditTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
+        var root = FindRepoRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "Program.cs"));
+        var invocation = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "CliInvocation.cs"));
+        var runtime = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "CliRuntime.cs"));
+        var client = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Cli", "AetheusApiClient.cs"));
+
+        Assert.Contains("ResolveInvocationAsync", program, StringComparison.Ordinal);
+        Assert.Contains("Uri.TryCreate", runtime, StringComparison.Ordinal);
+        Assert.Contains("uri.UserInfo", runtime, StringComparison.Ordinal);
+        Assert.Contains("MaximumPage = 1_000_000", invocation, StringComparison.Ordinal);
+        Assert.Contains("ToString(\"O\", CultureInfo.InvariantCulture)", program, StringComparison.Ordinal);
+        Assert.Contains("GetAsync(\"health/ready\", ct)", program, StringComparison.Ordinal);
+        Assert.Contains("internal sealed class AetheusApiClient", client, StringComparison.Ordinal);
     }
+
+    private static int Count(string source, string value) =>
+        source.Split(value, StringSplitOptions.None).Length - 1;
+
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

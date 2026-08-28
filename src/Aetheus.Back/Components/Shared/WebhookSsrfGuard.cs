@@ -16,29 +16,31 @@ public static class WebhookSsrfGuard
         if (IPAddress.IsLoopback(address)) return true;
 
         if (address.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var bytes = address.GetAddressBytes();
-            if (bytes[0] == 10) return true;                                // 10.0.0.0/8
-            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true; // 172.16.0.0/12
-            if (bytes[0] == 192 && bytes[1] == 168) return true;            // 192.168.0.0/16
-            if (bytes[0] == 169 && bytes[1] == 254) return true;            // 169.254.0.0/16
-            if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127) return true; // 100.64.0.0/10 shared space
-            if (bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 0) return true; // 192.0.0.0/24 IETF protocols
-            if (bytes[0] == 198 && bytes[1] is 18 or 19) return true;        // 198.18.0.0/15 benchmarking
-            if (bytes[0] == 0 || bytes[0] >= 224) return true;              // 0.0.0.0/8 + multicast
-        }
-        else if (address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            if (address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast)
-                return true;
-            if (IPAddress.IPv6Any.Equals(address) || IPAddress.IPv6Loopback.Equals(address))
-                return true;
-            var bytes = address.GetAddressBytes();
-            if ((bytes[0] & 0xfe) == 0xfc) return true;                     // fc00::/7
-            if (address.IsIPv4MappedToIPv6)
-                return IsForbiddenAddress(address.MapToIPv4());
-        }
+            return IsForbiddenIpv4(address.GetAddressBytes());
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+            return IsForbiddenIpv6(address);
 
         return false;
+    }
+
+    private static bool IsForbiddenIpv4(byte[] bytes) =>
+        bytes[0] == 10
+        || bytes[0] == 172 && bytes[1] is >= 16 and <= 31
+        || bytes[0] == 192 && bytes[1] == 168
+        || bytes[0] == 169 && bytes[1] == 254
+        || bytes[0] == 100 && bytes[1] is >= 64 and <= 127
+        || bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 0
+        || bytes[0] == 198 && bytes[1] is 18 or 19
+        || bytes[0] is 0 or >= 224;
+
+    private static bool IsForbiddenIpv6(IPAddress address)
+    {
+        if (address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast)
+            return true;
+        if (IPAddress.IPv6Any.Equals(address) || IPAddress.IPv6Loopback.Equals(address))
+            return true;
+        if ((address.GetAddressBytes()[0] & 0xfe) == 0xfc)
+            return true;
+        return address.IsIPv4MappedToIPv6 && IsForbiddenAddress(address.MapToIPv4());
     }
 }

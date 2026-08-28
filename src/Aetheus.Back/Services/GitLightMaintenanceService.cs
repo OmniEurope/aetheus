@@ -39,6 +39,7 @@ public sealed class GitLightMaintenanceService(
         var lightService = scope.ServiceProvider.GetRequiredService<IGitLightService>();
 
         var repos = await lightRepo.GetAllAsync(ct).ConfigureAwait(false);
+        var defaultBranchesChanged = 0;
 
         foreach (var repo in repos)
         {
@@ -46,6 +47,25 @@ public sealed class GitLightMaintenanceService(
             {
                 var diskPath = lightService.ResolveDiskPath(repo.ProjectId, repo.Slug);
                 if (!Directory.Exists(diskPath)) continue;
+
+                var detectedDefaultBranch = await cli
+                    .DetectDefaultBranchAsync(diskPath, ct)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(detectedDefaultBranch)
+                    && !string.Equals(
+                        repo.DefaultBranch,
+                        detectedDefaultBranch,
+                        StringComparison.Ordinal))
+                {
+                    logger.LogInformation(
+                        "Default branch drift for repo {RepoId} ({Slug}): stored={Stored}, detected={Detected}",
+                        repo.Id,
+                        repo.Slug,
+                        repo.DefaultBranch,
+                        detectedDefaultBranch);
+                    repo.DefaultBranch = detectedDefaultBranch;
+                    defaultBranchesChanged++;
+                }
 
                 await cli.RunGcAsync(diskPath, ct).ConfigureAwait(false);
                 logger.LogDebug("Ran git gc on {Slug}", repo.Slug);
@@ -55,6 +75,9 @@ public sealed class GitLightMaintenanceService(
                 logger.LogWarning(ex, "Git maintenance failed for repo {RepoId} ({Slug})", repo.Id, repo.Slug);
             }
         }
+
+        if (defaultBranchesChanged > 0)
+            await lightRepo.SaveChangesAsync(ct).ConfigureAwait(false);
 
         logger.LogInformation("Git maintenance completed for {Count} repositories", repos.Count);
     }

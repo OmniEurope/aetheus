@@ -1,15 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Organizations;
 
@@ -42,6 +32,7 @@ public partial class OrganizationDetail : IAsyncDisposable
     private List<UserDto> _users = [];
     private List<ProjectDto> _allProjects = [];
     private IEnumerable<int> _selectedProjectIds = [];
+    private bool _savingProjects;
     private int? _newUserId;
     private OrganizationRole _newUserRole = OrganizationRole.Member;
 
@@ -83,18 +74,7 @@ public partial class OrganizationDetail : IAsyncDisposable
         try
         {
             _hub = HubFactory.Create("admin");
-            _hub.On<string, int, string>("AdminEntityChanged", (entity, id, _) =>
-                entity == AdminEntities.Organization && id == Id
-                    ? InvokeAsync(async () =>
-                    {
-                        // A dirty General/Projects tab means the user has an unsaved edit in
-                        // progress: skip the reload (and the loading spinner) rather than
-                        // clobbering it. The next explicit save or navigation resyncs.
-                        if (IsGeneralTabDirty() || IsProjectsTabDirty()) return;
-                        await LoadAsync();
-                        StateHasChanged();
-                    })
-                    : Task.CompletedTask);
+            _hub.On<string, int, string>("AdminEntityChanged", OnAdminEntityChangedAsync);
             await _hub.StartAsync();
         }
         catch { /* Hub unavailable - degrade to static */ }
@@ -116,18 +96,40 @@ public partial class OrganizationDetail : IAsyncDisposable
         _org is not null
         && !_selectedProjectIds.OrderBy(id => id).SequenceEqual(_org.Projects.Select(p => p.Id).OrderBy(id => id));
 
-    private async Task LoadAsync()
+    internal Task OnAdminEntityChangedAsync(string entity, int id, string _)
+    {
+        if (entity != AdminEntities.Organization || id != Id)
+            return Task.CompletedTask;
+        return InvokeAsync(ReloadFromAdminEntityChangeAsync);
+    }
+
+    private async Task ReloadFromAdminEntityChangeAsync()
+    {
+        // Preserve any unsaved General/Projects edit. The next explicit save or navigation resyncs.
+        if (IsGeneralTabDirty() || IsProjectsTabDirty()) return;
+        await RefreshAsync();
+        StateHasChanged();
+    }
+
+    private Task LoadAsync() => LoadOrganizationAsync(showLoading: true);
+
+    private Task RefreshAsync() => LoadOrganizationAsync(showLoading: false);
+
+    private async Task LoadOrganizationAsync(bool showLoading)
     {
         var id = Id;
-        _loading = true;
-        _loadError = false;
+        if (showLoading)
+        {
+            _loading = true;
+            _loadError = false;
+        }
         try
         {
             OrganizationDetailDto? organization;
-            try { organization = await Api.GetOrganizationAsync(id); }
+            try { organization = await Api.Servers.GetOrganizationAsync(id); }
             catch (HttpRequestException)
             {
-                if (Id == id)
+                if (Id == id && showLoading)
                 {
                     _org = null;
                     _loadError = true;
@@ -136,6 +138,7 @@ public partial class OrganizationDetail : IAsyncDisposable
             }
             if (Id != id) return;
 
+            _loadError = false;
             _org = organization;
             _selectedProjectIds = organization?.Projects.Select(p => p.Id).ToList() ?? [];
             if (organization is null)
@@ -162,19 +165,19 @@ public partial class OrganizationDetail : IAsyncDisposable
         }
         finally
         {
-            if (Id == id) _loading = false;
+            if (Id == id && showLoading) _loading = false;
         }
     }
 
     private async Task<List<UserDto>> LoadUsersOrEmptyAsync()
     {
-        try { return (await Api.GetUsersAsync(1, 100))?.Items ?? []; }
+        try { return (await Api.Auth.GetUsersAsync(1, 100))?.Items ?? []; }
         catch (HttpRequestException) { return []; }
     }
 
     private async Task<List<ProjectDto>> LoadProjectsOrEmptyAsync()
     {
-        try { return await Api.GetAllProjectsAsync(); }
+        try { return await Api.Projects.GetAllProjectsAsync(); }
         catch (HttpRequestException) { return []; }
     }
 
@@ -183,7 +186,7 @@ public partial class OrganizationDetail : IAsyncDisposable
         _savingGeneral = true;
         try
         {
-            var updated = await Api.UpdateOrganizationAsync(Id, new UpdateOrganizationRequest
+            var updated = await Api.Servers.UpdateOrganizationAsync(Id, new UpdateOrganizationRequest
             {
                 Name = _general.Name,
                 Slug = _general.Slug,
@@ -192,7 +195,11 @@ public partial class OrganizationDetail : IAsyncDisposable
             if (updated is not null)
             {
                 Notify.Success(L["Saved"]);
-                await LoadAsync();
+                await RefreshAsync();
+            }
+            else
+            {
+                Notify.Error("Error", "SaveFailed");
             }
         }
         finally
@@ -208,35 +215,54 @@ public partial class OrganizationDetail : IAsyncDisposable
             L["Delete"],
             new ConfirmOptions { OkButtonText = L["Delete"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
-        if (await Api.DeleteOrganizationAsync(Id))
+        if (await Api.Servers.DeleteOrganizationAsync(Id))
+        {
+            Notify.Success("Deleted", "Deleted");
             Nav.NavigateTo("/admin/organizations");
+        }
+        else
+        {
+            Notify.Error("Error", "DeleteFailed");
+        }
     }
 
     private async Task OnAddMember()
     {
         if (_newUserId is null) return;
-        var member = await Api.AddOrganizationMemberAsync(Id, new AddOrganizationMemberRequest
+        var member = await Api.Servers.AddOrganizationMemberAsync(Id, new AddOrganizationMemberRequest
         {
             UserId = _newUserId.Value,
             Role = _newUserRole
         });
         if (member is not null && _org is not null)
         {
-            _org.Members.Add(member);
+            var existingIndex = _org.Members.FindIndex(existing => existing.Id == member.Id);
+            if (existingIndex >= 0)
+                _org.Members[existingIndex] = member;
+            else
+                _org.Members.Add(member);
             _newUserId = null;
             Notify.Success(L["MemberAdded"]);
+        }
+        else
+        {
+            Notify.Error("Error", "SaveFailed");
         }
     }
 
     private async Task OnChangeMemberRole(OrganizationMemberDto member, OrganizationRole role)
     {
-        var updated = await Api.UpdateOrganizationMemberAsync(Id, member.Id,
+        var updated = await Api.Servers.UpdateOrganizationMemberAsync(Id, member.Id,
             new UpdateOrganizationMemberRequest { Role = role });
         if (updated is not null && _org is not null)
         {
             var idx = _org.Members.FindIndex(m => m.Id == member.Id);
             if (idx >= 0) _org.Members[idx] = updated;
             Notify.Success(L["Saved"]);
+        }
+        else
+        {
+            Notify.Error("Error", "SaveFailed");
         }
     }
 
@@ -247,20 +273,51 @@ public partial class OrganizationDetail : IAsyncDisposable
             L["Remove"],
             new ConfirmOptions { OkButtonText = L["Remove"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
-        if (await Api.RemoveOrganizationMemberAsync(Id, member.Id) && _org is not null)
-            _org.Members.Remove(member);
-    }
-
-    private async Task OnSaveProjects()
-    {
-        var ok = await Api.AssignOrganizationProjectsAsync(Id,
-            new AssignProjectsRequest { ProjectIds = _selectedProjectIds.ToList() });
-        if (ok)
+        if (await Api.Servers.RemoveOrganizationMemberAsync(Id, member.Id) && _org is not null)
         {
-            Notify.Success(L["Saved"]);
-            await LoadAsync();
+            _org.Members.Remove(member);
+            Notify.Success("Deleted", "Saved");
+        }
+        else
+        {
+            Notify.Error("Error", "DeleteFailed");
         }
     }
+
+    private async Task OnProjectsChangedAsync(IEnumerable<int> projectIds)
+    {
+        var previous = _selectedProjectIds.ToList();
+        _selectedProjectIds = projectIds.ToList();
+        _savingProjects = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var ok = await Api.Servers.AssignOrganizationProjectsAsync(Id,
+                new AssignProjectsRequest { ProjectIds = _selectedProjectIds.ToList() });
+            if (ok)
+            {
+                Notify.Success(L["Saved"]);
+                await RefreshAsync();
+            }
+            else
+            {
+                _selectedProjectIds = previous;
+                Notify.Error("Error", "SaveFailed");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _selectedProjectIds = previous;
+            Notify.Error("Error", "SaveFailed");
+        }
+        finally
+        {
+            _savingProjects = false;
+        }
+    }
+
+    // Kept as a small compatibility shim for existing component-level tests and callers.
+    private Task OnSaveProjects() => OnProjectsChangedAsync(_selectedProjectIds);
 
     public async ValueTask DisposeAsync()
     {

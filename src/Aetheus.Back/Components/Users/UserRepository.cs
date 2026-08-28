@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Users;
 
@@ -11,40 +8,19 @@ public class UserRepository(AppDbContext db) : IUserRepository
     public async Task<(List<User> Items, int TotalCount)> GetUsersPagedAsync(
         string? search, int page, int pageSize, CancellationToken ct = default)
     {
-        var query = db.Users.AsNoTracking().AsQueryable();
-
-        if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(u => u.Username.Contains(search) || (u.Email != null && u.Email.Contains(search)));
-
-        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-
-        var items = await query
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-            .OrderBy(u => u.Username)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        return (items, totalCount);
+        return await GetUsersPageAsync(
+            search, page, pageSize, query => query.IncludeRoles(), ct).ConfigureAwait(false);
     }
 
     public async Task<(List<UserDto> Items, int TotalCount)> GetUsersPagedProjectedAsync(
-        string? search, int page, int pageSize, CancellationToken ct = default)
+        string? search, int page, int pageSize, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false)
     {
-        var query = db.Users.AsNoTracking().AsQueryable();
-
-        if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(u => u.Username.Contains(search) || (u.Email != null && u.Email.Contains(search)));
-
-        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-
-        var items = await query
-            .OrderBy(u => u.Username)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(u => new UserDto
+        return await GetUsersPageAsync(
+            search,
+            page,
+            pageSize,
+            query => query.Select(u => new UserDto
             {
                 Id = u.Id,
                 Username = u.Username,
@@ -54,11 +30,38 @@ public class UserRepository(AppDbContext db) : IUserRepository
                 Roles = u.UserRoles.Select(ur => ur.Role.Name).ToList(),
                 CreatedAt = u.CreatedAt,
                 UpdatedAt = u.UpdatedAt
-            })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+            }),
+            ct,
+            sortBy,
+            sortDescending).ConfigureAwait(false);
+    }
 
+    private async Task<(List<T> Items, int TotalCount)> GetUsersPageAsync<T>(
+        string? search,
+        int page,
+        int pageSize,
+        Func<IQueryable<User>, IQueryable<T>> project,
+        CancellationToken ct,
+        string? sortBy = null,
+        bool sortDescending = false)
+    {
+        var query = BuildUserQuery(search);
+        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
+        var pageQuery = query
+            .OrderByProperty(sortBy, sortDescending, user => user.Username, fallbackDescending: false)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize);
+        var items = await project(pageQuery).ToListAsync(ct).ConfigureAwait(false);
         return (items, totalCount);
+    }
+
+    private IQueryable<User> BuildUserQuery(string? search)
+    {
+        var query = db.Users.AsNoTracking().AsQueryable();
+        return string.IsNullOrWhiteSpace(search)
+            ? query
+            : query.Where(user => user.Username.Contains(search)
+                || (user.Email != null && user.Email.Contains(search)));
     }
 
     public async Task<User?> GetUserDetailAsync(int id, CancellationToken ct = default)
@@ -73,12 +76,7 @@ public class UserRepository(AppDbContext db) : IUserRepository
 
     public async Task<User?> FindByUsernameAsync(string username, CancellationToken ct = default)
     {
-        return await db.Users
-            .AsNoTracking()
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Username == username, ct)
-            .ConfigureAwait(false);
+        return await db.Users.FindByUsernameWithRolesAsync(username, ct).ConfigureAwait(false);
     }
 
     public async Task<User?> FindUserAsync(int id, CancellationToken ct = default)
@@ -109,7 +107,6 @@ public class UserRepository(AppDbContext db) : IUserRepository
     public async Task<List<Role>> GetRolesByNamesAsync(List<string> roleNames, CancellationToken ct = default)
     {
         return await db.Roles
-            .AsNoTracking()
             .Where(r => roleNames.Contains(r.Name))
             .ToListAsync(ct)
             .ConfigureAwait(false);

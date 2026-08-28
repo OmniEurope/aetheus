@@ -3,9 +3,10 @@
 
 <PageTitle>@(_org?.Name ?? L["Organization"]) - Aetheus</PageTitle>
 
+<div class="iam-page iam-detail-page">
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else if (_loadError)
 {
@@ -23,7 +24,8 @@ else if (_org is null)
 }
 else
 {
-    <Aetheus.Front.Shared.PageHeader Title="@_org.Name" Icon="apartment" BackHref="/admin/organizations">
+    <Aetheus.Front.Shared.PageHeader Title="@_org.Name" Icon="apartment"
+        Subtitle="@L["OrganizationManagement"]" BackHref="/admin/organizations" Class="iam-entity-header">
         <ChildContent>
             <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_org.Slug" />
         </ChildContent>
@@ -34,10 +36,11 @@ else
         <RadzenText class="rz-mt-2 rz-color-secondary">@_org.Description</RadzenText>
     }
 
-    <UrlSyncedTabs class="rz-mt-4" Slugs="@(new[] { "general", "members", "projects" })">
+    <UrlSyncedTabs Slugs="@(new[] { "general", "members", "projects", "quality-gates", "audit" })">
         <Tabs>
             <RadzenTabsItem Text="@L["General"]">
-                <RadzenTemplateForm TItem="OrgGeneralModel" Data="@_general" Submit="@OnSaveGeneral" class="rz-mt-2 form-narrow">
+                <RadzenCard class="iam-detail-card">
+                <RadzenTemplateForm TItem="OrgGeneralModel" Data="@_general" Submit="@OnSaveGeneral" class="form-narrow">
                     <LocalizedDataAnnotationsValidator />
                     <RadzenStack Gap="1rem">
                         <RadzenFormField Text="@L["Name"]">
@@ -58,9 +61,11 @@ else
                         <RadzenButton Text="@L["DeleteOrganization"]" Icon="delete" Click="@OnDeleteOrganization" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
                     </RadzenStack>
                 </RadzenTemplateForm>
+                </RadzenCard>
             </RadzenTabsItem>
             <RadzenTabsItem Text="@L["Members"]">
-                <RadzenStack Gap="0.75rem" class="rz-mt-2">
+                <RadzenCard class="iam-detail-card">
+                <RadzenStack Gap="0.75rem">
                     <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
                         <RadzenFormField Text="@L["User"]" Variant="Variant.Filled">
                             <RadzenDropDown TValue="int?" Data="@_users" TextProperty="Username" ValueProperty="Id"
@@ -74,8 +79,8 @@ else
                             Disabled="@(_newUserId is null)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
                     </RadzenStack>
 
-                    <RadzenDataGrid TItem="OrganizationMemberDto" Data="@_org.Members" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                        RowClick="@(args => { if (args.Data is { } member) Nav.NavigateTo($"/users/{member.UserId}"); })" class="aetheus-clickable-rows">
+                    <RadzenDataGrid Responsive="false" TItem="OrganizationMemberDto" Data="@_org.Members" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                        RowClick="@(args => { if (args.Data is { } member) Nav.NavigateTo($"/users/{member.UserId}"); })" class="aetheus-clickable-rows" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                         <Columns>
                             <RadzenDataGridColumn TItem="OrganizationMemberDto" Property="Username" Title="@L["Username"]">
                                 <Template Context="m">
@@ -98,19 +103,36 @@ else
                         </Columns>
                     </RadzenDataGrid>
                 </RadzenStack>
+                </RadzenCard>
             </RadzenTabsItem>
 
             <RadzenTabsItem Text="@L["Projects"]">
-                <RadzenStack Gap="0.75rem" class="rz-mt-2">
+                <RadzenCard class="iam-detail-card">
+                <RadzenStack Gap="0.75rem">
                     <RadzenText class="rz-color-secondary">@L["AssignProjectsHelp"]</RadzenText>
                     <RadzenListBox TValue="IEnumerable<int>" Data="@_allProjects" TextProperty="Name" ValueProperty="Id"
                         Multiple="true" AllowFiltering="true" class="org-projects-listbox"
-                        @bind-Value="_selectedProjectIds" />
-                    <div>
-                        <RadzenButton Icon="save" Text="@L["Save"]" Click="@OnSaveProjects" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                    </div>
+                        Value="@_selectedProjectIds" Change="@(value => OnProjectsChangedAsync((IEnumerable<int>)value!))"
+                        Disabled="@_savingProjects" />
+                    @if (_savingProjects)
+                    {
+                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Saving"]</RadzenText>
+                    }
                 </RadzenStack>
+                </RadzenCard>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["QualityGates"]" Icon="rule">
+                <div class="iam-quality-surface">
+                <QualityGatePolicyEditor Scope="AnalysisPolicyScope.Organization"
+                    OrganizationId="@Id" CanEdit="true" />
+                </div>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["AuditTrail"]">
+                <EntityAuditTrail EntityType="Organization" EntityId="@Id" />
             </RadzenTabsItem>
         </Tabs>
     </UrlSyncedTabs>
 }
+</div>

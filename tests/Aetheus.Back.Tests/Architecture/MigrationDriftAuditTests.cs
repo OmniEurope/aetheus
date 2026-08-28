@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 namespace Aetheus.Back.Tests.Architecture;
 
@@ -48,6 +49,17 @@ public class MigrationDriftAuditTests
         Assert.True(
             differences.Count == 0,
             $"EF model has {differences.Count} pending change(s) not captured in a migration. " +
+            $"Differences: {string.Join(", ", differences.Select(Describe))}. " +
             "Run: cd Aetheus.Back && dotnet ef migrations add <Name> --context AppDbContext -o Data/Migrations");
     }
+
+    private static string Describe(MigrationOperation operation) => operation switch
+    {
+        AddColumnOperation item => $"{item.GetType().Name}({item.Table}.{item.Name})",
+        AlterColumnOperation item => $"{item.GetType().Name}({item.Table}.{item.Name})",
+        DropColumnOperation item => $"{item.GetType().Name}({item.Table}.{item.Name})",
+        CreateIndexOperation item => $"{item.GetType().Name}({item.Table}.{item.Name})",
+        DropIndexOperation item => $"{item.GetType().Name}({item.Table}.{item.Name})",
+        _ => operation.GetType().Name
+    };
 }

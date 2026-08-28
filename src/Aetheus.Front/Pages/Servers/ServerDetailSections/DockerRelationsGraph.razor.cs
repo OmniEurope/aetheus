@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Front.Resources;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -31,6 +26,7 @@ public partial class DockerRelationsGraph : ComponentBase, IAsyncDisposable
         ["network"] = true,
         ["volume"] = true
     };
+    internal IReadOnlyDictionary<string, bool> KindFilter => _kindFilter;
 
     private (string Key, string Label)[] NodeKinds =>
     [
@@ -77,86 +73,94 @@ public partial class DockerRelationsGraph : ComponentBase, IAsyncDisposable
         await _module.InvokeVoidAsync("resetView", _svgId);
     }
 
-    private string BuildData()
+    internal string BuildData()
     {
         bool MatchProject(string? p) => string.IsNullOrEmpty(_selectedProject)
             || string.Equals(p ?? string.Empty, _selectedProject, StringComparison.OrdinalIgnoreCase);
 
         var nodes = new List<object>();
         var edges = new List<object>();
+        AddProjectNodes(nodes, MatchProject);
+        if (_kindFilter["container"]) AddContainerNodes(nodes, edges, MatchProject);
+        if (_kindFilter["image"]) AddImageNodes(nodes, edges, MatchProject);
+        if (_kindFilter["network"]) AddNetworkNodes(nodes, edges, MatchProject);
+        if (_kindFilter["volume"]) AddVolumeNodes(nodes, edges, MatchProject);
+        return JsonSerializer.Serialize(new { nodes, edges });
+    }
 
+    private void AddProjectNodes(ICollection<object> nodes, Func<string?, bool> matchProject)
+    {
         var projects = Docker.Containers.Select(c => c.Project)
             .Concat(Docker.Networks.Select(n => n.Project))
             .Concat(Docker.Volumes.Select(v => v.Project))
             .Concat(Docker.Images.Select(i => i.Project))
             .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Where(MatchProject)
+            .Where(matchProject)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         foreach (var p in projects)
-        {
             nodes.Add(new { id = $"p:{p}", label = p, group = "project" });
-        }
+    }
 
-        if (_kindFilter["container"])
+    private void AddContainerNodes(
+        ICollection<object> nodes, ICollection<object> edges, Func<string?, bool> matchProject)
+    {
+        foreach (var c in Docker.Containers.Where(c => matchProject(c.Project)))
         {
-            foreach (var c in Docker.Containers.Where(c => MatchProject(c.Project)))
+            var id = $"c:{c.ContainerId}";
+            var group = c.State == "running" ? "container" : "stopped";
+            nodes.Add(new { id, label = c.Name, group });
+            if (!string.IsNullOrWhiteSpace(c.Project))
+                edges.Add(new { from = $"p:{c.Project}", to = id });
+            if (_kindFilter["image"] && !string.IsNullOrWhiteSpace(c.Image))
             {
-                var id = $"c:{c.ContainerId}";
-                var group = c.State == "running" ? "container" : "stopped";
-                nodes.Add(new { id, label = c.Name, group });
-                if (!string.IsNullOrWhiteSpace(c.Project))
-                    edges.Add(new { from = $"p:{c.Project}", to = id });
-
-                if (_kindFilter["image"] && !string.IsNullOrWhiteSpace(c.Image))
-                {
-                    var imgId = $"i:{c.Image}";
-                    if (!nodes.Any(n => GetId(n) == imgId))
-                        nodes.Add(new { id = imgId, label = c.Image, group = "image" });
-                    edges.Add(new { from = id, to = imgId });
-                }
+                var imgId = $"i:{c.Image}";
+                if (!nodes.Any(n => GetId(n) == imgId))
+                    nodes.Add(new { id = imgId, label = c.Image, group = "image" });
+                edges.Add(new { from = id, to = imgId });
             }
         }
+    }
 
-        if (_kindFilter["image"])
+    private void AddImageNodes(
+        ICollection<object> nodes, ICollection<object> edges, Func<string?, bool> matchProject)
+    {
+        foreach (var img in Docker.Images.Where(i => matchProject(i.Project)))
         {
-            foreach (var img in Docker.Images.Where(i => MatchProject(i.Project)))
-            {
-                var label = string.IsNullOrEmpty(img.Tag) || img.Tag == "<none>"
-                    ? img.Repository
-                    : $"{img.Repository}:{img.Tag}";
-                var id = $"i:{label}";
-                if (!nodes.Any(n => GetId(n) == id))
-                    nodes.Add(new { id, label, group = "image" });
-                if (!string.IsNullOrWhiteSpace(img.Project))
-                    edges.Add(new { from = $"p:{img.Project}", to = id });
-            }
+            var label = string.IsNullOrEmpty(img.Tag) || img.Tag == "<none>"
+                ? img.Repository
+                : $"{img.Repository}:{img.Tag}";
+            var id = $"i:{label}";
+            if (!nodes.Any(n => GetId(n) == id))
+                nodes.Add(new { id, label, group = "image" });
+            if (!string.IsNullOrWhiteSpace(img.Project))
+                edges.Add(new { from = $"p:{img.Project}", to = id });
         }
+    }
 
-        if (_kindFilter["network"])
+    private void AddNetworkNodes(
+        ICollection<object> nodes, ICollection<object> edges, Func<string?, bool> matchProject)
+    {
+        foreach (var net in Docker.Networks.Where(n => matchProject(n.Project)))
         {
-            foreach (var net in Docker.Networks.Where(n => MatchProject(n.Project)))
-            {
-                var id = $"n:{net.NetworkId}";
-                nodes.Add(new { id, label = net.Name, group = "network" });
-                if (!string.IsNullOrWhiteSpace(net.Project))
-                    edges.Add(new { from = $"p:{net.Project}", to = id });
-            }
+            var id = $"n:{net.NetworkId}";
+            nodes.Add(new { id, label = net.Name, group = "network" });
+            if (!string.IsNullOrWhiteSpace(net.Project))
+                edges.Add(new { from = $"p:{net.Project}", to = id });
         }
+    }
 
-        if (_kindFilter["volume"])
+    private void AddVolumeNodes(
+        ICollection<object> nodes, ICollection<object> edges, Func<string?, bool> matchProject)
+    {
+        foreach (var vol in Docker.Volumes.Where(v => matchProject(v.Project)))
         {
-            foreach (var vol in Docker.Volumes.Where(v => MatchProject(v.Project)))
-            {
-                var id = $"v:{vol.Name}";
-                nodes.Add(new { id, label = vol.Name, group = "volume" });
-                if (!string.IsNullOrWhiteSpace(vol.Project))
-                    edges.Add(new { from = $"p:{vol.Project}", to = id });
-            }
+            var id = $"v:{vol.Name}";
+            nodes.Add(new { id, label = vol.Name, group = "volume" });
+            if (!string.IsNullOrWhiteSpace(vol.Project))
+                edges.Add(new { from = $"p:{vol.Project}", to = id });
         }
-
-        return JsonSerializer.Serialize(new { nodes, edges });
     }
 
     private static string GetId(object obj) =>

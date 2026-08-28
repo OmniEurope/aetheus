@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
 using Cronos;
 
@@ -13,13 +8,8 @@ namespace Aetheus.Back.Components.Cron;
 
 public class CronService(ICronRepository repo, IAuditService audit, ITaskService taskService) : ICronService
 {
-    // Persist a queued task AND push the "TaskQueued" SignalR event so the top-bar tracker shows it
-    // live (and can later flip it Running/Completed). Mirrors ServerServiceManager (see ITaskService).
-    private async Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
-    {
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await taskService.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
-    }
+    private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+        => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
 
     public Task<List<CronJobDto>> GetJobsAsync(int serverId, CancellationToken ct = default)
     {

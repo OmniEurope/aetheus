@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Agent.Core.Configuration;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Services;
 
 internal sealed class AgentLivenessWatchdogService(
     AgentRuntimeHealth health,
+    AgentState agentState,
     IEnrollmentService enrollment,
     IAgentProcessRestarter processRestarter,
     TimeProvider timeProvider,
@@ -20,6 +19,8 @@ internal sealed class AgentLivenessWatchdogService(
     private readonly TimeSpan _pollingStallThreshold = TimeSpan.FromSeconds(Math.Max(
         90,
         (options.Value.PollingIntervalSeconds * 3) + 30));
+    private readonly TimeSpan _restartJitter = TimeSpan.FromSeconds(
+        15 + Math.Abs(agentState.ServerId.GetValueOrDefault()) % 30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -37,18 +38,39 @@ internal sealed class AgentLivenessWatchdogService(
             return false;
 
         var now = timeProvider.GetUtcNow();
-        var heartbeatAge = Age(now, health.LastHeartbeatProgressAt);
-        var pollingAge = Age(now, health.LastPollingProgressAt);
+        var heartbeatAge = Age(now, health.LastHeartbeatSuccessAt);
+        var pollingAge = Age(now, health.LastPollingSuccessAt);
+        var heartbeatStalled = heartbeatAge > _heartbeatStallThreshold;
+        var pollingStalled = pollingAge > _pollingStallThreshold;
 
-        var stalledLoop = heartbeatAge > _heartbeatStallThreshold
-            ? $"heartbeat loop ({heartbeatAge.Value.TotalSeconds:F0}s without progress)"
-            : pollingAge > _pollingStallThreshold
-                ? $"polling loop ({pollingAge.Value.TotalSeconds:F0}s without progress)"
-                : null;
+        if (heartbeatStalled && pollingStalled)
+        {
+            logger.LogWarning(
+                "Control plane is unreachable: heartbeat and polling have both stalled; preserving the process and retry backoff");
+            return false;
+        }
 
-        if (stalledLoop is null)
+        if (!heartbeatStalled && !pollingStalled)
             return false;
 
+        if (!health.IsIdle)
+        {
+            logger.LogWarning(
+                "Local {Loop} loop is stalled but activity remains: tasks={TaskCount}, processes={ProcessCount}; restart deferred",
+                heartbeatStalled ? "heartbeat" : "polling",
+                health.ActiveTaskCount,
+                health.ActiveProcessCount);
+            return false;
+        }
+
+        var stalledAge = heartbeatStalled ? heartbeatAge!.Value : pollingAge!.Value;
+        var threshold = heartbeatStalled ? _heartbeatStallThreshold : _pollingStallThreshold;
+        if (stalledAge <= threshold + _restartJitter)
+            return false;
+
+        var stalledLoop = heartbeatStalled
+            ? $"heartbeat loop ({heartbeatAge!.Value.TotalSeconds:F0}s without a successful heartbeat)"
+            : $"polling loop ({pollingAge!.Value.TotalSeconds:F0}s without a successful poll)";
         var reason = $"Aetheus agent self-repair: {stalledLoop} stalled";
         logger.LogCritical(
             "{Reason}; terminating the process so the service manager restarts it",
@@ -57,6 +79,6 @@ internal sealed class AgentLivenessWatchdogService(
         return true;
     }
 
-    private static TimeSpan? Age(DateTimeOffset now, DateTimeOffset? lastProgress) =>
-        lastProgress is null ? null : now - lastProgress.Value;
+    private static TimeSpan? Age(DateTimeOffset now, DateTimeOffset? lastSuccess) =>
+        lastSuccess is null ? null : now - lastSuccess.Value;
 }

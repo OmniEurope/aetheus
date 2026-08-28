@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Resources;
 using Aetheus.Front.Services;
+using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using NSubstitute;
 using Radzen;
@@ -136,5 +138,18 @@ public class NotifyHelperTests
         var msg = Assert.Single(_notification.Messages);
         Assert.Equal(NotificationSeverity.Error, msg.Severity);
         Assert.Equal("ErrorSummary", msg.Summary);
+    }
+
+    [Fact]
+    public void Error_ForAdmin_AddsLogLinkContent()
+    {
+        using var context = new BunitContext();
+        BunitTestHelper.RegisterServices(context, isAdmin: true);
+        var helper = context.Services.GetRequiredService<NotifyHelper>();
+        var notifications = context.Services.GetRequiredService<NotificationService>();
+
+        helper.ErrorRaw("Failure", "Details", "request-42", reportClientError: false);
+
+        Assert.NotNull(Assert.Single(notifications.Messages).DetailContent);
     }
 }

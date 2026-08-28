@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.VariableLibraries;
 
 public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryRepository
 {
     public async Task<(List<VariableLibrary> Items, int TotalCount)> GetLibrariesPagedAsync(
-        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
+        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false)
     {
         var query = db.VariableLibraries.AsNoTracking().AsQueryable();
 
@@ -32,7 +31,7 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
             .Include(vl => vl.Environment)
             .Include(vl => vl.ProjectServer)
             .Include(vl => vl.Entries)
-            .OrderBy(vl => vl.Name)
+            .OrderByProperty(sortBy, sortDescending, vl => vl.Name, fallbackDescending: false)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsSplitQuery()

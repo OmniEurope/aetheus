@@ -222,7 +222,7 @@ public class ServerCertbotSectionExtendedTests : BunitContext
     }
 
     [Fact]
-    public async Task ConfirmAccepted_NullAction_DoesNotThrow()
+    public async Task ConfirmAccepted_NullAction_LeavesTheFlagOff()
     {
         var cut = RenderSection();
         typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);

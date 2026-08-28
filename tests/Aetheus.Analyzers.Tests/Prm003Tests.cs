@@ -45,6 +45,53 @@ public sealed class Prm003Tests
     }
 
     [Fact]
+    public async Task IncludeBeforeWhere_NoDiagnostic()
+    {
+        var source = Query(".Include(x => x.Id).Where(x => x.Id > 0)");
+        await Verifier<PRM003_NoIncludeAfterOrderByAnalyzer>.VerifyAsync("FooRepository.cs", source);
+    }
+
+    [Fact]
+    public async Task OrderingSplitAcrossLocalDeclaration_ReportsDiagnostic()
+    {
+        var source = EfStub + """
+
+            public sealed class FooRepository
+            {
+                public IQueryable<Row> Get()
+                {
+                    var query = new[] { new Row() }.AsQueryable().OrderBy(row => row.Id);
+                    var filtered = query.Where(row => row.Id > 0);
+                    return filtered.Include(row => row.Id);
+                }
+            }
+            """;
+
+        await Verifier<PRM003_NoIncludeAfterOrderByAnalyzer>.VerifyAsync(
+            "FooRepository.cs", source, ExpectInclude(source, "FooRepository.cs", "OrderBy"));
+    }
+
+    [Fact]
+    public async Task OrderingSplitAcrossLocalAssignment_ReportsDiagnostic()
+    {
+        var source = EfStub + """
+
+            public sealed class FooRepository
+            {
+                public IQueryable<Row> Get()
+                {
+                    var query = new[] { new Row() }.AsQueryable();
+                    query = query.OrderBy(row => row.Id);
+                    return query.Include(row => row.Id);
+                }
+            }
+            """;
+
+        await Verifier<PRM003_NoIncludeAfterOrderByAnalyzer>.VerifyAsync(
+            "FooRepository.cs", source, ExpectInclude(source, "FooRepository.cs", "OrderBy"));
+    }
+
+    [Fact]
     public async Task StaticEfIncludeAfterTake_ReportsDiagnostic()
     {
         var source = EfStub + """

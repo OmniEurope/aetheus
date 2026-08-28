@@ -14,6 +14,10 @@ namespace Aetheus.Agent.Core.Collectors;
 public sealed class TcpTeamspeakQueryClient : ITeamspeakQueryClient
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+    private readonly ITeamspeakQueryTransport _transport;
+
+    public TcpTeamspeakQueryClient(ITeamspeakQueryTransport transport) =>
+        _transport = transport;
 
     public async Task<string?> ExecuteAsync(int port, string commands, CancellationToken ct = default)
     {
@@ -23,16 +27,8 @@ public sealed class TcpTeamspeakQueryClient : ITeamspeakQueryClient
 
         try
         {
-            using var client = new TcpClient();
-            await client.ConnectAsync("localhost", port, token).ConfigureAwait(false);
-
-            await using var stream = client.GetStream();
             var payload = Encoding.ASCII.GetBytes(commands);
-            await stream.WriteAsync(payload, token).ConfigureAwait(false);
-            await stream.FlushAsync(token).ConfigureAwait(false);
-
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            var output = await reader.ReadToEndAsync(token).ConfigureAwait(false);
+            var output = await _transport.ExchangeAsync(port, payload, token).ConfigureAwait(false);
             return string.IsNullOrWhiteSpace(output) ? null : output;
         }
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException or ObjectDisposedException)

@@ -2,6 +2,7 @@
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Exceptions;
 using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -115,6 +116,68 @@ public class PipelineGitServiceTests
         Assert.Equal(yaml, result);
         await _cliMock.Received().GetBlobAsync(
             Arg.Any<string>(), commit, ".pipeline/deploy.yaml", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReadProjectPipelineYamlAsync_MultipleRepositoriesWithoutSelection_IsRejected()
+    {
+        _gitServiceMock.GetRepositoriesAsync(1, Arg.Any<CancellationToken>()).Returns(
+        [
+            new GitLightRepoDto { Id = 10, ProjectId = 1, Slug = "first", DefaultBranch = "main" },
+            new GitLightRepoDto { Id = 20, ProjectId = 1, Slug = "second", DefaultBranch = "main" }
+        ]);
+
+        var error = await Assert.ThrowsAsync<BadRequestException>(() =>
+            _sut.ReadProjectPipelineYamlAsync(
+                1, "deploy", ct: TestContext.Current.CancellationToken));
+
+        Assert.Contains("multiple repositories", error.Message, StringComparison.OrdinalIgnoreCase);
+        await _cliMock.DidNotReceiveWithAnyArgs().GetBlobAsync(
+            string.Empty, string.Empty, string.Empty, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ReadProjectConfigAtRevisionAsync_SelectedRepository_UsesExactCommitAndSafePath()
+    {
+        const string commit = "0123456789abcdef0123456789abcdef01234567";
+        _gitServiceMock.GetRepositoriesAsync(1, Arg.Any<CancellationToken>()).Returns(
+        [
+            new GitLightRepoDto { Id = 10, ProjectId = 1, Slug = "first", DefaultBranch = "main" },
+            new GitLightRepoDto { Id = 20, ProjectId = 1, Slug = "second", DefaultBranch = "develop" }
+        ]);
+        var secondPath = Path.Combine(Path.GetTempPath(), "pgs-test-1-second");
+        Directory.CreateDirectory(secondPath);
+        _gitServiceMock.ResolveDiskPath(1, "second").Returns(secondPath);
+        _cliMock.GetBlobAsync(
+                secondPath, commit, ".pipeline/configs/apache/site.conf", Arg.Any<CancellationToken>())
+            .Returns(new GitLightBlobDto
+            {
+                Content = "ServerName #{HOST}#\n",
+                Path = ".pipeline/configs/apache/site.conf"
+            });
+
+        var result = await _sut.ReadProjectConfigAtRevisionAsync(
+            1, ".pipeline/configs/apache/site.conf", commit,
+            TestContext.Current.CancellationToken, 20);
+
+        Assert.Equal("ServerName #{HOST}#\n", result);
+        await _cliMock.Received(1).GetBlobAsync(
+            secondPath, commit, ".pipeline/configs/apache/site.conf", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(".pipeline/configs/../secret.conf", null)]
+    [InlineData(".pipeline/configs/apache/site.conf", "main")]
+    public async Task ReadProjectConfigAtRevisionAsync_UnsafePathOrMutableRevision_IsRejected(
+        string path, string? revision)
+    {
+        revision ??= new string('a', 40);
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            _sut.ReadProjectConfigAtRevisionAsync(
+                1, path, revision, TestContext.Current.CancellationToken));
+
+        await _gitServiceMock.DidNotReceiveWithAnyArgs().GetRepositoriesAsync(
+            default, TestContext.Current.CancellationToken);
     }
 
     // --- WriteProjectPipelineYamlAsync ---

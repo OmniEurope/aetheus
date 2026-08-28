@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Services;
 

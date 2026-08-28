@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -163,7 +155,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
         try
         {
             await RunOperationAsync(
-                () => Api.ExecuteTeamspeakActionAsync(ServerId, new TeamspeakActionRequest { Action = action }),
+                () => Api.Teamspeak.ExecuteTeamspeakActionAsync(ServerId, new TeamspeakActionRequest { Action = action }),
                 action.ToString());
         }
         finally { _actionRunning = false; }
@@ -179,7 +171,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
             {
                 { "Mode", mode }, { "Model", model }, { "Channels", channels }, { "ServerName", Ts.ServerName }
             },
-            new DialogOptions { Width = width });
+            new DialogOptions { Width = width, AutoFocusFirstElement = false });
         return result as TeamspeakDialogModel;
     }
 
@@ -258,7 +250,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task SetupAsync()
     {
         await RunOperationAsync(
-            () => Api.SetupTeamspeakAsync(ServerId, new TeamspeakSetupRequest
+            () => Api.Teamspeak.SetupTeamspeakAsync(ServerId, new TeamspeakSetupRequest
             {
                 InstallPath = _setupInstallPath,
                 VoicePort = _setupVoicePort,
@@ -280,7 +272,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task KickAsync()
     {
         await RunOperationAsync(
-            () => Api.KickTeamspeakClientAsync(ServerId, new TeamspeakKickRequest
+            () => Api.Teamspeak.KickTeamspeakClientAsync(ServerId, new TeamspeakKickRequest
             {
                 ClientId = _kickClientId,
                 ReasonMessage = _kickReason
@@ -304,7 +296,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task MoveAsync()
     {
         await RunOperationAsync(
-            () => Api.MoveTeamspeakClientAsync(ServerId, new TeamspeakMoveClientRequest
+            () => Api.Teamspeak.MoveTeamspeakClientAsync(ServerId, new TeamspeakMoveClientRequest
             {
                 ClientId = _moveClientId,
                 TargetChannelId = _moveTargetChannelId,
@@ -329,7 +321,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(_pokeMessage)) return;
         await RunOperationAsync(
-            () => Api.PokeTeamspeakClientAsync(ServerId, new TeamspeakPokeClientRequest
+            () => Api.Teamspeak.PokeTeamspeakClientAsync(ServerId, new TeamspeakPokeClientRequest
             {
                 ClientId = _pokeClientId,
                 Message = _pokeMessage
@@ -342,7 +334,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task FetchClientInfoAsync(TeamspeakClientDto client)
     {
         await RunOperationAsync(
-            () => Api.GetTeamspeakClientInfoAsync(
+            () => Api.Teamspeak.GetTeamspeakClientInfoAsync(
                 ServerId, new TeamspeakClientInfoRequest { ClientId = client.ClientId }),
             $"{L["ClientInfo"]} - {client.Nickname}");
     }
@@ -350,7 +342,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task GracefulRestartAsync()
     {
         await RunOperationAsync(
-            () => Api.TeamspeakGracefulRestartAsync(ServerId, new TeamspeakGracefulRestartRequest
+            () => Api.Teamspeak.TeamspeakGracefulRestartAsync(ServerId, new TeamspeakGracefulRestartRequest
             {
                 WarningSeconds = _gracefulRestartSeconds,
                 WarningMessage = _gracefulRestartMessage
@@ -361,21 +353,21 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task FetchServerInfoAsync()
     {
         await RunOperationAsync(
-            () => Api.GetTeamspeakServerInfoAsync(ServerId),
+            () => Api.Teamspeak.GetTeamspeakServerInfoAsync(ServerId),
             L["TeamspeakStats"]);
     }
 
     private async Task CreateSnapshotAsync()
     {
         await RunOperationAsync(
-            () => Api.CreateTeamspeakSnapshotAsync(ServerId, new TeamspeakSnapshotCreateRequest()),
+            () => Api.Teamspeak.CreateTeamspeakSnapshotAsync(ServerId, new TeamspeakSnapshotCreateRequest()),
             L["SnapshotCreate"]);
     }
 
     private async Task DeploySnapshotAsync()
     {
         await RunOperationAsync(
-            () => Api.DeployTeamspeakSnapshotAsync(ServerId, new TeamspeakSnapshotDeployRequest
+            () => Api.Teamspeak.DeployTeamspeakSnapshotAsync(ServerId, new TeamspeakSnapshotDeployRequest
             {
                 SnapshotBlob = _snapshotBlob,
                 Confirmation = _snapshotConfirmation
@@ -391,21 +383,21 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task ListServerGroupsAsync()
     {
         await RunOperationAsync(
-            () => Api.ListTeamspeakServerGroupsAsync(ServerId),
+            () => Api.Teamspeak.ListTeamspeakServerGroupsAsync(ServerId),
             L["TeamspeakServerGroups"]);
     }
 
     private async Task ListTokensAsync()
     {
         await RunOperationAsync(
-            () => Api.ListTeamspeakTokensAsync(ServerId),
+            () => Api.Teamspeak.ListTeamspeakTokensAsync(ServerId),
             L["TeamspeakTokens"]);
     }
 
     private async Task ListComplaintsAsync()
     {
         await RunOperationAsync(
-            () => Api.ListTeamspeakComplaintsAsync(ServerId),
+            () => Api.Teamspeak.ListTeamspeakComplaintsAsync(ServerId),
             L["TeamspeakComplaints"]);
     }
 
@@ -423,7 +415,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task BanAsync()
     {
         await RunOperationAsync(
-            () => Api.BanTeamspeakClientAsync(ServerId, new TeamspeakBanRequest
+            () => Api.Teamspeak.BanTeamspeakClientAsync(ServerId, new TeamspeakBanRequest
             {
                 ClientUniqueId = _banClientUniqueId,
                 DurationSeconds = _banDuration,
@@ -435,14 +427,14 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task LoadLogsAsync()
     {
         await RunOperationAsync(
-            () => Api.GetTeamspeakLogsAsync(ServerId, new TeamspeakLogRequest { Lines = _logLines }),
+            () => Api.Teamspeak.GetTeamspeakLogsAsync(ServerId, new TeamspeakLogRequest { Lines = _logLines }),
             L["Logs"]);
     }
 
     private async Task CreateChannelAsync()
     {
         await RunOperationAsync(
-            () => Api.CreateTeamspeakChannelAsync(ServerId, new TeamspeakCreateChannelRequest
+            () => Api.Teamspeak.CreateTeamspeakChannelAsync(ServerId, new TeamspeakCreateChannelRequest
             {
                 Name = _newChannelName,
                 ParentId = _newChannelParentId,
@@ -474,7 +466,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task EditChannelAsync()
     {
         await RunOperationAsync(
-            () => Api.EditTeamspeakChannelAsync(ServerId, _editChannelId, new TeamspeakEditChannelRequest
+            () => Api.Teamspeak.EditTeamspeakChannelAsync(ServerId, _editChannelId, new TeamspeakEditChannelRequest
             {
                 ChannelId = _editChannelId,
                 Name = _editChannelName,
@@ -491,7 +483,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
         if (confirmed == true)
         {
             await RunOperationAsync(
-                () => Api.DeleteTeamspeakChannelAsync(ServerId, ch.Id),
+                () => Api.Teamspeak.DeleteTeamspeakChannelAsync(ServerId, ch.Id),
                 L["DeleteChannel"]);
         }
     }
@@ -499,7 +491,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task EditServerAsync()
     {
         await RunOperationAsync(
-            () => Api.EditTeamspeakServerAsync(ServerId, new TeamspeakServerEditRequest
+            () => Api.Teamspeak.EditTeamspeakServerAsync(ServerId, new TeamspeakServerEditRequest
             {
                 ServerName = string.IsNullOrWhiteSpace(_editServerName) ? null : _editServerName,
                 Password = string.IsNullOrWhiteSpace(_editServerPassword) ? null : _editServerPassword,
@@ -512,7 +504,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
     private async Task SendMessageAsync()
     {
         await RunOperationAsync(
-            () => Api.SendTeamspeakGlobalMessageAsync(ServerId, new TeamspeakGlobalMessageRequest
+            () => Api.Teamspeak.SendTeamspeakGlobalMessageAsync(ServerId, new TeamspeakGlobalMessageRequest
             {
                 Message = _globalMessage
             }),
@@ -539,7 +531,7 @@ public partial class ServerTeamspeakSection : IAsyncDisposable
             new ConfirmOptions { OkButtonText = L["Confirm"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
         await RunOperationAsync(
-            () => Api.UnbanTeamspeakClientAsync(ServerId, banId),
+            () => Api.Teamspeak.UnbanTeamspeakClientAsync(ServerId, banId),
             L["Unban"]);
     }
 

@@ -23,16 +23,21 @@ peut masquer le résultat réel de la tâche.
 | `/api/tasks/claim` | POST | AgentToken | Agent claims pending tasks |
 | `/api/tasks/{id}/start` | POST | AgentToken | Agent marks task running |
 | `/api/tasks/{id}/complete` | POST | AgentToken | Agent reports task result |
+| `/api/tasks/{id}/deployment-build-refusal` | POST | AgentToken | Report a deployment build refusal |
 | `/api/tasks/{id}/cancel` | POST | User | Cancel a task |
 
 ## Key Classes
 
 - `TasksController` -- thin controller, RBAC + agent-token gated
 - `ITaskService` / `TaskService` -- task lifecycle, operation dispatch
-- `ITaskRepository` / `TaskRepository` -- EF data access
-- `TaskTimeoutService` -- background: expires stale tasks
+- `ITaskRepository` / `TaskRepository` -- EF data access (with `TaskLeaseRepository` and `TaskQueuePersistence` collaborators)
+- `TaskCompletionFinalizer` -- shared completion path (result persistence, pipeline notification)
+- `TaskEnvProtection` -- filters the environment handed to agent task processes
+- `SelfUpdateTaskHandoff` / `AgentTaskProtocolCompatibility` -- agent update handoff and protocol gating
+- `PipelineTaskFailureClassifier` -- maps task failures to pipeline failure categories
+- `TaskTimeoutService` (in `Services/`, outside this module) -- background: expires stale tasks
 
 ## Cross-Module Dependencies
 
 - Depends on: Audit, Pipelines (pipeline-run context for operation tasks)
-- Depended on by: Logs, Servers (task listing per server)
+- Depended on by: AiTasks, Logs, Servers (task listing per server)

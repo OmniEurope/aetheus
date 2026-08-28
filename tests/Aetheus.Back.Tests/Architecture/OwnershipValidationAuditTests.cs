@@ -2,8 +2,8 @@
 namespace Aetheus.Back.Tests.Architecture;
 
 /// <summary>
-/// Architectural guard: entities with the exactly-one-owner pattern (ProjectId / EnvironmentId /
-/// ProjectServerId) must have the <c>[ExactlyOneOwner]</c> validation attribute on their
+/// Architectural guard: entities with the at-most-one-owner pattern (ProjectId / EnvironmentId /
+/// ProjectServerId) must have the <c>[AtMostOneOwner]</c> validation attribute on their
 /// corresponding Create and Update request DTOs. This prevents regressions where a new DTO
 /// is introduced without the ownership constraint.
 /// </summary>
@@ -12,10 +12,10 @@ public class OwnershipValidationAuditTests
     private static readonly string[] OwnedEntityNames = ["VariableLibrary", "Vault", "Pipeline"];
 
     [Fact]
-    public void AllOwnedEntityDtos_HaveExactlyOneOwnerAttribute()
+    public void AllOwnedEntityDtos_HaveAtMostOneOwnerAttribute()
     {
         var sharedAssembly = typeof(Aetheus.Shared.DTOs.PaginatedResult<>).Assembly;
-        var attributeType = typeof(Aetheus.Shared.Validation.ExactlyOneOwnerAttribute);
+        var attributeType = typeof(Aetheus.Shared.Validation.AtMostOneOwnerAttribute);
         var offenders = new List<string>();
 
         foreach (var entityName in OwnedEntityNames)
@@ -38,20 +38,20 @@ public class OwnershipValidationAuditTests
             }
 
             if (!Attribute.IsDefined(createType, attributeType))
-                offenders.Add($"{createDtoName} - missing [ExactlyOneOwner]");
+                offenders.Add($"{createDtoName} - missing [AtMostOneOwner]");
             if (!Attribute.IsDefined(updateType, attributeType))
-                offenders.Add($"{updateDtoName} - missing [ExactlyOneOwner]");
+                offenders.Add($"{updateDtoName} - missing [AtMostOneOwner]");
         }
 
         Assert.True(offenders.Count == 0,
-            "These DTOs for owned entities are missing the [ExactlyOneOwner] validation attribute. " +
-            "Add it to enforce the exactly-one-owner constraint (ProjectId | EnvironmentId | ProjectServerId):" +
+            "These DTOs for owned entities are missing the [AtMostOneOwner] validation attribute. " +
+            "Add it to enforce the at-most-one-owner constraint (ProjectId | EnvironmentId | ProjectServerId):" +
             System.Environment.NewLine +
             string.Join(System.Environment.NewLine, offenders.Select(o => $"  - {o}")));
     }
 
     [Fact]
-    public void ExactlyOneOwnerAttribute_AcceptsZeroOwners()
+    public void AtMostOneOwnerAttribute_AcceptsZeroOwners()
     {
         var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
         {
@@ -67,7 +67,7 @@ public class OwnershipValidationAuditTests
     }
 
     [Fact]
-    public void ExactlyOneOwnerAttribute_RejectsMultipleOwners()
+    public void AtMostOneOwnerAttribute_RejectsMultipleOwners()
     {
         var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
         {
@@ -85,7 +85,7 @@ public class OwnershipValidationAuditTests
     }
 
     [Fact]
-    public void ExactlyOneOwnerAttribute_AcceptsSingleOwner()
+    public void AtMostOneOwnerAttribute_AcceptsSingleOwner()
     {
         var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
         {
@@ -99,5 +99,16 @@ public class OwnershipValidationAuditTests
         var isValid = System.ComponentModel.DataAnnotations.Validator.TryValidateObject(dto, ctx, results, true);
 
         Assert.True(isValid, "Should accept when exactly one owner is set");
+    }
+
+    [Fact]
+    public void FormerAttributeName_RemainsACompatibilityAlias()
+    {
+        var sharedAssembly = typeof(Aetheus.Shared.Validation.AtMostOneOwnerAttribute).Assembly;
+        var formerType = sharedAssembly.GetType("Aetheus.Shared.Validation.ExactlyOneOwnerAttribute");
+
+        Assert.NotNull(formerType);
+        Assert.True(formerType.IsSubclassOf(typeof(Aetheus.Shared.Validation.AtMostOneOwnerAttribute)));
+        Assert.NotNull(formerType.GetCustomAttributes(typeof(ObsoleteAttribute), inherit: false).SingleOrDefault());
     }
 }

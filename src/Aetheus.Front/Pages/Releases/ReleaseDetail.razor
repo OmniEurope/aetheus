@@ -7,7 +7,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else if (_release is null)
 {
@@ -68,7 +68,7 @@ else
                     {
                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                             <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="call_split" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                            <a href="/git/branches/@branch.Id" class="detail-value-link">@branch.Name</a>
+                            <a href="/git-repositories/branches/@branch.Id" class="detail-value-link">@branch.Name</a>
                         </RadzenStack>
                     }
                 }
@@ -76,7 +76,7 @@ else
                 {
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                         <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="call_split" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2">@_release.BranchName</RadzenText>
+                        <a href="@($"/git-repositories?projectId={_release.ProjectId}")" class="detail-value-link">@_release.BranchName</a>
                     </RadzenStack>
                 }
                 @if (_release.Commits.Count > 0)
@@ -85,7 +85,7 @@ else
                     {
                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                             <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
-                            <a href="/git/commits/@commit.Id" class="detail-value-link text-mono" title="@commit.Sha">@ShortSha(commit.Sha)</a>
+                            <a href="/git-repositories/commits/@commit.Id" class="detail-value-link text-mono" title="@commit.Sha">@DisplayFormatting.ShortSha(commit.Sha)</a>
                         </RadzenStack>
                     }
                 }
@@ -93,7 +93,7 @@ else
                 {
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                         <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2" class="text-mono" title="@_release.CommitHash">@ShortSha(_release.CommitHash)</RadzenText>
+                        <a href="@($"/git-repositories?projectId={_release.ProjectId}")" class="detail-value-link text-mono" title="@_release.CommitHash">@DisplayFormatting.ShortSha(_release.CommitHash)</a>
                     </RadzenStack>
                 }
                 @if (!string.IsNullOrEmpty(_release.TagName))
@@ -129,7 +129,7 @@ else
                     {
                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                             <a href="/artifacts/@artifact.Id" class="detail-value-link"><RadzenIcon Icon="inventory_2" class="run-tile-icon rz-color-info" /> @artifact.Name</a>
-                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@FormatSize(artifact.SizeBytes)</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@DisplayFormatting.Size(artifact.SizeBytes)</RadzenText>
                         </RadzenStack>
                     }
                     @if (!string.IsNullOrEmpty(_release.EnvironmentName))
@@ -145,7 +145,7 @@ else
     </RadzenRow>
 
     @* Changelog as Timeline *@
-    @if (!string.IsNullOrEmpty(_release.Changelog))
+    @if (VisibleChangelogEntries.Count > 0)
     {
         <RadzenCard class="rz-mt-4 rz-p-4">
             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-3">
@@ -154,7 +154,7 @@ else
             </RadzenStack>
             <RadzenTimeline Orientation="Orientation.Vertical" AlignItems="AlignItems.Start" LinePosition="LinePosition.Start" class="release-changelog-timeline">
                 <Items>
-                    @foreach (var entry in ParseChangelogEntries(_release.Changelog))
+                    @foreach (var entry in VisibleChangelogEntries)
                     {
                         <RadzenTimelineItem PointStyle="@GetChangelogPointStyle(entry.Type)">
                             <ChildContent>

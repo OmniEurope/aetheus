@@ -3,41 +3,57 @@
 
 <PageTitle>@L["Organizations"] - Aetheus</PageTitle>
 
-<div class="user-list-toolbar">
-    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
-        <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["Organizations"]</RadzenText>
+<div class="iam-page iam-list-page">
+    <Aetheus.Front.Shared.PageHeader Title="@L["Organizations"]" Icon="apartment"
+        Subtitle="@L["OrganizationManagement"]" Class="iam-page-header">
+        <ChildContent>
         <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _totalCount)" />
-        <div class="server-list-spacer"></div>
+        </ChildContent>
+        <Actions>
         <RadzenButton Icon="refresh" Size="ButtonSize.Small"
             Click="@ReloadAsync" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-        <RadzenButton Text="@L["NewOrganization"]" Icon="add" Click="@OnCreate" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-    </RadzenStack>
-    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-2">
-        <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search" Change="@(_ => ResetSearchAsync())" />
-    </RadzenStack>
-</div>
+        <RadzenButton Text="@L["NewOrganization"]" Icon="add" Click="@OnCreate"
+            title="@L["NewOrganization"]" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </Actions>
+        <Filters>
+            <RadzenIcon Icon="search" class="rz-color-secondary" />
+            <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search"
+                Change="@(_ => ResetSearchAsync())" class="iam-list-search" />
+        </Filters>
+    </Aetheus.Front.Shared.PageHeader>
 
-<AetheusDataGrid @ref="_grid" TItem="OrganizationDto" Data="@_items" Count="@_totalCount"
-    PageSize="25" IsLoading="@_loading" LoadData="@LoadDataAsync" AllowFiltering="false"
-    class="rz-mt-4" FullHeight="true" RowClick="@(org => OpenDetail(org))">
-        <Columns>
-            <RadzenDataGridColumn TItem="OrganizationDto" Property="Name" Title="@L["Name"]" MinWidth="150px">
-                <Template Context="org">
-                    <span class="server-name-link">@org.Name</span>
-                </Template>
-            </RadzenDataGridColumn>
-            <RadzenDataGridColumn TItem="OrganizationDto" Property="Slug" Title="@L["Slug"]" Width="160px" />
-            <RadzenDataGridColumn TItem="OrganizationDto" Property="Description" Title="@L["Description"]" MinWidth="220px" />
-            <RadzenDataGridColumn TItem="OrganizationDto" Property="MemberCount" Title="@L["Members"]" Width="140px" />
-            <RadzenDataGridColumn TItem="OrganizationDto" Property="ProjectCount" Title="@L["Projects"]" Width="140px" />
-            <RadzenDataGridColumn TItem="OrganizationDto" Title="@L["Actions"]" MinWidth="14rem" Sortable="false">
-                <Template Context="org">
-                    <span @onclick:stopPropagation="true">
-                        <RadzenButton Text="@L["Edit"]" Icon="edit"
-                            Click="@(() => OpenDetail(org))" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-                        <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@(() => OnDelete(org))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
-                    </span>
-                </Template>
-            </RadzenDataGridColumn>
-        </Columns>
-    </AetheusDataGrid>
+    <AdminIdentityNav ActiveSection="organizations" />
+
+    <div class="iam-grid-surface">
+        <AetheusDataGrid @ref="_grid" TItem="OrganizationDto" Data="@_items" Count="@_totalCount"
+            PageSize="25" IsLoading="@_loading" LoadData="@LoadDataAsync"
+            FullHeight="true" RowClick="@(org => OpenDetail(org))">
+            <Columns>
+                <RadzenDataGridColumn TItem="OrganizationDto" Property="Name" Title="@L["Name"]" MinWidth="180px">
+                    <Template Context="org">
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.625rem">
+                            <span class="iam-entity-avatar"><RadzenIcon Icon="apartment" /></span>
+                            <span class="server-name-link">@org.Name</span>
+                        </RadzenStack>
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="OrganizationDto" Property="Slug" Title="@L["Slug"]" Width="160px">
+                    <Template Context="org"><RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@org.Slug" /></Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="OrganizationDto" Property="Description" Title="@L["Description"]" MinWidth="240px" />
+                <RadzenDataGridColumn TItem="OrganizationDto" Property="MemberCount" Title="@L["Members"]" Width="140px" />
+                <RadzenDataGridColumn TItem="OrganizationDto" Property="ProjectCount" Title="@L["Projects"]" Width="140px" />
+                <RadzenDataGridColumn TItem="OrganizationDto" Title="@L["Actions"]" Width="110px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="org">
+                        <span @onclick:stopPropagation="true">
+                            <RadzenButton Icon="edit" Size="ButtonSize.Small" title="@L["Edit"]"
+                                Click="@(() => OpenDetail(org))" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                            <RadzenButton Icon="delete" Size="ButtonSize.Small" title="@L["Delete"]"
+                                Click="@(() => OnDelete(org))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                        </span>
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </AetheusDataGrid>
+    </div>
+</div>

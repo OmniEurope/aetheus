@@ -11,6 +11,7 @@ public class ServerRepositoryMetricsTests : IDisposable
 {
     private readonly AppDbContext _db;
     private readonly ServerRepository _repo;
+    private readonly ServerHeartbeatRepository _heartbeatRepo;
 
     public ServerRepositoryMetricsTests()
     {
@@ -19,6 +20,9 @@ public class ServerRepositoryMetricsTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
         _repo = new ServerRepository(_db, TimeProvider.System);
+        // Same AppDbContext instance, deliberately: that shared context is what keeps one heartbeat
+        // one transaction after the split, so the tests must exercise the pair the same way.
+        _heartbeatRepo = new ServerHeartbeatRepository(_db);
     }
 
     public void Dispose() => _db.Dispose();
@@ -42,7 +46,7 @@ public class ServerRepositoryMetricsTests : IDisposable
         SeedMetric(1, new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc));
         SeedMetric(1, new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
 
-        var deleted = await _repo.DeleteMetricsOlderThanAsync(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc), ct: TestContext.Current.CancellationToken);
+        var deleted = await _heartbeatRepo.DeleteMetricsOlderThanAsync(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, deleted);
         Assert.Equal(1, await _db.ServerMetrics.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -75,7 +79,7 @@ public class ServerRepositoryMetricsTests : IDisposable
     }
 
     [Fact]
-    public async Task GetMetricTimestampsAsync_ReturnsTimestampsForServerSinceOrdered()
+    public async Task GetRecentMetricTimestampsAsync_ReturnsTimestampsForServerSinceOrdered()
     {
         SeedMetric(1, new DateTime(2026, 6, 3, 0, 0, 0, DateTimeKind.Utc));
         SeedMetric(1, new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
@@ -83,7 +87,7 @@ public class ServerRepositoryMetricsTests : IDisposable
         SeedMetric(2, new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc)); // other server
 
         var since = new DateTime(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc);
-        var stamps = await _repo.GetMetricTimestampsAsync(1, since, ct: TestContext.Current.CancellationToken);
+        var stamps = await _heartbeatRepo.GetRecentMetricTimestampsAsync(1, since, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, stamps.Count);
         Assert.True(stamps[0] < stamps[1]);

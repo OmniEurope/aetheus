@@ -1,0 +1,56 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Images tab of the Docker section: the inventory grid plus the two write paths that only ever
+   touch images (pull, build). Markup moved verbatim from the parent. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-3" Gap="0.5rem">
+    <RadzenBadge Text="@FilteredImages.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+    <RadzenTextBox @bind-Value="_imageSearch" Placeholder="@L["FilterImages"]" class="docker-search" />
+    <div class="flex-spacer"></div>
+    <RadzenTextBox @bind-Value="_pullImageName" Placeholder="@L["ImageNamePlaceholder"]" MaxLength="200" />
+    <RadzenButton Icon="download" Text="@L["DockerPull"]" Size="ButtonSize.Small"
+        Click="@PullImageAsync" IsBusy="@_imagePulling"
+        Disabled="@string.IsNullOrWhiteSpace(_pullImageName)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+</RadzenStack>
+<RadzenDataGrid Responsive="false" Data="@FilteredImages" TItem="DockerImageDto" Density="Density.Compact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    AllowGrouping="true" ShowGroupPanel="true" Groups="@_imageGroups"
+    @bind-AllGroupsExpanded="_allImageGroupsExpanded" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+    <Columns>
+        <RadzenDataGridColumn TItem="DockerImageDto" Property="Project" Title="@L["Project"]" Width="140px" />
+        <RadzenDataGridColumn TItem="DockerImageDto" Property="Repository" Title="@L["Repository"]" />
+        <RadzenDataGridColumn TItem="DockerImageDto" Property="Tag" Title="@L["Tag"]" Width="120px" />
+        <RadzenDataGridColumn TItem="DockerImageDto" Property="Size" Title="@L["Size"]" Width="100px" />
+        <RadzenDataGridColumn TItem="DockerImageDto" Title="@L["Created"]" Width="160px">
+            <Template Context="img">
+                @img.Created.ToString("g")
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="DockerImageDto" Title="@L["ID"]" Width="140px">
+            <Template Context="img">
+                <span title="@img.ImageId">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@img.ImageId[..Math.Min(12, img.ImageId.Length)]</RadzenText>
+                </span>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="DockerImageDto" Title="@L["Actions"]" MinWidth="9rem" Sortable="false" Filterable="false">
+            <Template Context="img">
+                <RadzenButton Text="@L["Delete"]" Icon="delete" Click="@(() => ConfirmRemoveImageAsync(img))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<RadzenCard class="rz-mt-3">
+    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["DockerBuildImage"]</RadzenText>
+    <RadzenStack Gap="0.5rem">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenLabel Text="@L["Tag"]" />
+            <RadzenTextBox @bind-Value="_buildImageTag" Placeholder="@L["BuildTagPlaceholder"]" MaxLength="200" />
+        </RadzenStack>
+        <textarea @bind="_buildDockerfileContent" class="docker-build-editor" rows="12"
+            placeholder="@L["DockerfilePlaceholder"]" spellcheck="false" />
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+            <RadzenButton Text="@L["DockerBuild"]" Icon="build" Click="@BuildImageAsync" IsBusy="@_buildingImage"
+                Disabled="@(string.IsNullOrWhiteSpace(_buildImageTag) || string.IsNullOrWhiteSpace(_buildDockerfileContent))" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+        </RadzenStack>
+    </RadzenStack>
+</RadzenCard>

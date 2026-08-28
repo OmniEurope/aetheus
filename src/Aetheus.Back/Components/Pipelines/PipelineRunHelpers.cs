@@ -3,8 +3,6 @@ using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -34,12 +32,6 @@ public static partial class PipelineRunHelpers
 
     [GeneratedRegex(@"##aetheus\[setvariable name=(\w+)\](.+)$", RegexOptions.Multiline)]
     private static partial Regex OutputVariablePattern();
-
-    [GeneratedRegex(@"^\d+(\.\d+)?\s*[bkmgBKMG]?$")]
-    private static partial Regex MemoryLimitPattern();
-
-    [GeneratedRegex(@"^\d+(\.\d+)?$")]
-    private static partial Regex CpusLimitPattern();
 
     // --- Variable substitution ($(VarName) syntax) ---
 
@@ -83,8 +75,18 @@ public static partial class PipelineRunHelpers
         if (string.IsNullOrEmpty(json))
             return [];
 
-        return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        return (JsonSerializer.Deserialize<List<string>>(json) ?? [])
+            .Where(warning => !warning.StartsWith(
+                "Cancellation requested; always() teardown stages remain mandatory",
+                StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
+
+    public static bool HasCancellationRequest(string? additionalVariablesJson) =>
+        DeserializeResolvedVariables(additionalVariablesJson)
+            .TryGetValue(PipelineRunService.CancellationRequestedVariable, out var requested)
+        && string.Equals(requested, "true", StringComparison.OrdinalIgnoreCase);
 
     public static List<CoverageFileDto> DeserializeCoverageFiles(string? json)
     {
@@ -108,12 +110,21 @@ public static partial class PipelineRunHelpers
         ProjectId = r.Pipeline != null ? r.Pipeline.ProjectId : null,
         PipelineName = r.Pipeline != null ? r.Pipeline.Name : string.Empty,
         Status = r.Status,
+        ProjectedWarningsJson = r.WarningsJson,
         StartedAt = r.StartedAt,
         CompletedAt = r.CompletedAt,
         BranchName = r.BranchName,
         CommitHash = r.CommitHash,
-        RepositoryUrl = r.Pipeline != null && r.Pipeline.Project != null ? r.Pipeline.Project.RepositoryUrl : null,
+        RepositoryUrl = r.RepositoryUrl,
         ProjectName = r.Pipeline != null && r.Pipeline.Project != null ? r.Pipeline.Project.Name : null,
+        // Worst letter wins: the enum is ordered A=0..F=5, so Max is the most severe grade the run
+        // earned. Read from the stored evaluations rather than recomputing the gate, which would mean
+        // one gate computation per listed row.
+        // A run with no evaluation of its own is completed by PipelineRunGradeHydration after
+        // materialisation (see there): a candidate delegates every analysis to a child run.
+        GateGrade = r.AnalysisEvaluations
+            .Where(evaluation => evaluation.Grade != null)
+            .Max(evaluation => evaluation.Grade),
         Steps = r.StepRuns.OrderBy(s => s.Order).Select(s => new PipelineStepRunDto
         {
             Id = s.Id,
@@ -132,6 +143,8 @@ public static partial class PipelineRunHelpers
             TaskId = s.TaskId,
             IsSystem = s.IsSystem,
             GroupName = s.GroupName,
+            SkippedCondition = s.SkippedCondition,
+            SkippedConditionVariables = DeserializeResolvedVariables(s.SkippedConditionVariablesJson),
             TriggeredRunId = s.TriggeredRunId
         }).ToList()
     };
@@ -143,11 +156,12 @@ public static partial class PipelineRunHelpers
         ProjectId = r.Pipeline?.ProjectId,
         PipelineName = r.Pipeline?.Name ?? string.Empty,
         Status = r.Status,
+        CancellationRequested = HasCancellationRequest(r.AdditionalVariablesJson),
         StartedAt = r.StartedAt,
         CompletedAt = r.CompletedAt,
         BranchName = r.BranchName,
         CommitHash = r.CommitHash,
-        RepositoryUrl = r.Pipeline?.Project?.RepositoryUrl,
+        RepositoryUrl = r.RepositoryUrl,
         ProjectName = r.Pipeline?.Project?.Name,
         YamlSnapshot = r.YamlSnapshot,
         ResolvedVariables = DeserializeResolvedVariables(r.ResolvedVariablesJson),
@@ -165,6 +179,8 @@ public static partial class PipelineRunHelpers
             StartedAt = s.StartedAt,
             CompletedAt = s.CompletedAt,
             ExitCode = s.ExitCode,
+            FailureCode = s.Task?.FailureCode ?? s.FailureCode,
+            FailureReason = s.Task?.FailureReason ?? s.FailureReason,
             OutputVariables = DeserializeResolvedVariables(s.OutputVariablesJson),
             RetryCount = s.RetryCount,
             ContinueOnError = s.ContinueOnError,
@@ -172,30 +188,15 @@ public static partial class PipelineRunHelpers
             TaskId = s.TaskId,
             IsSystem = s.IsSystem,
             GroupName = s.GroupName,
+            SkippedCondition = s.SkippedCondition,
+            SkippedConditionVariables = DeserializeResolvedVariables(s.SkippedConditionVariablesJson),
             // Command is masked in GetRunAsync (async secret-masking) before reaching the client.
             Command = s.Task?.Command,
-            IsContainerIsolated = !string.IsNullOrEmpty(s.Task?.ContainerImage),
+            IsContainerIsolated = !string.IsNullOrEmpty(s.Task?.ContainerImage)
+                || !string.IsNullOrEmpty(s.Task?.ContainerToolchain),
             TriggeredRunId = s.TriggeredRunId
         }).ToList(),
-        Artifacts = r.Artifacts.Select(a => new PipelineArtifactDto
-        {
-            Id = a.Id,
-            PipelineRunId = a.PipelineRunId,
-            PipelineId = a.PipelineId,
-            ProjectId = a.ProjectId,
-            Name = a.Name,
-            FilePath = a.FilePath,
-            SizeBytes = a.SizeBytes,
-            StageName = a.StageName,
-            StepName = a.StepName,
-            CreatedAt = a.CreatedAt,
-            RetentionPolicy = a.RetentionPolicy,
-            RetentionExpiresAt = a.RetentionExpiresAt,
-            EnvironmentName = a.EnvironmentName,
-            BranchName = r.BranchName,
-            CommitHash = r.CommitHash,
-            RepositoryUrl = r.Pipeline?.Project?.RepositoryUrl
-        }).ToList(),
+        Artifacts = r.Artifacts.Select(artifact => PipelineArtifactMapper.ToRunDto(artifact, r)).ToList(),
         TestResultSummary = r.TestResults.Count > 0 ? new PipelineTestResultSummaryDto
         {
             TotalTests = r.TestResults.Count,
@@ -228,15 +229,24 @@ public static partial class PipelineRunHelpers
         }).ToList()
     };
 
+    public static PipelineRunDto HydrateListWarnings(PipelineRunDto run)
+        => PipelineRunGradeHydration.Apply(run with
+        {
+            Warnings = DeserializeWarnings(run.ProjectedWarningsJson),
+            ProjectedWarningsJson = null
+        });
+
+
     // --- Fail-closed isolation enforcement ---
 
     public static string? CheckIsolationPolicy(string stageName, PipelineStageDefinition stageDef, Server server)
     {
         var wantsContainer = stageDef.Isolation?.IsContainer == true;
 
-        if (wantsContainer && string.IsNullOrWhiteSpace(stageDef.Isolation?.Image))
-            return $"Stage '{stageName}' requests container isolation but no image was given. " +
-                   "Add `isolation: { mode: container, image: <image> }`.";
+        var contractError = PipelineIsolationHelpers.ValidateDefinition(
+            $"Stage '{stageName}'", stageDef.Isolation);
+        if (contractError is not null)
+            return contractError;
 
         if (wantsContainer && !server.DockerAvailable)
             return $"Stage '{stageName}' requires container isolation but runner '{server.Name}' has no Docker available. " +
@@ -253,9 +263,12 @@ public static partial class PipelineRunHelpers
     {
         var wantsContainer = runIsolation?.IsContainer == true;
 
-        if (wantsContainer && string.IsNullOrWhiteSpace(runIsolation?.Image))
-            return "Run requests container isolation but no image was given. " +
-                   "Add `isolation: { mode: container, image: <image> }`.";
+        var contractError = PipelineIsolationHelpers.ValidateDefinition("Run", runIsolation);
+        if (contractError is not null)
+            return contractError;
+        if (wantsContainer && !string.IsNullOrWhiteSpace(runIsolation?.Toolchain))
+            return "Run-level isolation cannot resolve a repository toolchain before checkout. " +
+                   "Declare the toolchain per stage or job.";
 
         if (wantsContainer && !server.DockerAvailable)
             return $"Run requires container isolation but runner '{server.Name}' has no Docker available. " +
@@ -368,8 +381,11 @@ public static partial class PipelineRunHelpers
     // F-ENG-02/03: the tail also allows '=' (key=value), '%' (50%), ',', '^' and '~' (semver ranges) - all
     // shell-inert in a bare word. STILL rejected, by design: a leading '-' (argument-injection token), '\'
     // (shell escape, so Windows-style paths must use '/'), spaces and every shell metacharacter.
-    [GeneratedRegex(@"\A[A-Za-z0-9._+][A-Za-z0-9._+/:@=%,~^-]{0,199}\z")]
+    [GeneratedRegex(@"\A[A-Za-z0-9._+][A-Za-z0-9._+/:@=%,~^-]{0,1023}\z")]
     private static partial Regex SafeMatrixValueRegex();
+
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,63}\z")]
+    private static partial Regex SafeMatrixAxisRegex();
 
     /// <summary>Rejects matrix values whose shape could break out of the shell template once
     /// spliced by <c>Substitute</c>. Returns one error per offending value (empty = valid).</summary>
@@ -385,6 +401,9 @@ public static partial class PipelineRunHelpers
             long legCount = 1;
             foreach (var (axis, values) in stage.Matrix)
             {
+                if (!SafeMatrixAxisRegex().IsMatch(axis))
+                    errors.Add(
+                        $"Stage '{stage.Name}': matrix axis '{axis}' must be a safe variable name (letter or underscore first, then letters, digits or underscores; maximum 64 characters).");
                 if (values is null || values.Count == 0)
                 {
                     errors.Add($"Stage '{stage.Name}': matrix axis '{axis}' must contain at least one value.");
@@ -501,6 +520,10 @@ public static partial class PipelineRunHelpers
 
         if (secretKeys.Count == 0) return legVars;
         var referenceText = stepDef.Shell + "\n" + (stepDef.WorkingDirectory ?? string.Empty);
+        if (string.Equals(stepDef.Type, "publish-observability", StringComparison.OrdinalIgnoreCase))
+            referenceText += "\nAETHEUS_NUGET_SIGNING_PFX_BASE64\nAETHEUS_NUGET_SIGNING_PFX_PASSWORD"
+                + "\nAETHEUS_NUGET_SIGNING_CERTIFICATE_FINGERPRINT"
+                + "\nAETHEUS_PACKAGE_BASE_URL\nAETHEUS_PACKAGE_TOKEN";
         // A `checkout: true` step runs the auto-injected git-clone preamble, which references the
         // git credential vars even though the user's shell text never mentions them.
         if (stepDef.Checkout)
@@ -520,52 +543,18 @@ public static partial class PipelineRunHelpers
         stepRun.Status = TaskExecutionStatus.Assigned;
     }
 
-    /// <summary>Applies container isolation to the task and returns a (possibly empty) list of warnings for
-    /// limits that were dropped because they were malformed - so a rejected cap is surfaced, not fail-open.</summary>
-    public static IReadOnlyList<string> ApplyContainerIsolation(ServerTask task, PipelineIsolationDefinition? isolation)
-    {
-        if (isolation?.IsContainer != true) return [];
+    public static IReadOnlyList<string> ApplyContainerIsolation(
+        ServerTask task,
+        PipelineIsolationDefinition? isolation) =>
+        PipelineIsolationHelpers.Apply(task, isolation);
 
-        // Defense in depth: save and run preparation reject malformed caps. If an internal caller ever
-        // bypasses those gates, dispatch still fails instead of silently running an uncapped container.
-        var limitErrors = ValidateIsolationLimits(
-            [new PipelineStageDefinition { Name = task.Name, Isolation = isolation }]);
-        if (limitErrors.Count > 0)
-            throw new ArgumentException(string.Join(" ", limitErrors), nameof(isolation));
+    public static List<string> ValidateIsolationLimits(IEnumerable<PipelineStageDefinition> stages) =>
+        PipelineIsolationHelpers.ValidateLimits(stages);
 
-        task.Executor = ExecutorType.Container;
-        task.ContainerImage = isolation.Image;
-        task.ContainerRuntime = isolation.Runtime;
-        task.ContainerNetwork = isolation.Network;
-        if (IsValidMemory(isolation.Memory))
-            task.ContainerMemory = isolation.Memory;
-
-        if (IsValidCpus(isolation.Cpus))
-            task.ContainerCpus = isolation.Cpus;
-
-        return [];
-    }
-
-    public static List<string> ValidateIsolationLimits(IEnumerable<PipelineStageDefinition> stages)
-    {
-        var errors = new List<string>();
-        foreach (var stage in stages)
-        {
-            var isolation = stage.Isolation;
-            if (isolation is null) continue;
-            if (!string.IsNullOrWhiteSpace(isolation.Memory) && !IsValidMemory(isolation.Memory))
-                errors.Add($"Stage '{stage.Name}': container memory limit '{isolation.Memory}' is invalid.");
-            if (!string.IsNullOrWhiteSpace(isolation.Cpus) && !IsValidCpus(isolation.Cpus))
-                errors.Add($"Stage '{stage.Name}': container CPU limit '{isolation.Cpus}' is invalid.");
-        }
-        return errors;
-    }
-
-    private static bool IsValidMemory(string? value) =>
-        !string.IsNullOrWhiteSpace(value) && MemoryLimitPattern().IsMatch(value.Trim());
-
-    private static bool IsValidCpus(string? value) =>
-        !string.IsNullOrWhiteSpace(value) && CpusLimitPattern().IsMatch(value.Trim());
+    public static List<string> ValidateIsolationDefinitions(
+        PipelineIsolationDefinition? runIsolation,
+        IEnumerable<PipelineStageDefinition> stages) =>
+        PipelineIsolationHelpers.ValidateDefinitions(runIsolation, stages);
 
     public static Dictionary<string, string> ResolveLegVariables(
         Dictionary<string, string> stageVars, string legKey, List<Dictionary<string, string>> matrixLegs)
@@ -581,4 +570,30 @@ public static partial class PipelineRunHelpers
         }
         return legVars;
     }
+
+    /// <summary>
+    /// Marks a step failed without an agent ever having run it - a fail-closed decision taken by the
+    /// engine itself. Moved here from the run service when the step factories came out: they all need
+    /// it, and a second copy would be a second version of what "failed" means.
+    /// </summary>
+    public static void MarkSystemStepFailed(
+        PipelineStepRun stepRun,
+        string failureCode,
+        string failureReason,
+        DateTime failedAt)
+    {
+        stepRun.Status = TaskExecutionStatus.Failed;
+        stepRun.ExitCode ??= -1;
+        stepRun.StartedAt ??= failedAt;
+        stepRun.CompletedAt = failedAt;
+        stepRun.FailureCode = failureCode;
+        stepRun.FailureReason = failureReason.Length <= 2048
+            ? failureReason
+            : failureReason[..2048];
+    }
+
+    /// <summary>True for a full SHA-1 or SHA-256 commit hash - the immutability check the deploy path
+    /// relies on to refuse anything but a pinned commit.</summary>
+    internal static bool IsGitCommitHash(string? value)
+        => value is { Length: 40 or 64 } && value.All(Uri.IsHexDigit);
 }

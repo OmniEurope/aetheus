@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
 using System.Text.Encodings.Web;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Back.Components.PersonalAccessTokens;
 
 /// <summary>
-/// Authenticates a request bearing a Personal Access Token (PLAN-006 4.5). Reached from the JWT
+/// Authenticates a request bearing a Personal Access Token (ADR-024 4.5). Reached from the JWT
 /// bearer handler's <c>ForwardDefaultSelector</c> when the <c>Authorization: Bearer</c> value carries
 /// the <see cref="PatConstants.TokenPrefix"/>. Emits the SAME claim shape as a JWT session (Name /
 /// NameIdentifier / Role) plus the PAT scope + id, so every existing <c>[Authorize]</c> endpoint and
@@ -25,14 +24,8 @@ internal sealed class PatAuthenticationHandler(
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!Request.Headers.TryGetValue("Authorization", out var authHeader))
+        if (!AuthorizationHeaderParser.TryGetCredentials(Request, "Bearer", out var token))
             return AuthenticateResult.NoResult();
-
-        var header = authHeader.ToString();
-        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return AuthenticateResult.NoResult();
-
-        var token = header["Bearer ".Length..].Trim();
         if (!token.StartsWith(PatConstants.TokenPrefix, StringComparison.Ordinal))
             return AuthenticateResult.NoResult();
 

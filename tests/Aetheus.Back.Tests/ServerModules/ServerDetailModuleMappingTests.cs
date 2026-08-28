@@ -33,7 +33,7 @@ public class ServerDetailModuleMappingTests
         hubMock.Clients.Returns(clientsMock);
         alertHubMock.Clients.Returns(clientsMock);
 
-        _sut = new ServerService(_repoMock, hubMock, alertHubMock, Substitute.For<IAuditService>(),
+        _sut = new ServerService(_repoMock, Substitute.For<IServerHeartbeatRepository>(), hubMock, alertHubMock, Substitute.For<IAuditService>(),
             Substitute.For<Aetheus.Back.Components.Tasks.ITaskService>(),
             Options.Create(new BackgroundServicesOptions()), TimeProvider.System, Substitute.For<IDbTransactionScope>());
     }

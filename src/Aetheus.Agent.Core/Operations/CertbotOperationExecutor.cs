@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -19,7 +14,7 @@ namespace Aetheus.Agent.Core.Operations;
 /// vars; the helper re-validates them and performs real ACME issuance through a stable Apache
 /// webroot without stopping the server. Production ACME failures fail honestly; the explicit local
 /// mode never contacts ACME and creates a self-signed certificate in the Let's Encrypt layout so the
-/// isolated release laboratory still exercises HTTPS.
+/// disposable local simulator still exercises HTTPS.
 ///
 /// If the helper is not installed, sudo fails and the step fails honestly (never a fake green).
 /// </summary>
@@ -73,14 +68,7 @@ public sealed class CertbotOperationExecutor(
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         foreach (var arg in BuildObtainArgv(primaryDomain)) psi.ArgumentList.Add(arg);
 
         // Domains/email travel in env (kept off the argv / process list); the helper re-validates them.
@@ -137,14 +125,7 @@ public sealed class CertbotOperationExecutor(
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         foreach (var arg in BuildManageArgv(kind, verb, certName)) psi.ArgumentList.Add(arg);
 
         await onOutput($"certbot {verb}{(kind == OperationKind.CertbotRenewAll ? " (all)" : $" {certName}")}…", TaskLogLevel.Info).ConfigureAwait(false);

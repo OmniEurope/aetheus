@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages.Servers;
+using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
 
@@ -57,6 +58,27 @@ public class AgentUpdateCardTemplateCoverageTests : BunitContext
         SetPhase(cut.Instance, AgentUpdatePhase.Failed, 0, "Something went wrong");
         cut.Render();
         Assert.Contains("agent-update-progress-card", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_FailedBranch_ForAdmin_ShowsVersionsAndLogLink()
+    {
+        using var context = new BunitContext();
+        BunitTestHelper.RegisterServices(context, isAdmin: true);
+
+        var cut = context.Render<AgentUpdateProgressCard>(parameters => parameters
+            .Add(component => component.ServerId, 1)
+            .Add(component => component.Hub, null)
+            .Add(component => component.Request, new AgentUpdateRequestSummaryDto
+            {
+                RequestId = 42,
+                ObservedVersion = "1.0.1",
+                TargetVersion = "1.0.2",
+                Status = AgentUpdateRequestStatus.Failed
+            }));
+
+        Assert.Contains("AgentUpdateVersionTransition", cut.Markup);
+        Assert.Contains("agent-update-42", cut.Markup);
     }
 
     [Fact]
@@ -117,7 +139,7 @@ public class AgentUpdateCardTemplateCoverageTests : BunitContext
     }
 
     [Fact]
-    public void OnParametersSet_WithNullHub_DoesNotThrow()
+    public void OnParametersSet_WithNullHub_LeavesItNull()
     {
         // With a null hub there is nothing to subscribe to, so _phase stays null and the
         // card renders its invisible (empty) branch instead of throwing.

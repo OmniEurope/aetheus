@@ -2,7 +2,7 @@
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// An application log record ingested via OTLP (PLAN-001 phase 3, 7-day retention, no aggregate).
+/// An application log record ingested via OTLP (ADR-021 phase 3, 7-day retention, no aggregate).
 /// <see cref="Timestamp"/> is emit-sourced, excluded from auto-stamping in <c>AppDbContext.SaveChangesAsync</c>.
 /// </summary>
 public class AppLogEntry

@@ -52,7 +52,7 @@ public sealed class DemoContentSeederTests
         var pipelineGit = Substitute.For<IPipelineGitService>();
         pipelineGit.WriteProjectPipelineYamlAsync(
                 seed.TotoProjectId, Arg.Any<string>(), Arg.Any<string>(), "demo-seed",
-                Arg.Any<CancellationToken>(), "main")
+                Arg.Any<CancellationToken>(), "main", repo.Id)
             .Returns((GitWriteOutcome.Committed, (string?)null));
         var storage = Substitute.For<IArtifactStorageService>();
         storage.SaveArtifactAsync(
@@ -67,12 +67,13 @@ public sealed class DemoContentSeederTests
         Assert.False((await db.GitInternalRepos.SingleAsync(cancellationToken: TestContext.Current.CancellationToken)).IsEmpty);
         Assert.Equal(2, await db.PipelineArtifacts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         await git.Received(2).CreateBranchAsync(repo.Id, Arg.Any<CreateGitLightBranchRequest>(), Arg.Any<CancellationToken>());
+        await git.Received(1).EnsureRepositoryInitializedAsync(repo.Id, Arg.Any<CancellationToken>());
         await pipelineGit.Received(DemoDataSeeder.TotoPipelineDefinitions().Count)
             .WriteProjectPipelineYamlAsync(seed.TotoProjectId, Arg.Any<string>(), Arg.Any<string>(),
-                "demo-seed", Arg.Any<CancellationToken>(), "main");
+                "demo-seed", Arg.Any<CancellationToken>(), "main", repo.Id);
 
         pipelineGit.ReadProjectPipelineYamlAsync(
-                seed.TotoProjectId, Arg.Any<string>(), Arg.Any<CancellationToken>(), "main")
+                seed.TotoProjectId, Arg.Any<string>(), Arg.Any<CancellationToken>(), "main", repo.Id)
             .Returns(call => DemoDataSeeder.TotoPipelineDefinitions()[call.ArgAt<string>(1)]);
         git.GetBranchesAsync(repo.Id, Arg.Any<CancellationToken>()).Returns([
             new GitLightBranchDto { Name = "qa" }, new GitLightBranchDto { Name = "release/demo" }
@@ -82,9 +83,10 @@ public sealed class DemoContentSeederTests
         await sut.SeedAsync(seed, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, await db.PipelineArtifacts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        await git.Received(2).EnsureRepositoryInitializedAsync(repo.Id, Arg.Any<CancellationToken>());
         await pipelineGit.Received(DemoDataSeeder.TotoPipelineDefinitions().Count)
             .WriteProjectPipelineYamlAsync(seed.TotoProjectId, Arg.Any<string>(), Arg.Any<string>(),
-                "demo-seed", Arg.Any<CancellationToken>(), "main");
+                "demo-seed", Arg.Any<CancellationToken>(), "main", repo.Id);
     }
 
     [Fact]

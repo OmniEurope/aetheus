@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.Enums;
@@ -24,7 +25,12 @@ public class GetCompletedStageNamesTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _db = new AppDbContext(options);
-        _repo = new PipelineRepository(_db, TimeProvider.System, NullLogger<PipelineRepository>.Instance);
+        _repo = new PipelineRepository(
+            _db,
+            TimeProvider.System,
+            NullLogger<PipelineRepository>.Instance,
+            new PipelineTaskLifecycleRepository(_db, TimeProvider.System),
+            new PipelineRunLineageRepository(_db));
     }
 
     public void Dispose() => _db.Dispose();

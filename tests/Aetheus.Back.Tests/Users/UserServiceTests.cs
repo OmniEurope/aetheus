@@ -663,9 +663,8 @@ public class UserServiceTests
     }
 
     [Fact]
-    public async Task UpdateUserAsync_SelfDeactivation_ThrowsBadRequest()
+    public async Task UpdateUserAsync_SelfDeactivation_WithAnotherAdmin_Succeeds()
     {
-        // An admin must not be able to lock themselves out by deactivating their own account.
         var principal = new System.Security.Claims.ClaimsPrincipal(
             new System.Security.Claims.ClaimsIdentity(
                 [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "admin")], "test"));
@@ -680,6 +679,8 @@ public class UserServiceTests
                 IsActive = true,
                 UserRoles = [new UserRole { RoleId = 9, Role = new Role { Id = 9, Name = "Admin" } }]
             });
+        _repoMock.CountActiveAdminsAsync(Arg.Any<CancellationToken>()).Returns(2);
+        _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var request = new UpdateUserRequest
         {
@@ -689,7 +690,36 @@ public class UserServiceTests
             Roles = ["Admin"]
         };
 
-        await Assert.ThrowsAsync<BadRequestException>(() => _sut.UpdateUserAsync(1, request, ct: TestContext.Current.CancellationToken));
+        var updated = await _sut.UpdateUserAsync(1, request, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(updated);
+        Assert.False(updated.IsActive);
+        await _repoMock.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_SelfDeactivation_AsLastActiveAdmin_ThrowsBadRequest()
+    {
+        var principal = new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "admin")], "test"));
+        _httpContextAccessorMock.HttpContext.Returns(new DefaultHttpContext { User = principal });
+        _repoMock.GetUserDetailAsync(1, Arg.Any<CancellationToken>()).Returns(new User
+        {
+            Id = 1,
+            Username = "admin",
+            IsActive = true,
+            UserRoles = [new UserRole { RoleId = 9, Role = new Role { Id = 9, Name = "Admin" } }]
+        });
+        _repoMock.CountActiveAdminsAsync(Arg.Any<CancellationToken>()).Returns(1);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => _sut.UpdateUserAsync(1,
+            new UpdateUserRequest
+            {
+                Username = "admin",
+                IsActive = false,
+                Roles = ["Admin"]
+            }, ct: TestContext.Current.CancellationToken));
         await _repoMock.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 }

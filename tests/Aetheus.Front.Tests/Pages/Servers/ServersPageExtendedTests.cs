@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Shared;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 using ServersPage = Aetheus.Front.Pages.Servers.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -129,12 +131,77 @@ public class ServersPageExtendedTests : BunitContext
     // ── OnDeleteServer ────────────────────────────────────────────────────────
 
     [Fact]
-    public void OnDeleteServer_MethodExists()
+    public async Task OnDeleteServer_HidesRowBeforeDeleteCompletes()
     {
-        // OnDeleteServer calls ConfirmHelper → Dialog.Confirm which hangs in bUnit.
-        // Just verify the method is accessible.
-        var method = typeof(ServersPage).GetMethod("OnDeleteServer", InstPriv);
-        Assert.NotNull(method);
+        var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetJsonResponse(HttpMethod.Get, "api/servers", TwoServers());
+        _handler.SetAsyncJsonResponse(HttpMethod.Delete, "api/servers/1", async ct =>
+        {
+            await releaseDelete.Task.WaitAsync(ct);
+            return new { };
+        });
+        var cut = Render<ServersPage>();
+        cut.WaitForAssertion(() => Assert.Contains("web-01", cut.Markup));
+
+        var deletion = cut.InvokeAsync(() => cut.Instance.DeleteServerConfirmedAsync(TwoServers().Items[0]));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("web-01", cut.Markup);
+            Assert.Equal(1, cut.FindComponent<AetheusDataGrid<ServerDto>>().Instance.Count);
+        });
+        Assert.False(deletion.IsCompleted);
+
+        releaseDelete.SetResult();
+        await deletion;
+        Assert.Contains(_handler.Requests, request => request.Method == HttpMethod.Delete.Method);
+    }
+
+    [Fact]
+    public async Task OnDeleteServer_InFlightReloadDoesNotRestorePendingRowOrCount()
+    {
+        var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetJsonResponse(HttpMethod.Get, "api/servers", TwoServers());
+        _handler.SetAsyncJsonResponse(HttpMethod.Delete, "api/servers/1", async ct =>
+        {
+            await releaseDelete.Task.WaitAsync(ct);
+            return new { };
+        });
+        var cut = Render<ServersPage>();
+        cut.WaitForAssertion(() => Assert.Contains("web-01", cut.Markup));
+
+        var deletion = cut.InvokeAsync(() => cut.Instance.DeleteServerConfirmedAsync(TwoServers().Items[0]));
+        var reload = typeof(ServersPage).GetMethod("ReloadGridAsync", InstPriv)!;
+        await cut.InvokeAsync(async () => await (Task)reload.Invoke(cut.Instance, [])!);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("web-01", cut.Markup);
+            Assert.Equal(1, cut.FindComponent<AetheusDataGrid<ServerDto>>().Instance.Count);
+        });
+
+        releaseDelete.SetResult();
+        await deletion;
+    }
+
+    [Fact]
+    public async Task OnDeleteServer_FailedDeleteRestoresRow()
+    {
+        _handler.SetJsonResponse(HttpMethod.Get, "api/servers", TwoServers());
+        _handler.SetResponse(HttpMethod.Delete, "api/servers/1", System.Net.HttpStatusCode.BadRequest);
+        var cut = Render<ServersPage>();
+        cut.WaitForAssertion(() => Assert.Contains("web-01", cut.Markup));
+        _handler.SetResponse(HttpMethod.Get, "api/servers", System.Net.HttpStatusCode.ServiceUnavailable);
+
+        await cut.InvokeAsync(() => cut.Instance.DeleteServerConfirmedAsync(TwoServers().Items[0]));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("web-01", cut.Markup);
+            Assert.Equal(2, cut.FindComponent<AetheusDataGrid<ServerDto>>().Instance.Count);
+        });
+        var notification = Assert.Single(Services.GetRequiredService<Radzen.NotificationService>().Messages);
+        Assert.Equal(Radzen.NotificationSeverity.Error, notification.Severity);
     }
 
     // ── Render coverage ───────────────────────────────────────────────────────

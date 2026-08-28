@@ -128,15 +128,24 @@ public class MonacoEditorTests : BunitContext
     public async Task DebouncedValueChanged_OnlyPublishesLatestValue()
     {
         var published = new List<string>();
+        var callback = new TaskCompletionSource<string>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var cut = Render<MonacoEditor>(p => p
             .Add(x => x.Value, string.Empty)
-            .Add(x => x.DebounceDelay, 20)
-            .Add(x => x.DebouncedValueChanged, (string value) => published.Add(value)));
+            .Add(x => x.DebounceDelay, 500)
+            .Add(x => x.DebouncedValueChanged, (string value) =>
+            {
+                published.Add(value);
+                callback.TrySetResult(value);
+            }));
 
         await cut.Instance.OnYamlChanged("first");
         await cut.Instance.OnYamlChanged("second");
-        await Task.Delay(100, Xunit.TestContext.Current.CancellationToken);
+        var actual = await callback.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            Xunit.TestContext.Current.CancellationToken);
 
+        Assert.Equal("second", actual);
         Assert.Equal(["second"], published);
     }
 

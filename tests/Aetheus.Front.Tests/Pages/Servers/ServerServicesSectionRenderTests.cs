@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Front.Tests.TestDoubles;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -157,6 +159,45 @@ public class ServerServicesSectionRenderTests : BunitContext
         var cut = RenderSection(MakeServer(packageMgmt: true, Svc("certbot", installed: false)));
         Assert.True(cut.Instance.CanManagePackages);
         Assert.DoesNotContain("ServiceInstallCapabilityDisabled", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_OfflineServer_DisablesEveryMutatingServiceAction()
+    {
+        var server = MakeServer(
+            packageMgmt: true,
+            Svc("nginx", running: true),
+            Svc("certbot", installed: false)) with
+        { Status = ServerStatus.Offline };
+
+        var cut = RenderSection(server);
+
+        var mutating = cut.FindAll("button[title='AgentOfflineActionBlocked']").ToList();
+        Assert.NotEmpty(mutating);
+        Assert.All(mutating, button => Assert.True(button.HasAttribute("disabled")));
+        Assert.Contains("AgentOfflineActionBlocked", cut.Markup);
+    }
+
+    [Fact]
+    public void SuccessfulInstall_OffersImmediateStartPrompt()
+    {
+        BunitTestHelper.UseImmediateDialogs(this);
+        var cut = RenderSection(MakeServer(packageMgmt: true, Svc("nginx", installed: false)));
+        cut.Instance.TrackPendingInstall("nginx", 102);
+
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
+        {
+            ServerId = 21,
+            TaskId = 102,
+            TaskName = "Install - nginx",
+            Status = TaskExecutionStatus.Success
+        });
+
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        cut.WaitForState(() => dialog.OpenCount == 1);
+        Assert.Equal("ServiceInstalledTitle", dialog.LastTitle);
+        Assert.NotNull(dialog.LastConfirmMessage);
+        Assert.Contains("ConfirmStartAfterInstall", dialog.LastConfirmMessage);
     }
 
     // ── HandleTaskCompleted ──────────────────────────────────────────────────
@@ -322,7 +363,7 @@ public class ServerServicesSectionRenderTests : BunitContext
     // ── AppendLog ────────────────────────────────────────────────────────────
 
     [Fact]
-    public void AppendLog_NullMessage_DoesNothing()
+    public void AppendLog_NullMessage_ProducesNothing()
     {
         var cut = RenderSection();
         var method = typeof(ServerServicesSection).GetMethod("AppendLog", Priv)!;
@@ -425,8 +466,10 @@ public class ServerServicesSectionRenderTests : BunitContext
         var method = typeof(ServerServicesSection).GetMethod("OnLogLinesChanged", Priv)!;
         // The re-stream reaches the log-hub start (which fails under the test hub); the logs POST is
         // emitted before that, so tolerate the hub failure and assert the observable request.
-        await Record.ExceptionAsync(() => cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [200])!));
+        var exception = await Record.ExceptionAsync(
+            () => cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [200])!));
 
+        Assert.Null(exception);
         Assert.Equal(200, (int)typeof(ServerServicesSection).GetField("_logLines", Priv)!.GetValue(cut.Instance)!);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/21/services/logs"));
     }
@@ -438,9 +481,35 @@ public class ServerServicesSectionRenderTests : BunitContext
         typeof(ServerServicesSection).GetField("_logsServiceName", Priv)!.SetValue(cut.Instance, "nginx");
 
         var method = typeof(ServerServicesSection).GetMethod("OnFollowChangedAsync", Priv)!;
-        await Record.ExceptionAsync(() => cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [true])!));
+        var exception = await Record.ExceptionAsync(
+            () => cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [true])!));
 
-        Assert.True((bool)typeof(ServerServicesSection).GetField("_logFollow", Priv)!.GetValue(cut.Instance)!);
+        Assert.Null(exception);
+        Assert.True(cut.Instance.IsFollowingLogs);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/21/services/logs"));
+    }
+
+    [Fact]
+    public async Task FollowLogsToggle_ThroughRenderedControl_RestartsStream()
+    {
+        var cut = RenderSection();
+        await cut.InvokeAsync(() => cut.Instance.ViewServiceLogsAsync("nginx"));
+        cut.Render();
+        _handler.Requests.Clear();
+
+        var exception = Record.Exception(
+            () => cut.Find(".labeled-toggle-native-input").Change(true));
+
+        Assert.Null(exception);
+        // Change() dispatches the handler without awaiting it, unlike the sibling test that invokes
+        // OnFollowChangedAsync directly. Asserting immediately raced the continuation and failed only
+        // under full-suite load; waiting keeps the same discriminating power, because a toggle that
+        // never restarts the stream still never satisfies these assertions.
+        cut.WaitForAssertion(() =>
+        {
+            Assert.True(cut.Instance.IsFollowingLogs);
+            Assert.Contains(_handler.Requests,
+                r => r.Method == "POST" && r.Url.Contains("api/servers/21/services/logs"));
+        });
     }
 }

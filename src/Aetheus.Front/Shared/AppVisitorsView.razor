@@ -1,0 +1,44 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Front.Resources
+@using Aetheus.Front.Services
+@using Aetheus.Shared.DTOs
+@using Microsoft.Extensions.Localization
+
+@if (_loading)
+{
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
+}
+else if (_loadFailed)
+{
+    <RadzenStack Gap="0.75rem" AlignItems="AlignItems.Start">
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">@L["LoadFailed"]</RadzenAlert>
+        <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@RetryAsync"
+            ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </RadzenStack>
+}
+else
+{
+    <RadzenStack Gap="1rem">
+        <RadzenCard>
+            <RadzenText TextStyle="TextStyle.Overline">@L["UniqueVisitorsToday"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.H3">@_today</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                @L["CookieLessDailyVisitorsHint"]
+            </RadzenText>
+        </RadzenCard>
+
+        @if (_points.Any(point => point.UniqueVisitors > 0))
+        {
+            <RadzenChart>
+                <RadzenColumnSeries Data="@_points" CategoryProperty="Label" ValueProperty="UniqueVisitors"
+                                    Title="@L["DailyUniqueVisitors"]" />
+                <RadzenValueAxis Min="0" Step="1" />
+                <RadzenCategoryAxis />
+            </RadzenChart>
+        }
+        else
+        {
+            <EmptyState Icon="groups" Title="@L["NoVisitorDataYet"]" />
+        }
+    </RadzenStack>
+}

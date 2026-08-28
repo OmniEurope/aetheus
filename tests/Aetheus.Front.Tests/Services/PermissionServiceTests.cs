@@ -48,6 +48,47 @@ public class PermissionServiceTests
     }
 
     [Fact]
+    public void CanReadAny_GlobalAdmin_ReturnsTrueWithoutEntries()
+    {
+        var svc = new PermissionService();
+        svc.SetPermissions([], true);
+
+        Assert.True(svc.CanReadAny(ResourceType.Server));
+    }
+
+    [Fact]
+    public void CanReadAny_SpecificResourcePermission_ReturnsTrue()
+    {
+        var svc = new PermissionService();
+        svc.SetPermissions([
+            new EffectivePermissionDto
+            {
+                ResourceType = ResourceType.Project,
+                ResourceId = 42,
+                Permission = Permission.Read
+            }
+        ], false);
+
+        Assert.True(svc.CanReadAny(ResourceType.Project));
+    }
+
+    [Fact]
+    public void CanReadAny_NoMatchingPermission_ReturnsFalse()
+    {
+        var svc = new PermissionService();
+        svc.SetPermissions([
+            new EffectivePermissionDto
+            {
+                ResourceType = ResourceType.Project,
+                ResourceId = 42,
+                Permission = Permission.Read
+            }
+        ], false);
+
+        Assert.False(svc.CanReadAny(ResourceType.Server));
+    }
+
+    [Fact]
     public void ReadPermission_CanRead_CannotWrite()
     {
         var svc = new PermissionService();

@@ -44,4 +44,23 @@ public class ServerQueryHelperTests
         var back = ServerQueryHelper.UnescapeServerQuery(escaped);
         Assert.Equal(original, back);
     }
+
+    [Theory]
+    [InlineData(@"literal\s-token")]
+    [InlineData(@"literal\p-token")]
+    [InlineData(@"literal\n-token")]
+    [InlineData(@"literal\\s-token")]
+    [InlineData(@"trailing\")]
+    public void EscapeUnescape_RoundTrip_DecodesExactlyOnce(string original)
+    {
+        Assert.Equal(
+            original,
+            ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.EscapeServerQuery(original)));
+    }
+
+    [Fact]
+    public void UnescapeServerQuery_PreservesUnknownEscape()
+    {
+        Assert.Equal(@"unknown\x", ServerQueryHelper.UnescapeServerQuery(@"unknown\x"));
+    }
 }

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Projects;
 
-public class ProjectRepository(AppDbContext db) : IProjectRepository
+public class ProjectRepository(
+    AppDbContext db,
+    IProjectAnalysisGradeReader analysisGrades) : IProjectRepository
 {
     public async Task<(List<Project> Items, int TotalCount)> GetProjectsPagedAsync(
         string? search, string? sortBy, bool sortDescending,
@@ -65,6 +64,163 @@ public class ProjectRepository(AppDbContext db) : IProjectRepository
         return internalPushes.Concat(externalSyncs)
             .GroupBy(x => x.ProjectId)
             .ToDictionary(g => g.Key, g => g.Max(x => x.Date));
+    }
+
+    public async Task<Dictionary<int, int>> GetInternalRepositoryIdsAsync(
+        IReadOnlyCollection<int> projectIds, CancellationToken ct = default)
+    {
+        if (projectIds.Count == 0) return [];
+
+        return await db.GitInternalRepos.AsNoTracking()
+            .Where(repository => projectIds.Contains(repository.ProjectId))
+            .GroupBy(repository => repository.ProjectId)
+            .Select(group => new { ProjectId = group.Key, RepositoryId = group.Min(repository => repository.Id) })
+            .ToDictionaryAsync(item => item.ProjectId, item => item.RepositoryId, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<Dictionary<int, ProjectListInsight>> GetProjectListInsightsAsync(
+        IReadOnlyCollection<int> projectIds,
+        DateTime activeSessionCutoffUtc,
+        CancellationToken ct = default)
+    {
+        if (projectIds.Count == 0) return [];
+
+        var latestCommits = await db.GitCommits
+            .AsNoTracking()
+            .Where(commit => projectIds.Contains(commit.ProjectId))
+            .GroupBy(commit => commit.ProjectId)
+            .Select(group => group
+                .OrderByDescending(commit => commit.CommittedAt ?? commit.CreatedAt)
+                .ThenByDescending(commit => commit.Id)
+                .Select(commit => new
+                {
+                    commit.ProjectId,
+                    commit.Id,
+                    commit.Sha,
+                    commit.Message,
+                    Date = commit.CommittedAt ?? commit.CreatedAt
+                })
+                .First())
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var latestRuns = await db.PipelineRuns
+            .AsNoTracking()
+            .Where(run => run.Pipeline.ProjectId.HasValue
+                && projectIds.Contains(run.Pipeline.ProjectId.Value))
+            .GroupBy(run => run.Pipeline.ProjectId!.Value)
+            .Select(group => group
+                .OrderByDescending(run => run.StartedAt)
+                .ThenByDescending(run => run.Id)
+                .Select(run => new
+                {
+                    ProjectId = run.Pipeline.ProjectId!.Value,
+                    run.Id,
+                    PipelineName = run.Pipeline.Name,
+                    run.Status,
+                    run.StartedAt,
+                    ParentRunId = db.PipelineStepRuns
+                        .Where(step => step.TriggeredRunId == run.Id)
+                        .OrderBy(step => step.Id)
+                        .Select(step => (int?)step.PipelineRunId)
+                        .FirstOrDefault(),
+                    ParentRunName = db.PipelineStepRuns
+                        .Where(step => step.TriggeredRunId == run.Id)
+                        .OrderBy(step => step.Id)
+                        .Select(step => step.PipelineRun.Pipeline.Name)
+                        .FirstOrDefault()
+                })
+                .First())
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Use the same cross-run, latest-domain grade as the project Quality page. Looking only at
+        // the newest gate run is incorrect when quality and security are evaluated by separate
+        // pipelines: the most recent run may be A while another current required domain is F.
+        var gradesByProject = await analysisGrades.GetGradesAsync(projectIds, ct)
+            .ConfigureAwait(false);
+
+        var monitoredApps = await db.MonitoredApps
+            .AsNoTracking()
+            .Where(app => app.Enabled && projectIds.Contains(app.ProjectId))
+            .Select(app => new
+            {
+                app.Id,
+                app.ProjectId,
+                app.CurrentStatus,
+                app.AnalyticsEnabled,
+                EnvironmentType = app.Environment == null
+                    ? (EnvironmentType?)null
+                    : app.Environment.Type,
+                ActiveSessionCount = db.AppAnalyticsSessions
+                    .Where(session => session.MonitoredAppId == app.Id
+                        && session.LastSeenAtUtc >= activeSessionCutoffUtc)
+                    .Select(session => session.SessionPseudonym)
+                    .Distinct()
+                    .Count()
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var productionAppsByProject = monitoredApps
+            .GroupBy(app => app.ProjectId)
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var explicitlyProduction = group
+                        .Where(app => app.EnvironmentType == EnvironmentType.Production)
+                        .ToList();
+                    return explicitlyProduction.Count > 0
+                        ? explicitlyProduction
+                        : group.Where(app => app.EnvironmentType is null).ToList();
+                });
+
+        var commitsByProject = latestCommits.ToDictionary(commit => commit.ProjectId);
+        var runsByProject = latestRuns.ToDictionary(run => run.ProjectId);
+        var result = new Dictionary<int, ProjectListInsight>(projectIds.Count);
+
+        foreach (var projectId in projectIds)
+        {
+            commitsByProject.TryGetValue(projectId, out var commit);
+            runsByProject.TryGetValue(projectId, out var run);
+            var productionApps = productionAppsByProject.GetValueOrDefault(projectId) ?? [];
+            var productionStatus = ResolveProductionStatus(productionApps.Select(app => app.CurrentStatus));
+            var analyticsAvailable = productionApps.Any(app => app.AnalyticsEnabled);
+
+            result[projectId] = new ProjectListInsight(
+                projectId,
+                commit?.Id,
+                commit?.Sha,
+                commit?.Message,
+                commit?.Date,
+                run?.Id,
+                run?.PipelineName,
+                run?.Status,
+                run?.StartedAt,
+                run?.ParentRunId,
+                run?.ParentRunName,
+                gradesByProject.GetValueOrDefault(projectId)?.OverallGrade,
+                productionStatus,
+                analyticsAvailable
+                    ? productionApps.Where(app => app.AnalyticsEnabled).Sum(app => app.ActiveSessionCount)
+                    : null);
+        }
+
+        return result;
+    }
+
+    private static ProjectProductionStatus ResolveProductionStatus(IEnumerable<AppHealthStatus> statuses)
+    {
+        var values = statuses.ToList();
+        if (values.Count == 0 || values.Any(status => status == AppHealthStatus.Unknown))
+            return ProjectProductionStatus.Unavailable;
+        if (values.Any(status => status is AppHealthStatus.Down or AppHealthStatus.Degraded))
+            return ProjectProductionStatus.Offline;
+        return values.All(status => status == AppHealthStatus.Up)
+            ? ProjectProductionStatus.Online
+            : ProjectProductionStatus.Unavailable;
     }
 
     public async Task<Project?> GetProjectDetailAsync(int id, CancellationToken ct = default)

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// An application whose availability Aetheus monitors (PLAN-001 phase 1). RBAC and org-scope are
+/// An application whose availability Aetheus monitors (ADR-021 phase 1). RBAC and org-scope are
 /// inherited from the parent <see cref="Project"/>; there is no OrganizationId of its own.
 /// </summary>
 public class MonitoredApp
@@ -40,15 +39,33 @@ public class MonitoredApp
     public int ConsecutiveSuccesses { get; set; }
 
     /// <summary>
-    /// SHA-256 hash of the OTLP ingestion key (PLAN-001 phase 2). The plaintext is shown once at
+    /// SHA-256 hash of the OTLP ingestion key (ADR-021 phase 2). The plaintext is shown once at
     /// generation and never stored, mirroring RegistrationToken (leçon C-2). Null = no key issued.
     /// </summary>
     public string? IngestKeyHash { get; set; }
     public DateTime? IngestKeyCreatedAt { get; set; }
+    public DateTime? IngestKeyExpiresAt { get; set; }
+    public int IngestKeyVersion { get; set; }
+    public string? PreviousIngestKeyHash { get; set; }
+    public DateTime? PreviousIngestKeyValidUntil { get; set; }
 
     /// <summary>Data points rejected by the ingestion cardinality/rate caps (surfaced in the UI - no silent loss).</summary>
     public long IngestDroppedCount { get; set; }
     public DateTime? LastIngestAt { get; set; }
+
+    public long AnalyticsRejectedCount { get; set; }
+    public DateTime? AnalyticsLastIngestAt { get; set; }
+    public long AnalyticsStorageBudgetBytes { get; set; } = 104_857_600;
+    public int AnalyticsQuotaAlertLevel { get; set; }
+    public bool AnalyticsPublicIngestEnabled { get; set; }
+    public bool AnalyticsEnabled { get; set; }
+    public string? AnalyticsSiteId { get; set; }
+    public string? AnalyticsAllowedOriginsJson { get; set; }
+    public string? AnalyticsVaultName { get; set; }
+    public int AnalyticsPseudonymKeyVersion { get; set; }
+    public DateTime? AnalyticsPseudonymKeyCreatedAt { get; set; }
+    public int? AnalyticsPendingPseudonymKeyVersion { get; set; }
+    public DateTime? AnalyticsKeyRotationPendingAt { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

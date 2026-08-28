@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text;
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -69,46 +60,8 @@ public partial class ServerServicesSection : IAsyncDisposable
 
     private static readonly int[] LineOptions = [50, 100, 200, 500, 1000];
 
-    private static readonly Dictionary<string, string> ServiceToModule = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["docker"] = "docker",
-        ["apache2"] = "apache",
-        ["postfix"] = "mail",
-        ["dovecot"] = "mail",
-        ["portsentry"] = "portsentry",
-        ["rkhunter"] = "rkhunter",
-        ["certbot"] = "certbot",
-        ["teamspeak"] = "teamspeak",
-        ["ts3server"] = "teamspeak",
-        ["cron"] = "cron",
-        ["crond"] = "cron"
-    };
-
-    // Canonical (display name, module key) for modules with a dedicated Aetheus section.
-    // Synthesised as "not installed" entries when the agent does not report any matching service.
-    private static readonly (string DisplayName, string Module)[] DedicatedModules =
-    [
-        ("docker", "docker"),
-        ("apache2", "apache"),
-        ("certbot", "certbot"),
-        ("postfix", "mail"),
-        ("teamspeak", "teamspeak"),
-        ("portsentry", "portsentry"),
-        ("rkhunter", "rkhunter")
-    ];
-
     private IEnumerable<ServiceInfoDto> SyntheticMissingModules =>
-        DedicatedModules
-            .Where(m => !Server.Services.Any(s => ServiceToModule.TryGetValue(s.Name, out var mod) && mod == m.Module))
-            .Select(m => new ServiceInfoDto
-            {
-                Name = m.DisplayName,
-                Type = ServiceType.Systemd,
-                Status = string.Empty,
-                IsRunning = false,
-                IsManageable = true,
-                IsInstalled = false
-            });
+        ServerServiceModuleCatalog.MissingFrom(Server.Services);
 
     // Tab 1: Manageable + has dedicated Aetheus module (Docker, Apache, Mail, …)
     internal IEnumerable<ServiceInfoDto> ModuleInstalled =>
@@ -157,7 +110,7 @@ public partial class ServerServicesSection : IAsyncDisposable
     }
 
     internal static bool HasDedicatedModule(string serviceName) =>
-        ServiceToModule.ContainsKey(serviceName);
+        ServerServiceModuleCatalog.Contains(serviceName);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -224,11 +177,18 @@ public partial class ServerServicesSection : IAsyncDisposable
             _ = InvokeAsync(StateHasChanged);
     }
 
+    internal void TrackPendingInstall(string serviceName, int taskId)
+    {
+        _busyService = serviceName;
+        _busyTaskId = taskId;
+        _pendingStartAfterInstall = serviceName;
+    }
+
     private void OpenServiceModule(string serviceName)
     {
         // Item #1: switched to real routes (/servers/{id}/{section}) instead of the legacy
         // ?section= query string.
-        if (ServiceToModule.TryGetValue(serviceName, out var section))
+        if (ServerServiceModuleCatalog.TryGetSection(serviceName, out var section))
             Nav.NavigateTo($"/servers/{ServerId}/{section}");
     }
 
@@ -257,26 +217,11 @@ public partial class ServerServicesSection : IAsyncDisposable
         if (!EnsureAgentOnline()) return;
 
         var queued = 0;
+        var coordinator = new ServerBulkServiceActionCoordinator(Api, ServerId);
         foreach (var svc in req.Services)
         {
-            // TeamSpeak installs via its module helper, not apt - route it to the setup endpoint
-            // (which returns a status, not a task id) and count it as queued on success.
-            if (req.Kind == "Install" && ManageableServiceGrid.IsModuleInstallable(svc))
-            {
-                if (await Api.SetupTeamspeakAsync(ServerId, new TeamspeakSetupRequest())) queued++;
-                continue;
-            }
-
-            int? taskId = req.Kind switch
-            {
-                "Install" => await Api.InstallServiceAsync(ServerId, svc),
-                "Uninstall" => await Api.UninstallServiceAsync(ServerId, svc),
-                "Start" => await Api.ExecuteServiceActionAsync(ServerId, new ServiceActionRequest { Action = ServiceAction.Start, ServiceName = svc }),
-                "Stop" => await Api.ExecuteServiceActionAsync(ServerId, new ServiceActionRequest { Action = ServiceAction.Stop, ServiceName = svc }),
-                "Restart" => await Api.ExecuteServiceActionAsync(ServerId, new ServiceActionRequest { Action = ServiceAction.Restart, ServiceName = svc }),
-                _ => null
-            };
-            if (taskId is not null) queued++;
+            if (await coordinator.QueueAsync(
+                    req.Kind, svc, ManageableServiceGrid.IsModuleInstallable(svc))) queued++;
         }
 
         var summary = string.Format(L["BulkServiceQueued"].Value, queued, req.Services.Count);
@@ -291,7 +236,7 @@ public partial class ServerServicesSection : IAsyncDisposable
     private async Task ExecuteActionAsync(ServiceAction action, string serviceName)
     {
         _busyService = serviceName;
-        var taskId = await Api.ExecuteServiceActionAsync(ServerId, new ServiceActionRequest
+        var taskId = await Api.Auth.ExecuteServiceActionAsync(ServerId, new ServiceActionRequest
         {
             Action = action,
             ServiceName = serviceName
@@ -331,7 +276,7 @@ public partial class ServerServicesSection : IAsyncDisposable
         // not apt - route it to the teamspeak setup endpoint with the documented defaults.
         if (ManageableServiceGrid.IsModuleInstallable(serviceName))
         {
-            var ok = await Api.SetupTeamspeakAsync(ServerId, new TeamspeakSetupRequest());
+            var ok = await Api.Teamspeak.SetupTeamspeakAsync(ServerId, new TeamspeakSetupRequest());
             if (ok)
             {
                 Toast.Success(L["TaskQueued"], $"Install - {serviceName}");
@@ -345,12 +290,11 @@ public partial class ServerServicesSection : IAsyncDisposable
         }
 
         _busyService = serviceName;
-        var taskId = await Api.InstallServiceAsync(ServerId, serviceName);
+        var taskId = await Api.Auth.InstallServiceAsync(ServerId, serviceName);
 
         if (taskId is not null)
         {
-            _busyTaskId = taskId;
-            _pendingStartAfterInstall = serviceName;   // S-UX-INST: offer to start it once the install lands
+            TrackPendingInstall(serviceName, taskId.Value);   // S-UX-INST: offer to start it once the install lands
             Toast.Success(L["TaskQueued"], $"Install - {serviceName}");
         }
         else
@@ -383,7 +327,7 @@ public partial class ServerServicesSection : IAsyncDisposable
         if (confirmed != true) return;
 
         _busyService = serviceName;
-        var taskId = await Api.UninstallServiceAsync(ServerId, serviceName);
+        var taskId = await Api.Auth.UninstallServiceAsync(ServerId, serviceName);
 
         if (taskId is not null)
         {
@@ -397,7 +341,7 @@ public partial class ServerServicesSection : IAsyncDisposable
         }
     }
 
-    private async Task ViewServiceLogsAsync(string serviceName)
+    internal async Task ViewServiceLogsAsync(string serviceName)
     {
         _logsServiceName = serviceName;
         _logsVisible = true;
@@ -429,7 +373,7 @@ public partial class ServerServicesSection : IAsyncDisposable
             _logsLoading = true;
             StateHasChanged();
 
-            var taskId = await Api.RequestServiceLogsAsync(
+            var taskId = await Api.Security.RequestServiceLogsAsync(
                 serverId, serviceName, _logLines, _logFollow, _lifetimeCts.Token);
             if (_disposed || serverId != ServerId || serviceName != _logsServiceName)
                 return;
@@ -441,7 +385,11 @@ public partial class ServerServicesSection : IAsyncDisposable
             }
 
             _currentLogTaskId = taskId;
-            await EnsureLogHubAsync();
+            if (!await EnsureLogHubAsync())
+            {
+                _logsLoading = false;
+                return;
+            }
             try
             {
                 await _logHub!.InvokeAsync("JoinTaskGroup", taskId, _lifetimeCts.Token);
@@ -459,9 +407,9 @@ public partial class ServerServicesSection : IAsyncDisposable
         }
     }
 
-    private async Task EnsureLogHubAsync()
+    private async Task<bool> EnsureLogHubAsync()
     {
-        if (_logHub is not null) return;
+        if (_logHub is not null) return true;
 
         _logHub = HubFactory.Create("logs");
         _logHub.On<TaskLogDto>("LogReceived", log =>
@@ -490,7 +438,18 @@ public partial class ServerServicesSection : IAsyncDisposable
                 await _logHub.InvokeAsync("JoinTaskGroup", _currentLogTaskId);
         });
 
-        await _logHub.StartAsync();
+        try
+        {
+            await _logHub.StartAsync();
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
+        {
+            Logger.LogWarning(ex, "[ServerServices] Log hub connection failed");
+            await _logHub.DisposeAsync();
+            _logHub = null;
+            return false;
+        }
     }
 
     private async Task LeaveCurrentLogGroupCoreAsync()
@@ -531,17 +490,19 @@ public partial class ServerServicesSection : IAsyncDisposable
 
     private async Task RefreshLogsAsync() => await StartLogStreamAsync();
 
-    private async Task OnLogLinesChanged(int lines)
+    internal async Task OnLogLinesChanged(int lines)
     {
         _logLines = lines;
         await StartLogStreamAsync();
     }
 
-    private async Task OnFollowChangedAsync(bool follow)
+    internal async Task OnFollowChangedAsync(bool follow)
     {
         _logFollow = follow;
         await StartLogStreamAsync();
     }
+
+    internal bool IsFollowingLogs => _logFollow;
 
     private async Task CloseLogsAsync()
     {

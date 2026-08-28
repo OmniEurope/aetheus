@@ -2,8 +2,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using Aetheus.Back.Components.Git;
 using Aetheus.Back.Configuration;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.ExternalRepos;
 
@@ -40,18 +40,7 @@ public sealed class CreditedGitRunner(ILogger<CreditedGitRunner> logger)
         CancellationToken ct,
         TimeSpan? timeout = null)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        var psi = GitProcessStartInfoFactory.Create(workDir, args);
 
         // Defence in depth: a credential prompt must never block the process waiting on stdin.
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";

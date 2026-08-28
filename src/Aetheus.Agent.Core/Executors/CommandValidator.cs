@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Agent.Core.Configuration;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Executors;
 
@@ -9,6 +7,7 @@ public interface ICommandValidator
 {
     bool IsAllowed(string command);
     string? GetRejectionReason(string command);
+    IReadOnlyList<string> GetDangerousEnvironmentVariableNames(Dictionary<string, string> environmentVariables);
     bool HasDangerousEnvironmentVariables(Dictionary<string, string> environmentVariables);
 }
 
@@ -20,6 +19,8 @@ public interface ICommandValidator
 // path). Do not rely on IsAllowed as a security control.
 public sealed partial class CommandValidator(IOptions<AetheusAgentOptions> options) : ICommandValidator
 {
+    private static readonly TimeSpan AllowedPatternMatchTimeout = TimeSpan.FromSeconds(1);
+
     private static readonly HashSet<string> DangerousEnvVars = new(StringComparer.OrdinalIgnoreCase)
     {
         "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GCONV_PATH", "BASH_ENV", "ENV",
@@ -34,8 +35,27 @@ public sealed partial class CommandValidator(IOptions<AetheusAgentOptions> optio
     };
 
     private readonly List<Regex> _allowedPatterns = options.Value.AllowedCommandPatterns
-        .Select(p => new Regex(p, RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100)))
+        .Select(CreateAllowedPattern)
         .ToList();
+
+    private static Regex CreateAllowedPattern(string pattern)
+    {
+        const RegexOptions commonOptions = RegexOptions.Compiled | RegexOptions.IgnoreCase;
+        try
+        {
+            return new Regex(
+                pattern,
+                commonOptions | RegexOptions.NonBacktracking,
+                AllowedPatternMatchTimeout);
+        }
+        catch (NotSupportedException)
+        {
+            // Operator-provided patterns may use lookarounds or backreferences that the linear
+            // engine does not support. Preserve compatibility, keep the bounded timeout, and let
+            // GetRejectionReason fail closed if such a pattern still exhausts its budget.
+            return new Regex(pattern, commonOptions, AllowedPatternMatchTimeout);
+        }
+    }
 
     // A command is either a single allow-listed invocation or several joined by `&&`
     // (sequential AND - the only chaining operator permitted, so multi-step provisioning
@@ -69,7 +89,24 @@ public sealed partial class CommandValidator(IOptions<AetheusAgentOptions> optio
                 return "Empty segment in chain";
             if (ShellMetaCharsRegex().IsMatch(trimmed))
                 return $"Blocked metacharacter in segment: {Truncate(trimmed)}";
-            if (!_allowedPatterns.Any(p => p.IsMatch(trimmed)))
+            var matched = false;
+            foreach (var pattern in _allowedPatterns)
+            {
+                try
+                {
+                    if (!pattern.IsMatch(trimmed))
+                        continue;
+
+                    matched = true;
+                    break;
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    return $"Allow-list pattern evaluation timed out for segment: {Truncate(trimmed)}";
+                }
+            }
+
+            if (!matched)
                 return $"No allow-list pattern matched segment: {Truncate(trimmed)}";
         }
         return null;
@@ -80,21 +117,32 @@ public sealed partial class CommandValidator(IOptions<AetheusAgentOptions> optio
     [GeneratedRegex(@"[;|&`$(){}\<>\r\n\0]")]
     private static partial Regex ShellMetaCharsRegex();
 
-    public bool HasDangerousEnvironmentVariables(Dictionary<string, string> environmentVariables)
+    public IReadOnlyList<string> GetDangerousEnvironmentVariableNames(
+        Dictionary<string, string> environmentVariables)
     {
+        var blocked = new List<string>();
         foreach (var (key, value) in environmentVariables)
         {
             if (DangerousEnvVars.Contains(key))
-                return true;
+            {
+                blocked.Add(key);
+                continue;
+            }
 
             // Shellshock (CVE-2014-6271 / -7169) class: bash <4.3 imports an env var whose value
             // starts with "() {" as a function (executing trailing bytes); bash >=4.3 namespaces
             // them as BASH_FUNC_x%%. Block both forms regardless of the host's bash version.
             if (key.StartsWith("BASH_FUNC_", StringComparison.OrdinalIgnoreCase))
-                return true;
+            {
+                blocked.Add(key);
+                continue;
+            }
             if (value is not null && value.TrimStart().StartsWith("() {", StringComparison.Ordinal))
-                return true;
+                blocked.Add(key);
         }
-        return false;
+        return blocked.Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    public bool HasDangerousEnvironmentVariables(Dictionary<string, string> environmentVariables)
+        => GetDangerousEnvironmentVariableNames(environmentVariables).Count > 0;
 }

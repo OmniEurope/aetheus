@@ -118,4 +118,20 @@ public class AppMonitoringRetentionTests : IDisposable
         Assert.Equal(1, purged);
         Assert.Equal(1, await _db.AppHealthHourly.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public async Task VisitorRepository_DeduplicatesDailyIdentity_AndPurgesExpiredDays()
+    {
+        var visitors = new AppVisitorRepository(_db);
+        var today = new DateOnly(2026, 1, 10);
+        var now = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc);
+
+        await visitors.RecordAsync(1, today, "same", now, TestContext.Current.CancellationToken);
+        await visitors.RecordAsync(1, today, "same", now.AddMinutes(1), TestContext.Current.CancellationToken);
+        await visitors.RecordAsync(1, today.AddDays(-40), "old", now.AddDays(-40), TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, await _db.AppVisitorIdentities.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await visitors.PurgeOlderThanAsync(today.AddDays(-35), TestContext.Current.CancellationToken));
+        Assert.Single(await visitors.GetDailyCountsAsync(1, today, TestContext.Current.CancellationToken));
+    }
 }

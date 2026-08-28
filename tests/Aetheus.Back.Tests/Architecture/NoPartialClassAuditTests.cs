@@ -16,7 +16,7 @@ public sealed partial class NoPartialClassAuditTests
     {
         var root = FindRepoRoot();
         var sourceRoot = Path.Combine(root, "src");
-        var files = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+        var files = RepositoryScan.Enumerate(sourceRoot, "*.cs")
             .Where(path => !HasGeneratedSegment(path))
             .ToList();
         Assert.True(files.Count > 500, "The production-source scan is unexpectedly small.");
@@ -61,15 +61,5 @@ public sealed partial class NoPartialClassAuditTests
                || normalized.Contains("/obj/", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate repository root.");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

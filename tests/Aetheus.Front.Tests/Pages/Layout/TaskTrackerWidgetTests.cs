@@ -23,6 +23,16 @@ public class TaskTrackerWidgetTests : BunitContext
     }
 
     [Fact]
+    public void TrackerLifecycle_IsNotStartedByWidget()
+    {
+        var tracker = Services.GetRequiredService<TaskTrackerService>();
+
+        Render<TaskTrackerWidget>();
+
+        Assert.False(tracker.IsInitialized);
+    }
+
+    [Fact]
     public void Renders_Button_WhenUnauthenticated()
     {
         var cut = Render<TaskTrackerWidget>();

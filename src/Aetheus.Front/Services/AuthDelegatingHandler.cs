@@ -2,7 +2,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Front.Services;
@@ -16,7 +15,7 @@ public sealed class AuthDelegatingHandler(
     private const string RenewalMarkerHeader = "X-Aetheus-Renewal";
 
     private readonly SemaphoreSlim _renewalLock = new(1, 1);
-    private Task? _inFlightRenewal;
+    private Task<RenewalOutcome>? _inFlightRenewal;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
@@ -26,9 +25,9 @@ public sealed class AuthDelegatingHandler(
         if (!isRenewalRequest && auth.ShouldRenew())
             await EnsureRenewedAsync(request, cancellationToken).ConfigureAwait(false);
 
-        var token = auth.Token;
-        if (!string.IsNullOrEmpty(token))
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var sentToken = auth.Token;
+        if (!string.IsNullOrEmpty(sentToken))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sentToken);
 
         // S-TECH-30: buffer the body up-front so the request can be re-sent verbatim if the access
         // token turns out to have expired (the 401 path below clones and retries with a fresh token).
@@ -38,50 +37,67 @@ public sealed class AuthDelegatingHandler(
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && !isRenewalRequest &&
-            !request.RequestUri!.PathAndQuery.Contains("/api/auth/login", StringComparison.OrdinalIgnoreCase))
+            !IsLoginRequest(request.RequestUri))
         {
-            // Attempt a refresh before giving up - the access token may have expired
-            // while the refresh token is still valid (e.g. after a full-page reload).
-            if (!string.IsNullOrEmpty(auth.RefreshToken))
-            {
-                try
-                {
-                    await EnsureRenewedAsync(request, cancellationToken).ConfigureAwait(false);
+            var endpoint = EndpointForLog(request.RequestUri);
+            logger.LogWarning(
+                "Authenticated request {Method} {Endpoint} returned 401; forcing token refresh",
+                request.Method.Method, endpoint);
 
-                    // Retry exactly once whenever we now hold a valid token - whether THIS call refreshed
-                    // it or a *concurrent* request already refreshed it (single-flight) before we got here.
-                    // The earlier "token must have changed" guard regressed the latter case: a concurrent
-                    // renewal left auth.Token unchanged from our perspective, so the request was logged out
-                    // despite a perfectly fresh, valid token. Only the retry's own response decides logout,
-                    // so a genuinely dead-but-not-expired token (SecurityStamp invalidated, signing key
-                    // rotated, user disabled) still reaches the logout below on its second 401 - no loop.
-                    if (auth.HasValidToken)
-                    {
-                        logger.LogDebug("Valid token available after 401 - retrying original request once");
-                        var retry = await CloneRequestAsync(request).ConfigureAwait(false);
-                        retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", auth.Token);
-                        var retryResponse = await base.SendAsync(retry, cancellationToken).ConfigureAwait(false);
-                        response.Dispose();
-                        if (retryResponse.StatusCode != HttpStatusCode.Unauthorized)
-                            return retryResponse;
-                        // Still unauthorized - the token is genuinely rejected. Surface its status and
-                        // fall through to logout.
-                        response = retryResponse;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogDebug(ex, "Token refresh attempt after 401 failed");
-                }
+            var renewal = await EnsureRenewedAsync(
+                request, cancellationToken, force: true, rejectedToken: sentToken).ConfigureAwait(false);
+
+            if (renewal == RenewalOutcome.Succeeded && auth.HasValidToken)
+            {
+                logger.LogDebug("Fresh token available after 401; retrying {Method} {Endpoint} once",
+                    request.Method.Method, endpoint);
+                var retry = await CloneRequestAsync(request).ConfigureAwait(false);
+                retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", auth.Token);
+                var retryResponse = await base.SendAsync(retry, cancellationToken).ConfigureAwait(false);
+                response.Dispose();
+                if (retryResponse.StatusCode != HttpStatusCode.Unauthorized)
+                    return retryResponse;
+
+                logger.LogWarning(
+                    "Authenticated request {Method} {Endpoint} remained unauthorized after a successful token refresh; preserving session",
+                    request.Method.Method, endpoint);
+                return retryResponse;
             }
 
-            await auth.LogoutAsync();
-            // F-41: surface the need-to-login as an event so layout owns navigation. The previous
-            // in-handler NavigateTo could race with concurrent requests and trigger redirect loops.
-            auth.NotifyNeedsLogin();
+            if (renewal == RenewalOutcome.Rejected)
+            {
+                logger.LogWarning(
+                    "Token refresh was definitively rejected after 401 from {Method} {Endpoint}; clearing session",
+                    request.Method.Method, endpoint);
+                await auth.LogoutAsync();
+                // F-41: surface the need-to-login as an event so layout owns navigation. The previous
+                // in-handler NavigateTo could race with concurrent requests and trigger redirect loops.
+                auth.NotifyNeedsLogin();
+            }
+            else
+            {
+                logger.LogWarning(
+                    "Token refresh is temporarily unavailable after 401 from {Method} {Endpoint}; preserving session",
+                    request.Method.Method, endpoint);
+            }
         }
 
         return response;
+    }
+
+    private static string EndpointForLog(Uri? uri)
+    {
+        if (uri is null) return "unknown";
+        var path = uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString.Split('?', 2)[0];
+        var sanitized = new string(path.Where(c => !char.IsControl(c)).Take(256).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "/" : sanitized;
+    }
+
+    private static bool IsLoginRequest(Uri? uri)
+    {
+        if (uri is null) return false;
+        var path = uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString.Split('?', 2)[0];
+        return path.Trim('/').Equals("api/auth/login", StringComparison.OrdinalIgnoreCase);
     }
 
     // S-TECH-30: clone a (buffered) request so it can be replayed after a token refresh. The body
@@ -104,14 +120,23 @@ public sealed class AuthDelegatingHandler(
     /// <summary>
     /// Single-flight renewal: concurrent callers all await the same renewal Task and
     /// therefore all benefit from the fresh token before their request is signed.
+    /// A server-side 401 forces renewal even when the JWT expiry still looks valid locally.
     /// </summary>
-    private async Task EnsureRenewedAsync(HttpRequestMessage outerRequest, CancellationToken ct)
+    private async Task<RenewalOutcome> EnsureRenewedAsync(
+        HttpRequestMessage outerRequest,
+        CancellationToken ct,
+        bool force = false,
+        string? rejectedToken = null)
     {
-        Task renewal;
+        Task<RenewalOutcome> renewal;
         await _renewalLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (!auth.ShouldRenew()) return;
+            if (force && rejectedToken is not null
+                && !string.Equals(auth.Token, rejectedToken, StringComparison.Ordinal)
+                && auth.HasValidToken)
+                return RenewalOutcome.Succeeded;
+            if (!force && !auth.ShouldRenew()) return RenewalOutcome.NotNeeded;
             // The shared single-flight renewal must NOT be bound to the first caller's
             // CancellationToken: if that initiator is cancelled (navigation, disposed
             // component) it would fault every co-waiter that wasn't itself cancelled.
@@ -126,11 +151,11 @@ public sealed class AuthDelegatingHandler(
 
         try
         {
-            await renewal.ConfigureAwait(false);
+            return await renewal.ConfigureAwait(false);
         }
         finally
         {
-            await _renewalLock.WaitAsync(ct).ConfigureAwait(false);
+            await _renewalLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             try
             {
                 if (ReferenceEquals(_inFlightRenewal, renewal))
@@ -143,14 +168,14 @@ public sealed class AuthDelegatingHandler(
         }
     }
 
-    private async Task RenewAsync(HttpRequestMessage outerRequest, CancellationToken ct)
+    private async Task<RenewalOutcome> RenewAsync(HttpRequestMessage outerRequest, CancellationToken ct)
     {
         try
         {
             var baseAddress = outerRequest.RequestUri is { IsAbsoluteUri: true } absUri
                 ? new Uri(absUri.GetLeftPart(UriPartial.Authority))
                 : null;
-            if (baseAddress is null) return;
+            if (baseAddress is null) return RenewalOutcome.Unavailable;
 
             // F-012: prefer refresh token rotation over the old /api/auth/renew endpoint.
             if (!string.IsNullOrEmpty(auth.RefreshToken))
@@ -168,9 +193,16 @@ public sealed class AuthDelegatingHandler(
                     if (body is { Token.Length: > 0 })
                     {
                         await auth.LoginAsync(body.Token, body.RefreshToken);
-                        return;
+                        return RenewalOutcome.Succeeded;
                     }
                 }
+
+                if (IsDefinitiveRejection(refreshResp.StatusCode))
+                    return RenewalOutcome.Rejected;
+
+                logger.LogWarning("Refresh-token endpoint returned transient HTTP {StatusCode}; preserving session",
+                    (int)refreshResp.StatusCode);
+                return RenewalOutcome.Unavailable;
             }
 
             // Fallback: legacy renew endpoint (for bootstrap admin tokens without refresh tokens)
@@ -179,21 +211,38 @@ public sealed class AuthDelegatingHandler(
             renew.Headers.Authorization = new AuthenticationHeaderValue("Bearer", auth.Token);
 
             using var response = await base.SendAsync(renew, ct).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return;
+            if (response.IsSuccessStatusCode)
+            {
+                var legacyBody = await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions.Web, ct).ConfigureAwait(false);
+                if (legacyBody is { Token.Length: > 0 })
+                {
+                    await auth.LoginAsync(legacyBody.Token, legacyBody.RefreshToken);
+                    return RenewalOutcome.Succeeded;
+                }
+            }
 
-            var legacyBody = await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions.Web, ct).ConfigureAwait(false);
-            if (legacyBody is { Token.Length: > 0 })
-                await auth.LoginAsync(legacyBody.Token, legacyBody.RefreshToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
+            if (IsDefinitiveRejection(response.StatusCode))
+                return RenewalOutcome.Rejected;
+
+            logger.LogWarning("Legacy token-renewal endpoint returned transient HTTP {StatusCode}; preserving session",
+                (int)response.StatusCode);
+            return RenewalOutcome.Unavailable;
         }
         catch (Exception ex)
         {
-            // Renewal is best-effort - log and let the original request proceed.
-            // If the token has truly expired the 401 handler above will redirect to /login.
-            logger.LogDebug(ex, "Token renewal failed");
+            logger.LogWarning(ex, "Token renewal request failed transiently; preserving session");
+            return RenewalOutcome.Unavailable;
         }
+    }
+
+    private static bool IsDefinitiveRejection(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
+
+    private enum RenewalOutcome
+    {
+        NotNeeded,
+        Succeeded,
+        Rejected,
+        Unavailable
     }
 }

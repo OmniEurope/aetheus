@@ -7,11 +7,12 @@ Authentication and authorization: JWT login, refresh-token rotation, agent regis
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
+| `/api/auth/public-demo` | GET | Anonymous | Report whether public-demo mode is enabled |
 | `/api/auth/login` | POST | Anonymous | User login (rate-limited) |
 | `/api/auth/register` | POST | Anonymous | Agent server registration |
 | `/api/auth/renew` | POST | User | Renew JWT before expiry |
 | `/api/auth/token/refresh` | POST | Anonymous | Refresh-token rotation |
-| `/api/auth/external-login` | POST | Anonymous | External provider login |
+| `/api/auth/external-login` | POST | Trusted gateway | External provider login; requires the shared `X-Aetheus-External-Auth` gateway secret |
 | `/api/auth/registration-tokens` | GET | Admin | List registration tokens |
 | `/api/auth/registration-tokens/{id}` | GET | Admin | Single registration token (wizard verify-step poll) |
 | `/api/auth/registration-tokens` | POST | Admin | Create registration token |
@@ -29,6 +30,7 @@ Authentication and authorization: JWT login, refresh-token rotation, agent regis
 | `/api/roles/{id}/permissions` | PUT | Admin | Set role permissions |
 | `/api/roles/{id}/clone` | POST | Admin | Clone role |
 | `/api/roles/{id}/users` | GET | Admin | Lister les utilisateurs du role |
+| `/api/roles/{id}/available-users` | GET | Admin | Lister les utilisateurs disponibles pour le role |
 | `/api/roles/{id}/users` | POST | Admin | Ajouter un utilisateur au role |
 | `/api/roles/{id}/users/{userId}` | DELETE | Admin | Retirer un utilisateur du role |
 | `/api/users/{id}/effective-permissions` | GET | Admin | User effective permissions |

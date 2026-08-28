@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -12,6 +8,7 @@ public partial class DockerPruneDialog
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
 
     private DockerPruneDialogModel _model = new();
+    internal DockerPruneDialogModel Model => _model;
     private bool SelectAll => _model.Containers && _model.Images && _model.Volumes;
     private int SelectedCount => (_model.Containers ? 1 : 0) + (_model.Images ? 1 : 0) + (_model.Volumes ? 1 : 0);
     private void SetAll(bool value) => _model = new DockerPruneDialogModel { Containers = value, Images = value, Volumes = value };

@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
 
 namespace Aetheus.Front.Shared;
 
@@ -20,21 +18,27 @@ public partial class OwnerTypeSelector
 
     private OwnerKind _kind = OwnerKind.Global;
     private readonly string _radioGroupName = $"owner-kind-{Guid.NewGuid():N}";
-    private bool _kindInitialized;
+    private bool _userChoseKind;
     private int? _selectedProjectId;
     private List<EnvironmentDto> _environments = [];
     private List<ProjectServerDto> _projectServers = [];
 
     protected override async Task OnParametersSetAsync()
     {
-        // Bound owner ids define the initial mode. Afterwards the user's mode choice
-        // must survive the parent re-render caused by SetOwnership(null, null, null):
-        // re-inferring on every render immediately snapped Project/Environment/Server
-        // back to Global before the user could choose the scoped owner.
-        if (_kindInitialized) return;
-        _kindInitialized = true;
+        // Bound owner ids define the mode until the user picks one. Afterwards the user's choice
+        // must survive the parent re-render caused by SetOwnership(null, null, null): re-inferring
+        // on every render immediately snapped Project/Environment/Server back to Global before the
+        // user could choose the scoped owner.
+        //
+        // What this must NOT do is latch on the first parameter set regardless of content. Owners
+        // arrive late: PipelineEdit assigns _model.ProjectId inside an async load that completes
+        // after the first render, so latching on render one inferred Global from a still-null id and
+        // never looked again - opening /pipelines/new?projectId=13 from a project offered "Global"
+        // with no project dropdown. Latching on the user's choice instead of on the first render
+        // keeps the protection above and lets a late-arriving owner still be honoured.
+        if (_userChoseKind) return;
 
-        // Infer the initial kind from the bound values
+        // Infer the kind from the bound values
         if (ProjectServerId is > 0)
         {
             _kind = OwnerKind.ProjectServer;
@@ -57,20 +61,28 @@ public partial class OwnerTypeSelector
         }
     }
 
+    // Not gated on firstRender: the owner the mode was inferred from can arrive after it, and its
+    // dropdown would then render permanently empty. Gated on the list actually being missing
+    // instead, which is idempotent across the re-renders that follow.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _selectedProjectId is > 0)
-        {
-            if (_kind == OwnerKind.Environment)
-                await LoadEnvironmentsAsync(_selectedProjectId.Value);
-            else if (_kind == OwnerKind.ProjectServer)
-                await LoadProjectServersAsync(_selectedProjectId.Value);
-            StateHasChanged();
-        }
+        if (_selectedProjectId is not > 0) return;
+
+        if (_kind == OwnerKind.Environment && _environments.Count == 0)
+            await LoadEnvironmentsAsync(_selectedProjectId.Value);
+        else if (_kind == OwnerKind.ProjectServer && _projectServers.Count == 0)
+            await LoadProjectServersAsync(_selectedProjectId.Value);
+        else
+            return;
+
+        StateHasChanged();
     }
 
     private async Task OnKindChanged(OwnerKind newKind)
     {
+        // From here the user owns the mode: never re-infer it from the bound ids, which
+        // SetOwnership below is about to clear.
+        _userChoseKind = true;
         _kind = newKind;
         _selectedProjectId = null;
         _environments = [];
@@ -119,12 +131,12 @@ public partial class OwnerTypeSelector
 
     private async Task LoadEnvironmentsAsync(int projectId)
     {
-        _environments = await Api.GetAllEnvironmentsAsync(projectId);
+        _environments = await Api.Servers.GetAllEnvironmentsAsync(projectId);
     }
 
     private async Task LoadProjectServersAsync(int projectId)
     {
-        _projectServers = await Api.GetProjectServersAsync(projectId);
+        _projectServers = await Api.Projects.GetProjectServersAsync(projectId);
     }
 
     private async Task<int?> FindProjectForServerAsync(int projectServerId)
@@ -133,7 +145,7 @@ public partial class OwnerTypeSelector
         {
             try
             {
-                var servers = await Api.GetProjectServersAsync(project.Id);
+                var servers = await Api.Projects.GetProjectServersAsync(project.Id);
                 return servers.Any(server => server.Id == projectServerId) ? project.Id : (int?)null;
             }
             catch (HttpRequestException)
@@ -148,7 +160,7 @@ public partial class OwnerTypeSelector
     {
         try
         {
-            return (await Api.GetEnvironmentAsync(environmentId))?.ProjectId;
+            return (await Api.Servers.GetEnvironmentAsync(environmentId))?.ProjectId;
         }
         catch (HttpRequestException)
         {

@@ -1,7 +1,8 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectPagedSectionBase<ServerTaskDto>
 @if (_result is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
@@ -14,9 +15,29 @@ else
         <Columns>
             <RadzenDataGridColumn TItem="ServerTaskDto" Property="Name" Title="@L["Task"]" />
             <RadzenDataGridColumn TItem="ServerTaskDto" Property="ServerName" Title="@L["Server"]" Width="150px" />
-            <RadzenDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="120px">
+            <RadzenDataGridColumn TItem="ServerTaskDto" Title="@L["Source"]" Width="210px" Sortable="false">
+                <Template Context="task">
+                    @if (task.PipelineRunId is { } pipelineRunId)
+                    {
+                        <RadzenLink Path="@($"/pipelines/runs/{pipelineRunId}")"
+                            Text="@($"{L["PipelineRun"]} #{pipelineRunId}")" />
+                    }
+                    else
+                    {
+                        <RadzenLink Path="@($"/servers/{task.ServerId}/overview")"
+                            Text="@($"{L["Server"]}: {SourceServerName(task)}")" />
+                    }
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="220px">
                 <Template Context="task">
                     <RadzenBadge Text="@L[task.Status.ToString()]" />
+                    @if (!string.IsNullOrWhiteSpace(task.FailureCode))
+                    {
+                        <RadzenBadge BadgeStyle="@GetFailureBadge(task.FailureCode)"
+                            Icon="@GetFailureIcon(task.FailureCode)"
+                            Text="@L[task.FailureCode]" title="@task.FailureReason" class="rz-ml-1" />
+                    }
                 </Template>
             </RadzenDataGridColumn>
             <RadzenDataGridColumn TItem="ServerTaskDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" />

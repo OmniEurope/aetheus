@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Plugins;
 
@@ -31,7 +24,7 @@ public partial class PluginRegisterDialog
         _busy = true;
         try
         {
-            var result = await Api.RegisterPluginAsync(_model);
+            var result = await Api.Settings.RegisterPluginAsync(_model);
             if (result is not null)
             {
                 Toast.Success("Registered", "PluginRegistered");

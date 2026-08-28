@@ -37,12 +37,9 @@ RUN systemctl mask \
 # ssh on Ubuntu 24.04 is socket-activated (ssh.socket, not ssh.service).
 RUN systemctl enable ssh.socket 2>/dev/null || true
 
-# Throwaway dev access: root login over SSH with a fixed password. Disposable,
-# local-only — never mirror near prod. VPW3: the password is a build arg (default
-# 'aetheus') so it can be overridden per-run instead of being hard-coded here.
-ARG VPSSIM_ROOT_PASSWORD=aetheus
-RUN echo "root:${VPSSIM_ROOT_PASSWORD}" | chpasswd \
-    && mkdir -p /run/sshd \
+# Throwaway dev access is configured at runtime by ylaunch after container start,
+# so no password or password-derived layer is persisted in the image.
+RUN mkdir -p /run/sshd \
     && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && printf '\n=== Aetheus VPS-sim (BLANK) — disposable local sandbox (NOT production) ===\n\n' > /etc/motd
 
@@ -72,6 +69,11 @@ RUN if [ "$INSTALL_DOTNET" = "1" ]; then \
         && /usr/local/bin/dotnet --version; \
     fi
 
+# Safe image default: the supported Compose harness explicitly opts back into
+# uid 0 because systemd-as-PID-1 requires it. A plain `docker run` therefore
+# cannot start this privileged simulator as root by accident.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin vpssim-runtime
+USER vpssim-runtime
+
 STOPSIGNAL SIGRTMIN+3
-EXPOSE 22
 CMD ["/sbin/init"]

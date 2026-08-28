@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Monitoring;
 
@@ -23,10 +18,14 @@ public class MonitoringController(IMonitoringService monitoringService, IResourc
 
     [HttpGet("servers/{serverId:int}/metrics")]
     public async Task<ActionResult<List<ServerMetricDto>>> GetServerMetrics(
-        int serverId, [FromQuery, System.ComponentModel.DataAnnotations.Range(1, 168)] int hours = 24, CancellationToken ct = default)
+        int serverId,
+        [FromQuery, System.ComponentModel.DataAnnotations.Range(1, 168)] int hours = 24,
+        CancellationToken ct = default,
+        [FromQuery] DateTime? afterUtc = null,
+        [FromQuery, System.ComponentModel.DataAnnotations.Range(1, 2000)] int take = 1_000)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Read, ct))
             return Forbid();
-        return Ok(await monitoringService.GetServerMetricsAsync(serverId, hours, ct));
+        return Ok(await monitoringService.GetServerMetricsAsync(serverId, hours, ct, afterUtc, take));
     }
 }

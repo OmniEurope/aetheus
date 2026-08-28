@@ -5,7 +5,9 @@ using Aetheus.Front.Services;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests.Pages.Git;
 
@@ -37,6 +39,111 @@ public class GitRepositoriesRenderTests : BunitContext
         Assert.Contains("NewRepository", cut.Markup);
         Assert.Contains("SelectProject", cut.Markup);
         Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("api/projects"));
+    }
+
+    [Fact]
+    public void ProjectScopedPage_ContainsExternalRepositoryManagement()
+    {
+        _handler.SetJsonResponse("api/external-repos/enabled", true);
+        _handler.SetResponse("api/external-repos/project/1", System.Net.HttpStatusCode.NotFound);
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        navigation.NavigateTo(navigation.GetUriWithQueryParameter("projectId", 1));
+
+        var cut = Render<GitRepositories>();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("id=\"external-repository\"", cut.Markup);
+            Assert.Single(cut.FindComponents<
+                Aetheus.Front.Pages.Projects.ProjectDetailSections.ProjectExternalRepoSection>());
+            Assert.Contains(_handler.Requests, request =>
+                request.Url.Contains("api/external-repos/enabled", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void ProjectScopedPage_WithOneRepository_NavigatesDirectlyToRepository()
+    {
+        _handler.SetPaginatedJsonResponse("api/git/repos", new List<GitLightRepoDto>
+        {
+            new() { Id = 31, ProjectId = 1, Name = "only-repo", DefaultBranch = "main" }
+        });
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        navigation.NavigateTo(navigation.GetUriWithQueryParameter("projectId", 1));
+
+        Render<GitRepositories>();
+
+        Assert.EndsWith("/git-repositories/31?projectId=1", navigation.Uri, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExternalRepositoryFragment_WithOneInternalRepository_KeepsManagementSection()
+    {
+        _handler.SetPaginatedJsonResponse("api/git/repos", new List<GitLightRepoDto>
+        {
+            new() { Id = 31, ProjectId = 1, Name = "only-repo", DefaultBranch = "main" }
+        });
+        _handler.SetJsonResponse("api/external-repos/enabled", true);
+        _handler.SetResponse("api/external-repos/project/1", System.Net.HttpStatusCode.NotFound);
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        navigation.NavigateTo("git-repositories?projectId=1#external-repository");
+
+        var cut = Render<GitRepositories>();
+
+        cut.WaitForAssertion(() => Assert.Contains("id=\"external-repository\"", cut.Markup));
+        Assert.EndsWith("/git-repositories?projectId=1#external-repository", navigation.Uri, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProjectScopedPage_WithSeveralRepositories_KeepsTheList()
+    {
+        _handler.SetPaginatedJsonResponse("api/git/repos", new List<GitLightRepoDto>
+        {
+            new() { Id = 31, ProjectId = 1, Name = "first", DefaultBranch = "main" },
+            new() { Id = 32, ProjectId = 1, Name = "second", DefaultBranch = "main" }
+        });
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        navigation.NavigateTo(navigation.GetUriWithQueryParameter("projectId", 1));
+
+        var cut = Render<GitRepositories>();
+
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.Instance.RepositoryCount));
+        Assert.Contains("projectId=1", navigation.Uri, StringComparison.Ordinal);
+        Assert.DoesNotContain("/git-repositories/31", navigation.Uri, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmptyRepositoryLoad_KeepsGridMountedWhileLoading()
+    {
+        var response = new TaskCompletionSource<PaginatedResult<GitLightRepoDto>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(
+            HttpMethod.Get,
+            "api/git/repos",
+            _ => response.Task);
+
+        var cut = Render<GitRepositories>();
+        cut.WaitForState(
+            () => _handler.Requests.Any(request => request.Method == "GET"
+                && request.Url.Contains("api/git/repos", StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(2));
+
+        Assert.Single(cut.FindComponents<Aetheus.Front.Shared.AetheusDataGrid<GitLightRepoDto>>());
+        Assert.Empty(cut.FindComponents<RadzenProgressBarCircular>());
+
+        // Complete the pending HTTP operation on bUnit's renderer so the component continuation
+        // cannot be starved by an unrelated full-suite worker repeatedly scheduling renders.
+        await cut.InvokeAsync(() => response.SetResult(new PaginatedResult<GitLightRepoDto>()));
+        cut.WaitForState(
+            () => !cut.FindComponent<Aetheus.Front.Shared.AetheusDataGrid<GitLightRepoDto>>()
+                .Instance.IsLoading,
+            TimeSpan.FromSeconds(5));
+        Assert.Contains("NoRepositoriesFound", cut.Markup);
+
+        var repositoryRequests = _handler.Requests.Count(request =>
+            request.Method == "GET"
+            && request.Url.Contains("api/git/repos", StringComparison.Ordinal));
+        Assert.InRange(repositoryRequests, 1, 2);
     }
 
     [Fact]
@@ -75,6 +182,46 @@ public class GitRepositoriesRenderTests : BunitContext
         var repos = (List<GitLightRepoDto>)PageType.GetField("_repos", Priv)!.GetValue(cut.Instance)!;
         Assert.Single(repos);
         Assert.Equal("my-repo", repos[0].Name);
+    }
+
+    [Fact]
+    public async Task OnLoadDataAsync_CrossProjectSecondPage_ReplacesRowsAndKeepsServerTotal()
+    {
+        _handler.SetJsonResponse(
+            HttpMethod.Get,
+            "api/git/repos?page=2&pageSize=25",
+            new PaginatedResult<GitLightRepoDto>
+            {
+                Items =
+                [
+                    new()
+                    {
+                        Id = 26,
+                        Name = "project-b-repo",
+                        Slug = "project-b-repo",
+                        ProjectId = 2,
+                        ProjectName = "Project B"
+                    }
+                ],
+                TotalCount = 51,
+                Page = 2,
+                PageSize = 25
+            });
+        var cut = Render<GitRepositories>();
+        await cut.InvokeAsync(() => Task.CompletedTask);
+        _handler.Requests.Clear();
+        await cut.InvokeAsync(() => cut.Instance.OnLoadDataAsync(
+            new Radzen.LoadDataArgs { Skip = 25, Top = 25, OrderBy = "Name" }));
+
+        var request = Assert.Single(_handler.Requests, item =>
+            item.Method == "GET"
+            && item.Url.Contains("api/git/repos", StringComparison.Ordinal));
+        Assert.Contains("page=2", request.Url);
+        Assert.Contains("pageSize=25", request.Url);
+        Assert.DoesNotContain("projectId=", request.Url);
+        Assert.Single(cut.Instance.Repositories);
+        Assert.Equal(2, cut.Instance.Repositories[0].ProjectId);
+        Assert.Equal(51, cut.Instance.RepositoryCount);
     }
 
     [Fact]

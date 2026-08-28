@@ -179,6 +179,9 @@
         "type": "Transitive",
         "resolved": "17.0.24",
         "contentHash": "hA7bacntMiZv1Yf9xtjwl/GP3GT1mG84QxhAk7ijAUD0pJhJaVVwXScE13vMpXnNtlaRDW6SeyZdWg2j2qrh4w=="
+      },
+      "aetheus.webanalytics": {
+        "type": "Project"
       }
     }
   }

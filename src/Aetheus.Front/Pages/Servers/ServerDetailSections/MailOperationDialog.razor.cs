@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
+using Aetheus.Shared.Validation;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -51,7 +45,7 @@ public sealed class MailDialogModel : IValidatableObject
     public string Domain { get; set; } = string.Empty;
     [StringLength(63)] public string DkimSelector { get; set; } = "default";
     public string Email { get; set; } = string.Empty;
-    [StringLength(256)] public string Password { get; set; } = string.Empty;
+    [StringLength(PasswordPolicy.MaximumLength)] public string Password { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
     public string Destination { get; set; } = string.Empty;
     public int DomainId { get; set; }
@@ -62,6 +56,15 @@ public sealed class MailDialogModel : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        foreach (var result in ValidateDomain()) yield return result;
+        foreach (var result in ValidateAccount()) yield return result;
+        foreach (var result in ValidateAlias()) yield return result;
+        if (Mode == MailDialogMode.RotateDkim && string.IsNullOrWhiteSpace(NewSelector))
+            yield return new ValidationResult("Required", [nameof(NewSelector)]);
+    }
+
+    private IEnumerable<ValidationResult> ValidateDomain()
+    {
         if (Mode is MailDialogMode.AddDomain or MailDialogMode.Setup)
         {
             if (string.IsNullOrWhiteSpace(Domain))
@@ -69,15 +72,26 @@ public sealed class MailDialogModel : IValidatableObject
             else if (!DomainValidator.IsValid(Domain))
                 yield return new ValidationResult("Invalid domain", [nameof(Domain)]);
         }
+    }
 
+    private IEnumerable<ValidationResult> ValidateAccount()
+    {
         if (Mode is MailDialogMode.AddAccount or MailDialogMode.Setup)
         {
             if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Password))
                 yield return new ValidationResult("Required", [nameof(Email), nameof(Password)]);
-            else if (!EmailValidator.IsValid(Email))
-                yield return new ValidationResult("Invalid email", [nameof(Email)]);
+            else
+            {
+                if (!EmailValidator.IsValid(Email))
+                    yield return new ValidationResult("Invalid email", [nameof(Email)]);
+                if (!MailValidation.IsValidPassword(Password))
+                    yield return new ValidationResult("Invalid password", [nameof(Password)]);
+            }
         }
+    }
 
+    private IEnumerable<ValidationResult> ValidateAlias()
+    {
         if (Mode == MailDialogMode.AddAlias)
         {
             if (string.IsNullOrWhiteSpace(Source) || string.IsNullOrWhiteSpace(Destination) || DomainId <= 0)
@@ -90,8 +104,5 @@ public sealed class MailDialogModel : IValidatableObject
                     yield return new ValidationResult("Invalid destination email", [nameof(Destination)]);
             }
         }
-
-        if (Mode == MailDialogMode.RotateDkim && string.IsNullOrWhiteSpace(NewSelector))
-            yield return new ValidationResult("Required", [nameof(NewSelector)]);
     }
 }

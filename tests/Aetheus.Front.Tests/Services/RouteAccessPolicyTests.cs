@@ -17,6 +17,7 @@ public class RouteAccessPolicyTests
     [InlineData("servers")]
     [InlineData("projects/42/overview")]
     [InlineData("pipelines/runs/8?tab=logs")]
+    [InlineData("analysis")]
     [InlineData("backups")]
     [InlineData("admin/users")]
     [InlineData("unknown-future-page")]
@@ -36,6 +37,23 @@ public class RouteAccessPolicyTests
     public void AuthenticatedUser_CanAccessPersonalRoutes(string route)
     {
         Assert.True(RouteAccessPolicy.CanAccess(route, true, false, Loaded()));
+    }
+
+    [Theory]
+    [InlineData("analysis")]
+    [InlineData("backups")]
+    [InlineData("projects/12/quality")]
+    [InlineData("projects/12/backups")]
+    public void ProjectReadPermission_OpensAnalysisAndBackupRoutes(string route)
+    {
+        var permissions = Loaded(new EffectivePermissionDto
+        {
+            ResourceType = ResourceType.Project,
+            ResourceId = 12,
+            Permission = Permission.Read
+        });
+
+        Assert.True(RouteAccessPolicy.CanAccess(route, true, false, permissions));
     }
 
     [Theory]
@@ -109,6 +127,14 @@ public class RouteAccessPolicyTests
 
         Assert.True(RouteAccessPolicy.CanAccess("login", false, false, permissions));
         Assert.False(RouteAccessPolicy.CanAccess("settings", false, false, permissions));
+    }
+
+    [Fact]
+    public void Login_RemainsVisibleDuringAuthenticatedPermissionBootstrap()
+    {
+        var permissions = new PermissionService();
+
+        Assert.True(RouteAccessPolicy.CanAccess("login", true, false, permissions));
     }
 
     private static PermissionService Loaded(params EffectivePermissionDto[] grants)

@@ -1,0 +1,9 @@
+# Fast differential feedback using the shared application-light orchestration.
+name: toto-ci-light
+extends: application-light@1
+trigger: webhook
+branches:
+  - develop
+supersede_running: true
+variables:
+  APPLICATION_LIGHT_ADAPTER_PIPELINE: toto-ci-light-adapter

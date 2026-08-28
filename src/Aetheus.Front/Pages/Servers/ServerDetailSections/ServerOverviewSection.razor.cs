@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
 public partial class ServerOverviewSection : IDisposable
 {
+    private string ScannerDiagnosticState(string value) => value.Contains(":degraded:", StringComparison.OrdinalIgnoreCase)
+        || value.Contains(":unavailable:", StringComparison.OrdinalIgnoreCase)
+        ? L["AnalysisScannerUnavailable"]
+        : value.Contains(":available-on-demand:", StringComparison.OrdinalIgnoreCase)
+            ? L["AnalysisScannerOnDemand"] : L["AnalysisScannerReady"];
+
+    private static BadgeStyle ScannerDiagnosticStyle(string value) => value.Contains(":degraded:", StringComparison.OrdinalIgnoreCase)
+        || value.Contains(":unavailable:", StringComparison.OrdinalIgnoreCase)
+        ? BadgeStyle.Danger
+        : value.Contains(":available-on-demand:", StringComparison.OrdinalIgnoreCase) ? BadgeStyle.Warning : BadgeStyle.Success;
+
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
@@ -74,7 +77,7 @@ public partial class ServerOverviewSection : IDisposable
         _runnerBusy = true;
         try
         {
-            var updated = await Api.SetPipelineRunnerEnabledAsync(Server.Id, newValue);
+            var updated = await Api.Servers.SetPipelineRunnerEnabledAsync(Server.Id, newValue);
             if (updated is null)
             {
                 Toast.Error(L["ActionFailed"]);
@@ -118,7 +121,7 @@ public partial class ServerOverviewSection : IDisposable
         _isolationBusy = true;
         try
         {
-            var updated = await Api.SetContainerIsolationRequiredAsync(Server.Id, newValue);
+            var updated = await Api.Servers.SetContainerIsolationRequiredAsync(Server.Id, newValue);
             if (updated is null)
             {
                 Toast.Error(L["ActionFailed"]);
@@ -146,6 +149,20 @@ public partial class ServerOverviewSection : IDisposable
         return parts.Length >= 4
             ? $"v{string.Join(".", parts.Take(3))}"
             : $"v{version}";
+    }
+
+    private string FormatAgentVersionWithTarget()
+    {
+        var installed = FormatAgentVersion(Server.AgentVersion);
+        if (Server.AgentCompatibility is not
+            {
+                Status: AgentCompatibilityStatus.UpdateRecommended or AgentCompatibilityStatus.UpdateRequired,
+                TargetVersion: { Length: > 0 } target
+            }
+            || string.Equals(Server.AgentVersion, target, StringComparison.OrdinalIgnoreCase))
+            return installed;
+
+        return string.Format(L["AgentVersionUpdateAvailable"], installed, target);
     }
 
     private static string FormatBytes(long bytes)

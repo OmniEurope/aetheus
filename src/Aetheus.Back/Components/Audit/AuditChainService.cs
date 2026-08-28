@@ -2,7 +2,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Audit;
 
@@ -47,6 +46,16 @@ public class AuditChainService(IAuditRepository repo) : IAuditChainService
 
     public async Task<AuditChainVerificationResult> VerifyChainAsync(CancellationToken ct = default)
     {
+        return (await VerifyAsync(targetEntryId: null, ct).ConfigureAwait(false))!;
+    }
+
+    public async Task<AuditChainVerificationResult?> VerifyUpToEntryAsync(int entryId, CancellationToken ct = default)
+    {
+        return await VerifyAsync(entryId, ct).ConfigureAwait(false);
+    }
+
+    private async Task<AuditChainVerificationResult?> VerifyAsync(int? targetEntryId, CancellationToken ct)
+    {
         // F-006: streamed verification - bounded memory regardless of table size.
         var previousHash = string.Empty;
         var count = 0;
@@ -55,79 +64,39 @@ public class AuditChainService(IAuditRepository repo) : IAuditChainService
         {
             count++;
 
-            if (entry.PreviousHash != previousHash)
-            {
-                return new AuditChainVerificationResult
-                {
-                    IsValid = false,
-                    TotalEntries = count,
-                    FirstInvalidId = entry.Id,
-                    ErrorMessage = $"PreviousHash mismatch at entry {entry.Id}"
-                };
-            }
-
-            if (entry.Hash != ComputeHash(entry, previousHash) &&
-                entry.Hash != ComputeLegacyHash(entry, previousHash))
-            {
-                return new AuditChainVerificationResult
-                {
-                    IsValid = false,
-                    TotalEntries = count,
-                    FirstInvalidId = entry.Id,
-                    ErrorMessage = $"Hash mismatch at entry {entry.Id}"
-                };
-            }
-
-            previousHash = entry.Hash;
-        }
-
-        return new AuditChainVerificationResult
-        {
-            IsValid = true,
-            TotalEntries = count
-        };
-    }
-
-    public async Task<AuditChainVerificationResult?> VerifyUpToEntryAsync(int entryId, CancellationToken ct = default)
-    {
-        var previousHash = string.Empty;
-        var count = 0;
-
-        await foreach (var entry in repo.StreamOrderedAsync().WithCancellation(ct).ConfigureAwait(false))
-        {
-            count++;
-
-            if (entry.PreviousHash != previousHash)
-            {
-                return new AuditChainVerificationResult
-                {
-                    IsValid = false,
-                    TotalEntries = count,
-                    FirstInvalidId = entry.Id,
-                    ErrorMessage = $"PreviousHash mismatch at entry {entry.Id}"
-                };
-            }
-
-            if (entry.Hash != ComputeHash(entry, previousHash) &&
-                entry.Hash != ComputeLegacyHash(entry, previousHash))
-            {
-                return new AuditChainVerificationResult
-                {
-                    IsValid = false,
-                    TotalEntries = count,
-                    FirstInvalidId = entry.Id,
-                    ErrorMessage = $"Hash mismatch at entry {entry.Id}"
-                };
-            }
+            var failure = ValidateEntry(entry, previousHash, count);
+            if (failure is not null)
+                return failure;
 
             // Reached the target with every preceding link intact: the entry is verified.
-            if (entry.Id == entryId)
+            if (entry.Id == targetEntryId)
                 return new AuditChainVerificationResult { IsValid = true, TotalEntries = count };
 
             previousHash = entry.Hash;
         }
 
-        // No entry with that id in the chain.
+        return targetEntryId.HasValue
+            ? null
+            : new AuditChainVerificationResult { IsValid = true, TotalEntries = count };
+    }
+
+    private AuditChainVerificationResult? ValidateEntry(AuditLog entry, string previousHash, int count)
+    {
+        if (entry.PreviousHash != previousHash)
+            return InvalidEntry(entry, count, "PreviousHash mismatch");
+
+        if (entry.Hash != ComputeHash(entry, previousHash) &&
+            entry.Hash != ComputeLegacyHash(entry, previousHash))
+            return InvalidEntry(entry, count, "Hash mismatch");
+
         return null;
     }
+
+    private static AuditChainVerificationResult InvalidEntry(AuditLog entry, int count, string reason) => new()
+    {
+        IsValid = false,
+        TotalEntries = count,
+        FirstInvalidId = entry.Id,
+        ErrorMessage = $"{reason} at entry {entry.Id}"
+    };
 }

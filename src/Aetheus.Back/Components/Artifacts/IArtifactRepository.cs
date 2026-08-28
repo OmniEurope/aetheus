@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Artifacts;
 
@@ -14,6 +12,7 @@ public interface IArtifactRepository
     Task<List<PipelineArtifact>> GetByEnvironmentAsync(int pipelineId, int projectId, string environmentName, CancellationToken ct = default);
     Task<List<PipelineArtifact>> GetReleasesAsync(int pipelineId, int projectId, CancellationToken ct = default);
     Task<List<PipelineArtifact>> GetExpiredAsync(DateTime cutoff, int batchSize, CancellationToken ct = default);
+    Task<bool> HasActiveRetentionLeaseAsync(int artifactId, DateTime at, CancellationToken ct = default);
     Task<List<PipelineArtifact>> GetProjectBuildArtifactsAsync(int projectId, CancellationToken ct = default);
     Task AddAsync(PipelineArtifact artifact, CancellationToken ct = default);
     Task LinkReleaseAsync(PipelineArtifact artifact, int releaseId, CancellationToken ct = default);
@@ -33,21 +32,31 @@ public interface IArtifactRepository
     Task<PipelineArtifact?> FindRunArtifactByNameAsync(int runId, string name, CancellationToken ct = default);
     Task<PipelineArtifact?> FindSuccessfulPipelineArtifactByCommitAsync(
         int projectId, string pipelineName, string commitHash, string name, CancellationToken ct = default);
-    Task<PipelineArtifact?> FindReleaseArtifactAsync(int projectId, string releaseSelector, CancellationToken ct = default);
+    Task<PipelineArtifact?> FindReleaseArtifactAsync(
+        int projectId, string releaseSelector, string? artifactName = null, CancellationToken ct = default);
     Task<ReleaseArtifactSelection?> FindReleaseArtifactSelectionAsync(
-        int projectId, string releaseSelector, CancellationToken ct = default);
+        int projectId, string releaseSelector, string? artifactName = null, CancellationToken ct = default);
+    Task<bool> HasDeployedRollbackContractReleaseAsync(int projectId, CancellationToken ct = default);
     Task<PipelineArtifact?> FindPreviousPublishedReleaseArtifactAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default);
+        int projectId, string currentCommitHash, string? artifactName = null, CancellationToken ct = default);
     Task<PipelineArtifact?> FindPreviousDeployedReleaseArtifactAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default);
+        int projectId, string currentCommitHash, string? artifactName = null, CancellationToken ct = default);
     Task<bool> HasPublishedRollbackContractReleaseAsync(int projectId, CancellationToken ct = default);
-    Task<bool> HasPreviousPublishedRollbackContractReleaseAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default);
-    Task<bool> HasPreviousDeployedRollbackContractReleaseAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default);
+    Task<bool> RequiresPreviousPublishedArtifactAsync(
+        int projectId, string currentCommitHash, string? artifactName, CancellationToken ct = default);
+    Task<bool> RequiresPreviousDeployedArtifactAsync(
+        int projectId, string currentCommitHash, string? artifactName, CancellationToken ct = default);
     // IDOR-safe deploy download: the agent's server org must equal the artifact's project org. Null
     // when the server is unknown.
     Task<int?> GetServerOrganizationIdAsync(int serverId, CancellationToken ct = default);
+
+    // Own-reads over entities Artifacts shares with Pipelines and Releases. Obtaining them by
+    // injecting those modules' services is what put Artifacts inside a module cycle, for reads that
+    // change no ownership: the writes stay where they were.
+    Task<(int PipelineId, int? ProjectId)?> GetRunPipelineContextAsync(int runId, CancellationToken ct = default);
+    Task<bool> IsServerAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default);
+    Task<Release?> FindReleaseForRunAsync(int pipelineRunId, CancellationToken ct = default);
+    Task<List<Release>> GetDeployedProjectReleasesAsync(int projectId, CancellationToken ct = default);
 
     Task SaveChangesAsync(CancellationToken ct = default);
 }

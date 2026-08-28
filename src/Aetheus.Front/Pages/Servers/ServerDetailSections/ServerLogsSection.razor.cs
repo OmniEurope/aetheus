@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -32,7 +25,7 @@ public partial class ServerLogsSection
         var serverId = ServerId;
         try
         {
-            var result = await Api.GetServerLogsAsync(serverId, _page);
+            var result = await Api.Servers.GetServerLogsAsync(serverId, _page);
             if (ServerId == serverId) _result = result;
         }
         catch (HttpRequestException)
@@ -49,7 +42,7 @@ public partial class ServerLogsSection
         _loadMoreError = false;
         try
         {
-            var next = await Api.GetServerLogsAsync(serverId, nextPage);
+            var next = await Api.Servers.GetServerLogsAsync(serverId, nextPage);
             if (ServerId != serverId) return;
             _page = nextPage;
             _result = _result! with
@@ -67,11 +60,5 @@ public partial class ServerLogsSection
         }
     }
 
-    private static BadgeStyle GetLevelBadge(TaskLogLevel level) => level switch
-    {
-        TaskLogLevel.Error => BadgeStyle.Danger,
-        TaskLogLevel.Warning => BadgeStyle.Warning,
-        TaskLogLevel.Info => BadgeStyle.Info,
-        _ => BadgeStyle.Light
-    };
+    private static BadgeStyle GetLevelBadge(TaskLogLevel level) => DisplayFormatting.TaskLogBadge(level);
 }

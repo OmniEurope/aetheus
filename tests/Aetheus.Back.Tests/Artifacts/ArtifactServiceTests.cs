@@ -18,8 +18,7 @@ public class ArtifactServiceTests
     private readonly IArtifactRepository _repoMock = Substitute.For<IArtifactRepository>();
     private readonly IArtifactStorageService _storageMock = Substitute.For<IArtifactStorageService>();
     private readonly IArtifactRetentionService _retentionMock = Substitute.For<IArtifactRetentionService>();
-    private readonly IPipelineRunService _pipelineRunServiceMock = Substitute.For<IPipelineRunService>();
-    private readonly IReleaseRepository _releaseRepoMock = Substitute.For<IReleaseRepository>();
+    // The cross-module reads are now own-reads on the artifact repository, so the stubs move with them.
     private readonly IDbTransactionScope _transactionMock = Substitute.For<IDbTransactionScope>();
     private readonly ArtifactService _sut;
 
@@ -32,10 +31,8 @@ public class ArtifactServiceTests
             _repoMock,
             _storageMock,
             _retentionMock,
-            _pipelineRunServiceMock,
             config,
             NullLogger<ArtifactService>.Instance,
-            _releaseRepoMock,
             _transactionMock);
     }
 
@@ -44,7 +41,7 @@ public class ArtifactServiceTests
     [Fact]
     public async Task PublishArtifactAsync_RunNotFound_ReturnsNull()
     {
-        _pipelineRunServiceMock.GetRunPipelineContextAsync(99, Arg.Any<CancellationToken>()).Returns(((int PipelineId, int? ProjectId)?)null);
+        _repoMock.GetRunPipelineContextAsync(99, Arg.Any<CancellationToken>()).Returns(((int PipelineId, int? ProjectId)?)null);
 
         var result = await _sut.PublishArtifactAsync(99, "build", null, 0, Stream.Null, ct: TestContext.Current.CancellationToken);
 
@@ -54,7 +51,7 @@ public class ArtifactServiceTests
     [Fact]
     public async Task PublishArtifactAsync_ValidRun_SavesAndReturnsDto()
     {
-        _pipelineRunServiceMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
+        _repoMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
             .Returns((PipelineId: 10, ProjectId: (int?)5));
         _storageMock.SaveArtifactAsync(5, 10, 1, "build-1.zip", Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(("artifacts/5/10/1/build-1.zip", "abc123checksum"));
@@ -75,7 +72,7 @@ public class ArtifactServiceTests
     [Fact]
     public async Task PublishArtifactAsync_QuotaReached_ThrowsConflict_AndDoesNotSave()
     {
-        _pipelineRunServiceMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
+        _repoMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
             .Returns((PipelineId: 10, ProjectId: (int?)5));
         // Test config sets the project quota to 1000 bytes; report the project already at 1500.
         _repoMock.GetProjectTotalSizeBytesAsync(5, Arg.Any<CancellationToken>()).Returns(1500L);
@@ -90,7 +87,7 @@ public class ArtifactServiceTests
     [Fact]
     public async Task PublishArtifactAsync_QuotaPressure_EvictsOldBuildButRetainsNewestPerPipeline()
     {
-        _pipelineRunServiceMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
+        _repoMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
             .Returns((PipelineId: 10, ProjectId: (int?)5));
         _repoMock.GetProjectTotalSizeBytesAsync(5, Arg.Any<CancellationToken>()).Returns(1500L);
         var oldest = new PipelineArtifact
@@ -128,7 +125,7 @@ public class ArtifactServiceTests
     [Fact]
     public async Task PublishArtifactAsync_NullProjectId_UsesZeroAsDefault()
     {
-        _pipelineRunServiceMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
+        _repoMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
             .Returns((PipelineId: 10, ProjectId: (int?)null));
         _storageMock.SaveArtifactAsync(0, 10, 1, Arg.Any<string>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(("path/file.zip", "sha0"));
@@ -143,12 +140,12 @@ public class ArtifactServiceTests
     [Fact]
     public async Task PublishArtifactAsync_LinksReleaseCreatedBeforePostStageCollection()
     {
-        _pipelineRunServiceMock.GetRunPipelineContextAsync(42, Arg.Any<CancellationToken>())
+        _repoMock.GetRunPipelineContextAsync(42, Arg.Any<CancellationToken>())
             .Returns((PipelineId: 10, ProjectId: (int?)5));
         _storageMock.SaveArtifactAsync(5, 10, 42, "build-42.zip", Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(("artifacts/5/10/42/build-42.zip", "checksum"));
         _storageMock.GetArtifactSize("artifacts/5/10/42/build-42.zip").Returns(1024L);
-        _releaseRepoMock.FindByPipelineRunIdAsync(42, Arg.Any<CancellationToken>())
+        _repoMock.FindReleaseForRunAsync(42, Arg.Any<CancellationToken>())
             .Returns(new Release { Id = 8, PipelineRunId = 42 });
 
         await _sut.PublishArtifactAsync(42, "build", "package", 0, Stream.Null, ct: TestContext.Current.CancellationToken);
@@ -190,14 +187,14 @@ public class ArtifactServiceTests
         var artifact = new PipelineArtifact { Id = 7, ProjectId = 3, Releases = { release, otherLinkedRelease } };
         _repoMock.FindAsync(7, Arg.Any<CancellationToken>()).Returns(artifact);
         var previous = new Release { Id = 2, ProjectId = 3, Status = ReleaseStatus.Deployed };
-        _releaseRepoMock.GetDeployedProjectReleasesAsync(3, Arg.Any<CancellationToken>()).Returns([previous]);
+        _repoMock.GetDeployedProjectReleasesAsync(3, Arg.Any<CancellationToken>()).Returns([previous]);
         _transactionMock.IsRelational.Returns(true);
 
         await _sut.MarkDeployedAsync(7, "toto", releaseId: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(ReleaseStatus.Deployed, release.Status);
         Assert.Equal(ReleaseStatus.Published, otherLinkedRelease.Status);
-        Assert.Equal(ReleaseStatus.Published, previous.Status);
+        Assert.Equal(ReleaseStatus.Superseded, previous.Status);
         await _repoMock.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
         await _transactionMock.Received(1).BeginTransactionAsync(Arg.Any<CancellationToken>());
         await _transactionMock.Received(1).CommitAsync(Arg.Any<CancellationToken>());
@@ -259,6 +256,7 @@ public class ArtifactServiceTests
             SizeBytes = 2048,
             PipelineRunId = 5,
             PipelineId = 10,
+            Pipeline = new Pipeline { Id = 10, SourceRepositoryId = 23 },
             ProjectId = 3,
             StageName = "build",
             RetentionPolicy = ArtifactRetentionPolicy.Build
@@ -272,6 +270,7 @@ public class ArtifactServiceTests
         Assert.Equal("output.zip", result.Name);
         Assert.Equal(2048, result.SizeBytes);
         Assert.Equal(ArtifactRetentionPolicy.Build, result.RetentionPolicy);
+        Assert.Equal(23, result.SourceRepositoryId);
     }
 
     // --- DownloadArtifactAsync ---
@@ -386,18 +385,18 @@ public class ArtifactServiceTests
     [Fact]
     public async Task IsAgentAssignedToRunAsync_DelegatesToPipelineRepo()
     {
-        _pipelineRunServiceMock.IsServerAssignedToRunAsync(1, 2, Arg.Any<CancellationToken>()).Returns(true);
+        _repoMock.IsServerAssignedToRunAsync(1, 2, Arg.Any<CancellationToken>()).Returns(true);
 
         var result = await _sut.IsAgentAssignedToRunAsync(1, 2, ct: TestContext.Current.CancellationToken);
 
         Assert.True(result);
-        await _pipelineRunServiceMock.Received(1).IsServerAssignedToRunAsync(1, 2, Arg.Any<CancellationToken>());
+        await _repoMock.Received(1).IsServerAssignedToRunAsync(1, 2, Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task IsAgentAssignedToRunAsync_NotAssigned_ReturnsFalse()
     {
-        _pipelineRunServiceMock.IsServerAssignedToRunAsync(1, 2, Arg.Any<CancellationToken>()).Returns(false);
+        _repoMock.IsServerAssignedToRunAsync(1, 2, Arg.Any<CancellationToken>()).Returns(false);
 
         var result = await _sut.IsAgentAssignedToRunAsync(1, 2, ct: TestContext.Current.CancellationToken);
 
@@ -422,7 +421,7 @@ public class ArtifactServiceTests
     {
         _repoMock.FindAsync(100, Arg.Any<CancellationToken>()).Returns(ArrangeAgentArtifact());
         // Agent (server 2) is NOT a participant of the deploy run 42 it claims to execute.
-        _pipelineRunServiceMock.IsServerAssignedToRunAsync(42, 2, Arg.Any<CancellationToken>()).Returns(false);
+        _repoMock.IsServerAssignedToRunAsync(42, 2, Arg.Any<CancellationToken>()).Returns(false);
 
         var (status, stream, _) = await _sut.OpenArtifactForAgentAsync(100, 42, 2, ct: TestContext.Current.CancellationToken);
 
@@ -435,7 +434,7 @@ public class ArtifactServiceTests
     public async Task OpenArtifactForAgentAsync_CrossOrgArtifact_ReturnsForbidden()
     {
         _repoMock.FindAsync(100, Arg.Any<CancellationToken>()).Returns(ArrangeAgentArtifact(orgId: 7));
-        _pipelineRunServiceMock.IsServerAssignedToRunAsync(42, 2, Arg.Any<CancellationToken>()).Returns(true);
+        _repoMock.IsServerAssignedToRunAsync(42, 2, Arg.Any<CancellationToken>()).Returns(true);
         // Agent's server belongs to a DIFFERENT org (9) than the artifact's project org (7).
         _repoMock.GetServerOrganizationIdAsync(2, Arg.Any<CancellationToken>()).Returns(9);
 
@@ -461,7 +460,7 @@ public class ArtifactServiceTests
     public async Task OpenArtifactForAgentAsync_AssignedSameOrg_ReturnsOk()
     {
         _repoMock.FindAsync(100, Arg.Any<CancellationToken>()).Returns(ArrangeAgentArtifact(orgId: 7));
-        _pipelineRunServiceMock.IsServerAssignedToRunAsync(42, 2, Arg.Any<CancellationToken>()).Returns(true);
+        _repoMock.IsServerAssignedToRunAsync(42, 2, Arg.Any<CancellationToken>()).Returns(true);
         _repoMock.GetServerOrganizationIdAsync(2, Arg.Any<CancellationToken>()).Returns(7);
         _storageMock.OpenArtifact("artifacts/5/10/1/release.zip").Returns(new MemoryStream([1, 2, 3]));
 

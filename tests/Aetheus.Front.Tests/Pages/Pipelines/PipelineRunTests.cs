@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Layout;
 using Aetheus.Front.Pages;
 using Aetheus.Front.Pages.Pipelines;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -20,9 +22,33 @@ public class PipelineRunTests : BunitContext
             HttpMethod.Get,
             "/runs?pageSize=50",
             []);
+        _handler.SetPaginatedJsonResponse<AiRunResultDto>(
+            HttpMethod.Get,
+            "api/ai/results",
+            []);
+        _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/", System.Net.HttpStatusCode.NoContent);
     }
 
     private readonly BunitTestHelper.TestHandler _handler;
+
+    [Fact]
+    public void ReleaseEnrichmentFailure_DoesNotAbortRunPageInitialization()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/77", new PipelineRunDto
+        {
+            Id = 77,
+            PipelineId = 5,
+            PipelineName = "Release outage",
+            Status = PipelineStatus.Success
+        });
+        _handler.SetResponse(HttpMethod.Get, "api/releases/by-run/77", System.Net.HttpStatusCode.ServiceUnavailable);
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 77));
+
+        cut.WaitForState(() => typeof(PipelineRun).GetField("_live",
+            BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance) is not null);
+        Assert.Contains("Release outage", cut.Markup);
+    }
 
     [Fact]
     public void Renders_RunDetails()
@@ -54,6 +80,244 @@ public class PipelineRunTests : BunitContext
 
         Assert.Contains("CI Build", cut.Markup);
         Assert.Contains("Build", cut.Markup);
+    }
+
+    [Fact]
+    public void ProjectRun_Breadcrumb_Includes_Project_Pipeline_And_Run()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/80", new PipelineRunDto
+        {
+            Id = 80,
+            PipelineId = 5,
+            ProjectId = 2,
+            ProjectName = "Toto",
+            PipelineName = "CI Build",
+            Status = PipelineStatus.Success
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 80));
+        var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Projects", "Toto", "Pipelines", "CI Build", "PipelineRun #80"],
+            breadcrumb.Items.Select(item => item.Text)));
+        Assert.Equal("/pipelines/5?projectId=2", breadcrumb.Items[3].Href);
+    }
+
+    [Fact]
+    public void GateLoadFailure_RendersVisibleIncompleteWarning()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/702", new PipelineRunDto
+        {
+            Id = 702,
+            PipelineId = 5,
+            PipelineName = "quality",
+            Status = PipelineStatus.Success
+        });
+        _handler.SetResponse(
+            HttpMethod.Get,
+            "api/analysis/runs/702/result",
+            System.Net.HttpStatusCode.InternalServerError);
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 702));
+
+        cut.WaitForAssertion(() => Assert.Contains("AnalysisGateIncompleteTitle", cut.Markup));
+        Assert.Contains("702", cut.Markup);
+    }
+
+    [Fact]
+    public void GateResult_RendersCompactOverviewTileAndSingleGateTabAfterLogs()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/701", new PipelineRunDto
+        {
+            Id = 701,
+            PipelineId = 5,
+            PipelineName = "quality",
+            Status = PipelineStatus.Success,
+            StartedAt = DateTime.UtcNow.AddMinutes(-2),
+            CompletedAt = DateTime.UtcNow
+        });
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/701/result", new AnalysisRunGateDto
+        {
+            PipelineRunId = 701,
+            Status = AnalysisGateStatus.Warning,
+            ReportCount = 1,
+            FindingCount = 1,
+            NewFindingCount = 1,
+            Findings =
+            [
+                new AnalysisRunGateFindingDto
+                {
+                    FindingId = 17,
+                    Title = "Unsafe command",
+                    Message = "Untrusted input reaches a command sink.",
+                    RuleId = "security.command",
+                    Category = AnalysisCategory.Sast,
+                    Severity = AnalysisSeverity.High,
+                    Status = AnalysisFindingStatus.Open,
+                    FilePath = "src/Runner.cs",
+                    StartLine = 42,
+                    IsNew = true
+                }
+            ],
+            Reports = [new AnalysisRunGateReportDto { ReportId = 9, FindingCount = 1 }]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 701));
+
+        cut.WaitForState(() => cut.Markup.Contains("AnalysisGateOverview", StringComparison.Ordinal), TimeSpan.FromSeconds(3));
+        var overview = cut.Markup.IndexOf("Overview", StringComparison.Ordinal);
+        var logs = cut.Markup.IndexOf("Logs", overview, StringComparison.Ordinal);
+        var gate = cut.Markup.IndexOf("AnalysisGateTab", logs, StringComparison.Ordinal);
+        Assert.True(overview >= 0 && overview < logs && logs < gate);
+        Assert.DoesNotContain("AnalysisFindingsReport", cut.Find(".rz-tabview-nav").TextContent);
+        var gateTile = cut.Find(".run-overview-tiles .analysis-run-gate-tile");
+        Assert.Contains("AnalysisGateOverview", gateTile.TextContent);
+        Assert.Contains("AnalysisGateFindingsCount", gateTile.TextContent);
+        gateTile.Click();
+        cut.WaitForState(() => cut.Markup.Contains("AnalysisGateDescription", StringComparison.Ordinal));
+        Assert.Contains("AnalysisGateDescription", cut.Markup);
+        Assert.Contains("/analysis/findings/17", cut.Markup);
+        Assert.Equal("Untrusted input reaches a command sink.", cut.Find(".analysis-finding-grid-message").TextContent);
+        Assert.Equal("src/Runner.cs", cut.Find(".analysis-finding-location code").TextContent);
+        Assert.Contains("Line 42", cut.Find(".analysis-finding-location").TextContent);
+    }
+
+    [Fact]
+    public void RunningRun_DoesNotLoadOrRenderGate()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/703", new PipelineRunDto
+        {
+            Id = 703,
+            PipelineId = 5,
+            PipelineName = "running-quality",
+            Status = PipelineStatus.Running,
+            StartedAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/703/result", new AnalysisRunGateDto
+        {
+            PipelineRunId = 703,
+            Status = AnalysisGateStatus.Warning,
+            Findings = [new AnalysisRunGateFindingDto { FindingId = 99, Title = "Premature" }]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 703));
+
+        cut.WaitForState(() => cut.Markup.Contains("running-quality", StringComparison.Ordinal));
+        Assert.Empty(cut.FindAll(".analysis-run-gate-tile"));
+        Assert.DoesNotContain("AnalysisGateTab", cut.Find(".rz-tabview-nav").TextContent);
+        Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("api/analysis/runs/703/result", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunParameters_RenderAsOneTileAndOpenDialog()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/704", new PipelineRunDto
+        {
+            Id = 704,
+            PipelineId = 5,
+            PipelineName = "parameterized",
+            Status = PipelineStatus.Success,
+            Parameters = new Dictionary<string, string>
+            {
+                ["environment"] = "staging",
+                ["replicas"] = "3"
+            }
+        });
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 704));
+        cut.WaitForState(() => cut.FindAll(".run-parameters-tile").Count == 1);
+
+        Assert.DoesNotContain("run-params-grid", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("RunParametersCount", cut.Find(".run-parameters-tile").TextContent);
+
+        var dialog = Services.GetRequiredService<DialogService>();
+        var opened = false;
+        dialog.OnOpen += (_, _, _, _) => opened = true;
+        var method = typeof(PipelineRun).GetMethod("ShowParameters", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var task = cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
+        await cut.InvokeAsync(() => dialog.Close(null));
+        await task;
+        Assert.True(opened);
+    }
+
+    [Fact]
+    public void RunParametersDialog_RendersLocalizedKeyValueGrid()
+    {
+        var cut = Render<PipelineRunParametersDialog>(parameters => parameters.Add(component => component.Parameters,
+            new Dictionary<string, string> { ["replicas"] = "3", ["environment"] = "staging" }));
+
+        Assert.Contains("Parameter", cut.Markup);
+        Assert.Contains("Value", cut.Markup);
+        Assert.Contains("environment", cut.Markup);
+        Assert.Contains("staging", cut.Markup);
+    }
+
+    [Fact]
+    public void ParentRun_GateTileUsesAggregatedChildGate()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/710", new PipelineRunDto
+        {
+            Id = 710,
+            PipelineId = 5,
+            PipelineName = "parent",
+            Status = PipelineStatus.Success,
+            Steps = [new PipelineStepRunDto { Id = 1, Status = TaskExecutionStatus.Success, TriggeredRunId = 711 }]
+        });
+        _handler.SetJsonResponse("api/pipelines/runs/711", new PipelineRunDto
+        {
+            Id = 711,
+            PipelineId = 6,
+            PipelineName = "quality-child",
+            Status = PipelineStatus.Success
+        });
+        _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/710/result", System.Net.HttpStatusCode.NoContent);
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/711/result", new AnalysisRunGateDto
+        {
+            PipelineRunId = 711,
+            Status = AnalysisGateStatus.Warning,
+            FindingCount = 4,
+            Findings = [new AnalysisRunGateFindingDto { FindingId = 71, Title = "Child finding" }]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 710));
+
+        cut.WaitForAssertion(() =>
+        {
+            var tile = cut.Find(".analysis-run-gate-tile");
+            Assert.Contains("AnalysisGateStatusWarning", tile.TextContent);
+            Assert.Contains("AnalysisGateFindingsCount", tile.TextContent);
+        }, TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
+    public void Artifacts_RenderOneCountTileAndOneListTab()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/712", new PipelineRunDto
+        {
+            Id = 712,
+            PipelineId = 5,
+            PipelineName = "artifacts",
+            Status = PipelineStatus.Success,
+            Artifacts =
+            [
+                new PipelineArtifactDto { Id = 1, Name = "app.zip", SizeBytes = 1024, StageName = "package" },
+                new PipelineArtifactDto { Id = 2, Name = "coverage.xml", SizeBytes = 2048, StageName = "quality" }
+            ]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 712));
+        cut.WaitForState(() => cut.FindAll(".run-artifacts-tile").Count == 1, TimeSpan.FromSeconds(2));
+
+        var tile = Assert.Single(cut.FindAll(".run-artifacts-tile"));
+        Assert.Contains("Artifacts", tile.TextContent);
+        Assert.Contains("2", tile.TextContent);
+        tile.Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("app.zip", cut.Markup);
+            Assert.Contains("coverage.xml", cut.Markup);
+        });
     }
 
     [Fact]
@@ -114,13 +378,13 @@ public class PipelineRunTests : BunitContext
         cut.Render(parameters => parameters.Add(component => component.RunId, 318));
         cut.WaitForState(() => cut.Markup.Contains("child-ci"), TimeSpan.FromSeconds(2));
 
-        Assert.Contains("Run #318", cut.Markup);
+        Assert.Contains("PipelineRun #318", cut.Markup);
         Assert.Contains("child-ci", cut.Markup);
         Assert.DoesNotContain("parent-release", cut.Markup);
     }
 
     [Fact]
-    public async Task ReloadTerminalRun_StopsDurationTimer()
+    public async Task ReloadTerminalRun_StopsIsolatedDurationTimers()
     {
         _handler.SetJsonResponse("api/pipelines/runs/51", new PipelineRunDto
         {
@@ -131,8 +395,9 @@ public class PipelineRunTests : BunitContext
             StartedAt = DateTime.UtcNow.AddMinutes(-1)
         });
         var cut = Render<PipelineRun>(p => p.Add(x => x.RunId, 51));
-        cut.WaitForState(() => typeof(PipelineRun).GetField("_durationTimer",
-            BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance) is not null);
+        cut.WaitForState(() => cut.FindComponents<PipelineRunLiveDuration>().Any(component =>
+            typeof(Aetheus.Front.Shared.LiveDurationComponentBase).GetField("_timer", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(component.Instance) is not null));
         _handler.SetJsonResponse("api/pipelines/runs/51", new PipelineRunDto
         {
             Id = 51,
@@ -147,8 +412,9 @@ public class PipelineRunTests : BunitContext
 
         await cut.InvokeAsync(async () => await (Task)reload.Invoke(cut.Instance, [])!);
 
-        Assert.Null(typeof(PipelineRun).GetField("_durationTimer",
-            BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance));
+        Assert.All(cut.FindComponents<PipelineRunLiveDuration>(), component =>
+            Assert.Null(typeof(Aetheus.Front.Shared.LiveDurationComponentBase).GetField("_timer", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(component.Instance)));
     }
 
     [Fact]
@@ -312,6 +578,33 @@ public class PipelineRunTests : BunitContext
         Assert.Equal("45s", result);
     }
 
+    [Fact]
+    public void FormatDuration_FutureStartNeverShowsNegativeTime()
+    {
+        var result = PipelineRunFormatting.FormatDuration(DateTime.UtcNow.AddMinutes(1), null);
+
+        Assert.Equal("0s", result);
+    }
+
+    [Fact]
+    public void StepProgress_TerminalRunDoesNotShowIncompleteRatio()
+    {
+        var run = new PipelineRunDto
+        {
+            Status = PipelineStatus.Success,
+            Steps = Enumerable.Range(1, 14)
+                .Select(id => new PipelineStepRunDto { Id = id, Status = TaskExecutionStatus.Success })
+                .Concat([
+                    new PipelineStepRunDto { Id = 15, Status = TaskExecutionStatus.Pending },
+                    new PipelineStepRunDto { Id = 16, Status = TaskExecutionStatus.Pending }
+                ])
+                .ToList()
+        };
+
+        Assert.Equal((14, 14), PipelineRunPresentation.StepProgress(run));
+        Assert.Equal((14, 16), PipelineRunPresentation.StepProgress(run with { Status = PipelineStatus.Running }));
+    }
+
     [Theory]
     [InlineData(PipelineStatus.Success, BadgeStyle.Success)]
     [InlineData(PipelineStatus.Failed, BadgeStyle.Danger)]
@@ -362,6 +655,61 @@ public class PipelineRunTests : BunitContext
         var selected = typeof(PipelineRun).GetField("_selectedStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
         // Auto-selects the last completed step
         Assert.NotNull(selected.GetValue(cut.Instance));
+    }
+
+    [Fact]
+    public async Task ReloadRunAsync_KeepsManualSelectionPinnedWhileAnotherStepRuns()
+    {
+        var manuallySelected = new PipelineStepRunDto
+        {
+            Id = 101,
+            StepName = "Inspect",
+            StageName = "build",
+            Status = TaskExecutionStatus.Success
+        };
+        _handler.SetJsonResponse("api/pipelines/runs/401", new PipelineRunDto
+        {
+            Id = 401,
+            PipelineName = "Pinned selection",
+            Status = PipelineStatus.Running,
+            Steps =
+            [
+                manuallySelected,
+                new PipelineStepRunDto
+                {
+                    Id = 102,
+                    StepName = "Deploy",
+                    StageName = "deploy",
+                    Status = TaskExecutionStatus.Running
+                }
+            ]
+        });
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 401));
+        cut.WaitForState(() => cut.Markup.Contains("Pinned selection"), TimeSpan.FromSeconds(2));
+        await cut.InvokeAsync(() => cut.Instance.SelectStep(manuallySelected));
+
+        _handler.SetJsonResponse("api/pipelines/runs/401", new PipelineRunDto
+        {
+            Id = 401,
+            PipelineName = "Pinned selection",
+            Status = PipelineStatus.Running,
+            Steps =
+            [
+                manuallySelected with { CompletedAt = DateTime.UtcNow },
+                new PipelineStepRunDto
+                {
+                    Id = 102,
+                    StepName = "Deploy",
+                    StageName = "deploy",
+                    Status = TaskExecutionStatus.Running
+                }
+            ]
+        });
+        await cut.InvokeAsync(cut.Instance.ReloadRunAsync);
+
+        var selected = Assert.IsType<PipelineStepRunDto>(cut.Instance.SelectedStep);
+        Assert.Equal(101, selected.Id);
+        Assert.True(cut.Instance.IsStepSelectionPinned);
     }
 
     // --- ToggleMatrixGroup ---

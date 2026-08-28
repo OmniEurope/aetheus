@@ -45,7 +45,7 @@
             <Template Context="c">
                 <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
                     <RadzenButton Icon="wifi_tethering" Size="ButtonSize.ExtraSmall" Text="@L["TestConnection"]" IsBusy="@(_testing.Contains(c.Id))" Disabled="@(_testing.Contains(c.Id))"
-                        Click="@(() => TestAsync(c.Id))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        Click="@(() => TestAsync(c.Id))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     @if (_testResults.TryGetValue(c.Id, out var result))
                     {
                         <RadzenBadge BadgeStyle="@StatusBadge(result.Status)" Text="@L.Localize(result.Status)"

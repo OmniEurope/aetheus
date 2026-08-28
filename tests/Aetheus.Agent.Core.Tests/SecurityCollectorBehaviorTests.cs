@@ -30,7 +30,10 @@ public sealed class SecurityCollectorBehaviorTests
         shell.RunExecAsync("postqueue", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
             .Returns(new ShellExecResult(0, "queue item\n-- 5 Kbytes in 3 Requests.\n", string.Empty));
 
-        var result = await new MailCollector(NullLogger<MailCollector>.Instance, shell).CollectAsync(TestContext.Current.CancellationToken);
+        var result = await new MailCollector(
+            NullLogger<MailCollector>.Instance,
+            shell,
+            fileExists: path => path == "/etc/postfix/main.cf").CollectAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.IsInstalled);
         Assert.True(result.IsPostfixRunning);
@@ -48,14 +51,61 @@ public sealed class SecurityCollectorBehaviorTests
         shell.RunExecAsync(Arg.Is<string>(x => x == "where" || x == "which"),
                 Arg.Is<IReadOnlyList<string>>(a => a[0].StartsWith("postfix", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
             .Returns(new ShellExecResult(0, "postfix", string.Empty));
+        shell.RunExecAsync("postconf", Arg.Is<IReadOnlyList<string>>(a => a.SequenceEqual(new[] { "mail_version" })), Arg.Any<CancellationToken>())
+            .Returns(new ShellExecResult(0, "mail_version = 3.8.1\n", string.Empty));
         shell.RunExecAsync(Arg.Is<string>(x => x == "where" || x == "which"),
                 Arg.Is<IReadOnlyList<string>>(a => a[0].StartsWith("dovecot", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
             .Returns<Task<ShellExecResult>>(_ => throw new IOException("probe failed"));
 
-        var result = await new MailCollector(NullLogger<MailCollector>.Instance, shell).CollectAsync(TestContext.Current.CancellationToken);
+        var result = await new MailCollector(
+            NullLogger<MailCollector>.Instance,
+            shell,
+            fileExists: path => path == "/etc/postfix/main.cf").CollectAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.IsInstalled);
         Assert.False(result.IsDovecotRunning);
+    }
+
+    [Fact]
+    public async Task MailCollector_MissingPostfixConfiguration_SkipsPostfixCommands()
+    {
+        var shell = Substitute.For<IShellRunner>();
+        shell.RunExecAsync(Arg.Is<string>(x => x == "where" || x == "which"),
+                Arg.Is<IReadOnlyList<string>>(a => a[0].StartsWith("postfix", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
+            .Returns(new ShellExecResult(0, "/usr/sbin/postfix\n", string.Empty));
+        var collector = new MailCollector(
+            NullLogger<MailCollector>.Instance,
+            shell,
+            fileExists: _ => false);
+
+        var result = await collector.CollectAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsInstalled);
+        await shell.DidNotReceive().RunExecAsync("postconf", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+        await shell.DidNotReceive().RunExecAsync("postqueue", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+        await shell.DidNotReceive().RunExecAsync("systemctl", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MailCollector_InvalidPostfixConfiguration_SkipsQueueAndServiceCommands()
+    {
+        var shell = Substitute.For<IShellRunner>();
+        shell.RunExecAsync(Arg.Is<string>(x => x == "where" || x == "which"),
+                Arg.Is<IReadOnlyList<string>>(a => a[0].StartsWith("postfix", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
+            .Returns(new ShellExecResult(0, "/usr/sbin/postfix\n", string.Empty));
+        shell.RunExecAsync("postconf", Arg.Is<IReadOnlyList<string>>(a => a.SequenceEqual(new[] { "mail_version" })), Arg.Any<CancellationToken>())
+            .Returns(new ShellExecResult(1, string.Empty, "fatal: invalid configuration"));
+        var collector = new MailCollector(
+            NullLogger<MailCollector>.Instance,
+            shell,
+            fileExists: path => path == "/etc/postfix/main.cf");
+
+        var result = await collector.CollectAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsInstalled);
+        await shell.DidNotReceive().RunExecAsync("postqueue", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+        await shell.DidNotReceive().RunExecAsync("systemctl", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+        await shell.Received(1).RunExecAsync("postconf", Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

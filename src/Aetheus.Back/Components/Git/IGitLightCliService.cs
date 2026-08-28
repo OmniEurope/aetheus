@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Git;
+
+public readonly record struct GitPatchResult(string Patch, bool IsTruncated);
 
 public interface IGitLightCliService
 {
@@ -18,6 +19,7 @@ public interface IGitLightCliService
     /// </list>
     /// </summary>
     Task<List<GitLightCommitDto>> GetCommitsAsync(string diskPath, string? refName, int skip, int take, string? search = null, string? afterSha = null, CancellationToken ct = default);
+    Task<Dictionary<string, string>> GetCommitMessagesAsync(string diskPath, IReadOnlyCollection<string> shas, CancellationToken ct = default);
     Task<int> GetCommitCountAsync(string diskPath, string? refName, string? search = null, CancellationToken ct = default);
     Task<List<GitLightBranchDto>> GetBranchesAsync(string diskPath, string defaultBranch, CancellationToken ct = default);
     Task<List<GitLightTagDto>> GetTagsAsync(string diskPath, CancellationToken ct = default);
@@ -49,8 +51,19 @@ public interface IGitLightCliService
         IReadOnlyList<(string RelativePath, string Content)> upserts,
         IReadOnlyList<string> deletions,
         string commitMessage, string authorName, string authorEmail, CancellationToken ct = default);
+    Task<(bool Success, string? CommitSha, string? Error)> ApplyPatchAsync(
+        string diskPath, string branch, string patch,
+        string commitMessage, string authorName, string authorEmail, CancellationToken ct = default);
     Task<PullRequestDiffDto> GetDiffAsync(string diskPath, string fromRef, string toRef, CancellationToken ct = default);
-    Task<string> GetCommitPatchAsync(string diskPath, string fromRef, string toRef, CancellationToken ct = default);
+    Task<GitPatchResult> GetCommitPatchAsync(
+        string diskPath,
+        string fromRef,
+        string toRef,
+        CancellationToken ct = default);
+    Task<GitPatchResult> GetRootCommitPatchAsync(
+        string diskPath,
+        string commitRef,
+        CancellationToken ct = default);
     Task<string> GetCommitGraphAsync(string diskPath, int maxCount, CancellationToken ct = default);
     Task RunGcAsync(string diskPath, CancellationToken ct = default);
     Task InstallPreReceiveHookAsync(string diskPath, CancellationToken ct = default);

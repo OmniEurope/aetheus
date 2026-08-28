@@ -11,6 +11,9 @@ public sealed record PipelineTemplateSummaryDto
     public string Category { get; init; } = string.Empty;
     public int Version { get; init; }
     public int OrganizationId { get; init; }
+    public DateTime UpdatedAt { get; init; }
+    public int PipelineCount { get; init; }
+    public DateTime? LatestRunAt { get; init; }
 }
 
 public sealed record PipelineTemplateDto

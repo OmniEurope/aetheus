@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -17,13 +14,9 @@ internal sealed class PipelineRunsLiveConnection(
     Func<Task> onReload,
     Func<Func<Task>, Task> invokeAsync) : IAsyncDisposable
 {
-    private readonly CancellationTokenSource _lifetimeCts = new();
-    private readonly SemaphoreSlim _reloadGate = new(1, 1);
-    private readonly object _reloadSync = new();
+    private readonly DebouncedAsyncAction _reload = new(onReload, logger, "[PipelineEdit]");
     private readonly HashSet<int> _joinedRunGroups = [];
     private HubConnection? _hub;
-    private CancellationTokenSource? _reloadCts;
-    private Task? _reloadTask;
     private bool _disposed;
 
     public async Task StartAsync()
@@ -82,61 +75,13 @@ internal sealed class PipelineRunsLiveConnection(
         }
     }
 
-    private Task ScheduleReloadAsync()
-    {
-        lock (_reloadSync)
-        {
-            if (_disposed) return Task.CompletedTask;
-            _reloadCts?.Cancel();
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
-            _reloadCts = cts;
-            _reloadTask = ReloadAfterDelayAsync(cts);
-        }
-        return Task.CompletedTask;
-    }
-
-    private async Task ReloadAfterDelayAsync(CancellationTokenSource cts)
-    {
-        var entered = false;
-        try
-        {
-            await Task.Delay(250, cts.Token);
-            await _reloadGate.WaitAsync(cts.Token);
-            entered = true;
-            if (!_disposed) await onReload();
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
-        catch (Exception ex) { logger.LogWarning(ex, "[PipelineEdit] Live reload failed"); }
-        finally
-        {
-            if (entered) _reloadGate.Release();
-            lock (_reloadSync)
-            {
-                if (ReferenceEquals(_reloadCts, cts))
-                {
-                    _reloadCts = null;
-                    _reloadTask = null;
-                }
-            }
-            cts.Dispose();
-        }
-    }
+    private Task ScheduleReloadAsync() => _reload.ScheduleAsync();
 
     public async ValueTask DisposeAsync()
     {
-        Task? pendingReload;
-        lock (_reloadSync)
-        {
-            if (_disposed) return;
-            _disposed = true;
-            _lifetimeCts.Cancel();
-            _reloadCts?.Cancel();
-            pendingReload = _reloadTask;
-        }
-        if (pendingReload is not null) await pendingReload;
-
-        await _reloadGate.WaitAsync();
-        _reloadGate.Release();
+        if (_disposed) return;
+        _disposed = true;
+        await _reload.DisposeAsync();
         if (_hub is not null)
         {
             foreach (var runId in _joinedRunGroups.ToList())
@@ -148,7 +93,5 @@ internal sealed class PipelineRunsLiveConnection(
             await _hub.DisposeAsync();
         }
 
-        _lifetimeCts.Dispose();
-        _reloadGate.Dispose();
     }
 }

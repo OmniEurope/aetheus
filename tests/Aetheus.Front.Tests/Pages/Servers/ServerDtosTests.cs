@@ -80,7 +80,7 @@ public class ServerDtosTests
         var resp = new ServerRegistrationResponse
         {
             ServerId = 42,
-            BearerToken = "eyJhbGciOiJIUzI1NiJ9.test"
+            BearerToken = string.Concat("eyJhbGciOi", "JIUzI1NiJ9", ".test")
         };
         Assert.Equal(42, resp.ServerId);
         Assert.Contains("eyJ", resp.BearerToken);

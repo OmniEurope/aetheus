@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Toto.Api/Toto.Api.csproj" />
+    <Project Path="src/Toto.Domain/Toto.Domain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Toto.Domain.Tests/Toto.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

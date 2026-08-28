@@ -151,6 +151,48 @@ public class ArtifactRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetExpiredAsync_PreservesArtifactOfCurrentlyDeployedRelease()
+    {
+        var artifact = MakeArtifact(
+            expiresAt: new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc),
+            name: "deployed-baseline");
+        await _repo.AddAsync(artifact, ct: TestContext.Current.CancellationToken);
+        var release = new Release
+        {
+            ProjectId = artifact.ProjectId!.Value,
+            Version = "1.0.0",
+            Status = ReleaseStatus.Deployed,
+            Artifacts = [artifact]
+        };
+        _db.Releases.Add(release);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetExpiredAsync(
+            new DateTime(2026, 1, 31, 0, 0, 0, DateTimeKind.Utc),
+            10,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(result, item => item.Id == artifact.Id);
+    }
+
+    [Fact]
+    public async Task GetExpiredAsync_PreservesArtifactWithActiveCheckpointLease()
+    {
+        var artifact = MakeArtifact(
+            expiresAt: new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc),
+            name: "checkpoint");
+        artifact.RetentionLeaseExpiresAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+        await _repo.AddAsync(artifact, ct: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetExpiredAsync(
+            new DateTime(2026, 1, 31, 0, 0, 0, DateTimeKind.Utc),
+            10,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(result, item => item.Id == artifact.Id);
+    }
+
+    [Fact]
     public async Task GetExpiredAsync_RespectsBatchSize()
     {
         for (var i = 0; i < 5; i++)
@@ -324,6 +366,49 @@ public class ArtifactRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task FindReleaseArtifactAsync_CurrentDeployed_ReturnsExactActiveReleaseAtSameCommit()
+    {
+        const string sameCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        _db.Projects.Add(new Project { Id = 10, Name = "Current deployment project" });
+        _db.Pipelines.Add(new Pipeline { Id = 100, ProjectId = 10, Name = "toto-candidate" });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 100, PipelineId = 100, Status = PipelineStatus.Success, CommitHash = sameCommit },
+            new PipelineRun { Id = 101, PipelineId = 100, Status = PipelineStatus.Success, CommitHash = sameCommit });
+        var supersededArtifact = MakeArtifact(
+            pipelineId: 100, projectId: 10, runId: 100, name: "superseded-package");
+        var deployedArtifact = MakeArtifact(
+            pipelineId: 100, projectId: 10, runId: 101, name: "deployed-package");
+        await _repo.AddAsync(supersededArtifact, TestContext.Current.CancellationToken);
+        await _repo.AddAsync(deployedArtifact, TestContext.Current.CancellationToken);
+        var superseded = new Release
+        {
+            Id = 100,
+            ProjectId = 10,
+            Version = "candidate-a",
+            Status = ReleaseStatus.Superseded,
+            DetectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+        };
+        superseded.Artifacts.Add(supersededArtifact);
+        var deployed = new Release
+        {
+            Id = 101,
+            ProjectId = 10,
+            Version = "candidate-b",
+            Status = ReleaseStatus.Deployed,
+            DetectedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)
+        };
+        deployed.Artifacts.Add(deployedArtifact);
+        _db.Releases.AddRange(superseded, deployed);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var resolved = await _repo.FindReleaseArtifactAsync(
+            10, "current-deployed", ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(resolved);
+        Assert.Equal(deployedArtifact.Id, resolved.Id);
+    }
+
+    [Fact]
     public async Task FindPreviousPublishedReleaseArtifactAsync_SkipsNewestArtifactFromCurrentCommit()
     {
         const string previousCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -361,7 +446,7 @@ public class ArtifactRepositoryTests : IDisposable
         await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var resolved = await _repo.FindPreviousPublishedReleaseArtifactAsync(
-            12, currentCommit, TestContext.Current.CancellationToken);
+            12, currentCommit, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(resolved);
         Assert.Equal(previousArtifact.Id, resolved.Id);
@@ -403,10 +488,179 @@ public class ArtifactRepositoryTests : IDisposable
         await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var resolved = await _repo.FindPreviousDeployedReleaseArtifactAsync(
-            13, currentCommit, TestContext.Current.CancellationToken);
+            13, currentCommit, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(resolved);
         Assert.Equal(deployedArtifact.Id, resolved.Id);
+    }
+
+    [Fact]
+    public async Task FindPreviousDeployedReleaseArtifactAsync_SelectsSupersededDeploymentBeforeCurrentCommit()
+    {
+        const string previousCommit = "1111111111111111111111111111111111111111";
+        const string currentCommit = "2222222222222222222222222222222222222222";
+        _db.Projects.Add(new Project { Id = 14, Name = "Deployment lineage project" });
+        _db.Pipelines.Add(new Pipeline { Id = 140, ProjectId = 14, Name = "aetheus-ci" });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 140, PipelineId = 140, Status = PipelineStatus.Success, CommitHash = previousCommit },
+            new PipelineRun { Id = 141, PipelineId = 140, Status = PipelineStatus.Success, CommitHash = currentCommit });
+        var previousArtifact = MakeArtifact(pipelineId: 140, projectId: 14, runId: 140, name: "previous-deployed-package");
+        var currentArtifact = MakeArtifact(pipelineId: 140, projectId: 14, runId: 141, name: "current-deployed-package");
+        await _repo.AddAsync(previousArtifact, TestContext.Current.CancellationToken);
+        await _repo.AddAsync(currentArtifact, TestContext.Current.CancellationToken);
+        var previousRelease = new Release
+        {
+            Id = 140,
+            ProjectId = 14,
+            Version = "1.0.0",
+            Status = ReleaseStatus.Superseded,
+            PublishedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)
+        };
+        previousRelease.Artifacts.Add(previousArtifact);
+        var currentRelease = new Release
+        {
+            Id = 141,
+            ProjectId = 14,
+            Version = "1.1.0",
+            Status = ReleaseStatus.Deployed,
+            PublishedAt = new DateTime(2026, 1, 4, 0, 0, 0, DateTimeKind.Utc)
+        };
+        currentRelease.Artifacts.Add(currentArtifact);
+        _db.Releases.AddRange(previousRelease, currentRelease);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var resolved = await _repo.FindPreviousDeployedReleaseArtifactAsync(
+            14, currentCommit, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(resolved);
+        Assert.Equal(previousArtifact.Id, resolved.Id);
+    }
+
+    [Fact]
+    public async Task FindPreviousDeployedReleaseArtifactAsync_WithName_IgnoresNewerLinkedReport()
+    {
+        const string previousCommit = "3333333333333333333333333333333333333333";
+        const string currentCommit = "4444444444444444444444444444444444444444";
+        _db.Projects.Add(new Project { Id = 15, Name = "Named rollback artifact project" });
+        _db.Pipelines.Add(new Pipeline { Id = 150, ProjectId = 15, Name = "aetheus-ci" });
+        _db.PipelineRuns.Add(new PipelineRun
+        {
+            Id = 150,
+            PipelineId = 150,
+            Status = PipelineStatus.Success,
+            CommitHash = previousCommit
+        });
+        var package = MakeArtifact(
+            pipelineId: 150, projectId: 15, runId: 150,
+            createdAt: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            name: "BuildArtifacts-artifacts");
+        var report = MakeArtifact(
+            pipelineId: 150, projectId: 15, runId: 150,
+            createdAt: new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+            name: "analysis-dotnet-architecture-findings");
+        await _repo.AddAsync(package, TestContext.Current.CancellationToken);
+        await _repo.AddAsync(report, TestContext.Current.CancellationToken);
+        var release = new Release
+        {
+            Id = 150,
+            ProjectId = 15,
+            Version = "1.0.0",
+            Status = ReleaseStatus.Deployed,
+            PublishedAt = new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc)
+        };
+        release.Artifacts.AddRange([package, report]);
+        _db.Releases.Add(release);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var resolved = await _repo.FindPreviousDeployedReleaseArtifactAsync(
+            15, currentCommit, "BuildArtifacts-artifacts", TestContext.Current.CancellationToken);
+
+        Assert.NotNull(resolved);
+        Assert.Equal(package.Id, resolved.Id);
+    }
+
+    [Fact]
+    public async Task FindPreviousDeployedReleaseArtifactAsync_DoesNotFallBackToOlderReleaseForNamedArtifact()
+    {
+        const string olderCommit = "5555555555555555555555555555555555555555";
+        const string previousCommit = "6666666666666666666666666666666666666666";
+        const string currentCommit = "7777777777777777777777777777777777777777";
+        _db.Projects.Add(new Project { Id = 16, Name = "Exact predecessor project" });
+        _db.Pipelines.Add(new Pipeline { Id = 160, ProjectId = 16, Name = "aetheus-ci" });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 160, PipelineId = 160, Status = PipelineStatus.Success, CommitHash = olderCommit },
+            new PipelineRun { Id = 161, PipelineId = 160, Status = PipelineStatus.Success, CommitHash = previousCommit });
+        var olderRuntime = MakeArtifact(pipelineId: 160, projectId: 16, runId: 160, name: "QaRuntime-artifacts");
+        var previousPayload = MakeArtifact(pipelineId: 160, projectId: 16, runId: 161, name: "ApplicationPayload-artifacts");
+        await _repo.AddAsync(olderRuntime, TestContext.Current.CancellationToken);
+        await _repo.AddAsync(previousPayload, TestContext.Current.CancellationToken);
+        var olderRelease = new Release
+        {
+            Id = 160,
+            ProjectId = 16,
+            Version = "c-older",
+            Status = ReleaseStatus.Superseded,
+            PublishedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)
+        };
+        olderRelease.Artifacts.Add(olderRuntime);
+        var previousRelease = new Release
+        {
+            Id = 161,
+            ProjectId = 16,
+            Version = "c-previous",
+            Status = ReleaseStatus.Deployed,
+            PublishedAt = new DateTime(2026, 1, 4, 0, 0, 0, DateTimeKind.Utc)
+        };
+        previousRelease.Artifacts.Add(previousPayload);
+        _db.Releases.AddRange(olderRelease, previousRelease);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var resolved = await _repo.FindPreviousDeployedReleaseArtifactAsync(
+            16, currentCommit, "QaRuntime-artifacts", TestContext.Current.CancellationToken);
+
+        Assert.Null(resolved);
+    }
+
+    [Theory]
+    [InlineData("aetheus-release-fast", "QaRuntime-artifacts", false)]
+    [InlineData("aetheus-release-fast", "ApplicationPayload-artifacts", true)]
+    [InlineData("aetheus-candidate", "QaRuntime-artifacts", true)]
+    public async Task RequiresPreviousDeployedArtifactAsync_AppliesSelectedReleaseContract(
+        string pipelineName,
+        string artifactName,
+        bool expected)
+    {
+        const string previousCommit = "8888888888888888888888888888888888888888";
+        const string currentCommit = "9999999999999999999999999999999999999999";
+        _db.Projects.Add(new Project { Id = 17, Name = "Contract-specific artifact project" });
+        _db.Pipelines.Add(new Pipeline { Id = 170, ProjectId = 17, Name = pipelineName });
+        _db.PipelineRuns.Add(new PipelineRun
+        {
+            Id = 170,
+            PipelineId = 170,
+            Status = PipelineStatus.Success,
+            CommitHash = previousCommit
+        });
+        var payload = MakeArtifact(
+            pipelineId: 170, projectId: 17, runId: 170, name: "ApplicationPayload-artifacts");
+        await _repo.AddAsync(payload, TestContext.Current.CancellationToken);
+        var release = new Release
+        {
+            Id = 170,
+            ProjectId = 17,
+            PipelineRunId = 170,
+            Version = "c-previous",
+            Status = ReleaseStatus.Deployed,
+            PublishedAt = new DateTime(2026, 1, 4, 0, 0, 0, DateTimeKind.Utc)
+        };
+        release.Artifacts.Add(payload);
+        _db.Releases.Add(release);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var required = await _repo.RequiresPreviousDeployedArtifactAsync(
+            17, currentCommit, artifactName, TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, required);
     }
 
     [Fact]
@@ -451,6 +705,61 @@ public class ArtifactRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(await _repo.HasPublishedRollbackContractReleaseAsync(10, ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task HasDeployedRollbackContractReleaseAsync_RecognizesCanonicalCandidateWithRetainedArtifact()
+    {
+        _db.Projects.Add(new Project { Id = 12, Name = "Candidate project" });
+        _db.Pipelines.Add(new Pipeline { Id = 12, ProjectId = 12, Name = "aetheus-candidate" });
+        _db.PipelineRuns.Add(new PipelineRun { Id = 12, PipelineId = 12, Status = PipelineStatus.Success });
+        var release = new Release
+        {
+            Id = 120,
+            ProjectId = 12,
+            PipelineRunId = 12,
+            Version = "c-01234567",
+            Status = ReleaseStatus.Deployed
+        };
+        _db.Releases.Add(release);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(await _repo.HasDeployedRollbackContractReleaseAsync(
+            12, ct: TestContext.Current.CancellationToken));
+
+        var artifact = MakeArtifact(projectId: 12, runId: 12, name: "ApplicationPayload-artifacts");
+        await _repo.AddAsync(artifact, ct: TestContext.Current.CancellationToken);
+        release.Artifacts.Add(artifact);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(await _repo.HasDeployedRollbackContractReleaseAsync(
+            12, ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task HasDeployedRollbackContractReleaseAsync_RecognizesFastReleaseWithRetainedArtifact()
+    {
+        _db.Projects.Add(new Project { Id = 13, Name = "Fast release project" });
+        _db.Pipelines.Add(new Pipeline { Id = 13, ProjectId = 13, Name = "aetheus-release-fast" });
+        _db.PipelineRuns.Add(new PipelineRun { Id = 13, PipelineId = 13, Status = PipelineStatus.Success });
+        var release = new Release
+        {
+            Id = 130,
+            ProjectId = 13,
+            PipelineRunId = 13,
+            Version = "c-01234567",
+            Status = ReleaseStatus.Deployed
+        };
+        _db.Releases.Add(release);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var artifact = MakeArtifact(projectId: 13, runId: 13, name: "ApplicationPayload-artifacts");
+        await _repo.AddAsync(artifact, ct: TestContext.Current.CancellationToken);
+        release.Artifacts.Add(artifact);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(await _repo.HasDeployedRollbackContractReleaseAsync(
+            13, ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]

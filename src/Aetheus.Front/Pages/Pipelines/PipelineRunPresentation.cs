@@ -1,23 +1,32 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
 internal static class PipelineRunPresentation
 {
-    public static string EditBackHref(int? projectId, int? serverId) => projectId is { } project
-        ? $"/projects/{project}/pipelines"
-        : serverId is { } server ? $"/servers/{server}/pipelines" : "/pipelines";
+    public static string EditBackHref(int? projectId, int? serverId) => serverId is { } server
+        ? $"/servers/{server}/pipelines"
+        : projectId is { } project ? $"/projects/{project}/pipelines" : "/pipelines";
 
-    public static string Href(int runId, int? projectId, int? serverId) => projectId is { } project
-        ? $"/pipelines/runs/{runId}?projectId={project}"
-        : serverId is { } server ? $"/pipelines/runs/{runId}?serverId={server}" : $"/pipelines/runs/{runId}";
+    public static string Href(int runId, int? projectId, int? serverId) => serverId is { } server
+        ? $"/pipelines/runs/{runId}?serverId={server}"
+        : projectId is { } project ? $"/pipelines/runs/{runId}?projectId={project}" : $"/pipelines/runs/{runId}";
 
     public static string? CurrentStep(PipelineRunDto run) => PipelineHelper.GetCurrentStepLabel(run);
     public static bool IsFailed(PipelineRunDto run) => run.Status == PipelineStatus.Failed;
+
+    /// <summary>A run can be cancelled while it is still going anywhere. Once the cancellation has been
+    /// durably accepted the run keeps its mandatory teardown, so asking again would change nothing.</summary>
+    public static bool CanCancel(PipelineRunDto run) =>
+        !run.CancellationRequested
+        && run.Status is PipelineStatus.Pending or PipelineStatus.Running or PipelineStatus.WaitingForApproval;
+
+    /// <summary>Git's own abbreviation length: short enough to read in a column, long enough to stay
+    /// unambiguous. The full hash stays available as the cell's tooltip.</summary>
+    public static string? ShortCommit(string? commitHash) =>
+        string.IsNullOrWhiteSpace(commitHash)
+            ? null
+            : commitHash.Length <= 8 ? commitHash : commitHash[..8];
     public static bool IsConfigFailure(PipelineRunDto run) =>
         run.Status == PipelineStatus.Failed &&
         (run.Steps.Count == 0 || run.Steps.Any(step =>
@@ -27,15 +36,64 @@ internal static class PipelineRunPresentation
     public static bool IsWindows(string? os) => os?.Contains("Windows", StringComparison.OrdinalIgnoreCase) == true;
     public static BadgeStyle Badge(PipelineStatus status) => PipelineHelper.GetRunBadge(status);
 
-    public static List<string> TabSlugs(PipelineRunDto? run, bool hasYamlTab, bool hasLintTab)
+    public static string? GitBranch(PipelineRunDto? run) =>
+        run?.ResolvedVariables.GetValueOrDefault("BUILD_SOURCEBRANCH")
+        ?? run?.ResolvedVariables.GetValueOrDefault("DEFAULT_BRANCH");
+
+    public static IEnumerable<PipelineStepRunDto> AllSteps(
+        IEnumerable<StageViewModel> stages,
+        IReadOnlyDictionary<int, PipelineRunDto> children) =>
+        stages.SelectMany(stage => stage.Steps)
+            .Concat(children.Values.SelectMany(child => child.Steps));
+
+    public static IReadOnlyCollection<int> LiveChildRunIds(
+        IReadOnlyDictionary<int, PipelineRunDto> children) =>
+        children.Values
+            .Where(child => !PipelineRunFormatting.IsTerminal(child.Status))
+            .Select(child => child.Id)
+            .ToList();
+
+    public static IReadOnlyList<PipelineStepRunDto> LintSteps(
+        PipelineRunDto? run,
+        IReadOnlyDictionary<int, PipelineRunDto> children) =>
+        (run?.Steps ?? Enumerable.Empty<PipelineStepRunDto>())
+            .Concat(children.Values.SelectMany(child => child.Steps))
+            .Where(step => !step.IsSystem
+                && (step.StepName.Contains("lint", StringComparison.OrdinalIgnoreCase)
+                    || step.StageName.Contains("lint", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+    public static bool? LintPassed(
+        PipelineRunDto? run,
+        IReadOnlyList<PipelineStepRunDto> lintSteps) =>
+        run?.LintSummary is { } summary
+            ? summary.Passed
+            : lintSteps.Count > 0
+                ? lintSteps.All(step => step.Status != TaskExecutionStatus.Failed)
+                : null;
+
+    public static List<string> TabSlugs(PipelineRunDto? run, bool hasGateResult, bool hasYamlTab, bool hasLintTab)
     {
-        var slugs = new List<string> { "overview", "logs" };
+        var slugs = new List<string> { "overview" };
+        slugs.Add("logs");
+        if (hasGateResult) slugs.Add("gate");
         if (hasYamlTab) slugs.Add("yaml");
+        if (run?.Artifacts.Count > 0) slugs.Add("artifacts");
         if (PipelineRunMetrics.HasCoverage(run)) slugs.Add("coverage");
         if (run?.TestResultSummary is not null) slugs.Add("tests");
         if (hasLintTab) slugs.Add("lint");
         if (PipelineRunMetrics.HasComplexity(run)) slugs.Add("quality");
         return slugs;
+    }
+
+    public static (int Completed, int Total) StepProgress(PipelineRunDto run)
+    {
+        var steps = run.Steps.Where(step => !step.IsSystem).ToList();
+        var completed = steps.Count(step => step.Status is TaskExecutionStatus.Success
+            or TaskExecutionStatus.Failed or TaskExecutionStatus.Timeout or TaskExecutionStatus.Cancelled);
+        return PipelineRunFormatting.IsTerminal(run.Status)
+            ? (completed, completed)
+            : (completed, steps.Count);
     }
 
     public static string NextConnectorStatus(IReadOnlyList<StageViewModel> stages, int stageIndex)
@@ -54,6 +112,7 @@ internal static class PipelineRunPresentation
     {
         if (completed is null) return "\u2014";
         var duration = completed.Value - started;
+        if (duration < TimeSpan.Zero) duration = TimeSpan.Zero;
         return duration.TotalMinutes >= 1
             ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s"
             : $"{duration.Seconds}s";

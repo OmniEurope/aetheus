@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 
 /// <summary>
-/// PLAN-006 4.1: reports pending OS updates (total + security) at heartbeat by running
+/// ADR-024 4.1: reports pending OS updates (total + security) at heartbeat by running
 /// <c>apt-get -s upgrade</c> (a non-mutating simulation - no sudo, no changes). No-fake contract
 /// (mirrors <c>RkhunterCollector</c>'s installed-vs-failed decoupling):
 /// <list type="bullet">

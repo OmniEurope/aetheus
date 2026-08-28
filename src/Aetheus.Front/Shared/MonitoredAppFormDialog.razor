@@ -1,17 +1,22 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@* PLAN-001: create/edit a monitored app. Closes with `true` on success so the caller reloads. *@
+@inherits EntityEditDialogBase
+@* ADR-021: create/edit a monitored app. Closes with `true` on success so the caller reloads. *@
 <RadzenTemplateForm TItem="UpdateMonitoredAppRequest" Data="@_model" Submit="@SubmitAsync">
     <LocalizedDataAnnotationsValidator />
     <RadzenRow Gap="1rem">
         <RadzenColumn Size="12" SizeMD="6">
             <RadzenFormField Text="@L["MonitoredAppName"]" class="rz-w-100">
-                <RadzenTextBox @bind-Value="_model.Name" />
+                <RadzenTextBox @bind-Value="_model.Name"
+                    @oninput="@(e => _model.Name = e.Value?.ToString() ?? string.Empty)"
+                    Name="Name" />
             </RadzenFormField>
             <ValidationMessage For="@(() => _model.Name)" />
         </RadzenColumn>
         <RadzenColumn Size="12" SizeMD="6">
             <RadzenFormField Text="@L["ProbeUrl"]" class="rz-w-100">
-                <RadzenTextBox @bind-Value="_model.ProbeUrl" Placeholder="https://app.example.com/health" />
+                <RadzenTextBox @bind-Value="_model.ProbeUrl"
+                    @oninput="@(e => _model.ProbeUrl = e.Value?.ToString() ?? string.Empty)"
+                    Name="ProbeUrl" Placeholder="https://app.example.com/health" />
             </RadzenFormField>
             <ValidationMessage For="@(() => _model.ProbeUrl)" />
         </RadzenColumn>

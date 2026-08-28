@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines.Events;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -16,7 +15,6 @@ namespace Aetheus.Back.Components.Pipelines;
 public sealed class PipelineRunCompletedTriggerHandler(
     IPipelineRepository repo,
     IPipelineRunService runService,
-    TimeProvider timeProvider,
     ILogger<PipelineRunCompletedTriggerHandler> logger)
     : IDomainEventHandler<PipelineRunCompletedEvent>
 {
@@ -25,25 +23,37 @@ public sealed class PipelineRunCompletedTriggerHandler(
         ArgumentNullException.ThrowIfNull(domainEvent);
 
         var waitingSteps = await repo.FindStepRunsByTriggeredRunIdAsync(domainEvent.PipelineRunId, ct).ConfigureAwait(false);
-        var stepStatus = domainEvent.Status == PipelineStatus.Success
-            ? TaskExecutionStatus.Success
-            : TaskExecutionStatus.Failed;
+        if (!waitingSteps.Any(step => step.Status == TaskExecutionStatus.Running))
+            return;
+        var childOutputs = domainEvent.Status == PipelineStatus.Success
+            ? await CollectChildOutputsAsync(domainEvent.PipelineRunId, ct).ConfigureAwait(false)
+            : [];
 
         foreach (var step in waitingSteps)
         {
             if (step.Status != TaskExecutionStatus.Running) continue; // already resolved / not actually waiting
 
-            step.Status = stepStatus;
-            step.ExitCode = domainEvent.Status == PipelineStatus.Success ? 0 : 1;
-            step.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
-            await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            logger.LogInformation(
-                "Trigger step {StepId} (run {ParentRun}) resolved {Status} from child run {ChildRun}",
-                step.Id, step.PipelineRunId, stepStatus, domainEvent.PipelineRunId);
-
-            // Re-enter the normal advancement path so the parent stage/run can move on.
-            await runService.AdvanceStageAsync(step.PipelineRunId, step.StageName, ct).ConfigureAwait(false);
+            if (!await runService.ResolveCompletedTriggerStepAsync(
+                    step, domainEvent.Status, childOutputs, ct).ConfigureAwait(false))
+            {
+                logger.LogDebug(
+                    "Trigger step {StepId} was already resolved before child run {ChildRun} completed",
+                    step.Id, domainEvent.PipelineRunId);
+            }
         }
+    }
+
+    private async Task<Dictionary<string, string>> CollectChildOutputsAsync(
+        int childRunId,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var outputs = await repo.GetSuccessfulStepOutputsAsync(childRunId, ct).ConfigureAwait(false) ?? [];
+        foreach (var step in outputs)
+        {
+            foreach (var (name, value) in PipelineRunHelpers.DeserializeResolvedVariables(step.OutputVariablesJson))
+                result[name] = value;
+        }
+        return result;
     }
 }

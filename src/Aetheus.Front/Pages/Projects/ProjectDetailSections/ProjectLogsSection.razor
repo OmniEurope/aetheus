@@ -1,7 +1,8 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectPagedSectionBase<TaskLogDto>
 @if (_result is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {

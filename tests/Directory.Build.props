@@ -6,4 +6,18 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <!--
+    A test that only makes sense on one OS declares [Trait("Platform", "windows"|"linux")]. Excluding
+    the foreign platform by default keeps it out of the run entirely, so every suite reports zero
+    skipped on both this host and the Linux CI runner, and a plain `dotnet test` behaves the same as
+    the launchers. A test without the trait carries no Platform property, and "!=" matches it.
+    An explicit filter argument on the command line overrides this, the intended escape hatch.
+  -->
+  <PropertyGroup Condition="'$(VSTestTestCaseFilter)' == '' and '$(OS)' == 'Windows_NT'">
+    <VSTestTestCaseFilter>Platform!=linux</VSTestTestCaseFilter>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(VSTestTestCaseFilter)' == '' and '$(OS)' != 'Windows_NT'">
+    <VSTestTestCaseFilter>Platform!=windows</VSTestTestCaseFilter>
+  </PropertyGroup>
+
 </Project>

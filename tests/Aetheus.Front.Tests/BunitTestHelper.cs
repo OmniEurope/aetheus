@@ -26,7 +26,17 @@ internal static class BunitTestHelper
     {
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
+        // Blazor's Virtualize sizes its window from a real scroll viewport measured through JS. bUnit
+        // has neither, so a virtualised grid renders zero rows and every assertion on a cell fails for
+        // a reason unrelated to the component. Rendering the full set here keeps those tests about what
+        // the grid shows; that virtualization is actually declared on every grid is enforced separately
+        // by GridCapabilityAuditTests, and its behaviour is verified in the browser.
+        AetheusGrid.Virtualization = false;
+
         var handler = new TestHandler();
+        handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
+        handler.SetJsonResponse("api/external-repos/enabled", false);
+        handler.SetResponse(HttpMethod.Get, "health/live", HttpStatusCode.ServiceUnavailable);
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
         var apiClient = new ApiClient(http);
 
@@ -36,18 +46,21 @@ internal static class BunitTestHelper
         ctx.Services.AddSingleton<TooltipService>();
         ctx.Services.AddSingleton<ContextMenuService>();
 
-        var authProvider = new AuthStateProvider(Substitute.For<IJSRuntime>(), Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthStateProvider>.Instance);
+        var authJs = Substitute.For<IJSRuntime>();
+        var testToken = authenticated ? CreateTestToken(isAdmin) : null;
+        authJs.InvokeAsync<string?>(
+                "localStorage.getItem",
+                Arg.Is<object?[]>(args => args.Length == 1 && Equals(args[0], StorageKeys.AuthToken)))
+            .Returns(ValueTask.FromResult(testToken));
+        authJs.InvokeAsync<string?>(
+                "localStorage.getItem",
+                Arg.Is<object?[]>(args => args.Length == 1 && Equals(args[0], StorageKeys.RefreshToken)))
+            .Returns(ValueTask.FromResult<string?>(null));
+        var authProvider = new AuthStateProvider(
+            authJs,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthStateProvider>.Instance);
         if (authenticated)
-        {
-            var tokenProp = typeof(AuthStateProvider).GetProperty("Token")!;
-            tokenProp.SetValue(authProvider, "test-token");
-
-            if (isAdmin)
-            {
-                var rolesProp = typeof(AuthStateProvider).GetProperty("Roles")!;
-                rolesProp.SetValue(authProvider, new List<string> { "Admin" });
-            }
-        }
+            authProvider.LoginAsync(testToken!).GetAwaiter().GetResult();
         ctx.Services.AddSingleton(authProvider);
 
         var locMock = Substitute.For<IStringLocalizer<Aetheus.Front.Resources.AppStrings>>();
@@ -71,6 +84,9 @@ internal static class BunitTestHelper
                 sp.GetRequiredService<AuthStateProvider>()));
         ctx.Services.AddScoped<BreadcrumbService>();
         ctx.Services.AddScoped<ProjectNavContextService>();
+        ctx.Services.AddScoped(sp => new ClientErrorReporter(
+            http,
+            sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()));
         ctx.Services.AddScoped(sp => new ProjectDetailLoader(
             sp.GetRequiredService<ApiClient>(),
             sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
@@ -119,8 +135,21 @@ internal static class BunitTestHelper
             sp.GetRequiredService<ApiClient>(),
             sp.GetRequiredService<PermissionService>(),
             TimeProvider.System));
+        ctx.Services.AddScoped<RealtimeSessionLifecycle>();
 
         return handler;
+    }
+
+    private static string CreateTestToken(bool isAdmin)
+    {
+        var header = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"alg\":\"HS256\"}"))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        object claims = isAdmin
+            ? new { sub = "admin", role = "Admin", unique_name = "admin", exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() }
+            : new { sub = "user", unique_name = "user", exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() };
+        var payload = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(claims))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return $"{header}.{payload}.sig";
     }
 
     public static void UseImmediateDialogs(BunitContext ctx) =>
@@ -159,6 +188,31 @@ internal static class BunitTestHelper
         {
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
                 => Task.FromException<HttpResponseMessage>(new HttpRequestException("Test: hub not available"));
+        }
+    }
+
+    internal sealed class BlockingHubConnectionFactory(IConfiguration config, AuthStateProvider auth)
+        : HubConnectionFactory(config, auth, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthDelegatingHandler>.Instance)
+    {
+        public override HubConnection Create(string hubPath, IRetryPolicy? retryPolicy = null)
+        {
+            return new HubConnectionBuilder()
+                .WithUrl($"http://127.0.0.1:1/hubs/{hubPath}", options =>
+                {
+                    options.HttpMessageHandlerFactory = _ => new BlockingHandler();
+                })
+                .Build();
+        }
+
+        private sealed class BlockingHandler : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken ct)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                throw new InvalidOperationException("Unreachable");
+            }
         }
     }
 
@@ -212,6 +266,9 @@ internal static class BunitTestHelper
 
         public void SetRawResponse(HttpMethod method, string urlContains, string body, string contentType)
         {
+            _asyncMethodResponses.RemoveAll(response =>
+                string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
             _methodResponses.RemoveAll(response =>
                 string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
@@ -222,12 +279,18 @@ internal static class BunitTestHelper
         }
 
         public void SetJsonResponse<T>(HttpMethod method, string urlContains, T data)
+            => SetJsonResponse(method, urlContains, data, HttpStatusCode.OK);
+
+        public void SetJsonResponse<T>(HttpMethod method, string urlContains, T data, HttpStatusCode status)
         {
             var json = JsonSerializer.Serialize(data, JsonOpts);
+            _asyncMethodResponses.RemoveAll(response =>
+                string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
             _methodResponses.RemoveAll(response =>
                 string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
-            _methodResponses.Add((method.Method, urlContains, () => new HttpResponseMessage(HttpStatusCode.OK)
+            _methodResponses.Add((method.Method, urlContains, () => new HttpResponseMessage(status)
             {
                 Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
             }));
@@ -247,6 +310,9 @@ internal static class BunitTestHelper
 
         public void SetResponse(HttpMethod method, string urlContains, HttpStatusCode status)
         {
+            _asyncMethodResponses.RemoveAll(response =>
+                string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
             _methodResponses.RemoveAll(response =>
                 string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
@@ -259,6 +325,9 @@ internal static class BunitTestHelper
             string urlContains,
             Func<CancellationToken, Task<T>> responseFactory)
         {
+            _methodResponses.RemoveAll(response =>
+                string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
             _asyncMethodResponses.RemoveAll(response =>
                 string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));

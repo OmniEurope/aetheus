@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Collectors;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Shared.DTOs;
-using Microsoft.Extensions.Options;
+using Aetheus.Agent.Core.Operations;
 
 namespace Aetheus.Agent.Core.Services;
 
@@ -73,8 +71,13 @@ public sealed class HeartbeatService(
         SlowInventoryTtl, ct => DockerProbe.IsAvailableAsync(shell, ct), timeProvider, static () => false, logger, "docker availability");
     private readonly CachedCollector<bool> _pipelineRunnerAvailableCache = new(
         SlowInventoryTtl, ct => PipelineRunnerProbe.IsAvailableAsync(shell, ct), timeProvider, static () => false, logger, "pipeline runner");
+    private readonly CachedCollector<bool> _deploymentAvailableCache = new(
+        SlowInventoryTtl, ct => DeploymentCapabilityProbe.IsAvailableAsync(shell, ct), timeProvider, static () => false, logger, "deployment capability");
     private readonly CachedCollector<List<string>> _capDiagnosticsCache = new(
         SlowInventoryTtl, ct => CapabilityDiagnosticsProbe.CollectAsync(shell, ct), timeProvider, static () => [], logger, "capability diagnostics");
+    private readonly CachedCollector<List<string>> _scannerDiagnosticsCache = new(
+        SlowInventoryTtl, ct => ScannerCapabilityProbe.CollectAsync(shell, options.Value.WorkDirectory, timeProvider, ct),
+        timeProvider, static () => [], logger, "scanner capability diagnostics");
     private readonly CachedCollector<StorageDiagnosticsDto> _storageDiagnosticsCache = new(
         SlowInventoryTtl, dockerStorageMaintenance.CollectDiagnosticsAsync, timeProvider,
         static () => new StorageDiagnosticsDto(), logger, "storage diagnostics");
@@ -84,7 +87,7 @@ public sealed class HeartbeatService(
         while (!enrollment.IsEnrolled && !stoppingToken.IsCancellationRequested)
             await Task.Delay(AgentRuntimeDefaults.StartupRetryDelay, timeProvider, stoppingToken).ConfigureAwait(false);
 
-        runtimeHealth.MarkHeartbeatProgress();
+        runtimeHealth.BeginHeartbeatGracePeriod();
         logger.LogInformation("Heartbeat service started (interval: {Interval}s)", _options.HeartbeatIntervalSeconds);
 
         using var timer = new PeriodicTimer(
@@ -92,21 +95,30 @@ public sealed class HeartbeatService(
             timeProvider);
         _loopStarted.TrySetResult();
 
+        if (await TryCollectAndSendHeartbeatAsync(stoppingToken).ConfigureAwait(false))
+            logger.LogInformation("Initial heartbeat sent; agent contract is ready");
+        if (stoppingToken.IsCancellationRequested)
+            return;
+
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            await TryCollectAndSendHeartbeatAsync(stoppingToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> TryCollectAndSendHeartbeatAsync(CancellationToken stoppingToken)
+    {
+        try
         {
-            runtimeHealth.MarkHeartbeatProgress();
-            try
-            {
-                await CollectAndSendHeartbeatAsync(stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Heartbeat failed, will retry next interval");
-            }
+            await CollectAndSendHeartbeatAsync(stoppingToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Heartbeat failed, will retry next interval");
+            return false;
         }
     }
 
@@ -131,12 +143,15 @@ public sealed class HeartbeatService(
         var sudoersTask = _sudoersCache.GetAsync(collectorToken);
         var dockerAvailableTask = _dockerAvailableCache.GetAsync(collectorToken);
         var pipelineRunnerAvailableTask = _pipelineRunnerAvailableCache.GetAsync(collectorToken);
+        var deploymentAvailableTask = _deploymentAvailableCache.GetAsync(collectorToken);
         var capDiagnosticsTask = _capDiagnosticsCache.GetAsync(collectorToken);
+        var scannerDiagnosticsTask = _scannerDiagnosticsCache.GetAsync(collectorToken);
         var storageDiagnosticsTask = _storageDiagnosticsCache.GetAsync(collectorToken);
         var allCollectors = Task.WhenAll(
             servicesTask, dockerTask, apacheTask, certbotTask, mailTask, teamspeakTask,
             portsentryTask, rkhunterTask, securityUpdatesTask, firewallTask, sudoersTask,
-            dockerAvailableTask, pipelineRunnerAvailableTask, capDiagnosticsTask, storageDiagnosticsTask);
+            dockerAvailableTask, pipelineRunnerAvailableTask, capDiagnosticsTask, scannerDiagnosticsTask, storageDiagnosticsTask);
+        allCollectors = Task.WhenAll(allCollectors, deploymentAvailableTask);
 
         var timeoutTask = Task.Delay(_collectionTimeout, timeProvider, ct);
         var collectorsCompleted = await Task.WhenAny(allCollectors, timeoutTask).ConfigureAwait(false) == allCollectors;
@@ -170,15 +185,35 @@ public sealed class HeartbeatService(
             ];
         }
 
+        var dockerAvailable = CompletedValueOr(
+            dockerAvailableTask, _dockerAvailableCache.LastValueOr(false));
+        bool? pipelineRunnerAvailable = !_pipelineRunnerAvailableCache.IsCollectionInFlight
+            && pipelineRunnerAvailableTask.Status == TaskStatus.RanToCompletion
+                ? pipelineRunnerAvailableTask.Result
+                : null;
+        var sudoersHashes = CompletedValueOr(
+            sudoersTask, _sudoersCache.LastValueOr(new Dictionary<string, string>()));
+        var deploymentAvailable = CompletedValueOr(
+            deploymentAvailableTask, _deploymentAvailableCache.LastValueOr(false));
+        if (sudoersHashes.ContainsKey("aetheus-deploy") && !deploymentAvailable)
+        {
+            capabilityDiagnostics =
+            [
+                .. capabilityDiagnostics,
+                "deployment grant is installed but its versioned functional probe failed; deployment.apply is disabled"
+            ];
+        }
+
         heartbeat = heartbeat with
         {
+            AgentSessionId = agentState.SessionId,
             AgentVersion = AgentVersion,
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilities = BuildEffectiveCapabilities(
+                dockerAvailable, pipelineRunnerAvailable, deploymentAvailable, sudoersHashes),
             AgentInstalledAt = _agentInstalledAt,
-            DockerAvailable = CompletedValueOr(dockerAvailableTask, _dockerAvailableCache.LastValueOr(false)),
-            PipelineRunnerAvailable = !_pipelineRunnerAvailableCache.IsCollectionInFlight
-                && pipelineRunnerAvailableTask.Status == TaskStatus.RanToCompletion
-                ? pipelineRunnerAvailableTask.Result
-                : null,
+            DockerAvailable = dockerAvailable,
+            PipelineRunnerAvailable = pipelineRunnerAvailable,
             // S-DES-23: report the dev-only TLS-bypass mode so the UI can flag it on the server card.
             InsecureTls = _options.AllowInsecureCerts,
             Services = CompletedValueOr(servicesTask, _servicesCache.LastValueOr([])),
@@ -192,23 +227,72 @@ public sealed class HeartbeatService(
             SecurityUpdates = CompletedValueOr(
                 securityUpdatesTask, _securityUpdatesCache.LastValueOr(new SecurityUpdatesDataDto())),
             Firewall = CompletedValueOr(firewallTask, _firewallCache.LastValueOr(new FirewallDataDto())),
-            SudoersHashes = CompletedValueOr(
-                sudoersTask, _sudoersCache.LastValueOr(new Dictionary<string, string>())),
+            SudoersHashes = sudoersHashes,
             SudoersInventoryAvailable = _sudoersCache.HasValue,
             CapabilityDiagnostics = capabilityDiagnostics,
+            ScannerCapabilities = EnsureScannerManifestIdentity(CompletedValueOr(
+                scannerDiagnosticsTask, _scannerDiagnosticsCache.LastValueOr(new List<string>()))),
             StorageDiagnostics = CompletedValueOr(
                 storageDiagnosticsTask, _storageDiagnosticsCache.LastValueOr(new StorageDiagnosticsDto()))
         };
 
         var response = await apiClient.SendHeartbeatAsync(agentState.ServerId!.Value, heartbeat, ct).ConfigureAwait(false);
+        AgentUpdateRecoveryState.ConfirmSuccessfulHeartbeat(_options.WorkDirectory);
+        runtimeHealth.MarkHeartbeatSuccess();
         await ApplyTokenRenewalAsync(response, ct).ConfigureAwait(false);
 
         logger.LogDebug("Heartbeat sent - CPU: {Cpu}%, RAM: {Ram}/{Total} MB",
             heartbeat.CpuPercent, heartbeat.MemoryUsedMb, heartbeat.MemoryTotalMb);
     }
 
+    private static List<string> BuildEffectiveCapabilities(
+        bool dockerAvailable,
+        bool? pipelineRunnerAvailable,
+        bool deploymentAvailable,
+        IReadOnlyDictionary<string, string> sudoersHashes)
+    {
+        var capabilities = new HashSet<string>(
+            AgentCapabilities.SoftwareCapabilities,
+            StringComparer.Ordinal);
+
+        if (pipelineRunnerAvailable is not true)
+            capabilities.Remove(AgentCapabilities.PipelineBuild);
+        if (dockerAvailable)
+            capabilities.Add(AgentCapabilities.DockerExecution);
+
+        if (sudoersHashes.ContainsKey("aetheus-deploy") && deploymentAvailable)
+            capabilities.Add(AgentCapabilities.Deployment);
+        AddGrantCapability("aetheus-package", AgentCapabilities.PackageManagement);
+        AddGrantCapability("aetheus-patch", AgentCapabilities.PatchManagement);
+        AddGrantCapability("aetheus-firewall", AgentCapabilities.FirewallManagement);
+        AddGrantCapability("aetheus-apache", AgentCapabilities.ApacheManagement);
+        AddGrantCapability("aetheus-certbot", AgentCapabilities.CertbotManagement);
+        AddGrantCapability("aetheus-mail", AgentCapabilities.MailManagement);
+        AddGrantCapability("aetheus-teamspeak", AgentCapabilities.TeamspeakManagement);
+        AddGrantCapability("aetheus-portsentry", AgentCapabilities.PortsentryManagement);
+        AddGrantCapability("aetheus-cron", AgentCapabilities.CronManagement);
+        AddGrantCapability("aetheus-service-enable", AgentCapabilities.ServiceManagement);
+
+        return capabilities.Order(StringComparer.Ordinal).ToList();
+
+        void AddGrantCapability(string grant, string capability)
+        {
+            if (sudoersHashes.ContainsKey(grant))
+                capabilities.Add(capability);
+        }
+    }
+
     private static T CompletedValueOr<T>(Task<T> task, T fallback) =>
         task.Status == TaskStatus.RanToCompletion ? task.Result : fallback;
+
+    private static List<string> EnsureScannerManifestIdentity(IEnumerable<string> diagnostics)
+    {
+        var reported = diagnostics.ToList();
+        var identity = $"scanner-manifest:sha256:{ScannerManifestCatalog.Sha256}";
+        if (!reported.Contains(identity, StringComparer.Ordinal))
+            reported.Add(identity);
+        return reported;
+    }
 
     private List<string> GetQuarantinedCollectorNames()
     {
@@ -228,6 +312,7 @@ public sealed class HeartbeatService(
             ("docker availability", _dockerAvailableCache.IsCollectionInFlight),
             ("pipeline runner", _pipelineRunnerAvailableCache.IsCollectionInFlight),
             ("capability diagnostics", _capDiagnosticsCache.IsCollectionInFlight),
+            ("scanner capability diagnostics", _scannerDiagnosticsCache.IsCollectionInFlight),
             ("storage diagnostics", _storageDiagnosticsCache.IsCollectionInFlight)
         ];
         return collectors.Where(collector => collector.InFlight).Select(collector => collector.Name).ToList();

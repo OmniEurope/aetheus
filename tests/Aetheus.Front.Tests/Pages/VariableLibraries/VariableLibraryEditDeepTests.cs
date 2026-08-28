@@ -308,7 +308,7 @@ public class VariableLibraryEditDeepTests : BunitContext
     // ── AddEntry - empty key does nothing ────────────────────────────────────
 
     [Fact]
-    public async Task AddEntry_EmptyKey_DoesNothing()
+    public async Task AddEntry_EmptyKey_LeavesTheValueUnchanged()
     {
         SetupProjects();
         SetupLibrary(1);

@@ -1,88 +1,222 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.AgentUpdate;
 
-public sealed class AgentUpdateService(
-    IServerRepository repo,
+internal sealed class AgentUpdateService(
+    // No IServerRepository: the two reads it supplied are own-reads on this module own repository
+    // now, which is what took AgentUpdate out of the cycle with Servers.
     IHubContext<ServerHub> serverHub,
     ITaskService taskService,
-    IAuditService audit) : IAgentUpdateService
+    IAuditService audit,
+    IAgentUpdateRepository updateRepo,
+    IAgentReleaseCatalog releases,
+    IAgentCompatibilityPolicy compatibilityPolicy,
+    ILogger<AgentUpdateService> logger) : IAgentUpdateService
 {
-    // Self-update has to download the agent archive (a few MB), unpack it and hand off to the
-    // platform updater. The agent reports the task complete as soon as the detached updater is
-    // launched, so this generous ceiling only guards a stuck download.
-    private const int UpdateTimeoutSeconds = 600;
-
-    public async Task<AgentUpdateResponse> QueueUpdateAsync(int serverId, CancellationToken ct = default)
+    public async Task<AgentUpdateResponse> QueueUpdateAsync(
+        int serverId,
+        string requestedBy,
+        CancellationToken ct = default)
     {
         // FindServerAsync also covers the existence check and gives us the name in one query,
         // which is needed for the TaskQueued broadcast payload.
-        var server = await repo.FindServerAsync(serverId, ct).ConfigureAwait(false);
+        var server = await updateRepo.FindServerAsync(serverId, ct).ConfigureAwait(false);
         if (server is null)
             throw new NotFoundException($"Server {serverId} not found.");
 
-        var task = BuildSelfUpdateTask(serverId);
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await audit.LogAsync("AgentSelfUpdate", "Server", serverId, "Agent self-update queued", ct).ConfigureAwait(false);
-        await BroadcastQueuedAsync(serverId, ct).ConfigureAwait(false);
-        // Item #7: also surface to the top-bar widget through the canonical Tasks hook, so
-        // the DTO shape / hub groups can never drift from TaskService's own broadcasts.
-        await taskService.NotifyTaskQueuedAsync(task, server.Name, ct).ConfigureAwait(false);
+        var compatibility = compatibilityPolicy.Evaluate(ServerDataMapper.MapToDto(server));
+        if (compatibility.Status == AgentCompatibilityStatus.UpToDate)
+        {
+            await audit.LogAsync(
+                "AgentUpdateSkipped",
+                "Server",
+                serverId,
+                $"Agent is already on target version {releases.Current.SoftwareVersion}",
+                ct).ConfigureAwait(false);
+            return new AgentUpdateResponse
+            {
+                ServerId = serverId,
+                SourceVersion = server.AgentVersion,
+                TargetVersion = releases.Current.SoftwareVersion,
+                Status = AgentUpdateRequestStatus.Confirmed,
+                Outcome = AgentUpdateQueueOutcome.AlreadyUpToDate
+            };
+        }
 
-        return new AgentUpdateResponse { TaskId = task.Id };
+        var (request, created) = await updateRepo
+            .ReserveAsync(server, releases.Current, requestedBy, ct)
+            .ConfigureAwait(false);
+        var (_, task, blockingCount) = await updateRepo.TryQueueAsync(request.Id, ct).ConfigureAwait(false);
+        if (task is not null)
+        {
+            await BroadcastQueuedAsync(serverId, ct).ConfigureAwait(false);
+            await taskService.NotifyTaskQueuedAsync(task, server.Name, ct).ConfigureAwait(false);
+        }
+
+        await audit.LogAsync(
+            created ? "AgentUpdateReserved" : "AgentUpdateRequestReused",
+            "Server",
+            serverId,
+            $"Agent update to {request.TargetVersion}; blocking tasks: {blockingCount}",
+            ct).ConfigureAwait(false);
+
+        return ToResponse(request, task, blockingCount, !created);
     }
 
-    public async Task<AgentUpdateAllResponse> QueueUpdateAllAsync(List<int>? accessibleServerIds, CancellationToken ct = default)
+    public async Task<AgentUpdateAllResponse> QueueUpdateAllAsync(
+        List<int>? accessibleServerIds,
+        string requestedBy,
+        CancellationToken ct = default)
     {
         // accessibleServerIds == null means "no scoping restriction" (e.g. unrestricted admin).
         // An empty list means the caller can administer nothing → nothing to queue.
         if (accessibleServerIds is { Count: 0 })
             return new AgentUpdateAllResponse();
 
-        var servers = await repo.GetServerIdNamePairsAsync(accessibleServerIds, ct).ConfigureAwait(false);
+        var servers = await updateRepo.GetServersForAgentUpdateAsync(accessibleServerIds, ct).ConfigureAwait(false);
         if (servers.Count == 0)
             return new AgentUpdateAllResponse();
 
-        var tasks = servers.Select(s => BuildSelfUpdateTask(s.Id)).ToList();
-        await repo.AddTasksAsync(tasks, ct).ConfigureAwait(false);
-
         var queuedIds = new List<int>(servers.Count);
-        for (var i = 0; i < servers.Count; i++)
+        var results = new List<AgentUpdateResponse>(servers.Count);
+        var offlineCount = 0;
+        var alreadyUpToDateCount = 0;
+        var busyCount = 0;
+        foreach (var server in servers)
         {
-            var (id, name) = servers[i];
+            var id = server.Id;
+            if (server.Status != ServerStatus.Online)
+            {
+                offlineCount++;
+                results.Add(new AgentUpdateResponse
+                {
+                    ServerId = id,
+                    SourceVersion = server.AgentVersion,
+                    TargetVersion = releases.Current.SoftwareVersion,
+                    Outcome = AgentUpdateQueueOutcome.Offline
+                });
+                continue;
+            }
+            if (compatibilityPolicy.Evaluate(ServerDataMapper.MapToDto(server)).Status
+                == AgentCompatibilityStatus.UpToDate)
+            {
+                alreadyUpToDateCount++;
+                results.Add(new AgentUpdateResponse
+                {
+                    ServerId = id,
+                    SourceVersion = server.AgentVersion,
+                    TargetVersion = releases.Current.SoftwareVersion,
+                    Outcome = AgentUpdateQueueOutcome.AlreadyUpToDate
+                });
+                continue;
+            }
+
+            var (request, created) = await updateRepo
+                .ReserveAsync(server, releases.Current, requestedBy, ct)
+                .ConfigureAwait(false);
+            var (_, task, blockingCount) = await updateRepo.TryQueueAsync(request.Id, ct).ConfigureAwait(false);
+            if (blockingCount > 0) busyCount++;
             queuedIds.Add(id);
-            await BroadcastQueuedAsync(id, ct).ConfigureAwait(false);
-            await taskService.NotifyTaskQueuedAsync(tasks[i], name, ct).ConfigureAwait(false);
+            results.Add(ToResponse(request, task, blockingCount, !created));
+            if (task is not null)
+            {
+                await BroadcastQueuedAsync(id, ct).ConfigureAwait(false);
+                await taskService.NotifyTaskQueuedAsync(task, server.Name, ct).ConfigureAwait(false);
+            }
         }
 
         await audit.LogAsync("AgentSelfUpdateAll", "Server", null,
             $"Agent self-update queued for {queuedIds.Count} server(s)", ct).ConfigureAwait(false);
 
-        return new AgentUpdateAllResponse { QueuedCount = queuedIds.Count, ServerIds = queuedIds };
+        return new AgentUpdateAllResponse
+        {
+            QueuedCount = queuedIds.Count,
+            ServerIds = queuedIds,
+            AlreadyUpToDateCount = alreadyUpToDateCount,
+            OfflineCount = offlineCount,
+            BusyCount = busyCount,
+            Results = results
+        };
     }
 
-    private static ServerTask BuildSelfUpdateTask(int serverId) => new()
+    public async Task<AgentUpdateAllPreviewDto> PreviewUpdateAllAsync(
+        List<int>? accessibleServerIds,
+        CancellationToken ct = default)
     {
-        ServerId = serverId,
-        Name = "Agent self-update",
-        // Typed-operation pathway: no shell allow-list. Target is unused - the agent resolves
-        // the download URL from its own configured ServerUrl.
-        Command = string.Empty,
-        Executor = ExecutorType.Operation,
-        Operation = OperationKind.AgentSelfUpdate,
-        Status = TaskExecutionStatus.Pending,
-        TimeoutSeconds = UpdateTimeoutSeconds,
-        EnvironmentVariables = "{}"
-    };
+        if (accessibleServerIds is { Count: 0 })
+            return new AgentUpdateAllPreviewDto { TargetVersion = releases.Current.SoftwareVersion };
+
+        var servers = await updateRepo
+            .GetServersForCompatibilityAsync(accessibleServerIds, ct)
+            .ConfigureAwait(false);
+        var affected = 0;
+        var alreadyCurrent = 0;
+        var offline = 0;
+        var incompatible = 0;
+        var busy = 0;
+        // One round trip for the whole fleet instead of one COUNT per outdated server: this renders a
+        // preview dialog, and the per-server variant made that cost grow with the fleet.
+        var activeTaskCounts = await updateRepo
+            .CountActiveNonUpdateTasksAsync([.. servers.Select(server => server.Id)], ct)
+            .ConfigureAwait(false);
+        foreach (var server in servers)
+        {
+            if (server.Status != ServerStatus.Online)
+            {
+                offline++;
+                continue;
+            }
+
+            var compatibility = compatibilityPolicy.Evaluate(server);
+            if (compatibility.Status == AgentCompatibilityStatus.UpToDate)
+            {
+                alreadyCurrent++;
+                continue;
+            }
+
+            affected++;
+            if (compatibility.Status == AgentCompatibilityStatus.UpdateRequired)
+                incompatible++;
+            if (activeTaskCounts.TryGetValue(server.Id, out var activeTasks) && activeTasks > 0)
+                busy++;
+        }
+
+        return new AgentUpdateAllPreviewDto
+        {
+            TargetVersion = releases.Current.SoftwareVersion,
+            AffectedCount = affected,
+            AlreadyUpToDateCount = alreadyCurrent,
+            OfflineCount = offline,
+            IncompatibleCount = incompatible,
+            BusyCount = busy
+        };
+    }
+
+    private static AgentUpdateResponse ToResponse(
+        AgentUpdateRequest request,
+        ServerTask? task,
+        int blockingCount,
+        bool existing) => new()
+        {
+            RequestId = request.Id,
+            ServerId = request.ServerId,
+            SourceVersion = request.ObservedVersion,
+            TargetVersion = request.TargetVersion,
+            TaskId = task?.Id ?? request.TaskId ?? 0,
+            Status = request.Status,
+            BlockingTaskCount = blockingCount,
+            ExistingRequest = existing,
+            Outcome = existing
+                ? AgentUpdateQueueOutcome.ExistingRequest
+                : blockingCount > 0
+                    ? AgentUpdateQueueOutcome.WaitingForIdle
+                    : AgentUpdateQueueOutcome.Queued
+        };
 
     private async Task BroadcastQueuedAsync(int serverId, CancellationToken ct)
     {
@@ -100,6 +234,17 @@ public sealed class AgentUpdateService(
         // The progress is purely advisory - values outside [0,100] are coerced rather than
         // refused, so a buggy build still surfaces *something* useful (the phase enum).
         var clamped = dto with { Percent = Math.Clamp(dto.Percent, 0, 100) };
+        var request = await updateRepo.MarkProgressAsync(dto.ServerId, clamped, ct).ConfigureAwait(false);
+        if (clamped.Phase == AgentUpdatePhase.Failed && request is not null)
+        {
+            logger.LogError(
+                "Agent update {SourceVersion} to {TargetVersion} failed on server {ServerId}: {Diagnostic}; correlation {CorrelationId}",
+                request.ObservedVersion,
+                request.TargetVersion,
+                request.ServerId,
+                request.FailureDiagnostic ?? "No diagnostic reported.",
+                LogCorrelationIds.AgentUpdate(request.Id));
+        }
         await Task.WhenAll(
             serverHub.Clients.Group(HubGroups.Server(dto.ServerId))
                 .SendAsync("AgentUpdateProgress", clamped, ct),

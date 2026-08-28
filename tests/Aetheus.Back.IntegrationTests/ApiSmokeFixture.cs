@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -49,6 +50,9 @@ public sealed class ApiSmokeFixture(SharedPostgresContainer shared) : IAsyncLife
     /// <summary>Id of a project seeded directly in the DB, for project-scoped read endpoints.</summary>
     public int ProjectId { get; private set; }
 
+    /// <summary>Id of a pipeline run seeded directly in the DB, for run-scoped read endpoints.</summary>
+    public int PipelineRunId { get; private set; }
+
     public async ValueTask InitializeAsync()
     {
         // DRPS: use the shared assembly container's dedicated smoke database (no second container boot).
@@ -82,9 +86,25 @@ public sealed class ApiSmokeFixture(SharedPostgresContainer shared) : IAsyncLife
             OrganizationId = defaultOrg.Id
         };
         db.Projects.Add(project);
+        var pipeline = new Pipeline
+        {
+            Name = $"smoke-{Guid.NewGuid():N}",
+            Description = "smoke run-path target",
+            YamlDefinition = "name: smoke",
+            Project = project
+        };
+        var run = new PipelineRun
+        {
+            Pipeline = pipeline,
+            Status = PipelineStatus.Failed,
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        };
+        db.PipelineRuns.Add(run);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         ServerId = server.Id;
         ProjectId = project.Id;
+        PipelineRunId = run.Id;
     }
 
     /// <summary>

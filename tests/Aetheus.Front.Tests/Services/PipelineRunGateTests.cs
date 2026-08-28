@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
+using Aetheus.Front.Pages.Pipelines;
 using Aetheus.Front.Services;
 using Aetheus.Front.Tests.TestDoubles;
 using Aetheus.Shared.DTOs;
@@ -81,6 +82,26 @@ public class PipelineRunGateTests : BunitContext
         Assert.True(result);
     }
 
+    [Fact]
+    public async Task ConfirmPreflightAsync_WithWarnings_ShowsWarningsAndContinues()
+    {
+        _handler.SetJsonResponse("api/pipelines/13/preflight", new PipelinePreflightDto
+        {
+            Warnings = ["Variable library 'optional' not found."],
+            Stages =
+            [
+                new PreflightStageDto { StageName = "Build", Resolved = true, Target = "ci" }
+            ]
+        });
+
+        var result = await Sut.ConfirmPreflightAsync(13);
+
+        Assert.True(result);
+        var warning = Assert.Single(Toasts.Messages);
+        Assert.Equal(NotificationSeverity.Warning, warning.Severity);
+        Assert.Contains("optional", warning.Detail?.ToString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -99,16 +120,25 @@ public class PipelineRunGateTests : BunitContext
                 }
             ]
         });
-        Dialog.ConfirmResult = confirm;
+        Dialog.OpenResult = confirm;
 
         var result = await Sut.ConfirmPreflightAsync(9);
 
         Assert.Equal(confirm, result);
         Assert.Equal(1, Dialog.OpenCount);
         Assert.Equal("PreflightNoAgentTitle", Dialog.LastTitle);
-        Assert.Contains("Deploy", Dialog.LastConfirmMessage, StringComparison.Ordinal);
-        Assert.Contains("prod-web", Dialog.LastConfirmMessage, StringComparison.Ordinal);
-        Assert.Contains("no online matching agent", Dialog.LastConfirmMessage, StringComparison.Ordinal);
+
+        // The gate no longer concatenates one sentence per stage into a plain Confirm: an
+        // eleven-stage pipeline rendered eleven copies of the same reason and was unreadable. It
+        // hands the unresolved stages to a dialog that groups them by cause, so the contract to
+        // assert is the data handed over, not a formatted string.
+        Assert.Equal(typeof(PipelineRunPreflightDialog), Dialog.LastComponent);
+        var unresolved = Assert.IsAssignableFrom<IReadOnlyList<PreflightStageDto>>(
+            Dialog.LastParameters![nameof(PipelineRunPreflightDialog.Unresolved)]);
+        var stage = Assert.Single(unresolved);
+        Assert.Equal("Deploy", stage.StageName);
+        Assert.Equal("prod-web", stage.Target);
+        Assert.Equal("no online matching agent", stage.Reason);
     }
 
     // === Error path - 400 with YamlValidationResultDto body, no dialog ===

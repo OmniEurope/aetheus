@@ -11,7 +11,11 @@ using Aetheus.Agent.Windows.Services;
 // appsettings.json (parity with Aetheus.Agent.Linux). Runs the same .NET
 // HTTP stack the agent will use, so TLS / DNS / proxy issues surface here
 // instead of inside a service start-timeout. Exit code feeds the installer.
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory
+});
 var probeExitCode = await AgentBackendProbeEntrypoint.TryRunAsync(args, builder.Configuration).ConfigureAwait(false);
 if (probeExitCode.HasValue)
     return probeExitCode.Value;

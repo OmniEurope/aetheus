@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -52,7 +43,7 @@ public partial class ServerAppsSection
         _loading = true;
         try
         {
-            var result = await Api.GetServerAppsPageAsync(
+            var result = await Api.Servers.GetServerAppsPageAsync(
                 serverId, _page, _pageSize, _search, _sortBy, _sortDescending);
             if (ServerId != serverId) return;
             _apps = result.Items;
@@ -70,7 +61,7 @@ public partial class ServerAppsSection
     private async Task OnLoadDataAsync(LoadDataArgs args)
     {
         (_page, _pageSize) = args.ToPageRequest();
-        (_sortBy, _sortDescending) = GetSort(args);
+        (_sortBy, _sortDescending) = args.ToSortRequest("Name");
         await LoadAsync();
     }
 
@@ -89,7 +80,7 @@ public partial class ServerAppsSection
     private async Task AddAppAsync()
     {
         _addSaving = true;
-        var result = await Api.CreateServerAppAsync(ServerId, new CreateServerAppRequest
+        var result = await Api.Servers.CreateServerAppAsync(ServerId, new CreateServerAppRequest
         {
             Name = _addName,
             Version = string.IsNullOrWhiteSpace(_addVersion) ? null : _addVersion,
@@ -114,10 +105,15 @@ public partial class ServerAppsSection
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.DeleteServerAppAsync(ServerId, app.Id);
+        var success = await Api.Servers.DeleteServerAppAsync(ServerId, app.Id);
         if (success)
         {
             await LoadAsync();
+            Toast.Success("Deleted", "Deleted");
+        }
+        else
+        {
+            Toast.Error("Error", "DeleteFailed");
         }
     }
 
@@ -129,11 +125,4 @@ public partial class ServerAppsSection
         _ => BadgeStyle.Warning
     };
 
-    private static (string SortBy, bool Descending) GetSort(LoadDataArgs args)
-    {
-        if (string.IsNullOrWhiteSpace(args.OrderBy)) return ("Name", false);
-        var parts = args.OrderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return (parts[0], parts.Length > 1
-            && string.Equals(parts[1], "desc", StringComparison.OrdinalIgnoreCase));
-    }
 }

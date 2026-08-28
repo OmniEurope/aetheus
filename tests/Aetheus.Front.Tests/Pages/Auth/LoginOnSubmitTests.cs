@@ -61,9 +61,32 @@ public class LoginOnSubmitTests : BunitContext
     }
 
     [Fact]
+    public async Task TotpRequired_RecoveryMode_SubmitsRecoveryCodeInsteadOfTotpCode()
+    {
+        _handler.SetJsonResponse("api/auth/login", new LoginResponse { Token = null!, TotpRequired = true });
+        var cut = Render<Login>();
+        SetCredentials(cut.Instance, "admin", "password123");
+        await InvokeSubmit(cut);
+
+        cut.Render();
+        cut.Find(".totp-mode-toggle button").Click();
+        cut.Find("input[name='RecoveryCode']").Change("ABCDE-12345");
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() =>
+        {
+            var body = _handler.RequestDetails.Last(request =>
+                request.Method == "POST" && request.Url.EndsWith("api/auth/login", StringComparison.Ordinal)).Body;
+            var login = System.Text.Json.JsonSerializer.Deserialize<LoginRequest>(
+                body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            Assert.Equal("ABCDE-12345", login!.RecoveryCode);
+            Assert.Null(login.TotpCode);
+        });
+    }
+
+    [Fact]
     public async Task OnSubmit_NullResult_SetsInvalidCredentialsError()
     {
-        // 401 → ApiClient.LoginAsync returns null → _error = InvalidCredentials
         _handler.SetResponse("api/auth/login", System.Net.HttpStatusCode.Unauthorized);
 
         var cut = Render<Login>();
@@ -72,6 +95,19 @@ public class LoginOnSubmitTests : BunitContext
 
         var error = (string?)typeof(Login).GetField("_error", Priv)!.GetValue(cut.Instance);
         Assert.NotNull(error);
+    }
+
+    [Fact]
+    public async Task OnSubmit_RateLimited_ShowsSpecificInlineError()
+    {
+        _handler.SetResponse("api/auth/login", System.Net.HttpStatusCode.TooManyRequests);
+        var cut = Render<Login>();
+        SetCredentials(cut.Instance, "admin", "password123");
+
+        await InvokeSubmit(cut);
+
+        var error = (string?)typeof(Login).GetField("_error", Priv)!.GetValue(cut.Instance);
+        Assert.Equal("LoginRateLimited", error);
     }
 
     [Fact]

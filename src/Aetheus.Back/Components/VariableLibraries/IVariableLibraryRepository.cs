@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.VariableLibraries;
 public interface IVariableLibraryRepository
 {
     Task<(List<VariableLibrary> Items, int TotalCount)> GetLibrariesPagedAsync(
-        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
+        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false);
 
     Task<VariableLibrary?> GetLibraryDetailAsync(int id, CancellationToken ct = default);
 

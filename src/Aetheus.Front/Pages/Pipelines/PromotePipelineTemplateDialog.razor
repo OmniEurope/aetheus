@@ -1,8 +1,9 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplatePromotionBase
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else if (_preview is not null)
 {

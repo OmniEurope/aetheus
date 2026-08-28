@@ -57,11 +57,11 @@
         <SecondaryContent>
             @if (Release.Artifacts.Count > 0)
             {
-                <RadzenButton Text="@L["Artifact"]" Icon="inventory_2" Click="@(() => Nav.NavigateTo($"/projects/{Release.ProjectId}/artifacts"))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["Artifact"]" Icon="inventory_2" Click="@(() => Nav.NavigateTo($"/projects/{Release.ProjectId}/artifacts"))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
             }
             @if (Release.PipelineRunId.HasValue)
             {
-                <RadzenButton Text="@L["PipelineRun"]" Icon="visibility" Click="@(() => Nav.NavigateTo($"/pipelines/runs/{Release.PipelineRunId}"))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["PipelineRun"]" Icon="visibility" Click="@(() => Nav.NavigateTo($"/pipelines/runs/{Release.PipelineRunId}"))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
             }
         </SecondaryContent>
     </DialogFooter>

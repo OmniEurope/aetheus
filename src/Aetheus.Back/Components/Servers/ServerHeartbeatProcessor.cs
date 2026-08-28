@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Collections.Concurrent;
 using System.Text.Json;
-using Aetheus.Back.Components.Shared;
+using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 
@@ -19,10 +17,12 @@ namespace Aetheus.Back.Components.Servers;
 /// </summary>
 internal sealed class ServerHeartbeatProcessor(
     IServerRepository repo,
+    IServerHeartbeatRepository heartbeatRepo,
     IHubContext<ServerHub> serverHub,
     IHubContext<AlertHub> alertHub,
     TimeProvider timeProvider,
     IDbTransactionScope transaction,
+    IAgentUpdateConfirmationService? updateConfirmation,
     ILogger<ServerHeartbeatProcessor> logger)
 {
     private static readonly ConcurrentDictionary<int, DateTime> DeploymentBuildAlerts = new();
@@ -39,7 +39,7 @@ internal sealed class ServerHeartbeatProcessor(
         UpdateServerPresence(server);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        var (previousBlockedCount, previousWarningCount) = await repo.GetSecurityCountersAsync(serverId, ct).ConfigureAwait(false);
+        var (previousBlockedCount, previousWarningCount) = await heartbeatRepo.GetSecurityCountersAsync(serverId, ct).ConfigureAwait(false);
 
         // Atomicity (audit-360 lot F): the per-section Replace* repo calls each run an
         // ExecuteDeleteAsync OUTSIDE the final SaveChanges transaction, so a mid-sequence failure
@@ -52,45 +52,46 @@ internal sealed class ServerHeartbeatProcessor(
         else
             await PersistHeartbeatAsync(server, serverId, heartbeat, ct).ConfigureAwait(false);
 
+        if (updateConfirmation is not null)
+            await updateConfirmation.ProcessHeartbeatAsync(serverId, heartbeat, ct).ConfigureAwait(false);
         await BroadcastHeartbeatAsync(serverId, heartbeat, ct).ConfigureAwait(false);
         await CheckSecurityAlertsAsync(server.Name, serverId, heartbeat, previousBlockedCount, previousWarningCount, ct).ConfigureAwait(false);
     }
 
     private async Task PersistHeartbeatAsync(Server server, int serverId, ServerHeartbeatDto heartbeat, CancellationToken ct)
     {
-        // Self-heal OsType for servers enrolled before OS typing existed (or whose first heartbeat
-        // lands before re-registration). Cheap: only computes/writes while still Unknown.
+        ApplyAgentIdentity(server, serverId, heartbeat);
+        ServerHeartbeatCapabilityProjector.Apply(server, heartbeat);
+        ApplyCapabilityDiagnostics(server, serverId, heartbeat);
+        await PersistHeartbeatInventoriesAsync(serverId, heartbeat, ct).ConfigureAwait(false);
+        await CheckSudoersDriftAsync(server, heartbeat, ct).ConfigureAwait(false);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    private void ApplyAgentIdentity(Server server, int serverId, ServerHeartbeatDto heartbeat)
+    {
         if (server.OsType == OsType.Unknown)
             server.OsType = OsTypeHelper.FromDescription(server.OsDescription);
         if (!string.IsNullOrWhiteSpace(heartbeat.AgentVersion) && server.AgentVersion != heartbeat.AgentVersion)
             server.AgentVersion = heartbeat.AgentVersion;
+        if (!string.IsNullOrWhiteSpace(heartbeat.AgentSessionId)
+            && server.AgentSessionId != heartbeat.AgentSessionId)
+        {
+            logger.LogInformation(
+                "Server {ServerId} agent session changed from {PreviousSession} to {CurrentSession}",
+                serverId,
+                server.AgentSessionId ?? "legacy",
+                heartbeat.AgentSessionId);
+            server.AgentSessionId = heartbeat.AgentSessionId;
+        }
         // Persist the agent install timestamp only when it actually moves forward - the agent
         // resolves it once at startup, so an unchanged value just races to the same write.
         if (heartbeat.AgentInstalledAt is { } installedAt && server.AgentInstalledAt != installedAt)
             server.AgentInstalledAt = installedAt;
-        // Docker capability self-heals every heartbeat (installed/removed on the host).
-        if (server.DockerAvailable != heartbeat.DockerAvailable)
-            server.DockerAvailable = heartbeat.DockerAvailable;
-        // Legacy agents used an empty hash map for both a real empty inventory and a failed/timed-out
-        // collection. Only a new explicit availability marker (or a positive legacy hash) is authoritative;
-        // otherwise preserve the last known grants instead of revoking deployment during a transient stall.
-        var sudoersInventoryAuthoritative = heartbeat.SudoersInventoryAvailable == true
-            || heartbeat.SudoersHashes.Count > 0;
-        if (sudoersInventoryAuthoritative)
-        {
-            // S-FEAT-W8KN: hash-derived controlled-sudo capabilities self-heal both ways only from a
-            // completed inventory. A completed empty inventory therefore still revokes removed grants.
-            server.PackageManagementAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-package");
-            server.DeploymentTargetAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-deploy");
-            server.MailSetupAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-mail");
-            server.TeamspeakSetupAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-teamspeak");
-            server.PatchManagementAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-patch");
-            server.FirewallManagementAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-firewall");
-        }
-        // S-FEAT-HBDX / S-TECH-CAPX / S-TECH-CDUI: surface the agent's capability diagnostics (a drop-in
-        // present but unreadable, or a real sudo probe that failed) so an operator can see WHY a capability
-        // is OFF from the UI (and logs), without SSHing to the box. Persisted on the server and self-healed
-        // both ways every heartbeat (cleared when the agent reports none).
+    }
+
+    private void ApplyCapabilityDiagnostics(Server server, int serverId, ServerHeartbeatDto heartbeat)
+    {
         if (heartbeat.CapabilityDiagnostics.Count > 0)
         {
             logger.LogWarning("Server {ServerId} capability diagnostics: {Diagnostics}",
@@ -103,14 +104,18 @@ internal sealed class ServerHeartbeatProcessor(
         {
             server.CapabilityDiagnosticsJson = null;
         }
-        // Pipeline-runner gate self-heals DOWN only: if the toolchain is gone the server can no longer
-        // run steps, so revoke the authorisation. Never auto-RE-enable here (that would override a
-        // deliberate admin disable) - re-enabling happens on re-install (re-registration) or via the UI.
-        if (heartbeat.PipelineRunnerAvailable is false && server.PipelineRunnerEnabled)
-            server.PipelineRunnerEnabled = false;
-        // S-DES-23: TLS-bypass mode self-heals every heartbeat too.
-        if (server.InsecureTls != heartbeat.InsecureTls)
-            server.InsecureTls = heartbeat.InsecureTls;
+        var scannerCapabilitiesJson = heartbeat.ScannerCapabilities.Count == 0
+            ? null
+            : JsonSerializer.Serialize(heartbeat.ScannerCapabilities);
+        if (server.ScannerCapabilitiesJson != scannerCapabilitiesJson)
+            server.ScannerCapabilitiesJson = scannerCapabilitiesJson;
+    }
+
+    private async Task PersistHeartbeatInventoriesAsync(
+        int serverId,
+        ServerHeartbeatDto heartbeat,
+        CancellationToken ct)
+    {
         await StoreMetricAsync(serverId, heartbeat, ct).ConfigureAwait(false);
         await UpdateServicesAsync(serverId, heartbeat.Services, ct).ConfigureAwait(false);
         await UpdateDockerDataAsync(serverId, heartbeat.Docker, ct).ConfigureAwait(false);
@@ -122,10 +127,6 @@ internal sealed class ServerHeartbeatProcessor(
         await UpdateRkhunterDataAsync(serverId, heartbeat.Rkhunter, ct).ConfigureAwait(false);
         await UpdateSecurityUpdatesDataAsync(serverId, heartbeat.SecurityUpdates, ct).ConfigureAwait(false);
         await UpdateFirewallDataAsync(serverId, heartbeat.Firewall, ct).ConfigureAwait(false);
-
-        await CheckSudoersDriftAsync(server, heartbeat, ct).ConfigureAwait(false);
-
-        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -188,7 +189,7 @@ internal sealed class ServerHeartbeatProcessor(
         var diskTotal = heartbeat.Disks.Sum(d => d.TotalGb);
         var diskUsed = heartbeat.Disks.Sum(d => d.UsedGb);
         var storage = heartbeat.StorageDiagnostics;
-        await repo.AddMetricAsync(new ServerMetric
+        await heartbeatRepo.AddMetricAsync(new ServerMetric
         {
             ServerId = serverId,
             CpuPercent = heartbeat.CpuPercent,
@@ -217,7 +218,7 @@ internal sealed class ServerHeartbeatProcessor(
 
     private async Task UpdateServicesAsync(int serverId, List<ServiceInfoDto> services, CancellationToken ct)
     {
-        await repo.ReplaceServicesAsync(serverId, services.Select(svc => new ServiceInfo
+        await heartbeatRepo.ReplaceServicesAsync(serverId, services.Select(svc => new ServiceInfo
         {
             ServerId = serverId,
             Name = svc.Name,
@@ -295,7 +296,7 @@ internal sealed class ServerHeartbeatProcessor(
 
     private async Task UpdateDockerDataAsync(int serverId, DockerDataDto docker, CancellationToken ct)
     {
-        await repo.ReplaceDockerContainersAsync(serverId, docker.Containers.Select(c => new DockerContainer
+        await heartbeatRepo.ReplaceDockerContainersAsync(serverId, docker.Containers.Select(c => new DockerContainer
         {
             ServerId = serverId,
             ContainerId = c.ContainerId,
@@ -327,9 +328,9 @@ internal sealed class ServerHeartbeatProcessor(
                 Size = img.Size,
                 Created = img.Created
             }).ToList();
-        await repo.ReplaceDockerImagesAsync(serverId, images, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceDockerImagesAsync(serverId, images, ct).ConfigureAwait(false);
 
-        await repo.ReplaceDockerComposeStacksAsync(serverId, docker.ComposeStacks.Select(stack => new DockerComposeStack
+        await heartbeatRepo.ReplaceDockerComposeStacksAsync(serverId, docker.ComposeStacks.Select(stack => new DockerComposeStack
         {
             ServerId = serverId,
             Name = stack.Name,
@@ -339,7 +340,7 @@ internal sealed class ServerHeartbeatProcessor(
             TotalCount = stack.TotalCount
         }).ToList(), ct).ConfigureAwait(false);
 
-        await repo.ReplaceDockerNetworksAsync(serverId, docker.Networks.Select(net => new DockerNetwork
+        await heartbeatRepo.ReplaceDockerNetworksAsync(serverId, docker.Networks.Select(net => new DockerNetwork
         {
             ServerId = serverId,
             NetworkId = net.NetworkId,
@@ -348,7 +349,7 @@ internal sealed class ServerHeartbeatProcessor(
             Scope = net.Scope
         }).ToList(), ct).ConfigureAwait(false);
 
-        await repo.ReplaceDockerVolumesAsync(serverId, docker.Volumes.Select(vol => new DockerVolume
+        await heartbeatRepo.ReplaceDockerVolumesAsync(serverId, docker.Volumes.Select(vol => new DockerVolume
         {
             ServerId = serverId,
             Name = vol.Name,
@@ -388,7 +389,7 @@ internal sealed class ServerHeartbeatProcessor(
             IsEnabled = v.IsEnabled
         }).ToList();
 
-        await repo.ReplaceApacheDataAsync(serverId, apacheState, apacheModules, apacheVhosts, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceApacheDataAsync(serverId, apacheState, apacheModules, apacheVhosts, ct).ConfigureAwait(false);
     }
 
     private async Task UpdateCertbotDataAsync(int serverId, CertbotDataDto certbot, CancellationToken ct)
@@ -403,7 +404,7 @@ internal sealed class ServerHeartbeatProcessor(
             KeyPath = c.KeyPath
         }).ToList();
 
-        await repo.ReplaceCertbotCertificatesAsync(serverId, certbotCerts, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceCertbotCertificatesAsync(serverId, certbotCerts, ct).ConfigureAwait(false);
     }
 
     private async Task UpdateMailDataAsync(int serverId, MailDataDto mail, CancellationToken ct)
@@ -418,7 +419,7 @@ internal sealed class ServerHeartbeatProcessor(
             QueueSize = mail.QueueSize
         } : null;
 
-        await repo.ReplaceMailDataAsync(serverId, mailState, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceMailDataAsync(serverId, mailState, ct).ConfigureAwait(false);
     }
 
     private async Task UpdateTeamspeakDataAsync(int serverId, TeamspeakDataDto teamspeak, CancellationToken ct)
@@ -480,7 +481,7 @@ internal sealed class ServerHeartbeatProcessor(
             Created = ban.Created
         }).ToList();
 
-        await repo.ReplaceTeamspeakDataAsync(serverId, state, channels, clients, bans, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceTeamspeakDataAsync(serverId, state, channels, clients, bans, ct).ConfigureAwait(false);
     }
 
     private async Task UpdatePortsentryDataAsync(int serverId, PortsentryDataDto portsentry, CancellationToken ct)
@@ -505,7 +506,7 @@ internal sealed class ServerHeartbeatProcessor(
             Reason = b.Reason
         }).ToList();
 
-        await repo.ReplacePortsentryDataAsync(serverId, state, blockedIps, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplacePortsentryDataAsync(serverId, state, blockedIps, ct).ConfigureAwait(false);
     }
 
     private async Task UpdateRkhunterDataAsync(int serverId, RkhunterDataDto rkhunter, CancellationToken ct)
@@ -521,7 +522,7 @@ internal sealed class ServerHeartbeatProcessor(
             DatabaseLastUpdated = rkhunter.DatabaseLastUpdated
         } : null;
 
-        await repo.ReplaceRkhunterDataAsync(serverId, state, [], ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceRkhunterDataAsync(serverId, state, [], ct).ConfigureAwait(false);
     }
 
     private async Task UpdateSecurityUpdatesDataAsync(int serverId, SecurityUpdatesDataDto updates, CancellationToken ct)
@@ -540,7 +541,7 @@ internal sealed class ServerHeartbeatProcessor(
             CheckedAt = timeProvider.GetUtcNow().UtcDateTime
         } : null;
 
-        await repo.ReplaceSecurityUpdatesDataAsync(serverId, state, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceSecurityUpdatesDataAsync(serverId, state, ct).ConfigureAwait(false);
     }
 
     private async Task UpdateFirewallDataAsync(int serverId, FirewallDataDto firewall, CancellationToken ct)
@@ -557,6 +558,6 @@ internal sealed class ServerHeartbeatProcessor(
             RulesJson = firewall.Rules.Count > 0 ? JsonSerializer.Serialize(firewall.Rules) : null
         } : null;
 
-        await repo.ReplaceFirewallDataAsync(serverId, state, ct).ConfigureAwait(false);
+        await heartbeatRepo.ReplaceFirewallDataAsync(serverId, state, ct).ConfigureAwait(false);
     }
 }

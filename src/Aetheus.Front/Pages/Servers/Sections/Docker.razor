@@ -1,4 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerTaskAwareSectionBase
 @page "/servers/{Id:int}/docker"
 @layout Aetheus.Front.Layout.ServerDetailLayout
 @implements IDisposable
@@ -8,7 +9,7 @@
 
 @if (Loader is null || Loader.Server is null)
 {
-    <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+    <AetheusLoader />
 }
 else if (!Loader.HasDocker)
 {

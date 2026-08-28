@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Artifacts;
 
 public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
 {
+    private static readonly ReleaseStatus[] PublishedReleaseStatuses =
+        [ReleaseStatus.Published, ReleaseStatus.Deployed, ReleaseStatus.Superseded];
+
+    private static readonly ReleaseStatus[] DeployedReleaseStatuses =
+        [ReleaseStatus.Deployed, ReleaseStatus.Superseded];
+
     public async Task<PipelineArtifact?> FindAsync(int id, CancellationToken ct = default) =>
         await db.PipelineArtifacts
             .Where(a => a.Id == id)
@@ -77,10 +80,29 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
 
     public async Task<List<PipelineArtifact>> GetExpiredAsync(DateTime cutoff, int batchSize, CancellationToken ct = default) =>
         await db.PipelineArtifacts
-            .Where(a => a.RetentionExpiresAt <= cutoff)
+            .Where(a => a.RetentionExpiresAt <= cutoff
+                && (a.RetentionLeaseExpiresAt == null || a.RetentionLeaseExpiresAt <= cutoff)
+                // The factually deployed release is the rollback baseline. Its payload must survive
+                // ordinary retention even when its original deadline has passed; it becomes eligible
+                // again as soon as a later deployment supersedes that release.
+                && !a.Releases.Any(release => release.Status == ReleaseStatus.Deployed)
+                && !db.DependencyTrackOutboxItems.Any(item =>
+                    item.PipelineArtifactId == a.Id && item.CompletedAt == null))
             .OrderBy(a => a.RetentionExpiresAt)
             .Take(batchSize)
             .ToListAsync(ct).ConfigureAwait(false);
+
+    public Task<bool> HasActiveRetentionLeaseAsync(
+        int artifactId,
+        DateTime at,
+        CancellationToken ct = default) =>
+        db.PipelineArtifacts
+            .AsNoTracking()
+            .AnyAsync(
+                artifact => artifact.Id == artifactId
+                    && artifact.RetentionLeaseExpiresAt != null
+                    && artifact.RetentionLeaseExpiresAt > at,
+                ct);
 
     public async Task<List<PipelineArtifact>> GetProjectBuildArtifactsAsync(
         int projectId, CancellationToken ct = default) =>
@@ -89,7 +111,11 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
                         && a.RetentionPolicy == ArtifactRetentionPolicy.Build
                         // The release link is the authoritative retention boundary. A stale policy
                         // value must never make a rollback payload eligible for quota eviction.
-                        && !a.Releases.Any())
+                        && !a.Releases.Any()
+                        // A durable Dependency-Track delivery must retain its exact immutable SBOM
+                        // payload until the worker reaches a terminal state.
+                        && !db.DependencyTrackOutboxItems.Any(item =>
+                            item.PipelineArtifactId == a.Id && item.CompletedAt == null))
             .OrderBy(a => a.CreatedAt)
             .ThenBy(a => a.Id)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -157,22 +183,31 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
             .OrderByDescending(a => a.CreatedAt)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-    public async Task<PipelineArtifact?> FindReleaseArtifactAsync(int projectId, string releaseSelector, CancellationToken ct = default)
-        => (await FindReleaseArtifactSelectionAsync(projectId, releaseSelector, ct).ConfigureAwait(false))?.Artifact;
+    public async Task<PipelineArtifact?> FindReleaseArtifactAsync(
+        int projectId, string releaseSelector, string? artifactName = null, CancellationToken ct = default)
+        => (await FindReleaseArtifactSelectionAsync(
+            projectId, releaseSelector, artifactName, ct).ConfigureAwait(false))?.Artifact;
 
     public async Task<ReleaseArtifactSelection?> FindReleaseArtifactSelectionAsync(
-        int projectId, string releaseSelector, CancellationToken ct = default)
+        int projectId, string releaseSelector, string? artifactName = null, CancellationToken ct = default)
     {
-        // Resolve the release first (id / version / "latest"), then take its newest linked artifact.
+        // Resolve the release first (id / version / "latest"), then select the requested linked
+        // artifact. Without an explicit name, retain the legacy newest-linked-artifact behavior.
         var releases = db.Releases.Where(r => r.ProjectId == projectId);
         Release? release;
-        if (string.Equals(releaseSelector, "latest-published", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(releaseSelector, "current-deployed", StringComparison.OrdinalIgnoreCase))
+            release = await releases
+                .Where(r => r.Status == ReleaseStatus.Deployed)
+                .Where(r => r.Artifacts.Any(a => artifactName == null || a.Name == artifactName))
+                .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+        else if (string.Equals(releaseSelector, "latest-published", StringComparison.OrdinalIgnoreCase))
             release = await releases
                 .Where(r => r.Status == ReleaseStatus.Published
-                            || r.Status == ReleaseStatus.Deployed)
+                            || r.Status == ReleaseStatus.Deployed
+                            || r.Status == ReleaseStatus.Superseded)
                 // Imported/tag-only releases legitimately have no retained payload. "latest-published"
                 // means the newest rollback-capable release, not merely the newest metadata row.
-                .Where(r => r.Artifacts.Any())
+                .Where(r => r.Artifacts.Any(a => artifactName == null || a.Name == artifactName))
                 .OrderByDescending(r => r.PublishedAt ?? r.DetectedAt)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         else if (string.Equals(releaseSelector, "latest", StringComparison.OrdinalIgnoreCase))
@@ -185,104 +220,182 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
         if (release is null) return null;
 
         var artifact = await db.PipelineArtifacts
-            .Where(a => a.Releases.Any(r => r.Id == release.Id))
+            .Where(a => a.Releases.Any(r => r.Id == release.Id)
+                        && (artifactName == null || a.Name == artifactName))
             .Include(a => a.Project)
             .OrderByDescending(a => a.CreatedAt)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         return artifact is null ? null : new ReleaseArtifactSelection(artifact, release.Id);
     }
 
+    public async Task<bool> HasDeployedRollbackContractReleaseAsync(
+        int projectId, CancellationToken ct = default) =>
+        await db.Releases
+            .AsNoTracking()
+            .Where(release => release.ProjectId == projectId
+                              && release.Status == ReleaseStatus.Deployed
+                              && release.Artifacts.Any()
+                              && release.PipelineRun != null
+                              && (release.PipelineRun.Pipeline.Name == "aetheus-candidate"
+                                  || release.PipelineRun.Pipeline.Name == "aetheus-release-with-rollback"
+                                  || release.PipelineRun.Pipeline.Name == "aetheus-release-fast"))
+            .AnyAsync(ct)
+            .ConfigureAwait(false);
+
     public async Task<bool> HasPublishedRollbackContractReleaseAsync(int projectId, CancellationToken ct = default) =>
         await db.Releases
             .AsNoTracking()
             .Where(release => release.ProjectId == projectId
                                && (release.Status == ReleaseStatus.Published
-                                   || release.Status == ReleaseStatus.Deployed)
+                                   || release.Status == ReleaseStatus.Deployed
+                                   || release.Status == ReleaseStatus.Superseded)
                                // Metadata alone is not a rollback contract: the retained bytes must
                                // still exist and be linked to the release.
                                && release.Artifacts.Any()
                                && release.PipelineRun != null
-                              && release.PipelineRun.Pipeline.Name == "aetheus-release-with-rollback")
+                              && (release.PipelineRun.Pipeline.Name == "aetheus-candidate"
+                                  || release.PipelineRun.Pipeline.Name == "aetheus-release-with-rollback"
+                                  || release.PipelineRun.Pipeline.Name == "aetheus-release-fast"))
             .AnyAsync(ct)
             .ConfigureAwait(false);
 
     public async Task<PipelineArtifact?> FindPreviousPublishedReleaseArtifactAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default)
-    {
-        var release = await db.Releases
-            .Where(candidate => candidate.ProjectId == projectId
-                                && (candidate.Status == ReleaseStatus.Published
-                                    || candidate.Status == ReleaseStatus.Deployed)
-                                && candidate.Artifacts.Any(artifact =>
-                                    artifact.PipelineRun.CommitHash != currentCommitHash))
-            .OrderByDescending(candidate => candidate.PublishedAt ?? candidate.DetectedAt)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        if (release is null) return null;
-
-        return await db.PipelineArtifacts
-            .Where(artifact => artifact.Releases.Any(candidate => candidate.Id == release.Id)
-                               && artifact.PipelineRun.CommitHash != currentCommitHash)
-            .Include(artifact => artifact.Project)
-            .OrderByDescending(artifact => artifact.CreatedAt)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-    }
+        int projectId, string currentCommitHash, string? artifactName = null, CancellationToken ct = default) =>
+        await FindPreviousReleaseArtifactAsync(
+            projectId, currentCommitHash, artifactName, PublishedReleaseStatuses, ct).ConfigureAwait(false);
 
     public async Task<PipelineArtifact?> FindPreviousDeployedReleaseArtifactAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default)
+        int projectId, string currentCommitHash, string? artifactName = null, CancellationToken ct = default) =>
+        await FindPreviousReleaseArtifactAsync(
+            projectId, currentCommitHash, artifactName, DeployedReleaseStatuses, ct).ConfigureAwait(false);
+
+    public async Task<bool> RequiresPreviousPublishedArtifactAsync(
+        int projectId, string currentCommitHash, string? artifactName, CancellationToken ct = default) =>
+        await RequiresPreviousArtifactAsync(
+            projectId, currentCommitHash, artifactName, PublishedReleaseStatuses, ct).ConfigureAwait(false);
+
+    public async Task<bool> RequiresPreviousDeployedArtifactAsync(
+        int projectId, string currentCommitHash, string? artifactName, CancellationToken ct = default) =>
+        await RequiresPreviousArtifactAsync(
+            projectId, currentCommitHash, artifactName, DeployedReleaseStatuses, ct).ConfigureAwait(false);
+
+    private async Task<PipelineArtifact?> FindPreviousReleaseArtifactAsync(
+        int projectId,
+        string currentCommitHash,
+        string? artifactName,
+        ReleaseStatus[] statuses,
+        CancellationToken ct)
     {
         var release = await db.Releases
             .Where(candidate => candidate.ProjectId == projectId
-                                && candidate.Status == ReleaseStatus.Deployed
+                                && statuses.Contains(candidate.Status)
                                 && candidate.Artifacts.Any(artifact =>
                                     artifact.PipelineRun.CommitHash != currentCommitHash))
             .OrderByDescending(candidate => candidate.PublishedAt ?? candidate.DetectedAt)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
-        if (release is null) return null;
+        if (release is null)
+            return null;
 
         return await db.PipelineArtifacts
             .Where(artifact => artifact.Releases.Any(candidate => candidate.Id == release.Id)
-                               && artifact.PipelineRun.CommitHash != currentCommitHash)
+                               && artifact.PipelineRun.CommitHash != currentCommitHash
+                               && (artifactName == null || artifact.Name == artifactName))
             .Include(artifact => artifact.Project)
             .OrderByDescending(artifact => artifact.CreatedAt)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
     }
 
-    public async Task<bool> HasPreviousPublishedRollbackContractReleaseAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default) =>
-        await db.Releases
+    private async Task<bool> RequiresPreviousArtifactAsync(
+        int projectId,
+        string currentCommitHash,
+        string? artifactName,
+        ReleaseStatus[] statuses,
+        CancellationToken ct)
+    {
+        var pipelineName = await db.Releases
             .AsNoTracking()
             .Where(release => release.ProjectId == projectId
-                              && (release.Status == ReleaseStatus.Published
-                                  || release.Status == ReleaseStatus.Deployed)
+                              && statuses.Contains(release.Status)
                               && release.Artifacts.Any(artifact =>
-                                  artifact.PipelineRun.CommitHash != currentCommitHash)
+                                    artifact.PipelineRun.CommitHash != currentCommitHash)
                               && release.PipelineRun != null
-                              && release.PipelineRun.Pipeline.Name == "aetheus-release-with-rollback")
-            .AnyAsync(ct)
+                              && (release.PipelineRun.Pipeline.Name == "aetheus-candidate"
+                                  || release.PipelineRun.Pipeline.Name == "aetheus-release-with-rollback"
+                                  || release.PipelineRun.Pipeline.Name == "aetheus-release-fast"))
+            .OrderByDescending(release => release.PublishedAt ?? release.DetectedAt)
+            .Select(release => release.PipelineRun!.Pipeline.Name)
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-    public async Task<bool> HasPreviousDeployedRollbackContractReleaseAsync(
-        int projectId, string currentCommitHash, CancellationToken ct = default) =>
-        await db.Releases
-            .AsNoTracking()
-            .Where(release => release.ProjectId == projectId
-                              && release.Status == ReleaseStatus.Deployed
-                              && release.Artifacts.Any(artifact =>
-                                  artifact.PipelineRun.CommitHash != currentCommitHash)
-                              && release.PipelineRun != null
-                              && release.PipelineRun.Pipeline.Name == "aetheus-release-with-rollback")
-            .AnyAsync(ct)
-            .ConfigureAwait(false);
+        if (pipelineName is null)
+            return false;
+
+        return !string.Equals(pipelineName, "aetheus-release-fast", StringComparison.Ordinal)
+               || string.Equals(artifactName, "ApplicationPayload-artifacts", StringComparison.Ordinal);
+    }
 
     public async Task<int?> GetServerOrganizationIdAsync(int serverId, CancellationToken ct = default) =>
         await db.Servers
             .Where(s => s.Id == serverId)
             .Select(s => (int?)s.OrganizationId)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+    // --- Own-reads over shared entities -----------------------------------------------------------
+    // Four queries this module used to obtain by injecting the Pipelines and Releases services. Those
+    // injections put Artifacts inside a module cycle for what is, in every case, a read of an entity
+    // both modules already share. Reading them here removes the dependency without moving ownership:
+    // the writes still belong to Pipelines and Releases.
+    //
+    // Each query below is a copy of the canonical one, deliberately: a shared query would reinstate
+    // the dependency it removes. If the canonical shape changes, these must follow.
+
+    /// <summary>
+    /// Pipeline and project a run belongs to. Canonical shape:
+    /// <c>PipelineRunService.GetRunPipelineContextAsync</c>, which reads the same two columns through
+    /// a full run DTO this module has no use for.
+    /// </summary>
+    public async Task<(int PipelineId, int? ProjectId)?> GetRunPipelineContextAsync(
+        int runId, CancellationToken ct = default)
+    {
+        // Projected into an anonymous type, not a ValueTuple: EF Core translates a tuple projection
+        // into a PostgreSQL record, which Npgsql refuses to read back ("not supported for fields
+        // having DataTypeName 'record'"). That threw on every artifact upload. The tuple is composed
+        // here instead, so the public shape is unchanged.
+        var context = await db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == runId)
+            .Select(run => new { run.PipelineId, run.Pipeline.ProjectId })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        return context is null ? null : (context.PipelineId, context.ProjectId);
+    }
+
+    /// <summary>
+    /// Whether a server ran any step of a run - the RBAC question an agent upload has to answer.
+    /// Canonical shape: <c>PipelineCoreRepository.IsServerAssignedToRunAsync</c>. The semantics that
+    /// matter: ANY step, so a run fanned out over several servers authorizes each of them.
+    /// </summary>
+    public async Task<bool> IsServerAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default) =>
+        await db.PipelineStepRuns.AsNoTracking()
+            .AnyAsync(step => step.PipelineRunId == runId && step.ServerId == serverId, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Release produced by a run, if any. Canonical shape:
+    /// <c>ReleaseRepository.FindByPipelineRunIdAsync</c>.
+    /// </summary>
+    public async Task<Release?> FindReleaseForRunAsync(int pipelineRunId, CancellationToken ct = default) =>
+        await db.Releases
+            .AsNoTracking()
+            .FirstOrDefaultAsync(release => release.PipelineRunId == pipelineRunId, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Deployed releases of a project, which retention must not delete the artifacts of. Canonical
+    /// shape: <c>ReleaseRepository.GetDeployedProjectReleasesAsync</c>.
+    /// </summary>
+    public async Task<List<Release>> GetDeployedProjectReleasesAsync(int projectId, CancellationToken ct = default) =>
+        await db.Releases
+            .Where(release => release.ProjectId == projectId && release.Status == ReleaseStatus.Deployed)
+            .ToListAsync(ct).ConfigureAwait(false);
 
     public async Task SaveChangesAsync(CancellationToken ct = default) =>
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

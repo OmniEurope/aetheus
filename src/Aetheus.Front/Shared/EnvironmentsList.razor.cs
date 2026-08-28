@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -49,8 +41,10 @@ public partial class EnvironmentsList : IAsyncDisposable
         await StartHubAsync();
     }
 
-    private string CacheKey(int page, int pageSize, string? search) =>
-        $"environments:{ProjectId}:{page}:{pageSize}:{search}";
+    // The sort belongs in the key: without it two orders share one entry and the second is served the
+    // first one's rows, which looks exactly like a sort that does nothing.
+    private string CacheKey(int page, int pageSize, string? search, string? sortBy = null, bool sortDescending = false) =>
+        $"environments:{ProjectId}:{page}:{pageSize}:{search}:{sortBy}:{sortDescending}";
 
     private void ApplyEnvironments(PaginatedResult<EnvironmentDto> result)
     {
@@ -69,9 +63,11 @@ public partial class EnvironmentsList : IAsyncDisposable
     private async Task OnLoadData(LoadDataArgs args)
     {
         var (page, pageSize) = args.ToPageRequest();
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(EnvironmentDto.Name));
         await Cache.RevalidateAsync(
-            CacheKey(page, pageSize, _search),
-            () => Api.GetEnvironmentsAsync(page: page, pageSize: pageSize, search: _search, projectId: ProjectId),
+            CacheKey(page, pageSize, _search, sortBy, sortDescending),
+            () => Api.Servers.GetEnvironmentsAsync(page: page, pageSize: pageSize, search: _search, projectId: ProjectId,
+                sortBy: sortBy, sortDescending: sortDescending),
             ApplyEnvironments,
             loading => _loading = loading,
             () => InvokeAsync(StateHasChanged));
@@ -92,7 +88,7 @@ public partial class EnvironmentsList : IAsyncDisposable
 
     private async Task DuplicateEnvironment(EnvironmentDto env)
     {
-        var result = await Api.DuplicateEnvironmentAsync(env.Id, new DuplicateEnvironmentRequest { TargetProjectId = env.ProjectId });
+        var result = await Api.Servers.DuplicateEnvironmentAsync(env.Id, new DuplicateEnvironmentRequest { TargetProjectId = env.ProjectId });
         if (result is not null)
         {
             Toast.Success("Created", "EnvironmentDuplicated");
@@ -123,14 +119,16 @@ public partial class EnvironmentsList : IAsyncDisposable
         catch { /* Hub unavailable - degrade to static */ }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
-        if (_hubConnection is not null)
-        {
-            try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.Environment); } catch { /* best-effort */ }
-            await _hubConnection.DisposeAsync();
-            _hubConnection = null;
-        }
+        return DisposeHubAsync();
+    }
+
+    private async ValueTask DisposeHubAsync()
+    {
+        if (_hubConnection is null) return;
+        await _hubConnection.LeaveEntityUpdatesAndDisposeAsync(ResourceType.Environment);
+        _hubConnection = null;
     }
 }

@@ -13,7 +13,7 @@
 #
 # Real operations only - no faked success. LOCAL TEST ONLY.
 # =============================================================================
-set -u
+set -eu
 
 log() { echo "[vpssim-agent] $*"; }
 
@@ -56,7 +56,6 @@ if [ -r /proc/1/environ ]; then
 fi
 
 [ "${AGENT_AUTOINSTALL:-0}" = "1" ] || { log "auto-install disabled (AGENT_AUTOINSTALL!=1) - box stays blank."; exit 0; }
-[ -e /var/lib/vpssim-agent-installed ] && { log "agent already installed."; exit 0; }
 
 BACKEND_URL="${BACKEND_URL:-https://host.docker.internal:5301}"
 ADMIN_USER="${ADMIN_USER:-admin}"
@@ -71,6 +70,49 @@ if [[ ! "$BACKEND_URL" =~ ^https://(host\.docker\.internal|localhost|127\.0\.0\.
     log "ERROR: BACKEND_URL must be an HTTPS loopback/host.docker.internal URL for this local-only bootstrap."
     exit 1
 fi
+
+# The development control plane serves a self-signed certificate. Node ignores the system CA store
+# unless NODE_EXTRA_CA_CERTS points at it (a drop-in in the image does that), and the store must also
+# actually CONTAIN that root, or `npm publish` to the control plane registry fails with
+# DEPTH_ZERO_SELF_SIGNED_CERT - which is what stopped publish-observability-packages on the mirror.
+# The certificate is generated on the developer machine, so it cannot be baked into the image, and it
+# is renewed there independently of this box; reading it at boot from the endpoint the guard above
+# just proved to be a loopback one keeps the two in step. Done BEFORE the already-installed exit, so
+# an existing box refreshes the trust on restart instead of keeping a certificate that has rotated.
+#
+# This is the opposite of relaxing TLS: the chain stays verified, the simulated host is handed the
+# root to verify it against, exactly as the baked demo certificate does for the smoke probe.
+# A failure here is a warning, never an abort: the box is still a usable VPS without it.
+trust_control_plane_certificate() {
+    hostport="${BACKEND_URL#https://}"
+    hostport="${hostport%%/*}"
+    case "$hostport" in *:*) : ;; *) hostport="${hostport}:443" ;; esac
+    attempt=1
+    while [ "$attempt" -le 20 ]; do
+        pem="$(openssl s_client -connect "$hostport" -servername "${hostport%%:*}" </dev/null 2>/dev/null | openssl x509 -outform pem 2>/dev/null)"
+        [ -n "$pem" ] && break
+        attempt=$((attempt + 1))
+        sleep 3
+    done
+    if [ -z "$pem" ]; then
+        log "WARN: no certificate readable at $hostport; npm publish to that registry will fail"
+        log "WARN: with DEPTH_ZERO_SELF_SIGNED_CERT until the control plane is up and the box reboots."
+        return 0
+    fi
+    echo "$pem" > /usr/local/share/ca-certificates/aetheus-dev.crt
+    chmod 644 /usr/local/share/ca-certificates/aetheus-dev.crt
+    update-ca-certificates >/dev/null 2>&1 || log "WARN: update-ca-certificates reported an error."
+    log "Development control plane certificate installed in the system CA store."
+}
+trust_control_plane_certificate
+
+if [ -e /var/lib/vpssim-agent-installed ] && [ -x /opt/aetheus-agent/Aetheus.Agent.Linux ]; then
+    log "agent already installed."
+    exit 0
+fi
+# The state volume survives a simulator container replacement while /opt does not. A marker
+# without the installed binary is stale and must never suppress enrollment of the rebuilt agent.
+rm -f /var/lib/vpssim-agent-installed
 
 if [ -z "$TOKEN" ] && [ -z "$ADMIN_PASSWORD" ]; then
     log "ERROR: set AGENT_TOKEN or VPSSIM_ADMIN_PASSWORD when VPSSIM_AGENT=1; no default password is embedded."
@@ -116,19 +158,22 @@ chmod +x install-agent-linux.sh Aetheus.Agent.Linux 2>/dev/null || true
 log "Running install-agent-linux.sh (pipeline-runner + server-management + deployment, docker + certbot + teamspeak)..."
 preserve_deploy_state
 trap restore_deploy_state EXIT
-./install-agent-linux.sh \
-    --server-url "$BACKEND_URL" \
-    --token "$TOKEN" \
-    --name "$AGENT_NAME" \
-    --module pipeline-runner \
-    --module server-management \
-    --module deployment \
-    --enable-docker \
-    --enable-certbot-manage \
-    --enable-teamspeak \
-    --allow-insecure-certs \
-    --yes
-RC=$?
+if ./install-agent-linux.sh \
+        --server-url "$BACKEND_URL" \
+        --token "$TOKEN" \
+        --name "$AGENT_NAME" \
+        --module pipeline-runner \
+        --module server-management \
+        --module deployment \
+        --enable-docker \
+        --enable-certbot-manage \
+        --enable-teamspeak \
+        --allow-insecure-certs \
+        --yes; then
+    RC=0
+else
+    RC=$?
+fi
 restore_deploy_state
 trap - EXIT
 

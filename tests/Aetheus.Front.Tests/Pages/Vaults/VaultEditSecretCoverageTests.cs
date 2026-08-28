@@ -111,7 +111,7 @@ public class VaultEditSecretCoverageTests : BunitContext
     // ── AddSecret: empty key guard ─────────────────────────────────────────────
 
     [Fact]
-    public async Task AddSecret_EmptyKey_DoesNothing()
+    public async Task AddSecret_EmptyKey_KeepsItSet()
     {
         SetupProjects();
         SetupVault(1);

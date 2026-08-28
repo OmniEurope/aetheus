@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Constants;
 
 namespace Aetheus.Front.Services;
 

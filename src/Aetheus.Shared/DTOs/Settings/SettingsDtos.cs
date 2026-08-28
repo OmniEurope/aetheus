@@ -23,6 +23,7 @@ public sealed record CreateRegistrationTokenRequest
     /// when omitted, the API falls back to the caller's default organization.</summary>
     [Range(1, int.MaxValue)]
     public int? OrganizationId { get; init; }
+
 }
 
 public sealed record AppSettingDto
@@ -93,6 +94,11 @@ public sealed record LoginResponse
     /// change-password call can authenticate.
     /// </summary>
     public bool MustChangePassword { get; init; }
+}
+
+public sealed record PublicDemoInfoDto
+{
+    public bool Enabled { get; init; }
 }
 
 public sealed record RefreshTokenRequest

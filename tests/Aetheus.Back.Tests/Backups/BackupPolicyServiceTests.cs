@@ -6,6 +6,7 @@ using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Time.Testing;
@@ -20,6 +21,7 @@ public class BackupPolicyServiceTests
     private readonly ITaskService _taskService = Substitute.For<ITaskService>();
     private readonly IEncryptionService _encryption = Substitute.For<IEncryptionService>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
+    private readonly IEntityChangeNotifier _notifier = Substitute.For<IEntityChangeNotifier>();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 7, 9, 12, 0, 0, TimeSpan.Zero));
     private readonly BackupPolicyService _sut;
 
@@ -27,7 +29,9 @@ public class BackupPolicyServiceTests
     {
         _encryption.EncryptValue(Arg.Any<string>()).Returns(ci => "enc:" + ci.Arg<string>());
         _encryption.DecryptValue(Arg.Any<string>()).Returns(ci => ci.Arg<string>()["enc:".Length..]);
-        _sut = new BackupPolicyService(_repo, _serverRepo, _taskService, _encryption, _time, _audit);
+        _repo.GetProjectOrganizationIdAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(4);
+        _sut = new BackupPolicyService(
+            _repo, _serverRepo, _taskService, _encryption, _time, _audit, _notifier);
     }
 
     [Fact]
@@ -106,8 +110,10 @@ public class BackupPolicyServiceTests
     [Fact]
     public async Task ApplyBackupResult_Success_SetsSucceededAndMetadata()
     {
-        var run = new BackupRun { Id = 3, ServerId = 5, Status = BackupRunStatus.Running };
+        var run = new BackupRun { Id = 3, ServerId = 5, BackupPolicyId = 7, Status = BackupRunStatus.Running };
         _repo.FindRunAsync(3, Arg.Any<CancellationToken>()).Returns(run);
+        _repo.FindPolicyAsync(7, Arg.Any<CancellationToken>())
+            .Returns(new BackupPolicy { Id = 7, ProjectId = 2 });
 
         await _sut.ApplyBackupResultAsync(3, 5, new BackupExecuteResultDto { Success = true, ArchivePath = "/b/3.dump", SizeBytes = 1024, Sha256 = "ABC" }, ct: TestContext.Current.CancellationToken);
 
@@ -115,17 +121,29 @@ public class BackupPolicyServiceTests
         Assert.Equal("/b/3.dump", run.ArchivePath);
         Assert.Equal(1024, run.SizeBytes);
         Assert.NotNull(run.CompletedAt);
+        await _notifier.Received(1).BroadcastOperationalAsync(
+            ResourceType.Project,
+            2,
+            OperationalRealtimeEvents.BackupChanged,
+            Arg.Any<CancellationToken>(),
+            4);
     }
 
     [Fact]
     public async Task TriggerBackup_CreatesRunningRun_DispatchesTask_SetsLastRun()
     {
-        var policy = new BackupPolicy { Id = 1, ServerId = 2, Name = "toto", ScheduleCron = "0 3 * * *", RetentionCount = 5 };
+        var policy = new BackupPolicy { Id = 1, ProjectId = 3, ServerId = 2, Name = "toto", ScheduleCron = "0 3 * * *", RetentionCount = 5 };
 
         var runId = await _sut.TriggerBackupAsync(policy, ct: TestContext.Current.CancellationToken);
 
         _repo.Received().AddRun(Arg.Is<BackupRun>(r => r.Status == BackupRunStatus.Running && r.ServerId == 2));
         await _serverRepo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t => t.Operation == OperationKind.BackupExecute), Arg.Any<CancellationToken>());
         Assert.Equal(_time.GetUtcNow().UtcDateTime, policy.LastRunAt);
+        await _notifier.Received(1).BroadcastOperationalAsync(
+            ResourceType.Project,
+            3,
+            OperationalRealtimeEvents.BackupChanged,
+            Arg.Any<CancellationToken>(),
+            4);
     }
 }

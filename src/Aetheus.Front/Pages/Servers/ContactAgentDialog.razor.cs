@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers;
 
@@ -107,7 +100,7 @@ public partial class ContactAgentDialog : IAsyncDisposable
                 _attempt = attempt;
                 await InvokeAsync(StateHasChanged);
 
-                var probe = Api.ContactAgentAsync(ServerId, token);
+                var probe = Api.Servers.ContactAgentAsync(ServerId, token);
                 var countdown = RunCountdownAsync(token);
 
                 // Race: if the agent answers Reachable=true, succeed immediately -
@@ -203,7 +196,7 @@ public partial class ContactAgentDialog : IAsyncDisposable
         if (_diagnosticLoading) return;
         _diagnosticLoading = true;
         await InvokeAsync(StateHasChanged);
-        _diagnostic = await Api.GetServerDiagnosticAsync(ServerId);
+        _diagnostic = await Api.Servers.GetServerDiagnosticAsync(ServerId);
         _diagnosticLoading = false;
         await InvokeAsync(StateHasChanged);
     }

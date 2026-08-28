@@ -1,0 +1,105 @@
+# Project deployment adapter restores the candidate release; it never builds or retests source.
+name: toto-deploy-accept-adapter
+trigger: manual
+variable_libraries:
+  - toto-observability
+vaults:
+  - toto-package-registry
+variables:
+  CANDIDATE_VERSION: "$(APPLICATION_CANDIDATE_VERSION)"
+  TOTO_ACCEPT_PORT: "10090"
+
+stages:
+  - name: RestoreCandidate
+    group: Deploy
+    execution_role: build
+    os: linux
+    environment: accept
+    steps:
+      - name: Restore candidate bytes
+        type: restore-artifacts
+        release: "$(CANDIDATE_VERSION)"
+        timeout_seconds: 1200
+      - name: Restore current accept baseline contract
+        type: restore-artifacts
+        release: current-deployed
+        target_directory: .delivery-production
+        allow_missing: true
+        timeout_seconds: 1200
+
+  - name: VerifyCandidateContract
+    group: Deploy
+    execution_role: build
+    os: linux
+    environment: accept
+    depends_on: [RestoreCandidate]
+    isolation:
+      mode: container
+      toolchain: node
+      network: none
+    steps:
+      - name: Refuse changed bytes or a stale accept baseline
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          BASELINE="-"
+          if test -s .delivery-production/.pipeline-artifacts/delivery-contract.json; then
+            BASELINE=".delivery-production/.pipeline-artifacts/delivery-contract.json"
+          fi
+          node deploy/scripts/verify-delivery-promotion.mjs \
+            .pipeline-artifacts/delivery-contract.json \
+            "$BASELINE" \
+            .pipeline-artifacts
+        timeout_seconds: 300
+
+  - name: DeployAccept
+    group: Deploy
+    execution_role: deploy
+    os: linux
+    environment: accept
+    depends_on: [VerifyCandidateContract]
+    steps:
+      - name: Deploy candidate without rebuild
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -n "${AETHEUS_INGEST_KEY:-}" || {
+            echo "AETHEUS_INGEST_KEY is required for telemetry export."
+            exit 1
+          }
+          test -n "${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY:-}" || {
+            echo "AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY is required for analytics export."
+            exit 1
+          }
+          COMMIT="$(tr -d '\r\n' < .pipeline-artifacts/source-commit)"
+          test "$COMMIT" = "${BUILD_SOURCEVERSION}" || {
+            echo "Candidate source does not match the promotion revision."
+            exit 1
+          }
+          docker load -i .pipeline-artifacts/toto-image.tar
+          export TOTO_IMAGE="toto:$COMMIT"
+          export TOTO_PORT="$(TOTO_ACCEPT_PORT)"
+          export TOTO_DB_PASSWORD="${TOTO_ACCEPT_DB_PASSWORD:-toto-accept-local-only}"
+          # Docker-in-Docker (the local VPS simulator) otherwise maps
+          # host.docker.internal to the nested daemon's gateway. Preserve the
+          # runner host's own mapping so deployed apps can reach the local
+          # Aetheus ingest endpoint. Real VPS hosts simply leave this unset.
+          if command -v getent >/dev/null 2>&1; then
+            OUTER_HOST_GATEWAY="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR == 1 { print $1 }')"
+            if test -n "$OUTER_HOST_GATEWAY"; then
+              export AETHEUS_HOST_GATEWAY="$OUTER_HOST_GATEWAY"
+            fi
+          fi
+          docker compose -p toto-accept -f deploy/docker-compose.yml up -d --wait
+        timeout_seconds: 1800
+
+  - name: Smoke
+    group: Smoke
+    execution_role: build
+    os: linux
+    environment: accept
+    depends_on: [DeployAccept]
+    steps:
+      - name: Verify promoted API
+        shell: curl -fsS "http://127.0.0.1:$(TOTO_ACCEPT_PORT)/api/todos" >/dev/null
+        timeout_seconds: 120

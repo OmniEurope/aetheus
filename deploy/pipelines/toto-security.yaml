@@ -1,0 +1,142 @@
+# Security scanners publish evidence without enforcing policy themselves.
+name: toto-security
+trigger: manual
+
+stages:
+  - name: Checkout
+    group: Security
+    execution_role: build
+    os: linux
+    steps:
+      - name: Verify immutable source
+        checkout: true
+        shell: test "$(git rev-parse HEAD)" = "${BUILD_SOURCEVERSION}"
+
+  - name: SourceProducers
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [Checkout]
+    steps:
+      - name: Produce secret findings
+        type: scanner
+        scanner: gitleaks
+        continue_on_error: true
+        timeout_seconds: 600
+      - name: Produce SAST findings
+        type: scanner
+        scanner: opengrep
+        continue_on_error: true
+        timeout_seconds: 900
+      - name: Produce dependency findings
+        type: scanner
+        scanner: trivy-dependencies
+        continue_on_error: true
+        timeout_seconds: 900
+      - name: Produce IaC findings
+        type: scanner
+        scanner: trivy-iac
+        continue_on_error: true
+        timeout_seconds: 900
+
+  - name: RestoreImage
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [SourceProducers]
+    steps:
+      - name: Restore exact CI image
+        type: restore-artifacts
+        artifact: Package-artifacts
+        artifact_source_pipeline: toto-ci
+        timeout_seconds: 1200
+
+  - name: PrepareImage
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [RestoreImage]
+    steps:
+      - name: Prepare exact image archive
+        shell: |
+          set -eu
+          mkdir -p .analysis-image
+          cp .pipeline-artifacts/toto-image.tar .analysis-image/aetheus-back.tar
+          cp .pipeline-artifacts/source-commit .analysis-image/source-commit
+
+  - name: ImageProducers
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [PrepareImage]
+    steps:
+      - name: Produce SBOM
+        type: scanner
+        scanner: syft
+        continue_on_error: true
+        timeout_seconds: 900
+      - name: Produce container findings
+        type: scanner
+        scanner: trivy-image
+        continue_on_error: true
+        timeout_seconds: 1200
+
+  - name: SecurityGateBoundary
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [ImageProducers]
+    steps:
+      - name: Publish summaries and calculate the versioned security grade
+        type: analysis-gate
+        analysis_scope: security
+        analysis_rules:
+          - key: system.security.new-high.sast
+            behavior: warn
+          - key: system.security.new-high.secrets
+            severity: medium
+            behavior: warn
+          - key: system.security.new-high.dependencies
+            behavior: warn
+          - key: system.security.new-high.container
+            behavior: warn
+          - key: system.security.new-high.iac
+            behavior: warn
+          - key: system.security.new-high.dast
+            behavior: warn
+        analysis_grading:
+          version: 1
+          minimum_grade: F
+          required_domains:
+            - security
+          rules:
+            - key: grade.security.critical
+              domain: security
+              severity: critical
+              direction: lower-is-better
+              a: 0
+              b: 0
+              c: 0
+              d: 0
+              e: 0
+            - key: grade.security.high
+              domain: security
+              severity: high
+              direction: lower-is-better
+              a: 0
+              b: 1
+              c: 3
+              d: 5
+              e: 10
+            - key: grade.security.medium
+              domain: security
+              severity: medium
+              required: false
+              direction: lower-is-better
+              a: 0
+              b: 5
+              c: 15
+              d: 30
+              e: 60
+        continue_on_error: true
+        timeout_seconds: 300

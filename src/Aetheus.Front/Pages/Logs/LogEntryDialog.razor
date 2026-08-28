@@ -4,7 +4,7 @@
     <pre class="exception-pre">@Message</pre>
     @if (!string.IsNullOrWhiteSpace(Exception))
     {
-        <RadzenText TextStyle="TextStyle.H6" class="rz-mt-3 rz-mb-1">@L["ExceptionDetails"]</RadzenText>
+        <RadzenText TextStyle="TextStyle.H5" class="rz-mt-3 rz-mb-1">@L["ExceptionDetails"]</RadzenText>
         <pre class="exception-pre">@Exception</pre>
     }
     <DialogFooter CancelText="@L["Close"]" OnCancel="Close">

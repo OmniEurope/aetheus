@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Servers;
@@ -18,7 +12,11 @@ namespace Aetheus.Back.Components.Servers;
 /// journal-log task creation. Extracted from the former <c>ServerService.ServiceManagement.cs</c>
 /// partial into a real collaborator that <see cref="ServerService"/> delegates to.
 /// </summary>
-internal sealed class ServerServiceManager(IServerRepository repo, IAuditService audit, ITaskService taskService)
+internal sealed class ServerServiceManager(
+    IServerRepository repo,
+    IServerHeartbeatRepository heartbeatRepo,
+    IAuditService audit,
+    ITaskService taskService)
 {
     public async Task<int> ExecuteServiceActionAsync(int serverId, ServiceActionRequest request, CancellationToken ct = default)
     {
@@ -142,7 +140,7 @@ internal sealed class ServerServiceManager(IServerRepository repo, IAuditService
         return task.Id;
     }
 
-    // PLAN-006 4.1: enqueue a whole-box apt-get upgrade. Two modes ride in AETHEUS_PATCH_DRY_RUN: a
+    // ADR-024 4.1: enqueue a whole-box apt-get upgrade. Two modes ride in AETHEUS_PATCH_DRY_RUN: a
     // non-mutating preview (dry-run) or a consented apply. Gated on the reported patch-manage capability
     // so we never queue an apply the agent cannot perform; the agent still runs the dry-run first and
     // aborts honestly on any critical package. A generous 900s timeout covers a large upgrade set.
@@ -169,7 +167,7 @@ internal sealed class ServerServiceManager(IServerRepository repo, IAuditService
     {
         var server = await repo.FindServerAsync(serverId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException($"Server {serverId} not found.");
-        var state = await repo.GetSecurityUpdatesStateAsync(serverId, ct).ConfigureAwait(false);
+        var state = await heartbeatRepo.GetSecurityUpdatesStateAsync(serverId, ct).ConfigureAwait(false);
 
         var updates = state?.UpdatesJson is { } json && !string.IsNullOrEmpty(json)
             ? JsonSerializer.Deserialize<List<PendingUpdateDto>>(json) ?? []
@@ -188,7 +186,7 @@ internal sealed class ServerServiceManager(IServerRepository repo, IAuditService
         };
     }
 
-    // --- PLAN-006 4.2: firewall (ufw) via the root-owned aetheus-firewall helper ---
+    // --- ADR-024 4.2: firewall (ufw) via the root-owned aetheus-firewall helper ---
 
     public Task<int> FirewallAllowAsync(int serverId, FirewallRuleRequest request, CancellationToken ct = default)
         => DispatchFirewallRuleAsync(serverId, OperationKind.FirewallAllow, request, ct);
@@ -210,13 +208,7 @@ internal sealed class ServerServiceManager(IServerRepository repo, IAuditService
             throw new BadRequestException(
                 $"Refused: closing the administration port {request.Port} would lock you out of SSH.");
 
-        var server = await repo.FindServerAsync(serverId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Server {serverId} not found.");
-        EnsureOnline(server);
-        if (!server.FirewallManagementAvailable)
-            throw new BadRequestException(
-                "Firewall management is not enabled on this server. Re-run the agent installer with "
-                + "--enable-firewall-manage to grant the controlled-sudo capability.");
+        var server = await GetFirewallManagedServerAsync(serverId, ct).ConfigureAwait(false);
 
         var env = new Dictionary<string, string>
         {
@@ -240,13 +232,7 @@ internal sealed class ServerServiceManager(IServerRepository repo, IAuditService
 
     public async Task<int> FirewallToggleAsync(int serverId, bool enabled, CancellationToken ct = default)
     {
-        var server = await repo.FindServerAsync(serverId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Server {serverId} not found.");
-        EnsureOnline(server);
-        if (!server.FirewallManagementAvailable)
-            throw new BadRequestException(
-                "Firewall management is not enabled on this server. Re-run the agent installer with "
-                + "--enable-firewall-manage to grant the controlled-sudo capability.");
+        var server = await GetFirewallManagedServerAsync(serverId, ct).ConfigureAwait(false);
 
         var target = enabled ? "enable" : "disable";
         var task = ServerTaskFactory.Operation(serverId, $"Firewall {target}", OperationKind.FirewallSetEnabled, target, 60);
@@ -256,11 +242,23 @@ internal sealed class ServerServiceManager(IServerRepository repo, IAuditService
         return task.Id;
     }
 
+    private async Task<Server> GetFirewallManagedServerAsync(int serverId, CancellationToken ct)
+    {
+        var server = await repo.FindServerAsync(serverId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException($"Server {serverId} not found.");
+        EnsureOnline(server);
+        if (!server.FirewallManagementAvailable)
+            throw new BadRequestException(
+                "Firewall management is not enabled on this server. Re-run the agent installer with "
+                + "--enable-firewall-manage to grant the controlled-sudo capability.");
+        return server;
+    }
+
     public async Task<ServerFirewallDto> GetFirewallAsync(int serverId, CancellationToken ct = default)
     {
         var server = await repo.FindServerAsync(serverId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException($"Server {serverId} not found.");
-        var state = await repo.GetFirewallStateAsync(serverId, ct).ConfigureAwait(false);
+        var state = await heartbeatRepo.GetFirewallStateAsync(serverId, ct).ConfigureAwait(false);
 
         var rules = state?.RulesJson is { } json && !string.IsNullOrEmpty(json)
             ? JsonSerializer.Deserialize<List<FirewallRuleDto>>(json) ?? []

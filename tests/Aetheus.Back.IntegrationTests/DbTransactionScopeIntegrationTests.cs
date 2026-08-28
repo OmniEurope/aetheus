@@ -99,8 +99,6 @@ public sealed class DbTransactionScopeIntegrationTests(PostgresFixture fixture)
             await first.RollbackAsync(ct: TestContext.Current.CancellationToken);
         }
 
-        db.ChangeTracker.Clear();
-
         await using (var second = new DbTransactionScope(db))
         {
             await second.BeginTransactionAsync(ct: TestContext.Current.CancellationToken);

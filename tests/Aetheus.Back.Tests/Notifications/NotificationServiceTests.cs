@@ -14,14 +14,20 @@ public class NotificationServiceTests
     private readonly INotificationRepository _repo = Substitute.For<INotificationRepository>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
     private readonly IHttpClientFactory _httpFactory = Substitute.For<IHttpClientFactory>();
+    private readonly Aetheus.Back.Services.IEncryptionService _encryption =
+        Substitute.For<Aetheus.Back.Services.IEncryptionService>();
     private readonly NotificationService _sut;
 
     public NotificationServiceTests()
     {
+        _encryption.EncryptValue(Arg.Any<string>()).Returns(call => "enc:" + call.Arg<string>());
+        _encryption.DecryptValue(Arg.Any<string>()).Returns(call => call.Arg<string>()["enc:".Length..]);
         _sut = new NotificationService(
             _repo, _audit,
+            Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>(),
             _httpFactory,
             Substitute.For<ILogger<NotificationService>>(),
+            _encryption,
             TimeProvider.System);
     }
 
@@ -128,6 +134,30 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task GetChannelAsync_WebhookConfiguration_MasksUrlAndSecret()
+    {
+        _repo.GetChannelWithRulesAsync(1, Arg.Any<CancellationToken>())
+            .Returns(new NotificationChannel
+            {
+                Id = 1,
+                Name = "webhook",
+                Type = NotificationChannelType.Webhook,
+                ConfigurationJson =
+                    """{"url":"https://hooks.example/tenant/key","secret":"signing-secret","format":"json"}""",
+                Rules = []
+            });
+
+        var result = await _sut.GetChannelAsync(1, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("hooks.example", result.ConfigurationJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("signing-secret", result.ConfigurationJson, StringComparison.Ordinal);
+        Assert.Contains("\"url\":\"***\"", result.ConfigurationJson, StringComparison.Ordinal);
+        Assert.Contains("\"secret\":\"***\"", result.ConfigurationJson, StringComparison.Ordinal);
+        Assert.Contains("\"format\":\"json\"", result.ConfigurationJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetChannelAsync_NotFound_ReturnsNull()
     {
         _repo.GetChannelWithRulesAsync(99, Arg.Any<CancellationToken>())
@@ -152,7 +182,10 @@ public class NotificationServiceTests
         }, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal("slack", result.Name);
-        await _repo.Received(1).AddChannelAsync(Arg.Any<NotificationChannel>(), Arg.Any<CancellationToken>());
+        await _repo.Received(1).AddChannelAsync(
+            Arg.Is<NotificationChannel>(channel =>
+                channel.ConfigurationJson == "enc:{\"webhook_url\":\"https://hooks.slack.com/test\"}"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -181,6 +214,34 @@ public class NotificationServiceTests
 
         Assert.NotNull(result);
         Assert.Equal("updated", result.Name);
+    }
+
+    [Fact]
+    public async Task UpdateChannelAsync_MaskedSecrets_PreservesStoredValues()
+    {
+        var channel = new NotificationChannel
+        {
+            Id = 1,
+            Name = "old",
+            Type = NotificationChannelType.Webhook,
+            ConfigurationJson =
+                """{"url":"https://hooks.example/tenant/key","secret":"signing-secret"}""",
+            Rules = []
+        };
+        _repo.FindChannelAsync(1, Arg.Any<CancellationToken>()).Returns(channel);
+
+        await _sut.UpdateChannelAsync(1, new UpdateNotificationChannelRequest
+        {
+            Name = "updated",
+            ConfigurationJson = """{"url":"***","secret":"***"}""",
+            IsEnabled = true
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "enc:{\"url\":\"https://hooks.example/tenant/key\",\"secret\":\"signing-secret\"}",
+            channel.ConfigurationJson);
+        _encryption.Received(1).EncryptValue(
+            "{\"url\":\"https://hooks.example/tenant/key\",\"secret\":\"signing-secret\"}");
     }
 
     [Fact]

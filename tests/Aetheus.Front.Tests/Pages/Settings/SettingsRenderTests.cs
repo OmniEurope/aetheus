@@ -118,24 +118,19 @@ public class SettingsRenderTests : BunitContext
     }
 
     [Fact]
-    public async Task SaveNotificationPreferences_Succeeds()
+    public void NotificationToggle_PersistsImmediately()
     {
         SetupStubs();
 
-        var cut = Render<SettingsPage>();
+        var cut = Render<SettingsPage>(p => p.Add(x => x.Tab, "notifications"));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        var method = typeof(SettingsPage).GetMethod("SaveNotificationPreferences", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        cut.Find("input.labeled-toggle-native-input").Change(false);
 
-        // All three notification preference keys are written to localStorage.
-        var writtenKeys = JSInterop.Invocations
-            .Where(i => i.Identifier == "localStorage.setItem")
-            .Select(i => (string?)i.Arguments[0])
-            .ToList();
-        Assert.Contains("aetheus_notif_email", writtenKeys);
-        Assert.Contains("aetheus_notif_pipeline", writtenKeys);
-        Assert.Contains("aetheus_notif_server", writtenKeys);
+        cut.WaitForAssertion(() => Assert.Contains(JSInterop.Invocations, invocation =>
+            invocation.Identifier == "localStorage.setItem"
+            && (string?)invocation.Arguments[0] == "aetheus_notif_email"
+            && (string?)invocation.Arguments[1] == "false"));
     }
 
     [Fact]

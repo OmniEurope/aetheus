@@ -10,4 +10,10 @@ public interface ISecretMaskingService
     /// masked in this run's logs too (e.g. the ephemeral Git clone token). Defense in depth: the value
     /// should never be echoed, but if it leaks into a log line it must still be redacted.</summary>
     void RegisterRuntimeSecret(int pipelineRunId, string secret);
+
+    /// <summary>The runtime secret VALUES known for this run, for callers that must redact a value they
+    /// already hold rather than a log line. Synchronous on purpose: condition evidence is captured on a
+    /// synchronous path, and a value that reaches persistence unredacted is served unredacted forever.
+    /// Returns an empty set when nothing was registered.</summary>
+    IReadOnlyCollection<string> GetRuntimeSecretValues(int pipelineRunId);
 }

@@ -137,7 +137,7 @@ public class ServerConfigSectionTemplateTests : BunitContext
     [InlineData("enable", BadgeStyle.Success)]
     [InlineData("update", BadgeStyle.Info)]
     [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("remove", BadgeStyle.Secondary)]
+    [InlineData("remove", BadgeStyle.Light)]
     public void GetChangeBadgeStyle_ReturnsExpected(string action, BadgeStyle expected)
     {
         var method = typeof(ServerConfigSection).GetMethod("GetChangeBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;

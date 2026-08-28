@@ -10,7 +10,6 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
 {
     private readonly string _bare = Path.Combine(Path.GetTempPath(), $"prom-git-test-{Guid.NewGuid():N}.git");
     private readonly GitLightCliService _svc;
-    private readonly bool _gitAvailable;
 
     public GitLightCliServiceCommitTests()
     {
@@ -20,13 +19,12 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
             new GitLightCliWriter(runner, NullLogger<GitLightCliWriter>.Instance),
             NullLogger<GitLightCliService>.Instance,
             TimeProvider.System);
-        _gitAvailable = TryRunGit($"init --bare --initial-branch main \"{_bare}\"");
+        RunGit($"init --bare --initial-branch main \"{_bare}\"");
     }
 
     [Fact]
     public async Task CommitFileAsync_EmptyRepo_CreatesAndReadsBack()
     {
-        Assert.SkipUnless(_gitAvailable, "git not on PATH - environment can't exercise this");
 
         var (ok, sha, error) = await _svc.CommitFileAsync(
             _bare, "main", ".pipeline/ci.yaml", "name: ci\nstages: []\n",
@@ -43,7 +41,6 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
     [Fact]
     public async Task CommitFileAsync_RejectsPathTraversal()
     {
-        Assert.SkipUnless(_gitAvailable, "git not on PATH - environment can't exercise this");
 
         var (ok, _, error) = await _svc.CommitFileAsync(
             _bare, "main", "../escape.yaml", "x", "msg", "p", "p@test", ct: TestContext.Current.CancellationToken);
@@ -55,7 +52,7 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
     [Fact]
     public async Task CommitFileChangesAsync_RenameRemovesOldPathInSameCommit()
     {
-        Assert.SkipUnless(_gitAvailable, "git not on PATH - environment can't exercise this");
+
         var (seeded, _, seedError) = await _svc.CommitFileAsync(
             _bare, "main", ".pipeline/old.yaml", "name: old\n",
             "seed old", "aetheus", "aetheus@test", ct: TestContext.Current.CancellationToken);
@@ -72,17 +69,44 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
             _bare, "main", ".pipeline/new.yaml", ct: TestContext.Current.CancellationToken))!.Content);
     }
 
-    private static bool TryRunGit(string args)
+    [Fact]
+    public async Task GetCommitMessagesAsync_ReadsSeveralMessagesWithOneGitOperation()
     {
-        try
+
+        var (firstOk, firstSha, firstError) = await _svc.CommitFileAsync(
+            _bare, "main", "one.txt", "one", "feat: first message", "aetheus", "aetheus@test",
+            ct: TestContext.Current.CancellationToken);
+        Assert.True(firstOk, firstError);
+        var (secondOk, secondSha, secondError) = await _svc.CommitFileAsync(
+            _bare, "main", "two.txt", "two", "fix: second message", "aetheus", "aetheus@test",
+            ct: TestContext.Current.CancellationToken);
+        Assert.True(secondOk, secondError);
+
+        var messages = await _svc.GetCommitMessagesAsync(
+            _bare, [firstSha!, secondSha!], TestContext.Current.CancellationToken);
+
+        Assert.Equal("feat: first message", messages[firstSha!]);
+        Assert.Equal("fix: second message", messages[secondSha!]);
+    }
+
+    // git is a hard prerequisite of the product, not an optional convenience: a host without it must
+    // fail these tests rather than quietly pass a suite that exercised nothing.
+    private static void RunGit(string args)
+    {
+        var git = ExecutableLocator.Require("git");
+        var psi = new ProcessStartInfo(git, args)
         {
-            var psi = new ProcessStartInfo("git", args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
-            using var p = Process.Start(psi);
-            if (p is null) return false;
-            p.WaitForExit(10000);
-            return p.ExitCode == 0;
-        }
-        catch { return false; }
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true
+        };
+        using var process = Process.Start(psi)
+                            ?? throw new InvalidOperationException($"Could not start '{git}'.");
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit(10000);
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"git {args} failed ({process.ExitCode}): {stderr}");
     }
 
     public void Dispose()

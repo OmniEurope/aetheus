@@ -1,18 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
 /// <summary>
-/// PLAN-001 phase 1: monitored-apps list for a project (availability). Self-loading; the <c>entities</c>
+/// ADR-021 phase 1: monitored-apps list for a project (availability). Self-loading; the <c>entities</c>
 /// hub keeps statuses live (the backend broadcasts a Project "Updated" on every app status transition).
 /// </summary>
 public partial class MonitoredAppsList : IAsyncDisposable
@@ -77,7 +68,7 @@ public partial class MonitoredAppsList : IAsyncDisposable
     {
         try
         {
-            _apps = await Api.GetMonitoredAppsAsync(ProjectId);
+            _apps = await Api.Monitoring.GetMonitoredAppsAsync(ProjectId);
             await LoadSamplesAsync();
             Cache.Set(CacheKey, new CachedMonitoringData(_apps, _samples));
         }
@@ -94,7 +85,7 @@ public partial class MonitoredAppsList : IAsyncDisposable
         try
         {
             var loaded = await Task.WhenAll(_apps.Select(async a =>
-                (a.Id, Samples: (IReadOnlyList<AppHealthSampleDto>)await Api.GetMonitoredAppSamplesAsync(a.Id))));
+                (a.Id, Samples: (IReadOnlyList<AppHealthSampleDto>)await Api.Monitoring.GetMonitoredAppSamplesAsync(a.Id))));
             _samples = loaded.ToDictionary(x => x.Id, x => x.Samples);
         }
         catch (HttpRequestException)
@@ -110,7 +101,7 @@ public partial class MonitoredAppsList : IAsyncDisposable
         var result = await Dialog.OpenAsync<MonitoredAppFormDialog>(
             app is null ? L["AddMonitoredApp"] : L["Edit"],
             new Dictionary<string, object?> { ["ProjectId"] = ProjectId, ["App"] = app },
-            new DialogOptions { Width = "760px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "760px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
 
         if (result is true)
         {
@@ -128,7 +119,7 @@ public partial class MonitoredAppsList : IAsyncDisposable
             return;
 
         await Ui.RunAsync(
-            () => Api.DeleteMonitoredAppAsync(app.Id),
+            () => Api.Monitoring.DeleteMonitoredAppAsync(app.Id),
             "MonitoredAppDeleted",
             async () => await LoadAppsAsync(),
             errorKey: "DeleteFailed",
@@ -175,8 +166,7 @@ public partial class MonitoredAppsList : IAsyncDisposable
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_hubConnection is not null)
         {
-            try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.Project); } catch { /* best-effort */ }
-            await _hubConnection.DisposeAsync();
+            await _hubConnection.LeaveEntityUpdatesAndDisposeAsync(ResourceType.Project);
             _hubConnection = null;
         }
     }

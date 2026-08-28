@@ -16,14 +16,14 @@
 @inject Aetheus.Front.Services.ProjectDetailLoader Loader
 @inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
 @inject Microsoft.AspNetCore.Components.NavigationManager Nav
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
 
 @using Aetheus.Shared.Enums
 
 <CascadingValue Value="Loader" Name="ProjectLoader">
     @if (Loader.Project is null && !Loader.InitialLoadCompleted)
     {
-        <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate"
-            Size="ProgressBarCircularSize.Large" />
+        <AetheusLoader Size="AetheusLoaderSize.Large" />
     }
     else if (Loader.Project is null)
     {
@@ -35,15 +35,24 @@
     }
     else
     {
-        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
-            class="rz-mb-4 detail-page-header" Gap="1rem">
+        <div class="project-detail-header detail-page-header">
             <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
-            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@Loader.Project.Name</RadzenText>
-            <RadzenBadge BadgeStyle="@(Loader.Project.Status == ProjectStatus.Active ? BadgeStyle.Success : BadgeStyle.Light)"
-                Text="@L[Loader.Project.Status.ToString()]" />
+            <span class="project-detail-icon" aria-hidden="true"><RadzenIcon Icon="folder" /></span>
+            <div class="project-detail-identity">
+                <div class="project-detail-title-row">
+                    <RadzenText TextStyle="TextStyle.H4" class="rz-m-0 detail-page-title">@Loader.Project.Name</RadzenText>
+                    <RadzenBadge BadgeStyle="@(Loader.Project.Status == ProjectStatus.Active ? BadgeStyle.Success : BadgeStyle.Light)"
+                        Text="@L[Loader.Project.Status.ToString()]" />
+                </div>
+                @if (!string.IsNullOrWhiteSpace(Loader.Project.Description))
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" class="project-detail-description rz-m-0">@Loader.Project.Description</RadzenText>
+                }
+            </div>
             <div class="flex-spacer"></div>
-            <RadzenButton Icon="edit" Text="@L["Edit"]" Click="@(() => Nav.NavigateTo($"/projects/{Loader.Project.Id}/edit"))" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-        </RadzenStack>
+            <RadzenButton Icon="edit" Text="@L["Edit"]" Click="@(() => Nav.NavigateTo($"/projects/{Loader.Project.Id}/edit"))"
+                class="project-detail-edit-button" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+        </div>
     }
 
     <div class="@(Loader.Project is null ? "blade-content blade-content-hidden" : "blade-content")">

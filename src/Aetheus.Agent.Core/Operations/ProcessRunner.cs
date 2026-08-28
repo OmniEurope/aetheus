@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -59,12 +57,23 @@ internal static class ProcessRunner
         }
 
         var stdout = ExecutorHelper.StreamOutputAsync(process.StandardOutput, TaskLogLevel.Info, onOutput, timeoutCts.Token, logger);
-        var stderr = ExecutorHelper.StreamOutputAsync(process.StandardError, TaskLogLevel.Error, onOutput, timeoutCts.Token, logger);
+        // stderr is an output channel, not a semantic failure level: many successful tools use it for
+        // progress and diagnostics. Preserve the channel explicitly in the message and reserve Error for
+        // the exit-code proof below.
+        var stderr = ExecutorHelper.StreamOutputAsync(
+            process.StandardError,
+            TaskLogLevel.Warning,
+            (line, level) => onOutput($"[stderr] {line.TrimEnd()}", level),
+            timeoutCts.Token,
+            logger);
 
         try
         {
             await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
             await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+            await onOutput(
+                $"[process] exit-code={process.ExitCode}",
+                process.ExitCode == 0 ? TaskLogLevel.Info : TaskLogLevel.Error).ConfigureAwait(false);
             return new ExecutorResult(process.ExitCode, false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

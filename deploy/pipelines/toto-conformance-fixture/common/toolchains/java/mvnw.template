@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+MAVEN_VERSION="3.9.11"
+MAVEN_ARCHIVE_SHA256="4b7195b6a4f5c81af4c0212677a32ee8143643401bc6e1e8412e6b06ea82beac"
+MAVEN_ARCHIVE_URL="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+MAVEN_USER_HOME="${MAVEN_USER_HOME:-${HOME}/.m2}"
+MAVEN_HOME="${MAVEN_USER_HOME}/wrapper/dists/apache-maven-${MAVEN_VERSION}"
+
+if [ ! -x "${MAVEN_HOME}/bin/mvn" ]; then
+  download_dir="$(mktemp -d)"
+  trap 'rm -rf "${download_dir}"' EXIT HUP INT TERM
+  archive="${download_dir}/apache-maven.tar.gz"
+  cat > "${download_dir}/Download.java" <<'JAVA'
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+
+public final class Download {
+    public static void main(String[] args) throws Exception {
+        try (var input = URI.create(args[0]).toURL().openStream()) {
+            Files.copy(input, Path.of(args[1]), StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+}
+JAVA
+  javac -d "${download_dir}" "${download_dir}/Download.java"
+  java -cp "${download_dir}" Download "${MAVEN_ARCHIVE_URL}" "${archive}"
+  printf '%s  %s\n' "${MAVEN_ARCHIVE_SHA256}" "${archive}" | sha256sum -c -
+  mkdir -p "${MAVEN_USER_HOME}/wrapper/dists"
+  tar -xzf "${archive}" -C "${MAVEN_USER_HOME}/wrapper/dists"
+fi
+
+exec "${MAVEN_HOME}/bin/mvn" "$@"

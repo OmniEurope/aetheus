@@ -1,14 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Plugins;
 
@@ -45,7 +35,9 @@ public partial class PluginManagement : IAsyncDisposable
         }
 
         _authorized = true;
-        Breadcrumb.Set(new BreadcrumbItem(L["Plugins"]));
+        Breadcrumb.Set(
+            new BreadcrumbItem(L["Administration"], "/admin"),
+            new BreadcrumbItem(L["Plugins"]));
         await LoadPageAsync();
         // Realtime: refresh the list when plugins are registered/updated/unregistered (e.g. an agent
         // registering a plugin), so the management view reflects changes without a manual reload. RT4M.
@@ -62,7 +54,7 @@ public partial class PluginManagement : IAsyncDisposable
         _loading = true;
         try
         {
-            var result = await Api.GetPluginsPageAsync(
+            var result = await Api.Settings.GetPluginsPageAsync(
                 _currentPage, _pageSize, _search, _sortBy, _sortDescending);
             _plugins = result.Items;
             _totalCount = result.TotalCount;
@@ -78,7 +70,7 @@ public partial class PluginManagement : IAsyncDisposable
     private async Task OnLoadDataAsync(LoadDataArgs args)
     {
         (_currentPage, _pageSize) = args.ToPageRequest();
-        (_sortBy, _sortDescending) = GetSort(args);
+        (_sortBy, _sortDescending) = args.ToSortRequest("Name");
         await LoadPageAsync();
     }
 
@@ -106,7 +98,7 @@ public partial class PluginManagement : IAsyncDisposable
     private async Task TogglePlugin(PluginRegistrationDto plugin)
     {
         var newStatus = plugin.Status == PluginStatus.Enabled ? PluginStatus.Disabled : PluginStatus.Enabled;
-        var result = await Api.UpdatePluginAsync(plugin.Id, new UpdatePluginRequest
+        var result = await Api.Settings.UpdatePluginAsync(plugin.Id, new UpdatePluginRequest
         {
             Description = plugin.Description,
             Status = newStatus,
@@ -116,6 +108,11 @@ public partial class PluginManagement : IAsyncDisposable
         if (result is not null)
         {
             await LoadPageAsync();
+            Toast.Success("Saved", "Saved");
+        }
+        else
+        {
+            Toast.Error("Error", "SaveFailed");
         }
     }
 
@@ -125,7 +122,7 @@ public partial class PluginManagement : IAsyncDisposable
             new ConfirmOptions { OkButtonText = L["Unregister"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.UnregisterPluginAsync(id);
+        var success = await Api.Settings.UnregisterPluginAsync(id);
         if (success)
         {
             await LoadPageAsync();
@@ -144,14 +141,6 @@ public partial class PluginManagement : IAsyncDisposable
         PluginStatus.Error => BadgeStyle.Danger,
         _ => BadgeStyle.Info
     };
-
-    private static (string SortBy, bool Descending) GetSort(LoadDataArgs args)
-    {
-        if (string.IsNullOrWhiteSpace(args.OrderBy)) return ("Name", false);
-        var parts = args.OrderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return (parts[0], parts.Length > 1
-            && string.Equals(parts[1], "desc", StringComparison.OrdinalIgnoreCase));
-    }
 
     public async ValueTask DisposeAsync()
     {

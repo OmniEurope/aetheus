@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Collections.Concurrent;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.Vaults;
@@ -22,7 +16,8 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         request ??= new PaginationRequest();
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetVaultsPagedAsync(
-            request.Search, projectId, environmentId, projectServerId, page, pageSize, accessibleIds, ct).ConfigureAwait(false);
+            request.Search, projectId, environmentId, projectServerId, page, pageSize, accessibleIds, ct,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<VaultDto>
         {
@@ -154,21 +149,12 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         await transaction.ExecuteInTransactionAsync(async () =>
         {
             await repo.AddSecretAsync(secret, ct).ConfigureAwait(false);
-
-            var version = await repo.GetNextVersionAsync(secret.Id, ct).ConfigureAwait(false);
-            await repo.AddSecretVersionAsync(new VaultSecretVersion
-            {
-                VaultSecretId = secret.Id,
-                Key = secret.Key,
-                EncryptedValue = secret.EncryptedValue,
-                Version = version,
-                ChangeType = ChangeType.Created
-            }, ct).ConfigureAwait(false);
+            await AddSecretVersionAsync(secret, ChangeType.Created, ct).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         await audit.LogAsync("CreatedSecret", "VaultSecret", secret.Id, secret.Key, ct).ConfigureAwait(false);
 
-        return new VaultSecretDto { Id = secret.Id, Key = secret.Key, CreatedAt = secret.CreatedAt, UpdatedAt = secret.UpdatedAt, ExpiresAt = secret.ExpiresAt };
+        return ToDto(secret);
     }
 
     public async Task<VaultSecretDto?> UpdateSecretAsync(int vaultId, int secretId, UpdateVaultSecretRequest request, CancellationToken ct = default)
@@ -181,24 +167,9 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         secret.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         secret.ExpiresAt = request.ExpiresAt;
 
-        await transaction.ExecuteInTransactionAsync(async () =>
-        {
-            await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await PersistSecretChangeAsync(secret, ChangeType.Updated, "UpdatedSecret", ct).ConfigureAwait(false);
 
-            var version = await repo.GetNextVersionAsync(secret.Id, ct).ConfigureAwait(false);
-            await repo.AddSecretVersionAsync(new VaultSecretVersion
-            {
-                VaultSecretId = secret.Id,
-                Key = secret.Key,
-                EncryptedValue = secret.EncryptedValue,
-                Version = version,
-                ChangeType = ChangeType.Updated
-            }, ct).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
-
-        await audit.LogAsync("UpdatedSecret", "VaultSecret", secret.Id, secret.Key, ct).ConfigureAwait(false);
-
-        return new VaultSecretDto { Id = secret.Id, Key = secret.Key, CreatedAt = secret.CreatedAt, UpdatedAt = secret.UpdatedAt, ExpiresAt = secret.ExpiresAt };
+        return ToDto(secret);
     }
 
     public async Task<VaultSecretDto?> RotateSecretAsync(int vaultId, int secretId, RotateVaultSecretRequest request, CancellationToken ct = default)
@@ -217,24 +188,23 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         secret.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         secret.ExpiresAt = request.ExpiresAt;
 
+        await PersistSecretChangeAsync(secret, ChangeType.Rotated, "Rotated", ct).ConfigureAwait(false);
+
+        return ToDto(secret);
+    }
+
+    private async Task PersistSecretChangeAsync(
+        VaultSecret secret,
+        ChangeType changeType,
+        string auditAction,
+        CancellationToken ct)
+    {
         await transaction.ExecuteInTransactionAsync(async () =>
         {
             await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            var version = await repo.GetNextVersionAsync(secret.Id, ct).ConfigureAwait(false);
-            await repo.AddSecretVersionAsync(new VaultSecretVersion
-            {
-                VaultSecretId = secret.Id,
-                Key = secret.Key,
-                EncryptedValue = secret.EncryptedValue,
-                Version = version,
-                ChangeType = ChangeType.Rotated
-            }, ct).ConfigureAwait(false);
+            await AddSecretVersionAsync(secret, changeType, ct).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
-
-        await audit.LogAsync("Rotated", "VaultSecret", secret.Id, secret.Key, ct).ConfigureAwait(false);
-
-        return new VaultSecretDto { Id = secret.Id, Key = secret.Key, CreatedAt = secret.CreatedAt, UpdatedAt = secret.UpdatedAt, ExpiresAt = secret.ExpiresAt };
+        await audit.LogAsync(auditAction, "VaultSecret", secret.Id, secret.Key, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteSecretAsync(int vaultId, int secretId, CancellationToken ct = default)
@@ -278,21 +248,35 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         }).ToList();
     }
 
+    public async Task<int> PurgeHistoricalSecretVersionsAsync(
+        int vaultId,
+        int secretId,
+        DateTime cutoffUtc,
+        int maxCount,
+        CancellationToken ct = default)
+    {
+        var secret = await repo.FindSecretAsync(secretId, ct).ConfigureAwait(false);
+        if (secret is null || secret.VaultId != vaultId)
+            return 0;
+        var purged = await repo.PurgeHistoricalSecretVersionsAsync(secretId, cutoffUtc, maxCount, ct)
+            .ConfigureAwait(false);
+        if (purged > 0)
+        {
+            await audit.LogAsync(
+                "PurgedSecretVersions",
+                "VaultSecret",
+                secretId,
+                $"{purged} historical versions",
+                ct).ConfigureAwait(false);
+        }
+        return purged;
+    }
+
     public async Task<Dictionary<string, string>> ResolveVaultSecretsAsync(List<string> names, int? projectId, CancellationToken ct = default)
     {
         var vaults = await repo.FindByNamesAsync(names, projectId, ct).ConfigureAwait(false);
 
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var vault in vaults.Where(v => v.ProjectId == null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        foreach (var vault in vaults.Where(v => v.ProjectId != null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        return result;
+        return MergeVaults(vaults, vault => vault.ProjectId.HasValue ? 1 : 0);
     }
 
     public async Task<Dictionary<string, string>> ResolveVaultSecretsWithCrossAccessAsync(List<string> names, int projectId, CancellationToken ct = default)
@@ -303,25 +287,7 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
 
     private Dictionary<string, string> MergeVaultsWithPrecedence(List<Data.Entities.Vault> vaults)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var vault in vaults.Where(v => v.ProjectId == null && v.EnvironmentId == null && v.ProjectServerId == null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        foreach (var vault in vaults.Where(v => v.ProjectId != null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        foreach (var vault in vaults.Where(v => v.EnvironmentId != null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        foreach (var vault in vaults.Where(v => v.ProjectServerId != null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        return result;
+        return MergeVaults(vaults, VaultPrecedence);
     }
 
     public async Task<(Dictionary<string, string> Vars, HashSet<string> FoundNames)> ResolveVaultSecretsWithNamesAsync(List<string> names, int? projectId, CancellationToken ct = default)
@@ -329,15 +295,7 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         var vaults = await repo.FindByNamesAsync(names, projectId, ct).ConfigureAwait(false);
         var foundNames = new HashSet<string>(vaults.Select(v => v.Name), StringComparer.OrdinalIgnoreCase);
 
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var vault in vaults.Where(v => v.ProjectId == null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-        foreach (var vault in vaults.Where(v => v.ProjectId != null))
-            foreach (var secret in vault.Secrets)
-                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
-
-        return (result, foundNames);
+        return (MergeVaults(vaults, vault => vault.ProjectId.HasValue ? 1 : 0), foundNames);
     }
 
     public async Task<(Dictionary<string, string> Vars, HashSet<string> FoundNames)> ResolveVaultSecretsWithCrossAccessAndNamesAsync(List<string> names, int projectId, CancellationToken ct = default)
@@ -345,6 +303,47 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         var vaults = await repo.FindByNamesWithCrossAccessAsync(names, projectId, ct).ConfigureAwait(false);
         var foundNames = new HashSet<string>(vaults.Select(v => v.Name), StringComparer.OrdinalIgnoreCase);
         return (MergeVaultsWithPrecedence(vaults), foundNames);
+    }
+
+    private async Task AddSecretVersionAsync(VaultSecret secret, ChangeType changeType, CancellationToken ct)
+    {
+        var version = await repo.GetNextVersionAsync(secret.Id, ct).ConfigureAwait(false);
+        await repo.AddSecretVersionAsync(new VaultSecretVersion
+        {
+            VaultSecretId = secret.Id,
+            Key = secret.Key,
+            EncryptedValue = secret.EncryptedValue,
+            Version = version,
+            ChangeType = changeType
+        }, ct).ConfigureAwait(false);
+    }
+
+    private static VaultSecretDto ToDto(VaultSecret secret) => new()
+    {
+        Id = secret.Id,
+        Key = secret.Key,
+        CreatedAt = secret.CreatedAt,
+        UpdatedAt = secret.UpdatedAt,
+        ExpiresAt = secret.ExpiresAt
+    };
+
+    private Dictionary<string, string> MergeVaults(
+        IEnumerable<Data.Entities.Vault> vaults, Func<Data.Entities.Vault, int> precedence)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var vault in vaults.OrderBy(precedence))
+        {
+            foreach (var secret in vault.Secrets)
+                result[secret.Key] = encryption.DecryptValue(secret.EncryptedValue);
+        }
+        return result;
+    }
+
+    private static int VaultPrecedence(Data.Entities.Vault vault)
+    {
+        if (vault.ProjectServerId.HasValue) return 3;
+        if (vault.EnvironmentId.HasValue) return 2;
+        return vault.ProjectId.HasValue ? 1 : 0;
     }
 
     public async Task<List<string>> ExportSecretKeysAsync(int vaultId, CancellationToken ct = default)

@@ -4,20 +4,23 @@
 
 <PageTitle>@(_isNew ? L["NewRole"] : _name) - Aetheus</PageTitle>
 
+<div class="iam-page iam-detail-page">
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
-    <Aetheus.Front.Shared.PageHeader Title="@(_isNew ? L["NewRole"] : _name)" Icon="admin_panel_settings" BackHref="/admin/roles" />
+    <Aetheus.Front.Shared.PageHeader Title="@(_isNew ? L["NewRole"] : _name)" Icon="admin_panel_settings"
+        Subtitle="@L["RBACManagement"]" BackHref="/admin/roles" Class="iam-entity-header" />
 
     <UrlSyncedTabs Change="@OnTabChanged" Slugs="@(_isNew ? new[] { "general" } : new[] { "general", "permissions", "users", "audit" })">
         <Tabs>
             <RadzenTabsItem Text="@L["General"]">
+                <RadzenCard class="iam-detail-card">
                 <EditForm Model="@_model" OnValidSubmit="@OnSave">
                     <LocalizedDataAnnotationsValidator />
-                    <RadzenStack Gap="1rem" class="rz-mt-4 role-edit-stack">
+                    <RadzenStack Gap="1rem" class="role-edit-stack">
                         <RadzenFormField Text="@L["Name"]">
                             <ChildContent>
                                 <RadzenTextBox @bind-Value="_model.Name" MaxLength="50" />
@@ -38,20 +41,22 @@ else
                         </RadzenStack>
                     </RadzenStack>
                 </EditForm>
+                </RadzenCard>
             </RadzenTabsItem>
             @if (!_isNew)
             {
                 <RadzenTabsItem Text="@L["Permissions"]">
+                    <RadzenCard class="iam-detail-card">
                     <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">@L["PermissionMatrix"]</RadzenText>
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
                         <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@L["BulkPermissions"]:</RadzenText>
                         <RadzenDropDown TValue="Permission?" Data="@_permissionLevels" TextProperty="Text" ValueProperty="Value"
-                            @bind-Value="_bulkPermission" Placeholder="@L["PermissionLevel"]" class="bulk-perm-select" />
+                            @bind-Value="_bulkPermission" Placeholder="@L["PermissionLevel"]" class="bulk-perm-select" Disabled="@_savingPermissions" />
                         <RadzenButton Text="@L["ApplyBulkPermissions"]" Icon="checklist" Size="ButtonSize.Small"
-                            Click="@OnApplyBulk" Disabled="@(_bulkPermission is null)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            Click="@OnApplyBulk" Disabled="@(_bulkPermission is null || _savingPermissions)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     </RadzenStack>
-                    <RadzenDataGrid TItem="PermissionRowModel" Data="@_permissionRows" AllowSorting="true"
-                        class="rz-mt-2" Density="Density.Compact" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    <RadzenDataGrid Responsive="false" TItem="PermissionRowModel" Data="@_permissionRows" AllowSorting="true"
+                        class="rz-mt-2" Density="Density.Compact" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                         <Columns>
                             <RadzenDataGridColumn TItem="PermissionRowModel" Title="@L["ResourceType"]" Width="180px">
                                 <Template Context="row">
@@ -61,35 +66,37 @@ else
                             <RadzenDataGridColumn TItem="PermissionRowModel" Title="@L["Scope"]" Width="160px">
                                 <Template Context="row">
                                     <RadzenDropDown TValue="string" Data="@_scopeOptions" TextProperty="Text" ValueProperty="Value" @bind-Value="row.Scope"
-                                        class="role-perm-select" Change="@(_ => OnScopeChanged(row))" />
+                                        class="role-perm-select" Change="@(_ => OnScopeChangedAndSaveAsync(row))" Disabled="@_savingPermissions" />
                                 </Template>
                             </RadzenDataGridColumn>
                             <RadzenDataGridColumn TItem="PermissionRowModel" Title="@L["Read"]" Width="80px" TextAlign="TextAlign.Center">
                                 <Template Context="row">
-                                    <RadzenCheckBox TValue="bool" @bind-Value="row.CanRead" Change="@(_ => OnPermissionToggled(row))" />
+                                    <RadzenCheckBox TValue="bool" @bind-Value="row.CanRead" Change="@(_ => OnPermissionToggledAndSaveAsync(row))" Disabled="@_savingPermissions" />
                                 </Template>
                             </RadzenDataGridColumn>
                             <RadzenDataGridColumn TItem="PermissionRowModel" Title="@L["Write"]" Width="80px" TextAlign="TextAlign.Center">
                                 <Template Context="row">
-                                    <RadzenCheckBox TValue="bool" @bind-Value="row.CanWrite" Change="@(_ => OnPermissionToggled(row))" />
+                                    <RadzenCheckBox TValue="bool" @bind-Value="row.CanWrite" Change="@(_ => OnPermissionToggledAndSaveAsync(row))" Disabled="@_savingPermissions" />
                                 </Template>
                             </RadzenDataGridColumn>
                             <RadzenDataGridColumn TItem="PermissionRowModel" Title="@L["Admin"]" Width="80px" TextAlign="TextAlign.Center">
                                 <Template Context="row">
-                                    <RadzenCheckBox TValue="bool" @bind-Value="row.CanAdmin" Change="@(_ => OnPermissionToggled(row))" />
+                                    <RadzenCheckBox TValue="bool" @bind-Value="row.CanAdmin" Change="@(_ => OnPermissionToggledAndSaveAsync(row))" Disabled="@_savingPermissions" />
                                 </Template>
                             </RadzenDataGridColumn>
                         </Columns>
                     </RadzenDataGrid>
-                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-4">
-                        <RadzenButton Text="@L["SavePermissions"]" Icon="save" Click="@OnSavePermissions"
-                            BusyText="@L["Saving"]" IsBusy="@_savingPermissions" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                    </RadzenStack>
+                    @if (_savingPermissions)
+                    {
+                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mt-3">@L["Saving"]</RadzenText>
+                    }
+                    </RadzenCard>
                 </RadzenTabsItem>
                 <RadzenTabsItem Text="@L["Users"]">
+                    <RadzenCard class="iam-detail-card">
                     @if (!_usersLoaded)
                     {
-                        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+                        <AetheusLoader />
                     }
                     else
                     {
@@ -97,17 +104,17 @@ else
                             <RadzenFormField Text="@L["User"]">
                                 <RadzenDropDown TValue="int?" Data="@_availableUsers" TextProperty="Username" ValueProperty="UserId"
                                     Count="@_availableUsersCount" LoadData="@LoadAvailableUsersAsync"
-                                    @bind-Value="_selectedUserId" AllowFiltering="true" AllowVirtualization="true"
+                                    @bind-Value="_selectedUserId" AllowFiltering="true" AllowVirtualization="@AetheusGrid.Virtualization"
                                     AllowClear="true" Placeholder="@L["SelectUser"]" Disabled="@_loadingAvailableUsers" />
                             </RadzenFormField>
                             <RadzenButton Text="@L["AddUserToRole"]" Icon="person_add" Click="@OnAddUser"
                                 BusyText="@L["Saving"]" IsBusy="@_addingUser" Disabled="@(_selectedUserId is null)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
                         </RadzenStack>
-                            <RadzenDataGrid @ref="_usersGrid" TItem="RoleUserDto" Data="@_roleUsers" Count="@_roleUsersCount"
-                                LoadData="@LoadRoleUsersAsync" IsLoading="@_loadingRoleUsers" AllowPaging="true" PageSize="25"
+                            <RadzenDataGrid Responsive="false" @ref="_usersGrid" TItem="RoleUserDto" Data="@_roleUsers" Count="@_roleUsersCount"
+                                LoadData="@LoadRoleUsersAsync" IsLoading="@_loadingRoleUsers" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
                                 AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
                                 Density="Density.Compact" class="rz-mt-2 aetheus-clickable-rows"
-                                RowClick="@(args => { if (args.Data is { } user) Nav.NavigateTo($"/users/{user.UserId}"); })">
+                                RowClick="@(args => { if (args.Data is { } user) Nav.NavigateTo($"/users/{user.UserId}"); })" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                                 <EmptyTemplate>
                                     <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoUsersInRole"]</RadzenText>
                                 </EmptyTemplate>
@@ -132,31 +139,13 @@ else
                                 </Columns>
                             </RadzenDataGrid>
                     }
+                    </RadzenCard>
                 </RadzenTabsItem>
                 <RadzenTabsItem Text="@L["AuditTrail"]">
-                    @if (_auditLogs is null)
-                    {
-                        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
-                    }
-                    else if (_auditLogs.Count == 0)
-                    {
-                        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-mt-4">@L["NoAuditLogs"]</RadzenText>
-                    }
-                    else
-                    {
-                        <RadzenDataGrid TItem="AuditLogDto" Data="@_auditLogs" AllowSorting="true"
-                            Density="Density.Compact" class="rz-mt-2" AllowFiltering="true" FilterMode="FilterMode.Advanced">
-                            <Columns>
-                                <RadzenDataGridColumn TItem="AuditLogDto" Property="Timestamp" Title="@L["Date"]"
-                                    FormatString="{0:g}" Width="160px" />
-                                <RadzenDataGridColumn TItem="AuditLogDto" Property="Action" Title="@L["Action"]" Width="200px" />
-                                <RadzenDataGridColumn TItem="AuditLogDto" Property="Username" Title="@L["User"]" Width="150px" />
-                                <RadzenDataGridColumn TItem="AuditLogDto" Property="Details" Title="@L["Details"]" />
-                            </Columns>
-                        </RadzenDataGrid>
-                    }
+                    <EntityAuditTrail EntityType="Role" EntityId="@Id" />
                 </RadzenTabsItem>
             }
         </Tabs>
     </UrlSyncedTabs>
 }
+</div>

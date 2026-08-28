@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,7 @@ namespace Aetheus.Back.Tests;
 public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private const string AgentToken = "test-agent-token-for-integration";
+    private const string AgentSessionId = "11111111111111111111111111111111";
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
@@ -89,8 +91,16 @@ public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicatio
     {
         var created = await CreateTestTaskAsync();
         var agentClient = CreateAgentClient();
+        var claimed = await ClaimTaskAsync(agentClient, created.ServerId, created.Id);
 
-        var response = await agentClient.PostAsync($"/api/tasks/{created.Id}/start", null, cancellationToken: TestContext.Current.CancellationToken);
+        var response = await agentClient.PostAsJsonAsync(
+            $"/api/tasks/{created.Id}/start",
+            new AgentTaskLeaseRequest
+            {
+                AgentSessionId = AgentSessionId,
+                AgentSessionFencingToken = claimed.AgentSessionFencingToken
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -100,19 +110,71 @@ public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicatio
     {
         var created = await CreateTestTaskAsync();
         var agentClient = CreateAgentClient();
-        await agentClient.PostAsync($"/api/tasks/{created.Id}/start", null, cancellationToken: TestContext.Current.CancellationToken);
+        var claimed = await ClaimTaskAsync(agentClient, created.ServerId, created.Id);
+        await agentClient.PostAsJsonAsync(
+            $"/api/tasks/{created.Id}/start",
+            new AgentTaskLeaseRequest
+            {
+                AgentSessionId = AgentSessionId,
+                AgentSessionFencingToken = claimed.AgentSessionFencingToken
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var result = new TaskResultDto
         {
             TaskId = created.Id,
             Status = TaskExecutionStatus.Success,
             ExitCode = 0,
-            Output = "hello"
+            Output = "hello",
+            AgentSessionId = AgentSessionId,
+            AgentSessionFencingToken = claimed.AgentSessionFencingToken
         };
 
         var response = await agentClient.PostAsJsonAsync($"/api/tasks/{created.Id}/complete", result, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LegacyAgent_CanStartAndCompleteClaimedTaskWithoutFencingFields()
+    {
+        var created = await CreateTestTaskAsync();
+        await SetAgentVersionAsync(created.ServerId, "1.0.395");
+        var agentClient = CreateAgentClient();
+        await ClaimTaskAsync(agentClient, created.ServerId, created.Id);
+
+        var start = await agentClient.PostAsJsonAsync(
+            $"/api/tasks/{created.Id}/start",
+            new { },
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+
+        var complete = await agentClient.PostAsJsonAsync(
+            $"/api/tasks/{created.Id}/complete",
+            new TaskResultDto
+            {
+                TaskId = created.Id,
+                Status = TaskExecutionStatus.Success,
+                ExitCode = 0
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+    }
+
+    [Fact]
+    public async Task FencedAgent_CannotStartClaimedTaskWithoutFencingFields()
+    {
+        var created = await CreateTestTaskAsync();
+        await SetAgentVersionAsync(created.ServerId, "1.0.761");
+        var agentClient = CreateAgentClient();
+        await ClaimTaskAsync(agentClient, created.ServerId, created.Id);
+
+        var response = await agentClient.PostAsJsonAsync(
+            $"/api/tasks/{created.Id}/start",
+            new { },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -138,9 +200,28 @@ public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicatio
         var serverId = await SeedServerAsync();
         var agentClient = CreateAgentClient();
 
-        var response = await agentClient.PostAsync($"/api/tasks/claim?serverId={serverId}", null, cancellationToken: TestContext.Current.CancellationToken);
+        var response = await agentClient.PostAsync(
+            $"/api/tasks/claim?serverId={serverId}&agentSessionId={AgentSessionId}",
+            null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private static async Task<PendingTaskDto> ClaimTaskAsync(
+        HttpClient agentClient,
+        int serverId,
+        int taskId)
+    {
+        var response = await agentClient.PostAsync(
+            $"/api/tasks/claim?serverId={serverId}&agentSessionId={AgentSessionId}",
+            null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var tasks = await response.Content.ReadFromJsonAsync<List<PendingTaskDto>>(
+            TestJsonOptions.Default,
+            cancellationToken: TestContext.Current.CancellationToken);
+        return Assert.Single(tasks!, task => task.Id == taskId);
     }
 
     [Fact]
@@ -160,7 +241,12 @@ public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicatio
         // agent-token ownership check order-dependent once xunit.v3 reordered the tests.
         var existing = await db.Servers.FirstOrDefaultAsync(s => s.Name == "task-test-server");
         if (existing is not null)
+        {
+            existing.AgentProtocolVersion = AgentProtocol.CurrentVersion;
+            existing.AgentCapabilitiesJson = "[\"shell.execute\"]";
+            await db.SaveChangesAsync();
             return existing.Id;
+        }
 
         var hmacKey = System.Text.Encoding.UTF8.GetBytes("aetheus-dev-key-minimum-32-bytes!!");
         var tokenHash = Convert.ToBase64String(System.Security.Cryptography.HMACSHA256.HashData(
@@ -173,6 +259,8 @@ public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicatio
             Status = ServerStatus.Online,
             IpAddress = "10.0.0.10",
             AgentVersion = "1.0.0",
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilitiesJson = "[\"shell.execute\"]",
             OsDescription = "Linux",
             LastHeartbeat = DateTime.UtcNow
         };
@@ -202,5 +290,17 @@ public class TasksControllerIntegrationTests : IClassFixture<CustomWebApplicatio
         });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<ServerTaskDto>(TestJsonOptions.Default))!;
+    }
+
+    private async Task SetAgentVersionAsync(int serverId, string version)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var server = await db.Servers.FindAsync(
+            [serverId],
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(server);
+        server.AgentVersion = version;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 }

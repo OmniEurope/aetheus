@@ -585,3 +585,4 @@ public class VariableLibraryServiceTests
         Assert.Equal("globalB", result["B"]);
     }
 }
+

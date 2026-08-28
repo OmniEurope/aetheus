@@ -1,66 +1,23 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @page "/pipelines"
 @page "/templates"
-@using Aetheus.Front.Helpers
+@page "/pipelines/fleet"
 
 <PageTitle>@L["Pipelines"] - Aetheus</PageTitle>
 
-<UrlSyncedTabs Slugs="@(new[] { "pipelines", "templates" })" @bind-SelectedIndex="_selectedTab" Change="@OnTabChanged">
+<UrlSyncedTabs Slugs="@TabSlugs" class="pipeline-hub-tabs">
     <Tabs>
-        <RadzenTabsItem Text="@L["Pipelines"]" Icon="account_tree">
-            @* 0-a: the pipelines list is the shared PipelinesList (global scope). *@
-            <PipelinesList />
-        </RadzenTabsItem>
-
-        <RadzenTabsItem Text="@L["Templates"]" Icon="description">
-            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mt-2 rz-mb-4" Wrap="FlexWrap.Wrap">
-                <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["PipelineTemplates"]</RadzenText>
-                <HelpLink PageKey="templates" />
-                <div class="server-list-spacer"></div>
-                @if (_canTemplateWrite)
-                {
-                    <RadzenButton Text="@L["NewTemplate"]" Icon="add" Click="@OnCreateTemplate" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                    <RadzenButton Text="@L["Import"]" Icon="upload_file" Click="@OnImportTemplateClick" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                    <InputFile @ref="_fileInput" OnChange="@OnTemplateFileSelected" class="input-file-hidden" accept=".yaml,.yml" />
-                }
-                <RadzenButton Icon="refresh" Size="ButtonSize.Small"
-                              Click="@LoadTemplates" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-            </RadzenStack>
-
-            @if (_templatesLoading)
-            {
-                <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
-            }
-            else if (_templatesLoadFailed)
-            {
-                <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">
-                    @L["LoadFailed"] <RadzenButton Text="@L["Retry"]" Icon="refresh" Click="@LoadTemplates"
-                        ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-                </RadzenAlert>
-            }
-            else
-            {
-                <RadzenDataGrid Data="@_templates" TItem="PipelineTemplateSummaryDto" AllowSorting="true" EmptyText="@L["NoRecords"]" Density="Density.Compact" AllowFiltering="true" FilterMode="FilterMode.Advanced">
-                    <Columns>
-                        <RadzenDataGridColumn Property="Name" Title="@L["Name"]" MinWidth="200px" />
-                        <RadzenDataGridColumn Property="Category" Title="@L["Category"]" Width="150px" />
-                        <RadzenDataGridColumn Property="Version" Title="@L["Version"]" Width="80px" TextAlign="TextAlign.Center" />
-                        <RadzenDataGridColumn Property="Description" Title="@L["Description"]" />
-                        <RadzenDataGridColumn Title="@L["Actions"]" MinWidth="28rem" Sortable="false">
-                            <Template Context="tpl">
-                                <RadzenButton Text="@L["Export"]" Icon="download" Click="@(() => OnExportTemplate(tpl))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                                <RadzenButton Text="@L["VersionHistoryTitle"]" Icon="history" Click="@(() => OnTemplateHistory(tpl))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-                                @if (_canTemplateWrite)
-                                {
-                                    <RadzenButton Text="@L["Edit"]" Icon="edit" Click="@(() => OnEditTemplate(tpl))" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-                                    <RadzenButton Text="@L["Delete"]" Icon="delete"
-                                                  Click="@(() => OnDeleteTemplate(tpl))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
-                                }
-                            </Template>
-                        </RadzenDataGridColumn>
-                    </Columns>
-                </RadzenDataGrid>
-            }
-        </RadzenTabsItem>
+        @if (_canReadPipelines)
+        {
+            <RadzenTabsItem Text="@L["UsedPipelines"]" Icon="account_tree">
+                <PipelinesList TemplateId="@TemplateId" />
+            </RadzenTabsItem>
+        }
+        @if (_canReadTemplates)
+        {
+            <RadzenTabsItem Text="@L["Templates"]" Icon="description">
+                <PipelineTemplates Embedded="true" />
+            </RadzenTabsItem>
+        }
     </Tabs>
 </UrlSyncedTabs>

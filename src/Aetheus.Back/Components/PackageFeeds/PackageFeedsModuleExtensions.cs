@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Net;
-using System.Net.Sockets;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Configuration;
 
 namespace Aetheus.Back.Components.PackageFeeds;
@@ -31,24 +28,8 @@ public static class PackageFeedsModuleExtensions
             // Module-scoped SSRF escape hatch (defaults closed): relaxing package-feed targets must NOT
             // also open webhooks or service-connections. Each subsystem carries its own dedicated key.
             var allowPrivate = cfg.GetValue("PackageFeeds:AllowPrivateTargets", false);
-            return new SocketsHttpHandler
-            {
-                AllowAutoRedirect = false,
-                UseCookies = false,
-                ConnectCallback = async (ctx, ct) =>
-                {
-                    var addresses = await Dns.GetHostAddressesAsync(ctx.DnsEndPoint.Host, ct).ConfigureAwait(false);
-                    var safe = addresses.FirstOrDefault(a => allowPrivate || !WebhookSsrfGuard.IsForbiddenAddress(a))
-                        ?? throw new HttpRequestException("Registry target resolved to a forbidden address.");
-                    var socket = new Socket(safe.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-                    try
-                    {
-                        await socket.ConnectAsync(safe, ctx.DnsEndPoint.Port, ct).ConfigureAwait(false);
-                        return new NetworkStream(socket, ownsSocket: true);
-                    }
-                    catch { socket.Dispose(); throw; }
-                }
-            };
+            return SsrfProtectedHttpHandlerFactory.Create(
+                allowPrivate, "Registry target resolved to a forbidden address.");
         });
 
         // Periodic upstream sync (opt-in via PackageFeeds:SyncIntervalMinutes > 0; off by default so we

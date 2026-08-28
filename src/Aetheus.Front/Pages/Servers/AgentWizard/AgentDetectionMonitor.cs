@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Front.Pages.Servers.AgentWizard;
@@ -152,7 +149,7 @@ internal sealed class AgentDetectionMonitor(
         try
         {
             // RTOK: poll only *our* token by id instead of downloading the full unpaginated list every tick.
-            token = await api.GetRegistrationTokenAsync(_generatedToken.Id).ConfigureAwait(false);
+            token = await api.Auth.GetRegistrationTokenAsync(_generatedToken.Id).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -174,7 +171,7 @@ internal sealed class AgentDetectionMonitor(
     {
         try
         {
-            var detail = await api.GetServerDetailAsync(serverId).ConfigureAwait(false);
+            var detail = await api.Servers.GetServerDetailAsync(serverId).ConfigureAwait(false);
             return detail?.Name ?? $"Server #{serverId}";
         }
         catch (Exception ex)

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
 using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Resources;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Shared;
 

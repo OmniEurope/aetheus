@@ -233,7 +233,7 @@ public class MailServiceTests
     public async Task CreateAccountAsync_InvalidEmail_Throws()
     {
         await Assert.ThrowsAsync<BadRequestException>(() =>
-            _sut.CreateAccountAsync(1, new CreateMailAccountRequest { Email = "bad", Password = "password123" }, ct: TestContext.Current.CancellationToken));
+            _sut.CreateAccountAsync(1, new CreateMailAccountRequest { Email = "bad", Password = "strong-password" }, ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public class MailServiceTests
         _repo.GetDomainsAsync(1, TestContext.Current.CancellationToken).Returns([]);
 
         await Assert.ThrowsAsync<BadRequestException>(() =>
-            _sut.CreateAccountAsync(1, new CreateMailAccountRequest { Email = "user@unknown.com", Password = "password123" }, ct: TestContext.Current.CancellationToken));
+            _sut.CreateAccountAsync(1, new CreateMailAccountRequest { Email = "user@unknown.com", Password = "strong-password" }, ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -256,7 +256,7 @@ public class MailServiceTests
         var result = await _sut.CreateAccountAsync(1, new CreateMailAccountRequest
         {
             Email = "user@example.com",
-            Password = "securepass",
+            Password = "secure-password",
             QuotaMb = 2048
         }, ct: TestContext.Current.CancellationToken);
 
@@ -296,14 +296,14 @@ public class MailServiceTests
         _repo.GetAccountAsync(1, TestContext.Current.CancellationToken).Returns(
             new MailAccount { Id = 1, Email = "user@test.com", QuotaMb = 1024, MailDomain = new MailDomain { ServerId = 1, Name = "test.com" } });
 
-        await _sut.UpdateAccountAsync(1, 1, new UpdateMailAccountRequest { NewPassword = "newpassword" }, ct: TestContext.Current.CancellationToken);
+        await _sut.UpdateAccountAsync(1, 1, new UpdateMailAccountRequest { NewPassword = "new-password-1" }, ct: TestContext.Current.CancellationToken);
 
         // S-TECH-MCPW: typed MailChangePassword op - the email is the target; the password rides in the
         // encrypted env (never in the command/argv) and is piped to the helper over stdin.
         await _repo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
             t.Operation == OperationKind.MailChangePassword
             && t.Command.Contains("user@test.com")
-            && !t.Command.Contains("newpassword")), TestContext.Current.CancellationToken);
+            && !t.Command.Contains("new-password-1")), TestContext.Current.CancellationToken);
         await _repo.Received(1).UpdateAccountAsync(Arg.Any<MailAccount>(), TestContext.Current.CancellationToken);
     }
 
@@ -403,7 +403,7 @@ public class MailServiceTests
                 Hostname = "bad!",
                 Domain = "example.com",
                 AdminEmail = "admin@example.com",
-                AdminPassword = "password123"
+                AdminPassword = "strong-password"
             }, ct: TestContext.Current.CancellationToken));
     }
 
@@ -416,7 +416,7 @@ public class MailServiceTests
                 Hostname = "mail.example.com",
                 Domain = "bad!",
                 AdminEmail = "admin@example.com",
-                AdminPassword = "password123"
+                AdminPassword = "strong-password"
             }, ct: TestContext.Current.CancellationToken));
     }
 
@@ -429,7 +429,7 @@ public class MailServiceTests
                 Hostname = "mail.example.com",
                 Domain = "example.com",
                 AdminEmail = "not-an-email",
-                AdminPassword = "password123"
+                AdminPassword = "strong-password"
             }, ct: TestContext.Current.CancellationToken));
     }
 
@@ -442,7 +442,7 @@ public class MailServiceTests
             Domain = "example.com",
             DkimSelector = "default",
             AdminEmail = "admin@example.com",
-            AdminPassword = "securepass",
+            AdminPassword = "secure-password",
             QuotaMb = 2048
         };
 
@@ -476,7 +476,7 @@ public class MailServiceTests
             Domain = "example.com",
             DkimSelector = "default",
             AdminEmail = "admin@example.com",
-            AdminPassword = "securepass",
+            AdminPassword = "secure-password",
             QuotaMb = 2048
         };
 

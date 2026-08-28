@@ -1,0 +1,15 @@
+# Manual cancellation proof: cancel this run during the bounded child window.
+# The engine keeps toto-qa Teardown runnable and reaches Cancelled only after zero-resource proof.
+name: toto-conformance-cancellable
+trigger: manual
+
+stages:
+  - name: CancellationScenario
+    os: linux
+    steps:
+      - name: StartCancellableQA
+        type: trigger
+        pipeline: toto-qa
+        variables:
+          TOTO_CONFORMANCE_HOLD_SECONDS: "120"
+        timeout_seconds: 10800

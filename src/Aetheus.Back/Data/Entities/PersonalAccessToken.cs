@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// A per-user Personal Access Token (PLAN-006 4.5) - a second authentication path for scripts,
+/// A per-user Personal Access Token (ADR-024 4.5) - a second authentication path for scripts,
 /// external CI, and the future CLI. Follows the <see cref="RegistrationToken"/> / <see cref="RefreshToken"/>
 /// lifecycle: only an HMAC-SHA256 <see cref="TokenHash"/> is stored, the plaintext is shown once at
 /// creation and never persisted. Scope is always re-intersected with the user's CURRENT RBAC at

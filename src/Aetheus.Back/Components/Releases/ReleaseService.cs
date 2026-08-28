@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.AppBackups;
 using Aetheus.Back.Components.Artifacts;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.GitGraph;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Releases;
@@ -36,11 +31,12 @@ public class ReleaseService(
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetReleasesPagedAsync(
-            request.Search, projectId, page, pageSize, accessibleIds, ct).ConfigureAwait(false);
+            request.Search, projectId, page, pageSize, accessibleIds, ct,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<ReleaseDto>
         {
-            Items = items.Select(MapToDto).ToList(),
+            Items = await MapToDtosAsync(items, ct).ConfigureAwait(false),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
@@ -50,7 +46,7 @@ public class ReleaseService(
     public async Task<ReleaseDto?> GetReleaseAsync(int id, CancellationToken ct = default)
     {
         var release = await repo.FindReleaseAsync(id, ct).ConfigureAwait(false);
-        return release is null ? null : MapToDto(release);
+        return release is null ? null : await MapToDtoAsync(release, ct).ConfigureAwait(false);
     }
 
     public async Task<ReleaseRollbackPreviewDto> GetRollbackPreviewAsync(int id, CancellationToken ct = default)
@@ -76,14 +72,14 @@ public class ReleaseService(
     public async Task<List<ReleaseDto>> GetReleasesByRunAsync(int pipelineRunId, CancellationToken ct = default)
     {
         var releases = await repo.GetByPipelineRunIdAsync(pipelineRunId, ct).ConfigureAwait(false);
-        return releases.Select(MapToDto).ToList();
+        return await MapToDtosAsync(releases, ct).ConfigureAwait(false);
     }
 
     public async Task<List<ReleaseDto>> SyncReleasesAsync(int projectId, CancellationToken ct = default)
     {
         await SyncReleaseRowsAsync(projectId, ct).ConfigureAwait(false);
         var releases = await repo.GetProjectReleasesAsync(projectId, ct).ConfigureAwait(false);
-        return releases.Select(MapToDto).ToList();
+        return await MapToDtosAsync(releases, ct).ConfigureAwait(false);
     }
 
     private async Task SyncReleaseRowsAsync(int projectId, CancellationToken ct)
@@ -130,57 +126,21 @@ public class ReleaseService(
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return MapToDto(release);
+        return await MapToDtoAsync(release, ct).ConfigureAwait(false);
     }
 
     public async Task<ReleaseRollbackDto> RollbackReleaseAsync(int releaseId, RollbackReleaseRequest request, CancellationToken ct = default)
     {
         var release = await repo.FindReleaseAsync(releaseId, ct).ConfigureAwait(false);
         if (release is null) throw new NotFoundException("Release not found");
-
         var target = await repo.FindPreviousPublishedWithArtifactAsync(release, ct).ConfigureAwait(false);
         if (target is null)
             throw new BadRequestException("No previous release with a retained artifact is available for rollback.");
-
-        // The database row is not proof that the blob is still retained. Fail before creating a run or
-        // dispatching a task: a rollback without bytes must never become a deceptive green request.
-        var artifact = target.Artifacts.OrderByDescending(a => a.CreatedAt).First();
-        await using var artifactProbe = artifactStorage?.OpenArtifact(artifact.FilePath);
-        if (artifactProbe is null)
-            throw new BadRequestException("The previous release artifact is no longer available in storage; rollback was not started.");
-
-        var pipeline = await pipelineService.GetPipelineAsync(request.PipelineId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("Pipeline not found");
-        if (pipeline.ProjectId != release.ProjectId)
-            throw new BadRequestException("Rollback pipeline does not belong to the release project.");
-
-        var definition = pipelineService.ValidateYaml(pipeline.YamlDefinition)
-            ?? throw new BadRequestException("Rollback pipeline YAML is invalid.");
-        var rollbackDeploy = definition.Stages.SelectMany(s => s.Steps)
-            .Any(s => string.Equals(s.Type, "deploy", StringComparison.OrdinalIgnoreCase)
-                && IsRollbackReleaseSelector(s.Release));
-        if (!rollbackDeploy)
-            throw new BadRequestException("Rollback pipeline must contain a type: deploy step using $(RELEASE) or $(ROLLBACK_RELEASE).");
-
-        BackupRun? backup = null;
-        if (request.RestoreDatabase)
-        {
-            if (request.BackupRunId is null)
-                throw new BadRequestException("A verified backup is required when database restore is requested.");
-            backup = backupRepo is null ? null : await backupRepo.FindRunWithPolicyAsync(request.BackupRunId.Value, ct).ConfigureAwait(false);
-            if (backup?.BackupPolicy.ProjectId != release.ProjectId
-                || backup.Status != BackupRunStatus.Succeeded
-                || backup.RestoreCheckStatus != RestoreCheckStatus.Verified
-                || string.IsNullOrWhiteSpace(backup.ArchivePath))
-                throw new BadRequestException("The selected backup is not a verified successful backup for this project.");
-
-            var rollbackRestore = definition.Stages.SelectMany(s => s.Steps)
-                .Any(s => string.Equals(s.Type, "restore-backup", StringComparison.OrdinalIgnoreCase)
-                    && IsRollbackBackupSelector(s.BackupRun));
-            if (!rollbackRestore)
-                throw new BadRequestException("Rollback pipeline must contain a type: restore-backup step using $(AETHEUS_ROLLBACK_BACKUP_RUN_ID).");
-        }
-
+        await EnsureArtifactAvailableAsync(target).ConfigureAwait(false);
+        var (pipeline, definition) = await LoadRollbackPipelineAsync(
+            request.PipelineId, release.ProjectId, ct).ConfigureAwait(false);
+        var backup = await ResolveRollbackBackupAsync(
+            request, release.ProjectId, definition, ct).ConfigureAwait(false);
         var rollback = new ReleaseRollback
         {
             SourceReleaseId = release.Id,
@@ -191,19 +151,98 @@ public class ReleaseService(
             RequestedAt = timeProvider.GetUtcNow().UtcDateTime
         };
         await repo.AddRollbackAsync(rollback, ct).ConfigureAwait(false);
+        var variables = CreateRollbackVariables(release, target, rollback, backup);
+        var run = await pipelineLauncher.TriggerRunAsync(pipeline.Id, variables, ct: ct).ConfigureAwait(false);
+        await CompleteRollbackLaunchAsync(
+            release, target, rollback, run, request.RestoreDatabase, ct).ConfigureAwait(false);
+        return MapRollback(rollback);
+    }
 
+    private async Task EnsureArtifactAvailableAsync(Release target)
+    {
+        var artifact = target.Artifacts.OrderByDescending(item => item.CreatedAt).First();
+        await using var probe = artifactStorage?.OpenArtifact(artifact.FilePath);
+        if (probe is null)
+            throw new BadRequestException(
+                "The previous release artifact is no longer available in storage; rollback was not started.");
+    }
+
+    private async Task<(PipelineDto Pipeline, PipelineYamlDefinition Definition)> LoadRollbackPipelineAsync(
+        int pipelineId,
+        int projectId,
+        CancellationToken ct)
+    {
+        var pipeline = await pipelineService.GetPipelineAsync(pipelineId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException("Pipeline not found");
+        if (pipeline.ProjectId != projectId)
+            throw new BadRequestException("Rollback pipeline does not belong to the release project.");
+        var definition = pipelineService.ValidateYaml(pipeline.YamlDefinition)
+            ?? throw new BadRequestException("Rollback pipeline YAML is invalid.");
+        var hasRollbackDeploy = definition.Stages.SelectMany(stage => stage.Steps)
+            .Any(step => string.Equals(step.Type, "deploy", StringComparison.OrdinalIgnoreCase)
+                && IsRollbackReleaseSelector(step.Release));
+        if (!hasRollbackDeploy)
+            throw new BadRequestException(
+                "Rollback pipeline must contain a type: deploy step using $(RELEASE) or $(ROLLBACK_RELEASE).");
+        return (pipeline, definition);
+    }
+
+    private async Task<BackupRun?> ResolveRollbackBackupAsync(
+        RollbackReleaseRequest request,
+        int projectId,
+        PipelineYamlDefinition definition,
+        CancellationToken ct)
+    {
+        if (!request.RestoreDatabase) return null;
+        if (request.BackupRunId is null)
+            throw new BadRequestException("A verified backup is required when database restore is requested.");
+        var backup = backupRepo is null
+            ? null
+            : await backupRepo.FindRunWithPolicyAsync(request.BackupRunId.Value, ct).ConfigureAwait(false);
+        if (!IsVerifiedProjectBackup(backup, projectId))
+            throw new BadRequestException("The selected backup is not a verified successful backup for this project.");
+        var hasRollbackRestore = definition.Stages.SelectMany(stage => stage.Steps)
+            .Any(step => string.Equals(step.Type, "restore-backup", StringComparison.OrdinalIgnoreCase)
+                && IsRollbackBackupSelector(step.BackupRun));
+        if (!hasRollbackRestore)
+            throw new BadRequestException(
+                "Rollback pipeline must contain a type: restore-backup step using $(AETHEUS_ROLLBACK_BACKUP_RUN_ID).");
+        return backup;
+    }
+
+    private static bool IsVerifiedProjectBackup(BackupRun? backup, int projectId) =>
+        backup?.BackupPolicy.ProjectId == projectId
+        && backup.Status == BackupRunStatus.Succeeded
+        && backup.RestoreCheckStatus == RestoreCheckStatus.Verified
+        && !string.IsNullOrWhiteSpace(backup.ArchivePath);
+
+    private static Dictionary<string, string> CreateRollbackVariables(
+        Release release,
+        Release target,
+        ReleaseRollback rollback,
+        BackupRun? backup)
+    {
         var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["RELEASE"] = target.Id.ToString(),
             ["ROLLBACK_RELEASE"] = target.Id.ToString(),
             ["AETHEUS_ROLLBACK_ID"] = rollback.Id.ToString(),
             ["AETHEUS_ROLLBACK_SOURCE_RELEASE_ID"] = release.Id.ToString(),
-            ["AETHEUS_ROLLBACK_RESTORE_DATABASE"] = request.RestoreDatabase ? "true" : "false"
+            ["AETHEUS_ROLLBACK_RESTORE_DATABASE"] = rollback.RestoreDatabase ? "true" : "false"
         };
         if (backup is not null)
             variables["AETHEUS_ROLLBACK_BACKUP_RUN_ID"] = backup.Id.ToString();
+        return variables;
+    }
 
-        var run = await pipelineLauncher.TriggerRunAsync(pipeline.Id, variables, ct: ct).ConfigureAwait(false);
+    private async Task CompleteRollbackLaunchAsync(
+        Release release,
+        Release target,
+        ReleaseRollback rollback,
+        PipelineRunDto? run,
+        bool restoreDatabase,
+        CancellationToken ct)
+    {
         if (run is null)
         {
             rollback.Status = RollbackStatus.Failed;
@@ -212,24 +251,20 @@ public class ReleaseService(
             await repo.SaveChangesAsync(ct).ConfigureAwait(false);
             throw new BadRequestException(rollback.FailureReason);
         }
-
         rollback.PipelineRunId = run.Id;
         if (run.Status is PipelineStatus.Success or PipelineStatus.Failed or PipelineStatus.Cancelled)
         {
-            // A pipeline can fail synchronously during initial dispatch, before TriggerRunAsync returns.
-            // In that ordering the completion event cannot find this rollback yet because PipelineRunId
-            // is assigned here. Close it explicitly instead of leaving a permanently Pending record.
             rollback.Status = RollbackStatus.Failed;
             rollback.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
             rollback.FailureReason = BuildRollbackFailureReason(run.Status);
         }
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-        if (audit is not null) await audit.LogAsync("RollbackRequested", "Release", release.Id,
-            $"from={release.Version}; to={target.Version}; run={run.Id}; restoreDatabase={request.RestoreDatabase}", ct).ConfigureAwait(false);
-        if (audit is not null && rollback.Status == RollbackStatus.Failed)
+        if (audit is null) return;
+        await audit.LogAsync("RollbackRequested", "Release", release.Id,
+            $"from={release.Version}; to={target.Version}; run={run.Id}; restoreDatabase={restoreDatabase}", ct).ConfigureAwait(false);
+        if (rollback.Status == RollbackStatus.Failed)
             await audit.LogAsync("RollbackFailed", "Release", release.Id,
                 $"from={release.Version}; to={target.Version}; run={run.Id}; reason={rollback.FailureReason}", ct).ConfigureAwait(false);
-        return MapRollback(rollback);
     }
 
     public async Task<ReleaseDto> PromoteReleaseAsync(int releaseId, CancellationToken ct = default)
@@ -241,7 +276,7 @@ public class ReleaseService(
         release.PromotedAt = timeProvider.GetUtcNow().UtcDateTime;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        var dto = MapToDto(release);
+        var dto = await MapToDtoAsync(release, ct).ConfigureAwait(false);
         await releaseHub.Clients.Groups([HubGroups.AllReleases, HubGroups.ProjectReleases(dto.ProjectId)])
             .SendAsync("ReleaseStatusChanged", dto, ct).ConfigureAwait(false);
         return dto;
@@ -267,7 +302,7 @@ public class ReleaseService(
                 ? await repo.GetDeployedProjectReleasesAsync(projectId, ct).ConfigureAwait(false)
                 : [];
             foreach (var deployedRelease in deployedReleases)
-                deployedRelease.Status = ReleaseStatus.Published;
+                deployedRelease.Status = ReleaseStatus.Superseded;
             if (deployedReleases.Count > 0)
                 await repo.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -285,8 +320,11 @@ public class ReleaseService(
                 await repo.SaveChangesAsync(ct).ConfigureAwait(false);
                 await LinkRunArtifactsToReleaseAsync(
                     existingByVersion, retainedArtifactRunId, validatedArtifacts, ct).ConfigureAwait(false);
+                if (retainedArtifactRunId != pipelineRunId)
+                    await LinkRunArtifactsToReleaseAsync(
+                        existingByVersion, pipelineRunId, null, ct).ConfigureAwait(false);
                 await gitGraph.RecordReleaseContextAsync(existingByVersion, ct).ConfigureAwait(false);
-                return (MapToDto(existingByVersion), false);
+                return (await MapToDtoAsync(existingByVersion, ct).ConfigureAwait(false), false);
             }
 
             var maxBuildNumber = await repo.GetMaxBuildNumberAsync(projectId, ct).ConfigureAwait(false);
@@ -307,8 +345,11 @@ public class ReleaseService(
             await repo.AddReleaseAsync(release, ct).ConfigureAwait(false);
             await LinkRunArtifactsToReleaseAsync(
                 release, retainedArtifactRunId, validatedArtifacts, ct).ConfigureAwait(false);
+            if (retainedArtifactRunId != pipelineRunId)
+                await LinkRunArtifactsToReleaseAsync(
+                    release, pipelineRunId, null, ct).ConfigureAwait(false);
             await gitGraph.RecordReleaseContextAsync(release, ct).ConfigureAwait(false);
-            return (MapToDto(release), true);
+            return (await MapToDtoAsync(release, ct).ConfigureAwait(false), true);
         }
 
         (ReleaseDto Dto, bool Created) persisted;
@@ -402,7 +443,7 @@ public class ReleaseService(
 
     private async Task BroadcastStatusAsync(Release release, CancellationToken ct)
     {
-        var dto = MapToDto(release);
+        var dto = await MapToDtoAsync(release, ct).ConfigureAwait(false);
         await releaseHub.Clients.Groups([HubGroups.AllReleases, HubGroups.ProjectReleases(dto.ProjectId)])
             .SendAsync("ReleaseStatusChanged", dto, ct).ConfigureAwait(false);
     }
@@ -491,4 +532,44 @@ public class ReleaseService(
         Commits = r.Commits.Select(GitGraphMapper.ToLink).ToList(),
         Branches = r.Branches.Select(GitGraphMapper.ToLink).ToList()
     };
+
+    /// <summary>
+    /// Releases of every project a server is involved in.
+    ///
+    /// It lived in ServerService, which had to inject IPipelineRepository purely to enrich the result
+    /// with each release's source pipeline - the one thing that made Servers depend on Pipelines.
+    /// Here the enrichment is already what MapToDtosAsync does for every other release view.
+    /// </summary>
+    public async Task<List<ReleaseDto>> GetServerReleasesAsync(int serverId, CancellationToken ct = default)
+    {
+        var releases = await repo.GetReleasesForServerAsync(serverId, ct).ConfigureAwait(false);
+        return await MapToDtosAsync(releases, ct).ConfigureAwait(false);
+    }
+
+    public async Task<PaginatedResult<ReleaseDto>> GetServerReleasesAsync(
+        int serverId, PaginationRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (page, pageSize) = request.Normalize();
+        var (releases, total) = await repo
+            .GetReleasesForServerPagedAsync(serverId, page, pageSize, ct, request.SortBy, request.SortDescending)
+            .ConfigureAwait(false);
+        return new PaginatedResult<ReleaseDto>
+        {
+            Items = await MapToDtosAsync(releases, ct).ConfigureAwait(false),
+            TotalCount = total,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    private async Task<ReleaseDto> MapToDtoAsync(Release release, CancellationToken ct)
+        => (await MapToDtosAsync([release], ct).ConfigureAwait(false))[0];
+
+    private async Task<List<ReleaseDto>> MapToDtosAsync(
+        IReadOnlyCollection<Release> releases, CancellationToken ct)
+    {
+        var mapped = releases.Select(MapToDto).ToList();
+        return await ReleaseSourcePipelineEnricher.EnrichAsync(mapped, pipelineRepo, ct).ConfigureAwait(false);
+    }
 }

@@ -57,18 +57,20 @@ public sealed class PipelineFleetServiceTests
     }
 
     [Fact]
-    public async Task GetAsync_WhenCandidateSafetyBoundIsExceeded_RequiresNarrowerFilter()
+    public async Task GetAsync_PaginatesWithoutMaterializingAClientSideCandidateSet()
     {
-        _pipelineRepository.GetTemplatesAsync(Arg.Any<CancellationToken>()).Returns([]);
-        _fleetRepository.Rows = Enumerable.Range(1, PipelineFleetRepository.MaxCandidateCount + 1)
+        _fleetRepository.Rows = Enumerable.Range(1, 10_001)
             .Select(id => Row(id, $"pipeline-{id}", "stages: []"))
             .ToList();
 
-        var exception = await Assert.ThrowsAsync<BadRequestException>(() =>
-            _service.GetAsync(new PipelineFleetPaginationRequest(), null, null, ct: TestContext.Current.CancellationToken));
+        var result = await _service.GetAsync(new PipelineFleetPaginationRequest
+        {
+            Page = 401,
+            PageSize = 25
+        }, null, null, ct: TestContext.Current.CancellationToken);
 
-        Assert.Contains(PipelineFleetRepository.MaxCandidateCount.ToString(), exception.Message, StringComparison.Ordinal);
-        Assert.Contains("Narrow", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(10_001, result.TotalCount);
+        Assert.Single(result.Items);
     }
 
     [Fact]
@@ -228,6 +230,70 @@ public sealed class PipelineFleetServiceTests
     }
 
     [Fact]
+    public async Task ExtractAsync_PublicationFailure_RestoresAuthoritativePipeline()
+    {
+        var row = Row(3, "free", "name: free\nstages: []");
+        _fleetRepository.Rows = [row];
+        _pipelineService.UpdatePipelineAsync(3, Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PipelineDto { Id = 3 });
+        _templateService.CreateTemplateAsync(
+                Arg.Any<CreatePipelineTemplateRequest>(), Arg.Any<CancellationToken>())
+            .Returns<PipelineTemplateDto>(_ => throw new InvalidOperationException("publication failed"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.ExtractAsync(3, new ExtractPipelineTemplateRequest
+            {
+                TemplateName = "shared-ci",
+                Category = "CI",
+                RewritePipeline = true
+            }, ct: TestContext.Current.CancellationToken));
+
+        await _pipelineService.Received(2).UpdatePipelineAsync(
+            3, Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
+        await _pipelineService.Received(1).UpdatePipelineAsync(
+            3,
+            Arg.Is<UpdatePipelineRequest>(request => request.YamlDefinition == row.YamlDefinition),
+            Arg.Any<CancellationToken>());
+        await _audit.Received(1).LogAsync(
+            "TemplatePublicationCompensated",
+            "Pipeline",
+            3,
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReplayedSuccessfulPublication_IsIdempotent()
+    {
+        var template = Template();
+        template.Name = "shared-ci";
+        template.LatestVersion = 1;
+        template.Versions.RemoveAll(version => version.Version != 1);
+        template.Versions[0].ChangelogEntry = "Extracted from pipeline 'free'";
+        _fleetRepository.Rows =
+        [
+            Row(3, "free", "name: free\nextends: shared-ci@1\nstages: []")
+        ];
+        _pipelineRepository.FindTemplateByNameAsync("shared-ci", 4, Arg.Any<CancellationToken>())
+            .Returns(template);
+        _templateService.GetTemplateAsync(10, Arg.Any<CancellationToken>())
+            .Returns(new PipelineTemplateDto { Id = 10, Name = "shared-ci", Version = 1 });
+
+        var result = await _service.ExtractAsync(3, new ExtractPipelineTemplateRequest
+        {
+            TemplateName = "shared-ci",
+            Category = "CI",
+            RewritePipeline = true
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.Version);
+        await _templateService.DidNotReceive().CreateTemplateAsync(
+            Arg.Any<CreatePipelineTemplateRequest>(), Arg.Any<CancellationToken>());
+        await _pipelineService.DidNotReceive().UpdatePipelineAsync(
+            Arg.Any<int>(), Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PromoteAsync_PublishesNextVersionAndRebasesSourceWhenRequested()
     {
         var row = Row(2, "divergent", "name: child\nextends: ci@1\nstages: []");
@@ -252,6 +318,41 @@ public sealed class PipelineFleetServiceTests
         await _pipelineService.Received(1).UpdatePipelineAsync(2,
             Arg.Is<UpdatePipelineRequest>(request => request.YamlDefinition.Contains("ci@3")
                 && !request.YamlDefinition.Contains("echo local")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PromoteAsync_ReplayedSuccessfulPublication_IsIdempotent()
+    {
+        var template = Template();
+        var latest = template.Versions.Single(version => version.Version == 2);
+        latest.ChangelogEntry = "Already published";
+        _fleetRepository.Rows =
+        [
+            Row(2, "rebased", "name: child\nextends: ci@2\nstages: []")
+        ];
+        _pipelineRepository.FindTemplateByNameAsync("ci", 4, Arg.Any<CancellationToken>())
+            .Returns(template);
+        _templateService.GetTemplateAsync(10, Arg.Any<CancellationToken>())
+            .Returns(new PipelineTemplateDto
+            {
+                Id = 10,
+                Name = "ci",
+                Version = 2,
+                YamlContent = latest.YamlContent
+            });
+
+        var result = await _service.PromoteAsync(2, new PromotePipelineTemplateRequest
+        {
+            YamlContent = latest.YamlContent,
+            ChangelogEntry = latest.ChangelogEntry,
+            RebaseSourcePipeline = true
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.Version);
+        await _templateService.DidNotReceive().UpdateTemplateAsync(
+            Arg.Any<int>(), Arg.Any<UpdatePipelineTemplateRequest>(), Arg.Any<CancellationToken>());
+        await _pipelineService.DidNotReceive().UpdatePipelineAsync(
+            Arg.Any<int>(), Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
     }
 
     private static PipelineFleetRow Row(int id, string name, string yaml) =>
@@ -288,13 +389,63 @@ public sealed class PipelineFleetServiceTests
     {
         public List<PipelineFleetRow> Rows { get; set; } = [];
 
-        public Task<List<PipelineFleetRow>> GetCandidatesAsync(
-            IReadOnlyCollection<int>? organizationIds, IReadOnlyCollection<int>? accessiblePipelineIds,
-            string? search, int? projectId, CancellationToken ct) =>
-            Task.FromResult(Rows.Where(row => organizationIds is null || organizationIds.Contains(row.OrganizationId))
+        public Task<PaginatedResult<PipelineFleetItemDto>> GetPageAsync(
+            PipelineFleetPaginationRequest request,
+            IReadOnlyCollection<int>? organizationIds,
+            IReadOnlyCollection<int>? accessiblePipelineIds,
+            CancellationToken ct)
+        {
+            var items = Rows.Where(row => organizationIds is null || organizationIds.Contains(row.OrganizationId))
                 .Where(row => accessiblePipelineIds is null || accessiblePipelineIds.Contains(row.PipelineId))
-                .Where(row => projectId is null || row.OwnerProjectId == projectId)
-                .ToList());
+                .Where(row => request.ProjectId is null || row.OwnerProjectId == request.ProjectId)
+                .Select(row =>
+                {
+                    var marker = "extends:";
+                    var line = row.YamlDefinition.Split('\n')
+                        .FirstOrDefault(value => value.TrimStart().StartsWith(marker, StringComparison.OrdinalIgnoreCase));
+                    var reference = line?[line.IndexOf(marker, StringComparison.OrdinalIgnoreCase)..]
+                        .Split(':', 2)[1].Trim().Trim('\'', '"');
+                    var separator = reference?.LastIndexOf('@') ?? -1;
+                    var name = separator > 0 ? reference![..separator] : reference;
+                    var pinned = separator > 0 && int.TryParse(reference![(separator + 1)..], out var version)
+                        ? version
+                        : (int?)null;
+                    int? latest = name is null ? null : 3;
+                    return new PipelineFleetItemDto
+                    {
+                        PipelineId = row.PipelineId,
+                        PipelineName = row.PipelineName,
+                        ProjectId = row.ProjectId,
+                        OwnerName = row.OwnerName,
+                        OwnerType = row.OwnerType,
+                        OrganizationId = row.OrganizationId,
+                        TemplateId = name is null ? null : 10,
+                        TemplateName = name,
+                        PinnedVersion = pinned,
+                        LatestVersion = latest,
+                        UsesLegacyReference = name is not null && pinned is null,
+                        Freshness = name is null
+                            ? PipelineFleetFreshness.OffCatalog
+                            : (pinned ?? latest) == latest
+                                ? PipelineFleetFreshness.Current
+                                : PipelineFleetFreshness.Outdated
+                    };
+                });
+            items = request.SortBy?.Equals("PipelineName", StringComparison.OrdinalIgnoreCase) == true
+                ? request.SortDescending
+                    ? items.OrderByDescending(item => item.PipelineName)
+                    : items.OrderBy(item => item.PipelineName)
+                : items.OrderBy(item => item.PipelineId);
+            var all = items.ToList();
+            var (page, pageSize) = request.Normalize();
+            return Task.FromResult(new PaginatedResult<PipelineFleetItemDto>
+            {
+                Items = all.Skip((page - 1) * pageSize).Take(pageSize).ToList(),
+                TotalCount = all.Count,
+                Page = page,
+                PageSize = pageSize
+            });
+        }
 
         public Task<PipelineFleetRow?> GetAsync(int pipelineId, CancellationToken ct) =>
             Task.FromResult(Rows.FirstOrDefault(row => row.PipelineId == pipelineId));

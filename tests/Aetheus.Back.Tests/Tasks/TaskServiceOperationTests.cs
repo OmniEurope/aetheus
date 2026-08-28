@@ -29,10 +29,17 @@ public class TaskServiceOperationTests
         serverHub.Clients.Returns(clients);
         var encryption = Substitute.For<IEncryptionService>();
         encryption.EncryptValue(Arg.Any<string>()).Returns(ci => ci.Arg<string>());
+        var taskQueueNotifier = new TaskQueueNotifier(
+            serverHub,
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<TaskQueueNotifier>>());
 
-        _sut = new TaskService(_repo, Substitute.For<IPipelineRunService>(), Substitute.For<ILogService>(),
+        // No orchestration port any more: the run advances by domain event, so the spy is the
+        // dispatcher.
+        _sut = new TaskService(_repo, Substitute.For<ILogService>(),
             pipelineHub, serverHub, Substitute.For<IAuditService>(), TimeProvider.System, encryption, Substitute.For<IArtifactService>(),
-            Substitute.For<Microsoft.Extensions.Logging.ILogger<TaskService>>());
+            taskQueueNotifier,
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<TaskService>>(),
+            Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>());
     }
 
     [Fact]

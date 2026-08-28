@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Git;
 
@@ -22,7 +17,7 @@ public partial class GitDefaultBranchButton
     {
         if (!CanWrite || Branch.IsDefault) return;
 
-        var updated = await Api.UpdateGitRepoAsync(RepositoryId, new UpdateGitLightRepoRequest
+        var updated = await Api.Git.UpdateGitRepoAsync(RepositoryId, new UpdateGitLightRepoRequest
         {
             DefaultBranch = Branch.Name
         });

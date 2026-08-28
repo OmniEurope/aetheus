@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -12,7 +11,8 @@ internal static class PipelineAuthoritativeGitCoordinator
     {
         if (pipeline.ProjectId is not { } projectId) return;
         var (outcome, error) = await pipelineGit.WriteProjectPipelineYamlAsync(
-            projectId, pipeline.Name, pipeline.YamlDefinition, actor, ct, pipeline.SourceBranch)
+            projectId, pipeline.Name, pipeline.YamlDefinition, actor, ct,
+            pipeline.SourceBranch, pipeline.SourceRepositoryId)
             .ConfigureAwait(false);
         if (outcome == GitWriteOutcome.NoRepo)
             logger.LogInformation(

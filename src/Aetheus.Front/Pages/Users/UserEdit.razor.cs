@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Users;
 
@@ -21,8 +12,10 @@ public partial class UserEdit
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private AuthStateProvider Auth { get; set; } = default!;
+    [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
+    [Inject] private RealtimeSessionLifecycle RealtimeSession { get; set; } = default!;
 
     [Parameter] public int? Id { get; set; }
 
@@ -30,6 +23,9 @@ public partial class UserEdit
     private UserModel _model = new();
     private bool _isNew => Id is null or 0;
     private bool _saving;
+    private bool _savingRoles;
+    private bool _savingFlags;
+    private bool _rolesSaved;
     private bool _loading;
     private PasswordChangeModel _passwordChange = new();
     private bool _changingPassword;
@@ -37,7 +33,6 @@ public partial class UserEdit
     private bool PasswordMeetsRules => _passwordChange.NewPassword.Length >= PasswordMinLength;
     private int? _previousId = int.MinValue;
 
-    private List<string> _availableRoles = [];
     private List<EffectivePermissionDto>? _effectivePermissions;
 
     // Organizations tab (lazy-loaded on activation / deep-link).
@@ -71,12 +66,10 @@ public partial class UserEdit
 
         try
         {
-            _availableRoles = await Api.GetRolesAsync();
-
             if (!_isNew)
             {
                 _loading = true;
-                _user = await Api.GetUserDetailAsync(Id!.Value);
+                _user = await Api.Auth.GetUserDetailAsync(Id!.Value);
                 if (_user is not null)
                 {
                     _model = new UserModel
@@ -97,6 +90,7 @@ public partial class UserEdit
             await LoadEffectivePermissions();
 
         Breadcrumb.Set(
+            new BreadcrumbItem(L["Administration"], "/admin"),
             new BreadcrumbItem(L["Users"], "/users"),
             new BreadcrumbItem(_isNew ? L["NewUser"] : _user?.Username ?? L["User"]));
 
@@ -111,7 +105,7 @@ public partial class UserEdit
         return query.TryGetValue("tab", out var value) ? value.ToString() : null;
     }
 
-    // Slugs order: 0 general, 1 roles, 2 organizations, 3 security. Load the orgs tab on activation.
+    // Slugs order: 0 general, 1 roles, 2 organizations, 3 security, 4 audit.
     private async Task OnTabChanged(int index)
     {
         if (index == 2 && !_orgsLoaded)
@@ -125,13 +119,13 @@ public partial class UserEdit
         await InvokeAsync(StateHasChanged);
         try
         {
-            _userOrgs = await Api.GetUserOrganizationsAsync(Id.Value);
+            _userOrgs = await Api.Servers.GetUserOrganizationsAsync(Id.Value);
             var memberOf = _userOrgs.Select(o => o.OrganizationId).ToHashSet();
             var available = new List<OrganizationDto>();
             const int pageSize = 200;
             for (var page = 1; ; page++)
             {
-                var result = await Api.GetOrganizationsAsync(null, page, pageSize);
+                var result = await Api.Servers.GetOrganizationsAsync(null, page, pageSize);
                 if (result is null) break;
                 available.AddRange(result.Items.Where(o => !memberOf.Contains(o.Id)));
                 if (page * pageSize >= result.TotalCount || result.Items.Count == 0) break;
@@ -152,7 +146,7 @@ public partial class UserEdit
         _addingOrg = true;
         try
         {
-            var member = await Api.AddOrganizationMemberAsync(_selectedOrgId.Value,
+            var member = await Api.Servers.AddOrganizationMemberAsync(_selectedOrgId.Value,
                 new AddOrganizationMemberRequest { UserId = Id.Value, Role = _newOrgRole });
             if (member is not null)
             {
@@ -160,6 +154,10 @@ public partial class UserEdit
                 _selectedOrgId = null;
                 _newOrgRole = OrganizationRole.Member;
                 await LoadUserOrgsAsync();
+            }
+            else
+            {
+                Toast.Error("Error", "SaveFailed");
             }
         }
         finally
@@ -170,13 +168,17 @@ public partial class UserEdit
 
     private async Task OnChangeOrgRole(UserOrganizationDto org, OrganizationRole role)
     {
-        var updated = await Api.UpdateOrganizationMemberAsync(org.OrganizationId, org.MemberId,
+        var updated = await Api.Servers.UpdateOrganizationMemberAsync(org.OrganizationId, org.MemberId,
             new UpdateOrganizationMemberRequest { Role = role });
         if (updated is not null)
         {
             var idx = _userOrgs.FindIndex(o => o.MemberId == org.MemberId);
             if (idx >= 0) _userOrgs[idx] = org with { Role = role };
             Toast.Success("Saved", "Saved");
+        }
+        else
+        {
+            Toast.Error("Error", "SaveFailed");
         }
     }
 
@@ -188,54 +190,157 @@ public partial class UserEdit
             new ConfirmOptions { OkButtonText = L["Remove"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        if (await Api.RemoveOrganizationMemberAsync(org.OrganizationId, org.MemberId))
-            await LoadUserOrgsAsync();
-    }
-
-    private async Task OnSubmit()
-    {
-        _saving = true;
-        if (_isNew)
+        if (await Api.Servers.RemoveOrganizationMemberAsync(org.OrganizationId, org.MemberId))
         {
-            if (string.IsNullOrWhiteSpace(_model.Password) || _model.Password.Length < PasswordPolicy.MinimumLength)
-            {
-                Toast.Error(L["Error"], L["PasswordMinLength"]);
-                _saving = false;
-                return;
-            }
-
-            var created = await Api.CreateUserAsync(new CreateUserRequest
-            {
-                Username = _model.Username,
-                Password = _model.Password,
-                Email = string.IsNullOrWhiteSpace(_model.Email) ? null : _model.Email,
-                MustChangePassword = _model.MustChangePassword,
-                Roles = _model.Roles
-            });
-            if (created is not null)
-            {
-                Toast.Success("Created", "UserCreated");
-                Nav.NavigateTo($"/users/{created.Id}");
-            }
+            await LoadUserOrgsAsync();
+            Toast.Success("Deleted", "Saved");
         }
         else
         {
-            var updated = await Api.UpdateUserAsync(Id!.Value, new UpdateUserRequest
+            Toast.Error("Error", "DeleteFailed");
+        }
+    }
+
+    internal async Task OnSubmit()
+    {
+        _saving = true;
+        try
+        {
+            if (_isNew)
             {
-                Username = _model.Username,
-                Email = string.IsNullOrWhiteSpace(_model.Email) ? null : _model.Email,
-                IsActive = _model.IsActive,
-                MustChangePassword = _model.MustChangePassword,
-                Roles = _model.Roles
-            });
-            if (updated is not null)
+                if (string.IsNullOrWhiteSpace(_model.Password) || _model.Password.Length < PasswordPolicy.MinimumLength)
+                {
+                    Toast.Error(L["Error"], L["PasswordMinLength"]);
+                    return;
+                }
+
+                var outcome = await Api.Auth.CreateUserAsync(new CreateUserRequest
+                {
+                    Username = _model.Username,
+                    Password = _model.Password,
+                    Email = string.IsNullOrWhiteSpace(_model.Email) ? null : _model.Email,
+                    MustChangePassword = _model.MustChangePassword,
+                    Roles = _model.Roles
+                });
+                if (outcome.Value is { } created)
+                {
+                    Toast.Success("Created", "UserCreated");
+                    Nav.NavigateTo($"/users/{created.Id}");
+                }
+                else if (!string.IsNullOrWhiteSpace(outcome.Error?.Message))
+                {
+                    Toast.Notify(NotificationSeverity.Error, "Error", outcome.Error.Message);
+                }
+                else
+                {
+                    Toast.Error("Error", "SaveFailed");
+                }
+            }
+            else
             {
-                _user = await Api.GetUserDetailAsync(Id!.Value);
-                await LoadEffectivePermissions();
-                Toast.Success("Saved", "UserSaved");
+                var editingCurrentUser = IsEditingCurrentUser;
+                var updated = await Api.Auth.UpdateUserAsync(Id!.Value, new UpdateUserRequest
+                {
+                    Username = _model.Username,
+                    Email = string.IsNullOrWhiteSpace(_model.Email) ? null : _model.Email,
+                    IsActive = _user!.IsActive,
+                    MustChangePassword = _user.MustChangePassword,
+                    Roles = _model.Roles
+                });
+                if (updated is not null)
+                {
+                    _user = await Api.Auth.GetUserDetailAsync(Id!.Value);
+                    await LoadEffectivePermissions();
+                    if (editingCurrentUser)
+                        Permissions.SetPermissions(_effectivePermissions ?? [], Auth.IsAdmin);
+                    Toast.Success("Saved", "UserSaved");
+                }
+                else
+                {
+                    Toast.Error("Error", "SaveFailed");
+                }
             }
         }
-        _saving = false;
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    internal bool IsEditingCurrentUser =>
+        string.Equals(_user?.Username, Auth.Username, StringComparison.OrdinalIgnoreCase);
+    internal string? EditedUsername => _user?.Username;
+
+    private Task OnMustChangePasswordChangedAsync(bool value) => UpdateFlagsAsync(_model.IsActive, value);
+
+    private async Task OnActiveChangedAsync(bool value)
+    {
+        if (_user is null || value == _user.IsActive) return;
+        if (!value)
+        {
+            var confirmed = await Dialog.Confirm(
+                string.Format(L["DeactivateUserConfirm"].Value, _user.Username),
+                L["DeactivateUser"].Value,
+                new ConfirmOptions
+                {
+                    OkButtonText = L["Deactivate"].Value,
+                    CancelButtonText = L["Cancel"].Value
+                });
+            if (confirmed != true) return;
+        }
+
+        await UpdateFlagsAsync(value, _model.MustChangePassword);
+    }
+
+    private async Task UpdateFlagsAsync(bool isActive, bool mustChangePassword)
+    {
+        if (_isNew || Id is null or 0 || _user is null || _savingFlags) return;
+        var previousActive = _model.IsActive;
+        var previousMustChange = _model.MustChangePassword;
+        var editingCurrentUser = IsEditingCurrentUser;
+        _model.IsActive = isActive;
+        _model.MustChangePassword = mustChangePassword;
+        _savingFlags = true;
+        try
+        {
+            var updated = await Api.Auth.UpdateUserAsync(Id.Value, new UpdateUserRequest
+            {
+                Username = _user.Username,
+                Email = _user.Email,
+                IsActive = isActive,
+                MustChangePassword = mustChangePassword,
+                Roles = _user.Roles
+            });
+            if (updated is null)
+            {
+                _model.IsActive = previousActive;
+                _model.MustChangePassword = previousMustChange;
+                Toast.Error("Error", "SaveFailed");
+                return;
+            }
+
+            _user = updated;
+            _model.IsActive = updated.IsActive;
+            _model.MustChangePassword = updated.MustChangePassword;
+            Toast.Success("Saved", "UserSaved");
+
+            if (editingCurrentUser && !updated.IsActive)
+            {
+                await RealtimeSession.StopAsync();
+                await Auth.LogoutAsync();
+                Nav.NavigateTo("/login");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _model.IsActive = previousActive;
+            _model.MustChangePassword = previousMustChange;
+            Toast.Error("Error", "SaveFailed");
+        }
+        finally
+        {
+            _savingFlags = false;
+        }
     }
 
     private async Task OnDelete()
@@ -244,9 +349,12 @@ public partial class UserEdit
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed == true)
         {
-            var status = await Api.DeleteUserAsync(Id!.Value);
+            var status = await Api.Auth.DeleteUserAsync(Id!.Value);
             if (status.Success)
+            {
+                Toast.Success("Deleted", "Deleted");
                 Nav.NavigateTo("/users");
+            }
             else
                 Toast.Error("Error", "DeleteFailed");
         }
@@ -265,7 +373,7 @@ public partial class UserEdit
         _changingPassword = true;
         try
         {
-            var status = await Api.ChangeUserPasswordAsync(Id!.Value, new ChangeUserPasswordRequest { NewPassword = model.NewPassword });
+            var status = await Api.Auth.ChangeUserPasswordAsync(Id!.Value, new ChangeUserPasswordRequest { NewPassword = model.NewPassword });
             if (status.Success)
             {
                 Toast.Success("Saved", "PasswordChanged");
@@ -282,19 +390,78 @@ public partial class UserEdit
         }
     }
 
-    private void OnRoleToggled(string role, bool isChecked)
+    private void OnInvalidPasswordSubmit(FormInvalidSubmitEventArgs _)
     {
-        if (isChecked && !_model.Roles.Contains(role))
-            _model.Roles.Add(role);
-        else if (!isChecked)
-            _model.Roles.Remove(role);
+        Toast.Warning("Error", "PasswordMinLength");
+    }
+
+    private async Task OnRolesChangedAsync(List<string> roles)
+    {
+        if (_isNew || Id is null or 0 || _user is null || _savingRoles) return;
+
+        var previousRoles = _user.Roles.ToList();
+        var editingCurrentUser = IsEditingCurrentUser;
+        _model.Roles = roles.ToList();
+        _rolesSaved = false;
+        _savingRoles = true;
+        try
+        {
+            // Roles save independently so unsaved edits on the General tab are never submitted
+            // as a side effect of a checkbox click.
+            var updated = await Api.Auth.UpdateUserAsync(Id.Value, new UpdateUserRequest
+            {
+                Username = _user.Username,
+                Email = _user.Email,
+                IsActive = _user.IsActive,
+                MustChangePassword = _user.MustChangePassword,
+                Roles = _model.Roles
+            });
+            if (updated is null)
+            {
+                _model.Roles = previousRoles;
+                Toast.Error("Error", "SaveFailed");
+                return;
+            }
+
+            _user = updated;
+            _model.Roles = updated.Roles.ToList();
+            _rolesSaved = true;
+            Toast.Success("Saved", "UserSaved");
+
+            try
+            {
+                await LoadEffectivePermissions();
+                if (editingCurrentUser)
+                    Permissions.SetPermissions(_effectivePermissions ?? [], Auth.IsAdmin);
+            }
+            catch (HttpRequestException ex)
+            {
+                // The role update already succeeded. In particular, changing the current user's roles
+                // rotates their security stamp, so the follow-up permissions read can legitimately be 401.
+                _effectivePermissions = null;
+                Toast.Warning(
+                    "Saved",
+                    editingCurrentUser && ex.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                        ? "UserRolesSavedPermissionRefreshUnauthorized"
+                        : "UserRolesSavedPermissionRefreshFailed");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _model.Roles = previousRoles;
+            Toast.Error("Error", "SaveFailed");
+        }
+        finally
+        {
+            _savingRoles = false;
+        }
     }
 
     private async Task LoadEffectivePermissions()
     {
         if (_isNew || Id is null or 0) return;
 
-        var summary = await Api.GetUserEffectivePermissionsAsync(Id!.Value);
+        var summary = await Api.Auth.GetUserEffectivePermissionsAsync(Id!.Value);
         _effectivePermissions = summary?.EffectivePermissions ?? [];
     }
 

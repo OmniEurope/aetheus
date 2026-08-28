@@ -15,8 +15,42 @@ namespace Aetheus.Agent.Core.Tests;
 /// Covers S-TECH-61: artifact collection auto-detects Cobertura coverage and publishes it so
 /// shell-based runs light up the coverage tile without an explicit <c>type: coverage</c> step.
 /// </summary>
+[Collection(ProcessSpawningTestCollection.Name)]
 public class PipelineArtifactOperationExecutorTests
 {
+    [Theory]
+    [InlineData(null, CompressionLevel.Fastest)]
+    [InlineData("fastest", CompressionLevel.Fastest)]
+    [InlineData("Optimal", CompressionLevel.Optimal)]
+    [InlineData("NoCompression", CompressionLevel.NoCompression)]
+    public void CollectArtifacts_CompressionMode_IsExplicitAndValidated(
+        string? value,
+        CompressionLevel expected)
+    {
+        Assert.Equal(expected, PipelineArtifactCollector.ResolveCompressionLevel(value));
+    }
+
+    [Fact]
+    public void CollectArtifacts_UnknownCompressionMode_IsRejected()
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            PipelineArtifactCollector.ResolveCompressionLevel("maximum-magic"));
+    }
+
+    [Theory]
+    [InlineData("report.JSON", CompressionLevel.Optimal)]
+    [InlineData("contract.yaml", CompressionLevel.Optimal)]
+    [InlineData("package.ZIP", CompressionLevel.NoCompression)]
+    [InlineData("image.tar", CompressionLevel.Fastest)]
+    [InlineData("runtime.dll", CompressionLevel.Fastest)]
+    [InlineData("no-extension", CompressionLevel.Fastest)]
+    public void CollectArtifacts_AdaptiveCompression_UsesFileCategory(
+        string filePath,
+        CompressionLevel expected)
+    {
+        Assert.Equal(expected, PipelineArtifactCollector.ResolveCompressionLevel("Adaptive", filePath));
+    }
+
     [Theory]
     [InlineData("nminus1", "nminus1")]
     [InlineData("versions/v1", "versions/v1")]
@@ -44,8 +78,21 @@ public class PipelineArtifactOperationExecutorTests
         "<?xml version=\"1.0\"?><coverage line-rate=\"0.85\" branch-rate=\"0.7\" " +
         "lines-covered=\"85\" lines-valid=\"100\" branches-covered=\"7\" branches-valid=\"10\"></coverage>";
 
-    private static PipelineArtifactOperationExecutor NewExecutor(IServerApiClient apiClient) =>
-        new(apiClient, NullLogger<PipelineArtifactOperationExecutor>.Instance);
+    private static PipelineArtifactOperationExecutor NewExecutor(IServerApiClient apiClient)
+    {
+        apiClient.UploadArtifactAsync(
+                Arg.Any<int>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<Stream>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PipelineArtifactDto { Id = 101 });
+        apiClient.PublishAnalysisReportAsync(Arg.Any<int>(), Arg.Any<PublishAnalysisReportRequest>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AnalysisReportDto { GateStatus = AnalysisGateStatus.Passed });
+        return new PipelineArtifactOperationExecutor(
+            apiClient, NullLogger<PipelineArtifactOperationExecutor>.Instance, TimeProvider.System);
+    }
 
     private static string Sha256(Stream stream)
     {
@@ -94,6 +141,107 @@ public class PipelineArtifactOperationExecutorTests
             Assert.False(File.Exists(Path.Combine(workDir,
                 "src", "Aetheus.Back", "bin", "Release", "net10.0", "Aetheus.Back.dll")));
             await api.Received(1).DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("previous-deployed")]
+    [InlineData("current-deployed")]
+    public async Task RestoreArtifacts_DeployedSelector_ExportsVerifiedBaselineIdentity(string selector)
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-baseline-").FullName;
+        try
+        {
+            const string sourceSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const string contractJson =
+                """{"candidateVersion":"1.0.42","sourceSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}""";
+            var contractBytes = System.Text.Encoding.UTF8.GetBytes(contractJson);
+            var bytes = new MemoryStream();
+            using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var entry = archive.CreateEntry(".pipeline-artifacts/delivery-contract.json");
+                await using var entryStream = entry.Open();
+                await entryStream.WriteAsync(contractBytes, TestContext.Current.CancellationToken);
+            }
+            bytes.Position = 0;
+            var api = Substitute.For<IServerApiClient>();
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<Stream?>(bytes));
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineRestoreArtifacts,
+                target: "BuildArtifacts-artifacts",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = Sha256(bytes),
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_RESTORE_RELEASE_SELECTOR"] = selector
+                },
+                timeoutSeconds: 60,
+                onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("##aetheus[setvariable name=DELIVERY_BASELINE_BOOTSTRAP]false", output);
+            Assert.Contains("##aetheus[setvariable name=DELIVERY_BASELINE_CANDIDATE_VERSION]1.0.42", output);
+            Assert.Contains($"##aetheus[setvariable name=DELIVERY_BASELINE_SOURCE_SHA]{sourceSha}", output);
+            Assert.Contains(
+                $"##aetheus[setvariable name=DELIVERY_BASELINE_CONTRACT_SHA256]{Convert.ToHexString(SHA256.HashData(contractBytes)).ToLowerInvariant()}",
+                output);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("previous-deployed")]
+    [InlineData("current-deployed")]
+    public async Task RestoreArtifacts_DeployedSelectorWithoutContract_FailsClosed(string selector)
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-baseline-missing-").FullName;
+        try
+        {
+            var bytes = new MemoryStream();
+            using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var entry = archive.CreateEntry("payload.txt");
+                await using var writer = new StreamWriter(entry.Open());
+                await writer.WriteAsync("payload");
+            }
+            bytes.Position = 0;
+            var api = Substitute.For<IServerApiClient>();
+            api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<Stream?>(bytes));
+            var output = new List<string>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelineRestoreArtifacts,
+                target: "BuildArtifacts-artifacts",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+                    ["AETHEUS_RESTORE_RUN_ID"] = "42",
+                    ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = Sha256(bytes),
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    ["AETHEUS_RESTORE_RELEASE_SELECTOR"] = selector
+                },
+                timeoutSeconds: 60,
+                onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message =>
+                message.Contains("does not contain .pipeline-artifacts/delivery-contract.json", StringComparison.Ordinal));
+            Assert.DoesNotContain(output, message => message.Contains("DELIVERY_BASELINE_BOOTSTRAP", StringComparison.Ordinal));
         }
         finally
         {
@@ -690,6 +838,50 @@ public class PipelineArtifactOperationExecutorTests
         }
     }
 
+    [Fact]
+    public async Task PublishCoverage_WhenImmutableArtifactIsNotReturned_FailsClosed()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-cov-artifact-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(workDir, "coverage.cobertura.xml"),
+                CoberturaXml,
+                TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+            var executor = NewExecutor(api);
+            api.UploadArtifactAsync(
+                    Arg.Any<int>(),
+                    Arg.Any<string>(),
+                    Arg.Any<string?>(),
+                    Arg.Any<Stream>(),
+                    Arg.Any<CancellationToken>())
+                .Returns((PipelineArtifactDto?)null);
+
+            var result = await executor.ExecuteAsync(
+                OperationKind.PipelinePublishCoverage,
+                target: "[\"**/coverage.cobertura.xml\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.DidNotReceive().PublishAnalysisReportAsync(
+                Arg.Any<int>(),
+                Arg.Any<PublishAnalysisReportRequest>(),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
     private const string HighComplexitySource =
         "class C { int M(int x) { if (x > 0) return 1; if (x > 1) return 2; if (x > 2) return 3; " +
         "if (x > 3) return 4; return 0; } }";
@@ -780,6 +972,99 @@ public class PipelineArtifactOperationExecutorTests
             Assert.NotEqual(0, result.ExitCode);
             await api.DidNotReceive().PublishLintAsync(
                 Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishLint_MultipleOverlappingPatterns_PublishesEveryDistinctFileOnce()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-lint-many-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(workDir, "nested"));
+            await File.WriteAllTextAsync(
+                Path.Combine(workDir, "first.sarif"),
+                "{}",
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Combine(workDir, "nested", "second.sarif"),
+                "{}",
+                TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishLint,
+                target: "[\"**/*.sarif\",\"first.sarif\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            await api.Received(2).PublishLintAsync(
+                42, "{}", Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            await api.Received(2).PublishAnalysisReportAsync(
+                42, Arg.Any<PublishAnalysisReportRequest>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishLint_WhenSecondPublicationFails_FailsTheStep()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-lint-failure-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(workDir, "first.sarif"),
+                "{}",
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Combine(workDir, "second.sarif"),
+                "{}",
+                TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+            var calls = 0;
+            api.When(candidate => candidate.PublishLintAsync(
+                    Arg.Any<int>(),
+                    Arg.Any<string>(),
+                    Arg.Any<string?>(),
+                    Arg.Any<string?>(),
+                    Arg.Any<CancellationToken>()))
+                .Do(_ =>
+                {
+                    if (Interlocked.Increment(ref calls) == 2)
+                        throw new HttpRequestException("second publication failed");
+                });
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishLint,
+                target: "[\"**/*.sarif\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.Received(2).PublishLintAsync(
+                42, "{}", Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            await api.Received(1).PublishAnalysisReportAsync(
+                42, Arg.Any<PublishAnalysisReportRequest>(), Arg.Any<CancellationToken>());
         }
         finally
         {

@@ -4,6 +4,7 @@ using System.Reflection;
 using Aetheus.Front.Pages.Servers.ServerDetailSections;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
+using Aetheus.Shared.Validation;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Radzen;
@@ -175,7 +176,7 @@ public class ServerMailSectionRenderTests : BunitContext
     [Fact]
     public void MailDialogModel_ValidAccount_HasNoValidationError()
     {
-        var model = new MailDialogModel { Mode = MailDialogMode.AddAccount, Email = "user@example.com", Password = "secret" };
+        var model = new MailDialogModel { Mode = MailDialogMode.AddAccount, Email = "user@example.com", Password = "strong-secret" };
         var errors = new List<ValidationResult>();
 
         Assert.True(Validator.TryValidateObject(model, new ValidationContext(model), errors, true));
@@ -185,11 +186,26 @@ public class ServerMailSectionRenderTests : BunitContext
     [Fact]
     public void MailDialogModel_InvalidEmail_HasEmailValidationError()
     {
-        var model = new MailDialogModel { Mode = MailDialogMode.AddAccount, Email = "not-an-email", Password = "secret" };
+        var model = new MailDialogModel { Mode = MailDialogMode.AddAccount, Email = "not-an-email", Password = "strong-secret" };
         var errors = new List<ValidationResult>();
 
         Assert.False(Validator.TryValidateObject(model, new ValidationContext(model), errors, true));
         Assert.Contains(errors, error => error.MemberNames.Contains(nameof(MailDialogModel.Email)));
+    }
+
+    [Fact]
+    public void MailDialogModel_ShortPassword_HasPasswordValidationError()
+    {
+        var model = new MailDialogModel
+        {
+            Mode = MailDialogMode.AddAccount,
+            Email = "user@example.com",
+            Password = new string('x', PasswordPolicy.MinimumLength - 1)
+        };
+
+        var errors = model.Validate(new ValidationContext(model)).ToList();
+
+        Assert.Contains(errors, error => error.MemberNames.Contains(nameof(MailDialogModel.Password)));
     }
 
     // ── ShowConfirm / ConfirmCancelled ────────────────────────────────────────

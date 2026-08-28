@@ -5,12 +5,13 @@ COPY . .
 RUN dotnet restore src/Toto.Api/Toto.Api.csproj
 RUN dotnet publish src/Toto.Api/Toto.Api.csproj --configuration Release --no-restore --output /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf
 WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/publish .
+COPY --from=build --chown=app:app /app/publish .
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
+USER app
 ENTRYPOINT ["dotnet", "Toto.Api.dll"]

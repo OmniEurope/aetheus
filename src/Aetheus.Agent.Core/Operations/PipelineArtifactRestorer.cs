@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
+using System.Text.Json;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -19,17 +18,7 @@ internal static class PipelineArtifactRestorer
         Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct,
         Func<string, long>? availableSpaceProvider = null)
     {
-        envVars.TryGetValue("AETHEUS_RESTORE_ARTIFACT_ID", out var artifactIdText);
-        envVars.TryGetValue("AETHEUS_RESTORE_RUN_ID", out var runIdText);
-        envVars.TryGetValue("AETHEUS_RESTORE_ARTIFACT_SHA256", out var expectedSha256);
-        envVars.TryGetValue("AETHEUS_WORKING_DIR", out var workingDir);
-        envVars.TryGetValue("AETHEUS_RESTORE_TARGET_DIR", out var targetDirectory);
-        if (!int.TryParse(artifactIdText, out var artifactId) || artifactId <= 0
-            || !int.TryParse(runIdText, out var runId) || runId <= 0
-            || string.IsNullOrWhiteSpace(workingDir)
-            || expectedSha256 is null
-            || expectedSha256.Length != 64
-            || expectedSha256.Any(character => !Uri.IsHexDigit(character)))
+        if (!TryReadRequest(envVars, out var request))
         {
             await onOutput(
                 "Missing or invalid AETHEUS_RESTORE_ARTIFACT_ID, AETHEUS_RESTORE_RUN_ID, " +
@@ -40,50 +29,191 @@ internal static class PipelineArtifactRestorer
 
         try
         {
-            var restoreDirectory = ResolveRestoreDirectory(workingDir, targetDirectory);
-            Directory.CreateDirectory(restoreDirectory);
-            await onOutput($"Downloading verified artifact {artifactId} into {restoreDirectory}…", TaskLogLevel.Info).ConfigureAwait(false);
-            await using var zip = await apiClient.DownloadArtifactAsync(artifactId, runId, ct).ConfigureAwait(false);
-            if (zip is null)
-            {
-                await onOutput("Artifact download failed (not found / forbidden)", TaskLogLevel.Error).ConfigureAwait(false);
-                return new ExecutorResult(1, false);
-            }
-
-            var actualSha256 = Convert.ToHexString(
-                await SHA256.HashDataAsync(zip, ct).ConfigureAwait(false));
-            zip.Position = 0;
-            if (!actualSha256.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
-            {
-                await onOutput(
-                    $"Artifact SHA-256 mismatch: expected {expectedSha256}, received {actualSha256.ToLowerInvariant()}.",
-                    TaskLogLevel.Error).ConfigureAwait(false);
-                return new ExecutorResult(1, false);
-            }
-
-            using var archive = new ZipArchive(zip, ZipArchiveMode.Read);
-            var requiredBytes = DeployLayout.ValidateArchive(archive, restoreDirectory);
-            var root = Path.GetPathRoot(Path.GetFullPath(workingDir));
-            var availableBytes = availableSpaceProvider?.Invoke(root!) ?? new DriveInfo(root!).AvailableFreeSpace;
-            if (!HasEnoughSpace(requiredBytes, availableBytes))
-            {
-                await onOutput(
-                    $"Artifact restore refused: {requiredBytes} bytes to unpack with only {availableBytes} bytes free (512 MiB safety floor).",
-                    TaskLogLevel.Error).ConfigureAwait(false);
-                return new ExecutorResult(1, false);
-            }
-
-            DeployLayout.ExtractSafely(archive, restoreDirectory);
-            await onOutput($"Restored {archive.Entries.Count} artifact entries into {restoreDirectory}", TaskLogLevel.Info).ConfigureAwait(false);
-            return new ExecutorResult(0, false);
+            return await RestoreVerifiedAsync(
+                apiClient, request, onOutput, ct, availableSpaceProvider).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
-                                   or ArgumentException or NotSupportedException)
+                                   or ArgumentException or NotSupportedException or JsonException)
         {
-            logger.LogError(ex, "Failed to restore artifact {ArtifactId} for run {RunId}", artifactId, runId);
+            logger.LogError(ex, "Failed to restore artifact {ArtifactId} for run {RunId}", request.ArtifactId, request.RunId);
             await onOutput($"Artifact restore failed: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
             return new ExecutorResult(1, false);
         }
+    }
+
+    private static bool TryReadRequest(
+        IReadOnlyDictionary<string, string> envVars,
+        out ArtifactRestoreRequest request)
+    {
+        envVars.TryGetValue("AETHEUS_RESTORE_ARTIFACT_ID", out var artifactIdText);
+        envVars.TryGetValue("AETHEUS_RESTORE_RUN_ID", out var runIdText);
+        envVars.TryGetValue("AETHEUS_RESTORE_ARTIFACT_SHA256", out var expectedSha256);
+        envVars.TryGetValue("AETHEUS_RESTORE_ARTIFACT_SIZE_BYTES", out var expectedSizeText);
+        envVars.TryGetValue("AETHEUS_WORKING_DIR", out var workingDir);
+        envVars.TryGetValue("AETHEUS_RESTORE_TARGET_DIR", out var targetDirectory);
+        envVars.TryGetValue("AETHEUS_RESTORE_RELEASE_SELECTOR", out var releaseSelector);
+        var artifactIdValid = int.TryParse(artifactIdText, out var artifactId) && artifactId > 0;
+        var runIdValid = int.TryParse(runIdText, out var runId) && runId > 0;
+        var valid = artifactIdValid
+                    && runIdValid
+                    && !string.IsNullOrWhiteSpace(workingDir)
+                    && expectedSha256 is { Length: 64 }
+                    && expectedSha256.All(Uri.IsHexDigit);
+        var expectedSize = long.TryParse(expectedSizeText, out var parsedSize) && parsedSize >= 0
+            ? parsedSize
+            : 0;
+        request = new ArtifactRestoreRequest(
+            artifactId, runId, expectedSha256 ?? string.Empty, expectedSize,
+            workingDir ?? string.Empty, targetDirectory, releaseSelector);
+        return valid;
+    }
+
+    private static async Task<ExecutorResult> RestoreVerifiedAsync(
+        IServerApiClient apiClient,
+        ArtifactRestoreRequest request,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken ct,
+        Func<string, long>? availableSpaceProvider)
+    {
+        await using var transferLease = await ArtifactTransferBudget.Shared.AcquireAsync(request.ExpectedSize, ct)
+            .ConfigureAwait(false);
+        var restoreDirectory = ResolveRestoreDirectory(request.WorkingDirectory, request.TargetDirectory);
+        Directory.CreateDirectory(restoreDirectory);
+        await onOutput($"Downloading verified artifact {request.ArtifactId} into {restoreDirectory}…", TaskLogLevel.Info).ConfigureAwait(false);
+        var download = Stopwatch.StartNew();
+        await using var zip = await apiClient.DownloadArtifactAsync(request.ArtifactId, request.RunId, ct).ConfigureAwait(false);
+        download.Stop();
+        if (zip is null)
+        {
+            await onOutput("Artifact download failed (not found / forbidden)", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(1, false);
+        }
+
+        var hash = await ReadHashAsync(zip, ct).ConfigureAwait(false);
+        if (!hash.Sha256.Equals(request.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            await onOutput(
+                $"Artifact SHA-256 mismatch: expected {request.ExpectedSha256}, received {hash.Sha256.ToLowerInvariant()}.",
+                TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(1, false);
+        }
+
+        using var archive = new ZipArchive(zip, ZipArchiveMode.Read);
+        var requiredBytes = DeployLayout.ValidateArchive(archive, restoreDirectory);
+        var root = Path.GetPathRoot(Path.GetFullPath(request.WorkingDirectory));
+        var availableBytes = availableSpaceProvider?.Invoke(root!) ?? new DriveInfo(root!).AvailableFreeSpace;
+        if (!HasEnoughSpace(requiredBytes, availableBytes))
+        {
+            await onOutput(
+                $"Artifact restore refused: {requiredBytes} bytes to unpack with only {availableBytes} bytes free (512 MiB safety floor).",
+                TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(1, false);
+        }
+
+        var extraction = Stopwatch.StartNew();
+        DeployLayout.ExtractSafely(archive, restoreDirectory);
+        extraction.Stop();
+        var downloadDuration = ArtifactDownloadTelemetry.TryGet(zip, out var measured)
+            ? measured.DownloadDuration
+            : download.Elapsed;
+        await EmitRestoreMetricsAsync(
+            onOutput, downloadDuration, hash, extraction.Elapsed, requiredBytes).ConfigureAwait(false);
+        await onOutput($"Restored {archive.Entries.Count} artifact entries into {restoreDirectory}", TaskLogLevel.Info).ConfigureAwait(false);
+        if (IsDeployedReleaseSelector(request.ReleaseSelector))
+            await ExportDeployedBaselineAsync(
+                restoreDirectory, request.ReleaseSelector!, onOutput, ct).ConfigureAwait(false);
+        return new ExecutorResult(0, false);
+    }
+
+    private static bool IsDeployedReleaseSelector(string? selector) =>
+        string.Equals(selector, "previous-deployed", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(selector, "current-deployed", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<ArtifactHashResult> ReadHashAsync(Stream zip, CancellationToken ct)
+    {
+        if (ArtifactDownloadTelemetry.TryGet(zip, out var transfer))
+            return new ArtifactHashResult(transfer.Sha256, transfer.HashDuration, transfer.Bytes);
+        var timer = Stopwatch.StartNew();
+        var sha256 = Convert.ToHexString(await SHA256.HashDataAsync(zip, ct).ConfigureAwait(false));
+        timer.Stop();
+        var bytes = zip.CanSeek ? zip.Length : 0;
+        zip.Position = 0;
+        return new ArtifactHashResult(sha256, timer.Elapsed, bytes);
+    }
+
+    private static async Task EmitRestoreMetricsAsync(
+        Func<string, TaskLogLevel, Task> onOutput,
+        TimeSpan downloadDuration,
+        ArtifactHashResult hash,
+        TimeSpan extractionDuration,
+        long extractedBytes)
+    {
+        await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.restore.download", "Duration", "s", downloadDuration.TotalSeconds).ConfigureAwait(false);
+        await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.restore.hash", "Duration", "s", hash.Duration.TotalSeconds).ConfigureAwait(false);
+        await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.restore.extraction", "Duration", "s", extractionDuration.TotalSeconds).ConfigureAwait(false);
+        await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.restore.bytes.downloaded", "Size", "bytes", hash.Bytes).ConfigureAwait(false);
+        await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.restore.bytes.extracted", "Size", "bytes", extractedBytes).ConfigureAwait(false);
+    }
+
+    private sealed record ArtifactRestoreRequest(
+        int ArtifactId,
+        int RunId,
+        string ExpectedSha256,
+        long ExpectedSize,
+        string WorkingDirectory,
+        string? TargetDirectory,
+        string? ReleaseSelector);
+
+    private sealed record ArtifactHashResult(string Sha256, TimeSpan Duration, long Bytes);
+
+    private static async Task ExportDeployedBaselineAsync(
+        string restoreDirectory,
+        string releaseSelector,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken ct)
+    {
+        var contractPath = Path.Combine(restoreDirectory, ".pipeline-artifacts", "delivery-contract.json");
+        if (!File.Exists(contractPath))
+            throw new InvalidDataException(
+                $"The {releaseSelector} artifact does not contain .pipeline-artifacts/delivery-contract.json.");
+
+        var bytes = await File.ReadAllBytesAsync(contractPath, ct).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(bytes);
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("candidateVersion", out var candidateVersionElement)
+            || candidateVersionElement.ValueKind != JsonValueKind.String
+            || !document.RootElement.TryGetProperty("sourceSha", out var sourceShaElement)
+            || sourceShaElement.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidDataException(
+                $"The {releaseSelector} delivery contract has no valid candidateVersion or sourceSha.");
+        }
+
+        var candidateVersion = candidateVersionElement.GetString()?.Trim();
+        var sourceSha = sourceShaElement.GetString()?.Trim();
+        if (string.IsNullOrWhiteSpace(candidateVersion)
+            || candidateVersion.Length > 256
+            || candidateVersion.IndexOfAny(['\r', '\n']) >= 0
+            || sourceSha is not { Length: 40 }
+            || sourceSha.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new InvalidDataException(
+                $"The {releaseSelector} delivery contract has no valid candidateVersion or sourceSha.");
+        }
+
+        var contractSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        await onOutput(
+            "##aetheus[setvariable name=DELIVERY_BASELINE_BOOTSTRAP]false",
+            TaskLogLevel.Info).ConfigureAwait(false);
+        await onOutput(
+            $"##aetheus[setvariable name=DELIVERY_BASELINE_CANDIDATE_VERSION]{candidateVersion}",
+            TaskLogLevel.Info).ConfigureAwait(false);
+        await onOutput(
+            $"##aetheus[setvariable name=DELIVERY_BASELINE_SOURCE_SHA]{sourceSha.ToLowerInvariant()}",
+            TaskLogLevel.Info).ConfigureAwait(false);
+        await onOutput(
+            $"##aetheus[setvariable name=DELIVERY_BASELINE_CONTRACT_SHA256]{contractSha256}",
+            TaskLogLevel.Info).ConfigureAwait(false);
     }
 
     internal static bool HasEnoughSpace(long requiredBytes, long availableBytes) =>

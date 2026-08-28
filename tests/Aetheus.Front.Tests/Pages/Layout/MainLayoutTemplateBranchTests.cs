@@ -21,6 +21,7 @@ public class MainLayoutTemplateBranchTests : BunitContext
     private BunitTestHelper.TestHandler RegisterWithTaskTracker(bool authenticated = true, bool isAdmin = false)
     {
         var handler = BunitTestHelper.RegisterServices(this, authenticated, isAdmin);
+        handler.SetResponse(HttpMethod.Get, "health/live", System.Net.HttpStatusCode.ServiceUnavailable);
         Services.AddScoped(sp => new TaskTrackerService(
             sp.GetRequiredService<ApiClient>(),
             sp.GetRequiredService<AuthStateProvider>(),
@@ -96,10 +97,8 @@ public class MainLayoutTemplateBranchTests : BunitContext
         Assert.DoesNotContain("header-user-btn", cut.Markup);
     }
 
-    // ── Breadcrumb with Href → item rendered with its text (lines 146-149) ────
-
     [Fact]
-    public void Breadcrumb_WithHref_RendersItemText()
+    public void BreadcrumbItems_RenderInFixedGlobalSlot()
     {
         RegisterWithTaskTracker();
         var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
@@ -111,20 +110,10 @@ public class MainLayoutTemplateBranchTests : BunitContext
         ]));
         cut.Render();
 
+        Assert.Contains("app-breadcrumb", cut.Markup);
         Assert.Contains("Servers", cut.Markup);
         Assert.Contains("web-01", cut.Markup);
-    }
-
-    // ── Breadcrumb empty → no breadcrumb element (line 141 false branch) ──────
-
-    [Fact]
-    public void Breadcrumb_Empty_RendersNoBreadcrumb()
-    {
-        RegisterWithTaskTracker();
-        var cut = Render<MainLayout>();
-
-        // Fresh breadcrumb is empty → the rz-breadcrumb element is not emitted.
-        Assert.DoesNotContain("rz-breadcrumb", cut.Markup);
+        Assert.DoesNotContain("breadcrumb-slot", cut.Markup);
     }
 
     // ── User menu open → role badge + language/dark-mode/settings/logout rows ─
@@ -169,7 +158,7 @@ public class MainLayoutTemplateBranchTests : BunitContext
     // Covers the @(_darkMode ? "dark_mode" : "light_mode") expression (line 94).
 
     [Fact]
-    public void DarkMode_DefaultIcon_AndRowTogglesState()
+    public async Task DarkMode_DefaultIcon_AndRowTogglesState()
     {
         RegisterWithTaskTracker();
         var cut = Render<MainLayout>();
@@ -182,9 +171,14 @@ public class MainLayoutTemplateBranchTests : BunitContext
         Assert.True(cut.Instance._darkMode);
 
         // Click the dark-mode menu row - the real UI path that flips the theme.
+        // ClickAsync, not Click: the synchronous overload does not return the dispatch task, so with
+        // an `async Task` handler like ToggleDarkMode it is fire-and-forget. When the renderer's
+        // dispatcher is already busy (the version monitor re-rendering, or plain CPU contention on a
+        // loaded build agent) the handler had not even reached its first line when the assertion ran,
+        // and the test failed with Expected: False / Actual: True - exactly the CI flake on run 1166.
         var darkRow = cut.FindAll(".user-menu-section-clickable")
             .First(el => el.TextContent.Contains("DarkMode"));
-        darkRow.Click();
+        await darkRow.ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
 
         // Observable effect: the theme flag flipped to light mode.
         Assert.False(cut.Instance._darkMode);

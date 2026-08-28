@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Services;
 
@@ -29,9 +28,9 @@ public class AuthStateProvider(IJSRuntime js, ILogger<AuthStateProvider> logger)
     /// True only when a non-expired access token is currently held. Unlike <see cref="IsAuthenticated"/>
     /// - which stays true for an expired-but-present token so a refresh can recover the session on a
     /// full-page reload - this reflects whether the token would actually be accepted right now. The
-    /// 401 recovery path in <see cref="AuthDelegatingHandler"/> uses it to tell a *successful* refresh
-    /// (fresh token minted) apart from a *failed* one (the stale token is still sitting in memory), so
-    /// a dead refresh token forces logout + redirect instead of replaying the expired token forever.
+    /// 401 recovery path in <see cref="AuthDelegatingHandler"/> uses it before retrying with a freshly
+    /// renewed token. Local expiry alone never decides whether the session must be cleared; only an
+    /// explicit rejection from the renewal endpoint does.
     /// </summary>
     public bool HasValidToken => !string.IsNullOrEmpty(Token) && !IsTokenExpired(Token);
     public string? Username { get; private set; }
@@ -48,9 +47,10 @@ public class AuthStateProvider(IJSRuntime js, ILogger<AuthStateProvider> logger)
     public event Action? OnAuthStateChanged;
 
     /// <summary>
-    /// Raised when an HTTP call returns 401 and we cannot recover the session (e.g. expired token,
-    /// failed renew). Subscribers - typically <c>MainLayout</c> - should navigate the user to the
-    /// login screen. Keeping the redirect here (out of <c>AuthDelegatingHandler</c>) avoids racy
+    /// Raised only when the token-renewal endpoint definitively rejects the session. Transient
+    /// deployment, network and server failures retain the local session. Subscribers - typically
+    /// <c>MainLayout</c> - should navigate the user to the login screen. Keeping the redirect here
+    /// (out of <c>AuthDelegatingHandler</c>) avoids racy
     /// in-handler navigation and the redirect loops it can cause when multiple parallel requests
     /// each trigger their own <c>NavigateTo</c> call. (F-41)
     /// </summary>

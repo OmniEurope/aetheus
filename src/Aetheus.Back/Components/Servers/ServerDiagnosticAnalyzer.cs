@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
+using Aetheus.Back.Components.AgentUpdate;
 
 namespace Aetheus.Back.Components.Servers;
 
@@ -9,7 +9,10 @@ namespace Aetheus.Back.Components.Servers;
 /// token validity, agent version) and produces a single human-readable summary. Extracted from the
 /// former <c>ServerService.Diagnostic.cs</c> partial.
 /// </summary>
-internal sealed class ServerDiagnosticAnalyzer(IServerRepository repo, TimeProvider timeProvider)
+internal sealed class ServerDiagnosticAnalyzer(
+    IServerRepository repo,
+    TimeProvider timeProvider,
+    IAgentCompatibilityPolicy? compatibilityPolicy)
 {
     // Lazy-evaluated once per process. The version of the running backend assembly is the wire-side
     // identifier operators correlate with releases.
@@ -48,6 +51,7 @@ internal sealed class ServerDiagnosticAnalyzer(IServerRepository repo, TimeProvi
             ? Math.Round((referenceToken.ExpiresAt - now).TotalDays, 1)
             : null;
 
+        var compatibility = compatibilityPolicy?.Evaluate(ServerDataMapper.MapToDto(server));
         return new ServerDiagnosticDto
         {
             LastHeartbeatUtc = hasEverReported ? server.LastHeartbeat : null,
@@ -57,9 +61,14 @@ internal sealed class ServerDiagnosticAnalyzer(IServerRepository repo, TimeProvi
             TokenDaysRemaining = daysRemaining,
             AgentVersion = server.AgentVersion ?? string.Empty,
             BackendVersion = BackendVersionCached,
-            // No hard breaks yet: anything that reported is considered compatible.
-            // Wire a real semver gate here when the agent protocol changes.
-            VersionsCompatible = hasEverReported ? true : null,
+            VersionsCompatible = compatibility?.Status switch
+            {
+                AgentCompatibilityStatus.UpdateRequired => false,
+                AgentCompatibilityStatus.Unknown => null,
+                null => hasEverReported ? true : null,
+                _ => true
+            },
+            AgentCompatibility = compatibility,
             Summary = BuildSummary(hasEverReported, secondsSince, activeToken is not null, daysRemaining,
                 server.AgentVersion ?? string.Empty)
         };

@@ -1,0 +1,60 @@
+# Negative proof: production changes after validation, so promotion of the older candidate must fail.
+name: toto-conformance-stale
+trigger: manual
+parameters:
+  - name: telemetryVersion
+    display_name: Exact Aetheus.Telemetry version for the competing baseline
+    type: string
+    default: "0.1.0"
+  - name: telemetrySha256
+    display_name: Exact Aetheus.Telemetry package digest for the competing baseline
+    type: string
+    required: true
+variables:
+  TELEMETRY_VERSION: "${{ parameters.telemetryVersion }}"
+  TELEMETRY_SHA256: "${{ parameters.telemetrySha256 }}"
+
+stages:
+  - name: StaleCandidate
+    os: linux
+    steps:
+      - name: PrepareStale
+        type: trigger
+        pipeline: toto-candidate
+        timeout_seconds: 10800
+
+  - name: CompetingCandidate
+    os: linux
+    depends_on: [StaleCandidate]
+    steps:
+      - name: PrepareCompeting
+        type: trigger
+        pipeline: toto-candidate
+        variables:
+          TOTO_ENABLE_TELEMETRY: "true"
+          TOTO_TELEMETRY_VERSION: "$(TELEMETRY_VERSION)"
+          TOTO_TELEMETRY_SHA256: "$(TELEMETRY_SHA256)"
+          TOTO_ENABLE_WEB_ANALYTICS: "false"
+        timeout_seconds: 10800
+
+  - name: ChangeProduction
+    os: linux
+    depends_on: [CompetingCandidate]
+    steps:
+      - name: DeployCompetingBaseline
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(CompetingCandidate.PrepareCompeting.CANDIDATE_VERSION)"
+        timeout_seconds: 3600
+
+  - name: RefuseStalePromotion
+    os: linux
+    depends_on: [ChangeProduction]
+    steps:
+      - name: PromoteStale
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(StaleCandidate.PrepareStale.CANDIDATE_VERSION)"
+        timeout_seconds: 3600

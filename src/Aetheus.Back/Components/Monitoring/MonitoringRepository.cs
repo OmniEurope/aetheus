@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Monitoring;
 
@@ -79,12 +76,25 @@ public class MonitoringRepository(AppDbContext db) : IMonitoringRepository
             || (r.Pipeline.ProjectServer != null && accessibleProjectIds.Contains(r.Pipeline.ProjectServer.ProjectId)));
     }
 
-    public async Task<List<ServerMetric>> GetServerMetricsSinceAsync(int serverId, DateTime since, CancellationToken ct = default)
+    public async Task<List<ServerMetric>> GetServerMetricsSinceAsync(
+        int serverId,
+        DateTime since,
+        CancellationToken ct = default,
+        DateTime? afterUtc = null,
+        int take = 1_000)
     {
-        return await db.ServerMetrics
+        var query = db.ServerMetrics
             .AsNoTracking()
-            .Where(m => m.ServerId == serverId && m.Timestamp >= since)
-            .OrderBy(m => m.Timestamp)
+            .Where(m => m.ServerId == serverId
+                && m.Timestamp >= since
+                && (!afterUtc.HasValue || m.Timestamp > afterUtc.Value));
+
+        // Select the newest bounded window in SQL, then restore chronological order for charts.
+        var rows = await query
+            .OrderByDescending(m => m.Timestamp)
+            .Take(Math.Clamp(take, 1, 2_000))
             .ToListAsync(ct).ConfigureAwait(false);
+        rows.Reverse();
+        return rows;
     }
 }

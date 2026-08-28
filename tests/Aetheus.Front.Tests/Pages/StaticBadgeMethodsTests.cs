@@ -94,24 +94,24 @@ public class StaticBadgeMethodsTests
     [InlineData("created", BadgeStyle.Light)]
     public void ServerDockerSection_GetContainerBadge(string state, BadgeStyle expected)
     {
-        var result = InvokePrivateStatic(typeof(ServerDockerSection), "GetContainerBadge", state);
+        var result = InvokePrivateStatic(typeof(DockerContainersTab), "GetContainerBadge", state);
         Assert.Equal(expected, result);
     }
 
-    // --- ServerDockerSection.GetProjectAccentClass ---
+    // --- DockerContainersTab.GetProjectAccentClass ---
     // Source: null => docker-project-accent-none, non-null => $"docker-project-accent-{hash % 8}"
 
     [Fact]
     public void ServerDockerSection_GetProjectAccentClass_Null()
     {
-        var result = ServerDockerSection.GetProjectAccentClass(null);
+        var result = DockerContainersTab.GetProjectAccentClass(null);
         Assert.Equal(string.Empty, result);
     }
 
     [Fact]
     public void ServerDockerSection_GetProjectAccentClass_NonNull()
     {
-        var result = ServerDockerSection.GetProjectAccentClass("my-project");
+        var result = DockerContainersTab.GetProjectAccentClass("my-project");
         Assert.StartsWith("docker-project-accent-", result);
     }
 
@@ -121,7 +121,7 @@ public class StaticBadgeMethodsTests
     [Theory]
     [InlineData("clean", BadgeStyle.Success)]
     [InlineData("warning", BadgeStyle.Warning)]
-    [InlineData("error", BadgeStyle.Secondary)]
+    [InlineData("error", BadgeStyle.Light)]
     public void ServerRkhunterSection_GetScanBadgeStyle(string status, BadgeStyle expected)
     {
         var result = InvokePrivateStatic(typeof(ServerRkhunterSection), "GetScanBadgeStyle", status);
@@ -176,7 +176,7 @@ public class StaticBadgeMethodsTests
     [InlineData("enable", BadgeStyle.Success)]
     [InlineData("update", BadgeStyle.Info)]
     [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("other", BadgeStyle.Secondary)]
+    [InlineData("other", BadgeStyle.Light)]
     public void ServerConfigSection_GetChangeBadgeStyle(string action, BadgeStyle expected)
     {
         var result = InvokePrivateStatic(typeof(ServerConfigSection), "GetChangeBadgeStyle", action);

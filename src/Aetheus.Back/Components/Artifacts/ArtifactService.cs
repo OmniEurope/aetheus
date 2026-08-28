@@ -4,10 +4,6 @@ using Aetheus.Back.Components.GitGraph;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Artifacts;
 
@@ -15,10 +11,11 @@ public sealed class ArtifactService(
     IArtifactRepository repo,
     IArtifactStorageService storage,
     IArtifactRetentionService retention,
-    IPipelineRunService pipelineRunService,
+    // No IPipelineRunService, no IReleaseRepository. Both were injected for reads of entities this
+    // module already shares, and both put Artifacts inside a module cycle. The reads moved to
+    // IArtifactRepository; the writes stayed where they were.
     IConfiguration configuration,
     ILogger<ArtifactService> logger,
-    IReleaseRepository? releaseRepo = null,
     IDbTransactionScope? transaction = null) : IArtifactService
 {
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ProjectUploadLocks = new();
@@ -33,7 +30,7 @@ public sealed class ArtifactService(
     {
         ArgumentOutOfRangeException.ThrowIfNegative(contentLength);
 
-        var context = await pipelineRunService.GetRunPipelineContextAsync(runId, ct).ConfigureAwait(false);
+        var context = await repo.GetRunPipelineContextAsync(runId, ct).ConfigureAwait(false);
         if (context is null) return null;
 
         var (pipelineId, projectId) = context.Value;
@@ -135,9 +132,7 @@ public sealed class ArtifactService(
         // A release step and the post-stage artifact collection can legitimately complete in either
         // order. When the release already exists, attach this freshly-uploaded payload immediately;
         // otherwise ReleaseService performs the symmetric lookup after creating the release.
-        var release = releaseRepo is null
-            ? null
-            : await releaseRepo.FindByPipelineRunIdAsync(runId, ct).ConfigureAwait(false);
+        var release = await repo.FindReleaseForRunAsync(runId, ct).ConfigureAwait(false);
         if (release is not null)
             await retention.ApplyReleaseRetentionAsync(artifact, release.Id, ct).ConfigureAwait(false);
 
@@ -211,13 +206,13 @@ public sealed class ArtifactService(
                 throw new InvalidOperationException(
                     $"Release {releaseId.Value} is not linked to deployed artifact {artifactId}.");
 
-            if (artifact.ProjectId is int projectId && targetRelease is not null && releaseRepo is not null)
+            if (artifact.ProjectId is int projectId && targetRelease is not null)
             {
-                var deployedReleases = await releaseRepo.GetDeployedProjectReleasesAsync(projectId, ct).ConfigureAwait(false);
+                var deployedReleases = await repo.GetDeployedProjectReleasesAsync(projectId, ct).ConfigureAwait(false);
                 var demoted = false;
                 foreach (var deployedRelease in deployedReleases.Where(release => release.Id != targetRelease.Id))
                 {
-                    deployedRelease.Status = ReleaseStatus.Published;
+                    deployedRelease.Status = ReleaseStatus.Superseded;
                     demoted = true;
                 }
                 if (demoted) await repo.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -254,7 +249,7 @@ public sealed class ArtifactService(
     }
 
     public async Task<bool> IsAgentAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default) =>
-        await pipelineRunService.IsServerAssignedToRunAsync(runId, serverId, ct).ConfigureAwait(false);
+        await repo.IsServerAssignedToRunAsync(runId, serverId, ct).ConfigureAwait(false);
 
     public async Task<(DeployDownloadStatus Status, Stream? Stream, string? FileName)> OpenArtifactForAgentAsync(
         int artifactId, int deployRunId, int agentServerId, CancellationToken ct = default)
@@ -269,7 +264,7 @@ public sealed class ArtifactService(
         // The agent must be a participant of the DEPLOY run it claims to be executing. In scenario 3
         // the artifact's own PipelineRunId points at a different (build) run, so we deliberately do
         // NOT check assignment against artifact.PipelineRunId.
-        if (!await pipelineRunService.IsServerAssignedToRunAsync(deployRunId, agentServerId, ct).ConfigureAwait(false))
+        if (!await repo.IsServerAssignedToRunAsync(deployRunId, agentServerId, ct).ConfigureAwait(false))
             return (DeployDownloadStatus.Forbidden, null, null);
 
         // Org isolation: the agent's server org must equal the artifact's project org.
@@ -308,6 +303,7 @@ public sealed class ArtifactService(
         BranchName = a.PipelineRun?.BranchName ?? (a.Releases.Count > 0 ? a.Releases[0].BranchName : null),
         CommitHash = a.PipelineRun?.CommitHash ?? (a.Releases.Count > 0 ? a.Releases[0].CommitHash : null),
         RepositoryUrl = a.Project?.RepositoryUrl,
+        SourceRepositoryId = a.Pipeline?.SourceRepositoryId,
         Releases = a.Releases.Select(GitGraphMapper.ToLink).ToList(),
         Commits = a.Commits.Select(GitGraphMapper.ToLink).ToList(),
         Branches = a.Branches.Select(GitGraphMapper.ToLink).ToList()

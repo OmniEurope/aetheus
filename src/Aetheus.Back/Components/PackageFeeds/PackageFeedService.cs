@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.PackageFeeds;
 
@@ -10,7 +8,8 @@ public class PackageFeedService(
     IAuditService audit,
     IPackageVersionResolver resolver,
     PackageFeedSyncGate syncGate,
-    TimeProvider timeProvider) : IPackageFeedService
+    TimeProvider timeProvider,
+    IAdminChangeNotifier notifier) : IPackageFeedService
 {
     public async Task<PaginatedResult<PackageFeedDto>> GetFeedsAsync(
         int? projectId, PaginationRequest request, CancellationToken ct = default)
@@ -72,6 +71,8 @@ public class PackageFeedService(
 
         await repo.AddFeedAsync(entity, ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "PackageFeed", entity.Id, $"{request.FeedType}: {request.Name}", ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            AdminEntities.PackageFeed, entity.Id, EntityChangeOps.Created, ct).ConfigureAwait(false);
         return MapToDto(entity);
     }
 
@@ -88,6 +89,8 @@ public class PackageFeedService(
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         await audit.LogAsync("Updated", "PackageFeed", id, null, ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            AdminEntities.PackageFeed, id, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         return MapToDto(entity);
     }
 
@@ -98,6 +101,8 @@ public class PackageFeedService(
 
         await repo.RemoveFeedAsync(entity, ct).ConfigureAwait(false);
         await audit.LogAsync("Deleted", "PackageFeed", id, null, ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            AdminEntities.PackageFeed, id, EntityChangeOps.Deleted, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -128,6 +133,8 @@ public class PackageFeedService(
         }
 
         await audit.LogAsync("Created", "PackageEntry", entry.Id, $"{feed.Name}/{entry.Name}", ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            AdminEntities.PackageFeed, feedId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         return MapEntry(entry);
     }
 
@@ -138,6 +145,8 @@ public class PackageFeedService(
 
         await repo.RemovePackageAsync(entry, ct).ConfigureAwait(false);
         await audit.LogAsync("Deleted", "PackageEntry", packageId, null, ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            AdminEntities.PackageFeed, feedId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -153,42 +162,109 @@ public class PackageFeedService(
 
         try
         {
-            var packages = await repo.GetTrackedPackagesAsync(feedId, ct).ConfigureAwait(false);
-            var now = timeProvider.GetUtcNow().UtcDateTime;
-            int synced = 0, failed = 0, unsupported = 0;
-
-            foreach (var p in packages)
+            var clockNow = timeProvider.GetUtcNow();
+            if (syncGate.TryGetDeferral(feedId, clockNow, out var deferredUntil))
             {
-                var result = await resolver.ResolveLatestAsync(feed.FeedType, feed.UpstreamUrl, p.Name, ct).ConfigureAwait(false);
-                switch (result.Outcome)
+                return new PackageFeedSyncResultDto
                 {
-                    case PackageResolveOutcome.Resolved when result.LatestVersion is not null:
-                        p.LatestVersion = result.LatestVersion;
-                        if (result.PublishedAt is { } pub) p.PublishedAt = pub;
-                        p.LastSyncedAt = now;
-                        synced++;
-                        break;
-                    case PackageResolveOutcome.Unsupported:
-                        unsupported++; // honest: not counted as synced, entry left untouched
-                        break;
-                    default:
-                        failed++; // NotFound / Error: never fabricate a version
-                        break;
-                }
+                    Synced = 0,
+                    Failed = 0,
+                    Unsupported = 0,
+                    Message = $"Registry rate limit is active; retry after {deferredUntil:O}."
+                };
             }
-
-            if (synced > 0) await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-            await audit.LogAsync("Synced", "PackageFeed", feedId, $"synced={synced} failed={failed} unsupported={unsupported}", ct).ConfigureAwait(false);
-
-            var message = unsupported > 0 && synced == 0 && failed == 0
-                ? $"Feed type {feed.FeedType} is not supported for automatic version resolution yet."
-                : null;
-            return new PackageFeedSyncResultDto { Synced = synced, Failed = failed, Unsupported = unsupported, Message = message };
+            var packages = await repo.GetTrackedPackagesAsync(feedId, ct).ConfigureAwait(false);
+            var outcome = await SyncPackagesAsync(
+                feed, packages, feedId, clockNow.UtcDateTime, ct).ConfigureAwait(false);
+            if (outcome.Synced > 0) await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+            await audit.LogAsync(
+                "Synced", "PackageFeed", feedId,
+                $"synced={outcome.Synced} failed={outcome.Failed} unsupported={outcome.Unsupported}",
+                ct).ConfigureAwait(false);
+            if (outcome.Synced > 0)
+                await notifier.BroadcastAsync(
+                    AdminEntities.PackageFeed, feedId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
+            return BuildSyncResult(feed, outcome);
         }
         finally
         {
             syncGate.Release(feedId);
         }
+    }
+
+    private async Task<PackageSyncOutcome> SyncPackagesAsync(
+        PackageFeed feed,
+        IReadOnlyCollection<PackageEntry> packages,
+        int feedId,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var outcome = new PackageSyncOutcome();
+        foreach (var package in packages)
+        {
+            var result = await resolver.ResolveLatestAsync(
+                feed.FeedType, feed.UpstreamUrl, package.Name, ct).ConfigureAwait(false);
+            ApplyPackageResolution(package, result, outcome, feedId, now);
+            if (outcome.ThrottledUntil is not null) break;
+        }
+        return outcome;
+    }
+
+    private void ApplyPackageResolution(
+        PackageEntry package,
+        PackageResolveResult result,
+        PackageSyncOutcome outcome,
+        int feedId,
+        DateTime now)
+    {
+        switch (result.Outcome)
+        {
+            case PackageResolveOutcome.Resolved when result.LatestVersion is not null:
+                package.LatestVersion = result.LatestVersion;
+                if (result.PublishedAt is { } publishedAt) package.PublishedAt = publishedAt;
+                package.LastSyncedAt = now;
+                outcome.Synced++;
+                break;
+            case PackageResolveOutcome.Unsupported:
+                outcome.Unsupported++;
+                break;
+            case PackageResolveOutcome.RateLimited:
+                outcome.Failed++;
+                var retryAfter = result.RetryAfter ?? TimeSpan.FromMinutes(1);
+                retryAfter = TimeSpan.FromSeconds(Math.Clamp(
+                    retryAfter.TotalSeconds, 1, TimeSpan.FromHours(1).TotalSeconds));
+                outcome.ThrottledUntil = timeProvider.GetUtcNow().Add(retryAfter);
+                syncGate.DeferUntil(feedId, outcome.ThrottledUntil.Value);
+                break;
+            default:
+                outcome.Failed++;
+                break;
+        }
+    }
+
+    private static PackageFeedSyncResultDto BuildSyncResult(
+        PackageFeed feed, PackageSyncOutcome outcome)
+    {
+        var message = outcome.ThrottledUntil is not null
+            ? $"Registry rate limit reached; remaining packages were skipped until {outcome.ThrottledUntil:O}."
+            : outcome.Unsupported > 0 && outcome.Synced == 0 && outcome.Failed == 0
+                ? $"Feed type {feed.FeedType} is not supported for automatic version resolution yet."
+                : null;
+        return new PackageFeedSyncResultDto
+        {
+            Synced = outcome.Synced,
+            Failed = outcome.Failed,
+            Unsupported = outcome.Unsupported,
+            Message = message
+        };
+    }
+
+    private sealed class PackageSyncOutcome
+    {
+        public int Synced { get; set; }
+        public int Failed { get; set; }
+        public int Unsupported { get; set; }
+        public DateTimeOffset? ThrottledUntil { get; set; }
     }
 
     private static PackageEntryDto MapEntry(PackageEntry p) => new()

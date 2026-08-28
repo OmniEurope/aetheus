@@ -1,0 +1,270 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Net;
+using System.Net.Http;
+using System.Text.Json;
+using Aetheus.Front.Pages.Vaults;
+using Aetheus.Front.Tests.TestDoubles;
+using Aetheus.Shared.DTOs;
+using AngleSharp.Dom;
+using Bunit;
+using Microsoft.Extensions.DependencyInjection;
+using Radzen;
+
+namespace Aetheus.Front.Tests.Pages.Vaults;
+
+/// <summary>
+/// The vault actions that go through a Radzen dialog, driven with an immediate dialog double:
+/// deleting the vault, updating, rotating and deleting a secret, importing a JSON payload and
+/// reading a secret's version history. Those paths were previously skipped because the real dialog
+/// service never completes under bUnit, so none of their confirm/cancel rules were protected.
+/// </summary>
+public sealed class VaultEditDialogActionTests : BunitContext
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly DateTime Now = new(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+
+    private readonly BunitTestHelper.TestHandler _handler;
+    private readonly ImmediateDialogService _dialog;
+
+    public VaultEditDialogActionTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items = [new ProjectDto { Id = 1, Name = "aetheus" }],
+            TotalCount = 1
+        });
+        _handler.SetJsonResponse("api/vaults/1", new VaultDetailDto
+        {
+            Id = 1,
+            Name = "prod-vault",
+            Description = "production secrets",
+            ProjectId = 1,
+            RowVersion = Guid.NewGuid(),
+            Secrets =
+            [
+                new VaultSecretDto { Id = 10, Key = "DB_PASS", ExpiresAt = Now.AddDays(30), VersionCount = 2 }
+            ]
+        });
+    }
+
+    private IRenderedComponent<VaultEdit> RenderVault() =>
+        Render<VaultEdit>(parameters => parameters.Add(page => page.Id, 1));
+
+    private static IElement Button(IRenderedComponent<VaultEdit> cut, string title) =>
+        cut.FindAll("button").First(button =>
+            string.Equals(button.GetAttribute("title"), title, StringComparison.Ordinal));
+
+    private static IElement TextButton(IRenderedComponent<VaultEdit> cut, string text) =>
+        cut.FindAll("button").First(button => button.TextContent.Contains(text, StringComparison.Ordinal));
+
+    private bool Sent(string method, string urlContains) =>
+        _handler.Requests.Any(request => request.Method == method
+            && request.Url.Contains(urlContains, StringComparison.Ordinal));
+
+    private T LastBody<T>(string method, string urlContains)
+    {
+        var body = _handler.RequestDetails
+            .Last(request => request.Method == method
+                && request.Url.Contains(urlContains, StringComparison.Ordinal))
+            .Body;
+        return JsonSerializer.Deserialize<T>(body!, Json)!;
+    }
+
+    // ---------- deleting the vault ----------
+
+    [Fact]
+    public void DeletingTheVaultIsGatedByAConfirmation()
+    {
+        _dialog.ConfirmResult = false;
+        var cut = RenderVault();
+
+        TextButton(cut, "Delete").Click();
+
+        Assert.False(Sent("DELETE", "api/vaults/1"));
+    }
+
+    [Fact]
+    public void ConfirmingTheVaultDeleteCallsTheEndpoint()
+    {
+        _handler.SetResponse(HttpMethod.Delete, "api/vaults/1", HttpStatusCode.NoContent);
+        _dialog.ConfirmResult = true;
+        var cut = RenderVault();
+
+        TextButton(cut, "Delete").Click();
+
+        cut.WaitForAssertion(() => Assert.True(Sent("DELETE", "api/vaults/1")), TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void ARefusedVaultDeleteDoesNotNavigateAway()
+    {
+        _handler.SetResponse(HttpMethod.Delete, "api/vaults/1", HttpStatusCode.Conflict);
+        _dialog.ConfirmResult = true;
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        var cut = RenderVault();
+
+        TextButton(cut, "Delete").Click();
+
+        cut.WaitForAssertion(() => Assert.True(Sent("DELETE", "api/vaults/1")), TimeSpan.FromSeconds(2));
+        Assert.DoesNotContain("/vaults", new Uri(navigation.Uri).AbsolutePath.TrimEnd('/') + "/end");
+    }
+
+    // ---------- updating a secret ----------
+
+    [Fact]
+    public void UpdatingASecretSendsTheValueTheDialogReturned()
+    {
+        _handler.SetJsonResponse(
+            HttpMethod.Put, "api/vaults/1/secrets/10", new VaultSecretDto { Id = 10, Key = "DB_PASS" });
+        _dialog.OpenResult = "new-secret-value";
+        var cut = RenderVault();
+
+        Button(cut, "Edit").Click();
+
+        cut.WaitForAssertion(
+            () => Assert.True(Sent("PUT", "api/vaults/1/secrets/10")), TimeSpan.FromSeconds(2));
+        var request = LastBody<UpdateVaultSecretRequest>("PUT", "api/vaults/1/secrets/10");
+        Assert.Equal("DB_PASS", request.Key);
+        Assert.Equal("new-secret-value", request.Value);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void CancellingOrEmptyingTheSecretDialogSendsNothing(string? dialogResult)
+    {
+        _dialog.OpenResult = dialogResult;
+        var cut = RenderVault();
+
+        Button(cut, "Edit").Click();
+
+        Assert.False(Sent("PUT", "api/vaults/1/secrets/10"));
+    }
+
+    // ---------- rotating a secret ----------
+
+    [Fact]
+    public void RotatingASecretNeedsBothTheConfirmationAndAValue()
+    {
+        _dialog.ConfirmResult = false;
+        _dialog.OpenResult = "rotated-value";
+        var cut = RenderVault();
+
+        Button(cut, "Rotate").Click();
+
+        Assert.False(Sent("POST", "api/vaults/1/secrets/10/rotate"));
+    }
+
+    [Fact]
+    public void ConfirmingARotationPostsTheNewValueAndKeepsTheExpiry()
+    {
+        _handler.SetJsonResponse(
+            HttpMethod.Post, "api/vaults/1/secrets/10/rotate", new VaultSecretDto { Id = 10, Key = "DB_PASS" });
+        _dialog.ConfirmResult = true;
+        _dialog.OpenResult = "rotated-value";
+        var cut = RenderVault();
+
+        Button(cut, "Rotate").Click();
+
+        cut.WaitForAssertion(
+            () => Assert.True(Sent("POST", "api/vaults/1/secrets/10/rotate")), TimeSpan.FromSeconds(2));
+        var request = LastBody<RotateVaultSecretRequest>("POST", "api/vaults/1/secrets/10/rotate");
+        Assert.Equal("rotated-value", request.Value);
+        // The front deserializes dates as browser-local, so compare the instant, not the Kind.
+        Assert.Equal(Now.AddDays(30), request.ExpiresAt!.Value.ToUniversalTime());
+    }
+
+    [Fact]
+    public void AConfirmedRotationWithNoValueSendsNothing()
+    {
+        _dialog.ConfirmResult = true;
+        _dialog.OpenResult = null;
+        var cut = RenderVault();
+
+        Button(cut, "Rotate").Click();
+
+        Assert.False(Sent("POST", "api/vaults/1/secrets/10/rotate"));
+    }
+
+    // ---------- deleting a secret ----------
+
+    [Fact]
+    public void DeletingASecretIsGatedByAConfirmation()
+    {
+        _dialog.ConfirmResult = false;
+        var cut = RenderVault();
+
+        Button(cut, "Delete").Click();
+
+        Assert.False(Sent("DELETE", "api/vaults/1/secrets/10"));
+    }
+
+    [Fact]
+    public void ConfirmingTheSecretDeleteCallsTheEndpoint()
+    {
+        _handler.SetResponse(HttpMethod.Delete, "api/vaults/1/secrets/10", HttpStatusCode.NoContent);
+        _dialog.ConfirmResult = true;
+        var cut = RenderVault();
+
+        Button(cut, "Delete").Click();
+
+        cut.WaitForAssertion(
+            () => Assert.True(Sent("DELETE", "api/vaults/1/secrets/10")), TimeSpan.FromSeconds(2));
+    }
+
+    // ---------- version history ----------
+
+    [Fact]
+    public void ShowingTheHistoryLoadsTheVersionsAndOpensTheDialogWithThem()
+    {
+        _handler.SetJsonResponse("api/vaults/1/secrets/10/versions", new List<VaultSecretVersionDto>
+        {
+            new() { Version = 2, Key = "DB_PASS", ChangedAt = Now },
+            new() { Version = 1, Key = "DB_PASS", ChangedAt = Now.AddDays(-1) }
+        });
+        var cut = RenderVault();
+
+        Button(cut, "History").Click();
+
+        cut.WaitForAssertion(
+            () => Assert.True(Sent("GET", "api/vaults/1/secrets/10/versions")), TimeSpan.FromSeconds(2));
+        var versions = Assert.IsType<List<VaultSecretVersionDto>>(
+            Assert.Contains("Versions", _dialog.LastParameters!));
+        Assert.Equal([2, 1], versions.Select(version => version.Version));
+    }
+
+    // ---------- importing ----------
+
+    [Fact]
+    public void ImportingSendsTheParsedSecretsOfTheJsonPayload()
+    {
+        _handler.SetJsonResponse(
+            HttpMethod.Post, "api/vaults/1/import", new ImportResultDto { ImportedCount = 2 });
+        _dialog.OpenResult = "[{\"key\":\"A\",\"value\":\"1\"},{\"key\":\"B\",\"value\":\"2\"}]";
+        var cut = RenderVault();
+
+        TextButton(cut, "Import").Click();
+
+        cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/vaults/1/import")), TimeSpan.FromSeconds(2));
+        var request = LastBody<List<CreateVaultSecretRequest>>("POST", "api/vaults/1/import");
+        Assert.Equal(["A", "B"], request.Select(secret => secret.Key));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    [InlineData("not json at all")]
+    [InlineData("[]")]
+    public void ImportingRefusesAnAbsentBlankMalformedOrEmptyPayload(string? payload)
+    {
+        _dialog.OpenResult = payload;
+        var cut = RenderVault();
+
+        TextButton(cut, "Import").Click();
+
+        Assert.False(Sent("POST", "api/vaults/1/import"));
+    }
+}

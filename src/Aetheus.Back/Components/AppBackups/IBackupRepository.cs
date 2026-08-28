@@ -12,6 +12,7 @@ public interface IBackupRepository
         IReadOnlyCollection<int>? projectIds, string? search, string? sortBy,
         bool sortDescending, int page, int pageSize, CancellationToken ct = default);
     Task<BackupPolicy?> FindPolicyAsync(int id, CancellationToken ct = default);
+    Task<int?> GetProjectOrganizationIdAsync(int projectId, CancellationToken ct = default);
     Task<List<BackupPolicy>> GetEnabledPoliciesAsync(CancellationToken ct = default);
 
     void AddRun(BackupRun run);

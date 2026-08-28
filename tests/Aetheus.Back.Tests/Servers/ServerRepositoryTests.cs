@@ -11,6 +11,7 @@ public class ServerRepositoryTests : IDisposable
 {
     private readonly AppDbContext _db;
     private readonly ServerRepository _repo;
+    private readonly ServerHeartbeatRepository _heartbeatRepo;
 
     public ServerRepositoryTests()
     {
@@ -19,6 +20,9 @@ public class ServerRepositoryTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
         _repo = new ServerRepository(_db, TimeProvider.System);
+        // Same AppDbContext instance, deliberately: that shared context is what keeps one heartbeat
+        // one transaction after the split, so the tests must exercise the pair the same way.
+        _heartbeatRepo = new ServerHeartbeatRepository(_db);
     }
 
     // --- GetServersPagedAsync ---
@@ -229,7 +233,7 @@ public class ServerRepositoryTests : IDisposable
         _db.Servers.Add(s);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.AddMetricAsync(new ServerMetric { ServerId = s.Id, Timestamp = DateTime.UtcNow, CpuPercent = 50 }, ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.AddMetricAsync(new ServerMetric { ServerId = s.Id, Timestamp = DateTime.UtcNow, CpuPercent = 50 }, ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.ServerMetrics.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -247,7 +251,7 @@ public class ServerRepositoryTests : IDisposable
         _db.ServiceInfos.Add(new ServiceInfo { ServerId = server.Id, Name = "old", Type = ServiceType.Systemd, Status = "active", IsRunning = true });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceServicesAsync(server.Id, [new ServiceInfo { ServerId = server.Id, Name = "new", Type = ServiceType.Systemd, Status = "active", IsRunning = true }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceServicesAsync(server.Id, [new ServiceInfo { ServerId = server.Id, Name = "new", Type = ServiceType.Systemd, Status = "active", IsRunning = true }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var services = await _db.ServiceInfos.Where(s => s.ServerId == server.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -267,7 +271,7 @@ public class ServerRepositoryTests : IDisposable
         _db.DockerContainers.Add(new DockerContainer { ServerId = server.Id, ContainerId = "old", Name = "old", Image = "img", State = "running", Status = "Up" });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceDockerContainersAsync(server.Id, [new DockerContainer { ServerId = server.Id, ContainerId = "new", Name = "new", Image = "img", State = "running", Status = "Up" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerContainersAsync(server.Id, [new DockerContainer { ServerId = server.Id, ContainerId = "new", Name = "new", Image = "img", State = "running", Status = "Up" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var containers = await _db.DockerContainers.Where(c => c.ServerId == server.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -284,7 +288,7 @@ public class ServerRepositoryTests : IDisposable
         _db.Servers.Add(server);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceDockerImagesAsync(server.Id, [new DockerImage { ServerId = server.Id, ImageId = "i1", Repository = "nginx", Tag = "latest", Size = "100MB" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerImagesAsync(server.Id, [new DockerImage { ServerId = server.Id, ImageId = "i1", Repository = "nginx", Tag = "latest", Size = "100MB" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerImages.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -299,7 +303,7 @@ public class ServerRepositoryTests : IDisposable
         _db.Servers.Add(server);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceDockerComposeStacksAsync(server.Id, [new DockerComposeStack { ServerId = server.Id, Name = "stack1", Status = "running", ConfigFile = "/c.yml" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerComposeStacksAsync(server.Id, [new DockerComposeStack { ServerId = server.Id, Name = "stack1", Status = "running", ConfigFile = "/c.yml" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerComposeStacks.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -314,7 +318,7 @@ public class ServerRepositoryTests : IDisposable
         _db.Servers.Add(server);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceDockerNetworksAsync(server.Id, [new DockerNetwork { ServerId = server.Id, NetworkId = "n1", Name = "bridge", Driver = "bridge", Scope = "local" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerNetworksAsync(server.Id, [new DockerNetwork { ServerId = server.Id, NetworkId = "n1", Name = "bridge", Driver = "bridge", Scope = "local" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerNetworks.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -329,7 +333,7 @@ public class ServerRepositoryTests : IDisposable
         _db.Servers.Add(server);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceDockerVolumesAsync(server.Id, [new DockerVolume { ServerId = server.Id, Name = "vol1", Driver = "local", Mountpoint = "/data" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerVolumesAsync(server.Id, [new DockerVolume { ServerId = server.Id, Name = "vol1", Driver = "local", Mountpoint = "/data" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerVolumes.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -351,6 +355,50 @@ public class ServerRepositoryTests : IDisposable
 
         Assert.Single(result);
         Assert.Equal("stale", result[0].Name);
+    }
+
+    [Fact]
+    public async Task TryMarkOfflineIfStaleAsync_ObservedHeartbeatUnchanged_MarksOffline()
+    {
+        var observed = DateTime.UtcNow.AddMinutes(-10);
+        var server = new Server
+        {
+            Name = "stale",
+            Hostname = "stale",
+            Status = ServerStatus.Online,
+            LastHeartbeat = observed
+        };
+        _db.Servers.Add(server);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var changed = await _repo.TryMarkOfflineIfStaleAsync(
+            server.Id, observed, TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        Assert.True(changed);
+        Assert.Equal(ServerStatus.Offline, server.Status);
+    }
+
+    [Fact]
+    public async Task TryMarkOfflineIfStaleAsync_HeartbeatChangedAfterObservation_PreservesOnline()
+    {
+        var observed = DateTime.UtcNow.AddMinutes(-10);
+        var server = new Server
+        {
+            Name = "refreshed",
+            Hostname = "refreshed",
+            Status = ServerStatus.Online,
+            LastHeartbeat = observed
+        };
+        _db.Servers.Add(server);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        server.LastHeartbeat = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var changed = await _repo.TryMarkOfflineIfStaleAsync(
+            server.Id, observed, TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        Assert.False(changed);
+        Assert.Equal(ServerStatus.Online, server.Status);
     }
 
     // --- SaveChangesAsync ---

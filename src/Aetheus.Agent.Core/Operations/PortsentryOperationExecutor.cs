@@ -2,12 +2,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -50,10 +44,12 @@ public sealed class PortsentryOperationExecutor(
         int timeoutSeconds,
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken cancellationToken)
+    {
         // Setup is the only Portsentry op that carries env vars (the port lists); the rest ignore them.
-        => kind == OperationKind.PortsentrySetup
+        return kind == OperationKind.PortsentrySetup
             ? SetupAsync(target, envVars, timeoutSeconds, onOutput, cancellationToken)
             : ExecuteAsync(kind, target, timeoutSeconds, onOutput, cancellationToken);
+    }
 
     public async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
@@ -62,11 +58,9 @@ public sealed class PortsentryOperationExecutor(
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken cancellationToken)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("Portsentry operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var platformFailure = await OperationPlatformGuard.RequireLinuxAsync(
+            onOutput, "Portsentry operations are only supported on Linux").ConfigureAwait(false);
+        if (platformFailure is not null) return platformFailure;
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
@@ -76,11 +70,8 @@ public sealed class PortsentryOperationExecutor(
         if (kind == OperationKind.PortsentryUnblock)
             return await UnblockAsync(target, timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
 
-        var psi = BuildPsi(kind);
-        if (psi is null)
-            return new ExecutorResult(-1, false);
-
-        return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
+        return await OperationProcessRunner.RunOptionalAsync(
+            BuildPsi(kind), timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -95,14 +86,7 @@ public sealed class PortsentryOperationExecutor(
             case OperationKind.PortsentryStop:
             case OperationKind.PortsentryRestart:
                 {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "sudo",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
+                    var psi = SudoProcessStartInfo.Create();
                     psi.ArgumentList.Add("-n");
                     psi.ArgumentList.Add("/bin/systemctl");
                     psi.ArgumentList.Add(kind switch
@@ -181,14 +165,7 @@ public sealed class PortsentryOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         psi.ArgumentList.Add("-n"); // never prompt - NOPASSWD is required by the sudoers rule
         psi.ArgumentList.Add(UnblockHelperPath);
         psi.ArgumentList.Add(target);
@@ -227,22 +204,13 @@ public sealed class PortsentryOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("Portsentry operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var platformFailure = await OperationPlatformGuard.RequireLinuxAsync(
+            onOutput, "Portsentry operations are only supported on Linux").ConfigureAwait(false);
+        if (platformFailure is not null) return platformFailure;
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         // argv-exact: helper path, then mode / tcp / udp positional params. The helper re-validates each.
         psi.ArgumentList.Add("-n");
         psi.ArgumentList.Add(SetupHelperPath);

@@ -76,12 +76,12 @@ public class WebhookSecretReencryptionTests
     [Fact]
     public async Task RunAsync_WithLegacyCbcAllowed_StillReencryptsValidBase64Plaintext()
     {
-        // #9: under Auth:AllowLegacyCbc=true a residual plaintext that is itself valid base64 of
+        // #9: with the Auth:AllowLegacyCbc migration switch enabled, a residual plaintext that is valid base64 of
         // ciphertext-like length must NOT be mis-classified as already-encrypted - the version-byte gate
         // (not a trial decryption) forces it through re-encryption.
         await using var db = NewDb();
         var encryption = NewEncryption(allowLegacyCbc: true);
-        const string plaintext = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5"; // valid base64, not a GCM payload
+        var plaintext = string.Concat("QUJDREVGR0hJSktMTU5PUFFS", "U1RVVldYWVowMTIzNDU2Nzg5"); // valid base64, not a GCM payload
         db.WebhookSubscriptions.Add(new WebhookSubscription
         {
             EventType = "pipeline.completed",

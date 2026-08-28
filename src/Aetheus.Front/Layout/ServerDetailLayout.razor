@@ -21,6 +21,7 @@
 @inject Aetheus.Front.Services.ServerDetailLoader Loader
 @inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
 @inject Microsoft.AspNetCore.Components.NavigationManager Nav
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
 
 @using Aetheus.Front.Helpers
 @using Aetheus.Front.Pages.Servers
@@ -29,8 +30,7 @@
 <CascadingValue Value="Loader" Name="ServerLoader">
     @if (Loader.Server is null && !Loader.InitialLoadCompleted)
     {
-        <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate"
-            Size="ProgressBarCircularSize.Large" />
+        <AetheusLoader Size="AetheusLoaderSize.Large" />
     }
     else if (Loader.Server is null)
     {
@@ -45,7 +45,7 @@
         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
             class="rz-mb-4 detail-page-header" Gap="1rem">
             <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
-            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@Loader.Server.Name</RadzenText>
+            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0 detail-page-title">@Loader.Server.Name</RadzenText>
             @if (Loader.Server.Status == ServerStatus.Online)
             {
                 <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L.Localize(Loader.Server.Status)" />
@@ -57,20 +57,23 @@
                         Text="@L.Localize(Loader.Server.Status)" />
                 </span>
             }
+            <AgentCompatibilityBadge Value="@Loader.Server.AgentCompatibility" />
             <div class="flex-spacer"></div>
             @if (_canWrite)
             {
-                <RadzenButton Icon="cell_tower" Text="@L["ContactAgent"]" Click="@OpenContactAgentDialog" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                <RadzenButton Icon="system_update_alt" Text="@L["UpdateAgent"]" Click="@UpdateAgentAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                <RadzenButton Icon="edit" Text="@L["Edit"]" Click="@OpenEditDialog" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-                <RadzenButton Icon="delete" Text="@L["Delete"]" Click="@OnDeleteServer" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                <RadzenButton Icon="cell_tower" Text="@L["ContactAgent"]" Title="@L["ContactAgent"]" aria-label="@L["ContactAgent"]" Click="@OpenContactAgentDialog" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                <RadzenButton Icon="system_update_alt" Text="@L["UpdateAgent"]" Title="@L["UpdateAgent"]" aria-label="@L["UpdateAgent"]" Click="@UpdateAgentAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                <RadzenButton Icon="edit" Text="@L["Edit"]" Title="@L["Edit"]" aria-label="@L["Edit"]" Click="@OpenEditDialog" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                <RadzenButton Icon="delete" Text="@L["Delete"]" Title="@L["Delete"]" aria-label="@L["Delete"]"
+                    Click="@OnDeleteServer" IsBusy="@_deleteBusy" BusyText="@L["Deleting"]"
+                    ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
             }
         </RadzenStack>
 
         @if (_editVisible)
         {
             <RadzenCard class="rz-mb-4 edit-panel">
-                <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["EditServer"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["EditServer"]</RadzenText>
                 <RadzenRow Gap="1rem">
                     <RadzenColumn SizeMD="6" Size="12">
                         <RadzenStack Gap="0.25rem">
@@ -99,7 +102,8 @@
         }
 
         <AgentUpdateProgressCard @ref="_agentUpdateProgress" ServerId="Loader.Server.Id" Hub="Loader.Hub"
-            CurrentAgentVersion="@Loader.Server.AgentVersion" OnRetry="@UpdateAgentAsync" />
+            Request="@Loader.Server.AgentUpdateRequest"
+            OnRetry="@UpdateAgentAsync" />
     }
 
     <div class="blade-content" style="@(Loader.Server is null ? "display:none" : null)">

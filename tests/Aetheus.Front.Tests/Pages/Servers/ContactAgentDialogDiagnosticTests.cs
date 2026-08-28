@@ -154,7 +154,7 @@ public class ContactAgentDialogDiagnosticTests : BunitContext
     // ── CancelAndCloseAsync ───────────────────────────────────────────────────
 
     [Fact]
-    public async Task CancelAndCloseAsync_NullCts_DoesNotThrow()
+    public async Task CancelAndCloseAsync_NullCts_KeepsItSet()
     {
         var instance = CreateInstance();
         // _cts is null (never started)

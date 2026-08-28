@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.AppMonitoring.Ingest;
 
 /// <summary>
-/// OTLP ingestion pipeline (PLAN-001 phases 2-4): resolves the per-app ingest key (cached, incl. negative
+/// OTLP ingestion pipeline (ADR-021 phases 2-4): resolves the per-app ingest key (cached, incl. negative
 /// caching), applies cardinality caps (no silent loss - dropped points are counted on the app and shown in
 /// the UI), persists metric/log/error series in batch, and fires <c>app.metric.threshold</c> notifications.
 /// </summary>
@@ -41,6 +40,10 @@ public sealed class IngestService(
     // low enough to bound a runaway loop. Applied inside the per-app ingest gate, so it is race-free.
     internal const int MaxSamplesPerMinutePerApp = AppMonitoringDefaults.MaximumSamplesPerMinutePerApp;
     private static readonly TimeSpan KeyCacheTtl = TimeSpan.FromSeconds(60);
+    internal const int MaxNegativeKeyCacheEntries = 1024;
+    private readonly record struct CachedKeyResolution(int AppId);
+    private readonly ConcurrentDictionary<string, byte> negativeKeyCacheEntries = new(StringComparer.Ordinal);
+    private readonly object negativeKeyCacheSync = new();
     // Reject emit-sourced timestamps outside a sane window: a future-dated point would fall outside BOTH the
     // aggregation window AND the retention purge, leaving a permanent orphan row (unbounded PG growth) and
     // poisoning the graphs. Drop them honestly (counted). Tolerates modest clock skew + the raw window.
@@ -57,13 +60,50 @@ public sealed class IngestService(
 
         var hash = hasher.Hash(ingestKey);
         var cacheKey = KeyCacheKey(hash);
-        if (cache.TryGetValue<int>(cacheKey, out var cached))
-            return cached > 0 ? cached : null; // -1 = negative-cached miss
+        if (cache.TryGetValue<CachedKeyResolution>(cacheKey, out var cached))
+            return cached.AppId > 0 ? cached.AppId : null; // -1 = negative-cached miss
 
-        var appId = await appRepo.GetAppIdByIngestKeyHashAsync(hash, ct).ConfigureAwait(false);
+        var resolution = await appRepo.ResolveIngestKeyHashAsync(
+            hash,
+            timeProvider.GetUtcNow().UtcDateTime,
+            ct).ConfigureAwait(false);
         // Cache both hits and misses briefly to blunt DB-probing with random keys.
-        cache.Set(cacheKey, appId ?? -1, KeyCacheTtl);
-        return appId;
+        var cacheDuration = resolution?.ValidUntilUtc is { } validUntil
+            ? validUntil - timeProvider.GetUtcNow().UtcDateTime
+            : KeyCacheTtl;
+        if (cacheDuration > TimeSpan.Zero && (resolution is not null || TryTrackNegativeCacheEntry(cacheKey)))
+        {
+            var options = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = cacheDuration < KeyCacheTtl ? cacheDuration : KeyCacheTtl
+            };
+            if (resolution is null)
+            {
+                options.RegisterPostEvictionCallback(
+                    static (key, _, _, state) =>
+                        ((ConcurrentDictionary<string, byte>)state!).TryRemove((string)key, out _),
+                    negativeKeyCacheEntries);
+            }
+            cache.Set(
+                cacheKey,
+                new CachedKeyResolution(resolution?.AppId ?? -1),
+                options);
+        }
+        return resolution?.AppId;
+    }
+
+    internal int TrackedNegativeKeyCount => negativeKeyCacheEntries.Count;
+
+    private bool TryTrackNegativeCacheEntry(string cacheKey)
+    {
+        lock (negativeKeyCacheSync)
+        {
+            if (negativeKeyCacheEntries.ContainsKey(cacheKey))
+                return true;
+            if (negativeKeyCacheEntries.Count >= MaxNegativeKeyCacheEntries)
+                return false;
+            return negativeKeyCacheEntries.TryAdd(cacheKey, 0);
+        }
     }
 
     private static string KeyCacheKey(string ingestKeyHash) => $"ingest-key:{ingestKeyHash}";

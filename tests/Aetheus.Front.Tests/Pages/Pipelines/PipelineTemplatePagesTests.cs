@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Front.Pages.Pipelines;
+using Aetheus.Front.Pages.Shared;
+using Aetheus.Shared.DTOs;
+using Bunit;
+
+namespace Aetheus.Front.Tests.Pages.Pipelines;
+
+public sealed class PipelineTemplatePagesTests : BunitContext
+{
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    public PipelineTemplatePagesTests() => _handler = BunitTestHelper.RegisterServices(this);
+
+    [Fact]
+    public void ExtractPage_LoadsPipelineAndBuildsPinnedDefinition()
+    {
+        _handler.SetJsonResponse("api/pipelines/3", new PipelineDto
+        {
+            Id = 3,
+            Name = "ci",
+            YamlDefinition = "name: ci\nstages: []"
+        });
+
+        var cut = Render<PipelineTemplateExtract>(parameters => parameters.Add(component => component.PipelineId, 3));
+        cut.WaitForState(() => cut.FindComponents<MonacoEditor>().Count == 2);
+
+        Assert.Equal("name: ci\nstages: []", cut.FindComponents<MonacoEditor>()[0].Instance.Value);
+        Assert.Contains("extends: 'ci@1'", cut.FindComponents<MonacoEditor>()[1].Instance.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("rz-dialog", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PromotePage_ShowsResolvedDiffWithoutDialog()
+    {
+        MockPipeline(4);
+        _handler.SetJsonResponse("promote-template/preview", new PipelinePromotePreviewDto
+        {
+            PipelineId = 4,
+            TemplateId = 7,
+            TemplateName = "ci",
+            LatestVersion = 2,
+            LatestTemplateYaml = "name: old",
+            EffectivePipelineYaml = "name: new"
+        });
+
+        var cut = Render<PipelineTemplatePromote>(parameters => parameters.Add(component => component.PipelineId, 4));
+        cut.WaitForState(() => cut.FindComponents<MonacoDiffViewer>().Count == 1);
+
+        Assert.Equal("name: old", cut.FindComponent<MonacoDiffViewer>().Instance.OriginalValue);
+        Assert.Equal("name: new", cut.FindComponent<MonacoDiffViewer>().Instance.ModifiedValue);
+        Assert.DoesNotContain("rz-dialog", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdatePage_RequiresOrphanAcknowledgement()
+    {
+        MockPipeline(5);
+        _handler.SetJsonResponse("fleet-update/preview", new PipelineFleetUpdatePreviewDto
+        {
+            PipelineId = 5,
+            TemplateName = "ci",
+            CurrentVersion = 1,
+            TargetVersion = 2,
+            CurrentResolvedYaml = "name: old",
+            TargetResolvedYaml = "name: new",
+            OrphanOverrides = ["stage:removed"]
+        });
+
+        var cut = Render<PipelineTemplateUpdate>(parameters => parameters
+            .Add(component => component.PipelineId, 5)
+            .Add(component => component.TargetVersion, 2));
+        cut.WaitForState(() => cut.FindComponents<MonacoDiffViewer>().Count == 1);
+
+        Assert.Contains("OrphanOverridesWarning", cut.Markup, StringComparison.Ordinal);
+        Assert.True(cut.Find("button[disabled]").TextContent.Contains("ConfirmUpdate", StringComparison.Ordinal));
+        Assert.DoesNotContain("rz-dialog", cut.Markup, StringComparison.Ordinal);
+    }
+
+    private void MockPipeline(int id) => _handler.SetJsonResponse($"api/pipelines/{id}", new PipelineDto
+    {
+        Id = id,
+        Name = "ci",
+        ProjectId = 9,
+        ProjectName = "Aetheus"
+    });
+}

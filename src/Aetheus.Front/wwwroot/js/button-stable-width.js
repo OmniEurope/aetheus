@@ -1,77 +1,90 @@
-// Stabilizes Radzen button width when IsBusy toggles "rz-state-loading".
-// Without this, switching from text -> spinner shrinks the button visibly.
-// Strategy: track the natural width of every .rz-button while it is NOT loading,
-// then pin that width as min-width as soon as the loading class is added.
+// Stabilizes Radzen button dimensions when IsBusy toggles "rz-state-loading".
+// Without this, switching from the label to the spinner can shrink the button visibly.
 (function () {
     if (typeof window === 'undefined' || !('MutationObserver' in window)) return;
 
-    const NATURAL_KEY = 'data-natural-width';
+    const NATURAL_WIDTH = 'data-natural-width';
+    const NATURAL_HEIGHT = 'data-natural-height';
+    const INLINE_WIDTH = 'data-natural-inline-width';
+    const INLINE_HEIGHT = 'data-natural-inline-height';
 
-    function recordNaturalWidth(btn) {
-        if (!(btn instanceof HTMLElement)) return;
-        if (btn.classList.contains('rz-state-loading')) return;
-        if (btn.classList.contains('rz-button-icon-only')) return;
-        const w = btn.getBoundingClientRect().width;
-        if (w > 0) btn.setAttribute(NATURAL_KEY, Math.ceil(w));
+    function isTrackable(button) {
+        return button instanceof HTMLElement
+            && button.classList.contains('rz-button')
+            && !button.classList.contains('rz-button-icon-only');
     }
 
-    function applyPin(btn) {
-        if (!(btn instanceof HTMLElement)) return;
-        if (btn.classList.contains('rz-state-loading')) {
-            const natural = btn.getAttribute(NATURAL_KEY);
-            if (natural) {
-                btn.style.minWidth = natural + 'px';
-            }
-        } else {
-            btn.style.minWidth = '';
-        }
+    function recordNaturalSize(button) {
+        if (!isTrackable(button) || button.classList.contains('rz-state-loading')) return;
+        const rect = button.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        button.setAttribute(NATURAL_WIDTH, Math.ceil(rect.width));
+        button.setAttribute(NATURAL_HEIGHT, Math.ceil(rect.height));
+        if (!button.hasAttribute(INLINE_WIDTH))
+            button.setAttribute(INLINE_WIDTH, button.style.width);
+        if (!button.hasAttribute(INLINE_HEIGHT))
+            button.setAttribute(INLINE_HEIGHT, button.style.height);
     }
 
-    function scan(root) {
-        const buttons = root.querySelectorAll
-            ? root.querySelectorAll('.rz-button')
-            : [];
-        buttons.forEach(b => {
-            recordNaturalWidth(b);
-            applyPin(b);
-        });
+    function applyStableSize(button) {
+        if (!isTrackable(button)) return;
+        if (button.classList.contains('rz-state-loading')) {
+            const width = button.getAttribute(NATURAL_WIDTH);
+            const height = button.getAttribute(NATURAL_HEIGHT);
+            if (width) button.style.width = `${width}px`;
+            if (height) button.style.height = `${height}px`;
+            return;
+        }
+
+        if (button.hasAttribute(INLINE_WIDTH))
+            button.style.width = button.getAttribute(INLINE_WIDTH) || '';
+        if (button.hasAttribute(INLINE_HEIGHT))
+            button.style.height = button.getAttribute(INLINE_HEIGHT) || '';
+        recordNaturalSize(button);
     }
 
-    const classObserver = new MutationObserver(mutations => {
-        for (const m of mutations) {
-            if (m.type !== 'attributes' || m.attributeName !== 'class') continue;
-            const btn = m.target;
-            if (!(btn instanceof HTMLElement)) continue;
-            if (!btn.classList.contains('rz-button')) continue;
-            applyPin(btn);
-        }
-    });
+    const resizeObserver = 'ResizeObserver' in window
+        ? new ResizeObserver(entries => {
+            for (const entry of entries)
+                recordNaturalSize(entry.target);
+        })
+        : null;
 
-    const treeObserver = new MutationObserver(muts => {
-        for (const m of muts) {
-            m.addedNodes.forEach(node => {
-                if (!(node instanceof HTMLElement)) return;
-                if (node.classList && node.classList.contains('rz-button')) {
-                    recordNaturalWidth(node);
-                }
-                scan(node);
-            });
+    function register(root) {
+        const buttons = [];
+        if (isTrackable(root)) buttons.push(root);
+        if (root.querySelectorAll)
+            buttons.push(...root.querySelectorAll('.rz-button'));
+        for (const button of buttons) {
+            recordNaturalSize(button);
+            applyStableSize(button);
+            resizeObserver?.observe(button);
         }
-    });
+    }
 
     function init() {
-        scan(document);
-        classObserver.observe(document.body, {
+        register(document);
+        const observer = new MutationObserver(mutations => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'attributes') {
+                    applyStableSize(mutation.target);
+                    continue;
+                }
+                mutation.addedNodes.forEach(node => {
+                    if (node instanceof HTMLElement) register(node);
+                });
+            }
+        });
+        observer.observe(document.body, {
             attributes: true,
             attributeFilter: ['class'],
+            childList: true,
             subtree: true
         });
-        treeObserver.observe(document.body, { childList: true, subtree: true });
     }
 
-    if (document.readyState === 'loading') {
+    if (document.readyState === 'loading')
         document.addEventListener('DOMContentLoaded', init, { once: true });
-    } else {
+    else
         init();
-    }
 })();

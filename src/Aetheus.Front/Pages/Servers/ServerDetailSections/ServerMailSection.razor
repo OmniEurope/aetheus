@@ -60,7 +60,7 @@
         </RadzenSplitButton>
         <RadzenButton Icon="checklist" Text="@L["TestConfig"]"
             Disabled="@_actionRunning"
-            Click="@(() => ExecuteActionAsync(MailAction.TestConfig))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@(() => ExecuteActionAsync(MailAction.TestConfig))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
     }
 </RadzenStack>
 
@@ -122,9 +122,9 @@
                             <Template Context="d">
                                 <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
                                     <RadzenButton Icon="dns" Text="DNS"
-                                        Click="@(() => ShowDnsRecordsAsync(d))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                        Click="@(() => ShowDnsRecordsAsync(d))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                                     <RadzenButton Icon="vpn_key" Text="DKIM"
-                                        Click="@(() => ShowDkimRotation(d))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                        Click="@(() => ShowDkimRotation(d))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                                     <RadzenButton Icon="delete" Text="@L["Delete"]"
                                         Click="@(() => ShowConfirm(L["DeleteDomain"], string.Format(L["ConfirmDeleteMailDomain"], d.Name),
                                             () => DeleteDomainAsync(d.Id)))" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
@@ -228,12 +228,12 @@
                     <RadzenButton Icon="refresh" Text="@L["Refresh"]"
                         Click="@(() => ExecuteActionAsync(MailAction.ViewQueue))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                     <RadzenButton Icon="visibility" Text="@L["ViewQueue"]"
-                        Click="@(() => ExecuteActionAsync(MailAction.ViewQueue))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        Click="@(() => ExecuteActionAsync(MailAction.ViewQueue))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     <RadzenButton Icon="send" Text="@L["FlushQueue"]"
                         Click="@(() => ShowConfirm(L["FlushQueue"], L["ConfirmFlushQueue"],
                             () => ExecuteActionAsync(MailAction.FlushQueue)))" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
                 </RadzenStack>
-                <RadzenDataGrid Data="@_queueItems" TItem="MailQueueItemDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                <RadzenDataGrid Responsive="false" Data="@_queueItems" TItem="MailQueueItemDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                     <Columns>
                         <RadzenDataGridColumn TItem="MailQueueItemDto" Property="Id" Title="ID" Width="120px" />
                         <RadzenDataGridColumn TItem="MailQueueItemDto" Property="Sender" Title="@L["Sender"]" Width="200px" />
@@ -255,7 +255,7 @@
                         Placeholder="@L["SelectLogType"]" class="w-rem-10" />
                     <RadzenNumeric @bind-Value="_logLines" Min="10" Max="10000" TValue="int" class="w-rem-6" />
                     <RadzenButton Icon="download" Text="@L["FetchLogs"]"
-                        Click="@FetchLogsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        Click="@FetchLogsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 </RadzenStack>
             </RadzenTabsItem>
 

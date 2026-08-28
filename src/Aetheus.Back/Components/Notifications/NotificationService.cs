@@ -3,20 +3,22 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Shared;
+using Aetheus.Back.Components.Notifications.Events;
 using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Back.Services.DomainEvents;
 
 namespace Aetheus.Back.Components.Notifications;
 
 public class NotificationService(
     INotificationRepository repo,
     IAuditService audit,
+    // No AI trigger port: this module states that an event happened and subscribers decide what it
+    // means. Injecting the AI module to start its own triggers is what put the two in a cycle.
+    IDomainEventDispatcher domainEvents,
     IHttpClientFactory httpClientFactory,
     ILogger<NotificationService> logger,
+    IEncryptionService encryption,
     TimeProvider timeProvider) : INotificationService
 {
     public async Task<PaginatedResult<NotificationChannelDto>> GetChannelsAsync(
@@ -46,7 +48,9 @@ public class NotificationService(
         {
             Name = request.Name,
             Type = request.Type,
-            ConfigurationJson = request.ConfigurationJson
+            ConfigurationJson = NotificationConfigurationProtection.Protect(
+                encryption,
+                request.ConfigurationJson)
         };
         await repo.AddChannelAsync(channel, ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "NotificationChannel", channel.Id, channel.Name, ct).ConfigureAwait(false);
@@ -59,7 +63,15 @@ public class NotificationService(
         if (channel is null) return null;
 
         channel.Name = request.Name;
-        channel.ConfigurationJson = request.ConfigurationJson;
+        var existingConfiguration = NotificationConfigurationProtection.Unprotect(
+            encryption,
+            channel.ConfigurationJson);
+        var restoredConfiguration = SensitiveConfigurationJson.RestoreMaskedSecrets(
+            existingConfiguration,
+            request.ConfigurationJson);
+        channel.ConfigurationJson = NotificationConfigurationProtection.Protect(
+            encryption,
+            restoredConfiguration);
         channel.IsEnabled = request.IsEnabled;
         channel.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -132,11 +144,11 @@ public class NotificationService(
         }
     }
 
-    private static string? ExtractWebhookUrl(NotificationChannel channel)
+    private string? ExtractWebhookUrl(NotificationChannel channel)
     {
         try
         {
-            var config = JsonSerializer.Deserialize<JsonElement>(channel.ConfigurationJson);
+            var config = JsonSerializer.Deserialize<JsonElement>(GetConfiguration(channel));
             // Slack/Teams use "webhookUrl"; the generic Webhook channel uses "url".
             if (config.TryGetProperty("webhookUrl", out var w) && w.ValueKind == JsonValueKind.String) return w.GetString();
             if (config.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) return u.GetString();
@@ -180,6 +192,25 @@ public class NotificationService(
 
     public async Task SendEventAsync(string eventType, object payload, CancellationToken ct = default)
     {
+        try
+        {
+            // Observer dispatch, matching the catch below: a subscriber must never be able to stop a
+            // notification from being delivered.
+            await domainEvents
+                .DispatchAsync(new NotificationEventRaisedEvent(eventType, payload), ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "AI trigger dispatch failed for event {EventType}; normal notification delivery continues",
+                eventType);
+        }
         var rules = await repo.GetRulesForEventAsync(eventType, ct).ConfigureAwait(false);
         if (rules.Count == 0) return;
 
@@ -223,7 +254,7 @@ public class NotificationService(
 
     private async Task SendSlackNotificationAsync(NotificationChannel channel, string eventType, string jsonPayload, CancellationToken ct)
     {
-        var config = JsonSerializer.Deserialize<JsonElement>(channel.ConfigurationJson);
+        var config = JsonSerializer.Deserialize<JsonElement>(GetConfiguration(channel));
         if (!config.TryGetProperty("webhookUrl", out var urlElement)) return;
         if (!await IsUrlSafeAsync(urlElement.GetString(), ct).ConfigureAwait(false)) return;
 
@@ -235,7 +266,7 @@ public class NotificationService(
 
     private async Task SendTeamsNotificationAsync(NotificationChannel channel, string eventType, string jsonPayload, CancellationToken ct)
     {
-        var config = JsonSerializer.Deserialize<JsonElement>(channel.ConfigurationJson);
+        var config = JsonSerializer.Deserialize<JsonElement>(GetConfiguration(channel));
         if (!config.TryGetProperty("webhookUrl", out var urlElement)) return;
         if (!await IsUrlSafeAsync(urlElement.GetString(), ct).ConfigureAwait(false)) return;
 
@@ -268,7 +299,7 @@ public class NotificationService(
 
     private async Task SendWebhookNotificationAsync(NotificationChannel channel, string eventType, string jsonPayload, CancellationToken ct)
     {
-        var config = JsonSerializer.Deserialize<JsonElement>(channel.ConfigurationJson);
+        var config = JsonSerializer.Deserialize<JsonElement>(GetConfiguration(channel));
         if (!config.TryGetProperty("url", out var urlElement)) return;
         if (!await IsUrlSafeAsync(urlElement.GetString(), ct).ConfigureAwait(false)) return;
 
@@ -305,17 +336,20 @@ public class NotificationService(
         }
     }
 
-    private static NotificationChannelDto MapChannelToDto(NotificationChannel c) => new()
+    private NotificationChannelDto MapChannelToDto(NotificationChannel c) => new()
     {
         Id = c.Id,
         Name = c.Name,
         Type = c.Type,
-        ConfigurationJson = c.ConfigurationJson,
+        ConfigurationJson = SensitiveConfigurationJson.MaskSecrets(GetConfiguration(c)),
         IsEnabled = c.IsEnabled,
         RuleCount = c.Rules.Count,
         CreatedAt = c.CreatedAt,
         UpdatedAt = c.UpdatedAt
     };
+
+    private string GetConfiguration(NotificationChannel channel) =>
+        NotificationConfigurationProtection.Unprotect(encryption, channel.ConfigurationJson);
 
     private static NotificationRuleDto MapRuleToDto(NotificationRule r) => new()
     {

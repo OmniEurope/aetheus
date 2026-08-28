@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
-using Aetheus.Front.Resources;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Shared;
 

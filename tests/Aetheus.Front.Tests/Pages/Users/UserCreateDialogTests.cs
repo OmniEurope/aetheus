@@ -91,21 +91,6 @@ public class UserCreateDialogTests : BunitContext
         Assert.Contains("MustChangePassword", cut.Markup);
     }
 
-    // ── Role toggling mutates the model role set ─────────────────────────────
-
-    [Fact]
-    public void OnRoleToggled_AddsThenRemovesRole()
-    {
-        var cut = Render<UserCreateDialog>(p => p.Add(c => c.AvailableRoles, ["Admin", "Operator"]));
-        var toggle = typeof(UserCreateDialog).GetMethod("OnRoleToggled", Priv)!;
-
-        toggle.Invoke(cut.Instance, ["Admin", true]);
-        Assert.Contains("Admin", GetModel<List<string>>(cut, "Roles"));
-
-        toggle.Invoke(cut.Instance, ["Admin", false]);
-        Assert.DoesNotContain("Admin", GetModel<List<string>>(cut, "Roles"));
-    }
-
     // ── Valid submit issues the create call and closes with the DTO ──────────
 
     [Fact]
@@ -131,11 +116,14 @@ public class UserCreateDialogTests : BunitContext
     }
 
     [Fact]
-    public async Task OnSubmit_NullResult_SetsErrorAndDoesNotClose()
+    public async Task OnSubmit_Conflict_ShowsApiReasonAndDoesNotClose()
     {
         RegisterSpyDialog();
-        // 400 → ApiClient.CreateUserAsync returns null → _error set, dialog stays open.
-        _handler.SetResponse(HttpMethod.Post, "api/users", System.Net.HttpStatusCode.BadRequest);
+        _handler.SetJsonResponse(
+            HttpMethod.Post,
+            "api/users",
+            new ApiError { Message = "Username 'jdoe' is already taken." },
+            System.Net.HttpStatusCode.Conflict);
 
         var cut = Render<UserCreateDialog>(p => p.Add(c => c.AvailableRoles, ["Admin"]));
         SetModel(cut, "Username", "jdoe");
@@ -146,6 +134,6 @@ public class UserCreateDialogTests : BunitContext
 
         Assert.False(Spy().Closed);
         var error = (string?)typeof(UserCreateDialog).GetField("_error", Priv)!.GetValue(cut.Instance);
-        Assert.False(string.IsNullOrEmpty(error));
+        Assert.Equal("Username 'jdoe' is already taken.", error);
     }
 }

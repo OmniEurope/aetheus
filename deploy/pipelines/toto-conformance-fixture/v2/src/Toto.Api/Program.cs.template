@@ -1,0 +1,167 @@
+using Npgsql;
+using Toto.Domain;
+
+var builder = WebApplication.CreateBuilder(args);
+var connectionString = builder.Configuration.GetConnectionString("Default")
+    ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
+#if AETHEUS_TELEMETRY
+Aetheus.Telemetry.AetheusTelemetryBuilderExtensions.AddAetheusTelemetry(
+    builder.Services,
+    builder.Configuration);
+#endif
+#if AETHEUS_WEB_ANALYTICS
+Aetheus.WebAnalytics.AetheusWebAnalyticsServiceExtensions.AddAetheusWebAnalytics(
+    builder.Services,
+    builder.Configuration);
+#endif
+var app = builder.Build();
+
+#if AETHEUS_WEB_ANALYTICS
+app.UseStaticFiles();
+#endif
+
+await EnsureSchemaAsync(connectionString);
+
+app.MapGet("/", () => Results.Content(
+    """
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Toto acceptance V2</title>
+    </head>
+    <body>
+      <main>
+        <h1>Toto acceptance V2</h1>
+        <p id="integration-state">Loading integrations…</p>
+        <h2>Todos</h2>
+        <ul id="todos"></ul>
+      </main>
+      <script type="module">
+        import { createAetheusAnalytics } from "/_content/Aetheus.WebAnalytics/0.1.0/aetheus-web-analytics.js";
+
+        createAetheusAnalytics({
+          routeResolver: pathname => pathname,
+          capturePerformance: true,
+          captureErrors: true
+        }).install();
+
+        const [integrationResponse, todosResponse] = await Promise.all([
+          fetch("/api/integrations"),
+          fetch("/api/todos")
+        ]);
+        const integration = await integrationResponse.json();
+        const todos = await todosResponse.json();
+        document.getElementById("integration-state").textContent =
+          `Telemetry ${integration.telemetry.assemblyVersion} · Analytics ${integration.webAnalytics.assemblyVersion}`;
+        const list = document.getElementById("todos");
+        for (const todo of todos) {
+          const item = document.createElement("li");
+          item.textContent = todo.title;
+          list.appendChild(item);
+        }
+      </script>
+    </body>
+    </html>
+    """,
+    "text/html; charset=utf-8"));
+
+app.MapGet("/health/ready", async () =>
+{
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand("SELECT 1", connection);
+    await command.ExecuteScalarAsync();
+    return Results.Ok(new { version = 2 });
+});
+
+app.MapGet("/api/integrations", () => Results.Ok(GetIntegrationState()));
+
+app.MapGet("/api/todos", async () =>
+{
+    var items = new List<TodoContract>();
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand(
+        "SELECT id, title, is_done, priority FROM todo_items ORDER BY id", connection);
+    await using var reader = await command.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+        items.Add(new TodoContract(
+            reader.GetInt32(0),
+            reader.GetString(1),
+            reader.GetBoolean(2),
+            reader.IsDBNull(3) ? null : reader.GetInt32(3)));
+    return Results.Ok(items);
+});
+
+app.MapPost("/api/todos", async (CreateTodoRequest request) =>
+{
+    var title = TodoTitle.Normalize(request.Title);
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand(
+        "INSERT INTO todo_items(title, is_done, priority) VALUES ($1, false, $2) RETURNING id", connection);
+    command.Parameters.AddWithValue(title);
+    command.Parameters.AddWithValue(request.Priority ?? 0);
+    var id = (int)(await command.ExecuteScalarAsync()
+        ?? throw new InvalidOperationException("The inserted todo id was not returned."));
+    return Results.Created(
+        $"/api/todos/{id}",
+        new TodoContract(id, title, false, request.Priority ?? 0));
+});
+
+#if AETHEUS_WEB_ANALYTICS
+Aetheus.WebAnalytics.AetheusWebAnalyticsEndpointExtensions.MapAetheusWebAnalytics(app);
+#endif
+
+app.Run();
+
+static async Task EnsureSchemaAsync(string connectionString)
+{
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync();
+    const string sql = """
+        CREATE TABLE IF NOT EXISTS schema_versions (
+            version integer PRIMARY KEY,
+            applied_at timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS todo_items (
+            id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            title text NOT NULL,
+            is_done boolean NOT NULL DEFAULT false
+        );
+        ALTER TABLE todo_items ADD COLUMN IF NOT EXISTS priority integer;
+        INSERT INTO schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
+        INSERT INTO schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;
+        """;
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync();
+}
+
+static object GetIntegrationState()
+{
+    var telemetryEnabled = false;
+    string? telemetryVersion = null;
+    var webAnalyticsEnabled = false;
+    string? webAnalyticsVersion = null;
+#if AETHEUS_TELEMETRY
+    telemetryEnabled = true;
+    telemetryVersion = typeof(Aetheus.Telemetry.AetheusTelemetryBuilderExtensions)
+        .Assembly.GetName().Version?.ToString();
+#endif
+#if AETHEUS_WEB_ANALYTICS
+    webAnalyticsEnabled = true;
+    webAnalyticsVersion = typeof(Aetheus.WebAnalytics.AetheusWebAnalyticsServiceExtensions)
+        .Assembly.GetName().Version?.ToString();
+#endif
+    return new
+    {
+        telemetry = new { enabled = telemetryEnabled, assemblyVersion = telemetryVersion },
+        webAnalytics = new { enabled = webAnalyticsEnabled, assemblyVersion = webAnalyticsVersion }
+    };
+}
+
+public sealed record CreateTodoRequest(string Title, int? Priority);
+
+public partial class Program;

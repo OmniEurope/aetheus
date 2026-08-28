@@ -1,15 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Users;
 
@@ -22,6 +12,7 @@ public partial class RoleEdit
     [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private NotificationService Notification { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private ConfirmHelper Confirm { get; set; } = default!;
 
@@ -35,8 +26,6 @@ public partial class RoleEdit
     private RoleFormModel _model = new();
     private List<PermissionRowModel> _permissionRows = [];
     private List<object> _scopeOptions = [];
-    private List<AuditLogDto>? _auditLogs;
-    private bool _auditLoaded;
     private Permission? _bulkPermission;
     private List<object> _permissionLevels = [];
 
@@ -99,7 +88,7 @@ public partial class RoleEdit
 
         var id = Id;
         RoleDto? role;
-        try { role = await Api.GetRoleAsync(id); }
+        try { role = await Api.Auth.GetRoleAsync(id); }
         catch (HttpRequestException) { role = null; }
         if (Id != id || _isNew) return;
         if (role is null)
@@ -119,12 +108,10 @@ public partial class RoleEdit
             new BreadcrumbItem(role.Name));
         _loading = false;
 
-        // Lazy-load only the tab the user deep-linked to (no eager audit fetch on every visit).
+        // Lazy-load only the users tab. EntityAuditTrail owns audit loading.
         var tab = CurrentTab();
         if (string.Equals(tab, "users", StringComparison.OrdinalIgnoreCase))
             await InitializeUsersTabAsync();
-        else if (string.Equals(tab, "audit", StringComparison.OrdinalIgnoreCase))
-            await LoadAuditLogsAsync();
     }
 
     private void ResetLoadedState()
@@ -133,8 +120,6 @@ public partial class RoleEdit
         _name = string.Empty;
         _model = new RoleFormModel();
         _permissionRows = [];
-        _auditLogs = null;
-        _auditLoaded = false;
         _roleUsers = [];
         _availableUsers = [];
         _roleUsersCount = 0;
@@ -150,13 +135,11 @@ public partial class RoleEdit
         return query.TryGetValue("tab", out var value) ? value.ToString() : null;
     }
 
-    // Slugs order: 0 general, 1 permissions, 2 users, 3 audit. Load a tab's data on first activation.
+    // Slugs order: 0 general, 1 permissions, 2 users, 3 audit.
     private async Task OnTabChanged(int index)
     {
         if (index == 2 && !_usersLoaded)
             await InitializeUsersTabAsync();
-        else if (index == 3 && !_auditLoaded)
-            await LoadAuditLogsAsync();
     }
 
     private async Task InitializeUsersTabAsync()
@@ -174,7 +157,7 @@ public partial class RoleEdit
         _loadingRoleUsers = true;
         try
         {
-            var result = await Api.GetRoleUsersAsync(
+            var result = await Api.Auth.GetRoleUsersAsync(
                 id, page, pageSize, sortBy: sortBy, sortDescending: sortDescending);
             if (Id != id || _isNew) return;
             _roleUsers = result.Items;
@@ -196,7 +179,7 @@ public partial class RoleEdit
         _loadingAvailableUsers = true;
         try
         {
-            var result = await Api.GetUsersAvailableForRoleAsync(
+            var result = await Api.Auth.GetUsersAvailableForRoleAsync(
                 id, page, pageSize, args.Filter, "Username");
             if (Id != id || _isNew) return;
             _availableUsers = result.Items;
@@ -237,12 +220,16 @@ public partial class RoleEdit
         _addingUser = true;
         try
         {
-            var status = await Api.AddUserToRoleAsync(Id, _selectedUserId.Value);
+            var status = await Api.Auth.AddUserToRoleAsync(Id, _selectedUserId.Value);
             if (status.Success)
             {
                 Notification.Notify(NotificationSeverity.Success, L["Saved"]);
                 _selectedUserId = null;
                 await RefreshUserCollectionsAsync();
+            }
+            else
+            {
+                Toast.Error("Error", "SaveFailed");
             }
         }
         finally
@@ -256,7 +243,7 @@ public partial class RoleEdit
         var confirmed = await Confirm.ConfirmAsync("ConfirmRemoveUserFromRole", "Confirm", user.Username);
         if (confirmed != true) return;
 
-        var status = await Api.RemoveUserFromRoleAsync(Id, user.UserId);
+        var status = await Api.Auth.RemoveUserFromRoleAsync(Id, user.UserId);
         if (status.Success)
         {
             Notification.Notify(NotificationSeverity.Success, L["Saved"]);
@@ -314,7 +301,7 @@ public partial class RoleEdit
         {
             if (_isNew)
             {
-                var result = await Api.CreateRoleAsync(new CreateRoleRequest
+                var result = await Api.Auth.CreateRoleAsync(new CreateRoleRequest
                 {
                     Name = _model.Name,
                     Description = _model.Description
@@ -324,7 +311,7 @@ public partial class RoleEdit
             }
             else
             {
-                var result = await Api.UpdateRoleAsync(Id, new UpdateRoleRequest
+                var result = await Api.Auth.UpdateRoleAsync(Id, new UpdateRoleRequest
                 {
                     Name = _model.Name,
                     Description = _model.Description
@@ -345,6 +332,7 @@ public partial class RoleEdit
     private async Task OnSavePermissions()
     {
         _savingPermissions = true;
+        await InvokeAsync(StateHasChanged);
         try
         {
             var entries = new List<ResourcePermissionEntry>();
@@ -367,13 +355,19 @@ public partial class RoleEdit
                 });
             }
 
-            var success = await Api.SetRolePermissionsAsync(Id, new SetResourcePermissionsRequest
+            var success = await Api.Auth.SetRolePermissionsAsync(Id, new SetResourcePermissionsRequest
             {
                 Permissions = entries
             });
 
             if (success)
                 Notification.Notify(NotificationSeverity.Success, L["PermissionsSaved"]);
+            else
+                await RestorePermissionsAfterFailureAsync();
+        }
+        catch (HttpRequestException)
+        {
+            await RestorePermissionsAfterFailureAsync();
         }
         finally
         {
@@ -386,19 +380,7 @@ public partial class RoleEdit
         Nav.NavigateTo("/admin/roles");
     }
 
-    private async Task LoadAuditLogsAsync()
-    {
-        var id = Id;
-        // Server-side entityId filter: only this role's entries, correct beyond page 1 (the old
-        // client-side filter silently dropped anything past the first 50 rows).
-        var result = await Api.GetAuditLogsAsync(entityType: "Role", entityId: id);
-        if (Id != id || _isNew) return;
-        _auditLogs = result.Items;
-        _auditLoaded = true;
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private void OnApplyBulk()
+    private async Task OnApplyBulk()
     {
         if (_bulkPermission is null) return;
 
@@ -409,17 +391,29 @@ public partial class RoleEdit
             row.CanWrite = _bulkPermission.Value >= Permission.Write;
             row.CanAdmin = _bulkPermission.Value >= Permission.Admin;
         }
+
+        await OnSavePermissions();
     }
 
-    private class RoleFormModel
+    private async Task RestorePermissionsAfterFailureAsync()
     {
-        [Required]
-        [StringLength(50)]
-        public string Name { get; set; } = string.Empty;
-
-        [StringLength(200)]
-        public string Description { get; set; } = string.Empty;
+        var role = await Api.Auth.GetRoleAsync(Id);
+        if (role is not null) BuildPermissionRows(role.Permissions);
+        Toast.Error("Error", "SaveFailed");
     }
+
+    private async Task OnScopeChangedAndSaveAsync(PermissionRowModel row)
+    {
+        OnScopeChanged(row);
+        await OnSavePermissions();
+    }
+
+    private async Task OnPermissionToggledAndSaveAsync(PermissionRowModel row)
+    {
+        OnPermissionToggled(row);
+        await OnSavePermissions();
+    }
+
 
     internal class PermissionRowModel
     {

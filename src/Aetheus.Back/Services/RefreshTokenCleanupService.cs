@@ -6,28 +6,12 @@ namespace Aetheus.Back.Services;
 public sealed class RefreshTokenCleanupService(
     IServiceScopeFactory scopeFactory,
     ILogger<RefreshTokenCleanupService> logger,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider) : PeriodicBackgroundService(TimeSpan.FromHours(6))
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(6));
+    protected override Task ExecuteIterationAsync(CancellationToken ct) => CleanupExpiredTokensAsync(ct);
 
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
-        {
-            try
-            {
-                await CleanupExpiredTokensAsync(stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error during refresh token cleanup");
-            }
-        }
-    }
+    protected override void LogIterationError(Exception exception) =>
+        logger.LogError(exception, "Error during refresh token cleanup");
 
     internal async Task CleanupExpiredTokensAsync(CancellationToken ct)
     {

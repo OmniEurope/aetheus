@@ -2,7 +2,7 @@
 namespace Aetheus.Back.Components.PersonalAccessTokens;
 
 /// <summary>
-/// Shared constants for the Personal Access Token authentication path (PLAN-006 4.5).
+/// Shared constants for the Personal Access Token authentication path (ADR-024 4.5).
 /// </summary>
 public static class PatConstants
 {

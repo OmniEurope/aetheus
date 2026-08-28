@@ -149,7 +149,7 @@ public class AgentStartupServiceTests
     private static (EnrollmentService service, IServerApiClient apiClient, AgentState state) CreateEnrollmentService(bool isEnrolled)
     {
         var apiClient = Substitute.For<IServerApiClient>();
-        var state = new AgentState();
+        var state = new AgentState(TimeProvider.System);
         var logger = Substitute.For<ILogger<EnrollmentService>>();
         var options = Options.Create(new AetheusAgentOptions
         {

@@ -12,6 +12,11 @@ public record ServerDto
     public string Hostname { get; init; } = string.Empty;
     public string OsDescription { get; init; } = string.Empty;
     public string AgentVersion { get; init; } = string.Empty;
+    public int? AgentProtocolVersion { get; init; }
+    public List<string> AgentCapabilities { get; init; } = [];
+    public AgentCompatibilityDto? AgentCompatibility { get; init; }
+    public bool AgentUpdateReserved { get; init; }
+    public AgentUpdateRequestSummaryDto? AgentUpdateRequest { get; init; }
     public ServerStatus Status { get; init; }
     public ServerType Type { get; init; }
     public DateTime LastHeartbeat { get; init; }
@@ -41,14 +46,14 @@ public record ServerDto
     /// S-TECH-CUNK: tri-state on the list/tile - <c>null</c> = UNKNOWN (agent never phoned home yet).</summary>
     public bool? PackageManagementAvailable { get; init; }
 
-    /// <summary>PLAN-006 4.1: the agent has the patch-manage controlled-sudo capability (the argv-exact
+    /// <summary>ADR-024 4.1: the agent has the patch-manage controlled-sudo capability (the argv-exact
     /// <c>aetheus-patch</c> drop-in granting <c>apt-get upgrade</c>), so the fleet can APPLY pending OS
     /// updates. Derived every heartbeat from the reported sudoers drop-ins; the UI gates the Apply action
     /// on it. Pending-update VISIBILITY (the badge) does not require it - the dry-run probe is unprivileged.
     /// S-TECH-CUNK: tri-state - <c>null</c> = UNKNOWN (agent never phoned home yet).</summary>
     public bool? PatchManagementAvailable { get; init; }
 
-    /// <summary>PLAN-006 4.2: the agent has the firewall-manage controlled-sudo capability (the root-owned
+    /// <summary>ADR-024 4.2: the agent has the firewall-manage controlled-sudo capability (the root-owned
     /// <c>aetheus-firewall</c> helper grant), so the fleet can mutate ufw rules. Derived every heartbeat from
     /// the reported sudoers drop-ins; the UI gates the open/close/toggle actions on it. Firewall VISIBILITY
     /// (status + rules) does not require it - <c>ufw status</c> is read via a read-only path.
@@ -65,9 +70,9 @@ public record ServerDto
     /// heartbeat from the reported sudoers drop-ins; the UI gates the teamspeak Install action on it.</summary>
     public bool TeamspeakSetupAvailable { get; init; }
 
-    /// <summary>Cross-agent deploy capability - the deployment module's controlled-sudo grant is present,
-    /// so this server can be the target of a <c>type: deploy</c> step. Derived every heartbeat from the
-    /// reported sudoers drop-ins; drives the "Déploiement" badge and the deploy-stage targeting gate.
+    /// <summary>Cross-agent deploy capability - the deployment module's controlled-sudo helper passed its
+    /// versioned functional probe, so this server can be the target of a <c>type: deploy</c> step. Drives
+    /// the "Déploiement" badge and targeting gate.
     /// S-TECH-CUNK: tri-state on the list/tile - <c>null</c> = UNKNOWN (agent never phoned home yet).</summary>
     public bool? DeploymentTargetAvailable { get; init; }
 
@@ -84,7 +89,58 @@ public record ServerDto
     /// but unreadable, a sudo probe that failed) - persisted server-side and surfaced in the UI so an
     /// operator can see WHY a capability is OFF without SSHing. Empty when the last heartbeat reported none.</summary>
     public List<string> CapabilityDiagnostics { get; init; } = [];
+    public List<string> ScannerCapabilities { get; init; } = [];
     public StorageDiagnosticsDto StorageDiagnostics { get; init; } = new();
+
+    /// <summary>
+    /// Non-secret agent configuration, reported so an operator can diagnose a misbehaving agent from
+    /// the UI instead of reading files on the host. Deliberately excludes the enrolment token and every
+    /// other credential: a heartbeat is stored and logged, so nothing secret may travel here.
+    /// Null identifies an agent predating the field.
+    /// </summary>
+    public AgentConfigurationDto? AgentConfiguration { get; init; }
+}
+
+/// <summary>
+/// What the agent is actually configured with, as opposed to what the operator believes.
+/// Every field here answered a real production incident: a ServerUrl left on http:// broke package
+/// publishing, and a posture that no upgrade ever replayed silently revoked certbot.
+/// </summary>
+public sealed record AgentConfigurationDto
+{
+    /// <summary>Backend URL the agent calls. Non-secret, and the scheme alone explains a whole class
+    /// of failures (plain HTTP makes NuGet refuse a package push).</summary>
+    [StringLength(500)]
+    public string? ServerUrl { get; init; }
+
+    /// <summary>Directory the agent binaries run from.</summary>
+    [StringLength(500)]
+    public string? InstallDirectory { get; init; }
+
+    /// <summary>Durable working directory (offline queue, staging, install markers).</summary>
+    [StringLength(500)]
+    public string? WorkDirectory { get; init; }
+
+    /// <summary>System account the agent process runs as. Explains most permission failures.</summary>
+    [StringLength(100)]
+    public string? RunAsUser { get; init; }
+
+    /// <summary>Contents of the installer posture stamp. A value behind the installer means the host
+    /// never replayed the privileged provisioning, which is invisible from the version alone.</summary>
+    [StringLength(50)]
+    public string? PostureVersion { get; init; }
+
+    /// <summary>Whether the root-owned posture-upgrade worker is installed. Without it a self-update
+    /// swaps binaries but can never re-provision sudoers, ACLs or state directories.</summary>
+    public bool? PostureUpgradeWorkerInstalled { get; init; }
+
+    /// <summary>Heartbeat cadence in seconds, as configured.</summary>
+    [Range(1, 86400)]
+    public int? HeartbeatIntervalSeconds { get; init; }
+
+    /// <summary>Configured minimum log level.</summary>
+    [StringLength(20)]
+    public string? LogLevel { get; init; }
 }
 
 public sealed record ServerDetailDto : ServerDto
@@ -115,15 +171,26 @@ public sealed record ServerDetailDto : ServerDto
 
 public sealed record ServerHeartbeatDto
 {
+    /// <summary>Opaque id of the current agent process lifetime. Changes on every agent restart.</summary>
+    [StringLength(64)]
+    public string? AgentSessionId { get; init; }
     [StringLength(50)]
     public string? AgentVersion { get; init; }
+    /// <summary>Monotone backend-agent contract version. Every supported agent reports it.</summary>
+    [Range(1, int.MaxValue)]
+    public int? AgentProtocolVersion { get; init; }
+    /// <summary>Sorted stable identifiers the binary and host can effectively execute.</summary>
+    [MaxLength(128)]
+    [MaxItemStringLength(200)]
+    public List<string>? AgentCapabilities { get; init; }
     /// <summary>UTC instant of the agent binary's last (re)install. Read once at agent
     /// startup from <c>$WORK_DIR/.installed-at</c>, with assembly mtime as fallback.</summary>
     public DateTime? AgentInstalledAt { get; init; }
     /// <summary>True when the agent host has a working Docker CLI (<c>docker --version</c> exit 0).
     /// Reported every heartbeat so the capability self-heals if Docker is installed/removed.</summary>
     public bool DockerAvailable { get; init; }
-    /// <summary>Agent-reported: the pipeline-runner toolchain (.NET SDK + git) is installed. Nullable
+    /// <summary>Agent-reported: Git workspace preparation is available. Application SDKs are
+    /// resolved in containers and <see cref="DockerAvailable"/> reports the OCI capability. Nullable
     /// so a pre-feature agent (which omits it) reads as null = "unknown" rather than "absent".
     /// Reported every heartbeat; the backend self-heals the runner gate down when it goes false.</summary>
     public bool? PipelineRunnerAvailable { get; init; }
@@ -172,7 +239,11 @@ public sealed record ServerHeartbeatDto
     /// cause without SSHing to the box.
     /// </summary>
     [MaxLength(32)]
+    [MaxItemStringLength(1000)]
     public List<string> CapabilityDiagnostics { get; init; } = [];
+    [MaxLength(32)]
+    [MaxItemStringLength(200)]
+    public List<string> ScannerCapabilities { get; init; } = [];
     public StorageDiagnosticsDto StorageDiagnostics { get; init; } = new();
 }
 
@@ -213,6 +284,16 @@ public sealed record ServerRegistrationRequest
     [StringLength(50)]
     public string AgentVersion { get; init; } = string.Empty;
 
+    /// <summary>Current agent/backend contract, reported during enrollment so compatibility is
+    /// authoritative before the first periodic heartbeat.</summary>
+    [Range(1, int.MaxValue)]
+    public int? AgentProtocolVersion { get; init; }
+
+    /// <summary>Sorted stable identifiers available immediately after enrollment.</summary>
+    [MaxLength(128)]
+    [MaxItemStringLength(200)]
+    public List<string>? AgentCapabilities { get; init; }
+
     [StringLength(45)]
     public string IpAddress { get; init; } = string.Empty;
 
@@ -224,7 +305,8 @@ public sealed record ServerRegistrationRequest
     /// capability is known before the first heartbeat.</summary>
     public bool DockerAvailable { get; init; }
 
-    /// <summary>Agent-reported: the pipeline-runner toolchain (.NET SDK + git) is installed. Defaults
+    /// <summary>Agent-reported: Git workspace preparation is available. Application SDKs are
+    /// resolved in containers and <see cref="DockerAvailable"/> reports the OCI capability. Defaults
     /// the per-server PipelineRunnerEnabled gate at enrollment. Nullable so a pre-feature agent reads
     /// as null and keeps the legacy "enabled" default instead of being wrongly disabled.</summary>
     public bool? PipelineRunnerAvailable { get; init; }

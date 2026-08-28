@@ -21,7 +21,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else if (_loadFailed || (!_isNew && _detail is null))
 {
@@ -41,11 +41,15 @@ else
             <RadzenColumn Size="12" SizeMD="6">
                 <RadzenStack Gap="1rem">
                     <RadzenFormField Text="@L["Name"]">
-                        <RadzenTextBox @bind-Value="_model.Name" Name="Name" />
+                        <RadzenTextBox @bind-Value="_model.Name"
+                            @oninput="@(e => _model.Name = e.Value?.ToString() ?? string.Empty)"
+                            Name="Name" />
                         <ValidationMessage For="@(() => _model.Name)" />
                     </RadzenFormField>
                     <RadzenFormField Text="@L["Description"]">
-                        <RadzenTextArea @bind-Value="_model.Description" Name="Description" Rows="3" />
+                        <RadzenTextArea @bind-Value="_model.Description"
+                            @oninput="@(e => _model.Description = e.Value?.ToString() ?? string.Empty)"
+                            Name="Description" Rows="3" />
                     </RadzenFormField>
                 </RadzenStack>
             </RadzenColumn>
@@ -70,13 +74,17 @@ else
         <RadzenTemplateForm TItem="NewEntryModel" Data="@_newEntry" Submit="@AddEntry">
         <LocalizedDataAnnotationsValidator />
         <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mb-4" Wrap="FlexWrap.Wrap">
-            <RadzenTextBox @bind-Value="_newEntry.Key" Placeholder="@L["Key"]" />
+            <RadzenTextBox @bind-Value="_newEntry.Key"
+                @oninput="@(e => _newEntry.Key = e.Value?.ToString() ?? string.Empty)"
+                Placeholder="@L["Key"]" />
             <ValidationMessage For="@(() => _newEntry.Key)" />
-            <RadzenTextBox @bind-Value="_newEntry.Value" Placeholder="@L["Value"]" />
+            <RadzenTextBox @bind-Value="_newEntry.Value"
+                @oninput="@(e => _newEntry.Value = e.Value?.ToString() ?? string.Empty)"
+                Placeholder="@L["Value"]" />
             <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Add"]" Icon="add" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
             <div class="pipeline-list-spacer"></div>
-            <RadzenButton Text="@L["Export"]" Icon="download" Click="@ExportEntries" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-            <RadzenButton Text="@L["Import"]" Icon="upload" Click="@ImportEntries" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["Export"]" Icon="download" Click="@ExportEntries" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["Import"]" Icon="upload" Click="@ImportEntries" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         </RadzenStack>
         </RadzenTemplateForm>
 
@@ -91,10 +99,10 @@ else
             </RadzenAlert>
         }
 
-        <RadzenDataGrid @ref="_entriesGrid" Data="@_entries" Count="@_entryCount" TItem="VariableEntryDto" Density="Density.Compact"
-            IsLoading="@_entriesLoading" LoadData="@LoadEntriesAsync" AllowPaging="true" PageSize="25"
+        <RadzenDataGrid Responsive="false" @ref="_entriesGrid" Data="@_entries" Count="@_entryCount" TItem="VariableEntryDto" Density="Density.Compact"
+            IsLoading="@_entriesLoading" LoadData="@LoadEntriesAsync" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
             AllowAltering="true" EditMode="DataGridEditMode.Single" RowUpdate="@OnEntryUpdate" AllowSorting="true"
-            AllowFiltering="true" FilterMode="FilterMode.Advanced">
+            AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
             <Columns>
                 <RadzenDataGridColumn Property="Key" Title="@L["Key"]">
                     <Template Context="entry">
@@ -102,7 +110,9 @@ else
                             @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Key</span>
                     </Template>
                     <EditTemplate Context="entry">
-                        <RadzenTextBox @bind-Value="_editEntryKey" class="rz-w-100"
+                        <RadzenTextBox @bind-Value="_editEntryKey"
+                            @oninput="@(e => _editEntryKey = e.Value?.ToString() ?? string.Empty)"
+                            class="rz-w-100"
                             @onkeydown="@(e => OnEntryKeyDown(e, entry))" />
                     </EditTemplate>
                 </RadzenDataGridColumn>
@@ -112,7 +122,9 @@ else
                             @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Value</span>
                     </Template>
                     <EditTemplate Context="entry">
-                        <RadzenTextBox @bind-Value="_editEntryValue" class="rz-w-100"
+                        <RadzenTextBox @bind-Value="_editEntryValue"
+                            @oninput="@(e => _editEntryValue = e.Value?.ToString() ?? string.Empty)"
+                            class="rz-w-100"
                             @onkeydown="@(e => OnEntryKeyDown(e, entry))" />
                     </EditTemplate>
                 </RadzenDataGridColumn>

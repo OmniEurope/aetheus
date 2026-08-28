@@ -11,10 +11,10 @@
 # so only ONE flavor runs at a time - switching tears the other down. Drive it
 # through the launcher rather than raw compose:
 #
-#   .\ylaunch.ps1 -vps           # blank box (this file) - build + start + exit
-#   .\ylaunch.ps1 -vps -net10    # blank box + .NET SDK 10.0 pre-installed
-#   .\ylaunch.ps1 -vps -full     # fully-provisioned box (vpssim.compose.yml)
-#   .\ylaunch.ps1 -vps -r        # reset the current flavor (drops its volumes)
+#   .\launch-windows.ps1 -vps           # blank box (this file) - build + start + exit
+#   .\launch-windows.ps1 -vps -net10    # blank box + .NET SDK 10.0 pre-installed
+#   .\launch-windows.ps1 -vps -full     # fully-provisioned box (vpssim.compose.yml)
+#   .\launch-windows.ps1 -vps -r        # reset the current flavor (drops its volumes)
 #
 # LOCAL TEST ONLY - never deployed.
 # =============================================================================
@@ -28,10 +28,11 @@ services:
       args:
         # -net10: pre-bake the .NET SDK 10.0 into the image (1) or keep it bare (0, default).
         INSTALL_DOTNET: ${VPSSIM_DOTNET:-0}
-        # VPW3: throwaway root password - overridable via env, defaults to 'aetheus'.
-        VPSSIM_ROOT_PASSWORD: ${VPSSIM_ROOT_PASSWORD:-aetheus}
     # systemd needs to manage cgroups under Docker Desktop (cgroup v2).
     privileged: true
+    # The image defaults to an unprivileged user. This local system-container
+    # harness opts into uid 0 explicitly because systemd requires it.
+    user: "0:0"
     cgroup: host
     # Reach the host-side backend (started by ylaunch) for later agent enrollment.
     extra_hosts:

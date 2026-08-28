@@ -1,0 +1,25 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Networks tab of the Docker section. Extracted so the parent stops carrying five tabs' worth of
+   filter state; it owns nothing but its own search box and grouping. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-3" Gap="0.5rem">
+    <RadzenBadge Text="@FilteredNetworks.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+    <RadzenTextBox @bind-Value="_networkSearch" Placeholder="@L["FilterNetworks"]" class="docker-search" />
+</RadzenStack>
+<RadzenDataGrid Responsive="false" Data="@FilteredNetworks" TItem="DockerNetworkDto" Density="Density.Compact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    AllowGrouping="true" ShowGroupPanel="true" Groups="@_networkGroups"
+    @bind-AllGroupsExpanded="_allNetworkGroupsExpanded" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+    <Columns>
+        <RadzenDataGridColumn TItem="DockerNetworkDto" Property="Project" Title="@L["Project"]" Width="140px" />
+        <RadzenDataGridColumn TItem="DockerNetworkDto" Property="Name" Title="@L["Name"]" />
+        <RadzenDataGridColumn TItem="DockerNetworkDto" Property="Driver" Title="@L["Driver"]" Width="120px" />
+        <RadzenDataGridColumn TItem="DockerNetworkDto" Property="Scope" Title="@L["Scope"]" Width="120px" />
+        <RadzenDataGridColumn TItem="DockerNetworkDto" Title="@L["ID"]" Width="140px">
+            <Template Context="n">
+                <span title="@n.NetworkId">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@n.NetworkId[..Math.Min(12, n.NetworkId.Length)]</RadzenText>
+                </span>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>

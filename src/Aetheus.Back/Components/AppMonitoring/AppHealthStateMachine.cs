@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
 /// <summary>
-/// Pure anti-flapping availability state machine (PLAN-001 phase 1). Extracted as a static so the
+/// Pure anti-flapping availability state machine (ADR-021 phase 1). Extracted as a static so the
 /// threshold / flapping / Unknown-initial behaviour is unit-testable without EF or a service.
 /// </summary>
 public static class AppHealthStateMachine
@@ -48,6 +47,8 @@ public static class AppHealthStateMachine
             next = AppHealthStatus.Up;
         else if (!isUp && consecutiveFailures >= fails)
             next = AppHealthStatus.Down;
+        else if (current != AppHealthStatus.Unknown)
+            next = AppHealthStatus.Degraded;
 
         return new Transition(next, consecutiveFailures, consecutiveSuccesses, next != current);
     }

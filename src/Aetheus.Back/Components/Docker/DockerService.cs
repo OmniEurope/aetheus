@@ -1,40 +1,20 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
-using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Docker;
 
 public class DockerService(IDockerRepository repo, IAuditService audit, ITaskService taskService) : IDockerService
 {
-    // Persist a queued task AND push the "TaskQueued" SignalR event so the top-bar tracker shows it
-    // live (and can later flip it Running/Completed). Mirrors ServerServiceManager (see ITaskService).
-    private async Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
-    {
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await taskService.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
-    }
+    private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+        => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
 
     public async Task<List<DockerContainerDto>> GetContainersAsync(int serverId, CancellationToken ct = default)
     {
         var containers = await repo.GetContainersAsync(serverId, ct).ConfigureAwait(false);
-        return containers.Select(c => new DockerContainerDto
-        {
-            ContainerId = c.ContainerId,
-            Name = c.Name,
-            Image = c.Image,
-            State = c.State,
-            Status = c.Status,
-            Ports = c.Ports,
-            Created = c.Created,
-            CpuPercent = c.CpuPercent,
-            MemoryUsageMb = c.MemoryUsageMb,
-            MemoryLimitMb = c.MemoryLimitMb
-        }).ToList();
+        return ServerDataMapper.MapDockerContainers(containers);
     }
 
     public async Task ExecuteActionAsync(int serverId, DockerActionRequest request, CancellationToken ct = default)

@@ -1,4 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerActionSectionBase
 <RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Certbot"]</RadzenText>
 
 @* --- Status bar --- *@
@@ -29,9 +30,9 @@
                 <RadzenBadge Text="@FilteredCertificates.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
                 <RadzenTextBox @bind-Value="_certSearch" Placeholder="@L["FilterCertificates"]" />
             </RadzenStack>
-            <RadzenDataGrid Data="@FilteredCertificates" TItem="CertbotCertificateDto" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@FilteredCertificates" TItem="CertbotCertificateDto" Density="Density.Compact"
                 AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                 <Columns>
                     <RadzenDataGridColumn TItem="CertbotCertificateDto" Property="Name" Title="@L["CertName"]" Width="200px" />
                     <RadzenDataGridColumn TItem="CertbotCertificateDto" Title="@L["Domains"]">

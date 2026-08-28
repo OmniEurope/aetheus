@@ -1,0 +1,29 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Front.Helpers
+
+<RadzenCard class="iam-detail-card">
+    <AetheusDataGrid TItem="AuditLogDto" Data="@_logs" Count="@_count"
+        LoadData="@LoadDataAsync" PageSize="25" IsLoading="@_loading"
+        AllowSorting="true" Density="Density.Compact">
+        <Columns>
+            <RadzenDataGridColumn TItem="AuditLogDto" Property="Timestamp" Title="@L["Timestamp"]" Width="180px">
+                <Template Context="log">
+                    <span title="@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")">@RelativeTime.FormatAgo(L, log.Timestamp)</span>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="AuditLogDto" Property="Username" Title="@L["User"]" Width="150px" />
+            <RadzenDataGridColumn TItem="AuditLogDto" Property="Action" Title="@L["Action"]" Width="220px">
+                <Template Context="log">
+                    <RadzenBadge BadgeStyle="@GetActionBadge(log.Action)" Text="@ActionText(log.Action)" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="AuditLogDto" Property="Details" Title="@L["Details"]" />
+            <RadzenDataGridColumn TItem="AuditLogDto" Title="@L["Actions"]" Width="150px" Sortable="false" Filterable="false">
+                <Template Context="log">
+                    <RadzenButton Text="@L["ViewDetails"]" Icon="visibility" Size="ButtonSize.Small"
+                        Click="@(() => ShowDetailsAsync(log))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+</RadzenCard>

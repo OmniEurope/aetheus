@@ -4,7 +4,7 @@ using System.Globalization;
 namespace Aetheus.Agent.Core.Operations;
 
 /// <summary>
-/// Pure argv builders for DB dump/restore (PLAN-006 4.3). No sudo, no shell: the agent runs pg_dump /
+/// Pure argv builders for DB dump/restore (ADR-024 4.3). No sudo, no shell: the agent runs pg_dump /
 /// mysqldump / pg_restore / mysql as a normal DB client via <c>ProcessStartInfo.ArgumentList</c>. The
 /// password NEVER rides in argv - it is passed via <c>PGPASSWORD</c> / <c>MYSQL_PWD</c> in the (encrypted)
 /// process environment, off <c>ps</c> / <c>/proc/cmdline</c>. Pure so the argv shape is unit-testable.

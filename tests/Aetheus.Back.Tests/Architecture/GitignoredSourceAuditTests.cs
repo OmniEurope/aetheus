@@ -6,7 +6,7 @@ namespace Aetheus.Back.Tests.Architecture;
 /// <summary>
 /// Guards against the "silent .gitignore footgun": a stock Visual Studio rule
 /// (<c>[Rr]eleases/</c>, <c>[Ll]ogs/</c>, <c>[Bb]in/</c>…) matches a real source
-/// <em>folder</em> by name and silently excludes its <c>.cs</c>/<c>.razor</c> files,
+/// <em>folder</em> by name and silently excludes its source files,
 /// so <c>git add -A</c> skips them with no warning. This is exactly how the
 /// <c>ReleaseDetail</c> page once vanished from the repo and shipped a prod 404.
 ///
@@ -21,6 +21,24 @@ namespace Aetheus.Back.Tests.Architecture;
 public sealed class GitignoredSourceAuditTests
 {
     [Fact]
+    public void BrowserAnalyticsPackage_RequiredSourcesExist()
+    {
+        var repoRoot = FindRepoRoot();
+        string[] required =
+        [
+            "packages/aetheus-web-analytics/package.json",
+            "packages/aetheus-web-analytics/src/aetheus-web-analytics.js",
+            "packages/aetheus-web-analytics/test/aetheus-web-analytics.test.js"
+        ];
+
+        var missing = required
+            .Where(path => !File.Exists(Path.Combine(repoRoot, path.Replace('/', Path.DirectorySeparatorChar))))
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
+    [Fact]
     public void No_Source_File_Is_Silently_Gitignored()
     {
         var repoRoot = FindRepoRoot();
@@ -28,7 +46,10 @@ public sealed class GitignoredSourceAuditTests
         // --others   : untracked files
         // --ignored  : restrict to those an ignore rule matches
         // --exclude-standard : honour .gitignore / .git/info/exclude / global excludes
-        var output = RunGit(repoRoot, "ls-files", "--others", "--ignored", "--exclude-standard");
+        // Restrict git's walk to the only two extensions this audit can flag. Scanning every ignored
+        // build artifact in a large worktree can take indefinitely while producing data we discard.
+        var output = RunGit(repoRoot, "ls-files", "--others", "--ignored", "--exclude-standard",
+            "--", ":(glob)**/*.cs", ":(glob)**/*.razor");
 
         var offenders = output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -47,7 +68,13 @@ public sealed class GitignoredSourceAuditTests
 
     private static bool IsHandWrittenSource(string path) =>
         path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
-        || path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
+        || path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".proto", StringComparison.OrdinalIgnoreCase)
+        || path.Replace('\\', '/').StartsWith(
+            "packages/aetheus-web-analytics/",
+            StringComparison.OrdinalIgnoreCase)
+           && (path.EndsWith(".js", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
 
     // Build output is correctly ignored - never flag a generated .cs under obj/ or bin/.
     private static bool IsGeneratedOutput(string path)
@@ -73,13 +100,29 @@ public sealed class GitignoredSourceAuditTests
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        // CI and sandboxed local runners may use an identity different from the checkout owner.
+        // Scope the trust exception to this exact repository and this process invocation only.
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add($"safe.directory={workingDir.Replace('\\', '/')}");
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi)
             ?? throw new InvalidOperationException("Could not start git - it must be on PATH on the build host.");
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
-        p.WaitForExit();
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            p.WaitForExitAsync(timeout.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            throw new TimeoutException("git ls-files did not complete within 30 seconds.");
+        }
+
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
 
         // A non-zero git exit would leave stdout empty → the audit would "pass" vacuously
         // (false green: it would report no ignored files because git failed, not because the
@@ -91,14 +134,5 @@ public sealed class GitignoredSourceAuditTests
         return stdout;
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(GitignoredSourceAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

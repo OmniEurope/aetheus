@@ -82,7 +82,7 @@ export function initDockerGraph(svgId, dotNetRef, dataJson, viewKey) {
 
     function loadData(json) {
         let d;
-        try { d = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { d = {}; }
+        try { d = typeof json === 'string' ? JSON.parse(json) : json; } catch { d = {}; }
         S.nodes = (d.nodes || []).map(n => ({
             id: n.id, label: n.label || '', group: n.group || 'container',
             data: n.data ?? null,
@@ -145,10 +145,16 @@ export function initDockerGraph(svgId, dotNetRef, dataJson, viewKey) {
         const minX = Math.min(...xs), maxX = Math.max(...xs);
         const minY = Math.min(...ys), maxY = Math.max(...ys);
         const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+        // The graph lives in a tab kept in the DOM while inactive, so this can run while the SVG
+        // still measures 0x0. Falling back to the same nominal canvas autoLayout uses keeps the
+        // zoom away from 0, which would otherwise collapse every node to nothing and leave the
+        // tab showing an empty graph once it is finally opened.
         const r = svg.getBoundingClientRect();
-        S.zoom = Math.min(1, Math.min(r.width / Math.max(maxX - minX + 200, 1), r.height / Math.max(maxY - minY + 200, 1)));
-        S.panX = r.width / 2 - cx * S.zoom;
-        S.panY = r.height / 2 - cy * S.zoom;
+        const cw = Math.max(r.width, 800);
+        const ch = Math.max(r.height, 600);
+        S.zoom = Math.min(1, Math.min(cw / Math.max(maxX - minX + 200, 1), ch / Math.max(maxY - minY + 200, 1)));
+        S.panX = cw / 2 - cx * S.zoom;
+        S.panY = ch / 2 - cy * S.zoom;
     }
 
     function render() {
@@ -262,7 +268,7 @@ export function initDockerGraph(svgId, dotNetRef, dataJson, viewKey) {
             updateTransform();
         }
     }
-    function onMouseUp(e) {
+    function onMouseUp() {
         if (S.dragNode && !S.dragMoved && dotNetRef) {
             dotNetRef.invokeMethodAsync('OnGraphNodeClicked', S.dragNode.id);
         }

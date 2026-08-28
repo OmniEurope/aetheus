@@ -33,6 +33,674 @@
     --wizard-code-border-error: color-mix(in srgb, var(--rz-danger, #dc3545) 60%, var(--wizard-code-border));
 }
 
+.analysis-summary-card {
+    min-height: 8rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 0.25rem;
+    text-align: center;
+}
+
+.analysis-summary-card .rzi {
+    font-size: 1.75rem;
+}
+
+.analysis-summary-action.rz-button {
+    width: 100%;
+    min-width: 0;
+    padding: 0.75rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 18%, transparent);
+    border-radius: 0.5rem;
+    background-color: var(--rz-panel-background-color, var(--rz-base-background-color)) !important;
+    color: var(--rz-text-color);
+    transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.analysis-summary-action.rz-button:hover {
+    border-color: color-mix(in srgb, var(--rz-primary) 48%, transparent);
+    background: color-mix(in srgb, var(--rz-primary) 8%, var(--rz-panel-background-color, var(--rz-base-background-color)));
+    transform: translateY(-0.0625rem);
+}
+
+.analysis-summary-action.rz-button > .rz-button-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    width: 100%;
+}
+
+.analysis-summary-action.rz-button .rz-text {
+    color: inherit;
+}
+
+.analysis-summary-static {
+    padding: 0.75rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 18%, transparent);
+    border-radius: 0.5rem;
+    color: var(--rz-text-color);
+    background: var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.analysis-summary-card .rz-text {
+    margin: 0;
+    line-height: 1.2;
+}
+
+.analysis-workspace-tabs.rz-tabview {
+    min-width: 0;
+    min-height: 0;
+}
+
+.analysis-workspace-tabs > .rz-tabview-nav {
+    gap: 0.25rem;
+    padding: 0 0.25rem;
+    border-bottom: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 18%, transparent);
+    background: transparent;
+}
+
+.analysis-workspace-tabs > .rz-tabview-nav > li > button {
+    gap: 0.4rem;
+    min-height: 3rem;
+    padding-inline: 1rem;
+    color: var(--rz-text-secondary-color);
+}
+
+.analysis-workspace-tabs > .rz-tabview-nav > li.rz-tabview-selected > button {
+    color: var(--rz-text-color);
+}
+
+.analysis-workspace-tabs > .rz-tabview-panels {
+    display: none;
+}
+
+.analysis-workspace-panel {
+    min-width: 0;
+    padding: 1rem;
+    color: var(--rz-text-color);
+}
+
+.analysis-critical .rzi,
+.analysis-critical .rz-text-body1 {
+    color: var(--rz-danger);
+}
+
+.analysis-high .rzi,
+.analysis-high .rz-text-body1 {
+    color: var(--rz-warning);
+}
+
+.analysis-chart-card {
+    min-height: 24rem;
+    height: 100%;
+}
+
+.analysis-portfolio-filters .rz-form-field {
+    min-width: 10rem;
+}
+
+.analysis-commit {
+    font-family: var(--rz-code-font-family, monospace);
+}
+
+.analysis-governance-form .rz-form-field {
+    width: 100%;
+}
+
+.analysis-architecture-level-select {
+    min-width: 12rem;
+}
+
+.analysis-table {
+    min-height: 28rem;
+}
+
+.analysis-grade-overview {
+    margin-bottom: 1rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 36%, transparent);
+    background:
+        radial-gradient(circle at top left, color-mix(in srgb, var(--rz-primary) 16%, transparent), transparent 38%),
+        var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.analysis-grade-primary {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.analysis-grade-letter {
+    display: grid;
+    place-items: center;
+    width: 5.5rem;
+    min-width: 5.5rem;
+    height: 5.5rem;
+    border-radius: 1rem;
+    background: color-mix(in srgb, currentColor 14%, var(--rz-panel-background-color, var(--rz-base-background-color)));
+    font-size: 3.5rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.analysis-grade-meta,
+.analysis-grade-domain-state {
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8125rem;
+}
+
+.analysis-grade-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+}
+
+.analysis-grade-domains {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 0.75rem;
+}
+
+.analysis-grade-domain {
+    padding: 0.75rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 18%, transparent);
+    border-radius: 0.5rem;
+    color: var(--rz-text-color);
+    background: color-mix(in srgb, var(--rz-panel-background-color, var(--rz-base-background-color)) 92%, var(--rz-primary) 8%);
+}
+
+.analysis-grade-domain-heading,
+.analysis-grade-measure {
+    display: grid;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.analysis-grade-domain-heading {
+    grid-template-columns: minmax(0, 1fr) 2rem;
+}
+
+.analysis-grade-domain-heading strong {
+    font-size: 1.5rem;
+    text-align: center;
+}
+
+.analysis-grade-measure {
+    grid-template-columns: minmax(0, 1fr) 2rem minmax(3.5rem, auto);
+    margin-top: 0.65rem;
+    padding-top: 0.65rem;
+    border-top: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 18%, transparent);
+    font-size: 0.8125rem;
+}
+
+.analysis-grade-measure > strong {
+    text-align: center;
+}
+
+.analysis-grade-measure > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.analysis-grade-value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.analysis-grade-measure small {
+    grid-column: 1 / -1;
+    color: var(--rz-text-secondary-color);
+}
+
+.analysis-grade-a,
+.analysis-grade-b {
+    color: var(--rz-success);
+}
+
+.analysis-grade-c {
+    color: var(--rz-info);
+}
+
+.analysis-grade-d,
+.analysis-grade-e {
+    color: var(--rz-warning);
+}
+
+.analysis-grade-f {
+    color: var(--rz-danger);
+}
+
+.analysis-grade-na {
+    color: var(--rz-text-secondary-color);
+}
+
+html:has(#radzen-theme[href*="-dark"]) .analysis-grade-f,
+html:has(#radzen-theme[href*="-dark"]) .analysis-critical .rzi,
+html:has(#radzen-theme[href*="-dark"]) .analysis-critical .rz-text-body1 {
+    color: var(--rz-danger-light);
+}
+
+html:has(#radzen-theme[href*="-dark"]) .analysis-grade-d,
+html:has(#radzen-theme[href*="-dark"]) .analysis-grade-e,
+html:has(#radzen-theme[href*="-dark"]) .analysis-high .rzi,
+html:has(#radzen-theme[href*="-dark"]) .analysis-high .rz-text-body1 {
+    color: var(--rz-warning-light);
+}
+
+.analysis-run-gate-overview {
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 34%, var(--rz-base-700));
+    background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--rz-primary) 13%, transparent), transparent 40%),
+        var(--rz-base-900);
+}
+
+.analysis-run-gate-heading,
+.analysis-findings-report-heading,
+.analysis-finding-prompt-heading,
+.analysis-findings-report-group-heading,
+.analysis-finding-report-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.analysis-run-gate-heading .rzi {
+    color: var(--rz-primary);
+    font-size: 1.4rem;
+}
+
+.analysis-run-gate-grade {
+    margin-left: auto;
+    font-size: 1.75rem;
+    line-height: 1;
+}
+
+.analysis-run-gate-metrics {
+    flex: 1 1 32rem;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.analysis-run-gate-metrics > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.4rem;
+    min-width: 0;
+    padding: 0.5rem 0.65rem;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--rz-base-800) 84%, transparent);
+    white-space: nowrap;
+}
+
+.analysis-run-gate-metrics strong {
+    font-size: 1.1rem;
+}
+
+.analysis-run-gate-metrics span,
+.analysis-finding-report-meta {
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8rem;
+}
+
+.analysis-run-gate-toolbar {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.analysis-run-gate-actions {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.analysis-run-findings-grid {
+    min-height: 20rem;
+}
+
+.rz-datatable.analysis-run-findings-grid .rz-data-row,
+.rz-datatable.analysis-run-findings-grid .rz-data-row > td {
+    height: auto;
+    max-height: none;
+}
+
+.rz-datatable.analysis-run-findings-grid .rz-data-row > td {
+    overflow: visible;
+    padding-block: 0.5rem;
+    vertical-align: top;
+}
+
+.rz-datatable.analysis-run-findings-grid .rz-data-row > td > .rz-cell-data {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    white-space: normal;
+}
+
+.rz-datatable.analysis-run-findings-grid .rz-data-row .rz-cell-data > * {
+    max-height: none;
+}
+
+.analysis-finding-grid-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+    white-space: normal;
+}
+
+.analysis-finding-grid-message {
+    display: -webkit-box;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.analysis-finding-location {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.analysis-finding-location > .rzi {
+    flex: 0 0 auto;
+    margin-top: 0.1rem;
+    color: var(--rz-primary);
+    font-size: 1rem;
+}
+
+.analysis-finding-location > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.analysis-finding-location code {
+    color: var(--rz-text-color);
+    font-family: var(--rz-code-font-family, monospace);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+
+.analysis-finding-location span,
+.analysis-finding-location-unavailable {
+    color: var(--rz-text-secondary-color);
+    font-size: 0.75rem;
+}
+
+.analysis-findings-report-heading,
+.analysis-finding-prompt-heading,
+.analysis-findings-report-group-heading {
+    justify-content: space-between;
+}
+
+.analysis-findings-report-group {
+    margin-top: 1.25rem;
+}
+
+.analysis-findings-report-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.65rem;
+}
+
+.analysis-finding-report-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.65rem;
+    min-width: 0;
+    padding: 0.85rem;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--rz-base-800) 84%, transparent);
+}
+
+.analysis-finding-report-title {
+    flex-wrap: wrap;
+}
+
+.analysis-finding-report-item p {
+    margin: 0;
+    color: var(--rz-text-color);
+}
+
+.analysis-finding-report-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    overflow-wrap: anywhere;
+}
+
+.analysis-finding-prompt-heading {
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.analysis-finding-prompt-source,
+.analysis-finding-prompt-preview {
+    max-height: 34rem;
+    margin: 0;
+    padding: 1rem;
+    overflow: auto;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.5rem;
+    background: var(--wizard-code-bg);
+}
+
+.analysis-finding-prompt-source {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--wizard-code-text);
+    font-family: var(--rz-code-font-family, monospace);
+    font-size: 0.8125rem;
+}
+
+@media (max-width: 37.5rem) {
+    .analysis-grade-primary {
+        align-items: flex-start;
+    }
+
+    .analysis-grade-letter {
+        width: 4rem;
+        min-width: 4rem;
+        height: 4rem;
+        font-size: 2.5rem;
+    }
+
+    .analysis-run-gate-metrics {
+        grid-template-columns: repeat(4, minmax(7rem, 1fr));
+        overflow-x: auto;
+    }
+
+    .analysis-run-gate-actions,
+    .analysis-run-gate-actions > .rz-button {
+        flex: 1 1 auto;
+    }
+
+    .analysis-run-gate-actions > .rz-button,
+    .analysis-quality-findings .analysis-finding-filters > .rz-button {
+        min-height: 2.75rem;
+    }
+
+    .analysis-run-gate-heading {
+        display: grid;
+        grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+        align-items: start;
+    }
+
+    .analysis-run-gate-heading > .rzi {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .analysis-run-gate-heading > div {
+        grid-column: 2;
+        grid-row: 1;
+        min-width: 0;
+    }
+
+    .analysis-run-gate-heading > .rz-badge {
+        grid-column: 2 / -1;
+        grid-row: 2;
+        justify-self: start;
+        margin-top: 0.5rem;
+    }
+
+    .analysis-run-gate-heading .analysis-run-gate-grade {
+        grid-column: 3;
+        grid-row: 1;
+        margin-left: 0.5rem;
+    }
+
+    .analysis-findings-report-heading,
+    .analysis-finding-prompt-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .analysis-findings-report-list {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.quality-gate-activation-card {
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 42%, var(--rz-base-700));
+    background:
+        radial-gradient(circle at top left, color-mix(in srgb, var(--rz-primary) 18%, transparent), transparent 42%),
+        var(--rz-base-900);
+    overflow: hidden;
+}
+
+.quality-gate-activation-card > .rz-card-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(24rem, 0.95fr);
+    gap: 1.25rem;
+    align-items: stretch;
+}
+
+.quality-gate-activation-copy {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 0.35rem;
+}
+
+.quality-gate-activation-icon {
+    display: grid;
+    place-items: center;
+    width: 3rem;
+    height: 3rem;
+    flex: 0 0 3rem;
+    border-radius: 0.85rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 35%, transparent);
+    color: var(--rz-primary-lighter);
+    background: color-mix(in srgb, var(--rz-primary) 22%, transparent);
+}
+
+.quality-gate-activation-icon .rzi {
+    font-size: 1.65rem;
+}
+
+.quality-gate-yaml-panel {
+    min-width: 0;
+    border-radius: 0.7rem;
+    border: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-1000) 88%, black);
+    overflow: hidden;
+}
+
+.quality-gate-yaml-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-800) 84%, transparent);
+}
+
+.quality-gate-yaml-panel pre {
+    margin: 0;
+    padding: 0.85rem 1rem 1rem;
+    overflow-x: auto;
+    color: var(--rz-primary-lighter);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.quality-gate-rules-card {
+    padding: 0;
+    overflow: hidden;
+}
+
+.quality-gate-stat-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-800) 72%, transparent);
+}
+
+.quality-gate-stat-strip > div {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    padding: 0.7rem 0.9rem;
+}
+
+.quality-gate-stat-strip strong {
+    color: var(--rz-primary-lighter);
+    font-size: 1.15rem;
+}
+
+.quality-gate-stat-strip span {
+    color: var(--rz-text-secondary-color);
+    font-size: 0.78rem;
+}
+
+.quality-gate-table {
+    min-height: 18rem;
+    border: 0;
+}
+
+@media (max-width: 48rem) {
+    .quality-gate-activation-card > .rz-card-content {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .quality-gate-yaml-panel {
+        width: 100%;
+    }
+
+    .quality-gate-stat-strip {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .quality-gate-stat-strip > div + div {
+        border-top: 0.0625rem solid var(--rz-base-700);
+    }
+}
+
 html, body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
@@ -133,12 +801,94 @@ a, .btn-link {
 .app-splash-logo {
     width: 6rem;
     height: 6rem;
-    /* The boot loader is the inlined paper plane (see #app-splash in index.html); the external CSS
-       only handles the soft entrance fade. */
     animation: splash-fade-in 0.4s ease-out;
 }
 
+@keyframes p-bob { 0%,100% { transform: translate(0,0); } 50% { transform: translate(4px,-4px); } }
+
+/* Reordered vs. the old standalone svg so 0% (the paused start frame) is the neutral
+   resting pose; the loop keeps the same range/character, only its phase shifts. */
+@keyframes p-drift { 0%,50%,100% { transform: translate(0,0); } 25% { transform: translate(2.5px,2.5px); } 75% { transform: translate(-2.5px,-2.5px); } }
+
+@keyframes p-roll {
+    0%, 50%, 100% { transform: rotate(0deg) scaleX(1) skewY(0deg); }
+    25%           { transform: rotate(3deg) scaleX(0.55) skewY(9deg); }
+    75%           { transform: rotate(-3deg) scaleX(0.55) skewY(-9deg); }
+}
+
+@keyframes p-flow { to { stroke-dashoffset: -24; } }
+
+.p-ship { animation: p-bob 3.4s ease-in-out infinite; }
+.p-drift { animation: p-drift 4.4s ease-in-out infinite; }
+.p-roll { animation: p-roll 5.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.p-jet { stroke-dasharray: 8 16; animation: p-flow 1.1s linear infinite; }
+
+.app-splash.is-paused .p-ship,
+.app-splash.is-paused .p-drift,
+.app-splash.is-paused .p-roll,
+.app-splash.is-paused .p-jet { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: reduce) {
+    .p-ship, .p-drift, .p-roll, .p-jet { animation: none; }
+}
+
 @keyframes splash-fade-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+
+/* Shared loading identity: the same paper plane used by the boot splash replaces generic spinners. */
+.aetheus-loader {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.aetheus-loader-centered {
+    display: flex;
+    width: 100%;
+    min-height: 5rem;
+}
+
+.aetheus-loader-extrasmall .aetheus-loader-logo { width: 1.25rem; height: 1.25rem; }
+.aetheus-loader-small .aetheus-loader-logo { width: 2rem; height: 2rem; }
+.aetheus-loader-medium .aetheus-loader-logo { width: 3rem; height: 3rem; }
+.aetheus-loader-large .aetheus-loader-logo { width: 5rem; height: 5rem; }
+
+.aetheus-loader-bob {
+    animation: aetheus-loader-bob 2.4s ease-in-out infinite;
+}
+
+.aetheus-loader-roll {
+    animation: aetheus-loader-roll 3.2s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+.aetheus-loader-jet {
+    stroke-dasharray: 8 16;
+    animation: aetheus-loader-flow 0.9s linear infinite;
+}
+
+.aetheus-loader-jet-delay-one { animation-delay: -0.3s; }
+.aetheus-loader-jet-delay-two { animation-delay: -0.6s; }
+
+@keyframes aetheus-loader-bob {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(4px, -4px); }
+}
+
+@keyframes aetheus-loader-roll {
+    0%, 50%, 100% { transform: rotate(0deg) scaleX(1); }
+    25% { transform: rotate(3deg) scaleX(0.65); }
+    75% { transform: rotate(-3deg) scaleX(0.65); }
+}
+
+@keyframes aetheus-loader-flow { to { stroke-dashoffset: -24; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .aetheus-loader-bob,
+    .aetheus-loader-roll,
+    .aetheus-loader-jet { animation: none; }
+}
 
 .dev-exception-pre {
     max-width: 60rem;
@@ -314,10 +1064,52 @@ code {
 }
 
 .rz-datatable .rz-data-row .rz-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--aetheus-grid-row-content-height);
+    width: var(--aetheus-grid-row-content-height);
+    max-width: var(--aetheus-grid-row-content-height);
     min-height: var(--aetheus-grid-row-content-height);
     height: var(--aetheus-grid-row-content-height);
-    padding-top: 0;
-    padding-bottom: 0;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+    border-radius: 0.2rem;
+    vertical-align: middle;
+    margin-inline: 0.125rem;
+}
+
+/* Table actions are deliberately icon-only. Keep Text in the accessibility tree so every action
+   still has a readable name, but remove it from the visual flow and neutralise Radzen's icon gap.
+   This applies only to buttons rendered in data rows: toolbars, forms and dialogs keep their
+   regular labelled buttons and hit targets. */
+.rz-datatable .rz-data-row .rz-button .rz-button-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+.rz-datatable .rz-data-row .rz-button .rz-button-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.rz-datatable .rz-data-row .rz-button .rzi {
+    width: 0.875rem;
+    height: 0.875rem;
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 0.875rem;
 }
 
 /* E: full-height list — uniform sizing model for every list grid. The grid has NO minimum height:
@@ -342,8 +1134,43 @@ code {
 
 .aetheus-grid-fullheight .rz-data-grid-data {
     flex: 1 1 auto;
-    min-height: 0;
+    /* Floor of 10 compact rows. Without it the scroll body is free to collapse toward nothing when
+       the surrounding page is short, which is how a table ends up showing two rows above its own
+       scrollbar: the reader gets a scrollbar to see data that had room to be displayed. Above the
+       floor the grid still takes whatever height the window leaves it. */
+    min-height: calc(10 * var(--aetheus-grid-row-height));
     overflow-y: auto;
+}
+
+/* One compact Radzen row. Kept as a variable so the row floor above and any future height maths
+   stay tied to the real row height instead of a number copied by hand. */
+:root {
+    --aetheus-grid-row-height: 2.25rem;
+}
+
+/* Opt-in infinite scroll. Virtualization is off product-wide (tables page instead), but a caller can
+   still set Virtualize="true", and when it does the grid needs a bounded, scrollable body: Radzen
+   only virtualises inside one. Removing these rules while the wrapper still emits the class left that
+   opt-in silently broken, which is what this restores. */
+.aetheus-grid-virtualized {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.aetheus-grid-virtualized .rz-data-grid-data {
+    flex: 1 1 auto;
+    /* The floor is what makes virtualization possible at all: Radzen fills the scroll body with rows,
+       but the body only gets a height from its rows, so a body allowed to be 0 tall renders no rows and
+       stays 0. Declared after the full-height rule so it also wins when both classes are present. */
+    min-height: calc(10 * var(--aetheus-grid-row-height));
+    max-height: calc(100vh - 18rem);
+    overflow-y: auto;
+}
+
+.aetheus-grid-virtualized.aetheus-grid-fullheight .rz-data-grid-data {
+    min-height: calc(10 * var(--aetheus-grid-row-height));
+    max-height: none;
 }
 
 /* Keep every page in one stable vertical formatting context. Full-height tab panels (logs,
@@ -352,6 +1179,86 @@ code {
 .app-body-wrapper {
     display: flex;
     flex-direction: column;
+}
+
+/* The breadcrumb occupies the same single-line slot on every route. Dynamic entity names may
+   replace fallback labels after data loads, but fixed block geometry prevents content shifts. */
+.app-breadcrumb {
+    flex: 0 0 1.75rem;
+    min-width: 0;
+    height: 1.75rem;
+    margin-bottom: 0.5rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-color: var(--rz-text-disabled-color) transparent;
+    scrollbar-width: thin;
+}
+
+.app-breadcrumb > ol {
+    display: flex;
+    align-items: center;
+    width: max-content;
+    min-width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    white-space: nowrap;
+}
+
+.app-breadcrumb > ol > li {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8125rem;
+}
+
+.app-breadcrumb > ol > li:not(:first-child)::before {
+    flex: 0 0 auto;
+    margin: 0 0.45rem;
+    color: var(--rz-text-disabled-color);
+    content: "/";
+}
+
+.app-breadcrumb > ol > li a,
+.app-breadcrumb > ol > li span {
+    color: inherit;
+    text-decoration: none;
+}
+
+.app-breadcrumb > ol > li a:hover { color: var(--rz-primary); text-decoration: underline; }
+.app-breadcrumb > ol > li [aria-current="page"] { color: var(--rz-text-color); font-weight: 600; }
+
+.app-breadcrumb-skeleton {
+    position: relative;
+    display: inline-block;
+    width: 5.5rem;
+    height: 0.75rem;
+    overflow: hidden;
+    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--rz-text-color) 12%, transparent);
+}
+
+.app-breadcrumb-skeleton::after {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        color-mix(in srgb, var(--rz-text-color) 22%, transparent),
+        transparent);
+    content: "";
+    transform: translateX(-110%);
+    animation: app-breadcrumb-shimmer 1.25s ease-in-out infinite;
+}
+
+@keyframes app-breadcrumb-shimmer {
+    to { transform: translateX(110%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-breadcrumb-skeleton::after { animation: none; }
 }
 
 /* Reserve the document scrollbar lane on every page. Switching between tabs whose panels have
@@ -391,6 +1298,11 @@ html {
     margin-bottom: 1rem;
 }
 
+.page-header-subtitle {
+    margin: 0.375rem 0 0;
+    max-width: 46rem;
+}
+
 .page-header-spacer {
     flex: 1 1 auto;
 }
@@ -402,6 +1314,132 @@ html {
     flex-wrap: wrap;
     gap: 0.5rem;
     max-width: 100%;
+}
+
+/* Phone-only collapse of the header badges + actions. Above the phone breakpoint the toggle button
+   is hidden and the collapsible blocks lay out exactly as before, so the expansion state is inert
+   there. `display: contents` keeps the badges direct flex children of the title row on wide
+   viewports instead of boxing them into an extra flex item. */
+.page-header-badges {
+    display: contents;
+}
+
+.page-header-toggle {
+    display: none;
+}
+
+/* Detail headers share their horizontal space with the sidebar, title, status and actions. Use the
+   actual content width, not the viewport width, to compact action labels before Radzen clips them. */
+.detail-page-header {
+    container-name: detail-header;
+    container-type: inline-size;
+}
+
+.project-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 0.875rem;
+    overflow: hidden;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 24%, var(--rz-border-color));
+    border-radius: 0.75rem;
+    background:
+        radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--rz-primary) 12%, transparent), transparent 32%),
+        var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.project-detail-icon,
+.project-onboarding-heading-icon {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 0.75rem;
+    color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 15%, transparent);
+}
+
+.project-detail-icon .rzi,
+.project-onboarding-heading-icon .rzi {
+    font-size: 1.4rem;
+}
+
+.project-detail-identity {
+    min-width: 0;
+}
+
+.project-detail-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.project-detail-description {
+    max-width: 52rem;
+    margin-top: 0.125rem !important;
+    overflow: hidden;
+    color: var(--rz-text-secondary-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@container detail-header (max-width: 52rem) {
+    .detail-page-header > .rz-button .rz-button-text {
+        display: none;
+    }
+}
+
+@media (max-width: 48rem) {
+    .detail-page-header {
+        flex-wrap: wrap !important;
+        gap: 0.5rem !important;
+    }
+
+    .detail-page-header > .detail-page-title {
+        flex: 1 1 calc(100% - 3rem);
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .detail-page-header > .flex-spacer {
+        display: none;
+    }
+
+    .project-detail-header {
+        display: grid;
+        grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.625rem;
+    }
+
+    .project-detail-header > .rz-button {
+        min-width: 2.75rem;
+        min-height: 2.75rem;
+    }
+
+    .project-detail-header > .rz-button:first-child {
+        grid-column: 1;
+    }
+
+    .project-detail-header > .project-detail-icon {
+        display: none;
+    }
+
+    .project-detail-identity {
+        grid-column: 2;
+    }
+
+    .project-detail-header > .rz-button:last-child {
+        grid-column: 3;
+    }
+
+    .project-detail-description {
+        white-space: normal;
+    }
 }
 
 .page-header-icon {
@@ -450,12 +1488,16 @@ html {
     background-color: var(--rz-data-grid-row-hover-background-color, rgba(255, 255, 255, 0.05));
 }
 
-/* GENERIC TABLE-HEADER RULE - every data-grid column title stays on a SINGLE line, shown in full
-   when the column is wide enough and ellipsis-truncated only when it genuinely doesn't fit (never
-   wraps to a second line like "Pipelin/es"). Applies to every RadzenDataGrid site-wide. */
-.rz-column-title,
-.rz-column-title-content {
+/* Generic table-header rule: keep compact grids usable without forcing every header's intrinsic
+   width onto the whole table. The native title attribute remains available for the full label. */
+.rz-data-grid .rz-grid-table-fixed {
+    table-layout: fixed;
+}
+
+.rz-data-grid thead .rz-column-title,
+.rz-data-grid thead .rz-column-title-content {
     white-space: nowrap !important;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -907,14 +1949,13 @@ html {
 
 .project-card {
     cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color 0.15s;
     border: 1px solid var(--rz-base-700, #2e2e2e);
     height: 100%;
 }
 
 .project-card:hover {
     border-color: var(--rz-primary, #1b6ec2);
-    box-shadow: 0 0.125rem 0.5rem rgba(27, 110, 194, 0.15);
 }
 
 .project-card-icon {
@@ -1014,6 +2055,567 @@ html {
     }
 }
 
+/* Projects portfolio refresh: operational cards + high-density list. */
+.project-list-controls {
+    display: grid;
+    grid-template-columns: minmax(15rem, 1fr) 11rem 12rem auto auto auto;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.75rem;
+}
+
+.project-list-controls .project-list-search-wrap {
+    min-width: 0;
+}
+
+.project-list-status-filter,
+.project-list-sort {
+    width: 100%;
+}
+
+.project-favorites-filter[aria-pressed="true"] {
+    background-color: color-mix(in srgb, var(--rz-primary) 14%, transparent);
+}
+
+.project-view-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.125rem;
+    border: 1px solid var(--rz-base-600, #2e2e2e);
+    border-radius: var(--rz-border-radius, 4px);
+}
+
+.project-card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(21.5rem, 1fr));
+}
+
+.project-card {
+    min-width: 0;
+    transition: border-color 0.15s;
+}
+
+.project-card:focus-visible,
+.project-dense-row:focus-visible {
+    outline: 2px solid var(--rz-primary);
+    outline-offset: 2px;
+}
+
+.project-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+}
+
+.project-card-icon {
+    flex: 0 0 auto;
+}
+
+.project-card-heading {
+    min-width: 0;
+    flex: 1;
+}
+
+.project-card-name {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+
+.project-activity-link:hover,
+.project-parent-run a:hover,
+.project-dense-row a:hover {
+    color: var(--rz-primary);
+    text-decoration: underline;
+}
+
+.project-card-name:hover {
+    color: inherit;
+    text-decoration: none;
+}
+
+.analysis-portfolio-projects {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.analysis-portfolio-project-card {
+    min-width: 0;
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+}
+
+.analysis-portfolio-project-heading,
+.analysis-portfolio-project-metrics {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.analysis-portfolio-project-heading {
+    margin-bottom: 0.75rem;
+}
+
+.analysis-portfolio-project-name {
+    color: inherit;
+    font-weight: 650;
+    text-decoration: none;
+}
+
+.analysis-portfolio-organization {
+    display: block;
+    margin-top: 0.15rem !important;
+}
+
+.analysis-portfolio-project-metrics {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.analysis-portfolio-project-metrics span {
+    white-space: nowrap;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--rz-base-800, #1b1b1b) 75%, transparent);
+}
+
+.analysis-portfolio-grade {
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font-weight: 750;
+}
+
+.pipeline-setup-step {
+    max-width: 68rem;
+    margin: 0 auto;
+    padding: 1rem 0;
+}
+
+.pipeline-setup-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.pipeline-setup-option {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: start;
+    gap: 0.75rem;
+    padding: 0.875rem;
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: var(--rz-border-radius, 4px);
+    cursor: pointer;
+}
+
+.pipeline-setup-option:has(.rz-chkbox-box.rz-state-active) {
+    border-color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 8%, transparent);
+}
+
+.pipeline-setup-option strong,
+.pipeline-setup-option small {
+    display: block;
+}
+
+.pipeline-setup-option small {
+    margin-top: 0.2rem;
+    color: var(--rz-text-secondary-color, #aaa);
+    line-height: 1.35;
+}
+
+.pipeline-setup-summary {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 1rem;
+}
+
+.pipeline-setup-summary > div {
+    display: grid;
+    grid-template-columns: auto minmax(12rem, 1fr) minmax(12rem, 1fr);
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid var(--rz-base-700, #2e2e2e);
+}
+
+.pipeline-setup-summary span {
+    color: var(--rz-text-secondary-color, #aaa);
+}
+
+@media (max-width: 640px) {
+    .pipeline-setup-summary > div {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .pipeline-setup-summary span {
+        grid-column: 2;
+    }
+}
+
+.project-card-status {
+    margin-top: 0.25rem;
+}
+
+.project-card-action {
+    flex: 0 0 auto;
+    margin: -0.375rem -0.375rem 0 0;
+}
+
+.project-favorite.active {
+    color: var(--rz-primary);
+}
+
+.project-card-desc {
+    min-height: 2.6rem;
+    margin: 0.75rem 0;
+}
+
+.project-production {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.125rem;
+    padding: 0.5rem 0.625rem;
+    background: color-mix(in srgb, var(--rz-base-900, #121212) 60%, transparent);
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: var(--rz-border-radius, 4px);
+}
+
+.project-production-label,
+.project-activity-label {
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+}
+
+.project-production-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.project-production-status.online {
+    color: var(--rz-success, #4caf50);
+    background: color-mix(in srgb, var(--rz-success, #4caf50) 14%, transparent);
+}
+
+.project-production-status.offline {
+    color: var(--rz-danger, #f44336);
+    background: color-mix(in srgb, var(--rz-danger, #f44336) 14%, transparent);
+}
+
+.project-production-status.unavailable {
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    background: color-mix(in srgb, var(--rz-base-400, #383838) 55%, transparent);
+}
+
+.project-production-dot {
+    width: 0.4375rem;
+    height: 0.4375rem;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.project-online-users {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: auto;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.project-online-users .rzi {
+    font-size: var(--icon-sm);
+}
+
+.project-gate-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+    color: inherit;
+    text-decoration: none;
+}
+
+.project-gate-summary + .project-online-users {
+    margin-left: 0;
+}
+
+.project-gate-grade {
+    display: inline-grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 1px solid currentColor;
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    font-size: 0.875rem;
+    font-weight: 800;
+    line-height: 1;
+    text-decoration: none;
+}
+
+.project-gate-grade:hover {
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    text-decoration: none;
+}
+
+.project-overview-gate-grade {
+    margin-top: 0.2rem;
+}
+
+.project-activity {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--rz-base-700, #2e2e2e);
+    border-bottom: 1px solid var(--rz-base-700, #2e2e2e);
+}
+
+.project-activity-row {
+    display: grid;
+    grid-template-columns: 5.25rem minmax(0, 1fr);
+    gap: 0.625rem;
+    padding: 0.625rem 0;
+}
+
+.project-activity-row + .project-activity-row {
+    border-top: 1px solid var(--rz-base-700, #2e2e2e);
+}
+
+.project-activity-content {
+    min-width: 0;
+}
+
+.project-activity-link {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--rz-primary-light, #c99efd);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.project-activity-link code {
+    flex: 0 0 auto;
+}
+
+.project-activity-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-activity-run {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.project-activity-date,
+.project-parent-run,
+.project-activity-empty {
+    display: block;
+    margin-top: 0.125rem;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-size: 0.6875rem;
+}
+
+.project-parent-run {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.3rem;
+}
+
+.project-parent-run .rzi {
+    font-size: var(--icon-sm);
+}
+
+.project-parent-run a {
+    color: var(--rz-primary-light, #c99efd);
+    text-decoration: none;
+}
+
+.project-card-tags {
+    margin-top: 0.75rem;
+}
+
+.project-dense-list {
+    border: 1px solid var(--rz-base-700, #2e2e2e);
+    border-radius: var(--rz-border-radius, 4px);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+.project-dense-header,
+.project-dense-row {
+    display: grid;
+    grid-template-columns: minmax(13rem, 1.2fr) minmax(8rem, 0.65fr) 3.5rem minmax(9rem, 0.8fr) minmax(12rem, 1fr) 5.5rem;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 58rem;
+}
+
+.project-dense-header {
+    min-height: 2.25rem;
+    padding: 0 0.75rem;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    background: var(--rz-base-800, #1e1e1e);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.project-dense-row {
+    min-height: 3.75rem;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    background: var(--rz-panel-background-color, #1e1e1e);
+    border-top: 1px solid var(--rz-base-700, #2e2e2e);
+    transition: background 0.15s;
+}
+
+.project-dense-row:hover {
+    background: color-mix(in srgb, var(--rz-primary) 5%, var(--rz-panel-background-color, #1e1e1e));
+}
+
+.project-dense-project {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.project-dense-project > div {
+    min-width: 0;
+}
+
+.project-dense-project a,
+.project-dense-activity a {
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.project-dense-folder {
+    color: var(--rz-primary);
+}
+
+.project-dense-description,
+.project-dense-activity > span,
+.project-dense-parent {
+    display: block;
+    overflow: hidden;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.6875rem;
+}
+
+.project-dense-activity {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.75rem;
+}
+
+.project-dense-activity > div {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.project-dense-activity a {
+    overflow: hidden;
+    color: var(--rz-primary-light, #c99efd);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-dense-parent {
+    margin-top: 0.1rem;
+}
+
+.project-dense-users {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-size: 0.75rem;
+}
+
+@media (max-width: 1200px) {
+    .project-list-controls {
+        grid-template-columns: minmax(15rem, 1fr) 10.5rem 11.5rem auto auto;
+    }
+
+}
+
+@media (max-width: 900px) {
+    .project-list-controls {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .project-list-search-wrap {
+        grid-column: 1 / -1;
+    }
+
+    .project-favorites-filter {
+        justify-self: stretch;
+    }
+
+}
+
+@media (max-width: 768px) {
+    .project-card-grid,
+    .project-list-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .project-list-search-wrap {
+        grid-column: auto;
+    }
+
+    .project-view-switch,
+    .project-favorites-filter {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .project-view-switch > .rz-button {
+        flex: 1;
+    }
+
+    .project-activity-row {
+        grid-template-columns: 4.75rem minmax(0, 1fr);
+    }
+}
+
 /* ==========================================================================
    Pipeline List
    ========================================================================== */
@@ -1048,21 +2650,57 @@ html {
     text-decoration: underline;
 }
 
+.pipeline-template-link {
+    color: var(--rz-secondary);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.pipeline-template-link:hover {
+    text-decoration: underline;
+}
+
+.pipeline-template-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+.pipeline-hub-tabs > .rz-tabview-nav {
+    margin-bottom: 0.75rem;
+}
+
+.pipeline-hub-tabs > .rz-tabview-panels > .rz-tabview-panel {
+    padding: 0;
+}
+
 .pipeline-overview-layout {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto minmax(18rem, 1fr);
     gap: 1rem;
     min-height: 0;
 }
 
 .pipeline-overview-global {
     height: calc(100dvh - 17rem);
-    min-height: 47rem;
+    min-height: 50rem;
 }
 
 .pipeline-overview-project {
-    height: calc(100dvh - 14rem);
-    min-height: 47rem;
+    min-height: 0;
+}
+
+.pipeline-workspace {
+    display: grid;
+    grid-template-rows: auto minmax(18rem, auto);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: calc(var(--rz-border-radius) * 2);
+    background: var(--rz-panel-background-color);
+    box-shadow: var(--rz-shadow-3);
 }
 
 .pipeline-overview-section {
@@ -1077,7 +2715,12 @@ html {
 }
 
 .pipeline-overview-section-recent {
-    flex: 1 1 20rem;
+    min-height: 18rem;
+    overflow: hidden;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: calc(var(--rz-border-radius) * 2);
+    background: var(--rz-panel-background-color);
+    box-shadow: var(--rz-shadow-3);
 }
 
 .pipeline-section-title {
@@ -1094,20 +2737,209 @@ html {
     overflow: visible;
 }
 
+.pipeline-favorites-section {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 1rem;
+    min-height: 0;
+    padding: 0.75rem 1rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-800) 82%, var(--rz-base-900));
+}
+
+.pipeline-quick-launch-title {
+    margin: 0;
+    font-size: 1rem;
+    white-space: nowrap;
+}
+
+.pipeline-favorites-strip {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(22rem, 26rem);
+    gap: 0.5rem;
+    padding: 0.0625rem 0;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+}
+
+.pipeline-favorites-empty {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 3.25rem;
+    padding: 0.625rem 0.75rem;
+    color: var(--rz-text-secondary-color);
+    background: color-mix(in srgb, var(--rz-base-800) 72%, transparent);
+    border: 0.0625rem dashed var(--rz-base-600);
+    border-radius: var(--rz-border-radius);
+}
+
+.pipeline-favorites-empty .rzi {
+    color: var(--rz-warning);
+}
+
+.pipeline-favorite-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "heading actions"
+        "meta runs";
+    align-items: center;
+    gap: 0.35rem 0.75rem;
+    min-width: 0;
+    padding: 0.625rem 0.75rem;
+    background: var(--rz-panel-background-color);
+    border: 0.0625rem solid var(--rz-base-600);
+    border-radius: var(--rz-border-radius);
+    box-shadow: var(--rz-shadow-2);
+}
+
+.pipeline-favorite-card-heading,
+.pipeline-favorite-meta,
+.pipeline-favorite-runs {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.pipeline-favorite-card-heading {
+    grid-area: heading;
+    align-items: flex-start;
+}
+
+.pipeline-favorite-identity {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.pipeline-favorite-identity .pipeline-name-link {
+    overflow: hidden;
+    font-size: 1rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pipeline-favorite-project,
+.pipeline-favorite-relation {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.75rem;
+}
+
+.pipeline-favorite-project {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pipeline-favorite-project .rzi,
+.pipeline-favorite-relation .rzi {
+    flex: 0 0 auto;
+    font-size: 0.9rem;
+}
+
+.pipeline-favorite-meta {
+    grid-area: meta;
+    flex-wrap: wrap;
+}
+
+.pipeline-favorite-runs {
+    grid-area: runs;
+    justify-content: space-between;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.75rem;
+}
+
+.pipeline-favorite-actions {
+    grid-area: actions;
+}
+
+.pipeline-catalog-section {
+    min-height: 0;
+}
+
+.pipeline-catalog-header {
+    padding: 0.875rem 1rem 0.75rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+}
+
+.pipeline-catalog-title {
+    margin-bottom: 0.75rem;
+}
+
+.pipeline-catalog-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+.pipeline-catalog-filters .labeled-toggle {
+    flex: 0 0 auto;
+}
+
+.pipeline-catalog-tabs {
+    min-width: 0;
+}
+
+.pipeline-catalog-tabs > .rz-tabview-nav {
+    flex-wrap: nowrap;
+    margin: 0;
+    padding-inline: 1rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-900) 78%, var(--rz-base-800));
+}
+
+.pipeline-catalog-tabs > .rz-tabview-nav > li {
+    flex: 1 1 0;
+}
+
+.pipeline-catalog-tabs .rz-tabview-panel {
+    padding: 0;
+}
+
+.pipeline-recent-title {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0.75rem 1rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-800) 82%, var(--rz-base-900));
+}
+
+.pipeline-overview-project .pipeline-overview-section-recent {
+    height: clamp(20rem, 42vh, 28rem);
+}
+
+.pipeline-run-duration {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Height comes from the rows, not from the container. Constraining it made the grid body scroll on
+   its own while the page still scrolled, which put two vertical scrollbars on one table. Tables page
+   now, so a page's worth of rows is bounded by definition and needs no scroll region. */
 .pipeline-grid-fill {
     display: flex;
     flex-direction: column;
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    height: 100%;
     min-height: 0;
 }
 
 .pipeline-grid-fill .rz-data-grid-data {
-    flex: 1 1 auto;
     min-height: 0;
-    overflow-y: auto;
+    overflow-y: visible;
 }
 
 .pipeline-grid-virtualized {
@@ -1115,19 +2947,6 @@ html {
     max-width: 100%;
     min-width: 0;
     min-height: 0;
-}
-
-.pipeline-grid-five-rows {
-    /* 2.625rem Radzen header + five 1.8125rem compact data rows. */
-    height: 11.6875rem;
-}
-
-.pipeline-grid-five-rows .rz-data-grid-data {
-    overflow-y: auto;
-}
-
-.pipeline-grid-five-rows .rz-data-grid-data tr {
-    height: var(--aetheus-grid-row-height);
 }
 
 .pipeline-project-context {
@@ -1267,6 +3086,294 @@ a.pipeline-relation-card:hover {
     white-space: nowrap;
 }
 
+/* Radzen inserts the hierarchy toggler as the first column when a detail template exists. Keep it
+   deliberately narrow: it only contains the expansion triangle and must not compete with names. */
+.pipeline-dependency-grid colgroup col:first-child,
+.pipeline-dependency-grid th:first-child,
+.pipeline-dependency-grid td:first-child,
+.pipeline-runs-grouped colgroup col:first-child,
+.pipeline-runs-grouped th:first-child,
+.pipeline-runs-grouped td:first-child {
+    width: 2.25rem !important;
+    min-width: 2.25rem !important;
+    max-width: 2.25rem !important;
+    padding-inline: 0.25rem !important;
+    text-align: center;
+}
+
+.pipeline-linked-runs {
+    display: grid;
+    gap: 0.25rem;
+    padding-block: 0.375rem 0.5rem;
+    background: color-mix(in srgb, var(--rz-base-800) 18%, transparent);
+    font-size: 0.8125rem;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+.pipeline-linked-runs-header {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding-inline: 0.5rem;
+    color: var(--rz-text-secondary-color);
+}
+
+.pipeline-runs-grid,
+.pipeline-run-tree {
+    font-size: 0.8125rem;
+}
+
+.pipeline-runs-grid .pipeline-run-name-column,
+.pipeline-runs-grid .pipeline-run-name-column .rz-cell-data {
+    text-align: left;
+}
+
+.pipeline-runs-grid th.pipeline-run-name-column .rz-column-title {
+    justify-content: flex-start;
+}
+
+.pipeline-run-tree {
+    display: grid;
+    gap: 0.125rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pipeline-linked-runs > .pipeline-run-tree {
+    margin-inline: -0.25rem;
+}
+
+.pipeline-run-tree-nested {
+    margin-left: 0;
+    padding-left: 0;
+}
+
+.pipeline-run-tree-row {
+    display: grid;
+    grid-template-columns: 2.25rem 4.5rem minmax(10rem, 1fr) 7rem 11rem 9rem 8rem;
+    align-items: center;
+    gap: 0;
+    min-height: 1.75rem;
+    min-width: 52rem;
+    padding-block: 0.125rem;
+    border-radius: var(--rz-border-radius);
+}
+
+.pipeline-run-tree-with-project .pipeline-run-tree-row {
+    grid-template-columns: 2.25rem 4.5rem minmax(10rem, 1fr) 10rem 7rem 11rem 9rem 8rem;
+    min-width: 62rem;
+}
+
+.pipeline-run-tree-compact .pipeline-run-tree-row {
+    grid-template-columns: 2.25rem 4.5rem minmax(10rem, 1fr) 7rem 9rem;
+}
+
+.pipeline-run-tree-compact.pipeline-run-tree-with-project .pipeline-run-tree-row {
+    grid-template-columns: 2.25rem 4.5rem minmax(10rem, 1fr) 10rem 7rem 9rem;
+}
+
+.pipeline-run-tree-compact.pipeline-run-tree-with-duration .pipeline-run-tree-row {
+    grid-template-columns: 2.25rem 4.5rem minmax(10rem, 1fr) 7rem 9rem 8rem;
+}
+
+.pipeline-run-tree-compact.pipeline-run-tree-with-duration.pipeline-run-tree-with-project .pipeline-run-tree-row {
+    grid-template-columns: 2.25rem 4.5rem minmax(10rem, 1fr) 10rem 7rem 9rem 8rem;
+}
+
+.pipeline-run-tree-row:hover {
+    background: var(--rz-grid-hover-background-color);
+}
+
+.pipeline-run-tree-toggle.rz-button {
+    width: 1.5rem;
+    min-width: 1.5rem;
+    height: 1.5rem;
+    min-height: 1.5rem;
+    padding: 0;
+    justify-self: center;
+}
+
+.pipeline-run-tree-toggle .rzi {
+    font-size: 1rem;
+}
+
+.pipeline-run-tree-leaf {
+    position: relative;
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.pipeline-run-tree-leaf::after {
+    position: absolute;
+    top: 0.6875rem;
+    left: 0.625rem;
+    width: 0.25rem;
+    height: 0.25rem;
+    border-radius: 50%;
+    background: var(--rz-text-secondary-color);
+    content: "";
+    opacity: 0.55;
+}
+
+.pipeline-run-tree-name,
+.pipeline-run-tree-step {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pipeline-run-tree-name {
+    padding-inline: 0.5rem;
+    text-align: left;
+}
+
+.pipeline-run-tree-nested > .pipeline-run-tree-node > .pipeline-run-tree-row > .pipeline-run-tree-name {
+    padding-left: 1rem;
+}
+
+.pipeline-run-tree-id,
+.pipeline-run-tree-project,
+.pipeline-run-tree-status,
+.pipeline-run-tree-step,
+.pipeline-run-tree-duration,
+.pipeline-run-tree-started {
+    box-sizing: border-box;
+    padding-inline: 0.5rem;
+}
+
+.pipeline-run-tree-status {
+    min-width: 0;
+    text-align: left;
+}
+
+.pipeline-run-tree-project {
+    min-width: 0;
+}
+
+.pipeline-run-tree-project > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pipeline-run-tree-step {
+    color: var(--rz-text-secondary-color);
+}
+
+.pipeline-run-tree-id,
+.pipeline-run-tree-duration,
+.pipeline-run-tree-started {
+    white-space: nowrap;
+}
+
+.pipeline-run-tree-id,
+.pipeline-run-tree-project,
+.pipeline-run-tree-step,
+.pipeline-run-tree-duration,
+.pipeline-run-tree-started {
+    text-align: left;
+}
+
+.pipeline-run-tree-started {
+    color: var(--rz-text-secondary-color);
+}
+
+@media (max-width: 48rem) {
+    .pipeline-hub-tabs .pipeline-list-toolbar .rz-button,
+    .pipeline-hub-tabs .pipeline-dependency-grid .rz-button,
+    .pipeline-hub-tabs .pipeline-dependency-grid .rz-splitbutton-menubutton {
+        min-width: 2.75rem;
+        min-height: 2.75rem;
+    }
+
+    .project-detail-edit-button,
+    .project-pipeline-new-button {
+        min-width: 2.75rem !important;
+        min-height: 2.75rem !important;
+    }
+
+    .pipeline-favorites-section {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+        gap: 0.625rem;
+    }
+
+    .pipeline-quick-launch-title {
+        white-space: normal;
+    }
+
+    .pipeline-favorite-card .rz-button-text {
+        display: none;
+    }
+
+    .pipeline-favorite-card .rz-button,
+    .pipeline-favorite-card .rz-splitbutton-menubutton {
+        min-width: 2.75rem;
+        min-height: 2.75rem;
+    }
+
+    .pipeline-catalog-filters {
+        align-items: stretch;
+        flex-wrap: wrap;
+    }
+
+    .pipeline-catalog-tabs > .rz-tabview-nav {
+        padding-inline: 0;
+    }
+
+    .pipeline-catalog-filters > .pipeline-list-search,
+    .pipeline-catalog-filters > .rz-dropdown {
+        flex: 1 1 14rem;
+    }
+
+    .pipeline-dependency-grid .rz-button-text,
+    .pipeline-runs-grid .rz-button-text {
+        display: none;
+    }
+
+    .pipeline-dependency-grid .pipeline-actions-column {
+        width: 16rem !important;
+        min-width: 16rem !important;
+        max-width: 16rem !important;
+    }
+
+    .pipeline-dependency-grid.rz-datatable .rz-data-row > td,
+    .pipeline-runs-grid.rz-datatable .rz-data-row > td {
+        height: 3.25rem;
+        max-height: 3.25rem;
+    }
+
+    .pipeline-dependency-grid.rz-datatable .rz-data-row .rz-cell-data,
+    .pipeline-runs-grid.rz-datatable .rz-data-row .rz-cell-data {
+        max-height: 2.75rem;
+    }
+
+    .pipeline-run-tree-row,
+    .pipeline-run-tree-compact .pipeline-run-tree-row {
+        min-height: 2.75rem;
+    }
+
+    .pipeline-run-tree-toggle.rz-button,
+    .pipeline-run-tree-leaf {
+        width: 2.25rem;
+        min-width: 2.25rem;
+        height: 2.25rem;
+        min-height: 2.25rem;
+    }
+
+    .pipeline-dependency-grid.rz-datatable .rz-data-row .rz-button,
+    .pipeline-runs-grid.rz-datatable .rz-data-row .rz-button {
+        width: 2.75rem;
+        min-width: 2.75rem;
+        max-width: 2.75rem;
+        height: 2.75rem;
+        min-height: 2.75rem;
+        max-height: 2.75rem;
+    }
+}
+
 /* Cross-link (git source / linked releases) */
 .cross-link-icon {
     font-size: 1rem;
@@ -1299,6 +3406,42 @@ a.pipeline-relation-card:hover {
 
 .run-tile-link:hover .run-overview-card {
     box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.18);
+}
+
+/* A clickable tile must LOOK clickable before it is hovered: wherever a tile carries a destination
+   (an <a> wrapper or a role="button" jump-to-tab), its value text takes the link colour and
+   underlines on hover, exactly like an inline link. Applies to every tile pattern on the site
+   (run overview tiles, the metric tiles on the project / server overviews, and the administration tiles). The caption label
+   and any badge keep their own colour - only the value reads as the link. */
+.run-tile-link .run-overview-card > .rz-text-body1,
+.run-tile-link .run-overview-card .run-tile-value,
+.tile-link [class*="rz-text-h"]:not(.rz-color-secondary),
+.tile-link .rz-text-subtitle1:not(.rz-color-secondary),
+.tile-link .rz-text-subtitle2:not(.rz-color-secondary),
+.tile-link .metric-value,
+.tile-link .tile-value,
+.admin-tile-link .rz-text-subtitle1:not(.rz-color-secondary) {
+    color: var(--rz-primary, #1b6ec2);
+    font-weight: 500;
+}
+
+.run-tile-link:hover .run-overview-card > .rz-text-body1,
+.run-tile-link:hover .run-overview-card .run-tile-value,
+.run-tile-link:focus-visible .run-overview-card > .rz-text-body1,
+.run-tile-link:focus-visible .run-overview-card .run-tile-value,
+.tile-link:hover [class*="rz-text-h"]:not(.rz-color-secondary),
+.tile-link:hover .rz-text-subtitle1:not(.rz-color-secondary),
+.tile-link:hover .rz-text-subtitle2:not(.rz-color-secondary),
+.tile-link:hover .metric-value,
+.tile-link:hover .tile-value,
+.tile-link:focus-visible [class*="rz-text-h"]:not(.rz-color-secondary),
+.tile-link:focus-visible .rz-text-subtitle1:not(.rz-color-secondary),
+.tile-link:focus-visible .rz-text-subtitle2:not(.rz-color-secondary),
+.tile-link:focus-visible .metric-value,
+.tile-link:focus-visible .tile-value,
+.admin-tile-link:hover .rz-text-subtitle1:not(.rz-color-secondary),
+.admin-tile-link:focus-visible .rz-text-subtitle1:not(.rz-color-secondary) {
+    text-decoration: underline;
 }
 
 /* Grouped detail panels (artifact / release detail pages): two labelled columns of
@@ -1777,7 +3920,10 @@ a.pipeline-relation-card:hover {
 .run-split-timeline {
     display: flex;
     flex-direction: column;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     padding-right: 0.5rem;
 }
 
@@ -1861,10 +4007,10 @@ a.pipeline-relation-card:hover {
     white-space: nowrap;
 }
 
-/* Progress timeline: duration sits in a fixed left gutter (timers on the left), and the name no
-   longer grows so the trailing badges sit right after the label instead of the far right. */
+/* Progress timeline: durations share a fixed gutter while task labels consume only the available
+   width and truncate on one line. */
 .run-progress-timeline .run-tl-dur { min-width: 2.75rem; text-align: right; }
-.run-progress-timeline .run-tl-name { flex: initial; }
+.run-progress-timeline .run-tl-name { flex: 1 1 auto; }
 
 .run-split-logs {
     display: flex;
@@ -1887,21 +4033,80 @@ a.pipeline-relation-card:hover {
    each link flexes to fill and passes min-height:0 down so the terminal is the single scroll box.
    Mobile (<=768px, single column) keeps normal document flow — see the max-width media query. */
 @media (min-width: 769px) {
-    .rz-body:has(.run-split-layout, .run-yaml-split) { display: flex; flex-direction: column; }
-    .app-body-wrapper:has(.run-split-layout, .run-yaml-split) {
+    .rz-body:has(.run-split-layout, .run-yaml-split, .analysis-run-gate-page, .analysis-quality-findings) {
+        display: flex;
+        flex-direction: column;
+    }
+    .app-body-wrapper:has(.run-split-layout, .run-yaml-split, .analysis-run-gate-page, .analysis-quality-findings) {
         flex: 1 1 auto;
         min-height: 0;
         display: flex;
         flex-direction: column;
     }
-    .app-body-wrapper:has(.run-split-layout, .run-yaml-split) > .rz-tabview { flex: 1 1 auto; min-height: 0; }
-    .rz-tabview-panels:has(.run-split-layout, .run-yaml-split) { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-    .rz-tabview-panel:has(.run-split-layout, .run-yaml-split) { height: 100%; }
+    .app-body-wrapper:has(.run-split-layout, .run-yaml-split, .analysis-run-gate-page) > .rz-tabview {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+    .rz-tabview-panels:has(.run-split-layout, .run-yaml-split, .analysis-run-gate-page) {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .rz-tabview-panel:has(.run-split-layout, .run-yaml-split, .analysis-run-gate-page) {
+        height: 100%;
+        min-height: 0;
+    }
     .run-split-layout:has(.run-split-logs) { height: 100%; min-height: 0; }
     .run-split-timeline { height: 100%; }
     .run-split-logs { height: 100%; }
     /* YAML definition tab fills the same shell; panes take full height, code scrolls internally. */
     .run-yaml-split { height: 100%; min-height: 0; }
+
+    .analysis-run-gate-page {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+    }
+
+    .analysis-run-gate-page > .analysis-run-findings-grid {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+    }
+
+    .app-body-wrapper:has(.analysis-quality-findings) > .blade-content {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .analysis-quality-findings {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .analysis-quality-findings > .analysis-workspace-panel {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .analysis-quality-findings .analysis-finding-filters {
+        flex: 0 0 auto;
+    }
+
+    .analysis-quality-findings .aetheus-grid-fullheight {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+    }
 
     /* Pipeline edit tab: the Monaco editor fills the viewport below the compact meta + toolbar,
        with no page scrollbar (same flex-fill shell trick, scoped to the edit form). */
@@ -2098,6 +4303,13 @@ a.pipeline-relation-card:hover {
     flex-direction: column;
     min-width: max-content;
 }
+.app-log-scroll-region {
+    max-height: 30rem;
+    overflow-y: auto;
+}
+.app-error-top-frame {
+    font-size: 0.8rem;
+}
 .run-log-line {
     display: flex;
     gap: 0.75rem;
@@ -2152,6 +4364,10 @@ a.pipeline-relation-card:hover {
     grid-auto-rows: 1fr;
     gap: 0.75rem;
 }
+/* A grid item defaults to min-width:auto, so one unbreakable value (a release named after a full
+   commit sha) widened its column past the viewport and gave the whole content pane a horizontal
+   scrollbar. Pinning the minimum to 0 keeps the grid inside its container. */
+.run-overview-tiles > * { min-width: 0; }
 .run-overview-tiles > .run-tile-link { height: 100%; }
 /* Keyboard focus ring for the tiles that act as buttons (jump-to-tab), matching the hover affordance. */
 .run-tile-link[role="button"]:focus-visible { outline: 2px solid var(--rz-primary, #7c4dff); outline-offset: 2px; border-radius: 0.25rem; }
@@ -2160,7 +4376,34 @@ a.pipeline-relation-card:hover {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
+
+/* Merged tiles (status + steps, started + duration, repository + branch + commit, release + version)
+   stack "label: value" sub-rows under the tile's primary value. */
+.run-tile-subrow {
+    display: flex;
+    align-items: baseline;
+    gap: 0.375rem;
+    min-width: 0;
+    font-size: 0.8125rem;
+}
+.run-tile-sublabel {
+    color: var(--rz-text-secondary-color, #a0a0a0);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.run-tile-subrow > :last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.run-source-tile .run-tile-subrow { justify-content: space-between; }
+.run-release-version,
+.run-release-app-version { font-family: monospace; }
 .run-overview-stage-grouped { margin-left: 1.5rem; }
 .run-overview-stage-sub { padding-left: 1rem; opacity: 0.9; border-left: 1px solid var(--rz-base-600, #444); margin-left: 0.75rem; }
 .run-group-header {
@@ -2196,9 +4439,9 @@ a.pipeline-relation-card:hover {
    content — so no custom display:none / flex override is needed here (R2HD). */
 .run-logs-timeline .rz-timeline-content-end { text-align: left; }
 .run-logs-timeline .rz-timeline-item-content { padding-bottom: 0.25rem; }
-.run-logs-timeline .run-tl-name-grow { flex: 1 1 auto; min-width: 0; white-space: normal; overflow: visible; text-overflow: clip; }
+.run-logs-timeline .run-tl-name-grow { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .run-logs-timeline .run-tl-row {
-    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: nowrap;
     padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;
 }
 .run-logs-timeline .run-tl-row.selected { background: var(--rz-primary-light, #2a2150); }
@@ -2211,6 +4454,7 @@ a.pipeline-relation-card:hover {
    rounded card with row separators (run-timeline mockup); nested child runs stay indented + railed. */
 .run-tree { display: flex; flex-direction: column; gap: 0.125rem; }
 .run-tree:not(.run-tree-nested) {
+    flex: 0 0 auto;
     gap: 0;
     border: 0.0625rem solid var(--rz-base-700, #30363d);
     border-radius: 0.75rem;
@@ -2232,7 +4476,20 @@ a.pipeline-relation-card:hover {
     padding-left: 0.75rem;
     border-left: 0.125rem solid var(--rz-base-600, #333);
 }
-.run-tl-trigger { font-weight: 500; }
+.run-tl-trigger {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 500;
+}
+.run-tl-trigger-text {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
 /* Stage label column (CI / QA / DEPLOY) + child-pipeline chip on a trigger row */
 .run-tl-stage-label {
     font-size: 0.6875rem;
@@ -2241,7 +4498,11 @@ a.pipeline-relation-card:hover {
     text-transform: uppercase;
     color: var(--rz-text-tertiary-color, #8b949e);
     width: 3.75rem;
-    flex-shrink: 0;
+    flex: 0 1 3.75rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .run-tl-chip {
     display: inline-flex;
@@ -2260,7 +4521,11 @@ a.pipeline-relation-card:hover {
 /* The chip is a link to the triggered child run. */
 .run-tl-chip:hover { background: var(--rz-primary, #7c4dff); color: #fff; }
 .run-tl-chip .run-tl-chip-icon { font-size: 0.875rem; color: inherit; }
-.run-tl-desc { color: var(--rz-text-secondary-color, #c0c6cd); font-weight: 400; }
+.run-tl-desc {
+    color: var(--rz-text-secondary-color, #c0c6cd);
+    font-weight: 400;
+    white-space: nowrap;
+}
 .run-tl-caret {
     font-size: 1.125rem;
     flex-shrink: 0;
@@ -2324,8 +4589,37 @@ a.pipeline-relation-card:hover {
 
 /* Auth / Login */
 .login-container {
-    max-width: 400px;
-    margin: 5rem auto;
+    width: min(100%, 25rem);
+    min-width: 0;
+    margin: clamp(1rem, 8vh, 5rem) auto;
+    box-sizing: border-box;
+}
+
+.login-container > .rz-card {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.login-container .rz-form-field,
+.login-container .rz-textbox,
+.login-container .rz-password {
+    min-width: 0;
+    max-width: 100%;
+}
+
+@media (max-width: 30rem) {
+    .app-body-wrapper:has(.login-container) {
+        padding-inline: 0.75rem !important;
+    }
+
+    .login-container {
+        margin-block: 0.75rem;
+    }
+
+    .login-container > .rz-card {
+        padding: 1rem;
+    }
 }
 
 /* S-DES-07: login page logo */
@@ -2458,6 +4752,10 @@ a.pipeline-relation-card:hover {
     width: 100%;
     height: 100%;
     transform-origin: 0 0;
+}
+
+.vp-canvas-inner-loading {
+    visibility: hidden;
 }
 
 .vp-node {
@@ -2645,9 +4943,29 @@ a.pipeline-relation-card:hover {
     min-width: max-content;
 }
 
-.url-synced-tabs > .rz-tabview-nav > li > a,
+.rz-tabview > .rz-tabview-nav > li > button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 100%;
+}
+
+.url-synced-tabs > .rz-tabview-nav > li > button,
 .url-synced-tabs > .rz-tabview-nav .rz-tabview-title {
     white-space: nowrap !important;
+}
+
+/* A run can expose many data-driven tabs. Keep every destination visible instead of hiding the
+   overflow behind an invisible horizontal scrollbar. */
+.url-synced-tabs.pipeline-run-tabs > .rz-tabview-nav {
+    flex-wrap: wrap;
+    overflow: visible;
+}
+
+.url-synced-tabs.pipeline-run-tabs > .rz-tabview-nav > li {
+    flex: 1 1 8rem;
+    min-width: max-content;
 }
 
 /* Every Radzen data grid keeps every column available at every viewport width. Columns without an
@@ -2670,7 +4988,14 @@ a.pipeline-relation-card:hover {
 @media (max-width: 767.98px) {
     /* Every tab rail must remain a single, stable row on phones. Long labels scroll horizontally
        instead of wrapping and changing the page geometry when the selected tab changes. */
-    .rz-tabview > .rz-tabview-nav {
+    .rz-tabview > .rz-tabview-nav,
+    /* These rails opt into wrapping (or a two-column grid) on wide screens and at their own
+       breakpoints; on phones the single scrolling row wins, so they are repeated here with enough
+       specificity to override those declarations. */
+    .url-synced-tabs.pipeline-run-tabs > .rz-tabview-nav,
+    .pipeline-catalog-tabs > .rz-tabview-nav,
+    .analysis-finding-tabs > .rz-tabview-nav,
+    .analysis-workspace-tabs > .rz-tabview-nav {
         flex-wrap: nowrap;
         overflow-x: auto;
         overflow-y: hidden;
@@ -2678,16 +5003,25 @@ a.pipeline-relation-card:hover {
         overscroll-behavior-inline: contain;
     }
 
-    .rz-tabview > .rz-tabview-nav::-webkit-scrollbar {
+    .rz-tabview > .rz-tabview-nav::-webkit-scrollbar,
+    .url-synced-tabs.pipeline-run-tabs > .rz-tabview-nav::-webkit-scrollbar,
+    .pipeline-catalog-tabs > .rz-tabview-nav::-webkit-scrollbar,
+    .analysis-finding-tabs > .rz-tabview-nav::-webkit-scrollbar,
+    .analysis-workspace-tabs > .rz-tabview-nav::-webkit-scrollbar {
         display: none;
     }
 
-    .rz-tabview > .rz-tabview-nav > li {
+    /* A tab keeps its natural label width so the rail scrolls instead of squeezing every tab. */
+    .rz-tabview > .rz-tabview-nav > li,
+    .url-synced-tabs.pipeline-run-tabs > .rz-tabview-nav > li,
+    .pipeline-catalog-tabs > .rz-tabview-nav > li,
+    .analysis-finding-tabs > .rz-tabview-nav > li,
+    .analysis-workspace-tabs > .rz-tabview-nav > li {
         flex: 0 0 auto;
         min-width: max-content;
     }
 
-    .rz-tabview > .rz-tabview-nav > li > a,
+    .rz-tabview > .rz-tabview-nav > li > button,
     .rz-tabview > .rz-tabview-nav .rz-tabview-title {
         white-space: nowrap !important;
     }
@@ -2696,9 +5030,28 @@ a.pipeline-relation-card:hover {
         flex: 0 0 auto;
     }
 
-    .url-synced-tabs .rz-tabview-nav a,
+    .url-synced-tabs .rz-tabview-nav button,
     .url-synced-tabs .rz-tabview-title {
         white-space: nowrap !important;
+    }
+
+    /* A dense header (status badges plus half a dozen action buttons) otherwise pushes the page
+       content well below the fold on a phone. Collapse it behind the header toggle instead. */
+    .page-header-toggle {
+        display: inline-flex;
+    }
+
+    .page-header-badges.page-header-collapsible:not(.page-header-collapsible-open),
+    .page-header-actions.page-header-collapsible:not(.page-header-collapsible-open) {
+        display: none;
+    }
+
+    /* Expanded on a phone, the actions get the full width and read left-to-right rather than
+       hugging the right edge under the title. */
+    .page-header-actions.page-header-collapsible-open {
+        flex: 1 1 100%;
+        justify-content: flex-start;
+        margin-left: 0;
     }
 
     .project-ci-settings-row > .rz-col,
@@ -2772,7 +5125,7 @@ a.pipeline-relation-card:hover {
 
 .wizard-dialog .rz-steps > ul {
     flex-wrap: nowrap;
-    max-width: calc(100% - 21rem);
+    max-width: 100%;
 }
 
 .wizard-dialog .rz-steps-bar .rz-steps-item {
@@ -2827,10 +5180,14 @@ a.pipeline-relation-card:hover {
 }
 
 .wizard-actions {
-    position: absolute;
-    top: 2rem;
-    right: 0;
-    z-index: 5;
+    position: sticky;
+    bottom: 0;
+    width: 100%;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--rz-base-700, #2e2e2e);
+    background: var(--rz-base-background-color, #121212);
+    z-index: 10;
+    flex-wrap: wrap;
 }
 
 /* ─── Add Agent Page ─── */
@@ -2976,7 +5333,6 @@ a.pipeline-relation-card:hover {
 }
 
 /* S-DES-14: expandable changelog cell in the releases grid */
-.release-changelog-cell { white-space: pre-wrap; word-break: break-word; font-size: 0.8125rem; }
 
 /* S-DES-15: accent the literal <TOKEN> placeholder so it reads as "replace me" */
 .wizard-token-placeholder {
@@ -3225,6 +5581,69 @@ a.pipeline-relation-card:hover {
     display: flex;
     flex-direction: column;
     min-height: 0;
+}
+
+.project-section-grid-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0.125rem 0.125rem 0.375rem;
+    scrollbar-width: thin;
+}
+
+.project-section-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(7.25rem, 1fr));
+    grid-template-rows: repeat(2, 5.25rem);
+    gap: 0.625rem;
+    min-width: 56rem;
+}
+
+.project-section-link {
+    min-width: 0;
+}
+
+.project-section-tile {
+    height: 100%;
+    min-height: 0;
+    padding: 0.625rem;
+}
+
+.project-section-tile-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    height: 100%;
+    text-align: center;
+}
+
+.project-section-tile-heading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-width: 0;
+}
+
+.project-section-tile-heading > .rzi {
+    flex: 0 0 auto;
+    color: var(--rz-primary);
+    font-size: 1.25rem;
+}
+
+.project-section-tile-heading .rz-text {
+    overflow: hidden;
+    font-size: 0.75rem;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-section-tile-current {
+    border-color: color-mix(in srgb, var(--rz-primary) 55%, var(--rz-base-700));
+    background: color-mix(in srgb, var(--rz-primary) 9%, var(--rz-base-background-color));
 }
 
 /* Server overview — Pipeline runner / Container isolation posture tiles.
@@ -3558,7 +5977,13 @@ a.pipeline-relation-card:hover {
     display: none;
 }
 
-@media (max-width: 768px) {
+/* The splash covers this short pre-handshake state. Keeping the not-yet-classified rail invisible
+   also makes the cold-load contract robust when paint timing is unusually slow. */
+.viewport-pending .rz-sidebar {
+    visibility: hidden;
+}
+
+@media (max-width: 1024px) {
     .sidebar-backdrop {
         display: block;
         position: fixed;
@@ -3567,7 +5992,7 @@ a.pipeline-relation-card:hover {
         z-index: 999;
     }
 
-    /* Mobile drawer (Astraia parity): lift the sidebar out of flow so it OVERLAYS the content
+    /* Compact drawer (Astraia parity): lift the sidebar out of flow so it OVERLAYS the content
        instead of shoving RadzenBody sideways and squishing the page into an unreadable sliver.
        The backdrop above (z 999) sits just under it; tapping it closes the drawer.
        !important because the Radzen theme pins .rz-sidebar's position with a more specific
@@ -3767,44 +6192,48 @@ textarea:focus-visible,
         width: 100%;
     }
 
+    /* No capped height on narrow screens either: it would reintroduce the inner scrollbar the pager
+       exists to avoid. The page scrolls, the table does not. */
     .pipeline-grid-fill {
-        height: 24rem;
-        max-height: 24rem;
+        min-height: 0;
     }
 
     .pipeline-overview-global,
     .pipeline-overview-project {
+        display: flex;
+        flex-direction: column;
         height: auto;
         min-height: 0;
+    }
+
+    .pipeline-workspace {
+        flex: 0 0 auto;
+        grid-template-rows: auto auto;
+    }
+
+    .pipeline-favorites-strip {
+        grid-auto-columns: minmax(17rem, 86vw);
     }
 
     .pipeline-overview-section-recent {
         flex: 0 0 auto;
     }
 
-    .pipeline-project-column {
-        display: none !important;
-    }
-
-    .pipeline-secondary-column {
-        display: none !important;
-    }
-
-    .pipeline-dependency-grid .rz-button-text,
-    .pipeline-runs-grid .rz-button-text {
-        display: none;
-    }
-
-    .pipeline-dependency-grid th:nth-last-child(1),
-    .pipeline-dependency-grid td:nth-last-child(1) {
-        width: 7rem !important;
-        min-width: 7rem !important;
+    .pipeline-overview-project .pipeline-overview-section-recent {
+        height: auto;
     }
 
     .pipeline-dependency-grid .pipeline-name-link,
     .pipeline-runs-grid .pipeline-name-link {
         white-space: normal;
         overflow-wrap: anywhere;
+    }
+
+    .pipeline-runs-grid .pipeline-run-tree-name {
+        overflow: hidden;
+        overflow-wrap: normal;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .project-list-heading > .project-list-create,
@@ -4313,6 +6742,323 @@ textarea:focus-visible,
 .diff-file-stat-add { color: var(--rz-success); }
 .diff-file-stat-del { color: var(--rz-danger); }
 
+/* Commit detail: compact metadata and a focused explorer keep large patches readable without
+   stacking one full diff card per file down the page. */
+.git-commit-summary-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1.25rem;
+}
+
+.git-commit-overview {
+    min-width: 0;
+}
+
+.git-commit-message {
+    margin: 0 0 1rem;
+}
+
+.git-commit-metadata {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 1.5rem;
+}
+
+.git-commit-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(5rem, 1fr));
+    align-self: stretch;
+}
+
+.git-commit-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1rem;
+    text-align: center;
+}
+
+.git-commit-stat:not(:last-child) {
+    border-inline-end: 0.0625rem solid var(--rz-base-700);
+}
+
+.git-commit-stat strong {
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.git-commit-stat span {
+    margin-top: 0.25rem;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.git-diff-workspace {
+    display: grid;
+    grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr);
+    height: clamp(30rem, 64vh, 44rem);
+    min-height: 0;
+    overflow: hidden;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: var(--rz-border-radius);
+    background: var(--rz-panel-background-color, var(--rz-base-background-color));
+    box-shadow: var(--rz-shadow-3);
+}
+
+.git-file-browser {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-inline-end: 0.0625rem solid var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-900) 72%, var(--rz-base-800));
+}
+
+.git-file-browser-header {
+    flex: 0 0 auto;
+    padding: 0.75rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+}
+
+.git-file-browser-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.625rem;
+}
+
+.git-file-browser-title > span {
+    color: var(--rz-text-secondary-color);
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.75rem;
+}
+
+.git-file-search {
+    width: 100%;
+}
+
+.git-file-status-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.625rem;
+}
+
+.git-file-status-filter {
+    color: var(--rz-text-secondary-color);
+}
+
+.git-file-status-filter.is-active {
+    color: var(--rz-primary-light);
+    background: var(--rz-primary-lighter);
+    outline: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 40%, transparent);
+    outline-offset: -0.0625rem;
+}
+
+.git-file-listbox {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.git-file-listbox .rz-listbox-list-wrapper,
+.git-file-listbox .rz-listbox-list {
+    height: 100%;
+    max-height: none;
+}
+
+.git-file-listbox .rz-listbox-item {
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+    padding: 0.375rem 0.625rem;
+    border-radius: 0;
+}
+
+.git-file-listbox .rz-listbox-item.rz-state-highlight {
+    color: var(--rz-text-color);
+    background: var(--rz-primary-lighter);
+}
+
+.git-file-option {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.git-file-status-icon {
+    font-size: 1rem;
+}
+
+.git-file-option-path {
+    min-width: 0;
+    overflow: hidden;
+    color: inherit;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-file-option-delta {
+    display: flex;
+    gap: 0.375rem;
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.6875rem;
+}
+
+.git-file-browser-empty {
+    padding: 1.5rem 0.75rem;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8125rem;
+    text-align: center;
+}
+
+.git-focused-diff {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--rz-base-900);
+}
+
+.git-focused-diff-header {
+    flex: 0 0 auto;
+    min-height: 4.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 0.0625rem solid var(--rz-base-700);
+    background: var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.git-focused-diff-title {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.git-focused-diff-title > code {
+    display: block;
+    overflow: hidden;
+    color: var(--rz-text-color);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-focused-diff-title > div {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.75rem;
+}
+
+.git-focused-diff-body {
+    flex: 1 1 auto;
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    padding: 0.5rem 0;
+    border: 0;
+    border-radius: 0;
+}
+
+.git-focused-diff-body .diff-line {
+    min-width: max-content;
+    display: grid;
+    grid-template-columns: 3.5rem 3.5rem minmax(40rem, 1fr);
+    padding: 0;
+}
+
+.diff-line-number {
+    padding: 0 0.625rem;
+    border-inline-end: 0.0625rem solid color-mix(in srgb, var(--rz-base-700) 70%, transparent);
+    color: var(--rz-text-disabled-color);
+    background: color-mix(in srgb, var(--rz-base-900) 90%, black);
+    text-align: end;
+    user-select: none;
+}
+
+.diff-line-content {
+    padding: 0 0.75rem;
+    white-space: pre;
+}
+
+@media (max-width: 72rem) {
+    .git-commit-summary-content {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .git-commit-stats {
+        border-block-start: 0.0625rem solid var(--rz-base-700);
+    }
+}
+
+@media (max-width: 48rem) {
+    .git-commit-metadata {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .git-commit-stat {
+        padding: 0.75rem 0.375rem;
+    }
+
+    .git-commit-stat strong {
+        font-size: 1rem;
+    }
+
+    .git-diff-workspace {
+        display: block;
+        height: auto;
+        overflow: visible;
+        box-shadow: none;
+    }
+
+    .git-file-browser {
+        height: 20rem;
+        border-block-end: 0.0625rem solid var(--rz-base-700);
+        border-inline-end: 0;
+    }
+
+    .git-file-listbox .rz-listbox-item,
+    .rz-button.git-file-status-filter {
+        min-height: 2.75rem;
+    }
+
+    .git-focused-diff {
+        height: 32rem;
+    }
+
+    .git-focused-diff-header {
+        align-items: flex-start;
+    }
+
+    .rz-button.git-diff-toggle {
+        min-width: 2.75rem;
+        min-height: 2.75rem;
+    }
+
+    .git-diff-toggle .rz-button-text {
+        display: none;
+    }
+}
+
 /* F26: width utility classes (replace inline Style="width:NNNpx") */
 .w-rem-6 { width: 6rem; }      /* ~96px */
 .w-rem-7-5 { width: 7.5rem; }  /* 120px */
@@ -4414,7 +7160,10 @@ textarea:focus-visible,
    taller than the badge, leaving it ~1px off the bare badges next to it. Make such wrappers hug the
    badge so every badge centers identically on the title baseline, wherever this pattern appears. */
 .page-header a:has(> .rz-badge),
-.page-header span:has(> .rz-badge),
+/* The collapsible badges wrapper is excluded: it must stay `display: contents` so its badges remain
+   direct flex children of the title row and keep that row's gap, instead of collapsing into one
+   gapless inline-flex item. */
+.page-header span:not(.page-header-badges):has(> .rz-badge),
 .pipeline-run-toolbar a:has(> .rz-badge),
 .pipeline-run-toolbar span:has(> .rz-badge),
 .detail-page-header a:has(> .rz-badge),
@@ -4457,6 +7206,12 @@ textarea:focus-visible,
 .agent-update-phase-active  { font-size: 1.25rem; color: var(--rz-info); }
 .agent-update-phase-done    { font-size: 1.25rem; color: var(--rz-success); }
 .agent-update-phase-failed  { font-size: 1.25rem; color: var(--rz-danger); }
+
+.notification-log-link {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+}
 
 /* Item #7 — top-bar task tracker widget. Sits between the help button and the user menu in the
    header, shows a numeric badge when in-flight tasks exist, opens a fixed-width popover on
@@ -4621,6 +7376,308 @@ textarea:focus-visible,
 .role-perm-select { width: 100%; }
 .icon-inherit { font-size: inherit; }
 
+/* Administration identity area: users, organizations and roles share one visual vocabulary.
+   The redesign intentionally has no metric/stat tiles; information stays attached to the entity
+   header, navigation, forms and grids where it is actionable. */
+.iam-page {
+    min-width: 0;
+}
+
+.iam-page-header,
+.iam-entity-header {
+    padding: 1rem 1.125rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 28%, var(--rz-base-700));
+    border-radius: 0.75rem;
+    background:
+        radial-gradient(circle at top left, color-mix(in srgb, var(--rz-primary) 12%, transparent), transparent 24rem),
+        color-mix(in srgb, var(--rz-base-800) 92%, transparent);
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.08);
+}
+
+.iam-page-header .page-header-icon,
+.iam-entity-header .page-header-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.6875rem;
+    color: var(--rz-primary-light);
+    background: color-mix(in srgb, var(--rz-primary) 14%, transparent);
+}
+
+.iam-section-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 0 1rem;
+    padding: 0.3125rem;
+    overflow-x: auto;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.6875rem;
+    background: color-mix(in srgb, var(--rz-base-800) 84%, transparent);
+    scrollbar-width: thin;
+}
+
+.iam-section-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4375rem;
+    min-height: 2.375rem;
+    padding: 0.5rem 0.875rem;
+    border: 0.0625rem solid transparent;
+    border-radius: 0.5rem;
+    color: var(--rz-text-secondary-color);
+    font-weight: 600;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.iam-section-link:hover {
+    color: var(--rz-text-color);
+    background: var(--rz-base-700);
+}
+
+.iam-section-link-active {
+    color: var(--rz-primary-light);
+    border-color: color-mix(in srgb, var(--rz-primary) 30%, transparent);
+    background: color-mix(in srgb, var(--rz-primary) 13%, transparent);
+}
+
+.iam-section-link .rzi {
+    font-size: 1.1rem;
+}
+
+.app-body-wrapper:has(> .iam-list-page) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.app-body-wrapper > .iam-list-page {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.iam-list-search {
+    width: min(22rem, 100%);
+}
+
+.iam-grid-surface {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.75rem;
+    background: var(--rz-panel-background-color);
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.08);
+}
+
+.iam-grid-surface > .aetheus-grid-fullheight {
+    flex: 0 1 auto;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+}
+
+.iam-grid-surface .rz-datatable-thead > tr > th {
+    background: color-mix(in srgb, var(--rz-base-800) 76%, var(--rz-base-900));
+}
+
+.iam-grid-surface .rz-paginator {
+    border-top-color: var(--rz-base-700);
+    background: color-mix(in srgb, var(--rz-base-800) 82%, transparent);
+}
+
+.iam-entity-avatar {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 28%, transparent);
+    border-radius: 0.5rem;
+    color: var(--rz-primary-light);
+    background:
+        linear-gradient(145deg,
+            color-mix(in srgb, var(--rz-primary) 16%, transparent),
+            color-mix(in srgb, var(--rz-secondary) 10%, transparent));
+}
+
+.iam-entity-avatar .rzi {
+    font-size: 1rem;
+}
+
+.iam-entity-header {
+    margin-bottom: 1rem;
+}
+
+.iam-entity-header .page-header-subtitle {
+    margin-left: 3.125rem;
+}
+
+.iam-detail-card {
+    padding: 1.125rem;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--rz-panel-background-color) 94%, transparent);
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.08);
+}
+
+.iam-detail-card .rz-datatable {
+    border-radius: 0.625rem;
+}
+
+.role-assignment-picker {
+    width: 100%;
+    min-width: 0;
+}
+
+.iam-role-assignment-card {
+    width: 100%;
+}
+
+.iam-role-autosave-status {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.375rem;
+    min-height: 1.5rem;
+    margin-top: 0.625rem;
+    color: var(--rz-text-secondary-color);
+}
+
+.role-assignment-heading {
+    margin-bottom: 0.75rem;
+}
+
+.role-assignment-selected {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-bottom: 0.75rem;
+    padding: 0.625rem;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--rz-primary) 8%, transparent);
+}
+
+.role-assignment-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.role-assignment-search {
+    flex: 1 1 18rem;
+    min-width: 12rem;
+}
+
+.role-assignment-filter {
+    min-height: 2.5rem;
+    padding-inline: 0.625rem;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--rz-base-800) 84%, transparent);
+}
+
+.role-assignment-grid {
+    min-width: 0;
+    overflow: hidden;
+    border: 0.0625rem solid var(--rz-base-700);
+    border-radius: 0.625rem;
+}
+
+.role-assignment-grid .rz-datatable {
+    border: 0;
+    border-radius: 0;
+}
+
+.role-assignment-toggle {
+    font-weight: 600;
+    color: var(--rz-primary-light);
+}
+
+.role-assignment-description {
+    display: block;
+    margin-top: 0.1875rem;
+    margin-left: 1.75rem;
+}
+
+.iam-security-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(16rem, 0.7fr);
+    gap: 1rem;
+}
+
+.iam-quality-surface {
+    min-width: 0;
+}
+
+@media (max-width: 63.99rem) {
+    .iam-security-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 47.99rem) {
+    .iam-page-header,
+    .iam-entity-header {
+        padding: 0.875rem;
+    }
+
+    .iam-page-header .page-header-actions .rz-button,
+    .iam-entity-header .page-header-actions .rz-button {
+        min-width: 2.75rem;
+        min-height: 2.75rem;
+    }
+
+    .iam-page-header .page-header-actions .rz-button .rz-button-text,
+    .iam-entity-header .page-header-actions .rz-button .rz-button-text {
+        display: none;
+    }
+
+    .iam-entity-header .page-header-subtitle {
+        margin-left: 0;
+    }
+
+    .iam-section-nav {
+        width: 100%;
+    }
+
+    .iam-section-link {
+        flex: 1 0 auto;
+        min-height: 2.75rem;
+    }
+
+    .iam-detail-card {
+        padding: 0.875rem;
+    }
+
+    .iam-detail-card .rz-stack {
+        max-width: 100%;
+    }
+
+    .role-assignment-toolbar {
+        align-items: stretch;
+    }
+
+    .role-assignment-search,
+    .role-assignment-filter {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+}
+
 .scan-status-clean { color: var(--rz-success); }
 .scan-status-warning { color: var(--rz-warning); }
 .scan-status-unknown { color: var(--rz-secondary); }
@@ -4779,7 +7836,7 @@ textarea:focus-visible,
     .pipeline-branch-dialog-intro { align-items: flex-start; }
 }
 
-/* PLAN-005 4.1: work-items kanban board */
+/* Archived module-finalisation plan, section 4.1: work-items kanban board */
 .kanban-board { display: flex; gap: 1rem; overflow-x: auto; padding-bottom: 0.5rem; align-items: flex-start; }
 .kanban-column { flex: 1 1 0; min-width: 15rem; background: var(--rz-base-200, rgba(128,128,128,0.06)); border-radius: 0.5rem; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
 .kanban-column-header { display: flex; align-items: center; justify-content: space-between; padding: 0.25rem 0.5rem; font-weight: 600; }
@@ -4866,4 +7923,614 @@ textarea:focus-visible,
         padding-top: 0.625rem;
         row-gap: 0.5rem;
     }
+}
+.analysis-finding-problem {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 24%, var(--rz-border-color));
+    border-radius: var(--rz-border-radius);
+    color: var(--rz-text-color);
+    background: color-mix(in srgb, var(--rz-primary) 7%, var(--rz-panel-background-color, var(--rz-base-background-color)));
+}
+
+.analysis-finding-summary-card {
+    color: var(--rz-text-color);
+    background: var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.analysis-finding-tabs > .rz-tabview-panels {
+    padding: 1rem 0 0;
+}
+
+.analysis-finding-tabs .rz-tabview-panel {
+    min-width: 0;
+}
+
+.analysis-decision-card {
+    overflow: hidden;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 32%, transparent);
+    color: var(--rz-text-color);
+    background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--rz-primary) 12%, transparent), transparent 38%),
+        var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.analysis-decision-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    margin-bottom: 1.25rem;
+}
+
+.analysis-decision-icon {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 0.75rem;
+    color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 16%, transparent);
+}
+
+.analysis-decision-icon .rzi {
+    font-size: 1.4rem;
+}
+
+.analysis-decision-help {
+    margin-top: 0.2rem;
+    color: var(--rz-text-secondary-color);
+}
+
+.analysis-decision-layout {
+    display: grid;
+    grid-template-columns: minmax(16rem, 0.9fr) minmax(20rem, 1.5fr);
+    align-items: start;
+    gap: 1.25rem;
+}
+
+.analysis-decision-outcome,
+.analysis-decision-details {
+    min-width: 0;
+}
+
+.analysis-decision-choices {
+    display: grid;
+    gap: 0.625rem;
+    margin-top: 0.75rem;
+}
+
+.analysis-decision-choice {
+    display: grid;
+    grid-template-columns: minmax(8.5rem, 0.8fr) minmax(0, 1.2fr);
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 4rem;
+    padding: 0.625rem;
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, var(--rz-base-700, #292929) 55%, transparent);
+    transition: border-color 120ms ease, background 120ms ease;
+}
+
+.analysis-decision-choice.is-selected {
+    border-color: color-mix(in srgb, var(--rz-primary) 58%, var(--rz-border-color));
+    background: color-mix(in srgb, var(--rz-primary) 9%, var(--rz-base-700, #292929));
+}
+
+.analysis-decision-choice > .rz-button {
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 2.75rem;
+}
+
+.analysis-decision-choice > .rz-text {
+    color: var(--rz-text-secondary-color);
+    line-height: 1.35;
+}
+
+.analysis-decision-details {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, var(--rz-base-700, #292929) 42%, transparent);
+}
+
+.analysis-decision-details .rz-form-field,
+.analysis-decision-details .rz-textarea,
+.analysis-decision-details .rz-datepicker {
+    width: 100%;
+}
+
+.analysis-decision-details .rz-textarea {
+    min-height: 8rem;
+    resize: vertical;
+}
+
+.analysis-decision-field-hint {
+    display: block;
+    margin-top: 0.375rem !important;
+    color: var(--rz-text-secondary-color);
+}
+
+.analysis-decision-details .validation-message {
+    display: block;
+    margin-top: 0.375rem;
+    color: var(--rz-danger);
+    font-size: 0.8125rem;
+}
+
+.analysis-decision-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 18%, transparent);
+}
+
+.analysis-decision-selected {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8125rem;
+}
+
+.analysis-decision-selected strong {
+    color: var(--rz-text-color);
+}
+
+.analysis-finding-problem > .rzi {
+    flex: 0 0 auto;
+    color: var(--rz-primary);
+    font-size: 1.4rem;
+}
+
+.analysis-finding-problem p {
+    margin: 0.3rem 0 0;
+    line-height: 1.5;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+
+.analysis-source-card {
+    border: 0.0625rem solid var(--rz-border-color);
+    color: var(--rz-text-color);
+    background: var(--rz-panel-background-color, var(--rz-base-background-color));
+}
+
+.analysis-source-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.analysis-source-heading > .rzi {
+    color: var(--rz-primary);
+    font-size: 1.25rem;
+}
+
+.analysis-source-location {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0.8rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 24%, var(--rz-border-color));
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--rz-primary) 7%, var(--rz-base-background-color));
+}
+
+.analysis-source-location-link {
+    color: inherit;
+    text-decoration: none;
+    transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.analysis-source-location-link:hover,
+.analysis-source-location-link:focus-visible {
+    border-color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 13%, var(--rz-base-background-color));
+    transform: translateY(-0.0625rem);
+}
+
+.analysis-source-location-link:focus-visible {
+    outline: 0.125rem solid var(--rz-primary);
+    outline-offset: 0.125rem;
+}
+
+.analysis-source-location > .rzi {
+    flex: 0 0 auto;
+    color: var(--rz-primary);
+    font-size: 1.2rem;
+}
+
+.analysis-source-location code {
+    min-width: 0;
+    color: var(--rz-text-color);
+    font-family: var(--rz-code-font-family, monospace);
+    font-size: 0.875rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.analysis-source-location span {
+    flex: 0 0 auto;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999rem;
+    color: var(--rz-primary);
+    background: color-mix(in srgb, var(--rz-primary) 14%, transparent);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.analysis-source-location .analysis-source-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: auto;
+}
+
+.analysis-source-open .rzi {
+    font-size: 0.9rem;
+}
+
+.analysis-source-location-unavailable {
+    color: var(--rz-text-secondary-color);
+}
+
+.analysis-source-metadata {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+    margin-top: 0.75rem;
+}
+
+.analysis-source-metadata > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.65rem;
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: 0.4rem;
+    background: var(--rz-base-background-color);
+}
+
+.analysis-source-metadata span {
+    color: var(--rz-text-secondary-color);
+    font-size: 0.75rem;
+}
+
+.analysis-source-metadata strong {
+    color: var(--rz-text-color);
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
+}
+
+.analysis-source-commit {
+    font-family: var(--rz-code-font-family, monospace);
+}
+
+.analysis-source-excerpt {
+    max-height: 12rem;
+    margin-bottom: 0;
+    padding: 0.75rem;
+    overflow: auto;
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+    color: var(--rz-text-color);
+    background: var(--rz-base-background-color);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.analysis-source-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    margin-top: 0.75rem;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8125rem;
+}
+
+@media (max-width: 37.5rem) {
+    /* These two rails used to fold into a two-column grid here. Every tab rail now stays a single
+       scrolling row on phones (see the 767.98px block), so only the button padding is kept. */
+    .analysis-finding-tabs > .rz-tabview-nav > li > button,
+    .analysis-workspace-tabs > .rz-tabview-nav > li > button {
+        justify-content: center;
+        padding-inline: 0.5rem;
+    }
+
+    .analysis-workspace-panel {
+        padding-inline: 0;
+    }
+
+    .analysis-finding-filters > * {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .analysis-decision-heading {
+        align-items: flex-start;
+    }
+
+    .analysis-decision-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .analysis-decision-choice {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .analysis-decision-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .analysis-decision-actions > .rz-button {
+        width: 100%;
+    }
+
+    .analysis-source-location {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .analysis-source-metadata {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.project-overview-tabs > .rz-tabview-nav > li {
+    flex: 0 0 auto;
+}
+
+.project-overview-tabs > .rz-tabview-nav > li > button {
+    min-height: 2.75rem;
+    padding-inline: 1rem;
+}
+
+.project-overview-tabs > .rz-tabview-panels {
+    padding-top: 0;
+}
+
+.project-readme-panel {
+    max-width: 70rem;
+    margin-inline: auto;
+    padding: 1.25rem 1.5rem;
+    color: var(--rz-text-color);
+    background: color-mix(in srgb, var(--rz-card-background-color) 94%, var(--rz-primary) 6%);
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+}
+
+.project-readme-content {
+    color: var(--rz-text-color);
+}
+
+.project-readme-content h1,
+.project-readme-content h2,
+.project-readme-content h3,
+.project-readme-content h4,
+.project-readme-content p,
+.project-readme-content li,
+.project-readme-content td,
+.project-readme-content th {
+    color: inherit;
+}
+
+.project-readme-content code,
+.project-readme-content pre,
+.project-readme-content th {
+    color: var(--rz-text-color);
+    background: color-mix(in srgb, var(--rz-card-background-color) 72%, var(--rz-text-color) 8%);
+}
+
+.project-readme-content blockquote {
+    color: var(--rz-text-secondary-color);
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 35%, var(--rz-border-color));
+    border-radius: var(--rz-border-radius);
+    background: color-mix(in srgb, var(--rz-primary) 7%, transparent);
+}
+
+.project-changelog-timeline {
+    max-width: 64rem;
+    margin-inline: auto;
+}
+
+.project-changelog-entry {
+    min-width: min(42rem, calc(100vw - 12rem));
+    padding: 0.875rem 1rem;
+    color: var(--rz-text-color);
+    background: color-mix(in srgb, var(--rz-card-background-color) 94%, var(--rz-primary) 6%);
+    border: 0.0625rem solid var(--rz-border-color);
+    border-radius: var(--rz-border-radius);
+    box-shadow: 0 0.125rem 0.5rem color-mix(in srgb, #000 18%, transparent);
+}
+
+.project-changelog-copy {
+    color: var(--rz-text-color);
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 767.98px) {
+    .project-readme-panel {
+        padding: 1rem;
+    }
+
+    .project-changelog-entry {
+        min-width: 0;
+        width: calc(100vw - 6.5rem);
+    }
+}
+
+.project-onboarding {
+    overflow: hidden;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-primary) 22%, var(--rz-border-color));
+    background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--rz-primary) 10%, transparent), transparent 30%),
+        var(--rz-card-background-color);
+}
+
+.project-onboarding-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.project-onboarding-copy {
+    color: var(--rz-text-secondary-color);
+}
+
+.project-onboarding-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.project-onboarding-link {
+    min-width: 0;
+    border-radius: 0.625rem;
+}
+
+.project-onboarding-link:focus-visible {
+    outline: 0.125rem solid var(--rz-primary);
+    outline-offset: 0.125rem;
+}
+
+.git-repositories-grid-empty {
+    display: none;
+}
+
+.project-onboarding-step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    height: 100%;
+    min-height: 7.25rem;
+    padding: 0.875rem;
+    border: 0.0625rem solid color-mix(in srgb, var(--rz-text-color) 13%, transparent);
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, var(--rz-base-700, #292929) 58%, transparent);
+    transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.project-onboarding-step:hover {
+    transform: translateY(-0.125rem);
+    border-color: color-mix(in srgb, var(--rz-primary) 55%, var(--rz-border-color));
+    background: color-mix(in srgb, var(--rz-primary) 7%, var(--rz-base-700, #292929));
+}
+
+.project-onboarding-step-ready {
+    border-color: color-mix(in srgb, var(--rz-success) 42%, var(--rz-border-color));
+    background: color-mix(in srgb, var(--rz-success) 8%, var(--rz-base-700, #292929));
+}
+
+.project-onboarding-step-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.625rem;
+}
+
+.project-onboarding-title {
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.project-onboarding-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.625rem;
+    background: var(--rz-primary-lighter);
+    color: var(--rz-primary);
+    flex: 0 0 auto;
+}
+
+.project-onboarding-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 999rem;
+    color: var(--rz-info);
+    background: color-mix(in srgb, var(--rz-info) 14%, transparent);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.project-onboarding-state .rzi {
+    font-size: 0.875rem;
+}
+
+.project-onboarding-state.is-ready {
+    color: var(--rz-success);
+    background: color-mix(in srgb, var(--rz-success) 14%, transparent);
+}
+
+@media (max-width: 64rem) {
+    .project-onboarding-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .project-onboarding-step {
+        min-height: 0;
+    }
+}
+
+@media (max-width: 37.5rem) {
+    .project-onboarding-heading {
+        align-items: flex-start;
+    }
+
+    .project-onboarding-step-heading {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .project-onboarding-state {
+        grid-column: 2;
+        justify-self: start;
+        min-height: 2.75rem;
+    }
+}
+
+.environment-copy-source {
+    border: 1px solid color-mix(in srgb, var(--rz-primary) 34%, var(--rz-border-color));
+    background: linear-gradient(135deg, color-mix(in srgb, var(--rz-primary) 9%, var(--rz-card-background-color)), var(--rz-card-background-color));
+}
+
+.environment-copy-source__icon {
+    color: var(--rz-primary);
+    font-size: 1.5rem;
+}
+
+.environment-copy-source__hint {
+    color: var(--rz-text-secondary-color);
+    max-width: 34rem;
+}
+
+/* Ten-row floor for EVERY grid built on AetheusDataGrid, not only the virtualised ones. The floor
+   used to live on .aetheus-grid-virtualized alone, so a plain grid - the runs table on a pipeline
+   page among others - had no minimum height and showed its own scrollbar over a handful of rows
+   while empty space remained below. A grid that can take the remaining height still does: this is a
+   floor, not a fixed height, and .aetheus-grid-fullheight keeps overriding it. */
+.aetheus-grid .rz-data-grid-data {
+    min-height: calc(10 * var(--aetheus-grid-row-height));
 }

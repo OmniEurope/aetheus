@@ -11,7 +11,14 @@ public interface IAlertRepository
     Task<AlertRule?> FindAsync(int id, CancellationToken ct = default);
     Task AddAsync(AlertRule rule, CancellationToken ct = default);
     Task AddRangeAsync(IEnumerable<AlertRule> rules, CancellationToken ct = default);
+    Task<int> AddProvisionedRulesIfMissingAsync(
+        IReadOnlyCollection<AlertRule> rules,
+        CancellationToken ct = default);
     Task RemoveAsync(AlertRule rule, CancellationToken ct = default);
     Task<List<ServerMetric>> GetRecentMetricsAsync(int serverId, int seconds, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<int, List<ServerMetric>>> GetRecentMetricsForServersAsync(
+        IReadOnlyCollection<int> serverIds,
+        int seconds,
+        CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
 }

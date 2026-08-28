@@ -16,6 +16,8 @@ public class ProjectPipelinesSectionRenderTests : BunitContext
         _handler = BunitTestHelper.RegisterServices(this);
         _handler.SetJsonResponse("api/pipelines/dependencies", new PipelineDependencyGroupsDto());
         _handler.SetJsonResponse("api/pipelines/runs/recent", new List<PipelineRunDto>());
+        _handler.SetJsonResponse("api/pipelines/favorites", new PipelineFavoritesDto());
+        _handler.SetJsonResponse("api/pipelines/fleet", new PaginatedResult<PipelineFleetItemDto>());
     }
 
     [Fact]

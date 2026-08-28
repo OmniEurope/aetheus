@@ -1,27 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Servers.AgentWizard;
 
-public partial class WizardInstallInstructions
+public partial class WizardInstallInstructions : AgentInstallOptionsComponentBase
 {
-    [Parameter] public string Platform { get; set; } = "linux";
-    [Parameter] public string ServerBaseUrl { get; set; } = string.Empty;
-    [Parameter] public string SiteVersion { get; set; } = "dev";
     [Parameter] public string? Token { get; set; }
-    [Parameter] public bool IncludePipelineRunner { get; set; } = true;
-    [Parameter] public bool IncludeServerManagement { get; set; }
-    [Parameter] public bool IncludeDeploymentAgent { get; set; }
-    [Parameter] public bool IncludePatchManagement { get; set; }
-    [Parameter] public bool IncludeFirewallManagement { get; set; }
-    [Parameter] public bool IncludeDocker { get; set; }
-    [Parameter] public bool DevModeInsecureTls { get; set; }
 
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-
-    private bool IsLinux => string.Equals(Platform, "linux", StringComparison.OrdinalIgnoreCase);
 
     private string[] _linuxStep1 = [];
     private string[] _linuxStep2 = [];

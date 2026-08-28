@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Services;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -97,6 +98,45 @@ public class EnrollmentServiceTests
     }
 
     [Fact]
+    public async Task EnrollAsync_RegistrationPublishesCompatibilityContract()
+    {
+        _configMock["Aetheus:RegistrationToken"].Returns("reg-token-123");
+        _apiClientMock
+            .RegisterAsync(Arg.Any<ServerRegistrationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ServerRegistrationResponse { ServerId = 42, BearerToken = "new-bearer" });
+        var shell = Substitute.For<IShellRunner>();
+        shell.RunExecAsync(
+                "git",
+                Arg.Is<IReadOnlyList<string>>(args => args.SequenceEqual(new[] { "--version" })),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<TimeSpan?>())
+            .Returns(new ShellExecResult(0, "git version 2.50.0", string.Empty));
+        var tempDir = Path.Combine(Path.GetTempPath(), $"aetheus-test-{Guid.NewGuid()}");
+        _agentOptions.WorkDirectory = tempDir;
+        var svc = CreateService(shell);
+
+        try
+        {
+            Assert.True(await svc.EnrollAsync(TestContext.Current.CancellationToken));
+
+            await _apiClientMock.Received(1).RegisterAsync(
+                Arg.Is<ServerRegistrationRequest>(request =>
+                    request.AgentProtocolVersion == AgentProtocol.CurrentVersion
+                    && request.AgentCapabilities != null
+                    && request.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate)
+                    && request.AgentCapabilities.Contains(AgentCapabilities.PipelineBuild)
+                    && request.AgentCapabilities.SequenceEqual(
+                        request.AgentCapabilities.Order(StringComparer.Ordinal))),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public async Task EnrollAsync_Success_SetsCredentialsAndReturnsTrue()
     {
         _configMock["Aetheus:RegistrationToken"].Returns("reg-token-123");
@@ -130,8 +170,8 @@ public class EnrollmentServiceTests
         }
     }
 
-    private EnrollmentService CreateService() =>
-        new(_apiClientMock, _options, _agentState, _configMock, new PassThroughCredentialProtector(), Substitute.For<IShellRunner>(), TimeProvider.System, NullLogger<EnrollmentService>.Instance);
+    private EnrollmentService CreateService(IShellRunner? shell = null) =>
+        new(_apiClientMock, _options, _agentState, _configMock, new PassThroughCredentialProtector(), shell ?? Substitute.For<IShellRunner>(), TimeProvider.System, NullLogger<EnrollmentService>.Instance);
 
     private sealed class PassThroughCredentialProtector : ICredentialProtector
     {

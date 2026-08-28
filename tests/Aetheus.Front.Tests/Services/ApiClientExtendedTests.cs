@@ -38,7 +38,7 @@ public class ApiClientExtendedTests : BunitContext
             TokenValid = true
         });
 
-        var result = await _api.GetServerDiagnosticAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Servers.GetServerDiagnosticAsync(1, Xunit.TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Equal("2.0.0", result.AgentVersion);
     }
@@ -50,7 +50,7 @@ public class ApiClientExtendedTests : BunitContext
     {
         _handler.SetResponse("api/servers/1/diagnostic", System.Net.HttpStatusCode.InternalServerError);
 
-        var result = await _api.GetServerDiagnosticAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Servers.GetServerDiagnosticAsync(1, Xunit.TestContext.Current.CancellationToken);
         Assert.Null(result);
     }
 
@@ -63,7 +63,7 @@ public class ApiClientExtendedTests : BunitContext
     public async Task UpdateAgentAsync_Success()
     {
         _handler.SetJsonResponse("api/servers/1/agent/update", new AgentUpdateResponse { TaskId = 42 });
-        var result = await _api.UpdateAgentAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Servers.UpdateAgentAsync(1, Xunit.TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Equal(42, result.TaskId);
     }
@@ -74,7 +74,7 @@ public class ApiClientExtendedTests : BunitContext
     public async Task UpdateAllAgentsAsync_Success()
     {
         _handler.SetJsonResponse("api/servers/agent/update-all", new AgentUpdateAllResponse { QueuedCount = 5 });
-        var result = await _api.UpdateAllAgentsAsync(Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Servers.UpdateAllAgentsAsync(Xunit.TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Equal(5, result.QueuedCount);
     }
@@ -89,7 +89,7 @@ public class ApiClientExtendedTests : BunitContext
             new() { Id = 1, ServerId = 10, ProjectId = 1 }
         });
 
-        var result = await _api.GetProjectServersAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Projects.GetProjectServersAsync(1, Xunit.TestContext.Current.CancellationToken);
         Assert.Single(result);
     }
 
@@ -100,7 +100,7 @@ public class ApiClientExtendedTests : BunitContext
     {
         _handler.SetJsonResponse("api/projects/1/servers", new ProjectServerDto { Id = 5, ProjectId = 1, ServerId = 10 });
 
-        var result = await _api.CreateProjectServerAsync(1, new CreateProjectServerRequest
+        var result = await _api.Projects.CreateProjectServerAsync(1, new CreateProjectServerRequest
         {
             ServerId = 10,
             DisplayName = "web",
@@ -123,7 +123,7 @@ public class ApiClientExtendedTests : BunitContext
     {
         _handler.SetJsonResponse("api/projects/1/servers/5", new ProjectServerDto { Id = 5, ProjectId = 1, ServerId = 10 });
 
-        var result = await _api.UpdateProjectServerAsync(1, 5, new UpdateProjectServerRequest
+        var result = await _api.Projects.UpdateProjectServerAsync(1, 5, new UpdateProjectServerRequest
         {
             DisplayName = "web-updated",
             Host = "web01-new.example.com"
@@ -144,7 +144,7 @@ public class ApiClientExtendedTests : BunitContext
     {
         _handler.SetJsonResponse("api/projects/1/servers/5", new { });
 
-        var result = await _api.DeleteProjectServerAsync(1, 5, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Projects.DeleteProjectServerAsync(1, 5, Xunit.TestContext.Current.CancellationToken);
         Assert.True(result.Success);
     }
 
@@ -158,7 +158,7 @@ public class ApiClientExtendedTests : BunitContext
             new() { Id = 1, Message = "secret=abc123", Level = Aetheus.Shared.Enums.TaskLogLevel.Info }
         });
 
-        var result = await _api.GetTaskLogsUnmaskedAsync(7, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Monitoring.GetTaskLogsUnmaskedAsync(7, Xunit.TestContext.Current.CancellationToken);
         Assert.Single(result);
         Assert.Contains("abc123", result[0].Message);
     }
@@ -171,7 +171,8 @@ public class ApiClientExtendedTests : BunitContext
             new() { Id = 2, Message = "log line", Level = Aetheus.Shared.Enums.TaskLogLevel.Info }
         });
 
-        var result = await _api.GetTaskLogsUnmaskedAsync(8, CancellationToken.None);
+        var result = await _api.Monitoring.GetTaskLogsUnmaskedAsync(8, CancellationToken.None);
         Assert.Single(result);
     }
 }
+

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -15,22 +11,14 @@ public sealed class PipelineTemplateService(
     TimeProvider timeProvider,
     IOrganizationRepository organizationRepository,
     IPipelineTemplateResolver templateResolver,
+    IEntityChangeNotifier notifier,
     IHttpContextAccessor? httpContextAccessor = null) : IPipelineTemplateService
 {
     private IPipelineTemplateResolver Resolver => templateResolver;
 
     public async Task<List<PipelineTemplateSummaryDto>> GetTemplatesAsync(CancellationToken ct = default)
     {
-        var templates = await repo.GetTemplatesAsync(ct).ConfigureAwait(false);
-        return templates.Select(template => new PipelineTemplateSummaryDto
-        {
-            Id = template.Id,
-            Name = template.Name,
-            Description = template.Description,
-            Category = template.Category,
-            Version = template.LatestVersion,
-            OrganizationId = template.OrganizationId
-        }).ToList();
+        return await repo.GetTemplateSummariesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<PipelineTemplateDto?> GetTemplateAsync(int id, CancellationToken ct = default)
@@ -95,6 +83,12 @@ public sealed class PipelineTemplateService(
         };
         await repo.AddTemplateAsync(template, ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "PipelineTemplate", template.Id, template.Name, ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            ResourceType.PipelineTemplate,
+            template.Id,
+            EntityChangeOps.Created,
+            ct,
+            organizationId).ConfigureAwait(false);
         return MapTemplateToDto(template, template.Versions.Single());
     }
 
@@ -135,6 +129,12 @@ public sealed class PipelineTemplateService(
         }
         await audit.LogAsync("Updated", "PipelineTemplate", template.Id,
             $"{template.Name}@{template.LatestVersion}: {changelog}", ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            ResourceType.PipelineTemplate,
+            template.Id,
+            EntityChangeOps.Updated,
+            ct,
+            template.OrganizationId).ConfigureAwait(false);
         return MapTemplateToDto(template, newVersion);
     }
 
@@ -151,8 +151,15 @@ public sealed class PipelineTemplateService(
             throw new ConflictException(
                 $"Pipeline template '{template.Name}' cannot be deleted while pipelines or templates reference it.");
         var name = template.Name;
+        var organizationId = template.OrganizationId;
         await repo.RemoveTemplateAsync(template, ct).ConfigureAwait(false);
         await audit.LogAsync("Deleted", "PipelineTemplate", id, name, ct).ConfigureAwait(false);
+        await notifier.BroadcastAsync(
+            ResourceType.PipelineTemplate,
+            id,
+            EntityChangeOps.Deleted,
+            ct,
+            organizationId).ConfigureAwait(false);
         return true;
     }
 

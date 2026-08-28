@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: EUPL-1.2
+package fixtures;
+
+public final class QualityNegative {
+    public int add(int left, int right) {
+        return left + right;
+    }
+}

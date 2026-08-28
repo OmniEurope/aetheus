@@ -11,8 +11,19 @@ namespace Aetheus.Shared.DTOs;
 /// </summary>
 public sealed record AgentUpdateResponse
 {
-    /// <summary>Id of the queued self-update <c>ServerTask</c>.</summary>
+    public int ServerId { get; init; }
+    public int? RequestId { get; init; }
+    public string SourceVersion { get; init; } = string.Empty;
+    public string TargetVersion { get; init; } = string.Empty;
+    /// <summary>
+    /// Id of the self-update task, or 0 while existing work is still draining. The non-nullable
+    /// wire shape is retained for N-1 clients that predate deferred queueing.
+    /// </summary>
     public int TaskId { get; init; }
+    public AgentUpdateRequestStatus Status { get; init; }
+    public int BlockingTaskCount { get; init; }
+    public bool ExistingRequest { get; init; }
+    public AgentUpdateQueueOutcome Outcome { get; init; }
 }
 
 /// <summary>
@@ -25,6 +36,34 @@ public sealed record AgentUpdateAllResponse
 
     /// <summary>Ids of the servers a self-update task was queued for.</summary>
     public List<int> ServerIds { get; init; } = [];
+    public int AlreadyUpToDateCount { get; init; }
+    public int OfflineCount { get; init; }
+    public int BusyCount { get; init; }
+    public List<AgentUpdateResponse> Results { get; init; } = [];
+}
+
+public sealed record AgentUpdateAllPreviewDto
+{
+    public string TargetVersion { get; init; } = string.Empty;
+    public int AffectedCount { get; init; }
+    public int AlreadyUpToDateCount { get; init; }
+    public int OfflineCount { get; init; }
+    public int IncompatibleCount { get; init; }
+    public int BusyCount { get; init; }
+}
+
+public sealed record AgentUpdateRequestSummaryDto
+{
+    public int RequestId { get; init; }
+    public string ObservedVersion { get; init; } = string.Empty;
+    public string TargetVersion { get; init; } = string.Empty;
+    public AgentUpdateRequestStatus Status { get; init; }
+    public int BlockingTaskCount { get; init; }
+    public DateTime RequestedAt { get; init; }
+    public DateTime? HandoffAt { get; init; }
+    public DateTime? ConfirmedAt { get; init; }
+    public string? FailureCode { get; init; }
+    public string? FailureDiagnostic { get; init; }
 }
 
 /// <summary>

@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
 internal sealed class PipelineTemplateEditorCoordinator(ApiClient api)
 {
     public Task<List<PipelineTemplateSummaryDto>> LoadTemplatesAsync() =>
-        api.GetPipelineTemplatesAsync();
+        api.PipelineTemplates.GetPipelineTemplatesAsync();
 
     public async Task<string?> LoadBaseYamlAsync(
         string yaml, IReadOnlyCollection<PipelineTemplateSummaryDto> templates)
@@ -16,20 +14,20 @@ internal sealed class PipelineTemplateEditorCoordinator(ApiClient api)
         if (reference is null) return null;
         var summary = FindSummary(reference.Name, templates);
         if (summary is null) return null;
-        var template = await api.GetPipelineTemplateAsync(summary.Id);
+        var template = await api.PipelineTemplates.GetPipelineTemplateAsync(summary.Id);
         if (template is null) return null;
         var version = reference.Version ?? template.Version;
-        return await api.ResolvePipelineTemplateAsync(summary.Id, version);
+        return await api.PipelineTemplates.ResolvePipelineTemplateAsync(summary.Id, version);
     }
 
     public async Task<PipelineTemplateSelection?> SelectAsync(int templateId, string pipelineName)
     {
-        var template = await api.GetPipelineTemplateAsync(templateId);
+        var template = await api.PipelineTemplates.GetPipelineTemplateAsync(templateId);
         if (template is null) return null;
         var serializer = new YamlSerializationService();
         var templateDefinition = serializer.Parse(template.YamlContent);
         if (templateDefinition is null) return null;
-        var resolvedBaseYaml = await api.ResolvePipelineTemplateAsync(template.Id, template.Version);
+        var resolvedBaseYaml = await api.PipelineTemplates.ResolvePipelineTemplateAsync(template.Id, template.Version);
         if (resolvedBaseYaml is null) return null;
         var yaml = serializer.Serialize(new PipelineYamlDefinition
         {
@@ -64,6 +62,12 @@ internal sealed class PipelineTemplateEditorCoordinator(ApiClient api)
         return summary is null
             ? null
             : PipelineTemplateReferenceHelper.Pin(yaml, summary.Name, summary.Version);
+    }
+
+    public async Task<PipelineFleetItemDto?> FindFleetItemAsync(int pipelineId)
+    {
+        try { return await api.Pipelines.GetPipelineFleetItemAsync(pipelineId); }
+        catch (HttpRequestException) { return null; }
     }
 
     private static PipelineTemplateSummaryDto? FindSummary(

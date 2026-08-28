@@ -81,6 +81,43 @@ public class VisualPipelineEditorDeepTests : BunitContext
     }
 
     [Fact]
+    public void LateYamlChangeReloadsPersistedPositionsBeforeShowingNodes()
+    {
+        _handler.SetJsonResponse("api/pipelines/templates", new List<PipelineTemplateSummaryDto>());
+        JSInterop.Setup<LayoutResult>("visualPipeline.computeLayout", _ => true)
+            .SetResult(new LayoutResult
+            {
+                Nodes = [new LayoutNode { Id = "0", X = 0, Y = 0 }]
+            });
+        JSInterop.Setup<VisualPipelineLayoutStore.LayoutBlob>("visualPipeline.loadLayout", _ => true)
+            .SetResult(new VisualPipelineLayoutStore.LayoutBlob
+            {
+                Sig = "5:build",
+                Pos = new Dictionary<string, double[]> { ["0"] = [100, 76.666666666666657] }
+            });
+        var cut = Render<VisualPipelineEditor>(parameters => parameters
+            .Add(component => component.YamlDefinition, SimpleYaml)
+            .Add(component => component.PipelineId, 42)
+            .Add(component => component.AvailableServers, ["linux"])
+            .Add(component => component.AvailableLibraries, [])
+            .Add(component => component.AvailableVaults, []));
+
+        cut.Render(parameters => parameters.Add(
+            component => component.YamlDefinition,
+            SimpleYaml.Replace("echo hello", "echo changed", StringComparison.Ordinal)));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(2, JSInterop.Invocations.Count(invocation =>
+                invocation.Identifier == "visualPipeline.loadLayout"));
+            var nodeStyle = cut.Find(".vp-node").GetAttribute("style");
+            Assert.Contains("--node-x: 100px", nodeStyle, StringComparison.Ordinal);
+            Assert.Contains("--node-y: 76.66666666666666px", nodeStyle, StringComparison.Ordinal);
+            Assert.DoesNotContain("vp-canvas-inner-loading", cut.Markup, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task OnStageSelected_SelectsAndDeselects()
     {
         _handler.SetJsonResponse("api/pipelines/templates", new List<PipelineTemplateSummaryDto>());

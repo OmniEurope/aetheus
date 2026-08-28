@@ -287,4 +287,34 @@ public class ReleasesControllerTests
         Assert.IsType<OkResult>(result);
         await _serviceMock.Received(1).HandleWebhookAsync(Arg.Any<WebhookPayload>(), Arg.Any<CancellationToken>());
     }
+
+    // --- GetServerReleases (relocated from ServersController, route unchanged) ---
+
+    [Fact]
+    public async Task GetServerReleases_Authorized_ReturnsOk()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Read, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _serviceMock.GetServerReleasesAsync(1, Arg.Any<PaginationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PaginatedResult<ReleaseDto>());
+
+        var result = await _sut.GetServerReleases(1, new PaginationRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+    }
+
+    /// <summary>
+    /// The endpoint changed controller, not resource: it is still the SERVER's Read permission that
+    /// gates it. Authorizing against the release scope instead would silently widen access.
+    /// </summary>
+    [Fact]
+    public async Task GetServerReleases_Forbidden_ReturnsForbid()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Read, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var result = await _sut.GetServerReleases(1, new PaginationRequest(), TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
 }

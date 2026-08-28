@@ -31,6 +31,9 @@ public class ComplexityAnalyzerTests
         Assert.Equal(3.5, report.AvgCyclomatic, 2);
         Assert.Equal(0, report.HighComplexityMethods);
         Assert.True(report.TotalLinesOfCode > 0);
+        Assert.Equal("Branchy", report.Hotspots[0].Member);
+        Assert.Equal("C.cs", report.Hotspots[0].Path);
+        Assert.Equal(5, report.Hotspots[0].Line);
     }
 
     [Fact]
@@ -53,6 +56,7 @@ public class ComplexityAnalyzerTests
         Assert.Equal(1, report.TotalMethods);
         Assert.Equal(13, report.MaxCyclomatic);
         Assert.Equal(1, report.HighComplexityMethods);
+        Assert.Equal(13, report.Hotspots[0].Cyclomatic);
     }
 
     [Fact]
@@ -71,6 +75,56 @@ public class ComplexityAnalyzerTests
         Assert.Equal(0, report.TotalMethods);
         Assert.Equal(0, report.MaxCyclomatic);
         Assert.Equal(0, report.AvgCyclomatic);
+        Assert.Empty(report.Hotspots);
         Assert.True(report.TotalLinesOfCode > 0);
     }
+
+    [Fact]
+    public void Analyze_AttributesLambdaAndLocalFunctionComplexityToTheirOwnCallable()
+    {
+        const string src = """
+            public class C
+            {
+                public int Outer(int n)
+                {
+                    int Local(int value) => value > 0 && value < 10 ? value : 0;
+                    return new[] { n }.Where(value => value > 0 || value < -10).Sum(Local);
+                }
+            }
+            """;
+
+        var report = ComplexityAnalyzer.Analyze([("C.cs", src)]);
+
+        Assert.Equal(3, report.TotalMethods);
+        Assert.Equal(3, report.MaxCyclomatic);
+        Assert.Contains(report.Hotspots, item => item.Member == "Local" && item.Cyclomatic == 3);
+        Assert.Contains(report.Hotspots, item => item.Member == "<lambda>" && item.Cyclomatic == 2);
+        Assert.Contains(report.Hotspots, item => item.Member == "Outer" && item.Cyclomatic == 1);
+    }
+
+    [Fact]
+    public void Repository_RemainsWithinCandidateComplexityBudget()
+    {
+        var root = FindRepoRoot();
+        var separator = Path.DirectorySeparatorChar;
+        var sources = RepositoryScan.Enumerate(root, "*.cs")
+            .Where(path => !path.Contains($"{separator}bin{separator}", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains($"{separator}obj{separator}", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains($"{separator}node_modules{separator}", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains($"{separator}.git{separator}", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains($"{separator}.vs{separator}", StringComparison.OrdinalIgnoreCase))
+            .Select(path => (path, File.ReadAllText(path)));
+
+        var report = ComplexityAnalyzer.Analyze(sources);
+        var details = string.Join(
+            Environment.NewLine,
+            report.Hotspots.Select(item =>
+                $"CC {item.Cyclomatic}: {Path.GetRelativePath(root, item.Path)}:{item.Line} ({item.Member})"));
+
+        Assert.True(
+            report.MaxCyclomatic <= 25,
+            $"Repository max cyclomatic complexity is {report.MaxCyclomatic}; candidate budget is 25.{Environment.NewLine}{details}");
+    }
+
+    private static string FindRepoRoot() => Aetheus.Agent.Core.Tests.RepositoryScan.Root;
 }

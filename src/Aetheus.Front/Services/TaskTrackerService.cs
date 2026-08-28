@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Services;
 
@@ -39,9 +36,11 @@ public sealed class TaskTrackerService : IAsyncDisposable
 
     /// <summary>Fired whenever the visible set changes. UI subscribers re-render.</summary>
     public event Action? OnChanged;
+    public event Action<TaskCompletedNotification>? OnTaskCompleted;
 
     /// <summary>Current SignalR connection state for the global status indicator.</summary>
     public HubConnectionState ConnectionState => _hub?.State ?? HubConnectionState.Disconnected;
+    internal bool IsInitialized => _hub is not null;
 
     /// <summary>Fired on connection state transitions (connected/reconnecting/disconnected).</summary>
     public event Action? OnConnectionStateChanged;
@@ -93,7 +92,7 @@ public sealed class TaskTrackerService : IAsyncDisposable
         _hub = _hubFactory.Create("servers", new NotifyingRetryPolicy(this));
         _hub.On<ServerTaskDto>("TaskQueued", task => Upsert(task));
         _hub.On<TaskStartedEvent>("TaskStarted", evt => MarkRunning(evt.TaskId, evt.StartedAt));
-        _hub.On<TaskCompletedNotification>("TaskCompleted", evt => RemoveOnTerminal(evt.TaskId));
+        _hub.On<TaskCompletedNotification>("TaskCompleted", HandleTerminal);
 
         // Refetch from /active after every (re)connect to recover any events missed while
         // disconnected. Same call seeds the initial set on first connect.
@@ -148,31 +147,47 @@ public sealed class TaskTrackerService : IAsyncDisposable
 
     private async Task InitialRetryLoopAsync(CancellationToken token)
     {
-        var attempt = 0;
-        while (!token.IsCancellationRequested && _hub is not null && _auth.IsAuthenticated)
+        var connected = await RetryUntilConnectedAsync(
+            ConnectOnceAsync,
+            RetryDelays,
+            delay => OnReconnectAttempt?.Invoke(delay),
+            () => _hub is not null && _auth.IsAuthenticated,
+            token).ConfigureAwait(false);
+        if (connected)
         {
-            var delay = RetryDelays[Math.Min(attempt, RetryDelays.Count - 1)];
-            OnReconnectAttempt?.Invoke((int)delay.TotalSeconds);
-            try { await Task.Delay(delay, token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
-            if (token.IsCancellationRequested || _hub is null) return;
+            // Connected: retire the retry CTS instead of leaking it until the next Stop/Dispose.
+            _startRetryCts?.Dispose();
+            _startRetryCts = null;
+        }
+    }
 
-            if (await ConnectOnceAsync(token).ConfigureAwait(false))
-            {
-                // Connected: retire the retry CTS instead of leaking it until the next Stop/Dispose.
-                _startRetryCts?.Dispose();
-                _startRetryCts = null;
-                return;
-            }
+    internal static async Task<bool> RetryUntilConnectedAsync(
+        Func<CancellationToken, Task<bool>> connectAsync,
+        IReadOnlyList<TimeSpan> delays,
+        Action<int> onAttempt,
+        Func<bool> canRetry,
+        CancellationToken token)
+    {
+        var attempt = 0;
+        while (!token.IsCancellationRequested && canRetry())
+        {
+            var delay = delays[Math.Min(attempt, delays.Count - 1)];
+            onAttempt((int)delay.TotalSeconds);
+            try { await Task.Delay(delay, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return false; }
+            if (token.IsCancellationRequested || !canRetry()) return false;
+            if (await connectAsync(token).ConfigureAwait(false))
+                return true;
             attempt++;
         }
+        return false;
     }
 
     private async Task SeedActiveAsync(CancellationToken ct)
     {
         try
         {
-            var active = await _api.GetActiveTasksAsync(ct).ConfigureAwait(false);
+            var active = await _api.Pipelines.GetActiveTasksAsync(ct).ConfigureAwait(false);
             lock (_gate)
             {
                 _byId.Clear();
@@ -208,12 +223,13 @@ public sealed class TaskTrackerService : IAsyncDisposable
         OnChanged?.Invoke();
     }
 
-    private void RemoveOnTerminal(int taskId)
+    private void HandleTerminal(TaskCompletedNotification notification)
     {
         bool removed;
         lock (_gate)
-            removed = _byId.Remove(taskId);
+            removed = _byId.Remove(notification.TaskId);
         if (removed) OnChanged?.Invoke();
+        OnTaskCompleted?.Invoke(notification);
     }
 
     /// <summary>
@@ -237,13 +253,16 @@ public sealed class TaskTrackerService : IAsyncDisposable
     /// </summary>
     public async Task StopAsync(bool clearTasks = true)
     {
-        if (_hub is null) return;
         _startRetryCts?.Cancel();
         _startRetryCts?.Dispose();
         _startRetryCts = null;
-        try { await _hub.DisposeAsync().ConfigureAwait(false); }
-        catch (Exception ex) { _logger.LogDebug(ex, "[TaskTracker] hub dispose error"); }
+        var hub = _hub;
         _hub = null;
+        if (hub is not null)
+        {
+            try { await hub.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "[TaskTracker] hub dispose error"); }
+        }
         if (clearTasks)
         {
             lock (_gate) _byId.Clear();

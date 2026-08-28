@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -12,6 +9,43 @@ internal sealed class PipelineTemplateRepository(AppDbContext db)
         await db.PipelineTemplates.AsNoTracking()
             .OrderBy(template => template.Category)
             .ThenBy(template => template.Name)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+    public async Task<List<PipelineTemplateSummaryDto>> GetTemplateSummariesAsync(
+        CancellationToken ct = default) =>
+        await db.PipelineTemplates.AsNoTracking()
+            .OrderBy(template => template.Name)
+            .Select(template => new PipelineTemplateSummaryDto
+            {
+                Id = template.Id,
+                Name = template.Name,
+                Description = template.Description,
+                Category = template.Category,
+                Version = template.LatestVersion,
+                OrganizationId = template.OrganizationId,
+                UpdatedAt = template.UpdatedAt,
+                PipelineCount = db.Pipelines.Count(pipeline =>
+                    pipeline.TemplateReferenceName != null
+                    && pipeline.TemplateReferenceName.ToLower() == template.Name.ToLower()
+                    && (pipeline.Project != null
+                            && pipeline.Project.OrganizationId == template.OrganizationId
+                        || pipeline.Environment != null
+                            && pipeline.Environment.Project != null
+                            && pipeline.Environment.Project.OrganizationId == template.OrganizationId
+                        || pipeline.ProjectServer != null
+                            && pipeline.ProjectServer.Project.OrganizationId == template.OrganizationId)),
+                LatestRunAt = db.PipelineRuns
+                    .Where(run => run.Pipeline.TemplateReferenceName != null
+                        && run.Pipeline.TemplateReferenceName.ToLower() == template.Name.ToLower()
+                        && (run.Pipeline.Project != null
+                                && run.Pipeline.Project.OrganizationId == template.OrganizationId
+                            || run.Pipeline.Environment != null
+                                && run.Pipeline.Environment.Project != null
+                                && run.Pipeline.Environment.Project.OrganizationId == template.OrganizationId
+                            || run.Pipeline.ProjectServer != null
+                                && run.Pipeline.ProjectServer.Project.OrganizationId == template.OrganizationId))
+                    .Max(run => (DateTime?)run.StartedAt)
+            })
             .ToListAsync(ct).ConfigureAwait(false);
 
     public async Task<PipelineTemplate?> GetTemplateAsync(int id, CancellationToken ct = default) =>

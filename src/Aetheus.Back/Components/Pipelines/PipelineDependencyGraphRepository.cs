@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
-using Aetheus.Shared.DTOs;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 /// <summary>Read-only projection used by the pipeline parent/leaf graph.</summary>
 internal sealed class PipelineDependencyGraphRepository(AppDbContext db)
 {
-    internal Task<List<PipelineDto>> GetAsync(List<int>? accessibleIds = null, CancellationToken ct = default)
+    internal Task<List<PipelineDto>> GetAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default)
     {
         var query = db.Pipelines.AsNoTracking().AsQueryable();
         if (accessibleIds is not null)
             query = query.Where(p => accessibleIds.Contains(p.Id));
+        if (serverId.HasValue)
+        {
+            var usedPipelineIds = db.PipelineStepRuns
+                .Where(step => step.ServerId == serverId.Value)
+                .Select(step => step.PipelineRun.PipelineId)
+                .Distinct();
+            query = query.Where(pipeline => usedPipelineIds.Contains(pipeline.Id));
+        }
 
         return Project(query.OrderBy(pipeline => pipeline.Name))
             .AsSplitQuery()

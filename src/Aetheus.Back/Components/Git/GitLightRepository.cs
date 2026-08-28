@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -35,6 +33,20 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
         List<int>? projectIds, int? projectId, string? search, string? sortBy,
         bool sortDescending, int page, int pageSize, CancellationToken ct = default)
     {
+        var query = FilterAccessible(projectIds, projectId, search);
+        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
+        var items = await OrderAccessible(query, sortBy, sortDescending)
+            .Include(r => r.Project)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return (items, totalCount);
+    }
+
+    private IQueryable<GitInternalRepo> FilterAccessible(
+        List<int>? projectIds, int? projectId, string? search)
+    {
         IQueryable<GitInternalRepo> query = db.GitInternalRepos.AsNoTracking();
         if (projectIds is not null)
             query = query.Where(r => projectIds.Contains(r.ProjectId));
@@ -45,9 +57,12 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
                 || r.Slug.Contains(search)
                 || (r.Description != null && r.Description.Contains(search))
                 || r.Project.Name.Contains(search));
+        return query;
+    }
 
-        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var ordered = (sortBy, sortDescending) switch
+    private static IOrderedQueryable<GitInternalRepo> OrderAccessible(
+        IQueryable<GitInternalRepo> query, string? sortBy, bool sortDescending) =>
+        (sortBy, sortDescending) switch
         {
             ("ProjectName", false) => query.OrderBy(r => r.Project.Name).ThenBy(r => r.Name),
             ("ProjectName", true) => query.OrderByDescending(r => r.Project.Name).ThenBy(r => r.Name),
@@ -62,14 +77,6 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
             ("Name", true) => query.OrderByDescending(r => r.Name),
             _ => query.OrderBy(r => r.Name)
         };
-        var items = await ordered
-            .Include(r => r.Project)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-        return (items, totalCount);
-    }
 
     public async Task<GitInternalRepo?> FindByIdAsync(int id, CancellationToken ct = default)
     {
@@ -174,4 +181,23 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
         db.BranchProtectionRules.Remove(rule);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
+
+    // --- Own-reads over PipelineRun ---------------------------------------------------------------
+    // Two single-column reads this module obtained by injecting IPipelineRepository, which is what
+    // kept Git inside the cycle with Pipelines. Both loaded a full run with its pipeline to keep one
+    // value; neither writes anything.
+
+    /// <summary>Whether a run is still executing - the gate on serving a run-scoped clone token.</summary>
+    public async Task<bool> IsRunActiveAsync(int runId, CancellationToken ct = default) =>
+        await db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == runId)
+            .Select(run => run.Status)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false) == PipelineStatus.Running;
+
+    /// <summary>Project behind a run, for authorizing a run-scoped git operation.</summary>
+    public async Task<int?> GetRunProjectIdAsync(int pipelineRunId, CancellationToken ct = default) =>
+        await db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == pipelineRunId)
+            .Select(run => run.Pipeline.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 }

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
 using Aetheus.Shared.DTOs.Organizations;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Organizations;
 
@@ -21,13 +16,13 @@ public partial class OrganizationDialog
     private bool _isNew => Organization is null;
     private bool _saving;
     private string? _error;
-    private CreateOrganizationRequest _model = new();
+    private OrganizationFormModel _model = new();
 
     protected override void OnInitialized()
     {
         if (Organization is not null)
         {
-            _model = new CreateOrganizationRequest
+            _model = new OrganizationFormModel
             {
                 Name = Organization.Name,
                 Slug = Organization.Slug,
@@ -46,16 +41,11 @@ public partial class OrganizationDialog
             OrganizationDto? result;
             if (_isNew)
             {
-                result = await Api.CreateOrganizationAsync(_model);
+                result = await Api.Servers.CreateOrganizationAsync(_model.ToCreateRequest());
             }
             else
             {
-                result = await Api.UpdateOrganizationAsync(Organization!.Id, new UpdateOrganizationRequest
-                {
-                    Name = _model.Name,
-                    Slug = _model.Slug,
-                    Description = _model.Description
-                });
+                result = await Api.Servers.UpdateOrganizationAsync(Organization!.Id, _model.ToUpdateRequest());
             }
 
             if (result is not null)

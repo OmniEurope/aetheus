@@ -72,12 +72,12 @@ else
     </RadzenColumn>
     <RadzenColumn Size="12" SizeSM="6" SizeMD="4" SizeLG="2">
         <RadzenCard class="stat-card stat-card-success">
-            <RadzenIcon Icon="monitor_heart" class="stat-card-icon rz-color-success" />
-            <div>
-                <RadzenText TextStyle="TextStyle.Subtitle2">@L["MonitoredApps"]</RadzenText>
-                <RadzenText TextStyle="TextStyle.H3">@(_appSummary is null ? "-" : (_appSummary.UpCount + _appSummary.DownCount + _appSummary.DegradedCount + _appSummary.UnknownCount).ToString())</RadzenText>
-            </div>
-        </RadzenCard>
+                <RadzenIcon Icon="monitor_heart" class="stat-card-icon rz-color-success" />
+                <div>
+                    <RadzenText TextStyle="TextStyle.Subtitle2">@L["MonitoredApps"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H3">@(_appSummary?.TotalCount.ToString() ?? "-")</RadzenText>
+                </div>
+            </RadzenCard>
     </RadzenColumn>
 </RadzenRow>
 
@@ -86,12 +86,12 @@ else
         <RadzenCard class="dashboard-tile">
             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="dashboard-tile-title rz-mb-2">
                 <RadzenIcon Icon="dns" />
-                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["Servers"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Servers"]</RadzenText>
             </RadzenStack>
-            <RadzenDataGrid Data="@(_dashboard?.Servers)" TItem="ServerDto" AllowSorting="true" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@(_dashboard?.Servers)" TItem="ServerDto" AllowSorting="true" Density="Density.Compact"
                 IsLoading="@(_dashboard is null)"
                 EmptyText="@L["NoRecords"]" AllowFiltering="true" FilterMode="FilterMode.Advanced" RowClick="@(args => { if (args.Data is not null) Nav.NavigateTo($"/servers/{args.Data.Id}/overview"); })"
-                class="dashboard-clickable-grid">
+                class="dashboard-clickable-grid" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                 <EmptyTemplate>
                     <EmptyState Icon="dns" Title="@L["EmptyDashboardServers"]" />
                 </EmptyTemplate>
@@ -148,7 +148,7 @@ else
                                    shown as a muted marker - distinct from a reported "no capabilities" (all false = no icons). *@
                                 @if (server.PipelineRunnerEnabled is null && server.DeploymentTargetAvailable is null && server.PackageManagementAvailable is null)
                                 {
-                                    <RadzenIcon Icon="help_outline" class="rz-color-secondary" title="@L["CapUnknown"]" role="img" aria-label="@L["CapUnknown"]" />
+                                    <RadzenIcon Icon="help" class="rz-color-secondary" title="@L["CapUnknown"]" role="img" aria-label="@L["CapUnknown"]" />
                                 }
                                 @* S-UX-CDTT: when the agent reported capability diagnostics (a drop-in unreadable,
                                    sudo blocked), surface them in a rich tooltip so the operator sees WHY a capability
@@ -169,45 +169,26 @@ else
         <RadzenCard class="dashboard-tile">
             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="dashboard-tile-title rz-mb-2">
                 <RadzenIcon Icon="history" />
-                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["RecentRuns"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["RecentRuns"]</RadzenText>
             </RadzenStack>
-            <RadzenDataGrid Data="@(_dashboard?.RecentRuns)" TItem="PipelineRunDto" Density="Density.Compact"
-                IsLoading="@(_dashboard is null)"
-                AllowSorting="true"
-                EmptyText="@L["NoRecords"]" AllowFiltering="true" FilterMode="FilterMode.Advanced" RowClick="@(args => { if (args.Data is not null) Nav.NavigateTo($"/pipelines/runs/{args.Data.Id}"); })"
-                class="dashboard-clickable-grid">
-                <EmptyTemplate>
-                    <EmptyState Icon="play_circle" Title="@L["EmptyDashboardRuns"]" />
-                </EmptyTemplate>
-                <Columns>
-                    <RadzenDataGridColumn Property="Id" Title="@L["RunId"]" Width="6rem">
-                        <Template Context="run">
-                            <span @onclick:stopPropagation="true">
-                                <RadzenLink Path="@($"/pipelines/runs/{run.Id}")" Text="@($"#{run.Id}")" />
-                            </span>
-                        </Template>
-                    </RadzenDataGridColumn>
-                    <RadzenDataGridColumn Property="PipelineName" Title="@L["Pipeline"]" MinWidth="11rem" />
-                    <RadzenDataGridColumn Property="Status" Title="@L["Status"]" MinWidth="7rem">
-                        <Template Context="run">
-                            <RadzenBadge BadgeStyle="@GetRunBadge(run.Status)" Text="@L.Localize(run.Status)" />
-                        </Template>
-                    </RadzenDataGridColumn>
-                    <RadzenDataGridColumn Property="StartedAt" Title="@L["Started"]" FormatString="{0:g}" MinWidth="9rem" />
-                </Columns>
-            </RadzenDataGrid>
+            @* The dashboard lists runs from every project, so the project is part of reading a row:
+               without it two runs of same-named pipelines in different projects are indistinguishable.
+               (GroupByProject only controls the column's visibility here, it groups nothing.) *@
+            <PipelineRunsGrid Items="@(_dashboard?.RecentRuns ?? [])" Compact="true" ShowDurationInCompact="true" GroupByProject="true" AllowPaging="@(!AetheusGrid.Virtualization)"
+                IsLoading="@(_dashboard is null)" PageSize="10" MaxGroups="10" CssClass="dashboard-clickable-grid"
+                EmptyTitleKey="EmptyDashboardRuns" EmptyDescriptionKey="EmptyDashboardRuns" />
         </RadzenCard>
     </RadzenColumn>
     <RadzenColumn Size="12" SizeMD="6">
         <RadzenCard class="dashboard-tile">
             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="dashboard-tile-title rz-mb-2">
                 <RadzenIcon Icon="folder" />
-                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["Projects"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Projects"]</RadzenText>
             </RadzenStack>
-            <RadzenDataGrid Data="@(_dashboard?.Projects)" TItem="ProjectDto" AllowSorting="true" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@(_dashboard?.Projects)" TItem="ProjectDto" AllowSorting="true" Density="Density.Compact"
                 IsLoading="@(_dashboard is null)"
                 EmptyText="@L["NoRecords"]" AllowFiltering="true" FilterMode="FilterMode.Advanced" RowClick="@(args => { if (args.Data is not null) Nav.NavigateTo($"/projects/{args.Data.Id}"); })"
-                class="dashboard-clickable-grid">
+                class="dashboard-clickable-grid" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                 <EmptyTemplate>
                     <EmptyState Icon="folder" Title="@L["EmptyDashboardProjects"]" />
                 </EmptyTemplate>
@@ -231,7 +212,7 @@ else
             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-2">
                 <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
                     <RadzenIcon Icon="monitor_heart" />
-                    <RadzenText TextStyle="TextStyle.H6" class="rz-mb-0">@L["MonitoredApps"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H5" class="rz-mb-0">@L["MonitoredApps"]</RadzenText>
                 </RadzenStack>
                 <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center">
                     <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@($"{_appSummary?.UpCount ?? 0} {L["AppHealthUp"]}")" />
@@ -246,12 +227,12 @@ else
                     }
                 </RadzenStack>
             </RadzenStack>
-            <RadzenDataGrid Data="@(_appSummary?.Troubled)" TItem="MonitoredAppStatusDto" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@(_appSummary?.Applications)" TItem="MonitoredAppStatusDto" Density="Density.Compact"
                 IsLoading="@(_appSummary is null)"
-                EmptyText="@L["NoTroubledApps"]" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" RowClick="@(args => { if (args.Data is not null) Nav.NavigateTo($"/projects/{args.Data.ProjectId}/monitoring"); })"
-                class="dashboard-clickable-grid">
+                EmptyText="@L["NoMonitoredApps"]" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" RowClick="@(args => { if (args.Data is not null) Nav.NavigateTo($"/projects/{args.Data.ProjectId}/monitoring"); })"
+                class="dashboard-clickable-grid" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                 <EmptyTemplate>
-                    <EmptyState Icon="monitor_heart" Title="@L["NoTroubledApps"]" />
+                    <EmptyState Icon="monitor_heart" Title="@L["NoMonitoredApps"]" />
                 </EmptyTemplate>
                 <Columns>
                     <RadzenDataGridColumn Property="Name" Title="@L["Name"]" MinWidth="9rem">
@@ -261,12 +242,21 @@ else
                             </span>
                         </Template>
                     </RadzenDataGridColumn>
-                    <RadzenDataGridColumn Property="ProjectName" Title="@L["Project"]" MinWidth="8rem" />
                     <RadzenDataGridColumn Property="CurrentStatus" Title="@L["Status"]" Width="9rem">
                         <Template Context="app">
                             <RadzenBadge BadgeStyle="@GetAppHealthBadge(app.CurrentStatus)" Text="@L[$"AppHealth{app.CurrentStatus}"]" />
                         </Template>
                     </RadzenDataGridColumn>
+                    <RadzenDataGridColumn Property="OnlineVisitorCount" Title="@L["CurrentVisitors"]" Width="8rem"
+                        Visible="@(_appSummary?.Applications.Any(app => app.OnlineVisitorCount.HasValue) == true)">
+                        <Template Context="app">
+                            @if (app.OnlineVisitorCount is int onlineVisitors)
+                            {
+                                <span title="@L["OnlineUsersAvailable"]">@onlineVisitors</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn Property="ProjectName" Title="@L["Project"]" MinWidth="8rem" />
                     <RadzenDataGridColumn Property="LastStatusChangeAt" Title="@L["Since"]" FormatString="{0:g}" Width="10rem" />
                 </Columns>
             </RadzenDataGrid>

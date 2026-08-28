@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -10,11 +9,15 @@ public class Pipeline
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string YamlDefinition { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? TemplateReferenceName { get; set; }
+    public int? TemplateReferenceVersion { get; set; }
     public PipelineTriggerType TriggerType { get; set; } = PipelineTriggerType.Manual;
 
     // Exactly-one-owner: exactly one of ProjectId / EnvironmentId / ProjectServerId is set
     // (legacy rows may have all null until re-saved). Enforced in the service layer.
     public int? ProjectId { get; set; }
+    public int? SourceRepositoryId { get; set; }
     [MaxLength(255)]
     public string? SourceBranch { get; set; }
     public int? EnvironmentId { get; set; }
@@ -29,11 +32,21 @@ public class Pipeline
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    /// <summary>
+    /// Highest build number issued to a run of this pipeline. Monotonic and independent of run
+    /// retention, so an application version derived from it never repeats or goes backwards even
+    /// after old runs are purged. Reserved under a row lock (see
+    /// <c>PipelineCoreRepository.ReserveNextBuildNumberAsync</c>) and snapshotted onto the run as
+    /// <see cref="PipelineRun.BuildNumber"/>.
+    /// </summary>
+    public int BuildCounter { get; set; }
+
     [ConcurrencyCheck]
     public Guid RowVersion { get; set; } = Guid.NewGuid();
 
     // Navigation
     public Project? Project { get; set; }
+    public GitInternalRepo? SourceRepository { get; set; }
     public Environment? Environment { get; set; }
     public ProjectServer? ProjectServer { get; set; }
     public List<PipelineRun> Runs { get; set; } = [];

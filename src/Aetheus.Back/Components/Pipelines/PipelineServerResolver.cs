@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Shared;
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -23,14 +19,14 @@ internal sealed class PipelineServerResolver(AppDbContext db)
         // When no specific agent is requested (empty / "default"), pick any online pipeline runner.
         if (string.IsNullOrEmpty(agent) || agent.Equals("default", StringComparison.OrdinalIgnoreCase))
         {
-            return await db.Servers
+            return await db.Servers.WhereAgentCan(AgentCapabilities.PipelineBuild)
                 .Where(s => s.Status == ServerStatus.Online && s.PipelineRunnerEnabled)
                 .Where(s => requiredOs == OsType.Unknown || s.OsType == requiredOs)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         }
 
         // Fast path: indexed name match.
-        var byName = await db.Servers
+        var byName = await db.Servers.WhereAgentCan(AgentCapabilities.PipelineBuild)
             .Where(s => s.Status == ServerStatus.Online && s.PipelineRunnerEnabled && s.Name == agent)
             .Where(s => requiredOs == OsType.Unknown || s.OsType == requiredOs)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
@@ -38,7 +34,7 @@ internal sealed class PipelineServerResolver(AppDbContext db)
 
         // Tag match: load only the (small) set of online servers and do exact JSON-array
         // membership in memory. O(N_online) instead of O(N_total) substring scan.
-        var candidates = await db.Servers
+        var candidates = await db.Servers.WhereAgentCan(AgentCapabilities.PipelineBuild)
             .Where(s => s.Status == ServerStatus.Online && s.PipelineRunnerEnabled && s.Tags != null && s.Tags != "")
             .Where(s => requiredOs == OsType.Unknown || s.OsType == requiredOs)
             .Select(s => new { s.Id, s.Tags })
@@ -56,7 +52,7 @@ internal sealed class PipelineServerResolver(AppDbContext db)
     public async Task<Server?> FindOnlineServerByAgentInOrganizationAsync(
         string agent, OsType requiredOs, int organizationId, CancellationToken ct = default)
     {
-        var candidates = await db.Servers
+        var candidates = await db.Servers.WhereAgentCan(AgentCapabilities.PipelineBuild)
             .Where(s => s.OrganizationId == organizationId
                         && s.Status == ServerStatus.Online
                         && s.PipelineRunnerEnabled)
@@ -98,66 +94,51 @@ internal sealed class PipelineServerResolver(AppDbContext db)
     }
 
     public async Task<Server?> FindOnlineServerInPoolAsync(string poolName, OsType requiredOs = OsType.Unknown, CancellationToken ct = default)
-    {
-        // Item #11 secure-by-default: PipelineRunnerEnabled must be true (see entity comment).
-        return await db.AgentPoolServers
-            .Where(aps => aps.AgentPool.Name == poolName
-                          && aps.Server.Status == ServerStatus.Online
-                          && aps.Server.PipelineRunnerEnabled)
-            .Where(aps => requiredOs == OsType.Unknown || aps.Server.OsType == requiredOs)
-            .Select(aps => aps.Server)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-    }
+        => await FindOnlineServerAsync(
+            db.AgentPoolServers.Where(item => item.AgentPool.Name == poolName).Select(item => item.Server),
+            requiredOs,
+            organizationId: null,
+            ct).ConfigureAwait(false);
 
     public async Task<Server?> FindOnlineServerInPoolInOrganizationAsync(
         string poolName, OsType requiredOs, int organizationId, CancellationToken ct = default)
-    {
-        return await db.AgentPoolServers
-            .Where(aps => aps.AgentPool.Name == poolName
-                          && aps.Server.OrganizationId == organizationId
-                          && aps.Server.Status == ServerStatus.Online
-                          && aps.Server.PipelineRunnerEnabled)
-            .Where(aps => requiredOs == OsType.Unknown || aps.Server.OsType == requiredOs)
-            .Select(aps => aps.Server)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-    }
+        => await FindOnlineServerAsync(
+            db.AgentPoolServers.Where(item => item.AgentPool.Name == poolName).Select(item => item.Server),
+            requiredOs,
+            organizationId,
+            ct).ConfigureAwait(false);
 
     public async Task<Server?> FindOnlineServerInEnvironmentAsync(string environmentName, OsType requiredOs = OsType.Unknown, CancellationToken ct = default)
-    {
-        // Item #11 secure-by-default: PipelineRunnerEnabled must be true (see entity comment).
-        return await db.EnvironmentServers
-            .Where(es => es.Environment.Name == environmentName
-                         && es.Server.Status == ServerStatus.Online
-                         && es.Server.PipelineRunnerEnabled)
-            .Where(es => requiredOs == OsType.Unknown || es.Server.OsType == requiredOs)
-            .Select(es => es.Server)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-    }
+        => await FindOnlineServerAsync(
+            db.EnvironmentServers.Where(item => item.Environment.Name == environmentName).Select(item => item.Server),
+            requiredOs,
+            organizationId: null,
+            ct).ConfigureAwait(false);
 
     public async Task<Server?> FindOnlineServerInEnvironmentInOrganizationAsync(
         string environmentName, OsType requiredOs, int organizationId, CancellationToken ct = default)
-    {
-        return await db.EnvironmentServers
-            .Where(es => es.Environment.Name == environmentName
-                         && es.Server.OrganizationId == organizationId
-                         && es.Server.Status == ServerStatus.Online
-                         && es.Server.PipelineRunnerEnabled)
-            .Where(es => requiredOs == OsType.Unknown || es.Server.OsType == requiredOs)
-            .Select(es => es.Server)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-    }
+        => await FindOnlineServerAsync(
+            db.EnvironmentServers.Where(item => item.Environment.Name == environmentName).Select(item => item.Server),
+            requiredOs,
+            organizationId,
+            ct).ConfigureAwait(false);
 
     // Always-runnable fallback: any online pipeline-runner, scoped to the project's organization
     // when known. A project/environment pipeline must run regardless of whether a pool/environment/
     // server was specified - only a total absence of online org runners blocks it.
     public async Task<Server?> FindOnlineServerByIdAsync(int serverId, OsType requiredOs = OsType.Unknown, CancellationToken ct = default)
     {
-        return await db.Servers
-            .Where(s => s.Id == serverId && s.Status == ServerStatus.Online)
+        return await db.Servers.WhereAgentCan(AgentCapabilities.PipelineBuild)
+            .Where(s => s.Id == serverId
+                        && s.Status == ServerStatus.Online
+                        && s.PipelineRunnerEnabled)
             .Where(s => requiredOs == OsType.Unknown || s.OsType == requiredOs)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
     }
+
+    public Task<Server?> FindServerByIdAsync(int serverId, CancellationToken ct = default)
+        => db.Servers.FirstOrDefaultAsync(server => server.Id == serverId, ct);
 
     public async Task<int?> GetRunAffinityServerIdAsync(int runId, CancellationToken ct = default)
     {
@@ -189,53 +170,105 @@ internal sealed class PipelineServerResolver(AppDbContext db)
         var hasAgentSelector = !string.IsNullOrEmpty(agent)
             && !agent.Equals("default", StringComparison.OrdinalIgnoreCase);
         var hasExplicitSelector = !string.IsNullOrEmpty(pool) || !string.IsNullOrEmpty(environment) || hasAgentSelector;
-        var selectedIds = new List<int>();
-
+        List<int> selectedIds;
         if (!string.IsNullOrEmpty(pool))
-        {
-            var query = db.AgentPoolServers.Where(aps => aps.AgentPool.Name == pool);
-            if (deploymentStage) query = query.Where(aps => aps.Server.DeploymentTargetAvailable);
-            else query = query.Where(aps => aps.Server.PipelineRunnerEnabled);
-            if (organizationId is { } orgId) query = query.Where(aps => aps.Server.OrganizationId == orgId);
-            if (requiredOs != OsType.Unknown) query = query.Where(aps => aps.Server.OsType == requiredOs);
-            selectedIds = await query.Select(aps => aps.ServerId).Distinct().ToListAsync(ct).ConfigureAwait(false);
-        }
+            selectedIds = await FindPoolCandidateIdsAsync(
+                pool, requiredOs, organizationId, deploymentStage, ct).ConfigureAwait(false);
         else if (!string.IsNullOrEmpty(environment))
-        {
-            var query = db.EnvironmentServers.Where(es => es.Environment.Name == environment);
-            if (deploymentStage) query = query.Where(es => es.Server.DeploymentTargetAvailable);
-            else query = query.Where(es => es.Server.PipelineRunnerEnabled);
-            if (organizationId is { } orgId) query = query.Where(es => es.Server.OrganizationId == orgId);
-            if (requiredOs != OsType.Unknown) query = query.Where(es => es.Server.OsType == requiredOs);
-            selectedIds = await query.Select(es => es.ServerId).Distinct().ToListAsync(ct).ConfigureAwait(false);
-        }
+            selectedIds = await FindEnvironmentCandidateIdsAsync(
+                environment, requiredOs, organizationId, deploymentStage, ct).ConfigureAwait(false);
         else if (hasAgentSelector)
-        {
-            var query = db.Servers.Where(s => deploymentStage
-                ? s.DeploymentTargetAvailable
-                : s.PipelineRunnerEnabled);
-            if (organizationId is { } orgId) query = query.Where(s => s.OrganizationId == orgId);
-            if (requiredOs != OsType.Unknown) query = query.Where(s => s.OsType == requiredOs);
-            var candidates = await query.Select(s => new { s.Id, s.Name, s.Tags }).ToListAsync(ct).ConfigureAwait(false);
-            selectedIds = candidates
-                .Where(s => s.Name == agent || TagsHelper.DeserializeTags(s.Tags).Contains(agent!, StringComparer.OrdinalIgnoreCase))
-                .Select(s => s.Id)
-                .Distinct()
-                .ToList();
-        }
-
-        // Explicit selectors are fail-closed for both execution modes. Besides matching the online
-        // resolver, this keeps the authorization candidate set exact and lets the scheduler distinguish
-        // a configured-but-temporarily-offline target from a selector that never matched anything.
+            selectedIds = await FindAgentCandidateIdsAsync(
+                agent!, requiredOs, organizationId, deploymentStage, ct).ConfigureAwait(false);
+        else
+            selectedIds = [];
         if (hasExplicitSelector) return selectedIds;
+        var fallbackIds = await FindFallbackCandidateIdsAsync(
+            requiredOs, organizationId, deploymentStage, ct).ConfigureAwait(false);
+        return selectedIds.Union(fallbackIds).Distinct().ToList();
+    }
 
+    private async Task<List<int>> FindPoolCandidateIdsAsync(
+        string pool, OsType requiredOs, int? organizationId, bool deploymentStage, CancellationToken ct)
+        => await FindCandidateIdsAsync(
+            db.AgentPoolServers.Where(item => item.AgentPool.Name == pool).Select(item => item.Server),
+            requiredOs,
+            organizationId,
+            deploymentStage,
+            ct).ConfigureAwait(false);
+
+    private async Task<List<int>> FindEnvironmentCandidateIdsAsync(
+        string environment, OsType requiredOs, int? organizationId, bool deploymentStage, CancellationToken ct)
+        => await FindCandidateIdsAsync(
+            db.EnvironmentServers.Where(item => item.Environment.Name == environment).Select(item => item.Server),
+            requiredOs,
+            organizationId,
+            deploymentStage,
+            ct).ConfigureAwait(false);
+
+    private static async Task<Server?> FindOnlineServerAsync(
+        IQueryable<Server> query,
+        OsType requiredOs,
+        int? organizationId,
+        CancellationToken ct)
+    {
+        query = query.Where(server => server.Status == ServerStatus.Online && server.PipelineRunnerEnabled);
+        if (organizationId is { } orgId)
+            query = query.Where(server => server.OrganizationId == orgId);
+        if (requiredOs != OsType.Unknown)
+            query = query.Where(server => server.OsType == requiredOs);
+
+        return await query
+            .WhereAgentCan(AgentCapabilities.PipelineBuild)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<List<int>> FindCandidateIdsAsync(
+        IQueryable<Server> query,
+        OsType requiredOs,
+        int? organizationId,
+        bool deploymentStage,
+        CancellationToken ct)
+    {
+        query = deploymentStage
+            ? query.Where(server => server.DeploymentTargetAvailable)
+            : query.Where(server => server.PipelineRunnerEnabled);
+        if (organizationId is { } orgId)
+            query = query.Where(server => server.OrganizationId == orgId);
+        if (requiredOs != OsType.Unknown)
+            query = query.Where(server => server.OsType == requiredOs);
+
+        return await query.Select(server => server.Id).Distinct().ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task<List<int>> FindAgentCandidateIdsAsync(
+        string agent, OsType requiredOs, int? organizationId, bool deploymentStage, CancellationToken ct)
+    {
+        var query = db.Servers.Where(server => deploymentStage
+            ? server.DeploymentTargetAvailable
+            : server.PipelineRunnerEnabled);
+        if (organizationId is { } orgId) query = query.Where(server => server.OrganizationId == orgId);
+        if (requiredOs != OsType.Unknown) query = query.Where(server => server.OsType == requiredOs);
+        var candidates = await query.Select(server => new { server.Id, server.Name, server.Tags })
+            .ToListAsync(ct).ConfigureAwait(false);
+        return candidates
+            .Where(server => server.Name == agent
+                             || TagsHelper.DeserializeTags(server.Tags).Contains(agent, StringComparer.OrdinalIgnoreCase))
+            .Select(server => server.Id)
+            .Distinct()
+            .ToList();
+    }
+
+    private async Task<List<int>> FindFallbackCandidateIdsAsync(
+        OsType requiredOs, int? organizationId, bool deploymentStage, CancellationToken ct)
+    {
         var fallback = db.Servers.Where(s => deploymentStage
             ? s.DeploymentTargetAvailable
             : s.PipelineRunnerEnabled);
         if (organizationId is { } fallbackOrgId) fallback = fallback.Where(s => s.OrganizationId == fallbackOrgId);
         if (requiredOs != OsType.Unknown) fallback = fallback.Where(s => s.OsType == requiredOs);
-        var fallbackIds = await fallback.Select(s => s.Id).ToListAsync(ct).ConfigureAwait(false);
-        return selectedIds.Union(fallbackIds).Distinct().ToList();
+        return await fallback.Select(s => s.Id).ToListAsync(ct).ConfigureAwait(false);
     }
 
     // Cross-agent deploy targeting - FAIL-CLOSED. Mirrors the pool > environment > agent precedence of
@@ -262,6 +295,7 @@ internal sealed class PipelineServerResolver(AppDbContext db)
                 .Where(aps => organizationId == null || aps.Server.OrganizationId == organizationId.Value)
                 .Where(aps => requiredOs == OsType.Unknown || aps.Server.OsType == requiredOs)
                 .Select(aps => aps.Server)
+                .WhereAgentCan(AgentCapabilities.Deployment)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         else if (!string.IsNullOrEmpty(environment))
             server = await db.EnvironmentServers
@@ -271,9 +305,10 @@ internal sealed class PipelineServerResolver(AppDbContext db)
                 .Where(es => organizationId == null || es.Server.OrganizationId == organizationId.Value)
                 .Where(es => requiredOs == OsType.Unknown || es.Server.OsType == requiredOs)
                 .Select(es => es.Server)
+                .WhereAgentCan(AgentCapabilities.Deployment)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         else if (!string.IsNullOrEmpty(agent) && !agent.Equals("default", StringComparison.OrdinalIgnoreCase))
-            server = await db.Servers
+            server = await db.Servers.WhereAgentCan(AgentCapabilities.Deployment)
                 .Where(s => s.Status == ServerStatus.Online && s.DeploymentTargetAvailable && s.Name == agent)
                 .Where(s => organizationId == null || s.OrganizationId == organizationId.Value)
                 .Where(s => requiredOs == OsType.Unknown || s.OsType == requiredOs)
@@ -286,7 +321,9 @@ internal sealed class PipelineServerResolver(AppDbContext db)
 
         // No-selector org fallback: any ONLINE DEPLOY-CAPABLE server in the org. Lets a single deploy
         // host with no explicit selector still work, without ever resolving to a non-deploy runner.
-        var fallback = db.Servers.Where(s => s.Status == ServerStatus.Online && s.DeploymentTargetAvailable);
+        var fallback = db.Servers
+            .WhereAgentCan(AgentCapabilities.Deployment)
+            .Where(s => s.Status == ServerStatus.Online && s.DeploymentTargetAvailable);
         if (organizationId is { } orgId) fallback = fallback.Where(s => s.OrganizationId == orgId);
         if (requiredOs != OsType.Unknown) fallback = fallback.Where(s => s.OsType == requiredOs);
         return await fallback
@@ -296,7 +333,9 @@ internal sealed class PipelineServerResolver(AppDbContext db)
 
     public async Task<Server?> FindAnyOnlineRunnerAsync(int? organizationId, OsType requiredOs = OsType.Unknown, CancellationToken ct = default)
     {
-        var query = db.Servers.Where(s => s.Status == ServerStatus.Online && s.PipelineRunnerEnabled);
+        var query = db.Servers
+            .WhereAgentCan(AgentCapabilities.PipelineBuild)
+            .Where(s => s.Status == ServerStatus.Online && s.PipelineRunnerEnabled);
         if (organizationId is { } orgId)
             query = query.Where(s => s.OrganizationId == orgId);
         if (requiredOs != OsType.Unknown)

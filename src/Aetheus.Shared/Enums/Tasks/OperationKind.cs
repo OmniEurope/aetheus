@@ -55,7 +55,7 @@ public enum OperationKind
     ServiceUninstall = 211,
 
     /// <summary>
-    /// PLAN-006 4.1: apply pending OS security/package updates via the controlled-sudo recipe. Runs in
+    /// ADR-024 4.1: apply pending OS security/package updates via the controlled-sudo recipe. Runs in
     /// two modes carried in <c>AETHEUS_PATCH_DRY_RUN</c>: a non-mutating dry-run (<c>apt-get -s upgrade</c>,
     /// no sudo, lists what would change) and an apply (<c>sudo -n /usr/bin/apt-get -y upgrade</c> against
     /// the argv-exact <c>/etc/sudoers.d/aetheus-patch</c> drop-in). Before applying, the agent runs the
@@ -119,10 +119,17 @@ public enum OperationKind
     /// minus the metacharacters) - replaces the dead <c>printf ... | base64 -d &gt; "..."</c> builder.</summary>
     ApacheSaveHtaccess = 310,
 
+    /// <summary>Atomically applies a bounded set of rendered Apache configuration files. Target is
+    /// the fixed literal <c>config-set</c>; the encrypted task environment carries a base64 JSON map
+    /// of safe destination filenames to base64 content. The agent snapshots, writes, enables,
+    /// config-tests, reloads and restores the whole set on failure.</summary>
+    ApacheApplyConfigSet = 311,
+
     /// <summary>type: certbot - obtain/install an HTTPS certificate for one or more domains via a
     /// root-owned controlled-sudo helper (<c>sudo -n /usr/local/lib/aetheus/aetheus-certbot-issue</c>,
     /// which re-validates the domains then runs <c>certbot certonly --apache</c>). When ACME validation
-    /// cannot complete (no public DNS / unreachable :80) the helper falls back to a self-signed cert in
+    /// cannot complete (no public DNS / unreachable :80) production fails honestly; only explicit
+    /// local mode creates a self-signed certificate in
     /// the Let's Encrypt layout so the site still serves HTTPS. Domains/email are passed via
     /// <c>AETHEUS_CERTBOT_*</c> env vars. Requires <c>--enable-certbot-manage</c>.</summary>
     CertbotObtain = 320,
@@ -276,7 +283,7 @@ public enum OperationKind
     /// </summary>
     PortsentryUnblock = 555,
 
-    // Firewall (PLAN-006 4.2) - ufw control via the root-owned aetheus-firewall helper (sudo -n, the
+    // Firewall (ADR-024 4.2) - ufw control via the root-owned aetheus-firewall helper (sudo -n, the
     // helper re-validates port/proto/source before running ufw). Complements Portsentry (detection) with
     // control (prevention). Requires the firewall-manage capability. Anti-lockout is a LOGIC guard: a deny
     // on the admin SSH port is refused, and the admin port is auto-allowed before ufw is enabled.
@@ -356,7 +363,97 @@ public enum OperationKind
     /// </summary>
     PipelineRestoreArtifacts = 607,
 
-    // App backups (PLAN-006 4.3) - dump a managed app's DB + archive its files into a retained artifact,
+    /// <summary>
+    /// ADR-030: run one scanner selected from the embedded immutable scanner manifest, collect its
+    /// bounded report, upload the raw report artifact, then publish the normalized envelope. The target
+    /// is the scanner key only; no shell text or image reference comes from pipeline YAML.
+    /// </summary>
+    PipelineRunScanner = 608,
+
+    /// <summary>
+    /// ADR-030: fetch the immutable aggregate verdict after every analysis producer has published,
+    /// upload machine-readable and human-readable summaries, then enforce the common run gate.
+    /// </summary>
+    PipelineEvaluateAnalysisGate = 609,
+
+    /// <summary>
+    /// Promote the complete optional-observability package set through an agent-owned harness.
+    /// The pipeline checkout can provide candidate artifacts but cannot replace the signing or
+    /// publication program that receives the encrypted credentials.
+    /// </summary>
+    PipelinePublishObservabilityBundle = 610,
+
+    /// <summary>
+    /// Execute a provider-agnostic AI CLI profile. The fixed target is <c>ai-run</c>; the encrypted
+    /// task environment carries the binary, argv template, prompt, workspace and output bounds.
+    /// </summary>
+    AiRun = 611,
+
+    /// <summary>
+    /// Probe a deployed application and record findings without deciding its fate. The three
+    /// deployment paths each hand-rolled this: HTTP readiness probes, a frontend contract check and
+    /// an authenticated browser suite. Failing evidence is reported through the step's output
+    /// variables so a gate can grade it; the step itself only fails on a technical fault that makes
+    /// the evidence meaningless. Target is the probed origin; bounds and the optional browser image
+    /// travel in <c>AETHEUS_SMOKE_*</c> env vars. Handled by <c>SmokeOperationExecutor</c>.
+    /// </summary>
+    PipelineSmoke = 612,
+
+    // Blue-green host deployment. The three deployment paths each re-implemented this sequence in
+    // shell; these four operations are that sequence, factored so any project can reuse it. They
+    // share one on-disk journal under the environment's state directory, which is what lets them run
+    // as separate pipeline steps: each reads the state the previous one committed rather than
+    // depending on a lock held inside one long-lived process.
+    /// <summary>
+    /// Bring up the shared database, then reconcile schema: read the applied EF history, detect
+    /// pending migrations, enforce the expand/contract contract against them and run the migration
+    /// bundle once as a dedicated job. Target is the Compose project. Handled by
+    /// <c>BlueGreenOperationExecutor</c>.
+    /// </summary>
+    BlueGreenMigrate = 613,
+
+    /// <summary>
+    /// Select the idle colour from the persisted live colour, start it, and hold until it reports
+    /// ready on its own ports. Never touches the live colour, so a failure here leaves the current
+    /// deployment serving. Target is the Compose project.
+    /// </summary>
+    BlueGreenUp = 614,
+
+    /// <summary>
+    /// Open the transaction journal, point the web server at the idle colour and reload it. The
+    /// reload is self-validating: a rejected configuration keeps the previous colour serving, and the
+    /// journal lets a later step reconcile an interrupted cutover. Target is the Compose project.
+    /// </summary>
+    BlueGreenSwitch = 615,
+
+    /// <summary>
+    /// Close the transaction: record the deployed revision, stop the colour that was replaced and
+    /// clear the journal. Runs only after the evidence steps have had their say, so a finding can
+    /// never undo a cutover that is already serving. Target is the Compose project.
+    /// </summary>
+    BlueGreenCommit = 616,
+
+    /// <summary>
+    /// Put traffic back on the colour that was serving before the switch, then stop the candidate.
+    /// The evidence steps run after the cutover, so without this a failing probe would leave traffic
+    /// on a bad colour with the transaction half-open. Runs as a failure-condition step. Target is
+    /// the Compose project.
+    /// </summary>
+    BlueGreenRollback = 617,
+
+    /// <summary>
+    /// Undo a FIRST deployment that already moved traffic. There is no previous colour to restore, so
+    /// this is not a rollback and BlueGreenRollback rightly refuses it rather than taking the site
+    /// down under that name - but it then left the environment wedged, because the journal keeps
+    /// refusing every later deployment until someone resolves it, and nothing resolved it. This is
+    /// that missing operation: restore the recorded upstream, stop the switched colour and close the
+    /// transaction. It refuses when a previous colour exists, because that case IS a rollback. The
+    /// shared database and the environment file are never touched; secret-zero is not regenerable.
+    /// Target is the Compose project.
+    /// </summary>
+    BlueGreenRetire = 618,
+
+    // App backups (ADR-024 4.3) - dump a managed app's DB + archive its files into a retained artifact,
     // and verify recoverability with a restore-check on a throwaway target. argv-only; DB creds travel in
     // an encrypted env var and are piped/passed off the process list, never interpolated into a shell.
     /// <summary>Run a backup: dump the DB (pg_dump/mysqldump) + archive declared file paths, then upload

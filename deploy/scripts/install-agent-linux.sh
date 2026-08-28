@@ -12,7 +12,13 @@ set -e
 # Modes (mutually exclusive):
 #   (default)   Clean install: prompts for URL/token/name, wipes any previous
 #               install, writes fresh config + service, starts and health-checks.
-#   --upgrade   Binaries-only refresh: preserves appsettings.json and work dir.
+#               Idempotent by design - an agent is disposable, so re-running the
+#               enrolment command from the web UI is safe: the elevation posture
+#               already on the box is re-derived and re-applied, and privileged
+#               state dirs are re-provisioned, without repeating any --enable-*.
+#   --upgrade   Full integration refresh: binaries, systemd posture and root-owned helpers;
+#               Same posture preservation as the default mode, but additionally
+#               preserves appsettings.json, work dir and production secret-zero.
 #               Must be run from a DIFFERENT directory than INSTALL_DIR
 #               (extract the new tarball to /tmp first, then run from there).
 #   --purge     Full uninstall: stop service, remove unit, sudoers, install and
@@ -23,6 +29,7 @@ set -e
 #   sudo sh install-agent-linux.sh
 #   sudo sh install-agent-linux.sh --server-url URL --token TOKEN [--name NAME]
 #   sudo sh install-agent-linux.sh --upgrade
+#   sudo sh install-agent-linux.sh --bootstrap-update-supervisor
 #   sudo sh install-agent-linux.sh --purge [--yes]
 # =============================================================================
 
@@ -30,11 +37,29 @@ AGENT_USER="aetheus-agent"
 AGENT_GROUP="aetheus-agent"
 INSTALL_DIR="/opt/aetheus-agent"
 WORK_DIR="/var/lib/aetheus-agent"
+PRODUCTION_STATE_DIR="/var/lib/aetheus-production"
+PRODUCTION_ENV_FILE="$PRODUCTION_STATE_DIR/.env-prod"
+LEGACY_PRODUCTION_ENV_FILE="$WORK_DIR/aetheus-prod/.env-prod"
+# The nightly demo deployment keeps its Compose environment and secrets here, exactly as production
+# does above. It is created by the installer and not by the deployment, because the deployment runs
+# as the agent user, which cannot create a directory under /var/lib: the nightly failed on both the
+# mirror and the production host with "State directory /var/lib/aetheus-demo does not exist and
+# could not be created". No secrets are generated or migrated here - the demo preparation owns that.
+DEMO_STATE_DIR="/var/lib/aetheus-demo"
 SERVICE_NAME="aetheus-agent"
+AGENT_POSTURE_VERSION="2"
+AGENT_POSTURE_VERSION_FILE="/etc/aetheus-agent-posture-version"
+AGENT_UPDATE_URL_FILE="/etc/aetheus-agent-update-url"
+AGENT_UPDATE_REQUEST_FILE="$WORK_DIR/.agent-posture-upgrade-request"
+AGENT_UPDATE_WORKER_PATH="/usr/local/lib/aetheus/agent-posture-upgrade"
+AGENT_UPDATE_SERVICE_PATH="/etc/systemd/system/aetheus-agent-upgrade.service"
+AGENT_UPDATE_PATH_PATH="/etc/systemd/system/aetheus-agent-upgrade.path"
 SUDOERS_FILE="/etc/sudoers.d/aetheus-agent"
 # Item #6 - controlled sudo escalation for Apache management. Separate file so the broader
 # service-control sudoers can stay untouched on a routine flag change.
 APACHE_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-apache"
+APACHE_CONFIGTEST_HELPER_PATH="/usr/local/lib/aetheus/aetheus-apache-configtest"
+APACHE_RELOAD_HELPER_PATH="/usr/local/lib/aetheus/aetheus-apache-reload"
 CERTBOT_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-certbot"
 # Items #10.2/#10.3 - same recipe as Apache for RKHunter scan/update/propupd.
 RKHUNTER_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-rkhunter"
@@ -46,9 +71,9 @@ PORTSENTRY_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-portsentry"
 SERVICE_ENABLE_SUDOERS_FILE="/etc/sudoers.d/aetheus-service-enable"
 # S-FEAT-W8KN - argv-exact apt-get install/remove allow-list (managed-package install/uninstall).
 PACKAGE_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-package"
-# PLAN-006 4.1 - argv-exact apt-get upgrade grant (fleet OS patching / patch-manage capability).
+# ADR-024 4.1 - argv-exact apt-get upgrade grant (fleet OS patching / patch-manage capability).
 PATCH_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-patch"
-# PLAN-006 4.2 - path-only grant for the root-owned firewall (ufw) helper (firewall-manage capability).
+# ADR-024 4.2 - path-only grant for the root-owned firewall (ufw) helper (firewall-manage capability).
 FIREWALL_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-firewall"
 FIREWALL_HELPER_PATH="/usr/local/lib/aetheus/aetheus-firewall"
 # S-FEAT-W8KN - argv-exact grant for the root-owned mail-setup helper (full postfix/dovecot/opendkim
@@ -114,13 +139,57 @@ log_info()  { printf "${GREEN}[INFO]${NC} %s\n" "$1"; }
 log_warn()  { printf "${YELLOW}[WARN]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[ERROR]${NC} %s\n" "$1"; }
 
+preserve_production_environment() {
+    if [ -L "$PRODUCTION_ENV_FILE" ] || [ -L "$LEGACY_PRODUCTION_ENV_FILE" ]; then
+        log_error "Refusing to preserve a production environment through a symbolic link."
+        exit 1
+    fi
+
+    if [ -f "$PRODUCTION_ENV_FILE" ] && [ -f "$LEGACY_PRODUCTION_ENV_FILE" ] \
+        && ! cmp -s "$PRODUCTION_ENV_FILE" "$LEGACY_PRODUCTION_ENV_FILE"; then
+        log_error "Production environment conflict: canonical and legacy .env-prod files differ."
+        log_error "Installation stopped before cleanup; reconcile the files explicitly."
+        exit 1
+    fi
+
+    install -d -m 700 "$PRODUCTION_STATE_DIR"
+    if id "$AGENT_USER" >/dev/null 2>&1; then
+        chown -R "$AGENT_USER:$AGENT_GROUP" "$PRODUCTION_STATE_DIR"
+    fi
+
+    if [ ! -f "$PRODUCTION_ENV_FILE" ] && [ ! -f "$LEGACY_PRODUCTION_ENV_FILE" ]; then
+        return 0
+    fi
+
+    if [ ! -f "$PRODUCTION_ENV_FILE" ]; then
+        log_info "Migrating production secrets outside the agent work directory..."
+        cp -p "$LEGACY_PRODUCTION_ENV_FILE" "$PRODUCTION_ENV_FILE.tmp.$$"
+        chmod 600 "$PRODUCTION_ENV_FILE.tmp.$$"
+        mv "$PRODUCTION_ENV_FILE.tmp.$$" "$PRODUCTION_ENV_FILE"
+    fi
+
+    INSTALLATION_DATE="$(date -u +"%Y%m%dT%H%M%SZ")"
+    PRODUCTION_ENV_BACKUP="$PRODUCTION_STATE_DIR/.env-prod-$INSTALLATION_DATE"
+    log_info "Backing up production secrets to $PRODUCTION_ENV_BACKUP..."
+    cp -p "$PRODUCTION_ENV_FILE" "$PRODUCTION_ENV_BACKUP.tmp.$$"
+    chmod 600 "$PRODUCTION_ENV_BACKUP.tmp.$$"
+    mv "$PRODUCTION_ENV_BACKUP.tmp.$$" "$PRODUCTION_ENV_BACKUP"
+
+    if id "$AGENT_USER" >/dev/null 2>&1; then
+        chown -R "$AGENT_USER:$AGENT_GROUP" "$PRODUCTION_STATE_DIR"
+    fi
+}
+
 show_help() {
     cat <<EOF
 Usage: sudo sh install-agent-linux.sh [OPTIONS]
 
 Modes (mutually exclusive):
   (none)                    Clean install (default)
-  --upgrade                 Replace binaries + service only; preserve config and data
+  --upgrade                 Replace binaries, service posture and helpers; preserve config/data
+  --bootstrap-update-supervisor
+                            Install only the root-owned self-update supervisor for an
+                            existing pre-supervisor agent; never replace or stop the agent
   --purge                   Full uninstall (service, files, user)
 
 Install options:
@@ -129,9 +198,9 @@ Install options:
   --name NAME               Display name for this agent (default: hostname)
 
 Capability modules:
-  --module pipeline-runner  (DEFAULT ON) Install the CI/CD toolchain: .NET SDK, git,
-                            sshpass, acl. No elevation - pipeline shell runs as the
-                            unprivileged agent user.
+  --module pipeline-runner  (DEFAULT ON) Install Git, sshpass, acl and optional
+                            Buildx support. Application SDKs run in locked OCI
+                            images instead of being installed on the agent.
   --no-pipeline-runner      Skip the pipeline-runner toolchain install.
   --module server-management
                             Opt-in. Enable all server-administration capabilities
@@ -207,12 +276,12 @@ Elevation options (ALL DISABLED BY DEFAULT - opt in with --enable-* or --module 
                             'apt-get install|remove -y <pkg>' over a FIXED package list
                             (no wildcards). Required to install/uninstall managed server
                             components (docker/apache/mail/...) from Aetheus.
-  --enable-patch-manage     PLAN-006 4.1: tight NOPASSWD sudoers rule for
+  --enable-patch-manage     ADR-024 4.1: tight NOPASSWD sudoers rule for
                             'apt-get upgrade -y' (argv-exact, no wildcards). Lets the fleet
                             APPLY pending OS updates; the agent runs a dry-run first and
                             aborts on any critical package. Pending-update visibility does
                             not need this grant (the dry-run probe is unprivileged).
-  --enable-firewall-manage  PLAN-006 4.2: deploy the root-owned aetheus-firewall helper +
+  --enable-firewall-manage  ADR-024 4.2: deploy the root-owned aetheus-firewall helper +
                             a path-only NOPASSWD sudoers grant for it. Lets the agent control
                             ufw (open/close ports, enable/disable); the helper re-validates
                             every argument and enforces anti-lockout (never closes the SSH
@@ -299,16 +368,15 @@ ENABLE_CRON_MANAGE=0       # opt-in: cron-apply sudo helper (writes /etc/cron.d/
 ENABLE_PORTSENTRY_MANAGE=0 # opt-in: unblock-ip sudo helper (iptables/ip6tables + hosts.deny)
 ENABLE_SERVICE_ENABLE=0    # opt-in: systemctl enable --now on a FIXED unit list (argv-exact)
 ENABLE_PACKAGE_MANAGE=0    # opt-in: apt-get install/remove -y on a FIXED package list (argv-exact)
-ENABLE_PATCH_MANAGE=0      # opt-in: apt-get upgrade -y (fleet OS patching, argv-exact) - PLAN-006 4.1
-ENABLE_FIREWALL_MANAGE=0   # opt-in: ufw control via root-owned helper (firewall) - PLAN-006 4.2
+ENABLE_PATCH_MANAGE=0      # opt-in: apt-get upgrade -y (fleet OS patching, argv-exact) - ADR-024 4.1
+ENABLE_FIREWALL_MANAGE=0   # opt-in: ufw control via root-owned helper (firewall) - ADR-024 4.2
 ENABLE_MAIL_SETUP=0        # opt-in: root-owned mail-setup helper (full postfix/dovecot/opendkim setup)
 ENABLE_TEAMSPEAK_SETUP=0   # opt-in: root-owned teamspeak-setup helper (full TS3 server install)
 POSTURE_EXPLICIT=0         # set if any --enable-* flag was passed explicitly
 
 # Capability modules (higher-level than the granular --enable-* flags below).
-#   pipeline-runner    : ON by default. Installs the toolchain a CI/CD runner needs
-#                        (dotnet SDK, git, sshpass) + the acl package. NO elevation -
-#                        pipeline shell runs as the unprivileged agent user.
+#   pipeline-runner    : ON by default. Installs Git, sshpass and optional Buildx
+#                        support. Application SDKs stay in locked OCI images.
 #   server-management  : opt-in. Turns on the server-administration capabilities
 #                        (service-control, Apache, Certbot, RKHunter, Docker,
 #                        TeamSpeak) by expanding to the matching --enable-* flags below.
@@ -323,17 +391,15 @@ MODULE_SERVER_MANAGEMENT=0
 #                        (like service-control/package-manage/mail-setup).
 MODULE_DEPLOYMENT=0
 ENABLE_DEPLOYMENT=0        # derived from MODULE_DEPLOYMENT (and preserved on --upgrade)
-# Exact SDK required by global.json. The runtime remains channel-compatible, while
-# pipeline builds require this feature band because rollForward is disabled.
-DOTNET_SDK_VERSION="10.0.202"
 DOTNET_CHANNEL="10.0"
-DOTNET_RUNTIME_VERSION="10.0.10"
+DOTNET_RUNTIME_VERSION="10.0.11"
 DOTNET_INSTALLER_URL="https://raw.githubusercontent.com/dotnet/install-scripts/da3ce11ba63f3dbb0fb835d41bda2665d5c48e84/src/dotnet-install.sh"
 DOTNET_INSTALLER_SHA256="082f7685e156738a1b2e2ed8381a621870d4ce8e8c59278034556f05c186eb2e"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --upgrade)    MODE="upgrade"; shift ;;
+        --bootstrap-update-supervisor) MODE="bootstrap-update-supervisor"; shift ;;
         --purge)      MODE="purge"; shift ;;
         --server-url) SERVER_URL="$2"; shift 2 ;;
         --token)      REG_TOKEN="$2"; shift 2 ;;
@@ -432,6 +498,185 @@ remove_systemd_unit() {
         systemctl daemon-reload
         systemctl reset-failed "$SERVICE_NAME" 2>/dev/null || true
     fi
+}
+
+install_agent_update_supervisor() {
+    _update_server_url="$1"
+    case "$_update_server_url" in
+        https://*|http://localhost*|http://127.0.0.1*|http://\[::1\]*) ;;
+        *)
+            log_error "Agent update supervisor requires HTTPS (HTTP is allowed only for loopback)."
+            return 1
+            ;;
+    esac
+
+    install -d -m 755 "$AETHEUS_HELPER_DIR"
+    printf '%s\n' "$_update_server_url" > "$AGENT_UPDATE_URL_FILE"
+    chown root:root "$AGENT_UPDATE_URL_FILE"
+    chmod 600 "$AGENT_UPDATE_URL_FILE"
+
+    cat > "$AGENT_UPDATE_WORKER_PATH.tmp.$$" <<'AETHEUS_AGENT_UPDATE_WORKER'
+#!/bin/sh
+set -eu
+
+request_file="/var/lib/aetheus-agent/.agent-posture-upgrade-request"
+running_file="/var/lib/aetheus-agent/.agent-posture-upgrade-running"
+failed_request_file="/var/lib/aetheus-agent/.agent-posture-upgrade-failed-request"
+result_file="/var/lib/aetheus-agent/.agent-posture-upgrade-result"
+server_url_file="/etc/aetheus-agent-update-url"
+install_dir="/opt/aetheus-agent"
+work_dir="/var/lib/aetheus-agent"
+upgrade_dir=""
+rollback_ready=0
+outcome="failed"
+phase="claim"
+target_version="unknown"
+target_sha="unknown"
+target_commit="unknown"
+
+write_result() {
+    result_tmp="$result_file.tmp.$$"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$outcome" "$target_version" "$target_sha" "$target_commit" "$phase" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "$result_tmp"
+    chown root:root "$result_tmp"
+    chmod 644 "$result_tmp"
+    mv -f -- "$result_tmp" "$result_file"
+}
+
+restore_previous_agent() {
+    [ "$rollback_ready" -eq 1 ] || return 0
+    find "$install_dir" -mindepth 1 -maxdepth 1 ! -name appsettings.json \
+        -exec rm -rf -- {} +
+    cp -a "$rollback"/. "$install_dir"/
+    chown -R aetheus-agent:aetheus-agent "$install_dir"
+    rm -f -- "$work_dir/.agent-update-pending"
+    systemctl daemon-reload
+    systemctl start aetheus-agent
+}
+
+cleanup() {
+    [ -z "$upgrade_dir" ] || rm -rf -- "$upgrade_dir"
+}
+
+finish() {
+    exit_code="$?"
+    trap - EXIT HUP INT TERM
+    if [ "$outcome" != success ]; then
+        restore_previous_agent || true
+        if [ -f "$running_file" ]; then
+            mv -f -- "$running_file" "$failed_request_file"
+        fi
+        write_result || true
+    fi
+    cleanup
+    exit "$exit_code"
+}
+
+[ -f "$request_file" ] || exit 0
+trap finish EXIT HUP INT TERM
+[ ! -e "$running_file" ] || exit 9
+mv -- "$request_file" "$running_file"
+
+tab="$(printf '\t')"
+IFS="$tab" read -r target_version archive_name archive_size target_sha target_commit extra < "$running_file"
+case "$target_version" in ''|*[!0-9A-Za-z.+-]*) phase="invalid-version"; exit 10 ;; esac
+case "$archive_name" in
+    aetheus-agent-linux-x64-v*.tar.gz) ;;
+    *) phase="invalid-archive-name"; exit 11 ;;
+esac
+case "$archive_name" in *[!0-9A-Za-z.+-]*) phase="invalid-archive-name"; exit 11 ;; esac
+case "$archive_size" in ''|*[!0-9]*) phase="invalid-archive-size"; exit 12 ;; esac
+[ "$archive_size" -gt 0 ] || { phase="invalid-archive-size"; exit 12; }
+[ "${#target_sha}" -eq 64 ] || { phase="invalid-archive-sha"; exit 13; }
+case "$target_sha" in *[!0-9a-fA-F]*) phase="invalid-archive-sha"; exit 13 ;; esac
+case "${#target_commit}" in 40|64) ;; *) phase="invalid-commit"; exit 14 ;; esac
+case "$target_commit" in *[!0-9a-fA-F]*) phase="invalid-commit"; exit 14 ;; esac
+[ -z "${extra:-}" ] || { phase="invalid-request-fields"; exit 15; }
+
+# Let the running agent publish the handoff result before this root-owned unit replaces it.
+sleep 5
+server_url="$(head -n 1 "$server_url_file" | tr -d '\r\n')"
+case "$server_url" in
+    https://*|http://localhost*|http://127.0.0.1*|http://\[::1\]*) ;;
+    *) phase="invalid-server-url"; exit 16 ;;
+esac
+
+upgrade_dir="$(mktemp -d /var/tmp/aetheus-agent-upgrade.XXXXXX)"
+archive="$upgrade_dir/agent.tar.gz"
+payload="$upgrade_dir/payload"
+rollback="$upgrade_dir/rollback"
+mkdir -p "$payload" "$rollback"
+
+phase="download"
+curl -fSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
+    "$server_url/downloads/releases/$target_version/$archive_name" -o "$archive"
+[ "$(stat -c %s "$archive")" = "$archive_size" ] || { phase="size-mismatch"; exit 17; }
+[ "$(sha256sum "$archive" | cut -d ' ' -f1)" = "$(printf '%s' "$target_sha" | tr 'A-F' 'a-f')" ] \
+    || { phase="sha256-mismatch"; exit 18; }
+if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    phase="unsafe-archive"; exit 19
+fi
+phase="extract"
+tar -xzf "$archive" -C "$payload"
+test -f "$payload/install-agent-linux.sh"
+test -f "$payload/Aetheus.Agent.Linux.dll" || test -f "$payload/Aetheus.Agent.Linux"
+
+# Preserve a last-known-good binary tree independently from the agent-owned staging area.
+find "$install_dir" -mindepth 1 -maxdepth 1 ! -name appsettings.json \
+    -exec cp -a {} "$rollback/" \;
+rollback_ready=1
+
+phase="install"
+sh "$payload/install-agent-linux.sh" --upgrade --yes
+phase="service-health"
+systemctl is-active --quiet aetheus-agent
+outcome="success"
+phase="complete"
+write_result
+rm -f -- "$running_file" "$failed_request_file"
+rollback_ready=0
+exit 0
+AETHEUS_AGENT_UPDATE_WORKER
+    mv "$AGENT_UPDATE_WORKER_PATH.tmp.$$" "$AGENT_UPDATE_WORKER_PATH"
+    chown root:root "$AGENT_UPDATE_WORKER_PATH"
+    chmod 755 "$AGENT_UPDATE_WORKER_PATH"
+
+    cat > "$AGENT_UPDATE_SERVICE_PATH.tmp.$$" <<EOF
+[Unit]
+Description=Aetheus agent binary and integration-posture upgrade
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$AGENT_UPDATE_WORKER_PATH
+TimeoutStartSec=900
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true
+EOF
+    mv "$AGENT_UPDATE_SERVICE_PATH.tmp.$$" "$AGENT_UPDATE_SERVICE_PATH"
+
+    cat > "$AGENT_UPDATE_PATH_PATH.tmp.$$" <<EOF
+[Unit]
+Description=Watch for an Aetheus agent self-update request
+
+[Path]
+PathExists=$AGENT_UPDATE_REQUEST_FILE
+Unit=aetheus-agent-upgrade.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    mv "$AGENT_UPDATE_PATH_PATH.tmp.$$" "$AGENT_UPDATE_PATH_PATH"
+    chown root:root "$AGENT_UPDATE_SERVICE_PATH" "$AGENT_UPDATE_PATH_PATH"
+    chmod 644 "$AGENT_UPDATE_SERVICE_PATH" "$AGENT_UPDATE_PATH_PATH"
+    printf '%s\n' "$AGENT_POSTURE_VERSION" > "$AGENT_POSTURE_VERSION_FILE"
+    chown root:root "$AGENT_POSTURE_VERSION_FILE"
+    chmod 644 "$AGENT_POSTURE_VERSION_FILE"
+    systemctl daemon-reload
+    systemctl enable --now aetheus-agent-upgrade.path
 }
 
 ensure_docker_group() {
@@ -578,34 +823,8 @@ ask_install_package() {
     esac
 }
 
-# Ensure the exact .NET SDK required by global.json is available for the pipeline-runner
-# module. Microsoft's official installer adds it side-by-side in /usr/share/dotnet. Best-effort:
-# a failure is a warning, not fatal - pipelines that don't build .NET still run.
-ensure_dotnet_sdk() {
-    if command -v dotnet >/dev/null 2>&1 \
-        && dotnet --list-sdks 2>/dev/null | grep -q "^${DOTNET_SDK_VERSION} "; then
-        log_info "  Required .NET SDK ${DOTNET_SDK_VERSION} already present."
-        return 0
-    fi
-    log_info "  Installing exact .NET SDK ${DOTNET_SDK_VERSION} (pipeline-runner module)..."
-    if command -v curl >/dev/null 2>&1 \
-        && command -v bash >/dev/null 2>&1 \
-        && command -v sha256sum >/dev/null 2>&1; then
-        _ds_tmp="$(mktemp)"
-        if curl -fsSL "$DOTNET_INSTALLER_URL" -o "$_ds_tmp" 2>/dev/null \
-            && printf '%s  %s\n' "$DOTNET_INSTALLER_SHA256" "$_ds_tmp" | sha256sum -c - >/dev/null 2>&1; then
-            bash "$_ds_tmp" --version "$DOTNET_SDK_VERSION" --install-dir /usr/share/dotnet >/dev/null 2>&1 \
-                && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet 2>/dev/null \
-                && dotnet --list-sdks 2>/dev/null | grep -q "^${DOTNET_SDK_VERSION} " \
-                && { log_info "  .NET SDK ${DOTNET_SDK_VERSION} installed via dotnet-install.sh."; rm -f "$_ds_tmp"; return 0; }
-        fi
-        rm -f "$_ds_tmp"
-    fi
-    log_warn "  Could not install .NET SDK ${DOTNET_SDK_VERSION} automatically - install that exact SDK if your pipelines build Aetheus."
-    return 1
-}
-
-# Install the toolchain the pipeline-runner module needs (git, sshpass, dotnet SDK).
+# Install the host tools the pipeline-runner module needs. Language SDKs are resolved
+# from the repository lock manifest and run inside immutable OCI images.
 # No elevation is granted here - these are ordinary packages the agent invokes as
 # its own unprivileged user when executing pipeline steps.
 ensure_pipeline_runner_packages() {
@@ -615,9 +834,6 @@ ensure_pipeline_runner_packages() {
     # S-FEAT-BLDX: buildx is the modern (non-legacy) docker build backend. Best-effort: on a box without
     # the plugin, docker build still works via the legacy builder, so a missing plugin never blocks install.
     ask_install_package "docker-buildx" "docker-buildx-plugin" "used for BuildKit / multi-platform container builds" || true
-    # Best-effort, per ensure_dotnet_sdk's contract: a missing .NET SDK only blocks
-    # .NET pipeline builds, not enrollment - never fail the whole install (set -e) over it.
-    ensure_dotnet_sdk || true
 }
 
 # The deployment module also owns explicit, verified database restores during a release rollback.
@@ -673,7 +889,7 @@ ensure_optional_packages() {
 # Ubuntu/Debian image (the blank VPS-sim, or a minimal cloud image) makes the runtime FailFast at
 # startup ("Couldn't find a valid ICU package") - which the pre-start probe then misreports as a
 # backend-connectivity failure. Mandatory regardless of capability modules: without ICU the agent
-# never boots. Best-effort (like ensure_dotnet_sdk); the runtime probe stays the hard gate.
+# never boots. Package installation remains best-effort; the runtime probe stays the hard gate.
 ensure_icu() {
     if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -Eq 'libicuuc|libicui18n'; then
         log_info "  ICU runtime already present."
@@ -726,15 +942,16 @@ apply_read_acls() {
     if [ "$ENABLE_CERTBOT" -eq 1 ]; then
         grant_read_acl "Certbot introspection" /etc/letsencrypt
     fi
-    # The recursive read-only grant above (rX on all of /etc/apache2) would CLOBBER the write ACL
-    # write_apache_manage_sudoers set on the two sites dirs down to r-x. Re-assert rwx LAST so the
-    # apache-proxy step can still write vhosts + symlink them (apply_read_acls runs after the
-    # capability provisioning in the main flow).
+    # The recursive read-only grant above (rX on all of /etc/apache2) would remove the directory
+    # write ACL installed for Apache management. Re-assert directory rwx LAST, but never install a
+    # default write ACL on new entries. Sticky directories prevent the agent from unlinking or
+    # replacing root-owned/shared-host vhosts while still allowing it to manage files it owns.
     if [ "$ENABLE_APACHE_MANAGE" -eq 1 ] && command -v setfacl >/dev/null 2>&1; then
         for d in /etc/apache2/sites-available /etc/apache2/sites-enabled; do
             if [ -d "$d" ]; then
                 setfacl -m "u:$AGENT_USER:rwx" "$d" 2>/dev/null || true
-                setfacl -d -m "u:$AGENT_USER:rwx" "$d" 2>/dev/null || true
+                setfacl -x "d:u:$AGENT_USER" "$d" 2>/dev/null || true
+                chmod +t "$d"
             fi
         done
     fi
@@ -759,6 +976,15 @@ derive_existing_posture() {
     if [ -f "$RKHUNTER_MANAGE_SUDOERS_FILE" ]; then
         ENABLE_RKHUNTER_MANAGE=1
         log_info "  Preserving existing RKHunter-manage sudoers rule."
+    fi
+    # certbot-manage was historically absent from this derivation, so every reinstall
+    # silently revoked it via apply_sudoers and the production HTTPS issuance broke.
+    if [ -f "$CERTBOT_MANAGE_SUDOERS_FILE" ]; then
+        ENABLE_CERTBOT_MANAGE=1
+        ENABLE_CERTBOT=1        # implies the read ACL
+        ENABLE_APACHE_MANAGE=1  # certbot-manage drives apache2ctl through the helper
+        ENABLE_APACHE=1
+        log_info "  Preserving existing Certbot-manage sudoers rule."
     fi
     if [ -f "$CRON_MANAGE_SUDOERS_FILE" ]; then
         ENABLE_CRON_MANAGE=1
@@ -850,25 +1076,64 @@ EOF
     }
 }
 
-# Controlled sudo escalation for Apache management:
+# Item #6 - controlled sudo escalation for Apache manage. Strictly follows the recipe in
+# docs/claudes/claude-security.md#controlled-sudo-escalation:
 #   - exact argv (no wildcards) so apache2ctl -f <arbitrary> and friends are unreachable
-#   - Defaults!CMDS noexec so a successful exec cannot spawn a shell-escape
+#   - noexec for fixed systemctl commands; a root-owned no-argument helper for configtest,
+#     because apache2ctl must exec apache2 (ADR-019 compensating boundary)
 #   - timestamp_timeout=0 so a concurrent process cannot inherit the sudo cache
 #   - env_reset + fixed secure_path to neutralise PATH-style injection vectors
 #   - one justification comment per Cmnd_Alias entry - forces manual review on extension
 write_apache_manage_sudoers() {
     log_info "Configuring Apache-manage sudoers (item #6, ultra-strict allow-list)..."
-    cat > "$APACHE_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - Apache management. Every rule below must remain argv-exact.
+    mkdir -p "$(dirname "$APACHE_CONFIGTEST_HELPER_PATH")"
+    cat > "$APACHE_CONFIGTEST_HELPER_PATH" <<'APACHE_TEST_EOF'
+#!/bin/sh
+# Fixed-purpose root-owned helper. apache2ctl must exec apache2, so sudo noexec cannot be used.
+# No arguments or environment-controlled paths are accepted.
+set -eu
+[ "$#" -eq 0 ] || { echo "aetheus-apache-configtest accepts no arguments" >&2; exit 2; }
+exec /usr/sbin/apache2ctl configtest
+APACHE_TEST_EOF
+    chown root:root "$APACHE_CONFIGTEST_HELPER_PATH"
+    chmod 755 "$APACHE_CONFIGTEST_HELPER_PATH"
 
-# 1. Test the config (apache2ctl configtest is non-destructive but reads /etc/apache2
-#    and must run as root to read mod-restricted include files).
-# 2. Graceful reload (apache2ctl graceful re-reads config without dropping connections).
-# 3. systemd reload + lifecycle (preferred over apache2ctl on hosts where systemd owns it).
+    # The blue-green switch step invokes its reload helper as `sudo -n <path>` with argv exactly one
+    # element, so the three-word `systemctl reload apache2.service` grant above is unreachable from
+    # it. A shell step could pass three words; a typed step has no shell. Hence this second
+    # no-argument helper, on the same fixed-purpose pattern as configtest above.
+    cat > "$APACHE_RELOAD_HELPER_PATH" <<'APACHE_RELOAD_EOF'
+#!/bin/sh
+# Fixed-purpose root-owned helper: validate the configuration, then apply it. No arguments, no
+# environment-controlled paths.
+#
+# The configtest is not a convenience. Reloading IS how a blue-green cutover moves traffic, so a
+# reload that returns success without having applied anything would report a cutover that never
+# happened. Refusing an invalid configuration here keeps the previous colour serving and makes the
+# switch step fail honestly instead.
+set -eu
+[ "$#" -eq 0 ] || { echo "aetheus-apache-reload accepts no arguments" >&2; exit 2; }
+/usr/sbin/apache2ctl configtest || { echo "aetheus-apache-reload: configuration rejected; nothing applied" >&2; exit 1; }
+exec /bin/systemctl reload apache2.service
+APACHE_RELOAD_EOF
+    chown root:root "$APACHE_RELOAD_HELPER_PATH"
+    chmod 755 "$APACHE_RELOAD_HELPER_PATH"
+
+    cat > "$APACHE_MANAGE_SUDOERS_FILE" <<EOF
+# Aetheus Agent - Apache management. Item #6 of the plan; see
+# docs/claudes/claude-security.md#controlled-sudo-escalation for the rules every
+# line below must satisfy.
+
+# 1. Test the config through a fixed root-owned helper. This alias intentionally omits noexec:
+#    apache2ctl must exec apache2, and the helper accepts no arguments or variable paths.
+#    The reload helper joins it for the same reason: it runs configtest before applying, so it too
+#    must exec apache2. It exists because a typed blue-green step invokes "sudo -n <path>" with a
+#    single argv element and therefore cannot reach the three-word systemctl grant below.
+# 2. systemd reload + lifecycle. These fixed argv commands retain noexec.
 # Every entry uses an EXACT fully-resolved binary path + fixed argv string. No wildcards.
+Cmnd_Alias AETHEUS_APACHE_TEST = $APACHE_CONFIGTEST_HELPER_PATH, \\
+    $APACHE_RELOAD_HELPER_PATH
 Cmnd_Alias AETHEUS_APACHE_MANAGE = \\
-    /usr/sbin/apache2ctl configtest, \\
-    /usr/sbin/apache2ctl graceful, \\
     /bin/systemctl reload apache2.service, \\
     /bin/systemctl start apache2.service, \\
     /bin/systemctl stop apache2.service, \\
@@ -878,25 +1143,43 @@ Defaults!AETHEUS_APACHE_MANAGE noexec
 Defaults!AETHEUS_APACHE_MANAGE timestamp_timeout=0
 Defaults!AETHEUS_APACHE_MANAGE env_reset
 Defaults!AETHEUS_APACHE_MANAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults!AETHEUS_APACHE_TEST timestamp_timeout=0
+Defaults!AETHEUS_APACHE_TEST env_reset
+Defaults!AETHEUS_APACHE_TEST secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
 
 $AGENT_USER ALL=(root) NOPASSWD: AETHEUS_APACHE_MANAGE
+$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_APACHE_TEST
 EOF
     chmod 440 "$APACHE_MANAGE_SUDOERS_FILE"
     visudo -cf "$APACHE_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid Apache-manage sudoers syntax"
         rm -f "$APACHE_MANAGE_SUDOERS_FILE"
+        rm -f "$APACHE_CONFIGTEST_HELPER_PATH"
+        rm -f "$APACHE_RELOAD_HELPER_PATH"
         exit 1
     }
 
-    # ACL write on sites-available AND sites-enabled so the agent can edit vhost configs and enable
-    # them (the apache-proxy pipeline step symlinks into sites-enabled) without sudo. Reload is the
-    # only piece that still needs root - keeps the surface minimal.
+    # Directory write is needed to create vhosts and enable them with symlinks. Do NOT grant a
+    # default ACL: it would make unrelated future vhosts agent-writable. Sticky-bit protection
+    # prevents the agent from unlinking/replacing root-owned shared-host entries. On upgrade, take
+    # ownership only of files carrying the explicit Aetheus marker so existing managed vhosts stay
+    # editable without widening access to unrelated sites.
     if command -v setfacl >/dev/null 2>&1; then
         for d in /etc/apache2/sites-available /etc/apache2/sites-enabled; do
             if [ -d "$d" ]; then
                 setfacl -m "u:$AGENT_USER:rwx" "$d" || true
-                setfacl -d -m "u:$AGENT_USER:rwx" "$d" || true
-                log_info "  ACL +rw on $d granted to $AGENT_USER."
+                setfacl -x "d:u:$AGENT_USER" "$d" 2>/dev/null || true
+                chmod +t "$d"
+                log_info "  Sticky directory ACL on $d granted to $AGENT_USER."
+            fi
+        done
+        for f in /etc/apache2/sites-available/*.conf; do
+            [ -f "$f" ] || continue
+            if head -n 1 "$f" | grep -Fq '# Managed by Aetheus'; then
+                chown "$AGENT_USER:$AGENT_GROUP" "$f"
+                chmod u+rw "$f"
+                enabled="/etc/apache2/sites-enabled/$(basename "$f")"
+                [ -L "$enabled" ] && chown -h "$AGENT_USER:$AGENT_GROUP" "$enabled"
             fi
         done
     else
@@ -915,7 +1198,7 @@ EOF
 # Certbot management - root-owned issue helper + NOPASSWD sudoers. certbot's argv is domain-variable
 # (can't be argv-exact granted), so the helper IS the security boundary: it re-validates each domain,
 # performs real ACME issuance through a dedicated webroot in production. The explicit local mode
-# creates a self-signed certificate for the isolated release lab without contacting ACME.
+# creates a self-signed certificate for a disposable local simulator without contacting ACME.
 # Domains/email arrive via env (env_keep), never on the argv list.
 write_certbot_manage() {
     log_info "Configuring certbot management: root-owned production ACME/local TLS helper + sudoers..."
@@ -927,7 +1210,12 @@ write_certbot_manage() {
 # Args: $1 = primary domain. Env: AETHEUS_CERTBOT_DOMAINS (comma list), AETHEUS_CERTBOT_EMAIL,
 # AETHEUS_CERTBOT_MODE (production or local).
 set -eu
-ACME_WEBROOT=/var/lib/aetheus-agent/acme-webroot
+# Under /var/www, not under the agent state directory. Apache runs as www-data and cannot traverse
+# /var/lib/aetheus-agent, so it answered 403 on every challenge served from there and no new
+# certificate could be issued - docs.aetheus.sonytumen.com could never get one. Moving the web root
+# to the tree Apache is meant to read fixes that without loosening the agent directory, and the
+# challenge files are public, single-use and short-lived by design.
+ACME_WEBROOT=/var/www/aetheus-acme
 ACME_CONF=/etc/apache2/conf-available/aetheus-acme-webroot.conf
 LIVE_DIR=/etc/letsencrypt/live
 SITES_AVAIL=/etc/apache2/sites-available
@@ -1125,6 +1413,7 @@ apply_sudoers() {
         write_apache_manage_sudoers
     else
         rm -f "$APACHE_MANAGE_SUDOERS_FILE"
+        rm -f "$APACHE_CONFIGTEST_HELPER_PATH"
     fi
     # Certbot management: root-owned webroot ACME helper + NOPASSWD sudoers.
     if [ "$ENABLE_CERTBOT_MANAGE" -eq 1 ]; then
@@ -1161,13 +1450,13 @@ apply_sudoers() {
     else
         rm -f "$PACKAGE_MANAGE_SUDOERS_FILE"
     fi
-    # PLAN-006 4.1 - fixed apt-get upgrade allow-list (argv-exact, no helper) for fleet OS patching.
+    # ADR-024 4.1 - fixed apt-get upgrade allow-list (argv-exact, no helper) for fleet OS patching.
     if [ "$ENABLE_PATCH_MANAGE" -eq 1 ]; then
         write_patch_manage_sudoers
     else
         rm -f "$PATCH_MANAGE_SUDOERS_FILE"
     fi
-    # PLAN-006 4.2 - root-owned ufw helper + path-only sudoers for firewall control.
+    # ADR-024 4.2 - root-owned ufw helper + path-only sudoers for firewall control.
     if [ "$ENABLE_FIREWALL_MANAGE" -eq 1 ]; then
         write_firewall_manage
     else
@@ -1267,7 +1556,7 @@ ensure_helper_dir() {
 # re-validates every argument and can ONLY write /etc/cron.d/aetheus-<id>) and a NOPASSWD sudoers
 # grant for exactly that binary. noexec is intentionally NOT set on this Cmnd_Alias: the helper is a
 # vetted shell script that must exec coreutils (chmod/chown) - it is itself the boundary, not a
-# general GTFOBins tool.
+# general GTFOBins tool. See docs/claudes/claude-security.md#controlled-sudo-escalation.
 write_cron_manage() {
     log_info "Configuring cron-manage helper + sudoers (Phase 3, root-owned helper boundary)..."
     ensure_helper_dir
@@ -1346,7 +1635,7 @@ EOF
 #      aetheus-app@<app>.service) + a NOPASSWD sudoers grant for exactly that binary. noexec is
 #      omitted (the helper is a vetted script that must exec systemctl) - same recipe as cron-apply.
 #   3. The agent-owned $DEPLOY_BASE_DIR tree (it writes releases/ and atomically flips current).
-# The helper remains the narrow privilege boundary.
+# See docs/claudes/claude-security.md#controlled-sudo-escalation.
 # S-FEAT-DPU2 (v2 isolation - IMPLEMENTED): the unit template below runs each deployed app under a
 # transient per-app systemd identity (DynamicUser) with a StateDirectory for its writable state,
 # instead of the shared agent user. The ownership split that makes this work: $DEPLOY_BASE_DIR/%i
@@ -1396,7 +1685,7 @@ RestartSec=5
 # agent-manages-releases / app-reads-releases model.
 StateDirectory=aetheus-app-%i
 Environment=HOME=/var/lib/aetheus-app-%i
-# PLAN-001 phase 2 (zero-config OTLP): the deploy executor may drop a .aetheus-env (OTEL endpoint +
+# ADR-021 phase 2 (zero-config OTLP): the deploy executor may drop a .aetheus-env (OTEL endpoint +
 # ingestion key) into the flipped release. The leading '-' makes it OPTIONAL, so a deploy that injects
 # nothing (feature off / no linked MonitoredApp) leaves the unit unchanged.
 EnvironmentFile=-$DEPLOY_BASE_DIR/%i/current/.aetheus-env
@@ -1431,6 +1720,10 @@ EOF
 # (NOPASSWD). (Re)starts ONLY aetheus-app@<app>.service for a re-validated <app>. Never evals input.
 set -eu
 app="${1:-}"
+if [ "$app" = "--probe" ] && [ "$#" -eq 1 ]; then
+    echo "aetheus-deploy-helper-v2"
+    exit 0
+fi
 printf '%s' "$app" | grep -Eq '^[a-zA-Z0-9_-]{1,64}$' || { echo "invalid app" >&2; exit 1; }
 unit="aetheus-app@${app}.service"
 # `enable` makes the FIRST deploy of a template instance persist across reboot (idempotent on later
@@ -1604,7 +1897,7 @@ EOF
 # Phase 3 (option B) - systemctl enable --now on a FIXED list of pre-existing units. `systemctl
 # enable` is otherwise forbidden (mints new root services); permitted here ONLY argv-exact, no
 # wildcards, against units that already exist. Mirrors the AETHEUS_SYSTEMCTL unit set.
-# The allow-list remains argv-exact and unit-scoped.
+# See docs/claudes/claude-security.md#controlled-sudo-escalation.
 write_service_enable_sudoers() {
     log_info "Configuring service-enable sudoers (Phase 3 option B, fixed-unit allow-list)..."
     cat > "$SERVICE_ENABLE_SUDOERS_FILE" <<EOF
@@ -1644,7 +1937,7 @@ EOF
 # the Removable subset (protected packages - databases, ufw/fail2ban, docker - cannot be uninstalled). No
 # wildcards: anything outside the list is refused by sudo at the OS level. noexec is intentionally NOT set
 # - apt-get must exec dpkg + maintainer scripts; the argv-exact allow-list (no -o / config-file flags) is
-# the boundary.
+# the boundary. See docs/claudes/claude-security.md#controlled-sudo-escalation.
 write_package_manage_sudoers() {
     log_info "Configuring package-manage sudoers (S-FEAT-W8KN, fixed-package allow-list)..."
     cat > "$PACKAGE_MANAGE_SUDOERS_FILE" <<EOF
@@ -1694,7 +1987,7 @@ EOF
 }
 
 write_patch_manage_sudoers() {
-    log_info "Configuring patch-manage sudoers (PLAN-006 4.1, apt-get upgrade, argv-exact)..."
+    log_info "Configuring patch-manage sudoers (ADR-024 4.1, apt-get upgrade, argv-exact)..."
     cat > "$PATCH_MANAGE_SUDOERS_FILE" <<EOF
 # Aetheus Agent - fleet OS patching. A single EXACT argv (no wildcards): whole-box apt-get upgrade.
 # The agent runs a non-mutating 'apt-get -s upgrade' simulation FIRST (unprivileged, no sudo) and
@@ -1719,13 +2012,13 @@ EOF
 }
 
 write_firewall_manage() {
-    log_info "Configuring firewall-manage helper + sudoers (PLAN-006 4.2, ufw)..."
+    log_info "Configuring firewall-manage helper + sudoers (ADR-024 4.2, ufw)..."
     ensure_helper_dir
     # Root-owned helper = the security boundary: it re-validates every argument, re-enforces anti-lockout
     # with the REAL SSH port, and never evals. Quoted heredoc marker => no expansion inside.
     cat > "$FIREWALL_HELPER_PATH" <<'FWEOF'
 #!/bin/sh
-# Aetheus firewall helper (PLAN-006 4.2). Root-owned; the agent may exec but not modify it.
+# Aetheus firewall helper (ADR-024 4.2). Root-owned; the agent may exec but not modify it.
 set -u
 UFW=/usr/sbin/ufw
 # Detect the real SSH port so anti-lockout protects the actual admin port, not just 22.
@@ -1817,7 +2110,8 @@ EOF
 # that binary. The old MailService.SetupAsync enqueued a free-form apt/postconf/systemctl shell pipeline
 # that always failed for the non-root agent; this is the typed OperationKind.MailSetup path. noexec is
 # intentionally NOT set on this Cmnd_Alias: the helper is a vetted script that must exec apt-get /
-# postconf / systemctl / doveadm - it is itself the boundary.
+# postconf / systemctl / doveadm - it is itself the boundary. See
+# docs/claudes/claude-security.md#controlled-sudo-escalation.
 write_mail_setup() {
     log_info "Configuring mail-setup helper + sudoers (S-FEAT-W8KN, root-owned helper boundary)..."
     ensure_helper_dir
@@ -1943,6 +2237,8 @@ valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0
 valid_email()  { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'; }
 valid_sel()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]+$'; }
 valid_quota()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,7}$'; }
+without_space_key() { awk -v key="$1" '$1 != key' "$2" > "$2.tmp" 2>/dev/null || true; }
+without_colon_key() { awk -F: -v key="$1" '$1 != key' "$2" > "$2.tmp" 2>/dev/null || true; }
 
 cmd="${1:-}"
 [ -n "$cmd" ] || die "no sub-command"
@@ -1976,14 +2272,14 @@ case "$cmd" in
     chown -R vmail:vmail "/var/mail/vhosts/$domain"
     umask 022
     touch /etc/postfix/vmailbox
-    grep -v "^$email " /etc/postfix/vmailbox > /etc/postfix/vmailbox.tmp 2>/dev/null || true
+    without_space_key "$email" /etc/postfix/vmailbox
     printf '%s %s/%s/\n' "$email" "$domain" "$localpart" >> /etc/postfix/vmailbox.tmp
     mv /etc/postfix/vmailbox.tmp /etc/postfix/vmailbox
     postmap /etc/postfix/vmailbox
     hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
     umask 077
     touch /etc/dovecot/users
-    grep -v "^$email:" /etc/dovecot/users > /etc/dovecot/users.tmp 2>/dev/null || true
+    without_colon_key "$email" /etc/dovecot/users
     printf '%s:%s\n' "$email" "$hash" >> /etc/dovecot/users.tmp
     mv /etc/dovecot/users.tmp /etc/dovecot/users
     chmod 600 /etc/dovecot/users
@@ -1995,7 +2291,7 @@ case "$cmd" in
     valid_email "$destination" || die "invalid destination"
     umask 022
     touch /etc/postfix/virtual
-    grep -v "^$email " /etc/postfix/virtual > /etc/postfix/virtual.tmp 2>/dev/null || true
+    without_space_key "$email" /etc/postfix/virtual
     printf '%s %s\n' "$email" "$destination" >> /etc/postfix/virtual.tmp
     mv /etc/postfix/virtual.tmp /etc/postfix/virtual
     postmap /etc/postfix/virtual
@@ -2013,13 +2309,18 @@ case "$cmd" in
     valid_sel "$selector"  || die "invalid selector"
     mkdir -p /etc/opendkim/keys
     opendkim-genkey -s "$selector" -d "$domain" -D /etc/opendkim/keys/
-    chown opendkim:opendkim "/etc/opendkim/keys/$selector.private"
+    chown opendkim:opendkim \
+      "/etc/opendkim/keys/$selector.private" \
+      "/etc/opendkim/keys/$selector.txt"
     chmod 600 "/etc/opendkim/keys/$selector.private"
+    chmod 644 "/etc/opendkim/keys/$selector.txt"
     touch /etc/opendkim/KeyTable /etc/opendkim/SigningTable
-    grep -v "\.${domain} " /etc/opendkim/KeyTable > /etc/opendkim/KeyTable.tmp 2>/dev/null || true
+    awk -v suffix="._domainkey.$domain" \
+      'length($1) < length(suffix) || substr($1, length($1) - length(suffix) + 1) != suffix' \
+      /etc/opendkim/KeyTable > /etc/opendkim/KeyTable.tmp 2>/dev/null || true
     printf '%s._domainkey.%s %s:%s:/etc/opendkim/keys/%s.private\n' "$selector" "$domain" "$domain" "$selector" "$selector" >> /etc/opendkim/KeyTable.tmp
     mv /etc/opendkim/KeyTable.tmp /etc/opendkim/KeyTable
-    grep -v "^\*@$domain " /etc/opendkim/SigningTable > /etc/opendkim/SigningTable.tmp 2>/dev/null || true
+    without_space_key "*@$domain" /etc/opendkim/SigningTable
     printf '*@%s %s._domainkey.%s\n' "$domain" "$selector" "$domain" >> /etc/opendkim/SigningTable.tmp
     mv /etc/opendkim/SigningTable.tmp /etc/opendkim/SigningTable
     systemctl restart opendkim
@@ -2034,11 +2335,12 @@ case "$cmd" in
     [ -n "$password" ] || die "empty password"
     printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has control chars"
     [ "${#password}" -ge 8 ] || die "password too short"
-    grep -q "^$email:" /etc/dovecot/users 2>/dev/null || die "account does not exist"
+    awk -F: -v key="$email" '$1 == key { found=1; exit } END { exit !found }' \
+      /etc/dovecot/users 2>/dev/null || die "account does not exist"
     hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
     umask 077
     touch /etc/dovecot/users
-    grep -v "^$email:" /etc/dovecot/users > /etc/dovecot/users.tmp 2>/dev/null || true
+    without_colon_key "$email" /etc/dovecot/users
     printf '%s:%s\n' "$email" "$hash" >> /etc/dovecot/users.tmp
     mv /etc/dovecot/users.tmp /etc/dovecot/users
     chmod 600 /etc/dovecot/users
@@ -2066,12 +2368,12 @@ case "$cmd" in
     valid_domain "$domain" || die "invalid domain"
     case "$email" in *"@$domain") : ;; *) die "email not in domain" ;; esac
     if [ -f /etc/postfix/vmailbox ]; then
-      grep -v "^$email " /etc/postfix/vmailbox > /etc/postfix/vmailbox.tmp 2>/dev/null || true
+      without_space_key "$email" /etc/postfix/vmailbox
       mv /etc/postfix/vmailbox.tmp /etc/postfix/vmailbox
       postmap /etc/postfix/vmailbox
     fi
     if [ -f /etc/dovecot/users ]; then
-      grep -v "^$email:" /etc/dovecot/users > /etc/dovecot/users.tmp 2>/dev/null || true
+      without_colon_key "$email" /etc/dovecot/users
       mv /etc/dovecot/users.tmp /etc/dovecot/users
       chmod 600 /etc/dovecot/users
     fi
@@ -2082,7 +2384,7 @@ case "$cmd" in
     email="${2:-}"
     valid_email "$email" || die "invalid alias"
     if [ -f /etc/postfix/virtual ]; then
-      grep -v "^$email " /etc/postfix/virtual > /etc/postfix/virtual.tmp 2>/dev/null || true
+      without_space_key "$email" /etc/postfix/virtual
       mv /etc/postfix/virtual.tmp /etc/postfix/virtual
       postmap /etc/postfix/virtual
       systemctl reload postfix
@@ -2135,7 +2437,8 @@ EOF
 # NOPASSWD sudoers grant for exactly that binary. The old TeamspeakService.SetupAsync enqueued a free-form
 # useradd/cat>/etc/systemd/systemctl shell pipeline that always failed for the non-root agent; this is the
 # typed OperationKind.TeamspeakSetup path. noexec is intentionally NOT set: the helper must exec apt-get /
-# curl / tar / systemctl / useradd - it is itself the boundary.
+# curl / tar / systemctl / useradd - it is itself the boundary. See
+# docs/claudes/claude-security.md#controlled-sudo-escalation.
 write_teamspeak_setup() {
     log_info "Configuring teamspeak-setup helper + sudoers (root-owned helper boundary)..."
     ensure_helper_dir
@@ -2196,18 +2499,25 @@ useradd -r -m -d /opt/teamspeak -s /usr/sbin/nologin teamspeak 2>/dev/null || tr
 # 2. Download the server tarball to a temp file, optionally verify its integrity, then extract.
 # S-TECH-TSCK: TS_VERSION is the single pinned-version constant; download to a temp file (instead of
 # piping curl straight into tar) so the archive CAN be checksum-verified before it is trusted. Set
-# TS_SHA256 to the published SHA-256 of the tarball to fail-closed on a tampered/rotted download; left
-# empty it skips the check (HTTPS + a version-pinned URL still apply) but logs that it is unverified.
+# TS_SHA256 to the published SHA-256 of the tarball to fail-closed on a tampered/rotted download.
+# The operator pins the checksum in a root-owned config file before enabling TeamSpeak. sudo uses
+# env_reset for this helper, so a file is the deliberate, persistent trust channel.
+TS_CHECKSUM_FILE="/etc/aetheus-agent/teamspeak.sha256"
 TS_SHA256=""
+if [ -r "$TS_CHECKSUM_FILE" ]; then
+    TS_SHA256="$(tr -d '[:space:]' < "$TS_CHECKSUM_FILE")"
+fi
+case "$TS_SHA256" in
+    ''|*[!0-9a-fA-F]*)
+        die "TS_SHA256 must be a pinned 64-character hexadecimal checksum"
+        ;;
+esac
+[ "${#TS_SHA256}" -eq 64 ] || die "TS_SHA256 must be a pinned 64-character hexadecimal checksum"
 mkdir -p "$install_path"
 ts_tmp="$(mktemp)"
 trap 'rm -f "$ts_tmp"' EXIT
 curl -fsSL "$TS_URL" -o "$ts_tmp"
-if [ -n "$TS_SHA256" ]; then
-    echo "$TS_SHA256  $ts_tmp" | sha256sum -c - || die "TeamSpeak tarball checksum mismatch - refusing to install"
-else
-    echo "WARNING: TS_SHA256 is unset - installing TeamSpeak $TS_VERSION without checksum verification." >&2
-fi
+echo "$TS_SHA256  $ts_tmp" | sha256sum -c - || die "TeamSpeak tarball checksum mismatch - refusing to install"
 tar xjf "$ts_tmp" -C "$install_path" --strip-components=1
 chown -R teamspeak:teamspeak "$install_path"
 
@@ -2288,7 +2598,8 @@ EOF
 write_rkhunter_manage_sudoers() {
     log_info "Configuring RKHunter-manage sudoers (items #10.2/#10.3, ultra-strict allow-list)..."
     cat > "$RKHUNTER_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - RKHunter management with an argv-exact privilege boundary.
+# Aetheus Agent - RKHunter management. Items #10.2/#10.3 of the plan; see
+# docs/claudes/claude-security.md#controlled-sudo-escalation.
 
 # 1. Run scan (rkhunter --check needs root to read /var/lib/rkhunter/db + scan certain paths).
 # 2. Update signature DB (rkhunter --update fetches new mirror data, writes /var/lib/rkhunter).
@@ -2317,7 +2628,7 @@ EOF
 print_posture_summary() {
     log_info ""
     [ "$MODULE_PIPELINE_RUNNER" -eq 1 ] \
-        && log_info "  Module pipeline-runner: ON (dotnet/git/sshpass installed; no elevation)" \
+        && log_info "  Module pipeline-runner: ON (git/sshpass installed; SDKs use locked OCI images)" \
         || log_info "  Module pipeline-runner: off"
     log_info "  Elevation posture (server-management; all OFF by default - opt in with --module server-management or --enable-*):"
     if [ "$ENABLE_SERVICE_CONTROL" -eq 1 ]; then
@@ -2327,7 +2638,7 @@ print_posture_summary() {
     fi
     [ "$ENABLE_APACHE"  -eq 1 ] && log_info "    apache read ACL : ON" || log_info "    apache read ACL : off"
     if [ "$ENABLE_APACHE_MANAGE" -eq 1 ]; then
-        log_info "    apache manage   : ON  (sudoers ${APACHE_MANAGE_SUDOERS_FILE}; argv-exact, noexec; ACL +rw on sites-available)"
+        log_info "    apache manage   : ON  (fixed configtest helper + argv-exact systemctl; ACL +rw on sites-available)"
     else
         log_info "    apache manage   : off (no Apache write/reload privileges)"
     fi
@@ -2443,20 +2754,24 @@ NoNewPrivileges=false"
 CapabilityBoundingSet="
     fi
 
-    # ProtectSystem=strict mounts /usr, /boot and /etc (and the rest of the FS) read-only for the
-    # whole service - including sudo's elevated children. Package installs (apt/dpkg write /usr,
-    # /var, /etc), mail provisioning and deploy restarts then fail with 'Read-only file system'
-    # (apt exits 100) even though sudo elevated correctly. apache-manage writes vhosts under
-    # /etc/apache2, and certbot-manage's root helper writes /etc/apache2 + /etc/letsencrypt (on
-    # demand, so a targeted ReadWritePaths would also have to pre-create non-existent dirs or the
-    # unit refuses to start). Those grants therefore need the read-only system mount relaxed.
-    # service-control only drives systemd over dbus (no FS writes), so it keeps ProtectSystem=strict.
-    if [ "$ENABLE_PACKAGE_MANAGE" -eq 1 ] || [ "$ENABLE_PATCH_MANAGE" -eq 1 ] || [ "$ENABLE_FIREWALL_MANAGE" -eq 1 ] || [ "$ENABLE_MAIL_SETUP" -eq 1 ] || [ "$ENABLE_DEPLOYMENT" -eq 1 ] \
-       || [ "$ENABLE_APACHE_MANAGE" -eq 1 ] || [ "$ENABLE_CERTBOT_MANAGE" -eq 1 ]; then
-        PROTECT_SYSTEM_BLOCK="# RELAXED: package/mail/deploy/apache-manage/certbot-manage grants write system paths, so the read-only system mount is off.
+    # Package/mail/deploy operations genuinely need broad system writes. Apache/certbot only need
+    # narrow, pre-created trees, so retain ProtectSystem=strict and open those exact paths.
+    READ_WRITE_PATHS_BLOCK=""
+    if [ "$ENABLE_PACKAGE_MANAGE" -eq 1 ] || [ "$ENABLE_PATCH_MANAGE" -eq 1 ] \
+       || [ "$ENABLE_FIREWALL_MANAGE" -eq 1 ] || [ "$ENABLE_MAIL_SETUP" -eq 1 ] \
+       || [ "$ENABLE_DEPLOYMENT" -eq 1 ]; then
+        PROTECT_SYSTEM_BLOCK="# RELAXED: package/mail/deploy grants write broad system paths, so the read-only system mount is off.
 ProtectSystem=false"
     else
         PROTECT_SYSTEM_BLOCK="ProtectSystem=strict"
+        if [ "$ENABLE_APACHE_MANAGE" -eq 1 ]; then
+            mkdir -p /etc/apache2
+            READ_WRITE_PATHS_BLOCK="$READ_WRITE_PATHS_BLOCK /etc/apache2"
+        fi
+        if [ "$ENABLE_CERTBOT_MANAGE" -eq 1 ]; then
+            mkdir -p /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt
+            READ_WRITE_PATHS_BLOCK="$READ_WRITE_PATHS_BLOCK /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt"
+        fi
     fi
 
     # A deployment target needs an ACL mask with execute on the private state directory so the
@@ -2485,6 +2800,7 @@ Wants=network-online.target
 Type=exec
 User=$AGENT_USER
 Group=$AGENT_GROUP
+UMask=0077
 WorkingDirectory=$INSTALL_DIR
 # StateDirectory: systemd creates/owns /var/lib/aetheus-agent (= \$WORK_DIR) for the service user
 # on every start, and auto-adds it to ReadWritePaths under ProtectSystem=strict. Deployment targets
@@ -2514,7 +2830,7 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/s
 $NNP_BLOCK
 $PROTECT_SYSTEM_BLOCK
 ProtectHome=true
-ReadWritePaths=$WORK_DIR $INSTALL_DIR
+ReadWritePaths=$WORK_DIR $INSTALL_DIR$READ_WRITE_PATHS_BLOCK
 PrivateTmp=true
 ProtectControlGroups=true
 ProtectKernelTunables=true
@@ -2662,18 +2978,37 @@ run_health_check() {
     fi
     log_info "  Service active after ${_hc_waited}s."
 
-    # Phase 2 - wait for the enrollment handshake. AgentStartupService logs
-    # "Enrolled successfully" or "Agent is enrolled and ready" within ~5s on
-    # success. On failure it retries with backoff, so we don't need to wait the
-    # full 10-retry cycle to detect the first error.
-    log_info "  Waiting 8s for enrollment handshake..."
-    sleep 20
-
-    if [ -n "$_hc_since" ]; then
-        _hc_journal="$(journalctl -u "$SERVICE_NAME" --since "$_hc_since" --no-pager 2>/dev/null || echo '')"
-    else
-        _hc_journal="$(journalctl -u "$SERVICE_NAME" -n 200 --no-pager 2>/dev/null || echo '')"
-    fi
+    # Phase 2 - enrollment alone is not readiness: protocol/capabilities are authoritative only
+    # after the initial heartbeat. Do not return success while the UI can still observe P? and an
+    # empty capability set.
+    log_info "  Waiting up to 45s for enrollment and initial compatibility heartbeat..."
+    _hc_waited=0
+    _hc_max=45
+    _hc_enrolled=0
+    _hc_contract_ready=0
+    _hc_journal=""
+    while [ "$_hc_waited" -lt "$_hc_max" ]; do
+        if [ -n "$_hc_since" ]; then
+            _hc_journal="$(journalctl -u "$SERVICE_NAME" --since "$_hc_since" --no-pager 2>/dev/null || echo '')"
+        else
+            _hc_journal="$(journalctl -u "$SERVICE_NAME" -n 200 --no-pager 2>/dev/null || echo '')"
+        fi
+        printf '%s\n' "$_hc_journal" | grep -qE 'Enrolled successfully|Agent already enrolled|Agent is enrolled and ready' \
+            && _hc_enrolled=1
+        printf '%s\n' "$_hc_journal" | grep -Fq 'Initial heartbeat sent; agent contract is ready' \
+            && _hc_contract_ready=1
+        if [ "$_hc_enrolled" -eq 1 ] && [ "$_hc_contract_ready" -eq 1 ]; then
+            break
+        fi
+        if printf '%s\n' "$_hc_journal" | grep -qE 'Enrollment failed|Enrollment HTTP call.*failed|No registration token configured|credentials is missing or unreadable|Enrollment failed after [0-9]+ attempts'; then
+            break
+        fi
+        if ! systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        _hc_waited=$((_hc_waited + 1))
+    done
 
     # Negative signals (most recent match wins).
     _hc_err="$(printf '%s\n' "$_hc_journal" \
@@ -2688,7 +3023,7 @@ run_health_check() {
     fi
 
     # Positive signals.
-    if printf '%s\n' "$_hc_journal" | grep -qE 'Enrolled successfully|Agent already enrolled|Agent is enrolled and ready'; then
+    if [ "$_hc_enrolled" -eq 1 ] && [ "$_hc_contract_ready" -eq 1 ]; then
         _hc_server_id="$(printf '%s\n' "$_hc_journal" \
             | grep -oE 'Server ID [a-zA-Z0-9-]+' | tail -1 || true)"
         if [ -n "$_hc_server_id" ]; then
@@ -2704,11 +3039,50 @@ run_health_check() {
         return 0
     fi
 
-    # No clear signal either way - the first attempt may still be in flight.
-    log_error "  No successful enrollment outcome was observed; installation fails closed."
+    if [ "$_hc_enrolled" -ne 1 ]; then
+        log_error "  No successful enrollment outcome was observed; installation fails closed."
+    else
+        log_error "  Enrollment succeeded but no initial compatibility heartbeat was observed; installation fails closed."
+    fi
     diagnose_failure "$_hc_url"
     return 1
 }
+
+# =============================================================================
+# Mode: BOOTSTRAP UPDATE SUPERVISOR
+# =============================================================================
+if [ "$MODE" = "bootstrap-update-supervisor" ]; then
+    log_info "BOOTSTRAP mode: installing only the root-owned agent update supervisor."
+    if [ ! -f "$INSTALL_DIR/appsettings.json" ]; then
+        log_error "No existing config at $INSTALL_DIR/appsettings.json."
+        exit 1
+    fi
+    if ! systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}\.service"; then
+        log_error "Service ${SERVICE_NAME} is not installed."
+        exit 1
+    fi
+    EXISTING_URL="$(grep -oE '"ServerUrl"[[:space:]]*:[[:space:]]*"[^"]+"' "$INSTALL_DIR/appsettings.json" \
+        | sed -E 's/.*"ServerUrl"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' | head -1 || true)"
+    case "$EXISTING_URL" in https://*) ;; *) log_error "Existing agent ServerUrl must use HTTPS."; exit 1 ;; esac
+    install_agent_update_supervisor "$EXISTING_URL"
+    for _supervisor_file in \
+        "$AGENT_POSTURE_VERSION_FILE" "$AGENT_UPDATE_URL_FILE" \
+        "$AGENT_UPDATE_WORKER_PATH" "$AGENT_UPDATE_SERVICE_PATH" "$AGENT_UPDATE_PATH_PATH"; do
+        [ -f "$_supervisor_file" ] || { log_error "Supervisor file missing: $_supervisor_file"; exit 1; }
+        [ "$(stat -c %u "$_supervisor_file")" = 0 ] || { log_error "Supervisor file is not root-owned: $_supervisor_file"; exit 1; }
+        [ "$(stat -c %g "$_supervisor_file")" = 0 ] || { log_error "Supervisor file group is not root: $_supervisor_file"; exit 1; }
+    done
+    [ "$(cat "$AGENT_POSTURE_VERSION_FILE")" = "$AGENT_POSTURE_VERSION" ] || exit 1
+    [ "$(stat -c %a "$AGENT_POSTURE_VERSION_FILE")" = 644 ] || exit 1
+    [ "$(stat -c %a "$AGENT_UPDATE_URL_FILE")" = 600 ] || exit 1
+    [ "$(stat -c %a "$AGENT_UPDATE_WORKER_PATH")" = 755 ] || exit 1
+    [ "$(stat -c %a "$AGENT_UPDATE_SERVICE_PATH")" = 644 ] || exit 1
+    [ "$(stat -c %a "$AGENT_UPDATE_PATH_PATH")" = 644 ] || exit 1
+    systemctl is-enabled --quiet aetheus-agent-upgrade.path
+    systemctl is-active --quiet aetheus-agent-upgrade.path
+    log_info "Agent update supervisor bootstrap complete; the running agent binary was not replaced."
+    exit 0
+fi
 
 # =============================================================================
 # Mode: PURGE
@@ -2726,6 +3100,10 @@ if [ "$MODE" = "purge" ]; then
 
     log_info "Stopping and disabling service..."
     stop_and_disable_service
+    systemctl disable --now aetheus-agent-upgrade.path 2>/dev/null || true
+    rm -f "$AGENT_UPDATE_SERVICE_PATH" "$AGENT_UPDATE_PATH_PATH" \
+        "$AGENT_UPDATE_WORKER_PATH" "$AGENT_UPDATE_URL_FILE" \
+        "$AGENT_POSTURE_VERSION_FILE" "$AGENT_UPDATE_REQUEST_FILE"
     remove_systemd_unit
 
     if [ -f "$SUDOERS_FILE" ]; then
@@ -2736,6 +3114,7 @@ if [ "$MODE" = "purge" ]; then
         log_info "Removing Apache-manage sudoers file..."
         rm -f "$APACHE_MANAGE_SUDOERS_FILE"
     fi
+    rm -f "$APACHE_CONFIGTEST_HELPER_PATH"
     if [ -f "$RKHUNTER_MANAGE_SUDOERS_FILE" ]; then
         log_info "Removing RKHunter-manage sudoers file..."
         rm -f "$RKHUNTER_MANAGE_SUDOERS_FILE"
@@ -2866,6 +3245,7 @@ if [ "$MODE" = "upgrade" ]; then
     ensure_icu || true
     apply_sudoers
     write_systemd_unit
+    install_agent_update_supervisor "$EXISTING_URL"
     if id "$AGENT_USER" >/dev/null 2>&1; then
         apply_read_acls
         ensure_docker_group
@@ -2940,6 +3320,38 @@ else
     printf "  Token received: %d chars\n" "$TOKEN_LEN"
 fi
 
+# --- Prefer HTTPS for a remote backend ---
+# The agent publishes its own ServerUrl as the package base URL, and NuGet refuses to
+# push over plain HTTP ("NuGet requires HTTPS sources"), which broke the observability
+# package publisher in production. Upgrade a remote http:// endpoint to https:// only
+# when HTTPS actually answers, so a local or self-hosted dev backend keeps working.
+case "$SERVER_URL" in
+    http://*)
+        SERVER_URL_HOST="${SERVER_URL#http://}"
+        SERVER_URL_HOST="${SERVER_URL_HOST%%/*}"
+        SERVER_URL_HOST="${SERVER_URL_HOST%%:*}"
+        case "$SERVER_URL_HOST" in
+            localhost|127.*|::1|host.docker.internal|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+                log_info "Keeping http:// for local backend $SERVER_URL_HOST."
+                ;;
+            *)
+                SERVER_URL_HTTPS="https://${SERVER_URL#http://}"
+                if command -v curl >/dev/null 2>&1; then
+                    HTTPS_PROBE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${SERVER_URL_HTTPS}/health/live" 2>/dev/null || echo "000")"
+                    if [ "$HTTPS_PROBE" = "200" ]; then
+                        log_warn "Server URL was http://; HTTPS answers, switching to $SERVER_URL_HTTPS."
+                        log_warn "  Plain HTTP breaks NuGet package publishing and sends the enrolment token in clear."
+                        SERVER_URL="$SERVER_URL_HTTPS"
+                    else
+                        log_warn "Server URL uses http:// and HTTPS did not answer (got $HTTPS_PROBE) - keeping http://."
+                        log_warn "  NuGet package publishing will refuse this source."
+                    fi
+                fi
+                ;;
+        esac
+        ;;
+esac
+
 # --- Validate that ServerUrl points to the backend API, not the frontend ---
 # The backend exposes GET /health/live (anonymous liveness probe); the frontend
 # (Blazor WASM) does not. This catches the classic mistake of using
@@ -2976,10 +3388,20 @@ if [ ! -f "$SCRIPT_DIR/Aetheus.Agent.Linux.dll" ] && [ ! -f "$SCRIPT_DIR/Aetheus
     exit 1
 fi
 
+# --- Preserve the elevation posture of a pre-existing install ---
+# An agent is disposable: re-running the enrolment command from the UI must be
+# idempotent, never a downgrade. apply_sudoers revokes (rm -f) every capability whose
+# flag is 0, so without this derivation a plain reinstall silently disarmed the agent
+# (certbot, Apache, docker, deployment...) and the production pipelines broke. This runs
+# BEFORE the cleanup below, because the cleanup deletes the very sudoers files that act
+# as the on-disk witnesses of the posture. Explicit --enable-*/--disable-* flags still win.
+derive_existing_posture
+
 # --- Clean any previous installation ---
 # Stop + remove service, sudoers, stale config, and wipe work dir so the reinstall
 # starts from a known state. We never rm -rf "$INSTALL_DIR" because this script
 # typically lives inside it - removing it would kill the running shell.
+preserve_production_environment
 log_info "Cleaning previous installation (if any)..."
 stop_and_disable_service
 remove_systemd_unit
@@ -2992,6 +3414,7 @@ if [ -f "$APACHE_MANAGE_SUDOERS_FILE" ]; then
     log_info "  Removing old Apache-manage sudoers rules..."
     rm -f "$APACHE_MANAGE_SUDOERS_FILE"
 fi
+rm -f "$APACHE_CONFIGTEST_HELPER_PATH"
 if [ -f "$RKHUNTER_MANAGE_SUDOERS_FILE" ]; then
     log_info "  Removing old RKHunter-manage sudoers rules..."
     rm -f "$RKHUNTER_MANAGE_SUDOERS_FILE"
@@ -3024,6 +3447,15 @@ if id "$AGENT_USER" >/dev/null 2>&1; then
 else
     useradd -r -s /bin/false -d "$WORK_DIR" "$AGENT_USER"
 fi
+if [ -d "$PRODUCTION_STATE_DIR" ]; then
+    chown -R "$AGENT_USER:$AGENT_GROUP" "$PRODUCTION_STATE_DIR"
+    chmod 700 "$PRODUCTION_STATE_DIR"
+fi
+# Same treatment for the demo state root: create it if it is absent, and hand it to the agent user
+# so the nightly can write its environment file without ever needing root at deployment time.
+install -d -m 700 "$DEMO_STATE_DIR"
+chown -R "$AGENT_USER:$AGENT_GROUP" "$DEMO_STATE_DIR"
+chmod 700 "$DEMO_STATE_DIR"
 
 # --- Add agent user to docker group (required for container/image collection) ---
 ensure_docker_group
@@ -3066,7 +3498,9 @@ REG_TOKEN_J="$(json_escape "$REG_TOKEN")"
 AGENT_NAME_J="$(json_escape "$AGENT_NAME")"
 WORK_DIR_J="$(json_escape "$WORK_DIR")"
 DOCKER_STORAGE_DEPLOYMENT_ONLY=false
-if [ "$MODULE_DEPLOYMENT" -eq 1 ]; then
+# A deployment-capable pipeline runner is still a general runner. Restrict the task gate only
+# when the host was deliberately installed without the pipeline-runner module.
+if [ "$MODULE_DEPLOYMENT" -eq 1 ] && [ "$MODULE_PIPELINE_RUNNER" -eq 0 ]; then
     DOCKER_STORAGE_DEPLOYMENT_ONLY=true
 fi
 cat > "$INSTALL_DIR/appsettings.json" <<EOF
@@ -3082,7 +3516,7 @@ cat > "$INSTALL_DIR/appsettings.json" <<EOF
     "LogRetentionDays": 30,
     "AllowInsecureCerts": $ALLOW_INSECURE_JSON,
     "DockerStorageMaintenance": {
-      "PolicyVersion": 2,
+      "PolicyVersion": 3,
       "Enabled": true,
       "DryRun": false,
       "DeploymentOnly": $DOCKER_STORAGE_DEPLOYMENT_ONLY,
@@ -3090,8 +3524,8 @@ cat > "$INSTALL_DIR/appsettings.json" <<EOF
       "MaintenanceIntervalMinutes": 60,
       "MaxCacheAgeHours": 168,
       "PressureCacheAgeHours": 24,
-      "ReservedSpaceGiB": 20,
-      "MaxCacheGiB": 80,
+      "ReservedSpaceGiB": 5,
+      "MaxCacheGiB": 15,
       "MinFreeSpaceGiB": 20,
       "PressureUsedPercent": 80,
       "NuGetCacheRetentionDays": 30
@@ -3111,6 +3545,7 @@ ensure_optional_packages
 ensure_icu || true
 apply_sudoers
 write_systemd_unit
+install_agent_update_supervisor "$SERVER_URL"
 apply_read_acls
 
 # --- Faithful pre-start probe ---

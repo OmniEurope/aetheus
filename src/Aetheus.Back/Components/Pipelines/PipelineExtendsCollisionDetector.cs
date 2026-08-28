@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -7,7 +6,7 @@ namespace Aetheus.Back.Components.Pipelines;
 /// S-TECH-K7QX: census of base &lt;-&gt; child name collisions across a template <c>extends</c> merge.
 /// Today the merge <b>appends</b> the child's stages to the base's (<see cref="PipelineTemplateService"/>),
 /// so a child stage that reuses a base stage's name yields two same-named stages - a deliberate append.
-/// PLAN-003 §4.4/§6 plans <c>replace-by-name</c> semantics, under which that same authoring would
+/// The archived pipeline template catalog plan (§4.4/§6) defines <c>replace-by-name</c> semantics,
 /// silently flip from "append a second stage" to "override the base stage". This detector enumerates the
 /// homonyms (stage, and job/step within same-named stages) so the risk is surfaced <em>before</em> the
 /// semantics change - both as a build-time census (see the guard test) and as a runtime warning at merge.

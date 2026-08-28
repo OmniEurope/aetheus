@@ -46,6 +46,7 @@ public class ServerTasksSectionTests : BunitContext
 
         var view = cut.FindComponent<TaskListView>();
         Assert.Equal(server.Id, view.Instance.ServerId);
+        Assert.Equal(server.Name, view.Instance.ServerName);
     }
 
     [Fact]
@@ -85,6 +86,22 @@ public class ServerTasksSectionTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("DeployAlpha"), TimeSpan.FromSeconds(2));
 
         Assert.Contains("DeployAlpha", cut.Markup);
+    }
+
+    [Fact]
+    public void Renders_PipelineAndServerSources()
+    {
+        StubTasks(
+            new ServerTaskDto { Id = 10, ServerId = 1, Name = "Pipeline task", PipelineRunId = 55, Status = TaskExecutionStatus.Success, CreatedAt = DateTime.UtcNow },
+            new ServerTaskDto { Id = 11, ServerId = 1, Name = "Manual task", Status = TaskExecutionStatus.Success, CreatedAt = DateTime.UtcNow });
+
+        var cut = Render<ServerTasksSection>(p => p.Add(x => x.Server, MakeServer()));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotNull(cut.Find("a[href='/pipelines/runs/55']"));
+            Assert.Contains("web-server-01", cut.Find("a[href='/servers/1/overview']").TextContent);
+        }, TimeSpan.FromSeconds(2));
     }
 
     [Fact]

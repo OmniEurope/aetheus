@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Services;

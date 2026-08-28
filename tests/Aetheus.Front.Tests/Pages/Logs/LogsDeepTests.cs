@@ -41,7 +41,7 @@ public class LogsDeepTests : BunitContext
     }
 
     [Fact]
-    public async Task StartWatching_WithNullFilter_DoesNothing()
+    public async Task StartWatching_WithNullFilter_ProducesNothing()
     {
         var cut = Render<LogsPage>();
         // _taskIdFilter is null, so StartWatching returns immediately
@@ -69,7 +69,7 @@ public class LogsDeepTests : BunitContext
     }
 
     [Fact]
-    public async Task ToggleUnmasked_WithNoCurrentWatch_DoesNothing()
+    public async Task ToggleUnmasked_WithNoCurrentWatch_LeavesTheFlagOff()
     {
         var cut = Render<LogsPage>();
         // _currentWatchId is null, so ToggleUnmasked returns immediately

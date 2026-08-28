@@ -4,12 +4,10 @@
 # =============================================================================
 # syntax=docker/dockerfile:1.7
 ARG APP_VERSION=0.0.0
-# Set BUILD_AGENTS=0 to skip publishing the Linux/Windows agents. Speeds up
-# deploys that don't change agent code (~1-2 min). The agent download endpoints
-# will return 404 in the resulting image until a full build is run again.
-ARG BUILD_AGENTS=1
+ARG CACHE_COHORT=shared
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build-source
+ARG CACHE_COHORT
 WORKDIR /src
 
 # Persist NuGet cache across builds (BuildKit). Massively speeds up incremental
@@ -19,10 +17,14 @@ ENV NUGET_PACKAGES=/root/.nuget/packages \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 COPY Directory.Build.props .
+COPY Directory.Build.targets .
 COPY Directory.Packages.props .
 COPY NuGet.config .
+COPY scanner-manifest.json /scanner-manifest.json
+COPY .aetheus/security-rules/opengrep/aetheus-security.yml /.aetheus/security-rules/opengrep/aetheus-security.yml
 COPY src/Aetheus.Shared/Aetheus.Shared.csproj Aetheus.Shared/
 COPY src/Aetheus.Analyzers/Aetheus.Analyzers.csproj Aetheus.Analyzers/
+COPY src/Aetheus.Telemetry/Aetheus.Telemetry.csproj Aetheus.Telemetry/
 COPY src/Aetheus.Back/Aetheus.Back.csproj Aetheus.Back/
 COPY src/Aetheus.Agent.Core/Aetheus.Agent.Core.csproj Aetheus.Agent.Core/
 COPY src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj Aetheus.Agent.Linux/
@@ -31,78 +33,138 @@ COPY src/Aetheus.Agent.Windows/Aetheus.Agent.Windows.csproj Aetheus.Agent.Window
 # Single combined restore: -r linux-x64 covers both the runtime publish of
 # Aetheus.Back and the EF migrations bundle (also linux-x64). The agents
 # get RID-specific assets via their own publish later.
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+#
+# This layer WARMS the cache; it is deliberately no longer the only restore. Its result lives in two
+# stores with independent lifetimes: `project.assets.json` in the image layer, the packages it points
+# at in the `nuget-*` cache mount. `docker buildx prune` (the agent's bounded storage maintenance)
+# reclaims mount records and layer records separately, so the small, recently-used restore layer can
+# survive a sweep that empties the large package mount. A later `--no-restore` publish then reads an
+# assets file whose packages are gone and fails with NETSDK1064 - which is exactly what happened on
+# mirror run 1102, 36 minutes after run 1098 built the SAME commit successfully. The publishes below
+# therefore restore in their own layer, so a reclaimed mount is refilled instead of failing a build.
+RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
     dotnet restore Aetheus.Back/Aetheus.Back.csproj -r linux-x64 \
     && dotnet restore Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj -r linux-x64 \
     && dotnet restore Aetheus.Agent.Windows/Aetheus.Agent.Windows.csproj -r win-x64
 
 # Install the EF tool BEFORE copying sources: source-only rebuilds keep this
 # layer cached instead of re-downloading the tool on every deploy.
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet tool install --global dotnet-ef --version 10.0.10
+RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
+    dotnet tool install --global dotnet-ef --version 10.0.11
 ENV PATH="${PATH}:/root/.dotnet/tools"
 
+ARG APP_VERSION
+ARG SOURCE_COMMIT
+
+FROM build-source AS agent-linux-build
 COPY src/Aetheus.Shared/ Aetheus.Shared/
-COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
-COPY src/Aetheus.Back/ Aetheus.Back/
 COPY src/Aetheus.Agent.Core/ Aetheus.Agent.Core/
 COPY src/Aetheus.Agent.Linux/ Aetheus.Agent.Linux/
-COPY src/Aetheus.Agent.Windows/ Aetheus.Agent.Windows/
 COPY deploy/scripts/install-agent-linux.sh deploy/scripts/install-agent-linux.sh
-COPY deploy/scripts/install-agent-windows.ps1 deploy/scripts/install-agent-windows.ps1
-
-# Re-declare ARGs inside the build stage so they are available to every RUN below.
-# APP_VERSION drives both the agent download filenames AND the assembly version of every
-# published binary (Back + agents). Without /p:Version, the agent reports a stale "v1.0.0"
-# regardless of the deploy version — that's the bug fixed by wiring it into each publish.
-ARG BUILD_AGENTS
+COPY deploy/scripts/zap-active-automation.sh /deploy/scripts/zap-active-automation.sh
+COPY deploy/scripts/publish-observability-package.sh /deploy/scripts/publish-observability-package.sh
+COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-observability-packages.sh
 ARG APP_VERSION
+RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
+    dotnet publish Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj \
+        -c Release -r linux-x64 --self-contained true \
+        -o /tmp/agent-linux \
+        /p:Version=${APP_VERSION} \
+    && sed -i 's/\r$//' deploy/scripts/install-agent-linux.sh \
+    && chmod +x deploy/scripts/install-agent-linux.sh \
+    && cp deploy/scripts/install-agent-linux.sh /tmp/agent-linux/install-agent-linux.sh \
+    && mkdir -p /agent-release \
+    && tar -C /tmp/agent-linux -czf /agent-release/aetheus-agent-linux-x64-v${APP_VERSION}.tar.gz . \
+    && rm -rf /tmp/agent-linux
 
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
+FROM build-source AS agent-windows-build
+COPY src/Aetheus.Shared/ Aetheus.Shared/
+COPY src/Aetheus.Agent.Core/ Aetheus.Agent.Core/
+COPY src/Aetheus.Agent.Windows/ Aetheus.Agent.Windows/
+COPY deploy/scripts/install-agent-windows.ps1 deploy/scripts/install-agent-windows.ps1
+COPY deploy/scripts/zap-active-automation.sh /deploy/scripts/zap-active-automation.sh
+COPY deploy/scripts/publish-observability-package.sh /deploy/scripts/publish-observability-package.sh
+COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-observability-packages.sh
+ARG APP_VERSION
+RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    dotnet publish Aetheus.Agent.Windows/Aetheus.Agent.Windows.csproj \
+        -c Release -r win-x64 --self-contained true \
+        -o /tmp/agent-windows \
+        /p:Version=${APP_VERSION} \
+    && cp deploy/scripts/install-agent-windows.ps1 /tmp/agent-windows/install-agent-windows.ps1 \
+    && apt-get update && apt-get install -y --no-install-recommends zip \
+    && mkdir -p /agent-release \
+    && (cd /tmp/agent-windows && zip -r /agent-release/aetheus-agent-win-x64-v${APP_VERSION}.zip .) \
+    && rm -rf /tmp/agent-windows
+
+FROM build-source AS agent-release
+COPY --from=agent-linux-build /agent-release/ /agent-release/
+COPY --from=agent-windows-build /agent-release/ /agent-release/
+COPY deploy/scripts/generate-agent-release-manifest.sh /generate-agent-release-manifest.sh
+ARG APP_VERSION
+ARG SOURCE_COMMIT
+RUN chmod +x /generate-agent-release-manifest.sh \
+    && /generate-agent-release-manifest.sh /agent-release "${APP_VERSION}" "${SOURCE_COMMIT}"
+
+FROM scratch AS agent-release-output
+COPY --from=agent-release /agent-release/ /
+
+FROM build-source AS backend-build
+COPY src/Aetheus.Shared/ Aetheus.Shared/
+COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
+COPY src/Aetheus.Telemetry/ Aetheus.Telemetry/
+COPY src/Aetheus.Back/ Aetheus.Back/
+COPY deploy/pipelines/toto-conformance-fixture/ /deploy/pipelines/toto-conformance-fixture/
+COPY deploy/pipelines/toto-vulnerable-fixture/ /deploy/pipelines/toto-vulnerable-fixture/
+COPY deploy/pipelines/toto-*.yaml /deploy/pipelines/
+COPY deploy/pipeline-templates/*.yaml /deploy/pipeline-templates/
+COPY deploy/pipeline-templates/generic/*.yaml /deploy/pipeline-templates/generic/
+COPY deploy/scripts/generate-delivery-contract.mjs /deploy/scripts/generate-delivery-contract.mjs
+COPY deploy/scripts/verify-delivery-promotion.mjs /deploy/scripts/verify-delivery-promotion.mjs
+COPY deploy/scripts/resolve-injected-nuget-packages.mjs /deploy/scripts/resolve-injected-nuget-packages.mjs
+COPY deploy/scripts/generate-artifact-provenance.mjs /deploy/scripts/generate-artifact-provenance.mjs
+COPY deploy/scripts/generate-candidate-assurance-contract.mjs /deploy/scripts/generate-candidate-assurance-contract.mjs
+COPY deploy/scripts/verify-candidate-assurance-contract.mjs /deploy/scripts/verify-candidate-assurance-contract.mjs
+COPY deploy/scripts/zap-active-automation.sh /deploy/scripts/zap-active-automation.sh
+COPY deploy/scripts/publish-observability-package.sh /deploy/scripts/publish-observability-package.sh
+COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-observability-packages.sh
+ARG APP_VERSION
+RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
     dotnet publish Aetheus.Back/Aetheus.Back.csproj \
-        -c Release -r linux-x64 --no-self-contained --no-restore \
+        -c Release -r linux-x64 --no-self-contained \
         -o /app/publish \
         /p:Version=${APP_VERSION} \
     && mkdir -p /app/publish/wwwroot/downloads
 
-# Publish agents and package them into /app/publish/wwwroot/downloads.
-# Skipped when BUILD_AGENTS=0 (deploy.sh -s).
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    if [ "${BUILD_AGENTS}" = "1" ]; then \
-        dotnet publish Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj \
-            -c Release -r linux-x64 --self-contained true --no-restore \
-            -o /tmp/agent-linux \
-            /p:Version=${APP_VERSION} \
-        && sed -i 's/\r$//' deploy/scripts/install-agent-linux.sh \
-        && chmod +x deploy/scripts/install-agent-linux.sh \
-        && cp deploy/scripts/install-agent-linux.sh /tmp/agent-linux/install-agent-linux.sh \
-        && tar -C /tmp/agent-linux -czf /app/publish/wwwroot/downloads/aetheus-agent-linux-x64-v${APP_VERSION}.tar.gz . \
-        && rm -rf /tmp/agent-linux ; \
-    else \
-        echo ">>> BUILD_AGENTS=0 — skipping Linux agent publish" ; \
-    fi
-
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    if [ "${BUILD_AGENTS}" = "1" ]; then \
-        dotnet publish Aetheus.Agent.Windows/Aetheus.Agent.Windows.csproj \
-            -c Release -r win-x64 --self-contained true --no-restore \
-            -o /tmp/agent-windows \
-            /p:Version=${APP_VERSION} \
-        && cp deploy/scripts/install-agent-windows.ps1 /tmp/agent-windows/install-agent-windows.ps1 \
-        && apt-get update && apt-get install -y --no-install-recommends zip \
-        && (cd /tmp/agent-windows && zip -r /app/publish/wwwroot/downloads/aetheus-agent-win-x64-v${APP_VERSION}.zip .) \
-        && rm -rf /tmp/agent-windows ; \
-    else \
-        echo ">>> BUILD_AGENTS=0 — skipping Windows agent publish" ; \
-    fi
-
+FROM build-source AS ef-bundle
+COPY src/Aetheus.Shared/ Aetheus.Shared/
+COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
+COPY src/Aetheus.Telemetry/ Aetheus.Telemetry/
+COPY src/Aetheus.Back/ Aetheus.Back/
+COPY deploy/pipelines/toto-conformance-fixture/ /deploy/pipelines/toto-conformance-fixture/
+COPY deploy/pipelines/toto-vulnerable-fixture/ /deploy/pipelines/toto-vulnerable-fixture/
+COPY deploy/pipelines/toto-*.yaml /deploy/pipelines/
+COPY deploy/pipeline-templates/*.yaml /deploy/pipeline-templates/
+COPY deploy/pipeline-templates/generic/*.yaml /deploy/pipeline-templates/generic/
+COPY deploy/scripts/generate-delivery-contract.mjs /deploy/scripts/generate-delivery-contract.mjs
+COPY deploy/scripts/verify-delivery-promotion.mjs /deploy/scripts/verify-delivery-promotion.mjs
+COPY deploy/scripts/resolve-injected-nuget-packages.mjs /deploy/scripts/resolve-injected-nuget-packages.mjs
+COPY deploy/scripts/generate-artifact-provenance.mjs /deploy/scripts/generate-artifact-provenance.mjs
+COPY deploy/scripts/generate-candidate-assurance-contract.mjs /deploy/scripts/generate-candidate-assurance-contract.mjs
+COPY deploy/scripts/verify-candidate-assurance-contract.mjs /deploy/scripts/verify-candidate-assurance-contract.mjs
 # Pass the non-routable placeholder directly to the design-time factory. Arguments after
 # `--` are forwarded by dotnet-ef to IDesignTimeDbContextFactory, avoiding environment
 # propagation differences between Docker engines. This value is never used at runtime.
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet-ef migrations bundle \
+# The restore belongs to this layer for the same reason as the publishes above: `dotnet ef` builds
+# the project from the assets file the cached restore layer left behind, and never re-downloads a
+# package the buildx cache mount no longer holds. Mirror run 1104 proved the split exactly: the
+# combined restore came back `#28 CACHED`, the publish that had been given its own restore went
+# through, and this stage still failed with NETSDK1064 on Microsoft.AspNetCore.OpenApi.
+RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
+    dotnet restore Aetheus.Back/Aetheus.Back.csproj -r linux-x64 \
+    && dotnet-ef migrations bundle \
         --project Aetheus.Back/Aetheus.Back.csproj \
         --startup-project Aetheus.Back/Aetheus.Back.csproj \
         --runtime linux-x64 \
@@ -112,7 +174,7 @@ RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
         -- \
         --design-connection "Host=localhost;Database=aetheus_design;Username=build"
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
 WORKDIR /app
 
 # Static layers (apt, writable dirs) BEFORE the build-output COPY: placed after
@@ -126,11 +188,12 @@ RUN apt-get update \
 # fresh volume materializes root-owned and the first write fails under USER app.
 # Binaries copied below stay root-owned (read-only for the app user) on purpose;
 # only logs/ and data/ are writable.
-RUN mkdir -p /app/logs /app/data/git-repos /app/data/dp-keys /app/data/artifacts \
+RUN mkdir -p /app/logs /app/data/git-repos /app/data/dp-keys /app/data/artifacts /app/data/packages \
     && chown -R app:app /app/logs /app/data
 
-COPY --from=build /app/publish .
-COPY --from=build /app/efbundle ./efbundle
+COPY --from=backend-build /app/publish .
+COPY --from=ef-bundle /app/efbundle ./efbundle
+COPY --from=agent-release /agent-release/ ./wwwroot/downloads/
 COPY deploy/docker/entrypoint-back.sh ./entrypoint-back.sh
 
 RUN sed -i 's/\r//' /app/entrypoint-back.sh \

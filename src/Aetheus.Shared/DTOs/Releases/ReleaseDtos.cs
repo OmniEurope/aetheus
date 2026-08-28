@@ -17,6 +17,8 @@ public sealed record ReleaseDto
     public DateTime? PromotedAt { get; init; }
     public DateTime? RolledBackAt { get; init; }
     public int? PipelineRunId { get; init; }
+    public int? SourcePipelineId { get; init; }
+    public string? SourcePipelineName { get; init; }
     public string? Changelog { get; init; }
     public int BuildNumber { get; init; }
     public string? CommitHash { get; init; }

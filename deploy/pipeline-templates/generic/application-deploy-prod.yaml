@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: application-deploy-prod-template
+trigger: manual
+parameters:
+  - name: candidateVersion
+    display_name: Candidate release version
+    type: string
+    required: true
+variables:
+  APPLICATION_CANDIDATE_VERSION: "${{ parameters.candidateVersion }}"
+  APPLICATION_ROLLBACK_ENABLED: "true"
+
+stages:
+  - name: DeployProduction
+    group: Deploy
+    execution_role: deploy
+    os: linux
+    steps:
+      - name: Restore immutable candidate payload
+        type: restore-artifacts
+        release: "$(APPLICATION_CANDIDATE_VERSION)"
+        artifact: ApplicationPayload-artifacts
+        timeout_seconds: 1800
+      - name: Run project production deployment adapter
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/deploy-prod.sh
+          APPLICATION_CANDIDATE_VERSION="$(APPLICATION_CANDIDATE_VERSION)" \
+          APPLICATION_ROLLBACK_ENABLED="$(APPLICATION_ROLLBACK_ENABLED)" \
+            sh .pipeline/scripts/deploy-prod.sh
+        timeout_seconds: 7200
+      - name: Mark the exact candidate release as deployed
+        type: release
+        version: "$(APPLICATION_CANDIDATE_VERSION)"
+        deployed: true
+        timeout_seconds: 300

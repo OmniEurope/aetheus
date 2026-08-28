@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using Aetheus.Front.Layout;
 using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.VariableLibraries;
 
@@ -63,7 +53,26 @@ public partial class VariableLibraryEdit
         _previousKey = key;
         var generation = ++_loadGeneration;
         var isNew = key.Id is null or 0;
+        ResetLoadState();
+        await LoadLibraryAsync(key, generation, isNew);
 
+        // Publish the parent project so the NavMenu keeps the project's submenu open
+        // while we're editing one of its variable libraries.
+        ProjectNav.Set(_model.ProjectId);
+        ReassertBreadcrumb(isNew);
+    }
+
+    private void ReassertBreadcrumb(bool isNew)
+    {
+        var current = new BreadcrumbItem(isNew ? L["NewVariableLibrary"] : _detail?.Name ?? L["VariableLibrary"]);
+        Breadcrumb.SetProjectResource(
+            _model.ProjectId, _detail?.ProjectName, _projects,
+            L["Projects"], L["Project"], L["VariableLibraries"],
+            "libraries", "/variable-libraries", current);
+    }
+
+    private void ResetLoadState()
+    {
         _detail = null;
         _model = new LibraryModel();
         ResetEntryBuffers();
@@ -76,42 +85,21 @@ public partial class VariableLibraryEdit
         _entrySortDescending = false;
         _loading = true;
         _loadFailed = false;
+    }
 
+    private async Task LoadLibraryAsync(
+        (int? Id, int? ProjectId, int? EnvironmentId, int? ProjectServerId) key,
+        int generation,
+        bool isNew)
+    {
         try
         {
-            var projects = await Api.GetAllProjectsAsync();
-            VariableLibraryDetailDto? detail = null;
-
-            if (!isNew)
-            {
-                detail = await Api.GetVariableLibraryDetailAsync(key.Id!.Value);
-            }
+            var projects = await Api.Projects.GetAllProjectsAsync();
+            var detail = isNew
+                ? null
+                : await Api.Variables.GetVariableLibraryDetailAsync(key.Id!.Value);
             if (generation != _loadGeneration || key != (Id, ProjectId, EnvironmentId, ProjectServerId)) return;
-
-            _projects = projects;
-            _detail = detail;
-            if (detail is not null)
-            {
-                _entries = detail.Entries;
-                _entryCount = detail.EntryCount;
-                _model = new LibraryModel
-                {
-                    Name = detail.Name,
-                    Description = detail.Description,
-                    ProjectId = detail.ProjectId,
-                    EnvironmentId = detail.EnvironmentId,
-                    ProjectServerId = detail.ProjectServerId
-                };
-            }
-            else if (isNew)
-            {
-                if (key.ProjectId is > 0 && projects.Any(p => p.Id == key.ProjectId.Value))
-                    _model.ProjectId = key.ProjectId;
-                else if (key.EnvironmentId is > 0)
-                    _model.EnvironmentId = key.EnvironmentId;
-                else if (key.ProjectServerId is > 0)
-                    _model.ProjectServerId = key.ProjectServerId;
-            }
+            ApplyLoadedLibrary(key, projects, detail, isNew);
         }
         catch (HttpRequestException)
         {
@@ -123,14 +111,45 @@ public partial class VariableLibraryEdit
             if (generation == _loadGeneration)
                 _loading = false;
         }
+    }
 
-        // Publish the parent project so the NavMenu keeps the project's submenu open
-        // while we're editing one of its variable libraries.
-        ProjectNav.Set(_model.ProjectId);
+    private void ApplyLoadedLibrary(
+        (int? Id, int? ProjectId, int? EnvironmentId, int? ProjectServerId) key,
+        List<ProjectDto> projects,
+        VariableLibraryDetailDto? detail,
+        bool isNew)
+    {
+        _projects = projects;
+        _detail = detail;
+        if (detail is not null)
+        {
+            _entries = detail.Entries;
+            _entryCount = detail.EntryCount;
+            _model = new LibraryModel
+            {
+                Name = detail.Name,
+                Description = detail.Description,
+                ProjectId = detail.ProjectId,
+                EnvironmentId = detail.EnvironmentId,
+                ProjectServerId = detail.ProjectServerId
+            };
+        }
+        else if (isNew)
+        {
+            SelectInitialScope(key, projects);
+        }
+    }
 
-        Breadcrumb.Set(
-            new BreadcrumbItem(L["VariableLibraries"], "/variable-libraries"),
-            new BreadcrumbItem(isNew ? L["NewVariableLibrary"] : _detail?.Name ?? L["VariableLibrary"]));
+    private void SelectInitialScope(
+        (int? Id, int? ProjectId, int? EnvironmentId, int? ProjectServerId) key,
+        IReadOnlyCollection<ProjectDto> projects)
+    {
+        if (key.ProjectId is > 0 && projects.Any(p => p.Id == key.ProjectId.Value))
+            _model.ProjectId = key.ProjectId;
+        else if (key.EnvironmentId is > 0)
+            _model.EnvironmentId = key.EnvironmentId;
+        else if (key.ProjectServerId is > 0)
+            _model.ProjectServerId = key.ProjectServerId;
     }
 
     private async Task OnSubmit()
@@ -140,7 +159,7 @@ public partial class VariableLibraryEdit
         {
             if (_isNew)
             {
-                var created = await Api.CreateVariableLibraryAsync(new CreateVariableLibraryRequest
+                var created = await Api.Variables.CreateVariableLibraryAsync(new CreateVariableLibraryRequest
                 {
                     Name = _model.Name,
                     Description = _model.Description,
@@ -156,7 +175,7 @@ public partial class VariableLibraryEdit
             }
             else
             {
-                var updated = await Api.UpdateVariableLibraryAsync(Id!.Value, new UpdateVariableLibraryRequest
+                var updated = await Api.Variables.UpdateVariableLibraryAsync(Id!.Value, new UpdateVariableLibraryRequest
                 {
                     Name = _model.Name,
                     Description = _model.Description,
@@ -190,13 +209,14 @@ public partial class VariableLibraryEdit
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var status = await Api.DeleteVariableLibraryAsync(Id!.Value);
+        var status = await Api.Variables.DeleteVariableLibraryAsync(Id!.Value);
         if (!status.Success)
         {
             Toast.Error("Error", "OperationFailed");
             return;
         }
         Cache.InvalidatePrefix("variable-libraries:"); // S-TECH-SWIV
+        Toast.Success("Deleted", "Deleted");
         Nav.NavigateTo("/variable-libraries");
     }
 
@@ -205,7 +225,7 @@ public partial class VariableLibraryEdit
         if (string.IsNullOrWhiteSpace(model.Key))
             return;
 
-        var entry = await Api.CreateVariableEntryAsync(Id!.Value, new CreateVariableEntryRequest
+        var entry = await Api.Variables.CreateVariableEntryAsync(Id!.Value, new CreateVariableEntryRequest
         {
             Key = model.Key,
             Value = model.Value
@@ -242,7 +262,7 @@ public partial class VariableLibraryEdit
 
     private async Task OnEntryUpdate(VariableEntryDto entry)
     {
-        var updated = await Api.UpdateVariableEntryAsync(Id!.Value, entry.Id, new UpdateVariableEntryRequest
+        var updated = await Api.Variables.UpdateVariableEntryAsync(Id!.Value, entry.Id, new UpdateVariableEntryRequest
         {
             Key = _editEntryKey,
             Value = _editEntryValue
@@ -263,7 +283,7 @@ public partial class VariableLibraryEdit
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var status = await Api.DeleteVariableEntryAsync(Id!.Value, entryId);
+        var status = await Api.Variables.DeleteVariableEntryAsync(Id!.Value, entryId);
         if (!status.Success)
         {
             Toast.Error("Error", "OperationFailed");
@@ -292,12 +312,12 @@ public partial class VariableLibraryEdit
                 { "LibraryId", Id!.Value },
                 { "EntryId", entry.Id }
             },
-            new DialogOptions { Width = "600px" });
+            new DialogOptions { Width = "600px", AutoFocusFirstElement = false });
     }
 
     private async Task ExportEntries()
     {
-        var entries = await Api.ExportVariableEntriesAsync(Id!.Value);
+        var entries = await Api.Variables.ExportVariableEntriesAsync(Id!.Value);
         var json = JsonSerializer.Serialize(entries.Select(e => new { e.Key, e.Value }), new JsonSerializerOptions { WriteIndented = true });
         await JS.InvokeVoidAsync("downloadFile", $"{_detail?.Name ?? "entries"}.json", json, "application/json");
         Toast.Success("Exported", "EntriesExported", entries.Count);
@@ -308,7 +328,7 @@ public partial class VariableLibraryEdit
         var json = await Dialog.OpenAsync<ImportJsonDialog>(
             L["ImportEntries"].Value,
             new Dictionary<string, object?>(),
-            new DialogOptions { Width = "500px" });
+            new DialogOptions { Width = "500px", AutoFocusFirstElement = false });
 
         if (json is not string content || string.IsNullOrWhiteSpace(content)) return;
 
@@ -325,7 +345,7 @@ public partial class VariableLibraryEdit
 
         if (entries is null or { Count: 0 }) return;
 
-        var result = await Api.ImportVariableEntriesAsync(Id!.Value, entries);
+        var result = await Api.Variables.ImportVariableEntriesAsync(Id!.Value, entries);
         if (result is not null)
         {
             Toast.Success("Imported", "EntriesImported", result.ImportedCount);
@@ -335,7 +355,7 @@ public partial class VariableLibraryEdit
 
     private async Task ReloadDetail()
     {
-        _detail = await Api.GetVariableLibraryDetailAsync(Id!.Value);
+        _detail = await Api.Variables.GetVariableLibraryDetailAsync(Id!.Value);
         _entryCount = _detail?.EntryCount ?? 0;
     }
 
@@ -355,7 +375,7 @@ public partial class VariableLibraryEdit
         _entriesLoadFailed = false;
         try
         {
-            var result = await Api.GetVariableEntriesPageAsync(
+            var result = await Api.Variables.GetVariableEntriesPageAsync(
                 Id.Value, _entryPage, _entryPageSize,
                 sortBy: _entrySortBy, sortDescending: _entrySortDescending);
             _entries = result.Items;
@@ -396,17 +416,7 @@ public partial class VariableLibraryEdit
         public string Value { get; set; } = string.Empty;
     }
 
-    private class LibraryModel
+    private sealed class LibraryModel : ScopedResourceFormModel
     {
-        [Required]
-        [StringLength(100)]
-        public string Name { get; set; } = string.Empty;
-
-        [StringLength(500)]
-        public string Description { get; set; } = string.Empty;
-
-        public int? ProjectId { get; set; }
-        public int? EnvironmentId { get; set; }
-        public int? ProjectServerId { get; set; }
     }
 }

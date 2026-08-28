@@ -13,6 +13,8 @@ WORKDIR /src
 
 # CPM + build conventions — required for restore to resolve centrally-managed versions.
 COPY Directory.Packages.props Directory.Build.props NuGet.config ./
+COPY scanner-manifest.json /scanner-manifest.json
+COPY .aetheus/security-rules/opengrep/aetheus-security.yml /.aetheus/security-rules/opengrep/aetheus-security.yml
 
 COPY src/Aetheus.Shared/Aetheus.Shared.csproj Aetheus.Shared/
 COPY src/Aetheus.Agent.Core/Aetheus.Agent.Core.csproj Aetheus.Agent.Core/
@@ -22,10 +24,13 @@ RUN dotnet restore Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj
 COPY src/Aetheus.Shared/ Aetheus.Shared/
 COPY src/Aetheus.Agent.Core/ Aetheus.Agent.Core/
 COPY src/Aetheus.Agent.Linux/ Aetheus.Agent.Linux/
+COPY deploy/scripts/zap-active-automation.sh /deploy/scripts/zap-active-automation.sh
+COPY deploy/scripts/publish-observability-package.sh /deploy/scripts/publish-observability-package.sh
+COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-observability-packages.sh
 
 RUN dotnet publish Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj -c Release -o /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish .

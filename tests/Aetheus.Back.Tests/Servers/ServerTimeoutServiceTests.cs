@@ -30,7 +30,9 @@ public class ServerTimeoutServiceTests
 
         serverRepo.GetStaleOnlineServersAsync(Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(stale.ToList());
-        serverRepo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        serverRepo.TryMarkOfflineIfStaleAsync(
+                Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(true);
 
         var services = new ServiceCollection();
         services.AddScoped(_ => serverRepo);
@@ -59,8 +61,8 @@ public class ServerTimeoutServiceTests
 
         await sut.CheckServerTimeouts(TestContext.Current.CancellationToken);
 
-        Assert.Equal(ServerStatus.Offline, staleServer.Status);
-        await repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        await repo.Received(1).TryMarkOfflineIfStaleAsync(
+            1, staleServer.LastHeartbeat, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
         await proxy.Received(1).SendCoreAsync("ServerOffline", Arg.Is<object?[]>(a => (int)a[0]! == 1), Arg.Any<CancellationToken>());
         events.Received(1).Publish(Arg.Is<ServerWentOfflineEvent>(e => e.ServerId == 1));
     }
@@ -72,8 +74,57 @@ public class ServerTimeoutServiceTests
 
         await sut.CheckServerTimeouts(TestContext.Current.CancellationToken);
 
-        await repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await repo.DidNotReceive().TryMarkOfflineIfStaleAsync(
+            Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
         await proxy.DidNotReceive().SendCoreAsync(Arg.Any<string>(), Arg.Any<object?[]>(), Arg.Any<CancellationToken>());
         events.DidNotReceive().Publish(Arg.Any<ServerWentOfflineEvent>());
+    }
+
+    [Fact]
+    public async Task CheckServerTimeouts_ConcurrentHeartbeatWon_DoesNotBroadcastOffline()
+    {
+        var staleServer = new Aetheus.Back.Data.Entities.Server
+        {
+            Id = 1,
+            Name = "stale-server",
+            Status = ServerStatus.Online,
+            LastHeartbeat = new DateTime(2026, 6, 16, 11, 55, 0, DateTimeKind.Utc)
+        };
+        var (sut, repo, proxy, events) = BuildSut(staleServer);
+        repo.TryMarkOfflineIfStaleAsync(
+                staleServer.Id, staleServer.LastHeartbeat, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        await sut.CheckServerTimeouts(TestContext.Current.CancellationToken);
+
+        await proxy.DidNotReceive().SendCoreAsync(
+            Arg.Any<string>(), Arg.Any<object?[]>(), Arg.Any<CancellationToken>());
+        events.DidNotReceive().Publish(Arg.Any<ServerWentOfflineEvent>());
+    }
+
+    [Fact]
+    public async Task StartupGrace_BackendRestart_WaitsFullHeartbeatWindow()
+    {
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var clock = new FakeTimeProvider(
+            new DateTimeOffset(2026, 6, 16, 12, 0, 0, TimeSpan.Zero));
+        var options = new BackgroundServicesOptions
+        {
+            ServerHeartbeatTimeout = TimeSpan.FromMinutes(2),
+            ServerCheckInterval = TimeSpan.FromMinutes(1)
+        };
+        var sut = new ServerTimeoutService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            Substitute.For<ILogger<ServerTimeoutService>>(),
+            Options.Create(options),
+            clock);
+
+        var startupGrace = sut.WaitForStartupGraceAsync(TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(1).Add(TimeSpan.FromSeconds(59)));
+        Assert.False(startupGrace.IsCompleted);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await startupGrace;
     }
 }

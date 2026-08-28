@@ -1,0 +1,206 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/analysis/findings/{Id:int}"
+
+<PageTitle>@L["AnalysisFindingDetail"] - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
+}
+else if (_finding is null)
+{
+    <EmptyState Icon="search_off" Title="@L["NotFound"]" Description="@L["AnalysisFindingNotFound"]" />
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1rem" class="rz-mb-4 detail-page-header">
+        <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
+        <RadzenIcon Icon="policy" />
+        <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@_finding.Title</RadzenText>
+        <RadzenBadge Text="@L[$"AnalysisSeverity{_finding.Severity}"]" BadgeStyle="@SeverityStyle(_finding.Severity)" />
+        <RadzenBadge Text="@L[$"AnalysisFindingStatus{_finding.Status}"]" BadgeStyle="BadgeStyle.Info" />
+        @if (_canWrite)
+        {
+            <RadzenButton Text="@(_createdTicketId.HasValue ? $"{L["AnalysisTicket"]} #{_createdTicketId}" : L["AnalysisCreateTicket"])" Icon="add" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" Click="CreateTicketAsync" Disabled="@(_creatingTicket || _createdTicketId.HasValue)" />
+        }
+    </RadzenStack>
+
+    <UrlSyncedTabs Slugs="@(new[] { "overview", "prompt", "occurrences", "decisions" })" class="analysis-finding-tabs">
+        <Tabs>
+            <RadzenTabsItem Text="@L["Overview"]" Icon="dashboard">
+                <RadzenCard class="analysis-finding-summary-card">
+                    <div class="analysis-finding-problem">
+                        <RadzenIcon Icon="error" />
+                        <div>
+                            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["AnalysisProblemSummary"]</RadzenText>
+                            <p>@_finding.Message</p>
+                        </div>
+                    </div>
+                    @if (_finding.LatestOccurrence is { } source)
+                    {
+                        <RadzenCard class="rz-mt-3 analysis-source-card">
+                            <div class="analysis-source-heading">
+                                <RadzenIcon Icon="location_on" />
+                                <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["AnalysisExactLocation"]</RadzenText>
+                            </div>
+                            @if (string.IsNullOrWhiteSpace(source.FilePath))
+                            {
+                                <div class="analysis-source-location analysis-source-location-unavailable">@L["AnalysisLocationUnavailable"]</div>
+                            }
+                            else
+                            {
+                                @if (HasNavigableFile(source))
+                                {
+                                    <a href="@SourceFileHref(source)" class="analysis-source-location analysis-source-location-link">
+                                        <RadzenIcon Icon="description" />
+                                        <code>@source.FilePath</code>
+                                        @if (source.StartLine is not null)
+                                        {
+                                            <span>@L["Line"] @LocationRange(source)</span>
+                                        }
+                                        <span class="analysis-source-open"><RadzenIcon Icon="open_in_new" /> @L["AnalysisOpenSourceFile"]</span>
+                                    </a>
+                                }
+                                else
+                                {
+                                    <div class="analysis-source-location">
+                                        <code>@source.FilePath</code>
+                                        @if (source.StartLine is not null)
+                                        {
+                                            <span>@L["Line"] @LocationRange(source)</span>
+                                        }
+                                    </div>
+                                }
+                            }
+                            <div class="analysis-source-metadata">
+                                <div><span>@L["Symbol"]</span><strong>@(source.Symbol ?? L["NotAvailable"])</strong></div>
+                                <div><span>@L["AnalysisTool"]</span><strong>@(string.IsNullOrWhiteSpace(source.ToolName) ? L["NotAvailable"] : source.ToolName)</strong></div>
+                                <div><span>@L["Branch"]</span><strong>@(source.BranchName ?? L["NotAvailable"])</strong></div>
+                                <div><span>@L["Commit"]</span><strong class="analysis-source-commit">@(source.CommitHash ?? L["NotAvailable"])</strong></div>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(source.Message)
+                                && !string.Equals(source.Message, _finding.Message, StringComparison.Ordinal))
+                            {
+                                <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-3">@L["AnalysisScannerMessage"]</RadzenText>
+                                <pre class="analysis-source-excerpt">@source.Message</pre>
+                            }
+                            <div class="analysis-source-links">
+                                <span>@L["Report"] #@source.AnalysisReportId</span>
+                                @if (source.PipelineRunId.HasValue)
+                                {
+                                    <RadzenLink Path="@($"pipelines/runs/{source.PipelineRunId}")" Text="@($"{L["PipelineRun"]} #{source.PipelineRunId}")" />
+                                }
+                            </div>
+                        </RadzenCard>
+                    }
+                    <RadzenRow class="rz-mt-3">
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenText TextStyle="TextStyle.Caption">@L["AnalysisRule"]</RadzenText><RadzenText>@_finding.RuleId</RadzenText></RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenText TextStyle="TextStyle.Caption">CWE</RadzenText><RadzenText>@(_finding.Cwe ?? L["NotAvailable"])</RadzenText></RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenText TextStyle="TextStyle.Caption">@L["FirstSeen"]</RadzenText><RadzenText>@_finding.FirstSeenAt.ToString("g")</RadzenText></RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenText TextStyle="TextStyle.Caption">@L["LastSeen"]</RadzenText><RadzenText>@_finding.LastSeenAt.ToString("g")</RadzenText></RadzenColumn>
+                    </RadzenRow>
+                    @if (!string.IsNullOrWhiteSpace(_finding.HelpUri))
+                    {
+                        <RadzenButton Icon="open_in_new" Text="@L["Documentation"]" Click="OpenHelp" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" class="rz-mt-3" />
+                    }
+                </RadzenCard>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["AnalysisAiPromptTab"]" Icon="auto_awesome">
+                <RadzenCard class="analysis-finding-prompt rz-p-3">
+                    <div class="analysis-finding-prompt-heading">
+                        <div>
+                            <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["AnalysisAiPrompt"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["AnalysisAiPromptDescription"]</RadzenText>
+                        </div>
+                        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+                            <RadzenButton Text="@L["CopyAiPrompt"]" Icon="content_copy" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Click="CopyPromptAsync" />
+                            <RadzenButton Text="@L["DownloadMarkdown"]" Icon="download" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" Click="DownloadPromptAsync" />
+                            <RadzenButton Text="@(_showPromptPreview ? L["AnalysisPromptSource"] : L["AnalysisPromptPreview"])"
+                                          Icon="@(_showPromptPreview ? "code" : "visibility")" ButtonStyle="ButtonStyle.Primary"
+                                          Variant="Variant.Filled" Click="TogglePromptPreview" />
+                        </RadzenStack>
+                    </div>
+                    @if (_showPromptPreview)
+                    {
+                        <div class="markdown-content analysis-finding-prompt-preview">@((MarkupString)PromptHtml)</div>
+                    }
+                    else
+                    {
+                        <pre class="analysis-finding-prompt-source">@PromptMarkdown</pre>
+                    }
+                </RadzenCard>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["AnalysisOccurrences"]" Icon="history">
+                <RadzenDataGrid Responsive="false" Data="@_occurrences" TItem="AnalysisFindingOccurrenceDto" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" Density="Density.Compact" class="analysis-table" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
+                    <Columns><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="AnalysisReportId" Title="@L["AnalysisReports"]"><Template Context="item">@if (item.PipelineRunId.HasValue) { <RadzenLink Path="@($"pipelines/runs/{item.PipelineRunId}")" Text="@($"#{item.AnalysisReportId}")" /> } else { @($"#{item.AnalysisReportId}") }</Template></RadzenDataGridColumn><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="ToolName" Title="@L["AnalysisTool"]" /><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="FilePath" Title="@L["File"]" /><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="StartLine" Title="@L["Line"]" /><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="BranchName" Title="@L["Branch"]" /><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="CommitHash" Title="@L["Commit"]" /><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="IsNew" Title="@L["New"]" /><RadzenDataGridColumn TItem="AnalysisFindingOccurrenceDto" Property="CreatedAt" Title="@L["Date"]" FormatString="{0:g}" /></Columns>
+                </RadzenDataGrid>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["AnalysisDecision"]" Icon="gavel">
+                @if (_canAdmin)
+                {
+                    <RadzenCard class="analysis-decision-card">
+                        <div class="analysis-decision-heading">
+                            <span class="analysis-decision-icon"><RadzenIcon Icon="gavel" /></span>
+                            <div>
+                                <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["AnalysisDecision"]</RadzenText>
+                                <RadzenText TextStyle="TextStyle.Body2" class="analysis-decision-help">@L["AnalysisDecisionHelp"]</RadzenText>
+                            </div>
+                        </div>
+                        <RadzenTemplateForm Data="@_decision" TItem="DecisionFormModel" Submit="SaveDecisionAsync" class="analysis-decision-form">
+                            <LocalizedDataAnnotationsValidator />
+                            <div class="analysis-decision-layout">
+                                <section class="analysis-decision-outcome">
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["AnalysisDecisionChooseOutcome"]</RadzenText>
+                                    <div class="analysis-decision-choices">
+                                        @foreach (var status in _decisionStatuses)
+                                        {
+                                            var selected = _decision.Status == status;
+                                            <div class="@($"analysis-decision-choice{(selected ? " is-selected" : string.Empty)}")">
+                                                <RadzenButton ButtonType="ButtonType.Button"
+                                                              Text="@DecisionStatusText(status)"
+                                                              Icon="@DecisionStatusIcon(status)"
+                                                              ButtonStyle="@(selected ? DecisionStatusStyle(status) : ButtonStyle.Light)"
+                                                              Variant="@(selected ? Variant.Filled : Variant.Outlined)"
+                                                              Click="@(() => SelectDecisionStatus(status))" />
+                                                <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@DecisionStatusDescription(status)</RadzenText>
+                                            </div>
+                                        }
+                                    </div>
+                                </section>
+                                <section class="analysis-decision-details">
+                                    <div>
+                                        <RadzenFormField Text="@L["Reason"]">
+                                            <RadzenTextArea Name="DecisionReason" @bind-Value="_decision.Reason" Rows="5" Placeholder="@L["AnalysisDecisionReasonPlaceholder"]" />
+                                        </RadzenFormField>
+                                        <RadzenText TextStyle="TextStyle.Caption" class="analysis-decision-field-hint rz-m-0">@L["AnalysisDecisionReasonHint"]</RadzenText>
+                                        <ValidationMessage For="@(() => _decision.Reason)" />
+                                    </div>
+                                    <div>
+                                        <RadzenFormField Text="@L["ExpiresAt"]">
+                                            <RadzenDatePicker @bind-Value="_decision.ExpiresAt" ShowTime="true" DateFormat="g" />
+                                        </RadzenFormField>
+                                        <RadzenText TextStyle="TextStyle.Caption" class="analysis-decision-field-hint rz-m-0">@L["AnalysisDecisionExpirationHint"]</RadzenText>
+                                    </div>
+                                </section>
+                            </div>
+                            <div class="analysis-decision-actions">
+                                <div class="analysis-decision-selected">
+                                    <span>@L["AnalysisDecisionSelected"]</span>
+                                    <strong>@DecisionStatusText(_decision.Status)</strong>
+                                </div>
+                                <RadzenButton ButtonType="ButtonType.Submit" Icon="save" Text="@L["AnalysisSaveDecision"]" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" Disabled="@_saving" />
+                            </div>
+                        </RadzenTemplateForm>
+                    </RadzenCard>
+                }
+                <RadzenText TextStyle="TextStyle.H5" class="@(_canAdmin ? "rz-mt-4" : "rz-m-0 rz-mb-3")">@L["AnalysisDecisionHistory"]</RadzenText>
+                <RadzenDataGrid Responsive="false" Data="@_decisions" TItem="AnalysisFindingDecisionDto" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" Density="Density.Compact" EmptyText="@L["NoRecords"]" class="analysis-table" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+                    <Columns><RadzenDataGridColumn TItem="AnalysisFindingDecisionDto" Property="Status" Title="@L["Status"]"><Template Context="item"><RadzenBadge Text="@DecisionStatusText(item.Status)" BadgeStyle="@DecisionStatusBadgeStyle(item.Status)" /></Template></RadzenDataGridColumn><RadzenDataGridColumn TItem="AnalysisFindingDecisionDto" Property="Reason" Title="@L["Reason"]" /><RadzenDataGridColumn TItem="AnalysisFindingDecisionDto" Property="CreatedByUsername" Title="@L["CreatedBy"]" /><RadzenDataGridColumn TItem="AnalysisFindingDecisionDto" Property="CreatedAt" Title="@L["Date"]" FormatString="{0:g}" /><RadzenDataGridColumn TItem="AnalysisFindingDecisionDto" Property="ExpiresAt" Title="@L["ExpiresAt"]" FormatString="{0:g}" /></Columns>
+                </RadzenDataGrid>
+            </RadzenTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

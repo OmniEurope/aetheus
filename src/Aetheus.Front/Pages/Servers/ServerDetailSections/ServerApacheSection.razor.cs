@@ -1,25 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
-public partial class ServerApacheSection : IDisposable
+public partial class ServerApacheSection : ServerActionSectionBase, IDisposable
 {
     [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private NotifyHelper Toast { get; set; } = default!;
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
 
     [Parameter, EditorRequired] public ServerDetailDto Server { get; set; } = default!;
     [Parameter, EditorRequired] public int ServerId { get; set; }
 
-    private bool _actionRunning;
     private string _moduleSearch = string.Empty;
     private string _vhostSearch = string.Empty;
 
@@ -36,13 +25,6 @@ public partial class ServerApacheSection : IDisposable
     // shared model bridges the SignalR-pushed config text (HandleTaskCompleted) into the open
     // dialog. Non-null while a config-editor dialog is open so SignalR pushes can reach it.
     private ApacheConfigEditorModel? _configEditor;
-
-    // Confirmation dialog
-    private bool _confirmVisible;
-    private string _confirmTitle = string.Empty;
-    private string _confirmMessage = string.Empty;
-    private Func<Task>? _confirmAction;
-
 
     private ApacheDataDto Apache => Server.Apache;
 
@@ -96,27 +78,12 @@ public partial class ServerApacheSection : IDisposable
 
     private async Task ExecuteActionAsync(ApacheAction action, string? targetName = null)
     {
-        _actionRunning = true;
-        try
-        {
-            var success = await Api.ExecuteApacheActionAsync(ServerId, new ApacheActionRequest
+        await ExecuteServerActionAsync(() => Api.ServerTools.ExecuteApacheActionAsync(
+            ServerId, new ApacheActionRequest
             {
                 Action = action,
                 TargetName = targetName
-            });
-            if (success)
-                Toast.Success(L["TaskQueued"]);
-            else
-                Toast.Error(L["ActionFailed"]);
-        }
-        catch
-        {
-            Toast.Error(L["ActionFailed"]);
-        }
-        finally
-        {
-            _actionRunning = false;
-        }
+            }));
     }
 
     private async Task FetchLogsAsync()
@@ -125,7 +92,7 @@ public partial class ServerApacheSection : IDisposable
         _logContent = null;
         try
         {
-            var success = await Api.GetApacheLogsAsync(ServerId, new ApacheLogRequest
+            var success = await Api.ServerTools.GetApacheLogsAsync(ServerId, new ApacheLogRequest
             {
                 LogType = _logType,
                 Lines = _logLines
@@ -157,7 +124,7 @@ public partial class ServerApacheSection : IDisposable
         // the error rather than leaving the editor empty.
         try
         {
-            var status = await Api.GetApacheVHostConfigAsync(ServerId, siteName);
+            var status = await Api.ServerTools.GetApacheVHostConfigAsync(ServerId, siteName);
             if (!status.Success)
             {
                 model.Loading = false;
@@ -181,7 +148,7 @@ public partial class ServerApacheSection : IDisposable
         var result = await Dialog.OpenAsync<ApacheConfigEditorDialog>(
             $"{L["EditConfig"]} - {siteName}",
             new Dictionary<string, object?> { { "Model", model } },
-            new DialogOptions { Width = "50rem", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "50rem", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
 
         CancelConfigTimeout();
         if (ReferenceEquals(_configEditor, model))
@@ -217,7 +184,7 @@ public partial class ServerApacheSection : IDisposable
     {
         try
         {
-            var success = await Api.SaveApacheVHostConfigAsync(ServerId, request);
+            var success = await Api.ServerTools.SaveApacheVHostConfigAsync(ServerId, request);
             if (success)
                 Toast.Success(L["ConfigSaved"]);
             else
@@ -228,23 +195,6 @@ public partial class ServerApacheSection : IDisposable
             Toast.Error(L["ActionFailed"]);
         }
     }
-
-    private void ShowConfirm(string title, string message, Func<Task> action)
-    {
-        _confirmTitle = title;
-        _confirmMessage = message;
-        _confirmAction = action;
-        _confirmVisible = true;
-    }
-
-    private async Task ConfirmAccepted()
-    {
-        _confirmVisible = false;
-        if (_confirmAction is not null)
-            await _confirmAction();
-    }
-
-    private void ConfirmCancelled() => _confirmVisible = false;
 
     public void HandleTaskCompleted(TaskCompletedNotification notification)
     {

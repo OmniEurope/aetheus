@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
 using Aetheus.Shared.Enums;
+using Aetheus.Shared.Validation;
 
 namespace Aetheus.Shared.DTOs;
+
+public static class GitReference
+{
+    /// <summary>API sentinel requesting a revision walk across every repository branch.</summary>
+    public const string AllBranches = "*";
+}
 
 // --- Repository ---
 
@@ -70,6 +77,14 @@ public sealed record GitLightCommitDetailDto
 {
     public GitLightCommitDto Commit { get; init; } = new();
     public PullRequestDiffDto Diff { get; init; } = new();
+}
+
+public sealed record GitCommitMessagesRequest
+{
+    [MinLength(1)]
+    [MaxLength(200)]
+    [MaxItemStringLength(64)]
+    public List<string> Shas { get; init; } = [];
 }
 
 // --- Branches ---
@@ -182,6 +197,7 @@ public sealed record PullRequestDiffDto
 {
     public List<FileDiffDto> FileDiffs { get; init; } = [];
     public DiffStatsDto Stats { get; init; } = new();
+    public bool IsTruncated { get; init; }
 }
 
 public sealed record FileDiffDto

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: application-nightly-template
+trigger: schedule
+schedule: "0 0 2 * * *"
+variables:
+  APPLICATION_CI_PIPELINE: application-ci
+  APPLICATION_QUALITY_PIPELINE: application-quality
+  APPLICATION_SECURITY_PIPELINE: application-security
+
+stages:
+  - name: NightlyCI
+    group: Build
+    execution_role: build
+    os: linux
+    steps:
+      - name: Build and test independently with cold caches
+        type: trigger
+        pipeline: "$(APPLICATION_CI_PIPELINE)"
+        variables:
+          CACHE_SCENARIO: cold
+        timeout_seconds: 9000
+
+  - name: NightlyQuality
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [NightlyCI]
+    steps:
+      - name: Run complete quality analysis
+        type: trigger
+        pipeline: "$(APPLICATION_QUALITY_PIPELINE)"
+        variables:
+          FORMAT_MODE: full
+        timeout_seconds: 9000
+
+  - name: NightlySecurity
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [NightlyQuality]
+    steps:
+      - name: Run complete full-history security analysis
+        type: trigger
+        pipeline: "$(APPLICATION_SECURITY_PIPELINE)"
+        variables:
+          SECRET_HISTORY_MODE: full
+        timeout_seconds: 9000

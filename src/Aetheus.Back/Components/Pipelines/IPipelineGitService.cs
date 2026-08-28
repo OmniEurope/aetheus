@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -15,7 +14,7 @@ public enum GitWriteOutcome
 }
 
 public sealed record PipelineGitDefinitionLocation(
-    int ProjectId, string PipelineName, string? SourceBranch);
+    int ProjectId, string PipelineName, string? SourceBranch, int? SourceRepositoryId = null);
 
 /// <summary>
 /// Git-strict storage for project-owned pipeline definitions: the authoritative YAML lives in the
@@ -31,21 +30,32 @@ public interface IPipelineGitService
     /// Returns null when the project has no internal repo or no matching file - the caller then falls
     /// back to the DB definition.
     /// </summary>
-    Task<string?> ReadProjectPipelineYamlAsync(int projectId, string pipelineName, CancellationToken ct = default, string? sourceBranch = null);
+    Task<string?> ReadProjectPipelineYamlAsync(int projectId, string pipelineName, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null);
 
     /// <summary>Reads the pipeline YAML at an exact git revision so a pinned run uses one commit for
     /// both its definition and its workspace.</summary>
     Task<string?> ReadProjectPipelineYamlAtRevisionAsync(
-        int projectId, string pipelineName, string revision, CancellationToken ct = default);
+        int projectId, string pipelineName, string revision, CancellationToken ct = default,
+        int? sourceRepositoryId = null);
+
+    /// <summary>Reads a versioned deployment configuration from <c>.pipeline/configs/**</c> at the
+    /// exact run revision. Paths outside that directory and ambiguous repositories are rejected.</summary>
+    Task<string?> ReadProjectConfigAtRevisionAsync(
+        int projectId, string relativePath, string revision, CancellationToken ct = default,
+        int? sourceRepositoryId = null);
 
     /// <summary>Best-effort head commit SHA of the project's internal repo default branch, captured
     /// at run trigger time so the run records exactly which commit it built. Returns null when the
-    /// project has no internal repo on disk or the commit cannot be resolved - never throws.</summary>
-    Task<string?> GetHeadCommitShaAsync(int projectId, CancellationToken ct = default, string? sourceBranch = null);
+    /// project has no internal repo on disk or the commit cannot be resolved. Workspace pipelines
+    /// treat that null as a blocking preflight failure.</summary>
+    Task<string?> GetHeadCommitShaAsync(int projectId, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null);
 
     /// <summary>Returns the authoritative internal-Git path, branch and current commit for a
     /// project-owned pipeline. Null means that the project has no internal repository.</summary>
-    Task<PipelineSourceDto?> GetPipelineSourceAsync(int projectId, string pipelineName, CancellationToken ct = default, string? sourceBranch = null);
+    Task<PipelineSourceDto?> GetPipelineSourceAsync(int projectId, string pipelineName, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null);
 
     /// <summary>
     /// Commits the YAML to <c>.pipeline/&lt;slug&gt;.yaml</c> on the selected source branch (or the
@@ -56,7 +66,8 @@ public interface IPipelineGitService
     /// the commit/push could not be persisted, or <see cref="GitWriteOutcome.Committed"/> on success.
     /// </summary>
     Task<(GitWriteOutcome Outcome, string? Error)> WriteProjectPipelineYamlAsync(
-        int projectId, string pipelineName, string yaml, string actor, CancellationToken ct = default, string? sourceBranch = null);
+        int projectId, string pipelineName, string yaml, string actor, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null);
 
     /// <summary>
     /// Moves, rewrites or deletes an authoritative pipeline definition. A same-repository rename is

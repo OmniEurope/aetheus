@@ -73,7 +73,65 @@ public class ReleasesListTests : BunitContext
     }
 
     [Fact]
-    public void GlobalScope_EmptyReleases_DoesNotThrow()
+    public void ProjectScope_ReplacesChangelogWithRootPipelineLink()
+    {
+        _handler.SetJsonResponse("api/releases", new PaginatedResult<ReleaseDto>
+        {
+            Items =
+            [
+                new ReleaseDto
+                {
+                    Id = 3,
+                    ProjectId = 7,
+                    Version = "2.1.0",
+                    Status = ReleaseStatus.Published,
+                    PipelineRunId = 99,
+                    SourcePipelineId = 17,
+                    SourcePipelineName = "release-orchestrator",
+                    Changelog = "This text belongs in the detail view only."
+                }
+            ],
+            TotalCount = 1
+        });
+
+        var cut = Render<ReleasesList>(parameters => parameters.Add(component => component.ProjectId, 7));
+        cut.WaitForState(() => cut.Markup.Contains("release-orchestrator"), TimeSpan.FromSeconds(2));
+
+        Assert.Contains("Pipeline", cut.Markup);
+        Assert.DoesNotContain("Changelog", cut.Markup);
+        Assert.Contains("href=\"/pipelines/17?projectId=7\"", cut.Markup);
+        Assert.DoesNotContain("This text belongs in the detail view only.", cut.Markup);
+    }
+
+    [Fact]
+    public void ServerScope_RootPipelineLinkPreservesServerContext()
+    {
+        _handler.SetJsonResponse("api/servers/4/releases", new PaginatedResult<ReleaseDto>
+        {
+            Items =
+            [
+                new ReleaseDto
+                {
+                    Id = 3,
+                    ProjectId = 7,
+                    Version = "2.1.0",
+                    SourcePipelineId = 17,
+                    SourcePipelineName = "release-orchestrator"
+                }
+            ],
+            TotalCount = 1,
+            Page = 1,
+            PageSize = 25
+        });
+
+        var cut = Render<ReleasesList>(parameters => parameters.Add(component => component.ServerId, 4));
+        cut.WaitForState(() => cut.Markup.Contains("release-orchestrator"), TimeSpan.FromSeconds(2));
+
+        Assert.Contains("href=\"/pipelines/17?serverId=4\"", cut.Markup);
+    }
+
+    [Fact]
+    public void GlobalScope_EmptyReleases_StillCallsTheApi()
     {
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
         _handler.SetJsonResponse("api/releases", new PaginatedResult<ReleaseDto> { Items = [], TotalCount = 0 });
@@ -131,7 +189,7 @@ public class ReleasesListTests : BunitContext
     }
 
     [Fact]
-    public async Task SyncReleases_WithNoFilter_DoesNothing()
+    public async Task SyncReleases_WithNoFilter_LeavesTheFlagOff()
     {
         var cut = Render<ReleasesList>();
         ListType.GetField("_projectFilter", Priv)!.SetValue(cut.Instance, null);
@@ -149,7 +207,9 @@ public class ReleasesListTests : BunitContext
     public async Task SyncReleases_WithFilter_NewReleases_Completes()
     {
         const string syncUrl = "api/releases/sync/1";
-        const string reloadUrl = "api/releases?page=1&pageSize=25&projectId=1";
+        // The grid now sends its current sort with the page request, so the reload URL carries the
+        // default ordering explicitly instead of leaving it implicit on the server.
+        const string reloadUrl = "api/releases?page=1&pageSize=25&sortBy=PublishedAt&sortDescending=True&projectId=1";
         _handler.SetJsonResponse(HttpMethod.Post, syncUrl, new List<ReleaseDto>
         {
             new() { Id = 9, ProjectId = 1, Version = "1.2.0", Status = ReleaseStatus.Detected }
@@ -213,7 +273,7 @@ public class ReleasesListTests : BunitContext
     }
 
     [Fact]
-    public async Task TriggerBuild_NoPipelines_DoesNotThrow()
+    public async Task TriggerBuild_NoPipelines_StillCallsTheApi()
     {
         _handler.SetJsonResponse("api/pipelines", new PaginatedResult<PipelineDto> { Items = [], TotalCount = 0 });
         var cut = Render<ReleasesList>();

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+global using Aetheus.Front.Shared;
 global using Aetheus.Front.Pages.Alerts;
 global using Aetheus.Front.Pages.Audit;
 global using Aetheus.Front.Pages.Auth;

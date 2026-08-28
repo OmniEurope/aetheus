@@ -1,0 +1,46 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Aetheus.Shared.DTOs
+
+@* The previous gate concatenated one full sentence per unresolved stage into a plain Confirm, so a
+   pipeline with eleven stages produced eleven copies of the same reason and nothing was readable.
+   Stages are grouped by their reason here: the cause is stated once, the affected stages are listed
+   compactly, and each cause carries the action that actually fixes it. *@
+<RadzenStack Gap="1rem" class="preflight-dialog">
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter"
+                 AllowClose="false" Icon="warning">
+        @string.Format(L["PreflightBlockedSummary"], Unresolved.Count)
+    </RadzenAlert>
+
+    @foreach (var group in Groups)
+    {
+        <RadzenCard Variant="Variant.Outlined" class="preflight-cause">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@group.Reason</RadzenText>
+
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.3rem" Wrap="FlexWrap.Wrap" class="rz-mb-2">
+                @foreach (var stage in group.Stages)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@stage" />
+                }
+            </RadzenStack>
+
+            @if (group.Remediation is { } fix)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center">
+                    <RadzenIcon Icon="build" aria-hidden="true" />
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@fix.Explanation</RadzenText>
+                    <RadzenButton Text="@fix.ActionLabel" Icon="@fix.ActionIcon" Size="ButtonSize.Small"
+                                  ButtonStyle="ButtonStyle.Primary" Variant="Variant.Flat"
+                                  Click="@(() => GoAsync(fix.Href))" />
+                </RadzenStack>
+            }
+        </RadzenCard>
+    }
+
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+        @* Icon/style pairs are imposed by the shared semantic family (ButtonFamilyAndGridNavigationAuditTests). *@
+        <RadzenButton Text="@L["Cancel"]" Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text"
+                      Click="@(() => Dialog.Close(false))" />
+        <RadzenButton Text="@L["RunAnyway"]" Icon="play_arrow" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled"
+                      Click="@(() => Dialog.Close(true))" />
+    </RadzenStack>
+</RadzenStack>

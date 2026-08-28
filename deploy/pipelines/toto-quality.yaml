@@ -1,0 +1,149 @@
+# Quality producers and the versioned analysis gate are advisory and publish the grade.
+name: toto-quality
+trigger: manual
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+stages:
+  - name: RestoreQualityTools
+    group: Quality
+    execution_role: build
+    os: linux
+    isolation:
+      mode: container
+      toolchain: node
+      network: bridge
+    steps:
+      - name: Restore locked quality dependencies
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        shell: npm ci --ignore-scripts --no-audit --no-fund
+        timeout_seconds: 900
+
+  - name: ProduceCoverage
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [RestoreQualityTools]
+    isolation:
+      mode: container
+      toolchain: dotnet
+      network: bridge
+    steps:
+      - name: Build and collect coverage
+        checkout: true
+        continue_on_error: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          rm -rf coverage
+          dotnet test Toto.slnx --configuration Release \
+            --collect:"XPlat Code Coverage" --results-directory coverage --verbosity minimal
+        timeout_seconds: 1200
+
+  - name: PublishCoverage
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [ProduceCoverage]
+    steps:
+      - name: Publish coverage evidence
+        type: coverage
+        min_coverage: 0
+        continue_on_error: true
+
+  - name: ProduceMetrics
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [ProduceCoverage]
+    steps:
+      - name: Publish complexity evidence
+        type: complexity
+        continue_on_error: true
+      - name: Publish duplication evidence
+        type: scanner
+        scanner: jscpd
+        continue_on_error: true
+        timeout_seconds: 900
+
+  - name: ProduceFormat
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [ProduceCoverage]
+    isolation:
+      mode: container
+      toolchain: dotnet
+      network: none
+    steps:
+      - name: Check formatting
+        shell: dotnet format Toto.slnx --no-restore --verify-no-changes --verbosity minimal
+        continue_on_error: true
+        timeout_seconds: 600
+
+  - name: QualityGateBoundary
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [PublishCoverage, ProduceMetrics, ProduceFormat]
+    steps:
+      - name: Publish summaries and calculate the versioned quality grade
+        type: analysis-gate
+        analysis_scope: quality
+        analysis_preset: recommended
+        analysis_rules:
+          - key: quality.coverage.line
+            minimum: 50
+            behavior: warn
+        continue_on_error: true
+        analysis_grading:
+          version: 1
+          minimum_grade: F
+          required_domains:
+            - reliability
+            - code-quality
+            - architecture
+          rules:
+            - key: grade.coverage.line
+              domain: reliability
+              metric: coverage.line.percent
+              category: coverage
+              direction: higher-is-better
+              a: 75
+              b: 65
+              c: 55
+              d: 40
+              e: 20
+            - key: grade.duplication
+              domain: code-quality
+              metric: duplication.percentage
+              category: duplication
+              direction: lower-is-better
+              a: 3
+              b: 5
+              c: 8
+              d: 12
+              e: 20
+            - key: grade.complexity.maximum
+              domain: code-quality
+              metric: complexity.cyclomatic.maximum
+              category: code-quality
+              direction: lower-is-better
+              a: 15
+              b: 20
+              c: 25
+              d: 35
+              e: 50
+            - key: grade.architecture.cycles
+              domain: architecture
+              metric: architecture.cycles
+              category: architecture
+              direction: lower-is-better
+              a: 0
+              b: 1
+              c: 2
+              d: 4
+              e: 8
+        timeout_seconds: 300

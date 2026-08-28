@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
 /// <summary>
-/// Read/manage surface for OTLP telemetry (PLAN-001 phases 2-4): ingestion keys, metric series + thresholds,
+/// Read/manage surface for OTLP telemetry (ADR-021 phases 2-4): ingestion keys, metric series + thresholds,
 /// logs, errors. RBAC is inherited from the monitored app's parent Project, like <see cref="AppMonitoringController"/>.
 /// </summary>
 [ApiController]
@@ -16,6 +11,8 @@ namespace Aetheus.Back.Components.AppMonitoring;
 [Authorize]
 public sealed class AppTelemetryController(
     IAppTelemetryService telemetry,
+    IAppWebAnalyticsService webAnalytics,
+    IAppWebAnalyticsConfigurationService webAnalyticsConfiguration,
     IAppMonitoringService monitoring,
     IResourceAuthorizationService authz) : ControllerBase
 {
@@ -53,6 +50,65 @@ public sealed class AppTelemetryController(
             return BadRequest(new ApiError { Message = "metric query parameter is required." });
         if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
         return Ok(await telemetry.GetMetricSeriesAsync(id, metric, hours, ct));
+    }
+
+    // --- visitors ---
+
+    [HttpGet("apps/{id:int}/visitors")]
+    public async Task<ActionResult<AppVisitorSeriesDto>> GetVisitors(
+        int id, [FromQuery] int days = 30, CancellationToken ct = default)
+    {
+        if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
+        return Ok(await telemetry.GetVisitorSeriesAsync(id, days, ct));
+    }
+
+    [HttpGet("apps/{id:int}/web-analytics")]
+    public async Task<ActionResult<AppWebAnalyticsSummaryDto>> GetWebAnalytics(
+        int id,
+        [FromQuery] int days = 30,
+        CancellationToken ct = default)
+    {
+        if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
+        var summary = await webAnalytics.GetSummaryAsync(id, days, ct);
+        return summary is null ? NotFound() : Ok(summary);
+    }
+
+    [HttpPut("apps/{id:int}/web-analytics/configuration")]
+    public async Task<ActionResult<AppWebAnalyticsConfigurationDto>> ConfigureWebAnalytics(
+        int id,
+        [FromBody] ConfigureAppWebAnalyticsRequest request,
+        CancellationToken ct)
+    {
+        if (await GateAsync(id, Permission.Write, ct) is { } fail) return fail;
+        try
+        {
+            var configured = await webAnalyticsConfiguration.ConfigureAsync(id, request, ct);
+            return configured is null ? NotFound() : Ok(configured);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new ApiError { Message = exception.Message });
+        }
+    }
+
+    [HttpGet("apps/{id:int}/web-analytics/configuration")]
+    public async Task<ActionResult<AppWebAnalyticsConfigurationDto>> GetWebAnalyticsConfiguration(
+        int id,
+        CancellationToken ct)
+    {
+        if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
+        var configured = await webAnalyticsConfiguration.GetAsync(id, ct);
+        return configured is null ? NotFound() : Ok(configured);
+    }
+
+    [HttpPost("apps/{id:int}/web-analytics/rotate-key")]
+    public async Task<ActionResult<AppWebAnalyticsConfigurationDto>> RotateWebAnalyticsKey(
+        int id,
+        CancellationToken ct)
+    {
+        if (await GateAsync(id, Permission.Write, ct) is { } fail) return fail;
+        var configured = await webAnalyticsConfiguration.RotateKeyAsync(id, ct);
+        return configured is null ? NotFound() : Ok(configured);
     }
 
     // --- thresholds ---

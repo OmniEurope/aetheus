@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 
@@ -30,26 +29,39 @@ public class ServerEnrollmentService(
         if (regToken is null) return null;
 
         var server = await repo.FindServerByHostnameAsync(request.Hostname, ct).ConfigureAwait(false);
+        if (server is not null && server.OrganizationId != regToken.OrganizationId)
+            return null;
+
         var now = timeProvider.GetUtcNow().UtcDateTime;
+        var capabilitiesJson = request.AgentCapabilities is null
+            ? null
+            : JsonSerializer.Serialize(request.AgentCapabilities
+                .Where(capability => !string.IsNullOrWhiteSpace(capability))
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal));
+        var pipelineRunnerEligible = request.PipelineRunnerAvailable == true
+            && request.AgentProtocolVersion is { } protocol
+            && AgentProtocol.IsSupported(protocol)
+            && request.AgentCapabilities?.Contains(
+                AgentCapabilities.PipelineBuild,
+                StringComparer.Ordinal) == true;
         if (server is not null)
         {
-            if (await repo.ServerHasActiveTokensAsync(server.Id, ct).ConfigureAwait(false))
-                await repo.RevokeServerTokensAsync(server.Id, ct).ConfigureAwait(false);
-
             server.OsDescription = request.OsDescription;
             server.OsType = OsTypeHelper.FromDescription(request.OsDescription);
             server.IpAddress = request.IpAddress;
             server.AgentVersion = request.AgentVersion;
+            server.AgentProtocolVersion = request.AgentProtocolVersion;
+            server.AgentCapabilitiesJson = capabilitiesJson;
             server.AgentInstalledAt = request.AgentInstalledAt;
             server.DockerAvailable = request.DockerAvailable;
             server.InsecureTls = request.InsecureTls;
             server.Status = ServerStatus.Online;
             server.LastHeartbeat = now;
             server.UpdatedAt = now;
-            // Re-derive the runner gate from the reported toolchain (a re-install is an explicit
-            // operator action). A pre-feature agent omits it (null) → preserve the existing choice.
-            if (request.PipelineRunnerAvailable is { } reReg)
-                server.PipelineRunnerEnabled = reReg;
+            // Re-derive the runner gate from the reported toolchain. A request without the current
+            // capability contract is not eligible to execute pipelines.
+            server.PipelineRunnerEnabled = pipelineRunnerEligible;
         }
         else
         {
@@ -61,32 +73,33 @@ public class ServerEnrollmentService(
                 OsType = OsTypeHelper.FromDescription(request.OsDescription),
                 IpAddress = request.IpAddress,
                 AgentVersion = request.AgentVersion,
+                AgentProtocolVersion = request.AgentProtocolVersion,
+                AgentCapabilitiesJson = capabilitiesJson,
                 AgentInstalledAt = request.AgentInstalledAt,
                 DockerAvailable = request.DockerAvailable,
                 InsecureTls = request.InsecureTls,
                 Status = ServerStatus.Online,
                 LastHeartbeat = now,
                 OrganizationId = regToken.OrganizationId,
-                // Default the runner gate from the reported toolchain instead of authorising every box
-                // (secure-by-default, per the migration/DTO contract). A pre-feature agent omits it
-                // (null) → keep the legacy enabled default.
-                PipelineRunnerEnabled = request.PipelineRunnerAvailable ?? true
+                // Default the runner gate from the reported toolchain instead of authorising every box.
+                PipelineRunnerEnabled = pipelineRunnerEligible
             };
-            repo.AddServer(server);
         }
         var bearerToken = AuthTokenHelper.GenerateSecureToken();
         var tokenHash = AuthTokenHelper.HashToken(jwtOptions.SigningKey, bearerToken);
         var ttlDays = config.GetValue("AgentToken:TtlDays", 365);
-        repo.AddServerToken(new ServerToken
+        var serverToken = new ServerToken
         {
             Server = server,
             TokenHash = tokenHash,
             ExpiresAt = timeProvider.GetUtcNow().UtcDateTime.AddDays(ttlDays)
-        });
-
-        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        if (!await repo.ConsumeRegistrationTokenAsync(regToken.Id, server.Id, ct).ConfigureAwait(false))
+        };
+        if (!await repo.TryPersistServerEnrollmentAsync(
+                regToken.Id,
+                server,
+                serverToken,
+                ct)
+            .ConfigureAwait(false))
             return null;
 
         await audit.LogAsync("Registered", "Server", server.Id, server.Hostname, ct).ConfigureAwait(false);

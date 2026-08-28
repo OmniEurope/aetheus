@@ -6,7 +6,7 @@ Expose les journaux système agrégés par le backend.
 
 ## Points d’entrée
 
-- API ou consommateur principal : `SystemLogsController.cs`.
+- API ou consommateur principal : `SystemLogsController.cs` et `ClientErrorsController.cs`.
 - Enregistrement DI : `SystemLogsModuleExtensions.cs`.
 - Les interfaces `I*` définissent les contrats du module; les services portent la logique et les repositories l’accès persistant lorsqu’il existe.
 

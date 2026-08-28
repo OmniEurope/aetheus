@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text;
 using System.Text.RegularExpressions;
-using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -36,7 +36,9 @@ internal static partial class PipelineCommandBuilder
         return mixed.ToString("x8");
     }
 
-    [GeneratedRegex(@"\$\(([A-Za-z_][A-Za-z0-9_]*)\)")]
+    // Qualified step outputs use the Azure-style $(Stage.Step.Variable) syntax. Keep the
+    // character set deliberately narrow so ordinary shell command substitutions are untouched.
+    [GeneratedRegex(@"\$\(([A-Za-z_][A-Za-z0-9_.]*)\)")]
     private static partial Regex VariablePattern();
 
     // S-TECH-V6QN: ${{ parameters.X }} is a distinct namespace from $(X). It resolves only from the
@@ -221,54 +223,65 @@ internal static partial class PipelineCommandBuilder
         for (var i = 0; i < command.Length; i++)
         {
             var c = command[i];
-
-            // Backtick escape (PowerShell): outside single-quoted literals it escapes the next char,
-            // so emit both verbatim and never let an escaped quote flip the string state.
-            if (c == '`' && !inSingle && i + 1 < command.Length)
-            {
-                sb.Append(c).Append(command[i + 1]);
-                i++;
-                continue;
-            }
-
-            if (c == '\'' && !inDouble)
-            {
-                // Doubled '' inside a single-quoted string is a literal quote, not a terminator.
-                if (inSingle && i + 1 < command.Length && command[i + 1] == '\'')
-                {
-                    sb.Append("''");
-                    i++;
-                    continue;
-                }
-                inSingle = !inSingle;
-                sb.Append(c);
-                continue;
-            }
-
-            if (c == '"' && !inSingle)
-            {
-                // Doubled "" inside a double-quoted string is a literal quote, not a terminator.
-                if (inDouble && i + 1 < command.Length && command[i + 1] == '"')
-                {
-                    sb.Append("\"\"");
-                    i++;
-                    continue;
-                }
-                inDouble = !inDouble;
-                sb.Append(c);
-                continue;
-            }
-
-            if (c == '&' && !inSingle && !inDouble && i + 1 < command.Length && command[i + 1] == '&')
-            {
-                sb.Append("; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };");
-                i++;
-                continue;
-            }
-
+            if (TryAppendBacktick(command, sb, ref i, c, inSingle)) continue;
+            if (TryAppendSingleQuote(command, sb, ref i, c, ref inSingle, inDouble)) continue;
+            if (TryAppendDoubleQuote(command, sb, ref i, c, inSingle, ref inDouble)) continue;
+            if (TryAppendAndChain(command, sb, ref i, c, inSingle, inDouble)) continue;
             sb.Append(c);
         }
         return sb.ToString();
+    }
+
+    private static bool TryAppendBacktick(
+        string command, StringBuilder output, ref int index, char current, bool inSingle)
+    {
+        if (current != '`' || inSingle || index + 1 >= command.Length) return false;
+        output.Append(current).Append(command[index + 1]);
+        index++;
+        return true;
+    }
+
+    private static bool TryAppendSingleQuote(
+        string command, StringBuilder output, ref int index, char current,
+        ref bool inSingle, bool inDouble)
+    {
+        if (current != '\'' || inDouble) return false;
+        if (inSingle && index + 1 < command.Length && command[index + 1] == '\'')
+        {
+            output.Append("''");
+            index++;
+            return true;
+        }
+        inSingle = !inSingle;
+        output.Append(current);
+        return true;
+    }
+
+    private static bool TryAppendDoubleQuote(
+        string command, StringBuilder output, ref int index, char current,
+        bool inSingle, ref bool inDouble)
+    {
+        if (current != '"' || inSingle) return false;
+        if (inDouble && index + 1 < command.Length && command[index + 1] == '"')
+        {
+            output.Append("\"\"");
+            index++;
+            return true;
+        }
+        inDouble = !inDouble;
+        output.Append(current);
+        return true;
+    }
+
+    private static bool TryAppendAndChain(
+        string command, StringBuilder output, ref int index, char current,
+        bool inSingle, bool inDouble)
+    {
+        if (current != '&' || inSingle || inDouble
+            || index + 1 >= command.Length || command[index + 1] != '&') return false;
+        output.Append("; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };");
+        index++;
+        return true;
     }
 
     // Phase 3: reject a working_directory that escapes the pipeline workspace (absolute path outside
@@ -276,20 +289,16 @@ internal static partial class PipelineCommandBuilder
     internal static bool WorkingDirectoryEscapesWorkspace(string? workDir, string? workspace)
     {
         if (string.IsNullOrEmpty(workDir)) return false;
-        var workSegments = workDir.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var workSegments = PathSegments(workDir);
         if (workSegments.Contains("..", StringComparer.Ordinal)) return true;
-        var isAbsolute = workDir.StartsWith('/') || workDir.StartsWith('\\')
-            || (workDir.Length >= 2 && char.IsLetter(workDir[0]) && workDir[1] == ':');
-        if (!isAbsolute) return false; // relative paths resolve under the workspace - allowed
+        if (!IsAbsolutePath(workDir)) return false;
         if (string.IsNullOrEmpty(workspace)) return true; // absolute with no known workspace - unsafe
 
-        var workspaceSegments = workspace.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var workspaceSegments = PathSegments(workspace);
         if (workspaceSegments.Contains("..", StringComparer.Ordinal)) return true;
-        var windowsStyle = workDir.Contains('\\', StringComparison.Ordinal)
-            || workspace.Contains('\\', StringComparison.Ordinal)
-            || (workDir.Length >= 2 && workDir[1] == ':')
-            || (workspace.Length >= 2 && workspace[1] == ':');
-        var comparison = windowsStyle ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var comparison = UsesWindowsPathStyle(workDir, workspace)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
         var normalizedWorkDir = string.Join('/', workSegments.Where(s => s != "."));
         var normalizedWorkspace = string.Join('/', workspaceSegments.Where(s => s != "."));
 
@@ -297,33 +306,43 @@ internal static partial class PipelineCommandBuilder
             && !normalizedWorkDir.StartsWith(normalizedWorkspace + "/", comparison);
     }
 
+    private static string[] PathSegments(string path) =>
+        path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+    private static bool IsAbsolutePath(string path) =>
+        path.StartsWith('/') || path.StartsWith('\\')
+        || path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':';
+
+    private static bool UsesWindowsPathStyle(string workDir, string workspace) =>
+        workDir.Contains('\\', StringComparison.Ordinal)
+        || workspace.Contains('\\', StringComparison.Ordinal)
+        || workDir.Length >= 2 && workDir[1] == ':'
+        || workspace.Length >= 2 && workspace[1] == ':';
+
     // P-07: Build every step inside its run workspace. An explicit working_directory may narrow
     // that location, while checkout only controls source preparation (handled by System:Prepare).
-    internal static string BuildStepCommand(PipelineStepDefinition stepDef, Dictionary<string, string> stageVars, bool isWindows)
+    internal static string BuildStepCommand(
+        PipelineStepDefinition stepDef,
+        Dictionary<string, string> stageVars,
+        bool isWindows,
+        IReadOnlySet<string>? secretKeys = null)
     {
         var vars = new Dictionary<string, string>(stageVars, StringComparer.OrdinalIgnoreCase);
-
-        if (!string.IsNullOrEmpty(stepDef.WorkingDirectory))
-        {
-            var resolvedWorkDir = Substitute(stepDef.WorkingDirectory, vars);
-            if (WorkingDirectoryEscapesWorkspace(resolvedWorkDir, vars.GetValueOrDefault("WORKSPACE")))
-                return isWindows
-                    ? $"$ErrorActionPreference='Stop'\nWrite-Error \"working_directory '{resolvedWorkDir}' is outside the pipeline workspace - blocked.\"\nexit 1"
-                    : $"echo \"working_directory '{resolvedWorkDir}' is outside the pipeline workspace - blocked.\" >&2\nexit 1";
-        }
+        var refusal = BuildWorkingDirectoryRefusal(stepDef.WorkingDirectory, vars, isWindows);
+        if (refusal is not null) return refusal;
+        ReplaceSecretsWithPlaceholders(vars, secretKeys);
 
         var command = Substitute(stepDef.Shell, vars);
         if (isWindows)
             command = RewritePwshAndChains(command);
 
-        string? workDir = null;
-        if (!string.IsNullOrEmpty(stepDef.WorkingDirectory))
-            workDir = Substitute(stepDef.WorkingDirectory, vars);
-        else if (vars.TryGetValue("WORKSPACE", out var workspace) && !string.IsNullOrWhiteSpace(workspace))
-            workDir = workspace;
+        var workDir = ResolveWorkingDirectory(stepDef.WorkingDirectory, vars);
 
         if (!string.IsNullOrEmpty(workDir))
         {
+            // A runner or Docker daemon restart can remove an ephemeral workspace before an always()
+            // teardown is scheduled. Recreate only the already-validated in-workspace path so
+            // label-based cleanup can still run; steps that require source files still fail honestly.
             // 0-d (double-clone fix): `checkout: true` no longer re-clones the repo. The auto-injected
             // system Prepare step already cloned REPOSITORY_URL into the run workspace before any stage
             // runs (every repo-backed run gets one, pinned to the same affinity server), so re-running
@@ -331,21 +350,56 @@ internal static partial class PipelineCommandBuilder
             // network with no benefit. Every step now enters the run workspace, including pipelines
             // without a repository, so concurrent runs never share the agent's global work directory.
             command = isWindows
-                ? $"Set-Location '{workDir}'\n{command}"
-                : $"cd \"{workDir}\"\n{command}";
+                ? $"New-Item -ItemType Directory -Force -Path '{workDir}' | Out-Null\nSet-Location '{workDir}'\n{command}"
+                : $"mkdir -p -- \"{workDir}\"\ncd \"{workDir}\"\n{command}";
         }
 
+        return AddStrictShellMode(command, isWindows);
+    }
+
+    private static string? BuildWorkingDirectoryRefusal(
+        string? configuredWorkDir,
+        Dictionary<string, string> vars,
+        bool isWindows)
+    {
+        if (string.IsNullOrEmpty(configuredWorkDir)) return null;
+        var resolved = Substitute(configuredWorkDir, vars);
+        if (!WorkingDirectoryEscapesWorkspace(resolved, vars.GetValueOrDefault("WORKSPACE"))) return null;
+        return isWindows
+            ? "$ErrorActionPreference='Stop'\nWrite-Error \"working_directory is outside the pipeline workspace - blocked.\"\nexit 1"
+            : "echo \"working_directory is outside the pipeline workspace - blocked.\" >&2\nexit 1";
+    }
+
+    private static void ReplaceSecretsWithPlaceholders(
+        IDictionary<string, string> vars,
+        IReadOnlySet<string>? secretKeys)
+    {
+        if (secretKeys is null) return;
+        foreach (var key in secretKeys)
+        {
+            if (vars.ContainsKey(key))
+                vars[key] = PipelineSecretPlaceholder.Create(key);
+        }
+    }
+
+    private static string? ResolveWorkingDirectory(
+        string? configuredWorkDir,
+        Dictionary<string, string> vars)
+    {
+        if (!string.IsNullOrEmpty(configuredWorkDir)) return Substitute(configuredWorkDir, vars);
+        return vars.TryGetValue("WORKSPACE", out var workspace) && !string.IsNullOrWhiteSpace(workspace)
+            ? workspace
+            : null;
+    }
+
+    private static string AddStrictShellMode(string command, bool isWindows)
+    {
         if (isWindows)
-        {
-            if (!command.Contains("$ErrorActionPreference", StringComparison.Ordinal))
-                command = $"$ErrorActionPreference = 'Stop'\n{command}";
-        }
-        else
-        {
-            if (!command.StartsWith("set -e", StringComparison.Ordinal))
-                command = $"set -e\n{command}";
-        }
-
-        return command;
+            return command.Contains("$ErrorActionPreference", StringComparison.Ordinal)
+                ? command
+                : $"$ErrorActionPreference = 'Stop'\n{command}";
+        return command.StartsWith("set -e", StringComparison.Ordinal)
+            ? command
+            : $"set -e\n{command}";
     }
 }

@@ -4,17 +4,23 @@
 <RadzenTemplateForm TItem="CreateGitLightRepoRequest" Data="@_request" Submit="@Submit">
     <LocalizedDataAnnotationsValidator />
     <RadzenStack Gap="1rem">
-        <RadzenFormField Text="@L["Name"]" Variant="Variant.Filled">
-            <RadzenTextBox @bind-Value="_request.Name" />
+        <RadzenFormField Text="@L["Name"]" Variant="Variant.Filled" class="rz-w-100">
+            <RadzenTextBox @bind-Value="_request.Name"
+                @oninput="@(e => _request.Name = e.Value?.ToString() ?? string.Empty)"
+                Name="Name" class="rz-w-100" />
         </RadzenFormField>
         <ValidationMessage For="@(() => _request.Name)" />
 
-        <RadzenFormField Text="@L["Description"]" Variant="Variant.Filled">
-            <RadzenTextArea @bind-Value="_request.Description" Rows="3" />
+        <RadzenFormField Text="@L["Description"]" Variant="Variant.Filled" class="rz-w-100">
+            <RadzenTextArea @bind-Value="_request.Description"
+                @oninput="@(e => _request.Description = e.Value?.ToString())"
+                Name="Description" Rows="3" class="rz-w-100" />
         </RadzenFormField>
 
-        <RadzenFormField Text="@L["DefaultBranch"]" Variant="Variant.Filled">
-            <RadzenTextBox @bind-Value="_request.DefaultBranch" Placeholder="main" />
+        <RadzenFormField Text="@L["DefaultBranch"]" Variant="Variant.Filled" class="rz-w-100">
+            <RadzenTextBox @bind-Value="_request.DefaultBranch"
+                @oninput="@(e => _request.DefaultBranch = e.Value?.ToString())"
+                Name="DefaultBranch" Placeholder="main" class="rz-w-100" />
         </RadzenFormField>
 
         <DialogFooter OnCancel="@Cancel">

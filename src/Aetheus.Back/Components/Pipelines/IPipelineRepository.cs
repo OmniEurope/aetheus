@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 public sealed record StepOutputProjection(string StageName, string StepName, string? OutputVariablesJson);
+public sealed record PipelineRunRootReference(int RunId, int PipelineId, string PipelineName);
+public sealed record TaskQueuePosition(int Position, int Depth);
+public sealed record PipelineRunQueueReference(int StepId, int TaskId);
 
 public interface IPipelineRepository
 {
@@ -20,7 +21,7 @@ public interface IPipelineRepository
         string? search, PipelineTriggerType? triggerType, int? environmentId, int? projectServerId, int? projectId,
         int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
 
-    Task<List<PipelineDto>> GetPipelinesForDependencyGraphAsync(List<int>? accessibleIds = null, CancellationToken ct = default);
+    Task<List<PipelineDto>> GetPipelinesForDependencyGraphAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default);
     Task<(List<PipelineDto> Items, List<PipelineDto> Identities, int TotalCount)> GetPipelineDependencyPageAsync(
         PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
 
@@ -35,6 +36,12 @@ public interface IPipelineRepository
     Task RemovePipelineAsync(Pipeline pipeline, CancellationToken ct = default);
 
     Task AddPipelineRunAsync(PipelineRun run, CancellationToken ct = default);
+    Task<(PipelineRun Run, bool Created)> GetOrAddPipelineRunAsync(
+        PipelineRun run, CancellationToken ct = default);
+
+    /// <summary>Reserves the next per-pipeline build number (exposed as <c>BUILD_PIPELINE_RUNNUMBER</c>).
+    /// Returns 0 when the pipeline no longer exists.</summary>
+    Task<int> ReserveNextBuildNumberAsync(int pipelineId, CancellationToken ct = default);
 
     /// <summary>Tracks a step run on the change tracker. Caller must invoke <see cref="SaveChangesAsync"/> to flush.</summary>
     void TrackPipelineStepRun(PipelineStepRun stepRun);
@@ -69,6 +76,7 @@ public interface IPipelineRepository
     /// organization, OS and deploy-capability rules as execution.</summary>
     Task<List<int>> FindCandidateTargetServerIdsAsync(string? pool, string? environment, string? agent, OsType requiredOs, int? organizationId, bool deploymentStage, CancellationToken ct = default);
     Task<Server?> FindOnlineServerByIdAsync(int serverId, OsType requiredOs = OsType.Unknown, CancellationToken ct = default);
+    Task<Server?> FindServerByIdAsync(int serverId, CancellationToken ct = default);
     Task<int?> GetRunAffinityServerIdAsync(int runId, CancellationToken ct = default);
     Task<int?> GetStageProducerServerIdAsync(int runId, string stageName, CancellationToken ct = default);
 
@@ -101,23 +109,41 @@ public interface IPipelineRepository
 
     /// <summary>Tracks a server task on the change tracker. Caller must invoke <see cref="SaveChangesAsync"/> to flush.</summary>
     void TrackTask(ServerTask task);
+    void TrackDastExecutionLease(DastExecutionLease lease);
 
     Task<List<PipelineRun>> GetRunsAsync(int pipelineId, int count, CancellationToken ct = default);
-    Task<(List<PipelineRunDto> Items, int TotalCount)> GetRunsPagedAsync(int pipelineId, int page, int pageSize, CancellationToken ct = default);
+    Task<(List<PipelineRunDto> Items, int TotalCount)> GetRunsPagedAsync(int pipelineId, int page, int pageSize, PipelineRunPaginationRequest? request = null, CancellationToken ct = default);
     Task<List<PipelineRunDto>> GetActiveRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
-    Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
+    Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, int? serverId = null, CancellationToken ct = default);
 
     Task<PipelineRun?> GetRunDetailAsync(int runId, CancellationToken ct = default);
+    Task<Dictionary<int, TaskQueuePosition>> GetTaskQueuePositionsAsync(
+        IReadOnlyCollection<int> taskIds, CancellationToken ct = default);
+    Task<List<PipelineRunQueueReference>> GetRunQueueReferencesAsync(
+        int runId, CancellationToken ct = default);
 
     Task<List<StepOutputProjection>> GetSuccessfulStepOutputsAsync(int runId, CancellationToken ct = default);
 
     Task<PipelineRun?> GetPipelineRunWithPipelineAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>Resolves each supplied run to the root run and pipeline that started its trigger lineage.</summary>
+    Task<Dictionary<int, PipelineRunRootReference>> GetRootRunReferencesAsync(
+        IReadOnlyCollection<int> runIds, CancellationToken ct = default);
 
     Task<bool> AreAllStepsInStageCompletedAsync(int runId, string stageName, CancellationToken ct = default);
 
     /// <summary>Trigger-step orchestration: the (tracked) step runs that launched <paramref name="triggeredRunId"/>
     /// and are still waiting on it. Used by <c>PipelineRunCompletedTriggerHandler</c> to complete the parent step.</summary>
     Task<List<PipelineStepRun>> FindStepRunsByTriggeredRunIdAsync(int triggeredRunId, CancellationToken ct = default);
+    Task<bool> TryResolveTriggeredStepAsync(
+        int stepId,
+        TaskExecutionStatus status,
+        int exitCode,
+        string? outputVariablesJson,
+        string? failureCode,
+        string? failureReason,
+        DateTime completedAt,
+        CancellationToken ct = default);
 
     /// <summary>Direct child runs launched by trigger steps of the supplied parent run.</summary>
     Task<List<int>> GetTriggeredChildRunIdsAsync(int parentRunId, CancellationToken ct = default);
@@ -138,6 +164,10 @@ public interface IPipelineRepository
     /// <summary>Active runs old enough to require a scheduler retry, with pending pipeline steps but no
     /// assigned/running step, in-flight server task, child trigger or approval that could wake them.</summary>
     Task<List<int>> GetStalledSchedulableRunIdsAsync(DateTime startedBefore, CancellationToken ct = default);
+
+    /// <summary>Cancellation-requested runs with no active server task. The reconciliation sweep
+    /// reapplies cancellation so orphan Running steps cannot prevent mandatory teardown.</summary>
+    Task<List<int>> GetStalledCancellationRunIdsAsync(DateTime startedBefore, CancellationToken ct = default);
 
     /// <summary>Runs wedged in Running past <paramref name="startedBefore"/> with no in-flight task and no
     /// trigger step waiting on a child - i.e. runs that can no longer make progress. The reconcile sweep
@@ -165,6 +195,9 @@ public interface IPipelineRepository
 
     Task<List<string>> GetActiveStageNamesAsync(int runId, CancellationToken ct = default);
 
+    /// <summary>True while post-stage artifact collection is pending or executing.</summary>
+    Task<bool> HasActiveArtifactCollectionAsync(int runId, CancellationToken ct = default);
+
     Task UpdatePipelineRunStatusAsync(int runId, PipelineStatus status, CancellationToken ct = default);
     Task<bool> TryTransitionPipelineRunStatusAsync(int runId, PipelineStatus expectedStatus, PipelineStatus newStatus, CancellationToken ct = default);
 
@@ -176,6 +209,8 @@ public interface IPipelineRepository
 
     Task<List<PipelineTemplate>> GetTemplatesAsync(CancellationToken ct = default);
 
+    Task<List<PipelineTemplateSummaryDto>> GetTemplateSummariesAsync(CancellationToken ct = default);
+
     Task<PipelineTemplate?> GetTemplateAsync(int id, CancellationToken ct = default);
 
     Task<PipelineTemplate?> FindTemplateAsync(int id, CancellationToken ct = default);
@@ -184,7 +219,19 @@ public interface IPipelineRepository
 
     Task RemoveTemplateAsync(PipelineTemplate template, CancellationToken ct = default);
 
+    /// <summary>Cancels every non-terminal step and server task still attached to the run.</summary>
+    Task CancelActiveStepRunsAndTasksAsync(int runId, CancellationToken ct = default);
+
     Task CancelPendingStepRunsAsync(int runId, CancellationToken ct = default);
+    Task RequestPipelineRunCancellationAsync(int runId, CancellationToken ct = default);
+    Task CancelPendingStepRunsExceptStagesAsync(
+        int runId,
+        IReadOnlyCollection<string> preservedStages,
+        CancellationToken ct = default);
+    Task CancelOrphanedRunningStepRunsExceptStagesAsync(
+        int runId,
+        IReadOnlyCollection<string> preservedStages,
+        CancellationToken ct = default);
 
     /// <summary>Resets every <c>Failed</c> step run of a run back to <c>Pending</c> and re-opens the
     /// run (Status → Running, CompletedAt → null) so the scheduler reruns only the failed steps.
@@ -204,6 +251,7 @@ public interface IPipelineRepository
     Task AddApprovalAsync(PipelineApproval approval, CancellationToken ct = default);
 
     Task<Data.Entities.Environment?> FindEnvironmentByNameAsync(string name, CancellationToken ct = default);
+    Task<Data.Entities.Environment?> FindEnvironmentByNameForProjectAsync(string name, int projectId, CancellationToken ct = default);
 
     Task<PipelineTemplate?> FindTemplateByNameAsync(string name, CancellationToken ct = default);
 
@@ -249,6 +297,7 @@ public interface IPipelineRepository
     Task<List<PipelineStepRun>> GetFailedStepRunsInStageAsync(int runId, string stageName, CancellationToken ct = default);
 
     Task<List<EnvironmentCheck>> GetEnvironmentChecksAsync(int environmentId, CancellationToken ct = default);
+    Task<bool> IsStepRetryEligibleAsync(int pipelineRunId, int stepRunId, CancellationToken ct = default);
 
     Task<int> DeleteRunsOlderThanAsync(DateTime cutoff, CancellationToken ct = default);
 
@@ -258,6 +307,8 @@ public interface IPipelineRepository
     Task<List<Pipeline>> GetScheduledPipelinesAsync(CancellationToken ct = default);
 
     Task<bool> HasActiveRunAsync(int pipelineId, CancellationToken ct = default);
+    Task<bool> LockPipelineForWebhookAsync(int pipelineId, CancellationToken ct = default);
+    Task<List<int>> GetActiveRunIdsAsync(int pipelineId, CancellationToken ct = default);
 
     Task<HashSet<int>> GetPipelineIdsWithActiveRunsAsync(CancellationToken ct = default);
 

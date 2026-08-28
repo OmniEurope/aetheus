@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
 using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
+using NSubstitute;
 
 namespace Aetheus.Back.Tests.Repositories;
 
@@ -18,7 +21,15 @@ public class ProjectRepositoryTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _db = new AppDbContext(options);
-        _repo = new ProjectRepository(_db);
+        var analysisGrades = Substitute.For<IProjectAnalysisGradeReader>();
+        analysisGrades.GetGradesAsync(
+                Arg.Any<IReadOnlyCollection<int>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => new Aetheus.Back.Components.Analysis.AnalysisProjectSummaryRepository(_db)
+                .GetGradesAsync(
+                    call.Arg<IReadOnlyCollection<int>>(),
+                    call.ArgAt<CancellationToken>(1)));
+        _repo = new ProjectRepository(_db, analysisGrades);
     }
 
     [Fact]
@@ -386,6 +397,216 @@ public class ProjectRepositoryTests : IDisposable
 
         var result = await _repo.GetRecentPipelineRunsAsync(project.Id, 3, ct: TestContext.Current.CancellationToken);
         Assert.Equal(3, result.Count);
+    }
+
+    [Fact]
+    public async Task GetProjectListInsightsAsync_ReturnsCommitRunParentProductionAndOnlineUsers()
+    {
+        var now = new DateTime(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc);
+        var project = new Project { Name = "Portfolio", Description = "d" };
+        var pipeline = new Pipeline { Name = "Deploy", Project = project };
+        var parentRun = new PipelineRun
+        {
+            Pipeline = pipeline,
+            Status = PipelineStatus.Running,
+            StartedAt = now.AddMinutes(-10)
+        };
+        var childRun = new PipelineRun
+        {
+            Pipeline = pipeline,
+            Status = PipelineStatus.Success,
+            StartedAt = now.AddMinutes(-5)
+        };
+        parentRun.StepRuns =
+        [
+            new PipelineStepRun
+            {
+                PipelineRun = parentRun,
+                StageName = "Deploy",
+                StepName = "Child",
+                Status = TaskExecutionStatus.Success,
+                TriggeredRunId = null
+            }
+        ];
+        _db.PipelineRuns.AddRange(parentRun, childRun);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        parentRun.StepRuns[0].TriggeredRunId = childRun.Id;
+
+        _db.GitCommits.AddRange(
+            new GitCommit
+            {
+                Project = project,
+                Sha = "old",
+                Message = "Old",
+                CommittedAt = now.AddHours(-1),
+                CreatedAt = now.AddHours(-1)
+            },
+            new GitCommit
+            {
+                Project = project,
+                Sha = "0123456789abcdef",
+                Message = "Latest",
+                CommittedAt = now.AddMinutes(-3),
+                CreatedAt = now.AddMinutes(-3)
+            });
+        var production = new Aetheus.Back.Data.Entities.Environment
+        {
+            Name = "Production",
+            Project = project,
+            Type = EnvironmentType.Production
+        };
+        var app = new MonitoredApp
+        {
+            Project = project,
+            Environment = production,
+            Name = "Web",
+            Enabled = true,
+            CurrentStatus = AppHealthStatus.Up,
+            AnalyticsEnabled = true
+        };
+        _db.MonitoredApps.Add(app);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.AppAnalyticsSessions.Add(new AppAnalyticsSession
+        {
+            MonitoredAppId = app.Id,
+            SessionPseudonym = "session-1",
+            StartedAtUtc = now.AddMinutes(-4),
+            LastSeenAtUtc = now.AddMinutes(-1)
+        });
+        var qualityReport = new AnalysisReport
+        {
+            ProjectId = project.Id,
+            PipelineRunId = parentRun.Id,
+            ScannerKey = "quality",
+            ScannerName = "Quality",
+            ScannerVersion = "1",
+            ContentHash = "grade-f",
+            StartedAt = now.AddMinutes(-3),
+            CompletedAt = now.AddMinutes(-2),
+            CreatedAt = now.AddMinutes(-3)
+        };
+        var securityReport = new AnalysisReport
+        {
+            ProjectId = project.Id,
+            PipelineRunId = childRun.Id,
+            ScannerKey = "security",
+            ScannerName = "Security",
+            ScannerVersion = "1",
+            ContentHash = "grade-a",
+            StartedAt = now.AddMinutes(-2),
+            CompletedAt = now.AddMinutes(-1),
+            CreatedAt = now.AddMinutes(-2)
+        };
+        _db.AnalysisReports.AddRange(qualityReport, securityReport);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var qualitySnapshot = new AnalysisGradeSummaryDto
+        {
+            OverallGrade = AnalysisGrade.F,
+            Completeness = AnalysisGradeCompleteness.Complete,
+            EvaluatedAt = now.AddMinutes(-2),
+            Domains =
+            [
+                new AnalysisGradeDomainDto
+                {
+                    Domain = AnalysisGradeDomain.CodeQuality,
+                    Grade = AnalysisGrade.F,
+                    Required = true,
+                    Completeness = AnalysisGradeCompleteness.Complete,
+                    EvaluatedAt = now.AddMinutes(-2),
+                    Measures =
+                    [
+                        new AnalysisGradeMeasureDto
+                        {
+                            Key = "quality",
+                            Domain = AnalysisGradeDomain.CodeQuality,
+                            Grade = AnalysisGrade.F,
+                            Required = true,
+                            Observed = true,
+                            ObservedValue = 40,
+                            Direction = AnalysisMetricDirection.HigherIsBetter,
+                            AThreshold = 90,
+                            BThreshold = 80,
+                            CThreshold = 70,
+                            DThreshold = 60,
+                            EThreshold = 50
+                        }
+                    ]
+                }
+            ]
+        };
+        var securitySnapshot = new AnalysisGradeSummaryDto
+        {
+            EvaluatedAt = now.AddMinutes(-1),
+            OverallGrade = AnalysisGrade.A,
+            Completeness = AnalysisGradeCompleteness.Complete,
+            Domains =
+            [
+                new AnalysisGradeDomainDto
+                {
+                    Domain = AnalysisGradeDomain.Security,
+                    Grade = AnalysisGrade.A,
+                    Required = true,
+                    Completeness = AnalysisGradeCompleteness.Complete,
+                    EvaluatedAt = now.AddMinutes(-1),
+                    Measures =
+                    [
+                        new AnalysisGradeMeasureDto
+                        {
+                            Key = "security",
+                            Domain = AnalysisGradeDomain.Security,
+                            Grade = AnalysisGrade.A,
+                            Required = true,
+                            Observed = true,
+                            ObservedValue = 100,
+                            Direction = AnalysisMetricDirection.HigherIsBetter,
+                            AThreshold = 90,
+                            BThreshold = 80,
+                            CThreshold = 70,
+                            DThreshold = 60,
+                            EThreshold = 50
+                        }
+                    ]
+                }
+            ]
+        };
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        _db.AnalysisEvaluations.AddRange(
+            new AnalysisEvaluation
+            {
+                ProjectId = project.Id,
+                AnalysisReportId = qualityReport.Id,
+                PipelineRunId = parentRun.Id,
+                Status = AnalysisGateStatus.Blocked,
+                Grade = AnalysisGrade.F,
+                GradeCompleteness = AnalysisGradeCompleteness.Complete,
+                GradeSnapshotJson = JsonSerializer.Serialize(qualitySnapshot, jsonOptions),
+                EvaluatedAt = now.AddMinutes(-2),
+                CreatedAt = now.AddMinutes(-2)
+            },
+            new AnalysisEvaluation
+            {
+                ProjectId = project.Id,
+                AnalysisReportId = securityReport.Id,
+                PipelineRunId = childRun.Id,
+                Status = AnalysisGateStatus.Passed,
+                Grade = AnalysisGrade.A,
+                GradeCompleteness = AnalysisGradeCompleteness.Complete,
+                GradeSnapshotJson = JsonSerializer.Serialize(securitySnapshot, jsonOptions),
+                EvaluatedAt = now.AddMinutes(-1),
+                CreatedAt = now.AddMinutes(-1)
+            });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetProjectListInsightsAsync(
+            [project.Id], now.AddMinutes(-5), TestContext.Current.CancellationToken);
+
+        var insight = Assert.Single(result).Value;
+        Assert.Equal("0123456789abcdef", insight.LastCommitSha);
+        Assert.Equal(childRun.Id, insight.LastRunId);
+        Assert.Equal(parentRun.Id, insight.ParentRunId);
+        Assert.Equal(AnalysisGrade.F, insight.LatestGateGrade);
+        Assert.Equal(ProjectProductionStatus.Online, insight.ProductionStatus);
+        Assert.Equal(1, insight.OnlineUserCount);
     }
 
     public void Dispose() => _db.Dispose();

@@ -51,4 +51,26 @@ public sealed class Prm002Tests
         const string razor = "@codeValue { }\n@functionsHelper { }\n";
         await Verifier<PRM002_NoInlineCodeBlockAnalyzer>.VerifyAdditionalFileAsync("Names.razor", razor);
     }
+
+    [Fact]
+    public async Task RazorAndHtmlComments_DoNotReportDiagnostic()
+    {
+        const string razor = "@*\n@code { }\n*@\n<!--\n@functions { }\n-->\n";
+
+        await Verifier<PRM002_NoInlineCodeBlockAnalyzer>.VerifyAdditionalFileAsync(
+            "Comments.razor", razor);
+    }
+
+    [Fact]
+    public async Task EveryInlineBlock_ReportsItsOwnDiagnostic()
+    {
+        const string razor = "@code { }\n<div />\n@functions\n{\n}\n";
+        var first = Verifier<PRM002_NoInlineCodeBlockAnalyzer>.Expect(
+            "PRM002", DiagnosticSeverity.Warning, "Multiple.razor", 1, 1, 1, 10);
+        var second = Verifier<PRM002_NoInlineCodeBlockAnalyzer>.Expect(
+            "PRM002", DiagnosticSeverity.Warning, "Multiple.razor", 3, 1, 3, 11);
+
+        await Verifier<PRM002_NoInlineCodeBlockAnalyzer>.VerifyAdditionalFileAsync(
+            "Multiple.razor", razor, first, second);
+    }
 }

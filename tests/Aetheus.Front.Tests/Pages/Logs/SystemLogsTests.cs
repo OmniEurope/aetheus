@@ -3,6 +3,8 @@ using System.Reflection;
 using Aetheus.Front.Pages.Logs;
 using Aetheus.Shared.DTOs;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -69,6 +71,21 @@ public class SystemLogsTests : BunitContext
     {
         var cut = Render<SystemLogs>();
         await ((IAsyncDisposable)cut.Instance).DisposeAsync();
+    }
+
+    [Fact]
+    public void SearchQueryChange_ReloadsEntriesWithCorrelationFilter()
+    {
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        navigation.NavigateTo(navigation.GetUriWithQueryParameter("search", "initial"));
+        var cut = Render<SystemLogs>();
+        cut.WaitForState(() => _handler.Requests.Any(request =>
+            request.Url.Contains("search=initial", StringComparison.Ordinal)));
+
+        navigation.NavigateTo(navigation.GetUriWithQueryParameter("search", "agent-update-42"));
+
+        cut.WaitForState(() => _handler.Requests.Any(request =>
+            request.Url.Contains("search=agent-update-42", StringComparison.Ordinal)));
     }
 
     [Fact]

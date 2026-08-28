@@ -1,0 +1,70 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits Aetheus.Front.Shared.RealtimeAdminGridPageBase<PackageRegistryPackageDto>
+@page "/admin/package-registry"
+
+<PageTitle>@L["PackageRegistry"] - Aetheus</PageTitle>
+
+@if (Auth.IsAdmin)
+{
+<PageHeader Title="@L["PackageRegistry"]" Icon="deployed_code">
+    <Actions>
+        <RadzenButton Icon="refresh" Size="ButtonSize.Small" Click="@ReloadAsync"
+            title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </Actions>
+    <Filters>
+        <RadzenTextBox Placeholder="@L["Search"]" @bind-Value="_search"
+            Change="@(_ => ResetSearchAsync())" class="pipeline-list-search" />
+    </Filters>
+</PageHeader>
+
+<RadzenRow Gap="1rem" class="rz-mt-4 rz-mb-4">
+    <RadzenColumn Size="12" SizeMD="6">
+        <RadzenCard>
+            <RadzenText TextStyle="TextStyle.H5">NuGet</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-mb-2">@L["RegistryNuGetHelp"]</RadzenText>
+            <code class="text-mono">/api/packages/nuget/v3/index.json</code>
+        </RadzenCard>
+    </RadzenColumn>
+    <RadzenColumn Size="12" SizeMD="6">
+        <RadzenCard>
+            <RadzenText TextStyle="TextStyle.H5">npm</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-mb-2">@L["RegistryNpmHelp"]</RadzenText>
+            <code class="text-mono">/api/packages/npm/</code>
+        </RadzenCard>
+    </RadzenColumn>
+</RadzenRow>
+
+<AetheusDataGrid @ref="_grid" Data="@_packages" TItem="PackageRegistryPackageDto"
+    Count="@_totalCount" IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="25"
+ FullHeight="true">
+    <EmptyTemplate>
+        <EmptyState Icon="deployed_code" Title="@L["NoRegistryPackages"]"
+            Description="@L["NoRegistryPackagesDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Property="Kind" Title="@L["Type"]" Width="100px">
+            <Template Context="p"><RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@p.Kind.ToString()" /></Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Property="Name" Title="@L["PackageName"]">
+            <Template Context="p"><span class="text-mono">@p.Name</span></Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Property="LatestVersion" Title="@L["LatestVersion"]" Width="140px">
+            <Template Context="p"><span class="text-mono">@(p.LatestVersion ?? "-")</span></Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Property="VersionCount" Title="@L["Versions"]" Width="100px" />
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Property="TotalSizeBytes" Title="@L["Size"]" Width="110px">
+            <Template Context="p">@DisplayFormatting.BinarySize(p.TotalSizeBytes)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Property="UpdatedAt" Title="@L["UpdatedAt"]" Width="160px">
+            <Template Context="p">@p.UpdatedAt.ToString("g")</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="PackageRegistryPackageDto" Title="@L["Actions"]" Width="90px" Sortable="false">
+            <Template Context="p">
+                <RadzenButton Icon="visibility" Size="ButtonSize.ExtraSmall" Click="@(() => OpenPackageAsync(p))"
+                    title="@L["ViewDetails"]" aria-label="@L["ViewDetails"]"
+                    ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+}

@@ -6,7 +6,7 @@ namespace Aetheus.Shared.DTOs;
 
 // Per-run results & metrics published by step types (test / coverage / lint / complexity), plus their
 // trend points and the generic run-metric shape. Split out of PipelineDtos.cs to keep that file within
-// the 600-line budget while keeping closely related DTOs together.
+// the 600-line budget (related DTOs may share a file - see CLAUDE.md).
 
 public sealed record PipelineTestResultDto
 {
@@ -87,7 +87,7 @@ public sealed record ComplexityTrendPointDto
     public double? CrapAvg { get; init; }
 }
 
-/// <summary>PLAN-005 4.4: a single test pass/fail trend point across recent runs of a project.</summary>
+/// <summary>Archived module-finalisation plan, section 4.4: one test trend point across recent project runs.</summary>
 public sealed record TestTrendPointDto
 {
     public int RunId { get; init; }
@@ -97,7 +97,7 @@ public sealed record TestTrendPointDto
     public int Skipped { get; init; }
 }
 
-/// <summary>PLAN-005 4.4: project-level quality trend bundle (coverage + tests + complexity across runs).</summary>
+/// <summary>Archived module-finalisation plan, section 4.4: project quality trends across runs.</summary>
 public sealed record ProjectQualityTrendDto
 {
     [MaxLength(50)]
@@ -121,12 +121,17 @@ public sealed record RunMetricDto
     public string? StepName { get; init; }
 }
 
+public static class CoverageUploadLimits
+{
+    public const int MaxRawXmlBytes = 100 * 1024 * 1024;
+}
+
 public sealed record PublishCoverageRequest
 {
     [Required]
-    // 100 MB - a full-solution Cobertura/SARIF report routinely exceeds 10 MB; kept in lockstep with
-    // the [RequestSizeLimit] on the coverage/lint endpoints so DTO validation never rejects before it.
-    [StringLength(100 * 1024 * 1024)]
+    // Legacy JSON compatibility endpoint. Current agents use the raw XML endpoint so JSON escaping
+    // cannot make an otherwise accepted report breach the byte-oriented transport limit.
+    [StringLength(CoverageUploadLimits.MaxRawXmlBytes)]
     public string XmlContent { get; init; } = string.Empty;
 
     [StringLength(200)]

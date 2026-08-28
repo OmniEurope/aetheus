@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -95,7 +93,7 @@ internal sealed class TeamspeakDataCoordinator(
         var result = new List<TeamspeakChannelDto>();
         for (var page = 1; ; page++)
         {
-            var response = await _api.GetTeamspeakChannelsAsync(
+            var response = await _api.Teamspeak.GetTeamspeakChannelsAsync(
                 _serverId, page, pageSize, sortBy: "Name", ct: CurrentToken).ConfigureAwait(false);
             result.AddRange(response.Items);
             if (page * pageSize >= response.TotalCount || response.Items.Count == 0)
@@ -128,7 +126,7 @@ internal sealed class TeamspeakDataCoordinator(
 
     private async Task RefreshStateAsync(long generation, CancellationToken ct)
     {
-        var state = await _api.GetTeamspeakStateAsync(_serverId, ct).ConfigureAwait(false);
+        var state = await _api.Teamspeak.GetTeamspeakStateAsync(_serverId, ct).ConfigureAwait(false);
         if (!IsCurrent(generation, ct)) return;
         State = state;
         await NotifyChangedAsync().ConfigureAwait(false);
@@ -140,7 +138,7 @@ internal sealed class TeamspeakDataCoordinator(
         await NotifyChangedAsync().ConfigureAwait(false);
         try
         {
-            var result = await _api.GetTeamspeakClientsAsync(
+            var result = await _api.Teamspeak.GetTeamspeakClientsAsync(
                 _serverId, query.Page, query.PageSize, query.Search,
                 query.SortBy, query.SortDescending, ct).ConfigureAwait(false);
             if (!IsCurrent(generation, ct)) return;
@@ -163,7 +161,7 @@ internal sealed class TeamspeakDataCoordinator(
         await NotifyChangedAsync().ConfigureAwait(false);
         try
         {
-            var result = await _api.GetTeamspeakChannelsAsync(
+            var result = await _api.Teamspeak.GetTeamspeakChannelsAsync(
                 _serverId, query.Page, query.PageSize, query.Search,
                 query.SortBy, query.SortDescending, ct).ConfigureAwait(false);
             if (!IsCurrent(generation, ct)) return;
@@ -186,7 +184,7 @@ internal sealed class TeamspeakDataCoordinator(
         await NotifyChangedAsync().ConfigureAwait(false);
         try
         {
-            var result = await _api.GetTeamspeakBansAsync(
+            var result = await _api.Teamspeak.GetTeamspeakBansAsync(
                 _serverId, query.Page, query.PageSize, query.Search,
                 query.SortBy, query.SortDescending, ct).ConfigureAwait(false);
             if (!IsCurrent(generation, ct)) return;

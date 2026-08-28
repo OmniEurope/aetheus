@@ -106,23 +106,26 @@ public class SharedDtoPipelineTests
     public void PipelineRunRequest_CurrentShape_Deserializes()
     {
         var request = JsonSerializer.Deserialize<PipelineRunRequest>(
-            """{"parameters":{"ENV":"qa"},"sourceBranch":"release/1"}""");
+            """{"parameters":{"ENV":"qa"},"sourceBranch":"release/1","idempotencyKey":"request-42"}""");
 
         Assert.NotNull(request);
         Assert.Equal("qa", request.Parameters!["ENV"]);
         Assert.Equal("release/1", request.SourceBranch);
+        Assert.Equal("request-42", request.IdempotencyKey);
     }
 
     [Fact]
     public void PipelineRunRequest_LegacyDictionary_DeserializesDuringTransition()
     {
         var request = JsonSerializer.Deserialize<PipelineRunRequest>(
-            """{"ENV":"qa","AETHEUS_RUN_BRANCH":"release/1"}""");
+            """{"ENV":"qa","AETHEUS_RUN_BRANCH":"release/1","AETHEUS_RUN_IDEMPOTENCY_KEY":"request-42"}""");
 
         Assert.NotNull(request);
         Assert.Equal("qa", request.Parameters!["ENV"]);
         Assert.False(request.Parameters.ContainsKey("AETHEUS_RUN_BRANCH"));
         Assert.Equal("release/1", request.SourceBranch);
+        Assert.Equal("request-42", request.IdempotencyKey);
+        Assert.False(request.Parameters.ContainsKey("AETHEUS_RUN_IDEMPOTENCY_KEY"));
     }
 
     [Fact]

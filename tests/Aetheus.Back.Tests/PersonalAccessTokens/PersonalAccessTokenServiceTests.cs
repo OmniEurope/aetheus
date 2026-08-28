@@ -63,6 +63,22 @@ public class PersonalAccessTokenServiceTests
     }
 
     [Fact]
+    public async Task Create_RejectsLifetimeLongerThanNinetyDays()
+    {
+        await Assert.ThrowsAsync<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            _sut.CreateAsync(
+                7,
+                new CreatePersonalAccessTokenRequest
+                {
+                    Name = "too-long",
+                    ExpirationDays = 91
+                },
+                TestContext.Current.CancellationToken));
+
+        _repo.DidNotReceive().Add(Arg.Any<PersonalAccessToken>());
+    }
+
+    [Fact]
     public async Task Create_ThenValidate_HashesConsistently_RoundTrip()
     {
         PersonalAccessToken? captured = null;

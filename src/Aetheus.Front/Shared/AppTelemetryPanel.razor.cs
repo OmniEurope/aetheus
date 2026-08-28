@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Shared;
 
 /// <summary>
-/// PLAN-001 phases 2-4: OTLP telemetry panel for a project. An app picker selects one monitored app,
+/// ADR-021 phases 2-4: OTLP telemetry panel for a project. An app picker selects one monitored app,
 /// then sub-tabs (Metrics / Logs / Errors / Ingestion) show its telemetry. RBAC inherited from the Project.
 /// </summary>
 public partial class AppTelemetryPanel : IAsyncDisposable
@@ -44,7 +38,7 @@ public partial class AppTelemetryPanel : IAsyncDisposable
 
     private async Task LoadAppsAsync()
     {
-        try { _apps = await Api.GetMonitoredAppsAsync(ProjectId); }
+        try { _apps = await Api.Monitoring.GetMonitoredAppsAsync(ProjectId); }
         catch (HttpRequestException) { _apps = []; }
 
         if (_apps.Count > 0 && (_selectedAppId is null || _apps.All(a => a.Id != _selectedAppId)))

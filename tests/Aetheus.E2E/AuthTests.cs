@@ -98,4 +98,23 @@ public class AuthTests : E2ETestBase
         await Expect(Page.Locator("input[name='Password']")).ToBeVisibleAsync();
         await Expect(Page.Locator("button[type='submit']")).ToBeVisibleAsync();
     }
+
+    [Test]
+    public async Task Login_MobileCard_RemainsInsideViewport()
+    {
+        await Page.SetViewportSizeAsync(375, 667);
+        await Page.GotoAsync($"{FrontendUrl}/login");
+        await Page.WaitForSelectorAsync(".login-container .rz-card", new() { Timeout = 15000 });
+
+        var box = await Page.Locator(".login-container .rz-card").BoundingBoxAsync();
+        Assert.That(box, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(box!.X, Is.GreaterThanOrEqualTo(0));
+            Assert.That(box.X + box.Width, Is.LessThanOrEqualTo(375));
+        });
+        var hasHorizontalOverflow = await Page.EvaluateAsync<bool>(
+            "() => document.documentElement.scrollWidth > document.documentElement.clientWidth");
+        Assert.That(hasHorizontalOverflow, Is.False);
+    }
 }

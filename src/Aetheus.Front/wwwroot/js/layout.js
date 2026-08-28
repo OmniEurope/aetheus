@@ -159,10 +159,9 @@ Aetheus.setLocal = function (key, value) {
     } catch { /* ignore */ }
 };
 
-// Mobile drawer viewport watcher (Astraia parity). A matchMedia("(max-width: 768px)") listener
+// Compact drawer viewport watcher (Astraia parity). A matchMedia("(max-width: 1024px)") listener
 // pushes the mobile/desktop boolean into MainLayout via [JSInvokable] OnViewportChanged, so the
-// sidebar collapses to a hidden overlay drawer on phones and restores to the always-open rail on
-// desktop - deterministically, instead of leaning on Radzen's opaque built-in responsiveness.
+// sidebar collapses to an overlay on phones/tablets and restores the in-flow rail on wider screens.
 Aetheus._viewportMql = null;
 Aetheus._viewportRef = null;
 Aetheus._onViewportChange = function (e) {
@@ -172,10 +171,11 @@ Aetheus._onViewportChange = function (e) {
 };
 Aetheus.watchViewport = function (dotNetRef) {
     Aetheus._viewportRef = dotNetRef;
-    Aetheus._viewportMql = window.matchMedia('(max-width: 768px)');
+    Aetheus._viewportMql = window.matchMedia('(max-width: 1024px)');
     Aetheus._viewportMql.addEventListener('change', Aetheus._onViewportChange);
-    // Fire the initial state so the component knows whether it booted on a phone.
-    dotNetRef.invokeMethodAsync('OnViewportChanged', Aetheus._viewportMql.matches);
+    // Return the promise: MainLayout keeps the opaque splash mounted until this initial state has
+    // been applied and rendered, eliminating the cold-load drawer/backdrop flash.
+    return dotNetRef.invokeMethodAsync('OnViewportChanged', Aetheus._viewportMql.matches);
 };
 Aetheus.disposeViewportWatcher = function () {
     if (Aetheus._viewportMql) {
@@ -185,8 +185,41 @@ Aetheus.disposeViewportWatcher = function () {
     Aetheus._viewportRef = null;
 };
 
-window.downloadFile = function (filename, content, mimeType) {
-    const blob = new Blob([content], { type: mimeType });
+// Data-grid actions are visually icon-only in compact rows. Radzen keeps their localized Text in
+// the DOM for accessibility, but does not copy it to `title`, so mouse users get no tooltip. Apply
+// the same contract to every current and future grid button, including Radzen's filter controls.
+(function addDataGridButtonTooltips() {
+    function apply(root) {
+        const buttons = [];
+        if (root instanceof Element && root.matches('.rz-datatable button')) buttons.push(root);
+        if (root.querySelectorAll) buttons.push(...root.querySelectorAll('.rz-datatable button'));
+
+        buttons.forEach(function (button) {
+            if (button.getAttribute('title')) return;
+            const text = button.querySelector('.rz-button-text')?.textContent?.trim();
+            const label = text || button.getAttribute('aria-label');
+            if (label) button.setAttribute('title', label);
+        });
+    }
+
+    const observer = new MutationObserver(function (mutations) {
+        mutations.forEach(function (mutation) {
+            mutation.addedNodes.forEach(function (node) {
+                if (node.nodeType === Node.ELEMENT_NODE) apply(node);
+            });
+        });
+    });
+
+    function start() {
+        apply(document);
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
+})();
+
+function downloadBlob(filename, blob) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -195,31 +228,19 @@ window.downloadFile = function (filename, content, mimeType) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+window.downloadFile = function (filename, content, mimeType) {
+    downloadBlob(filename, new Blob([content], { type: mimeType }));
 };
 
 window.downloadFileFromBytes = function (bytes, filename, mimeType) {
-    const blob = new Blob([new Uint8Array(bytes)], { type: mimeType || 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(filename, new Blob([new Uint8Array(bytes)], { type: mimeType || 'application/octet-stream' }));
 };
 
 window.downloadFileFromStream = async function (filename, streamRef) {
     const data = await streamRef.arrayBuffer();
-    const blob = new Blob([data], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(filename, new Blob([data], { type: 'application/octet-stream' }));
 };
 
 window.copyToClipboard = async function (text) {
@@ -228,7 +249,7 @@ window.copyToClipboard = async function (text) {
             await navigator.clipboard.writeText(text);
             return true;
         }
-    } catch (e) {
+    } catch {
         // fall through
     }
     try {
@@ -241,7 +262,7 @@ window.copyToClipboard = async function (text) {
         const ok = document.execCommand('copy');
         document.body.removeChild(ta);
         return ok;
-    } catch (e) {
+    } catch {
         return false;
     }
 };

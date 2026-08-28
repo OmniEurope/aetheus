@@ -25,18 +25,19 @@ public sealed class AgentServiceRecoveryPolicyAuditTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WindowsInstaller_PreservesIsolationParametersWhenSelfElevating()
+    {
+        var script = ReadScript("install-agent-windows.ps1");
+
+        Assert.Contains("-InstallDir `\"$InstallDir`\"", script, StringComparison.Ordinal);
+        Assert.Contains("-WorkDir `\"$WorkDir`\"", script, StringComparison.Ordinal);
+        Assert.Contains("-ServiceName `\"$ServiceName`\"", script, StringComparison.Ordinal);
+        Assert.Contains("if ($NonInteractive)     { $argList += \" -NonInteractive\" }", script, StringComparison.Ordinal);
+    }
+
     private static string ReadScript(string name) =>
         File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", name));
 
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(AgentServiceRecoveryPolicyAuditTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx")))
-                return directory.FullName;
-            directory = directory.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Agent.Core.Tests.RepositoryScan.Root;
 }

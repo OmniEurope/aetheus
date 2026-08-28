@@ -24,4 +24,10 @@
     <ProjectReference Include="..\..\src\Aetheus.Agent.Core\Aetheus.Agent.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\fixtures\agent-protocol\*.json"
+             Link="fixtures\agent-protocol\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

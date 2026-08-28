@@ -1,0 +1,17 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Shared
+
+<nav class="iam-section-nav" aria-label="@L["Administration"]">
+    <a href="/admin/users" class="@LinkClass("users")" aria-current="@AriaCurrent("users")">
+        <RadzenIcon Icon="group" />
+        <span>@L["Users"]</span>
+    </a>
+    <a href="/admin/organizations" class="@LinkClass("organizations")" aria-current="@AriaCurrent("organizations")">
+        <RadzenIcon Icon="apartment" />
+        <span>@L["Organizations"]</span>
+    </a>
+    <a href="/admin/roles" class="@LinkClass("roles")" aria-current="@AriaCurrent("roles")">
+        <RadzenIcon Icon="admin_panel_settings" />
+        <span>@L["Roles"]</span>
+    </a>
+</nav>

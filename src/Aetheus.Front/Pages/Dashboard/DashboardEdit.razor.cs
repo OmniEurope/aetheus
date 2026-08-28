@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Dashboard;
 
@@ -61,7 +52,7 @@ public partial class DashboardEdit
         _dashboard = null;
 
         DashboardDto? dashboard;
-        try { dashboard = await Api.GetDashboardAsync(id); }
+        try { dashboard = await Api.Monitoring.GetDashboardAsync(id); }
         catch (HttpRequestException) { dashboard = null; }
         if (Id != id) return;
         _dashboard = dashboard;
@@ -73,6 +64,7 @@ public partial class DashboardEdit
         }
 
         Breadcrumb.Set(
+            new BreadcrumbItem(L["Administration"], "/admin"),
             new BreadcrumbItem(L["Dashboards"], "/dashboards"),
             new BreadcrumbItem(dashboard.Name));
 
@@ -192,7 +184,7 @@ public partial class DashboardEdit
         };
 
         await Ui.RunAsync(
-            () => Api.UpdateDashboardAsync(Id, request),
+            () => Api.Monitoring.UpdateDashboardAsync(Id, request),
             successKey: "DashboardUpdated",
             successTitleKey: "Updated",
             onSuccess: result =>

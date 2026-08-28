@@ -1,0 +1,53 @@
+services:
+  database:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: toto
+      POSTGRES_USER: toto
+      POSTGRES_PASSWORD: "${TOTO_DB_PASSWORD}"
+    volumes:
+      - database:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toto -d toto"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  api:
+    image: "${TOTO_IMAGE}"
+    environment:
+      ConnectionStrings__Default: "Host=database;Port=5432;Database=toto;Username=toto;Password=${TOTO_DB_PASSWORD}"
+      AETHEUS_TELEMETRY_ENABLED: "${AETHEUS_TELEMETRY_ENABLED:-false}"
+      AETHEUS_TELEMETRY_APPLICATION_ID: "${AETHEUS_TELEMETRY_APPLICATION_ID:-0}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-toto}"
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}"
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}"
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}"
+      OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
+      Aetheus__Telemetry__EnableLogs: "${AETHEUS_TELEMETRY_LOGS_ENABLED:-true}"
+      Aetheus__Telemetry__TraceSampleRatio: "${AETHEUS_TELEMETRY_TRACE_SAMPLE_RATIO:-1}"
+      AETHEUS_WEB_ANALYTICS_ENABLED: "${AETHEUS_WEB_ANALYTICS_ENABLED:-false}"
+      AETHEUS_WEB_ANALYTICS_APPLICATION_ID: "${AETHEUS_WEB_ANALYTICS_APPLICATION_ID:-0}"
+      AETHEUS_WEB_ANALYTICS_SITE_ID: "${AETHEUS_WEB_ANALYTICS_SITE_ID:-}"
+      AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT: "${AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT:-}"
+      AETHEUS_WEB_ANALYTICS_INGEST_KEY: "${AETHEUS_WEB_ANALYTICS_INGEST_KEY:-}"
+      AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY: "${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY:-}"
+      AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION: "${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION:-1}"
+      ASPNETCORE_ENVIRONMENT: "Production"
+    extra_hosts:
+      - "host.docker.internal:${AETHEUS_HOST_GATEWAY:-host-gateway}"
+    ports:
+      # Host-side QA and DAST stay on loopback. The QA-only Compose override adds a second,
+      # private bridge binding for hardened toolchain containers.
+      - "127.0.0.1:${TOTO_PORT}:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  database:

@@ -2,7 +2,12 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <Version Condition="'$(Version)' == ''">1.1.0</Version>
+    <!-- Shipped as a self-contained zip to agent hosts, so the embedded runtime is a delivered
+         artifact rather than a build detail. Pinned to the same single source of truth as the
+         production images; without it the runtime is whatever the build SDK image bundles
+         (see MISTAKES.md M-040). -->
+    <RuntimeFrameworkVersion>$(AetheusRuntimeImageVersion)</RuntimeFrameworkVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +19,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Aetheus.Agent.Core\Aetheus.Agent.Core.csproj" />
+    <ProjectReference Include="..\Aetheus.Analyzers\Aetheus.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

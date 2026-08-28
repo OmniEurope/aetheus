@@ -1,0 +1,35 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
+WORKDIR /src
+COPY . .
+RUN if find .aetheus-injection/feed -maxdepth 1 -name '*.nupkg' -print -quit \
+        | grep -q .; then \
+      SIGNER_FINGERPRINT="$(tr -d '\r\n' \
+        < .aetheus-injection/signer-fingerprint.txt)" \
+      && (cd .aetheus-injection/verify \
+        && dotnet nuget verify --all \
+          --certificate-fingerprint "$SIGNER_FINGERPRINT" ../feed/*.nupkg); \
+    fi \
+    && dotnet restore Toto.slnx \
+    --configfile .aetheus-injection/NuGet.config \
+    --use-lock-file \
+    -p:NuGetLockFilePath=/src/.aetheus-injection/packages.lock.json \
+    -p:WarningsNotAsErrors=NU3018%3BNU3027%3BNU3042
+RUN dotnet publish src/Toto.Api/Toto.Api.csproj --configuration Release --no-restore \
+    -p:NoWarn=NU3018%3BNU3027%3BNU3042 --output /app/publish
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=bind,source=.aetheus-injection,target=/tmp/aetheus-injection,ro \
+    if [ -s /tmp/aetheus-injection/aetheus-local.crt ]; then \
+      cp /tmp/aetheus-injection/aetheus-local.crt \
+        /usr/local/share/ca-certificates/aetheus-local.crt \
+      && update-ca-certificates; \
+    fi
+COPY --from=build --chown=app:app /app/publish .
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+USER app
+ENTRYPOINT ["dotnet", "Toto.Api.dll"]

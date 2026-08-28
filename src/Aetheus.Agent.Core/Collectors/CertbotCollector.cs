@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 
@@ -16,6 +15,8 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
 {
     private const string LetsEncryptLiveDir = "/etc/letsencrypt/live";
     private readonly Func<List<CertbotCertificateDto>> _collectCertificates;
+    private readonly Func<string, bool> _fileExists;
+    private readonly bool _unixLike;
 
     public CertbotCollector(ILogger<CertbotCollector> logger, IShellRunner shell)
         : this(logger, shell, null)
@@ -25,10 +26,21 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
     internal CertbotCollector(
         ILogger<CertbotCollector> logger,
         IShellRunner shell,
-        Func<List<CertbotCertificateDto>>? collectCertificates)
+        Func<List<CertbotCertificateDto>>? collectCertificates,
+        // The known-path probe reads the real filesystem, so a test scripting the shell into
+        // "not found" still detected certbot on any machine that actually has it installed, and
+        // the suite failed on exactly the hosts the agent is meant to run on. Injectable here so
+        // detection can be driven end to end; production keeps File.Exists.
+        Func<string, bool>? fileExists = null,
+        // Same reason as fileExists, one level up: the known-path fallback is Unix-only by design, so
+        // on Windows the probe was unreachable and its test could only skip itself. Injecting the
+        // platform decision lets the fallback be driven anywhere; production still reads the real OS.
+        bool? unixLike = null)
         : base(logger, shell)
     {
         _collectCertificates = collectCertificates ?? CollectCertificates;
+        _fileExists = fileExists ?? File.Exists;
+        _unixLike = unixLike ?? !OperatingSystem.IsWindows();
     }
 
     public async Task<CertbotDataDto> CollectAsync(CancellationToken ct = default)
@@ -84,10 +96,7 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
         }
 
         // PATH lookup failed: probe the well-known install locations directly (no shell).
-        if (!OperatingSystem.IsWindows())
-            return KnownCertbotPaths.FirstOrDefault(File.Exists);
-
-        return null;
+        return _unixLike ? KnownCertbotPaths.FirstOrDefault(_fileExists) : null;
     }
 
     private async Task<string> CollectVersionAsync(string binary, CancellationToken ct)

@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Settings;
 
@@ -48,9 +39,9 @@ public partial class AdminSettings : IAsyncDisposable
 
         try
         {
-            var settingsTask = Api.GetSettingsAsync();
-            var secretsTask = Api.GetSecretsAsync();
-            var tokensTask = Api.GetRegistrationTokensAsync();
+            var settingsTask = Api.Settings.GetSettingsAsync();
+            var secretsTask = Api.Settings.GetSecretsAsync();
+            var tokensTask = Api.Auth.GetRegistrationTokensAsync();
             await Task.WhenAll(settingsTask, secretsTask, tokensTask);
 
             _settings = await settingsTask;
@@ -76,7 +67,7 @@ public partial class AdminSettings : IAsyncDisposable
         _adminRt = new AdminEntitySubscription(HubFactory);
         return _adminRt.StartAsync(AdminEntities.RegistrationToken, () => InvokeAsync(async () =>
         {
-            try { _tokens = await Api.GetRegistrationTokensAsync(); } catch (HttpRequestException) { }
+            try { _tokens = await Api.Auth.GetRegistrationTokensAsync(); } catch (HttpRequestException) { }
             StateHasChanged();
         }));
     }
@@ -89,7 +80,7 @@ public partial class AdminSettings : IAsyncDisposable
         _savingKeys.Add(key);
         try
         {
-            var success = await Api.UpdateSettingAsync(key, value);
+            var success = await Api.Settings.UpdateSettingAsync(key, value);
             if (success)
                 Toast.Success("Saved", "SettingSaved", key);
             else
@@ -109,10 +100,10 @@ public partial class AdminSettings : IAsyncDisposable
             return;
         }
 
-        var created = await Api.CreateSecretAsync(new CreateSecretRequest { Key = _newSecretKey, Value = _newSecretValue });
+        var created = await Api.Settings.CreateSecretAsync(new CreateSecretRequest { Key = _newSecretKey, Value = _newSecretValue });
         if (created is not null)
         {
-            _secrets = await Api.GetSecretsAsync();
+            _secrets = await Api.Settings.GetSecretsAsync();
             Toast.Success("Added", "SecretAdded");
             _newSecretKey = string.Empty;
             _newSecretValue = string.Empty;
@@ -129,10 +120,10 @@ public partial class AdminSettings : IAsyncDisposable
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.DeleteSecretAsync(id);
+        var success = await Api.Settings.DeleteSecretAsync(id);
         if (success)
         {
-            _secrets = await Api.GetSecretsAsync();
+            _secrets = await Api.Settings.GetSecretsAsync();
             Toast.Success("Deleted", "SecretDeleted");
         }
         else
@@ -143,10 +134,10 @@ public partial class AdminSettings : IAsyncDisposable
 
     private async Task GenerateToken()
     {
-        var token = await Api.CreateRegistrationTokenAsync();
+        var token = await Api.Auth.CreateRegistrationTokenAsync();
         if (token is not null)
         {
-            _tokens = await Api.GetRegistrationTokensAsync();
+            _tokens = await Api.Auth.GetRegistrationTokensAsync();
             Toast.Success("Generated", "TokenGenerated");
         }
         else

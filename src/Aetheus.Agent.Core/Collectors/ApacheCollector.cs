@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.RegularExpressions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 

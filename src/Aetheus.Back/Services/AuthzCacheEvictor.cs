@@ -14,11 +14,28 @@ namespace Aetheus.Back.Services;
 /// </summary>
 public sealed class AuthzCacheEvictor
 {
+    private static readonly TimeSpan TokenLifetime = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _tokens = new(StringComparer.Ordinal);
 
     /// <summary>An expiration token tying a cache entry to the user's current eviction generation.</summary>
     public CancellationChangeToken TokenFor(string username)
-        => new(_tokens.GetOrAdd(username, _ => new CancellationTokenSource()).Token);
+        => TokenFor(username, TokenLifetime);
+
+    internal CancellationChangeToken TokenFor(string username, TimeSpan lifetime)
+    {
+        var cts = _tokens.GetOrAdd(username, key =>
+        {
+            var created = new CancellationTokenSource();
+            created.Token.Register(() =>
+                ((ICollection<KeyValuePair<string, CancellationTokenSource>>)_tokens)
+                    .Remove(new KeyValuePair<string, CancellationTokenSource>(key, created)));
+            created.CancelAfter(lifetime);
+            return created;
+        });
+        return new CancellationChangeToken(cts.Token);
+    }
+
+    internal int TrackedUserCount => _tokens.Count;
 
     /// <summary>
     /// Evicts every cache entry tied to the user's token, then hands out a fresh token for later

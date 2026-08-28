@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Markdig;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Projects.ProjectDetailSections;
 
@@ -18,6 +9,7 @@ public partial class ProjectOverviewSection : IAsyncDisposable
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
+    [Inject] private PermissionService Permissions { get; set; } = default!;
 
     [Parameter, EditorRequired] public ProjectDetailDto? Project { get; set; }
 
@@ -26,11 +18,14 @@ public partial class ProjectOverviewSection : IAsyncDisposable
     private List<RecentCommitView> _recentCommits = [];
     private bool _loadingRecentPipelines = true;
     private bool _loadingRecentCommits = true;
+    private bool _gitStateLoaded;
+    private bool _hasGitRepository;
+    private GitLightRepoDto? _primaryGitRepository;
     private HubConnection? _pipelineHub;
     private readonly TrailingReloadCoalescer _pipelineReload = new(500);
 
     // F-ter: README (rendered from the project's git repo, same Markdig pipeline as GitRepositoryDetail)
-    // and the release changelog timeline. README + Changelog tabs only render when real data exists.
+    // and the release changelog timeline. Their tabs stay visible and show an honest empty state.
     private string? _readmeHtml;
     private string? _readmeBranch;
     private List<ReleaseDto> _changelog = [];
@@ -46,28 +41,29 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         string AuthorName,
         DateTime AuthorDate)
     {
-        public static RecentCommitView FromCommit(GitLightRepoDto repository, GitLightCommitDto commit) => new(
-            repository.Id,
-            repository.Name,
-            commit.Sha,
-            commit.ShortSha,
-            repository.DefaultBranch,
-            commit.Message,
-            commit.AuthorName,
-            commit.AuthorDate);
-    }
-
-    // Ordered tab slugs for UrlSyncedTabs (?tab=). Mirrors the markup; Readme/Changelog are conditional.
-    private string[] TabSlugs
-    {
-        get
+        public static RecentCommitView FromCommit(GitLightRepoDto repository, GitLightCommitDto commit)
         {
-            var slugs = new List<string> { "overview" };
-            if (!string.IsNullOrEmpty(_readmeHtml)) slugs.Add("readme");
-            if (_changelog.Count > 0) slugs.Add("changelog");
-            return [.. slugs];
+            var branchRefs = commit.RefNames
+                .Where(reference => !reference.StartsWith("tag:", StringComparison.OrdinalIgnoreCase))
+                .Select(reference => reference.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+                    ? reference["origin/".Length..]
+                    : reference)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return new(
+                repository.Id,
+                repository.Name,
+                commit.Sha,
+                commit.ShortSha,
+                branchRefs.Count == 0 ? "-" : string.Join(", ", branchRefs),
+                commit.Message,
+                commit.AuthorName,
+                commit.AuthorDate);
         }
     }
+
+    private static readonly string[] TabSlugs = ["overview", "readme", "changelog"];
 
     // F-bis: "Métriques · dernière release" - coverage (CoverageSummary) and LOC (RunMetric "loc.total")
     // of the run that produced the project's most recent release. Null when the latest release has no
@@ -85,6 +81,11 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         _ => "rz-color-danger"
     };
 
+    private static string GradeText(AnalysisGrade? grade) => grade?.ToString() ?? "-";
+
+    private static string GradeCss(AnalysisGrade? grade) =>
+        $"analysis-grade-{grade?.ToString().ToLowerInvariant() ?? "na"}";
+
     // Mirrors GitRepositoryDetail: HTML disabled so untrusted README markup can't inject script.
     private static readonly MarkdownPipeline _markdownPipeline =
         new MarkdownPipelineBuilder().DisableHtml().Build();
@@ -98,12 +99,47 @@ public partial class ProjectOverviewSection : IAsyncDisposable
             .Select(p => p.LastRunStatus)
             .FirstOrDefault();
 
-    protected override async Task OnInitializedAsync() => await StartPipelineHubAsync();
+    private bool ShowGettingStarted => Project is not null && _gitStateLoaded
+        && (!_hasGitRepository || Project.EnvironmentCount == 0 || Project.Pipelines.Count == 0);
+
+    private string GitOnboardingHref => _hasGitRepository
+        ? $"/git-repositories?projectId={Project!.Id}"
+        : $"/git-repositories?projectId={Project!.Id}&create=true";
+
+    private string EnvironmentOnboardingHref => Project!.EnvironmentCount > 0
+        ? $"/projects/{Project.Id}/environments"
+        : $"/environments/new?projectId={Project.Id}";
+
+    private string PipelineOnboardingHref => Project!.Pipelines.Count > 0
+        ? $"/projects/{Project.Id}/pipelines"
+        : $"/pipelines/setup?projectId={Project.Id}";
+
+    private void AddGitRepository()
+    {
+        if (Project is not null)
+            Nav.NavigateTo($"/git-repositories?projectId={Project.Id}&create=true");
+    }
+
+    private string? RepositoryDisplayUrl => !string.IsNullOrWhiteSpace(Project?.RepositoryUrl)
+        ? Project.RepositoryUrl
+        : _primaryGitRepository?.CloneUrl;
+
+    private string? RepositoryDisplayBranch => !string.IsNullOrWhiteSpace(Project?.DefaultBranch)
+        ? Project.DefaultBranch
+        : _primaryGitRepository?.DefaultBranch;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Permissions.OnPermissionsChanged += OnPermissionsChanged;
+        await StartPipelineHubAsync();
+    }
+
+    private void OnPermissionsChanged() => InvokeAsync(StateHasChanged);
 
     /// <summary>Maps a release status to a timeline point color for the changelog.</summary>
     private static PointStyle ReleasePointStyle(ReleaseStatus status) => status switch
     {
-        ReleaseStatus.Published or ReleaseStatus.Promoted => PointStyle.Success,
+        ReleaseStatus.Published or ReleaseStatus.Promoted or ReleaseStatus.Superseded => PointStyle.Success,
         ReleaseStatus.Failed => PointStyle.Danger,
         ReleaseStatus.Building => PointStyle.Info,
         ReleaseStatus.RolledBack => PointStyle.Warning,
@@ -118,6 +154,9 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         _recentCommits = [];
         _loadingRecentPipelines = true;
         _loadingRecentCommits = true;
+        _gitStateLoaded = false;
+        _hasGitRepository = false;
+        _primaryGitRepository = null;
         _readmeHtml = null;
         _readmeBranch = null;
         _changelog = [];
@@ -133,9 +172,8 @@ public partial class ProjectOverviewSection : IAsyncDisposable
     {
         try
         {
-            _recentPipelineRuns = (await Api.GetRecentPipelineRunsAsync(projectId))
+            _recentPipelineRuns = (await Api.Pipelines.GetRecentPipelineRunsAsync(projectId))
                 .OrderByDescending(run => run.StartedAt)
-                .Take(RecentItemLimit)
                 .ToList();
         }
         catch
@@ -176,7 +214,7 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         if (Project is null) return;
         try
         {
-            var run = await Api.GetPipelineRunAsync(runId);
+            var run = await Api.Pipelines.GetPipelineRunAsync(runId);
             if (run?.ProjectId == Project.Id) await RequestRecentPipelineReloadAsync();
         }
         catch (HttpRequestException) { }
@@ -197,20 +235,25 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         List<GitLightRepoDto> repositories;
         try
         {
-            repositories = await Api.GetGitReposAsync(projectId);
+            repositories = await Api.Git.GetGitReposAsync(projectId);
         }
         catch
         {
             _recentCommits = [];
             _loadingRecentCommits = false;
+            _gitStateLoaded = false;
             return;
         }
+
+        _hasGitRepository = repositories.Count > 0 || !string.IsNullOrWhiteSpace(Project?.RepositoryUrl);
+        _primaryGitRepository = repositories.FirstOrDefault(repository => !repository.IsEmpty)
+            ?? repositories.FirstOrDefault();
+        _gitStateLoaded = true;
 
         var commitTasks = repositories
             .Where(repository => !repository.IsEmpty)
             .Select(LoadRecentCommitsAsync);
-        var readmeRepository = repositories.FirstOrDefault(repository => !repository.IsEmpty)
-            ?? repositories.FirstOrDefault();
+        var readmeRepository = _primaryGitRepository;
 
         var commitsTask = Task.WhenAll(commitTasks);
         var readmeTask = readmeRepository is null ? Task.CompletedTask : LoadReadmeAsync(readmeRepository);
@@ -228,7 +271,10 @@ public partial class ProjectOverviewSection : IAsyncDisposable
     {
         try
         {
-            var result = await Api.GetGitCommitsAsync(repository.Id, pageSize: RecentItemLimit);
+            var result = await Api.Git.GetGitCommitsAsync(
+                repository.Id,
+                GitReference.AllBranches,
+                pageSize: RecentItemLimit);
             return result.Items
                 .Select(commit => RecentCommitView.FromCommit(repository, commit))
                 .ToList();
@@ -243,7 +289,7 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         List<ReleaseDto> releases;
         try
         {
-            var result = await Api.GetReleasesAsync(projectId: projectId);
+            var result = await Api.Projects.GetReleasesAsync(projectId: projectId);
             releases = result.Items;
         }
         // Best-effort enrichment (same isolation as GitRepositoryDetail's loaders): an expired
@@ -269,7 +315,7 @@ public partial class ProjectOverviewSection : IAsyncDisposable
         if (latest?.PipelineRunId is not { } runId) return;
 
         PipelineRunDto? run;
-        try { run = await Api.GetPipelineRunAsync(runId); }
+        try { run = await Api.Pipelines.GetPipelineRunAsync(runId); }
         catch (HttpRequestException) { return; }
         if (run is null) return;
 
@@ -286,42 +332,31 @@ public partial class ProjectOverviewSection : IAsyncDisposable
     /// Renders the README of the project's first git repository (HEAD of its default branch),
     /// reusing the exact Markdig pipeline + sanitization from GitRepositoryDetail. No fabrication:
     /// when the project has no internal git repo, or the repo has no README.md, the README tab
-    /// simply does not appear.
+    /// retains its explicit empty state.
     /// </summary>
     private async Task LoadReadmeAsync(GitLightRepoDto repo)
     {
         try
         {
             var branch = repo.DefaultBranch;
-            var tree = await Api.GetGitTreeAsync(repo.Id, branch);
+            var tree = await Api.Git.GetGitTreeAsync(repo.Id, branch);
             var readme = tree.FirstOrDefault(e =>
                 e.Type == GitTreeEntryType.Blob &&
                 e.Name.Equals("README.md", StringComparison.OrdinalIgnoreCase));
             if (readme is null) return;
 
-            var blob = await Api.GetGitBlobAsync(repo.Id, branch, readme.Path);
+            var blob = await Api.Git.GetGitBlobAsync(repo.Id, branch, readme.Path);
             if (blob is null || blob.IsBinary || string.IsNullOrWhiteSpace(blob.Content)) return;
 
             _readmeHtml = Markdown.ToHtml(blob.Content, _markdownPipeline);
             _readmeBranch = branch;
         }
-        // Best-effort: no internal git repo / no README / 401 / transport error → README tab simply absent.
+        // Best-effort: no internal git repo / no README / 401 / transport error → explicit empty state.
         catch { _readmeHtml = null; }
     }
 
-    private string PipelineRunHref(PipelineRunDto run) =>
-        $"/pipelines/runs/{run.Id}?projectId={Project!.Id}";
-
-    private string PipelineHref(PipelineRunDto run) =>
-        $"/pipelines/{run.PipelineId}?projectId={Project!.Id}";
-
     private static string CommitHref(RecentCommitView commit) =>
         $"/git-repositories/{commit.RepositoryId}/commits/{Uri.EscapeDataString(commit.Sha)}";
-
-    private void OnRecentPipelineClick(DataGridRowMouseEventArgs<PipelineRunDto> args)
-    {
-        if (args.Data is not null) Nav.NavigateTo(PipelineRunHref(args.Data));
-    }
 
     private void OnRecentCommitClick(DataGridRowMouseEventArgs<RecentCommitView> args)
     {
@@ -330,6 +365,7 @@ public partial class ProjectOverviewSection : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_pipelineHub is not null)
         {
             try { await _pipelineHub.InvokeAsync("LeavePipelineUpdatesGroup"); } catch { /* best-effort */ }

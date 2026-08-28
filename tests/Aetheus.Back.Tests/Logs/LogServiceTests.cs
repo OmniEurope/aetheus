@@ -146,3 +146,4 @@ public class LogServiceTests
         Assert.Equal("normal", result[0].Message);
     }
 }
+

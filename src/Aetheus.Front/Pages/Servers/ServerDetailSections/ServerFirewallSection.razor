@@ -16,12 +16,12 @@
             <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
                 @if (_firewall.Active)
                 {
-                    <RadzenButton Text="@L["FirewallDisable"]" Icon="gpp_maybe" Size="ButtonSize.Small" Busy="@_busy" Click="@(() => ToggleAsync(false))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    <RadzenButton Text="@L["FirewallDisable"]" Icon="gpp_maybe" Size="ButtonSize.Small" Busy="@_busy" Click="@(() => ToggleAsync(false))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 }
                 else
                 {
                     <RadzenButton Text="@L["FirewallEnable"]" Icon="gpp_good" Size="ButtonSize.Small"
-                        Busy="@_busy" Click="@(() => ToggleAsync(true))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        Busy="@_busy" Click="@(() => ToggleAsync(true))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 }
             </RadzenStack>
         }
@@ -29,7 +29,7 @@
 
     @if (_loading)
     {
-        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+        <AetheusLoader Size="AetheusLoaderSize.Small" />
     }
     else if (_firewall is null || !_firewall.Installed)
     {
@@ -66,7 +66,7 @@
                             <RadzenTextBox @bind-Value="_rule.Source" MaxLength="64" />
                         </RadzenFormField>
                         <RadzenButton ButtonType="ButtonType.Submit" Text="@L["FirewallAllow"]" Icon="lock_open" Busy="@_busy"
-                            Click="@(() => _ruleAction = FirewallRuleAction.Allow)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            Click="@(() => _ruleAction = FirewallRuleAction.Allow)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                         <RadzenButton ButtonType="ButtonType.Submit" Text="@L["FirewallDeny"]" Icon="block" Busy="@_busy"
                             Click="@(() => _ruleAction = FirewallRuleAction.Deny)" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
                     </RadzenStack>
@@ -74,7 +74,7 @@
             </RadzenCard>
         }
 
-        <RadzenDataGrid Data="@_firewall.Rules" TItem="FirewallRuleDto" AllowSorting="true" Density="Density.Compact" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+        <RadzenDataGrid Responsive="false" Data="@_firewall.Rules" TItem="FirewallRuleDto" AllowSorting="true" Density="Density.Compact" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
             <EmptyTemplate>
                 <EmptyState Icon="rule" Title="@L["FirewallNoRulesTitle"]" Description="@L["FirewallNoRulesDescription"]" />
             </EmptyTemplate>

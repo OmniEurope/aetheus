@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
+using Aetheus.Front.Pages.Projects;
 
 namespace Aetheus.Front.Pages.Projects.ProjectDetailSections;
 
@@ -18,11 +11,13 @@ public partial class ProjectEditSection
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private ILogger<ProjectEditSection> Logger { get; set; } = default!;
 
     [Parameter, EditorRequired] public ProjectDetailDto? Project { get; set; }
     [Parameter] public EventCallback OnSaved { get; set; }
 
-    private ProjectModel _model = new();
+    private ProjectFormModel _model = new();
+    private int? _modelProjectId;
     private bool _saving;
     private List<object> _statusOptions = [];
 
@@ -30,29 +25,24 @@ public partial class ProjectEditSection
     private List<string> _branches = [];
     private bool _branchesLoaded;
     private int? _branchesProjectId;
+    private string? _repositoryDefaultBranch;
+
+    private bool DefaultBranchesDiffer =>
+        !string.IsNullOrWhiteSpace(_model.DefaultBranch)
+        && !string.IsNullOrWhiteSpace(_repositoryDefaultBranch)
+        && !string.Equals(_model.DefaultBranch, _repositoryDefaultBranch, StringComparison.OrdinalIgnoreCase);
 
     protected override void OnParametersSet()
     {
-        _statusOptions =
-        [
-            new { Text = L["Active"].Value, Value = ProjectStatus.Active },
-            new { Text = L["Archived"].Value, Value = ProjectStatus.Archived }
-        ];
+        _statusOptions = ProjectFormModel.BuildStatusOptions(L);
 
-        if (Project is not null)
+        // Preserve in-progress edits when the parent rerenders the same project. Rebuilding the
+        // model on every parameter pass could visibly restore the stored branch after the user
+        // selected another one in the dropdown.
+        if (Project is not null && _modelProjectId != Project.Id)
         {
-            _model = new ProjectModel
-            {
-                Name = Project.Name,
-                Description = Project.Description,
-                RepositoryUrl = Project.RepositoryUrl ?? string.Empty,
-                DefaultBranch = Project.DefaultBranch ?? string.Empty,
-                Status = Project.Status,
-                TagsRaw = string.Join(", ", Project.Tags),
-                ArtifactRetentionDays = Project.ArtifactRetentionDays,
-                ArtifactLatestRetentionDays = Project.ArtifactLatestRetentionDays,
-                ReleaseNumberingPattern = Project.ReleaseNumberingPattern ?? string.Empty
-            };
+            _model = ProjectFormModel.From(Project);
+            _modelProjectId = Project.Id;
         }
     }
 
@@ -66,30 +56,42 @@ public partial class ProjectEditSection
     private async Task LoadBranchesAsync()
     {
         _branches = [];
+        _repositoryDefaultBranch = null;
         // Best-effort: the branch list only enriches the DefaultBranch picker. A repo without an
         // internal git repo (external-only / not yet cloned) or a transient failure just falls back
         // to the free-text box - never blocks editing.
         try
         {
-            var repos = await Api.GetGitReposAsync(Project!.Id);
-            var repo = repos.FirstOrDefault();
+            var repos = await Api.Git.GetGitReposAsync(Project!.Id);
+            var repo = repos.Count == 1 ? repos[0] : null;
             if (repo is not null)
-                _branches = (await Api.GetGitBranchesAsync(repo.Id)).Select(b => b.Name).ToList();
+            {
+                _repositoryDefaultBranch = repo.DefaultBranch;
+                _branches = (await Api.Git.GetGitBranchesAsync(repo.Id)).Select(b => b.Name).ToList();
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or TaskCanceledException)
         {
+            Logger.LogDebug(ex,
+                "Could not load internal repository branches for project {ProjectId}; keeping the stored branch as free text",
+                Project!.Id);
             _branches = [];
+            _repositoryDefaultBranch = null;
         }
 
         _branchesLoaded = _branches.Count > 0;
         _model.DefaultBranch = ResolveDefaultBranch(_branches, _model.DefaultBranch);
+        if (_branchesLoaded && !_branches.Any(branch =>
+                branch.Equals(_model.DefaultBranch, StringComparison.OrdinalIgnoreCase)))
+            _branches.Insert(0, _model.DefaultBranch);
         StateHasChanged();
     }
 
     /// <summary>Case-insensitive default-branch resolution: keep an existing value (normalised to the
-    /// repo's actual branch casing) when it still exists, otherwise prefer <c>main</c>, then
-    /// <c>master</c>, then the first branch. With no branches, keep the current value or fall back to
-    /// <c>main</c>.</summary>
+    /// repo's actual branch casing) when it still exists. A non-empty stored value that is absent
+    /// from the repository is preserved so merely opening and saving the form cannot silently
+    /// rewrite configuration. Only an empty value falls back to <c>main</c>, <c>master</c>, then the
+    /// first branch.</summary>
     internal static string ResolveDefaultBranch(IReadOnlyList<string> branches, string? current)
     {
         if (branches.Count == 0)
@@ -98,7 +100,7 @@ public partial class ProjectEditSection
         if (!string.IsNullOrWhiteSpace(current))
         {
             var match = branches.FirstOrDefault(b => b.Equals(current, StringComparison.OrdinalIgnoreCase));
-            if (match is not null) return match;
+            return match ?? current;
         }
 
         return branches.FirstOrDefault(b => b.Equals("main", StringComparison.OrdinalIgnoreCase))
@@ -109,22 +111,7 @@ public partial class ProjectEditSection
     private async Task OnSubmit()
     {
         _saving = true;
-        var tags = _model.TagsRaw
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .ToList();
-
-        var updated = await Api.UpdateProjectAsync(Project!.Id, new UpdateProjectRequest
-        {
-            Name = _model.Name,
-            Description = _model.Description,
-            RepositoryUrl = string.IsNullOrWhiteSpace(_model.RepositoryUrl) ? null : _model.RepositoryUrl,
-            DefaultBranch = string.IsNullOrWhiteSpace(_model.DefaultBranch) ? null : _model.DefaultBranch,
-            Status = _model.Status,
-            Tags = tags,
-            ArtifactRetentionDays = _model.ArtifactRetentionDays,
-            ArtifactLatestRetentionDays = _model.ArtifactLatestRetentionDays,
-            ReleaseNumberingPattern = string.IsNullOrWhiteSpace(_model.ReleaseNumberingPattern) ? null : _model.ReleaseNumberingPattern
-        });
+        var updated = await Api.Projects.UpdateProjectAsync(Project!.Id, _model.ToUpdateRequest());
 
         if (updated is not null)
         {
@@ -144,9 +131,10 @@ public partial class ProjectEditSection
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.DeleteProjectAsync(Project!.Id);
+        var success = await Api.Projects.DeleteProjectAsync(Project!.Id);
         if (success)
         {
+            Toast.Success("Deleted", "Deleted");
             Nav.NavigateTo("/projects");
         }
         else
@@ -155,27 +143,4 @@ public partial class ProjectEditSection
         }
     }
 
-    internal class ProjectModel
-    {
-        [Required(ErrorMessage = "Name is required.")]
-        [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
-        public string Name { get; set; } = string.Empty;
-
-        [StringLength(500)]
-        public string Description { get; set; } = string.Empty;
-
-        public string RepositoryUrl { get; set; } = string.Empty;
-        public string DefaultBranch { get; set; } = string.Empty;
-        public ProjectStatus Status { get; set; } = ProjectStatus.Active;
-        public string TagsRaw { get; set; } = string.Empty;
-
-        [Range(1, 3650, ErrorMessage = "Retention must be between 1 and 3650 days.")]
-        public int? ArtifactRetentionDays { get; set; }
-
-        [Range(1, 3650, ErrorMessage = "Retention must be between 1 and 3650 days.")]
-        public int? ArtifactLatestRetentionDays { get; set; }
-
-        [StringLength(100)]
-        public string ReleaseNumberingPattern { get; set; } = string.Empty;
-    }
 }

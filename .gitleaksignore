@@ -1,0 +1,39 @@
+# Reviewed false positives. Gitleaks fingerprints deliberately include the path, rule and line
+# (plus the introducing commit for history scans), so any moved or changed value is reviewed again.
+
+# Documentation mentions configuration keys, not credentials.
+CHANGELOG.md:generic-api-key:1370
+docs/adr/ADR-008-aes256-gcm-encryption.md:generic-api-key:32
+src/Aetheus.Back/Services/EncryptionService.cs:generic-api-key:71
+src/Aetheus.Back/Services/EncryptionService.cs:generic-api-key:76
+
+# Scanner conformance fixture intentionally contains a synthetic GitHub-shaped token.
+scripts/run-scanner-campaign.ps1:github-pat:431
+
+# Vendored Monaco identifiers are source-code tokens, not credential values.
+src/Aetheus.Front/wwwroot/lib/monaco-editor/min/vs/editor/editor.main.js:generic-api-key:631
+src/Aetheus.Front/wwwroot/lib/monaco-editor/min/vs/language/typescript/tsWorker.js:generic-api-key:320
+
+# Test-only constants use invalid hosts, synthetic hashes or non-secret DTO values.
+tests/Aetheus.Back.Tests/Pipelines/PipelineGitServiceTests.cs:generic-api-key:169
+tests/Aetheus.Back.Tests/Webhooks/WebhookSecretReencryptionTests.cs:generic-api-key:79
+tests/Aetheus.E2E/WebAnalyticsConsumerBrowserTests.cs:generic-api-key:57
+tests/Aetheus.Front.Tests/Pages/Servers/ServerDtosTests.cs:generic-api-key:83
+tests/Aetheus.WebAnalytics.Tests/AetheusWebAnalyticsEndpointTests.cs:generic-api-key:127
+tests/Aetheus.WebAnalytics.Tests/AnalyticsPrivacyTests.cs:generic-api-key:144
+tests/Aetheus.WebAnalytics.Tests/AudienceMeasurementPageTests.cs:generic-api-key:33
+
+# Historical introductions of the same reviewed documentation, conformance and test fixtures.
+013fe39ba1aa5e9ffec97eaf9e508c1627549145:tests/Aetheus.Back.Tests/Pipelines/PipelineGitServiceTests.cs:generic-api-key:169
+06d218f6d88659c06467cb1e666d76f8230b0aeb:tests/Prometheus.Front.Tests/Pages/Servers/ServerDtosTests.cs:generic-api-key:83
+117795d14d34966a4a143f943c02f89e14bb4add:CHANGELOG.md:generic-api-key:245
+3d64bd6d457826c4e920e9c6ee2c3019bbab39d8:tests/Aetheus.E2E/WebAnalyticsConsumerBrowserTests.cs:generic-api-key:57
+3d64bd6d457826c4e920e9c6ee2c3019bbab39d8:tests/Aetheus.WebAnalytics.Tests/AetheusWebAnalyticsEndpointTests.cs:generic-api-key:127
+3d64bd6d457826c4e920e9c6ee2c3019bbab39d8:tests/Aetheus.WebAnalytics.Tests/AnalyticsPrivacyTests.cs:generic-api-key:142
+3d64bd6d457826c4e920e9c6ee2c3019bbab39d8:tests/Aetheus.WebAnalytics.Tests/AudienceMeasurementPageTests.cs:generic-api-key:31
+49c9e02a129e67fc81f98fc5ee60b5bdc66900b4:docs/adr/ADR-008-aes256-gcm-encryption.md:generic-api-key:32
+7be4d29ebfc1efa28a0173469dfb26ea86423f9a:CHANGELOG.md:generic-api-key:25
+7be4d29ebfc1efa28a0173469dfb26ea86423f9a:tests/Prometheus.Back.Tests/Webhooks/WebhookSecretReencryptionTests.cs:generic-api-key:79
+8b726697d1b64e71cdeaf17951ba34fa55bd7e2a:scripts/run-scanner-campaign.ps1:github-pat:431
+9acf7b2cafc43f24405064681d29e5f1b3fd59ae:src/Prometheus.Back/Services/EncryptionService.cs:generic-api-key:71
+ba4d19f9a98eaba49d57124ff9a0d5020702532d:.claude/auditsession.md:generic-api-key:12

@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.Vaults;
 public interface IVaultRepository
 {
     Task<(List<Vault> Items, int TotalCount)> GetVaultsPagedAsync(
-        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
+        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false);
 
     Task<Vault?> GetVaultDetailAsync(int id, CancellationToken ct = default);
 
@@ -35,6 +36,11 @@ public interface IVaultRepository
     Task AddSecretVersionsRangeAsync(List<VaultSecretVersion> versions, CancellationToken ct = default);
 
     Task<List<VaultSecretVersion>> GetSecretVersionsAsync(int secretId, CancellationToken ct = default);
+    Task<int> PurgeHistoricalSecretVersionsAsync(
+        int secretId,
+        DateTime cutoffUtc,
+        int maxCount,
+        CancellationToken ct = default);
 
     Task<int> GetNextVersionAsync(int secretId, CancellationToken ct = default);
 

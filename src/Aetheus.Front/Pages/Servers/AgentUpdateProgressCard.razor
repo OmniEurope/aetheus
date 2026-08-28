@@ -31,7 +31,18 @@
             }
             @if (_phase == AgentUpdatePhase.Failed)
             {
-                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End">
+                @if (Request is not null)
+                {
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">
+                        @string.Format(L["AgentUpdateVersionTransition"], Request.ObservedVersion, Request.TargetVersion)
+                    </RadzenText>
+                }
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.End" Gap="0.5rem">
+                    @if (_requestId is not null && Auth.IsAdmin)
+                    {
+                        <RadzenLink Icon="receipt_long" Text="@L["Logs"]" Path="@FailureLogsPath"
+                            class="notification-log-link" />
+                    }
                     <RadzenButton Icon="replay" Text="@L["Retry"]" Size="ButtonSize.Small"
                         Click="@RetryAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
                 </RadzenStack>

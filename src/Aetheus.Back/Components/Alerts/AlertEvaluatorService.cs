@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Alerts;
@@ -46,24 +44,35 @@ public sealed class AlertEvaluatorService(
 
         var rules = await alertRepo.GetEnabledAsync(ct).ConfigureAwait(false);
 
+        var serverGroups = rules.Where(rule => rule.ServerId is not null)
+            .GroupBy(rule => rule.ServerId!.Value)
+            .ToList();
+        var maximumWindowSeconds = serverGroups.Count == 0
+            ? 0
+            : checked(serverGroups.Max(group => group.Max(rule => rule.SustainedSeconds))
+                + (int)MaximumMetricGap.TotalSeconds);
+        var metricsByServer = await alertRepo.GetRecentMetricsForServersAsync(
+            serverGroups.Select(group => group.Key).ToArray(),
+            maximumWindowSeconds,
+            ct).ConfigureAwait(false);
+
         var changedRules = false;
-        foreach (var serverGroup in rules.Where(r => r.ServerId is not null).GroupBy(r => r.ServerId!.Value))
+        foreach (var serverGroup in serverGroups)
         {
-            var maxWindowSeconds = serverGroup.Max(r => r.SustainedSeconds);
-            var queryWindowSeconds = checked(maxWindowSeconds + (int)MaximumMetricGap.TotalSeconds);
-            var metricsByServer = await alertRepo.GetRecentMetricsAsync(serverGroup.Key, queryWindowSeconds, ct).ConfigureAwait(false);
-            if (metricsByServer.Count == 0) continue;
+            if (!metricsByServer.TryGetValue(serverGroup.Key, out var serverMetrics)
+                || serverMetrics.Count == 0)
+                continue;
 
             foreach (var rule in serverGroup)
             {
                 var now = timeProvider.GetUtcNow().UtcDateTime;
                 var since = now.AddSeconds(-rule.SustainedSeconds);
-                var boundary = metricsByServer
+                var boundary = serverMetrics
                     .Where(metric => metric.Timestamp <= since)
                     .MaxBy(metric => metric.Timestamp);
                 if (boundary is null) continue;
 
-                var metrics = metricsByServer
+                var metrics = serverMetrics
                     .Where(metric => metric.Timestamp >= boundary.Timestamp && metric.Timestamp <= now)
                     .OrderBy(metric => metric.Timestamp)
                     .ToList();
@@ -133,7 +142,12 @@ public sealed class AlertEvaluatorService(
 
     internal static bool IsThresholdBreached(AlertRule rule, ServerMetric metric)
     {
-        double? metricValue = rule.Metric switch
+        var metricValue = ReadMetricValue(rule.Metric, metric);
+        return metricValue is not null && Compare(metricValue.Value, rule.Operator, rule.Threshold);
+    }
+
+    private static double? ReadMetricValue(MetricType metricType, ServerMetric metric) =>
+        metricType switch
         {
             MetricType.Cpu => metric.CpuPercent,
             MetricType.Memory => metric.MemoryTotalMb > 0
@@ -150,15 +164,14 @@ public sealed class AlertEvaluatorService(
                 : null,
             _ => null
         };
-        if (metricValue is null) return false;
 
-        return rule.Operator switch
+    private static bool Compare(double value, ComparisonOperator comparison, double threshold) =>
+        comparison switch
         {
-            ComparisonOperator.GreaterThan => metricValue.Value > rule.Threshold,
-            ComparisonOperator.LessThan => metricValue.Value < rule.Threshold,
-            ComparisonOperator.GreaterThanOrEqual => metricValue.Value >= rule.Threshold,
-            ComparisonOperator.LessThanOrEqual => metricValue.Value <= rule.Threshold,
+            ComparisonOperator.GreaterThan => value > threshold,
+            ComparisonOperator.LessThan => value < threshold,
+            ComparisonOperator.GreaterThanOrEqual => value >= threshold,
+            ComparisonOperator.LessThanOrEqual => value <= threshold,
             _ => false
         };
-    }
 }

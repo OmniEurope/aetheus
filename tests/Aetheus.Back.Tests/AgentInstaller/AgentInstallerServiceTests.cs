@@ -13,8 +13,8 @@ public class AgentInstallerServiceTests
     {
         var script = _svc.Build("linux", "tok", "https://aetheus.example.com", "1.0.0");
 
-        // The one-shot delegates to the bundled full installer, which provisions the CI/CD toolchain
-        // (.NET SDK, git) via its default-on pipeline-runner module - so the script invokes the installer
+        // The one-shot delegates to the bundled full installer, which provisions Git workspace
+        // preparation via its default-on pipeline-runner module - so the script invokes the installer
         // and must NOT opt out of pipeline-runner.
         Assert.Contains("install-agent-linux.sh", script.Body);
         Assert.DoesNotContain("--no-pipeline-runner", script.Body);
@@ -44,8 +44,26 @@ public class AgentInstallerServiceTests
     {
         var script = _svc.Build("windows", "tok", "https://aetheus.example.com", "1.0.0");
 
-        Assert.Contains("Microsoft.DotNet.SDK.10", script.Body);
         Assert.Contains("Git.Git", script.Body);
+        Assert.DoesNotContain("Microsoft.DotNet.SDK", script.Body);
+    }
+
+    [Fact]
+    public void Build_Linux_UsesTheArchiveRouteServedByTheBackend()
+    {
+        var script = _svc.Build("linux", "tok", "https://aetheus.example.com", "1.0.0");
+
+        Assert.Contains("${SERVER_URL}/downloads/aetheus-agent-linux-x64.tar.gz", script.Body);
+        Assert.DoesNotContain("aetheus-agent-linux-1.0.0.tar.gz", script.Body);
+    }
+
+    [Fact]
+    public void Build_Windows_UsesTheArchiveRouteServedByTheBackend()
+    {
+        var script = _svc.Build("windows", "tok", "https://aetheus.example.com", "1.0.0");
+
+        Assert.Contains("$ServerUrl/downloads/aetheus-agent-win-x64.zip", script.Body);
+        Assert.DoesNotContain("aetheus-agent-windows-1.0.0.zip", script.Body);
     }
 
     [Theory]

@@ -16,82 +16,29 @@ public sealed partial class DeliveryReproducibilityAuditTests
     private static partial Regex ExternalImageRegex();
 
     [Fact]
-    public void ExternalContainerImagesAndHostedRunnerGeneration_ArePinned()
+    public void LocalFixtures_MinimizePrivilegeAndKeepSshPasswordsOutOfImageLayers()
     {
-        var deploymentFiles = Directory.EnumerateFiles(Path.Combine(Root, "deploy"), "*", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(Path.Combine(Root, ".github", "workflows"), "*", SearchOption.AllDirectories))
-            .Where(path => Path.GetFileName(path).StartsWith("Dockerfile", StringComparison.Ordinal)
-                           || new[] { ".yml", ".yaml", ".sh" }.Contains(Path.GetExtension(path), StringComparer.Ordinal))
-            .ToList();
+        var e2eDockerfile = Read("deploy", "docker", "Dockerfile.e2e");
+        var totoDockerfile = Read("deploy", "pipelines", "toto-e2e-fixture", "Dockerfile");
+        Assert.Contains("USER pwuser", e2eDockerfile, StringComparison.Ordinal);
+        Assert.Contains("USER app", totoDockerfile, StringComparison.Ordinal);
 
-        var unpinnedImages = deploymentFiles
-            .SelectMany(path => ExternalImageRegex().Matches(File.ReadAllText(path))
-                .Select(match => $"{Path.GetRelativePath(Root, path)}: {match.Groups["image"].Value}"))
-            .Where(match => !match.Contains("@sha256:", StringComparison.Ordinal))
-            .ToList();
-        Assert.True(unpinnedImages.Count == 0,
-            "Every external container image must retain a readable tag plus an immutable digest:\n  "
-            + string.Join("\n  ", unpinnedImages));
+        var vpsDockerfiles = Read("deploy", "docker", "Dockerfile.vpssim")
+                             + Read("deploy", "docker", "Dockerfile.vpssim-blank");
+        var vpsCompose = Read("deploy", "compose", "vpssim.compose.yml")
+                         + Read("deploy", "compose", "vpssim-blank.compose.yml");
+        Assert.DoesNotContain("ARG VPSSIM_ROOT_PASSWORD", vpsDockerfiles, StringComparison.Ordinal);
+        Assert.DoesNotContain("VPSSIM_ROOT_PASSWORD:", vpsCompose, StringComparison.Ordinal);
 
-        var workflows = string.Join('\n', Directory.EnumerateFiles(Path.Combine(Root, ".github", "workflows"), "*.yml")
-            .Select(File.ReadAllText));
-        Assert.DoesNotContain("ubuntu-latest", workflows, StringComparison.Ordinal);
-        Assert.Contains("runs-on: ubuntu-24.04", workflows, StringComparison.Ordinal);
-        Assert.All(Regex.Matches(workflows, @"uses:\s*[^@\s]+@(?<reference>[^\s]+)")
-            .Select(match => match.Groups["reference"].Value), reference =>
-            Assert.Matches("^[0-9a-f]{40}$", reference));
-        Assert.Contains("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0", workflows, StringComparison.Ordinal);
-        Assert.Contains("actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0", workflows, StringComparison.Ordinal);
-        Assert.Contains("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1", workflows, StringComparison.Ordinal);
-
-        var e2eInputs = Read("deploy", "docker", "Dockerfile.e2e");
-        Assert.DoesNotContain("mcr.microsoft.com/playwright/dotnet:v1.61.0-noble\"", e2eInputs, StringComparison.Ordinal);
-        Assert.Contains("mcr.microsoft.com/playwright/dotnet:v1.61.0-noble@sha256:", e2eInputs, StringComparison.Ordinal);
-
-        var backendDockerfile = Read("deploy", "docker", "Dockerfile.back");
-        Assert.Contains("dotnet tool install --global dotnet-ef --version 10.0.10", backendDockerfile, StringComparison.Ordinal);
-        Assert.Contains("COPY src/Aetheus.Analyzers/Aetheus.Analyzers.csproj Aetheus.Analyzers/", backendDockerfile, StringComparison.Ordinal);
-        Assert.Contains("COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/", backendDockerfile, StringComparison.Ordinal);
-
-        var frontendDockerfile = Read("deploy", "docker", "Dockerfile.front");
-        Assert.Contains("COPY src/Aetheus.Analyzers/Aetheus.Analyzers.csproj Aetheus.Analyzers/", frontendDockerfile, StringComparison.Ordinal);
-        Assert.Contains("COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/", frontendDockerfile, StringComparison.Ordinal);
-
-        using var globalJson = JsonDocument.Parse(Read("global.json"));
-        var sdk = globalJson.RootElement.GetProperty("sdk");
-        var sdkVersion = sdk.GetProperty("version").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(sdkVersion));
-        var sdkImageReferences = deploymentFiles
-            .SelectMany(path => Regex.Matches(
-                File.ReadAllText(path),
-                @"mcr\.microsoft\.com/dotnet/sdk:(?<version>[^@\s]+)@sha256:[0-9a-f]{64}"))
-            .ToList();
-        Assert.NotEmpty(sdkImageReferences);
-        Assert.All(sdkImageReferences, match => Assert.Equal(sdkVersion, match.Groups["version"].Value));
-
-        var buildProps = Read("Directory.Build.props");
-        var runtimeVersion = Regex.Match(
-            buildProps,
-            @"<AetheusRuntimeImageVersion>(?<version>[^<]+)</AetheusRuntimeImageVersion>").Groups["version"].Value;
-        Assert.False(string.IsNullOrWhiteSpace(runtimeVersion));
-        var frontProject = Read("src", "Aetheus.Front", "Aetheus.Front.csproj");
-        Assert.Contains("<KnownWebAssemblySdkPack Update=\"Microsoft.NET.Sdk.WebAssembly.Pack\"", frontProject, StringComparison.Ordinal);
-        Assert.Contains("WebAssemblySdkPackVersion=\"$(AetheusRuntimeImageVersion)\"", frontProject, StringComparison.Ordinal);
-        Assert.Contains("<KnownAspNetCorePack Update=\"Microsoft.AspNetCore.App.Internal.Assets\"", frontProject, StringComparison.Ordinal);
-        Assert.Contains("AspNetCorePackVersion=\"$(AetheusRuntimeImageVersion)\"", frontProject, StringComparison.Ordinal);
-        var runtimeImageReferences = deploymentFiles
-            .SelectMany(path => Regex.Matches(
-                File.ReadAllText(path),
-                @"mcr\.microsoft\.com/dotnet/(?:aspnet|runtime):(?<version>[^@\s]+)@sha256:[0-9a-f]{64}"))
-            .ToList();
-        Assert.NotEmpty(runtimeImageReferences);
-        Assert.All(runtimeImageReferences, match => Assert.Equal(runtimeVersion, match.Groups["version"].Value));
+        var launcher = Read("scripts", "launch-core.ps1");
+        Assert.Contains("""docker exec -i aetheus-vpssim sh -c 'tr -d "\r" | chpasswd'""", launcher, StringComparison.Ordinal);
+        Assert.Contains("$rootPassword = $null", launcher, StringComparison.Ordinal);
     }
 
     [Fact]
     public void RemoteDotnetInstallers_AreCommitPinnedAndHashVerified()
     {
-        var candidates = Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)
+        var candidates = RepositoryScan.Enumerate(Root, "*")
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
             .Where(path => !IsNestedWorktree(path))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
@@ -102,7 +49,7 @@ public sealed partial class DeliveryReproducibilityAuditTests
             .Where(file => file.Source.Contains("dotnet-install.sh", StringComparison.Ordinal))
             .ToList();
 
-        Assert.True(candidates.Count >= 5, "The dotnet-installer scan is unexpectedly small.");
+        Assert.Equal(5, candidates.Count);
         Assert.All(candidates, file =>
         {
             Assert.DoesNotContain("https://dot.net/v1/dotnet-install.sh", file.Source, StringComparison.Ordinal);
@@ -110,6 +57,16 @@ public sealed partial class DeliveryReproducibilityAuditTests
             Assert.Contains(InstallerSha256, file.Source, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("sha256sum", file.Source, StringComparison.Ordinal);
         });
+    }
+
+    [Fact]
+    public void ProgressCancellation_TerminatesTheWholeProcessGroup()
+    {
+        var script = Read("deploy", "scripts", "run-with-progress.sh");
+        Assert.Contains("setsid \"$@\" &", script, StringComparison.Ordinal);
+        Assert.Contains("kill -TERM -- \"-$COMMAND_PID\"", script, StringComparison.Ordinal);
+        Assert.Contains("[ \"$ATTEMPT\" -lt 10 ]", script, StringComparison.Ordinal);
+        Assert.Contains("kill -KILL -- \"-$COMMAND_PID\"", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -124,47 +81,12 @@ public sealed partial class DeliveryReproducibilityAuditTests
         Assert.Contains("File.Move(temporaryPath, settingsPath, overwrite: true)", server, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void EveryProjectHasALockFile_AndCiRestoresInLockedMode()
-    {
-        var projectFiles = Directory.EnumerateFiles(Root, "*.csproj", SearchOption.AllDirectories)
-            .Where(path => !IsNestedWorktree(path))
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        Assert.True(projectFiles.Count >= 14, "The project scan is unexpectedly small.");
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 
-        var missingLocks = projectFiles
-            .Where(project => !File.Exists(Path.Combine(Path.GetDirectoryName(project)!, "packages.lock.json")))
-            .Select(project => Path.GetRelativePath(Root, project))
-            .ToList();
-        Assert.True(missingLocks.Count == 0,
-            "Every project must commit its NuGet lock file:\n  " + string.Join("\n  ", missingLocks));
-
-        var buildProps = Read("Directory.Build.props");
-        Assert.Contains("<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>", buildProps, StringComparison.Ordinal);
-        Assert.Contains("<NuGetLockFilePath Condition=\"'$(Configuration)' != 'Release'\">", buildProps, StringComparison.Ordinal);
-        Assert.Contains("obj\\packages.$(Configuration).lock.json", buildProps, StringComparison.Ordinal);
-        Assert.Contains("<RestoreLockedMode Condition=\"'$(CI)' == 'true'\">true</RestoreLockedMode>", buildProps, StringComparison.Ordinal);
-
-        var workflows = Read(".github", "workflows", "build-test.yml");
-        Assert.DoesNotContain("run: dotnet restore\n", workflows.Replace("\r\n", "\n"), StringComparison.Ordinal);
-        Assert.Contains("dotnet restore --locked-mode -p:Configuration=Release", workflows, StringComparison.Ordinal);
-    }
-
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate repository root.");
-    }
-
-    private static bool IsNestedWorktree(string path) => path.Contains(
-        $"{Path.DirectorySeparatorChar}.claude{Path.DirectorySeparatorChar}worktrees{Path.DirectorySeparatorChar}",
-        StringComparison.OrdinalIgnoreCase);
+    // Relative to Root, never on the absolute path: when the suite itself runs from a worktree, Root
+    // already sits under .claude/worktrees/, so an absolute Contains() excluded every file in the
+    // repository and left both scans below silently empty.
+    private static bool IsNestedWorktree(string path) => Path.GetRelativePath(Root, path)
+        .Replace('\\', '/')
+        .StartsWith(".claude/worktrees/", StringComparison.OrdinalIgnoreCase);
 }

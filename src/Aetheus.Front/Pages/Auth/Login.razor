@@ -10,6 +10,16 @@
     <RadzenCard>
         <RadzenText TextStyle="TextStyle.H4" class="rz-mb-4">@L["Login"]</RadzenText>
 
+        @if (_isPublicDemo)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Info" ShowIcon="true" Variant="Variant.Flat" class="rz-mb-4">
+                <RadzenStack Gap="0.25rem">
+                    <RadzenText TextStyle="TextStyle.Subtitle2">@L["PublicDemo"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@L["PublicDemoCredentials"]</RadzenText>
+                </RadzenStack>
+            </RadzenAlert>
+        }
+
         <RadzenTemplateForm TItem="LoginModel" Data="@_model" Submit="@OnSubmit">
             <LocalizedDataAnnotationsValidator />
             <RadzenStack Gap="1rem">
@@ -48,14 +58,27 @@
 
                 @if (_totpRequired)
                 {
-                    <RadzenFormField Text="@L["TotpCode"]">
-                        <RadzenTextBox @bind-Value="_model.TotpCode" Name="TotpCode"
-                                       MaxLength="10" aria-label="@L["TotpCode"]"
-                                       Placeholder="@L["TotpCodePlaceholder"]" AutoComplete="false" />
-                    </RadzenFormField>
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-base-500">
-                        @L["TotpRecoveryHint"]
-                    </RadzenText>
+                    @if (_useRecoveryCode)
+                    {
+                        <RadzenFormField Text="@L["TotpRecoveryCode"]">
+                            <RadzenTextBox @bind-Value="_model.RecoveryCode" Name="RecoveryCode"
+                                           MaxLength="20" aria-label="@L["TotpRecoveryCode"]"
+                                           Placeholder="@L["TotpRecoveryCodePlaceholder"]" AutoComplete="false" />
+                        </RadzenFormField>
+                    }
+                    else
+                    {
+                        <RadzenFormField Text="@L["TotpCode"]">
+                            <RadzenTextBox @bind-Value="_model.TotpCode" Name="TotpCode"
+                                           MaxLength="10" aria-label="@L["TotpCode"]"
+                                           Placeholder="@L["TotpCodePlaceholder"]" AutoComplete="false" />
+                        </RadzenFormField>
+                    }
+                    <div class="totp-mode-toggle">
+                        <RadzenButton ButtonType="ButtonType.Button" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light"
+                                      Text="@(_useRecoveryCode ? L["TotpUseAuthenticatorCode"] : L["TotpUseRecoveryCode"])"
+                                      Click="@ToggleRecoveryCode" />
+                    </div>
                 }
 
                 <LabeledToggle @bind-Value="_model.RememberMe" Text="@L["RememberMe"]" />
@@ -73,7 +96,7 @@
                                   aria-label="@L["Login"]" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
                     <RadzenButton ButtonType="ButtonType.Button" Icon="lock_reset"
                                   Text="@L["ForgotPassword"]" Click="@ToggleForgotHint"
-                                  ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                  ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 </RadzenStack>
                 @if (_showForgotHint)
                 {
@@ -85,3 +108,5 @@
         </RadzenTemplateForm>
     </RadzenCard>
 </div>
+
+

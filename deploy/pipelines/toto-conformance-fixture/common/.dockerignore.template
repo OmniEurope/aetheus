@@ -1,0 +1,5 @@
+.git
+.pipeline-artifacts
+**/bin
+**/obj
+TestResults

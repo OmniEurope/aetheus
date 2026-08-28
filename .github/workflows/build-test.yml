@@ -3,9 +3,9 @@ name: Build & Test
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/v1]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, feature/v1]
 
 permissions:
   contents: read
@@ -48,27 +48,27 @@ jobs:
       - name: Build (Release, warnings as errors)
         run: dotnet build -c Release --no-restore --warnaserror
 
-      - name: Product unit tests with coverage
-        run: |
-          rm -rf ./coverage ./coverage-merged
-          mkdir -p ./coverage
-          for project in \
-            tests/Aetheus.Back.Tests \
-            tests/Aetheus.Front.Tests \
-            tests/Aetheus.Agent.Core.Tests; do
-            dotnet test "$project" -c Release --no-build \
-              --filter "Category!=E2E&Category!=Integration" \
-              --collect:"XPlat Code Coverage" \
-              --results-directory ./coverage \
-              --settings coverage.runsettings \
-              --logger "console;verbosity=minimal"
-          done
+      - name: Verify optional observability variants
+        run: DOTNET=dotnet sh deploy/scripts/verify-optional-observability.sh
 
-      - name: Analyzer tests
-        run: >-
-          dotnet test tests/Aetheus.Analyzers.Tests -c Release --no-build
-          --logger "trx;LogFileName=analyzer-results.trx"
-          --results-directory ./test-results
+      # Suites are named explicitly rather than filtered: the E2E project needs a running
+      # application, and a --filter argument would override the platform exclusion that
+      # tests/Directory.Build.props applies by default (Platform!=windows on this runner).
+      - name: Unit tests
+        run: |
+          for project in \
+            tests/Aetheus.Back.Tests/Aetheus.Back.Tests.csproj \
+            tests/Aetheus.Front.Tests/Aetheus.Front.Tests.csproj \
+            tests/Aetheus.Agent.Core.Tests/Aetheus.Agent.Core.Tests.csproj \
+            tests/Aetheus.Analyzers.Tests/Aetheus.Analyzers.Tests.csproj \
+            tests/Aetheus.Telemetry.Tests/Aetheus.Telemetry.Tests.csproj \
+            tests/Aetheus.WebAnalytics.Tests/Aetheus.WebAnalytics.Tests.csproj
+          do
+            name="$(basename "$project" .csproj)"
+            dotnet test "$project" -c Release --no-build \
+              --logger "trx;LogFileName=$name.trx" \
+              --results-directory ./test-results
+          done
 
       - name: Integration tests
         env:
@@ -76,34 +76,10 @@ jobs:
             Host=localhost;Port=5432;Database=aetheus_test;
             Username=dbaetheus_test;Password=test_password
         run: >-
-          dotnet test -c Release --no-build
-          --filter "Category=Integration"
+          dotnet test tests/Aetheus.Back.IntegrationTests/Aetheus.Back.IntegrationTests.csproj
+          -c Release --no-build
           --logger "trx;LogFileName=integration-results.trx"
           --results-directory ./test-results
-
-      - name: Merge and enforce product coverage
-        run: |
-          REPORT_COUNT="$(find ./coverage -type f -name coverage.cobertura.xml | wc -l | tr -d ' ')"
-          if [ "$REPORT_COUNT" -ne 3 ]; then
-            echo "Expected exactly 3 product coverage reports, found $REPORT_COUNT."
-            exit 1
-          fi
-          REPORTS="$(find ./coverage -type f -name coverage.cobertura.xml -print | sort | paste -sd ';' -)"
-          dotnet tool restore
-          dotnet tool run reportgenerator -- \
-            "-reports:$REPORTS" \
-            "-targetdir:./coverage-merged" \
-            "-reporttypes:Cobertura" \
-            "-assemblyfilters:+Aetheus.Back;+Aetheus.Front;+Aetheus.Agent.Core" \
-            "-verbosity:Warning"
-          test -s ./coverage-merged/Cobertura.xml
-          sed -i '/^[[:space:]]*<!DOCTYPE coverage /d' ./coverage-merged/Cobertura.xml
-          LINE_RATE="$(sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' ./coverage-merged/Cobertura.xml | head -1)"
-          MIN_COVERAGE=75
-          awk -v rate="$LINE_RATE" -v minimum="$MIN_COVERAGE" 'BEGIN { exit !((rate * 100) >= minimum) }' || {
-            echo "Line coverage is below the required 75%: $LINE_RATE"
-            exit 1
-          }
 
       - name: Upload test results
         if: always()

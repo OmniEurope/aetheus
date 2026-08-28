@@ -18,7 +18,7 @@
             <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@Ts.ServerName</RadzenText>
         }
         <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@($"{Ts.OnlineClients}/{Ts.MaxClients} {L["OnlineClients"]}")" />
-        <RadzenBadge BadgeStyle="BadgeStyle.Secondary" Text="@($"{Ts.ChannelCount} {L["Channels"]}")" />
+        <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@($"{Ts.ChannelCount} {L["Channels"]}")" />
         @if (Ts.UptimeSeconds > 0)
         {
             <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0">@L["Uptime"]: @FormatUptime(Ts.UptimeSeconds)</RadzenText>
@@ -44,27 +44,27 @@
         <RadzenButton Icon="settings" Text="@L["EditServer"]" Size="ButtonSize.Small"
             Click="@OpenEditServerDialogAsync" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
         <RadzenButton Icon="message" Text="@L["SendMessage"]" Size="ButtonSize.Small"
-            Click="@OpenMessageDialogAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@OpenMessageDialogAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="content_copy" Text="@L["CopyCredentials"]" Size="ButtonSize.Small"
             Click="@(() => CopyToClipboardAsync($"serveradmin / QueryPort: {Ts.QueryPort}"))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
         @* Item #9 tier-2: ops buttons (results land in the task tracker). *@
         <RadzenButton Icon="restart_alt" Text="@L["GracefulRestart"]" Size="ButtonSize.Small"
             Click="@OpenGracefulRestartDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
         <RadzenButton Icon="bar_chart" Text="@L["TeamspeakStats"]" Size="ButtonSize.Small"
-            Click="@FetchServerInfoAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@FetchServerInfoAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="cloud_download" Text="@L["SnapshotCreate"]" Size="ButtonSize.Small"
-            Click="@CreateSnapshotAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@CreateSnapshotAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="cloud_upload" Text="@L["SnapshotDeploy"]" Size="ButtonSize.Small"
             Click="@OpenSnapshotDeployDialogAsync" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
         <RadzenButton Icon="group" Text="@L["TeamspeakServerGroups"]" Size="ButtonSize.Small"
-            Click="@ListServerGroupsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@ListServerGroupsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="key" Text="@L["TeamspeakTokens"]" Size="ButtonSize.Small"
-            Click="@ListTokensAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@ListTokensAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="report_problem" Text="@L["TeamspeakComplaints"]" Size="ButtonSize.Small"
-            Click="@ListComplaintsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@ListComplaintsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="link" Text="@L["QuickConnect"]" Size="ButtonSize.Small"
             Click="@(() => CopyToClipboardAsync(BuildConnectionLink(Server.Hostname, Ts.VoicePort)))"
-            title="@BuildConnectionLink(Server.Hostname, Ts.VoicePort)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            title="@BuildConnectionLink(Server.Hostname, Ts.VoicePort)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
     }
 </RadzenStack>
 
@@ -77,9 +77,9 @@
                 <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-2" Gap="0.5rem">
                     <RadzenBadge Text="@_data.ClientsCount.ToString()" BadgeStyle="BadgeStyle.Info" />
                 </RadzenStack>
-                <RadzenDataGrid Data="@_data.Clients" Count="@_data.ClientsCount" TItem="TeamspeakClientDto"
-                    LoadData="@LoadClientsDataAsync" IsLoading="@_data.ClientsLoading" AllowPaging="true" PageSize="25"
-                    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                <RadzenDataGrid Responsive="false" Data="@_data.Clients" Count="@_data.ClientsCount" TItem="TeamspeakClientDto"
+                    LoadData="@LoadClientsDataAsync" IsLoading="@_data.ClientsLoading" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
+                    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                     <Columns>
                         <RadzenDataGridColumn TItem="TeamspeakClientDto" Property="Nickname" Title="@L["Nickname"]" Width="200px" />
                         <RadzenDataGridColumn TItem="TeamspeakClientDto" Title="@L["Channel"]" Width="200px">
@@ -95,7 +95,7 @@
                                 <RadzenButton Icon="swap_horiz" Size="ButtonSize.ExtraSmall"
                                     Click="@(() => ShowMoveDialog(c))" title="@L["Move"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                                 <RadzenButton Icon="campaign" Size="ButtonSize.ExtraSmall"
-                                    Click="@(() => ShowPokeDialog(c))" title="@L["Poke"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                    Click="@(() => ShowPokeDialog(c))" title="@L["Poke"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                                 <RadzenButton Icon="logout" Size="ButtonSize.ExtraSmall"
                                     Click="@(() => ShowKickDialog(c))" title="@L["Kick"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
                                 <RadzenButton Icon="block" Size="ButtonSize.ExtraSmall"
@@ -114,14 +114,14 @@
                     <RadzenButton Icon="add_circle" Text="@L["CreateChannel"]" Size="ButtonSize.Small"
                         Click="@OpenCreateChannelDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
                 </RadzenStack>
-                <RadzenDataGrid Data="@_data.Channels" Count="@_data.ChannelsCount" TItem="TeamspeakChannelDto"
-                    LoadData="@LoadChannelsDataAsync" IsLoading="@_data.ChannelsLoading" AllowPaging="true" PageSize="25"
+                <RadzenDataGrid Responsive="false" Data="@_data.Channels" Count="@_data.ChannelsCount" TItem="TeamspeakChannelDto"
+                    LoadData="@LoadChannelsDataAsync" IsLoading="@_data.ChannelsLoading" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
                     Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
                     RowRender="@((RowRenderEventArgs<TeamspeakChannelDto> args) => {
                         if (args.Data is null) return;
                         if (args.Data.IsPermanent) args.Attributes["class"] = "rz-background-color-primary-lighter";
                         else if (args.Data.HasPassword) args.Attributes["class"] = "rz-background-color-warning-lighter";
-                    })">
+                    })" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                     <Columns>
                         <RadzenDataGridColumn TItem="TeamspeakChannelDto" Title="@L["ChannelName"]" Width="250px">
                             <Template Context="ch">
@@ -213,9 +213,9 @@
                     <RadzenButton Icon="refresh" Text="@L["RefreshBans"]" Size="ButtonSize.Small"
                         IsBusy="@_data.BansLoading" Click="@RefreshBansInlineAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                 </RadzenStack>
-                    <RadzenDataGrid Data="@_data.Bans" Count="@_data.BansCount" TItem="TeamspeakBanDto"
-                        LoadData="@LoadBansDataAsync" IsLoading="@_data.BansLoading" AllowPaging="true" PageSize="25"
-                        Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    <RadzenDataGrid Responsive="false" Data="@_data.Bans" Count="@_data.BansCount" TItem="TeamspeakBanDto"
+                        LoadData="@LoadBansDataAsync" IsLoading="@_data.BansLoading" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
+                        Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                         <EmptyTemplate>
                             <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 rz-color-secondary">@L["NoRecords"]</RadzenText>
                         </EmptyTemplate>

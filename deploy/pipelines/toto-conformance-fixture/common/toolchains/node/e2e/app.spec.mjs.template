@@ -1,0 +1,7 @@
+import { expect, test } from '@playwright/test';
+
+test('renders the real Angular application', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Toto multilangage' })).toBeVisible();
+  await expect(page.getByTestId('toolchain')).toContainText('Node 24.4.1');
+});

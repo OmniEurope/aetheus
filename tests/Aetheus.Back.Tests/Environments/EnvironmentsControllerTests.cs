@@ -104,6 +104,69 @@ public class EnvironmentsControllerTests
     }
 
     [Fact]
+    public async Task CreateEnvironment_ServerOutsideWritableScope_ReturnsForbid()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, null, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(new List<int> { 10 });
+
+        var result = await _sut.CreateEnvironment(new CreateEnvironmentRequest
+        {
+            Name = "New",
+            ServerIds = [10, 99]
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        await _serviceMock.DidNotReceive().CreateEnvironmentAsync(
+            Arg.Any<CreateEnvironmentRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateEnvironment_SourceOutsideReadableScope_ReturnsForbid()
+    {
+        _authzMock.HasPermissionAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, null, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.HasPermissionAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 77, Permission.Read, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var result = await _sut.CreateEnvironment(new CreateEnvironmentRequest
+        {
+            Name = "Copied",
+            SourceEnvironmentId = 77
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        await _serviceMock.DidNotReceive().CreateEnvironmentAsync(
+            Arg.Any<CreateEnvironmentRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateEnvironment_ReadableSource_ReturnsCreated()
+    {
+        _authzMock.HasPermissionAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, null, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.HasPermissionAsync(
+                Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 77, Permission.Read, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _serviceMock.CreateEnvironmentAsync(
+                Arg.Is<CreateEnvironmentRequest>(request => request.SourceEnvironmentId == 77),
+                Arg.Any<CancellationToken>())
+            .Returns(new EnvironmentDto { Id = 90, Name = "Copied" });
+
+        var result = await _sut.CreateEnvironment(new CreateEnvironmentRequest
+        {
+            Name = "Copied",
+            SourceEnvironmentId = 77
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<CreatedAtActionResult>(result.Result);
+    }
+
+    [Fact]
     public async Task UpdateEnvironment_Authorized_ReturnsOk()
     {
         _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 1, Permission.Write, Arg.Any<CancellationToken>())
@@ -114,6 +177,25 @@ public class EnvironmentsControllerTests
         var result = await _sut.UpdateEnvironment(1, new UpdateEnvironmentRequest { Name = "Updated" }, TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateEnvironment_ServerOutsideWritableScope_ReturnsForbid()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 1, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(new List<int> { 10 });
+
+        var result = await _sut.UpdateEnvironment(1, new UpdateEnvironmentRequest
+        {
+            Name = "Updated",
+            ServerIds = [10, 99]
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        await _serviceMock.DidNotReceive().UpdateEnvironmentAsync(
+            Arg.Any<int>(), Arg.Any<UpdateEnvironmentRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

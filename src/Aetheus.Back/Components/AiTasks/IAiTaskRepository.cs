@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Data.Entities;
+
+namespace Aetheus.Back.Components.AiTasks;
+
+public interface IAiTaskRepository
+{
+    Task<(List<AiRunnerProfile> Items, int Total)> GetProfilesPageAsync(
+        string? search, int page, int pageSize, CancellationToken ct);
+    Task<List<AiRunnerProfile>> GetProfilesForOrganizationsAsync(
+        List<int> organizationIds, CancellationToken ct);
+    Task<AiRunnerProfile?> FindProfileAsync(int id, CancellationToken ct);
+    Task<AiRunnerProfile?> FindProfileByNameAsync(string name, int organizationId, CancellationToken ct);
+    Task AddProfileAsync(AiRunnerProfile profile, CancellationToken ct);
+    Task RemoveProfileAsync(AiRunnerProfile profile, CancellationToken ct);
+    Task<bool> ProfileHasDefinitionsAsync(int profileId, CancellationToken ct);
+
+    Task<(List<AiTaskDefinition> Items, int Total)> GetDefinitionsPageAsync(
+        string? search, int page, int pageSize, int? projectId, int? serverId,
+        List<int>? accessibleProjectIds, List<int>? accessibleServerIds, CancellationToken ct);
+    Task<AiTaskDefinition?> FindDefinitionAsync(int id, CancellationToken ct);
+    Task AddDefinitionAsync(AiTaskDefinition definition, CancellationToken ct);
+    Task RemoveDefinitionAsync(AiTaskDefinition definition, CancellationToken ct);
+    Task<List<AiTaskDefinition>> GetScheduledDefinitionsAsync(CancellationToken ct);
+    Task<List<AiTaskDefinition>> GetDefinitionsForEventAsync(string eventType, CancellationToken ct);
+    Task<Server?> ResolveExecutionServerAsync(AiTaskDefinition definition, CancellationToken ct);
+    Task<int?> GetProjectOrganizationIdAsync(int projectId, CancellationToken ct);
+    Task<int?> GetServerOrganizationIdAsync(int serverId, CancellationToken ct);
+    Task<GitInternalRepo?> GetPrimaryProjectRepositoryAsync(int projectId, CancellationToken ct);
+    Task<int> GetActiveRunCountAsync(int serverId, CancellationToken ct);
+
+    Task<ServerTask> AddTaskAsync(ServerTask task, CancellationToken ct);
+    Task<ServerTask?> FindTaskAsync(int id, CancellationToken ct);
+    Task<AiRunResult?> FindResultByTaskAsync(int taskId, CancellationToken ct);
+    Task<AiRunResult?> FindResultAsync(int id, CancellationToken ct);
+    Task AddResultAsync(AiRunResult result, CancellationToken ct);
+    Task<(List<AiRunResult> Items, int Total)> GetResultsPageAsync(
+        int? definitionId, int? pipelineRunId, int page, int pageSize, CancellationToken ct);
+    Task<List<AiProfileConsumptionDto>> GetConsumptionByProfileAsync(
+        DateTime since, int? projectId, CancellationToken ct);
+    /// <summary>Own-read for the run-scoped RBAC check; see the implementation for why.</summary>
+    Task<int?> GetRunPipelineIdAsync(int pipelineRunId, CancellationToken ct);
+    Task SaveChangesAsync(CancellationToken ct);
+}

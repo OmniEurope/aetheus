@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 /// <summary>
-/// Tests for ServerDockerSection:
+/// Tests for DockerContainersTab:
 /// - ProjectBulkActionAsync (iterates containers of a project and posts actions)
 /// - ContainersForProject (filter helper)
 /// - GetProjectAccentClass (hash-based CSS class)
@@ -75,15 +75,19 @@ public class ServerDockerBulkActionTests : BunitContext
         }
     };
 
-    private IRenderedComponent<ServerDockerSection> RenderSection(ServerDetailDto? server = null)
+    /// <summary>
+    /// Every test here exercises the containers tab, which is a component of its own since the Docker
+    /// section was split, so it is rendered directly rather than fished out of the parent.
+    /// </summary>
+    private IRenderedComponent<DockerContainersTab> RenderSection(ServerDetailDto? server = null)
     {
         server ??= MakeServerWithProject();
         _handler.SetJsonResponse("api/servers/10/docker/containers", new List<DockerContainerDto>());
         _handler.SetJsonResponse("api/servers/10/docker/action", true);
-        return Render<ServerDockerSection>(p => p
+        return Render<DockerContainersTab>(p => p
             .Add(x => x.Server, server)
             .Add(x => x.ServerId, 10)
-            .Add(x => x.DockerInitialLoaded, true));
+            .Add(x => x.InitialLoaded, true));
     }
 
     // ── ContainersForProject ──────────────────────────────────────────────────
@@ -92,7 +96,7 @@ public class ServerDockerBulkActionTests : BunitContext
     public void ContainersForProject_ReturnsMatchingContainers()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ContainersForProject", Priv)!;
         var result = (List<DockerContainerDto>)method.Invoke(cut.Instance, ["myapp"])!;
         Assert.Equal(2, result.Count);
@@ -103,7 +107,7 @@ public class ServerDockerBulkActionTests : BunitContext
     public void ContainersForProject_UnknownProject_ReturnsEmpty()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ContainersForProject", Priv)!;
         var result = (List<DockerContainerDto>)method.Invoke(cut.Instance, ["nonexistent"])!;
         Assert.Empty(result);
@@ -124,7 +128,7 @@ public class ServerDockerBulkActionTests : BunitContext
             Status = "Exited"
         });
         var cut = RenderSection(server);
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ContainersForProject", Priv)!;
         var result = (List<DockerContainerDto>)method.Invoke(cut.Instance, [string.Empty])!;
         // ContainersForProject("") matches containers where project is null or empty
@@ -137,7 +141,7 @@ public class ServerDockerBulkActionTests : BunitContext
     public async Task ProjectBulkActionAsync_EmptyProject_ReturnsEarly()
     {
         var cut = RenderSection();
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ProjectBulkActionAsync", Priv)!;
 
         // "nonexistent" has 0 containers → should return early
@@ -156,7 +160,7 @@ public class ServerDockerBulkActionTests : BunitContext
         _handler.SetJsonResponse("api/servers/10/docker/action", true);
         var cut = RenderSection();
 
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ProjectBulkActionAsync", Priv)!;
 
         await cut.InvokeAsync(async () =>
@@ -174,7 +178,7 @@ public class ServerDockerBulkActionTests : BunitContext
         _handler.SetJsonResponse("api/servers/10/docker/action", false);
         var cut = RenderSection();
 
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ProjectBulkActionAsync", Priv)!;
         await cut.InvokeAsync(async () =>
             await (Task)method.Invoke(cut.Instance, ["myapp", DockerContainerAction.Start])!);
@@ -188,15 +192,15 @@ public class ServerDockerBulkActionTests : BunitContext
     [Fact]
     public void GetProjectAccentClass_NullOrEmpty_ReturnsEmpty()
     {
-        Assert.Equal(string.Empty, ServerDockerSection.GetProjectAccentClass(null));
-        Assert.Equal(string.Empty, ServerDockerSection.GetProjectAccentClass(""));
-        Assert.Equal(string.Empty, ServerDockerSection.GetProjectAccentClass("   "));
+        Assert.Equal(string.Empty, DockerContainersTab.GetProjectAccentClass(null));
+        Assert.Equal(string.Empty, DockerContainersTab.GetProjectAccentClass(""));
+        Assert.Equal(string.Empty, DockerContainersTab.GetProjectAccentClass("   "));
     }
 
     [Fact]
     public void GetProjectAccentClass_NonEmpty_ReturnsCssClass()
     {
-        var cls = ServerDockerSection.GetProjectAccentClass("myapp");
+        var cls = DockerContainersTab.GetProjectAccentClass("myapp");
         Assert.StartsWith("docker-project-accent-", cls);
         // Must be 0–7
         var suffix = int.Parse(cls.Replace("docker-project-accent-", ""));
@@ -206,8 +210,8 @@ public class ServerDockerBulkActionTests : BunitContext
     [Fact]
     public void GetProjectAccentClass_Deterministic()
     {
-        var a = ServerDockerSection.GetProjectAccentClass("stable-project");
-        var b = ServerDockerSection.GetProjectAccentClass("stable-project");
+        var a = DockerContainersTab.GetProjectAccentClass("stable-project");
+        var b = DockerContainersTab.GetProjectAccentClass("stable-project");
         Assert.Equal(a, b);
     }
 
@@ -217,7 +221,7 @@ public class ServerDockerBulkActionTests : BunitContext
     public async Task OpenProjectZoom_OpensDialogWithProject()
     {
         var cut = RenderSection();
-        var open = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", Priv)!;
+        var open = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)open.Invoke(cut.Instance, ["myapp"])!);
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
 
@@ -231,7 +235,7 @@ public class ServerDockerBulkActionTests : BunitContext
         var cut = RenderSection();
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
         dialog.OpenResult = DockerContainerAction.Stop;
-        var open = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", Priv)!;
+        var open = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)open.Invoke(cut.Instance, ["myapp"])!);
 
         Assert.Equal(2, _handler.Requests.Count(request => request.Method == "POST" && request.Url.Contains("docker/action")));
@@ -242,7 +246,7 @@ public class ServerDockerBulkActionTests : BunitContext
     [Fact]
     public void ParseEnvVars_ValidJson_ParsesCorrectly()
     {
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ParseEnvVars", PrivStatic)!;
         var json = "[\"KEY=value\", \"PATH=/usr/bin\", \"HOME=/root\"]";
         var result = (List<DockerEnvVarDto>)method.Invoke(null, [json])!;
@@ -256,7 +260,7 @@ public class ServerDockerBulkActionTests : BunitContext
     [Fact]
     public void ParseEnvVars_EmptyJson_ReturnsEmpty()
     {
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ParseEnvVars", PrivStatic)!;
         var result = (List<DockerEnvVarDto>)method.Invoke(null, ["[]"])!;
         Assert.Empty(result);
@@ -265,7 +269,7 @@ public class ServerDockerBulkActionTests : BunitContext
     [Fact]
     public void ParseEnvVars_EntryWithoutEquals_IsSkipped()
     {
-        var method = typeof(ServerDockerSection)
+        var method = typeof(DockerContainersTab)
             .GetMethod("ParseEnvVars", PrivStatic)!;
         var json = "[\"NOEQUALS\", \"VALID=yes\"]";
         var result = (List<DockerEnvVarDto>)method.Invoke(null, [json])!;
@@ -275,9 +279,6 @@ public class ServerDockerBulkActionTests : BunitContext
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private static void Priv_Set(object obj, string field, object? value)
-        => typeof(ServerDockerSection).GetField(field, Priv)!.SetValue(obj, value);
-
     private static T? Priv_Get<T>(object obj, string field)
-        => (T?)typeof(ServerDockerSection).GetField(field, Priv)!.GetValue(obj);
+        => (T?)typeof(DockerContainersTab).GetField(field, Priv)!.GetValue(obj);
 }

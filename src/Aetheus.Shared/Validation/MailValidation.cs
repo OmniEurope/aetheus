@@ -37,7 +37,9 @@ public static partial class MailValidation
 
     public static bool IsValidPassword(string? password)
     {
-        if (string.IsNullOrEmpty(password) || password.Length is < 8 or > 128) return false;
+        if (string.IsNullOrEmpty(password)
+            || password.Length is < PasswordPolicy.MinimumLength or > PasswordPolicy.MaximumLength)
+            return false;
         // Reject control chars / NUL - they would break the helper's stdin read and could smuggle
         // a newline into the dovecot users file.
         return !password.Any(char.IsControl);

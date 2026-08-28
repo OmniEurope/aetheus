@@ -1,66 +1,21 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Projects.ProjectDetailSections;
 
-public partial class ProjectTasksSection
+public partial class ProjectTasksSection : ProjectPagedSectionBase<ServerTaskDto>
 {
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-    [Inject] private ApiClient Api { get; set; } = default!;
-
-    [Parameter, EditorRequired] public int ProjectId { get; set; }
-
     private PaginatedResult<ServerTaskDto>? _result;
-    private int? _loadedProjectId;
-    private int _page = 1;
-    private int _pageSize = 25;
-    private string _sortBy = "CreatedAt";
-    private bool _sortDescending = true;
-    private string? _search;
-    private AetheusDataGrid<ServerTaskDto>? _grid;
-    private bool _loading;
+    protected override string DefaultSortBy => "CreatedAt";
+    protected override bool DefaultSortDescending => true;
 
-    protected override async Task OnParametersSetAsync()
-    {
-        if (_loadedProjectId == ProjectId) return;
-        _loadedProjectId = ProjectId;
-        _page = 1;
-        await LoadAsync();
-    }
-
-    private async Task OnLoadDataAsync(LoadDataArgs args)
-    {
-        (_page, _pageSize) = args.ToPageRequest();
-        (_sortBy, _sortDescending) = GetSort(args);
-        await LoadAsync();
-    }
-
-    private async Task OnSearchChangedAsync(object _)
-    {
-        if (_grid is not null && _page != 1)
-        {
-            _page = 1;
-            await _grid.GoToPage(0);
-            return;
-        }
-        _page = 1;
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
+    protected override async Task LoadAsync()
     {
         var projectId = ProjectId;
         _loading = true;
         PaginatedResult<ServerTaskDto> result;
         try
         {
-            result = await Api.GetProjectTasksAsync(
+            result = await Api.Projects.GetProjectTasksAsync(
             projectId, _page, _pageSize, _search, _sortBy, _sortDescending);
         }
         catch (HttpRequestException) { result = new PaginatedResult<ServerTaskDto>(); }
@@ -69,11 +24,17 @@ public partial class ProjectTasksSection
         _loading = false;
     }
 
-    private static (string SortBy, bool Descending) GetSort(LoadDataArgs args)
+    private static BadgeStyle GetFailureBadge(string failureCode) =>
+        failureCode == TaskFailureCodes.ToolError ? BadgeStyle.Warning : BadgeStyle.Danger;
+
+    private static string GetFailureIcon(string failureCode) => failureCode switch
     {
-        if (string.IsNullOrWhiteSpace(args.OrderBy)) return ("CreatedAt", true);
-        var parts = args.OrderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return (parts[0], parts.Length > 1
-            && string.Equals(parts[1], "desc", StringComparison.OrdinalIgnoreCase));
-    }
+        TaskFailureCodes.InfrastructureMismatch => "construction",
+        TaskFailureCodes.TestsFailed => "science",
+        TaskFailureCodes.BuildFailed => "build",
+        _ => "report_problem"
+    };
+
+    private static string SourceServerName(ServerTaskDto task) =>
+        string.IsNullOrWhiteSpace(task.ServerName) ? $"#{task.ServerId}" : task.ServerName;
 }

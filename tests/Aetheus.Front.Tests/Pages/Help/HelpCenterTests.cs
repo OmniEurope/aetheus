@@ -82,4 +82,25 @@ public class HelpCenterTests : BunitContext
         var inputs = cut.FindAll("input");
         Assert.True(inputs.Count >= 1);
     }
+
+    [Fact]
+    public void SearchInput_FiltersArticles_WhileTyping()
+    {
+        _handler.SetJsonResponse("help/help-", new List<HelpArticle>
+        {
+            new("servers", "Servers", "Manage servers", "rzi-server", []),
+            new("pipelines", "Pipelines", "CI/CD pipelines", "rzi-pipeline", [])
+        });
+
+        var cut = Render<HelpCenterPage>();
+        cut.WaitForState(() => cut.Markup.Contains("Servers"), TimeSpan.FromSeconds(2));
+
+        cut.Find("input").Input("servers");
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("Servers", cut.Markup);
+            Assert.DoesNotContain("Pipelines", cut.Markup);
+        });
+    }
 }

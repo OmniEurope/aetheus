@@ -3,8 +3,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.ServiceConnections;
 
@@ -102,8 +100,97 @@ public sealed class ServiceConnectionTester(IHttpClientFactory httpClientFactory
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
         }
 
-        using var response = await Client().SendAsync(request, ct).ConfigureAwait(false);
-        return MapAuthResponse(response.StatusCode, "Docker registry");
+        var client = Client();
+        using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.Unauthorized
+            || !TryGetBearerChallenge(response, out var challenge))
+        {
+            return MapAuthResponse(response.StatusCode, "Docker registry");
+        }
+
+        // Registry v2 commonly delegates authentication to a Bearer token service (Docker Hub,
+        // GHCR, and many private registries). A 401 challenge proves only that this flow is
+        // required; exchange the configured Basic credentials for a token and retry /v2/ before
+        // deciding whether the credentials are valid.
+        var token = await RequestDockerBearerTokenAsync(client, challenge, creds, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(token))
+            return Invalid("Docker registry authentication service rejected the credentials.");
+
+        using var retry = new HttpRequestMessage(HttpMethod.Get, $"{origin}/v2/");
+        retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var retryResponse = await client.SendAsync(retry, ct).ConfigureAwait(false);
+        return MapAuthResponse(retryResponse.StatusCode, "Docker registry");
+    }
+
+    private static bool TryGetBearerChallenge(
+        HttpResponseMessage response,
+        out IReadOnlyDictionary<string, string> parameters)
+    {
+        parameters = new Dictionary<string, string>();
+        var bearer = response.Headers.WwwAuthenticate.FirstOrDefault(
+            value => string.Equals(value.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(bearer?.Parameter))
+            return false;
+
+        var parsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in bearer.Parameter.Split(','))
+        {
+            var pair = segment.Trim().Split('=', 2);
+            if (pair.Length != 2 || string.IsNullOrWhiteSpace(pair[0]))
+                continue;
+            parsed[pair[0].Trim()] = pair[1].Trim().Trim('"');
+        }
+
+        if (!parsed.TryGetValue("realm", out var realm)
+            || !Uri.TryCreate(realm, UriKind.Absolute, out var realmUri)
+            || realmUri.Scheme != Uri.UriSchemeHttps)
+        {
+            return false;
+        }
+
+        parameters = parsed;
+        return true;
+    }
+
+    private static async Task<string?> RequestDockerBearerTokenAsync(
+        HttpClient client,
+        IReadOnlyDictionary<string, string> challenge,
+        Credentials creds,
+        CancellationToken ct)
+    {
+        var query = new List<string>();
+        foreach (var key in new[] { "service", "scope" })
+        {
+            if (challenge.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+                query.Add($"{key}={Uri.EscapeDataString(value)}");
+        }
+
+        var separator = challenge["realm"].Contains('?', StringComparison.Ordinal) ? '&' : '?';
+        var tokenUrl = query.Count == 0
+            ? challenge["realm"]
+            : challenge["realm"] + separator + string.Join("&", query);
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Get, tokenUrl);
+        if (!string.IsNullOrEmpty(creds.Username))
+        {
+            var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{creds.Username}:{creds.Password}"));
+            tokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+        }
+
+        using var tokenResponse = await client.SendAsync(tokenRequest, ct).ConfigureAwait(false);
+        if (!tokenResponse.IsSuccessStatusCode)
+            return null;
+
+        try
+        {
+            await using var body = await tokenResponse.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(body, cancellationToken: ct).ConfigureAwait(false);
+            var root = document.RootElement;
+            return GetString(root, "token") ?? GetString(root, "access_token");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private HttpClient Client() => httpClientFactory.CreateClient("service-connection-test");

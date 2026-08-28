@@ -62,6 +62,37 @@ public class NavMenuTests : BunitContext
         Assert.Contains("HelpCenter", cut.Markup);
     }
 
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("analysis")]
+    [InlineData("backups")]
+    public void ProjectGlobalMenu_HidesDeferredEntries(string route)
+    {
+        Services.GetRequiredService<NavigationManager>().NavigateTo(route);
+
+        var cut = Render<NavMenu>();
+
+        Assert.Contains("href=\"analysis\"", cut.Markup);
+        Assert.DoesNotContain("href=\"backups\"", cut.Markup);
+        Assert.DoesNotContain("href=\"service-connections\"", cut.Markup);
+        Assert.DoesNotContain("href=\"ai-tasks\"", cut.Markup);
+    }
+
+    [Fact]
+    public void ProjectDetailMenu_HidesDeferredEntriesAndKeepsAnalysis()
+    {
+        Services.GetRequiredService<NavigationManager>().NavigateTo("projects/7/overview");
+
+        var cut = Render<NavMenu>();
+
+        Assert.Contains("projects/7/quality", cut.Markup);
+        Assert.DoesNotContain("projects/7/board", cut.Markup);
+        Assert.DoesNotContain("projects/7/backups", cut.Markup);
+        Assert.DoesNotContain("projects/7/ai-tasks", cut.Markup);
+        Assert.DoesNotContain("href=\"analysis\"", cut.Markup);
+        Assert.DoesNotContain("href=\"backups\"", cut.Markup);
+    }
+
     [Fact]
     public void Dispose_UnsubscribesEvents()
     {

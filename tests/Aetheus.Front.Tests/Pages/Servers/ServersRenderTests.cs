@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Pages.Servers;
+using Aetheus.Front.Resources;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Localization;
+using NSubstitute;
 using Radzen;
 using ServersPage = Aetheus.Front.Pages.Servers.Servers;
 
@@ -29,14 +34,14 @@ public class ServersRenderTests : BunitContext
             {
                 Id = 1, Name = "web-01", Hostname = "10.0.0.1",
                 Type = ServerType.Docker, Status = ServerStatus.Online,
-                OsDescription = "Ubuntu 22.04", AgentVersion = "1.2.3",
+                OsDescription = "Ubuntu 22.04", AgentVersion = "1.2.3", AgentProtocolVersion = 2,
                 Tags = ["prod"], LastHeartbeat = DateTime.UtcNow.AddSeconds(-10)
             },
             new ServerDto
             {
                 Id = 2, Name = "db-01", Hostname = "10.0.0.2",
                 Type = ServerType.Normal, Status = ServerStatus.Offline,
-                OsDescription = "Debian 11", AgentVersion = "1.2.2",
+                OsDescription = "Debian 11", AgentVersion = "1.2.2", AgentProtocolVersion = 2,
                 Tags = ["prod", "db"], LastHeartbeat = DateTime.UtcNow.AddHours(-3)
             }
         ],
@@ -64,6 +69,29 @@ public class ServersRenderTests : BunitContext
         // Both server names from the stubbed page render into the grid.
         cut.WaitForState(() => cut.Markup.Contains("web-01"), TimeSpan.FromSeconds(2));
         Assert.Contains("db-01", cut.Markup);
+        Assert.DoesNotContain("· P2", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompatibilityBadge_TooltipUsesStatusWithoutProtocolReason()
+    {
+        var localizer = Services.GetRequiredService<IStringLocalizer<AppStrings>>();
+        localizer["AgentCompatibility_UpdateRequired"]
+            .Returns(new LocalizedString("AgentCompatibility_UpdateRequired", "Update required"));
+        localizer["AgentCompatibilityReason_UnsupportedProtocol"]
+            .Returns(new LocalizedString(
+                "AgentCompatibilityReason_UnsupportedProtocol",
+                "Unsupported protocol P1"));
+
+        var cut = Render<AgentCompatibilityBadge>(parameters => parameters.Add(component => component.Value,
+            new AgentCompatibilityDto
+            {
+                Status = AgentCompatibilityStatus.UpdateRequired,
+                Reason = AgentCompatibilityReason.UnsupportedProtocol
+            }));
+
+        Assert.Equal("Update required", cut.Find("span").GetAttribute("title"));
+        Assert.DoesNotContain("Unsupported protocol P1", cut.Markup);
     }
 
     // ── _canWrite reflects permissions ────────────────────────────────────────

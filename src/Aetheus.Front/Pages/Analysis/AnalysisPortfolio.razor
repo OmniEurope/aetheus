@@ -1,0 +1,85 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/analysis"
+
+<PageTitle>@L["AnalysisPortfolio"] - Aetheus</PageTitle>
+
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem" class="rz-mb-3 detail-page-header">
+    <RadzenIcon Icon="shield" />
+    <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">@L["AnalysisPortfolio"]</RadzenText>
+    <RadzenBadge Text="@string.Format(L["Total"], PortfolioReportCount)" BadgeStyle="BadgeStyle.Light" />
+</RadzenStack>
+
+<RadzenCard class="rz-mb-3 analysis-portfolio-filters">
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.75rem" Wrap="FlexWrap.Wrap" AlignItems="AlignItems.End">
+        <RadzenFormField Text="@L["Search"]"><RadzenTextBox @bind-Value="_search" Change="@(_ => ReloadAsync())" aria-label="@L["Search"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["Organization"]"><RadzenNumeric TValue="int?" @bind-Value="_organizationId" Change="@(_ => ReloadAsync())" AriaLabel="@L["Organization"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["Project"]"><RadzenDropDown TValue="int?" Data="@_projects" TextProperty="Name" ValueProperty="Id" @bind-Value="_projectId" AllowClear="true" Change="@(_ => ReloadAsync())" aria-label="@L["Project"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["Pipeline"]"><RadzenNumeric TValue="int?" @bind-Value="_pipelineId" Change="@(_ => ReloadAsync())" AriaLabel="@L["Pipeline"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["Category"]"><RadzenDropDown TValue="AnalysisCategory?" Data="@_categories" @bind-Value="_category" AllowClear="true" Change="@(_ => ReloadAsync())" aria-label="@L["Category"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["Branch"]"><RadzenTextBox @bind-Value="_branch" Change="@(_ => ReloadAsync())" aria-label="@L["Branch"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["Commit"]"><RadzenTextBox @bind-Value="_commit" Change="@(_ => ReloadAsync())" aria-label="@L["Commit"]" /></RadzenFormField>
+        <RadzenFormField Text="@L["From"]"><RadzenDatePicker @bind-Value="_from" ShowTime="true" Change="@(_ => ReloadAsync())" InputAttributes="@(new Dictionary<string, object> { ["aria-label"] = L["From"].Value })" /></RadzenFormField>
+        <RadzenFormField Text="@L["To"]"><RadzenDatePicker @bind-Value="_to" ShowTime="true" Change="@(_ => ReloadAsync())" InputAttributes="@(new Dictionary<string, object> { ["aria-label"] = L["To"].Value })" /></RadzenFormField>
+        <RadzenButton Icon="clear" Text="@L["ClearFilters"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Click="ClearFiltersAsync" />
+    </RadzenStack>
+</RadzenCard>
+
+@if (_projectSummaries.Count > 0)
+{
+    <section class="analysis-portfolio-projects" aria-label="@L["Projects"]">
+        @foreach (var project in _projectSummaries)
+        {
+            <RadzenCard class="analysis-portfolio-project-card">
+                <div class="analysis-portfolio-project-heading">
+                    <div>
+                        <RadzenLink Path="@($"projects/{project.ProjectId}/quality")"
+                                    Text="@project.ProjectName" class="analysis-portfolio-project-name" />
+                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0 analysis-portfolio-organization">
+                            @project.OrganizationName
+                        </RadzenText>
+                    </div>
+                    @if (project.Grade?.OverallGrade is not null)
+                    {
+                        <span class="@($"analysis-portfolio-grade analysis-grade-{GradeText(project).ToLowerInvariant()}")"
+                              aria-label="@L["AnalysisGlobalGrade"]">@GradeText(project)</span>
+                    }
+                    else
+                    {
+                        <RadzenBadge Text="@L["NotAvailable"]" BadgeStyle="BadgeStyle.Light" />
+                    }
+                </div>
+                <div class="analysis-portfolio-project-metrics">
+                    <span><strong>@project.ReportCount</strong> @L["AnalysisReports"]</span>
+                    <span><strong>@project.OpenCount</strong> @L["AnalysisOpenFindings"]</span>
+                    <span><strong>@project.NewCount</strong> @L["New"]</span>
+                    <span class="analysis-critical"><strong>@project.CriticalCount</strong> @L["Critical"]</span>
+                    <span class="analysis-high"><strong>@project.HighCount</strong> @L["High"]</span>
+                </div>
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">
+                    @L["AnalysisLastRun"]: @(project.LastAnalysisAt?.ToString("g") ?? L["Never"])
+                </RadzenText>
+            </RadzenCard>
+        }
+    </section>
+}
+
+<RadzenDataGrid Responsive="false" @ref="_grid" Data="@_rows" Count="@_count" TItem="AnalysisPortfolioRowDto"
+                LoadData="LoadDataAsync" RowClick="OpenRun" AllowPaging="@(!AetheusGrid.Virtualization)" AllowSorting="true"
+                AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                PageSize="25" Density="Density.Compact" class="analysis-table aetheus-clickable-rows aetheus-grid-fullheight" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
+    <Columns>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="PipelineRunId" Title="@L["PipelineRun"]" Width="7rem"><Template Context="item">@if (item.PipelineRunId.HasValue) { <RadzenLink Path="@($"pipelines/runs/{item.PipelineRunId}")" Text="@($"#{item.PipelineRunId}")" /> }</Template></RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="OrganizationName" Title="@L["Organization"]" />
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="ProjectName" Title="@L["Project"]"><Template Context="item"><RadzenLink Path="@($"projects/{item.ProjectId}/quality")" Text="@item.ProjectName" /></Template></RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="PipelineName" Title="@L["Pipeline"]" />
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="Category" Title="@L["Posture"]"><Template Context="item"><RadzenBadge Text="@Posture(item.Category)" BadgeStyle="@PostureStyle(item.Category)" /></Template></RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="ScannerName" Title="@L["AnalysisScanner"]" />
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="GateStatus" Title="Gate"><Template Context="item"><RadzenBadge Text="@(item.GateStatus?.ToString() ?? L["NotAvailable"])" BadgeStyle="@GateStyle(item.GateStatus)" /></Template></RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="Grade" Title="@L["AnalysisGrade"]"><Template Context="item"><RadzenBadge Text="@(item.Grade?.ToString() ?? "-")" BadgeStyle="@GradeStyle(item.Grade)" /></Template></RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="FindingCount" Title="@L["AnalysisFindings"]" />
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="NewFindingCount" Title="@L["New"]" />
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="BranchName" Title="@L["Branch"]" />
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="CommitHash" Title="@L["Commit"]"><Template Context="item"><span class="analysis-commit">@ShortCommit(item.CommitHash)</span></Template></RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AnalysisPortfolioRowDto" Property="CompletedAt" Title="@L["Date"]" FormatString="{0:g}" />
+    </Columns>
+</RadzenDataGrid>

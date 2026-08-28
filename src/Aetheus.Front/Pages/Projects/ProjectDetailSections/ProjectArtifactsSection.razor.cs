@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Projects.ProjectDetailSections;
 
@@ -67,7 +58,7 @@ public partial class ProjectArtifactsSection
         var projectId = ProjectId;
         return Cache.RevalidateAsync(
             CacheKey(1, _pageSize, _selectedPolicy),
-            () => Api.GetProjectArtifactsAsync(projectId, 1, _pageSize, _selectedPolicy),
+            () => Api.ServerTools.GetProjectArtifactsAsync(projectId, 1, _pageSize, _selectedPolicy),
             result => { if (ProjectId == projectId) ApplyArtifacts(result); },
             loading => { if (ProjectId == projectId) _loading = loading; },
             () => InvokeAsync(StateHasChanged));
@@ -81,7 +72,7 @@ public partial class ProjectArtifactsSection
         var projectId = ProjectId;
         return Cache.RevalidateAsync(
             CacheKey(page, _pageSize, _selectedPolicy),
-            () => Api.GetProjectArtifactsAsync(projectId, page, _pageSize, _selectedPolicy),
+            () => Api.ServerTools.GetProjectArtifactsAsync(projectId, page, _pageSize, _selectedPolicy),
             result => { if (ProjectId == projectId) ApplyArtifacts(result); },
             _ => { },
             () => InvokeAsync(StateHasChanged));
@@ -95,7 +86,7 @@ public partial class ProjectArtifactsSection
 
     private async Task DownloadArtifact(PipelineArtifactDto artifact)
     {
-        var stream = await Api.DownloadArtifactAsync(artifact.Id);
+        var stream = await Api.ServerTools.DownloadArtifactAsync(artifact.Id);
         if (stream is null) return;
 
         using var streamRef = new DotNetStreamReference(stream);

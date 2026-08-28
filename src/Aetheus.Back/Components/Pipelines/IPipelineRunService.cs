@@ -1,11 +1,26 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
+using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 public interface IPipelineRunService
 {
+    /// <summary>
+    /// Advances the run past a stage whose steps have all settled.
+    ///
+    /// Declared here rather than on a port outside both modules. That port existed to keep Tasks from
+    /// depending on Pipelines, but resolving it landed on this very service, so the dependency was
+    /// real and the two modules stayed in one cycle. Tasks now raises
+    /// <c>PipelineStepTaskCompletedEvent</c> and this side reacts, which is the direction the module
+    /// layering wants: "a step finished" is a notification from below.
+    /// </summary>
+    Task AdvanceStageAsync(int pipelineRunId, string completedStageName, CancellationToken ct = default);
+
+    /// <summary>Resumes a run after its artifact collection task settled, which carries no step.</summary>
+    Task ContinueAfterArtifactCollectionAsync(
+        int pipelineRunId, TaskExecutionStatus collectionStatus, CancellationToken ct = default);
+
     /// <summary>Resolves the exact branch, commit, YAML and target servers that a run would execute.
     /// Callers must authorize <see cref="PipelineRunPreparation.TargetServerIds"/> before launching.</summary>
     Task<PipelineRunPreparation?> PrepareRunAsync(int pipelineId, string? sourceBranch = null,
@@ -21,7 +36,8 @@ public interface IPipelineRunService
     /// <summary>Launches an already-resolved snapshot. No Git ref is read again.</summary>
     Task<PipelineRunDto?> TriggerPreparedRunAsync(PipelineRunPreparation preparation,
         Dictionary<string, string>? additionalVariables = null,
-        Dictionary<string, string>? parameters = null, CancellationToken ct = default);
+        Dictionary<string, string>? parameters = null, CancellationToken ct = default,
+        string? idempotencyKey = null);
 
     Task<PipelineRunDto?> TriggerRunAsync(int id, Dictionary<string, string>? additionalVariables = null,
         Dictionary<string, string>? parameters = null, CancellationToken ct = default);
@@ -29,10 +45,11 @@ public interface IPipelineRunService
     /// <summary>P: the queue-time parameters declared by the pipeline's authoritative (git-first) YAML,
     /// for rendering the run dialog. Empty list when the pipeline declares no <c>parameters:</c>.</summary>
     Task<List<PipelineRunParameterDto>> GetRunParametersAsync(int pipelineId, string? sourceBranch = null, CancellationToken ct = default);
-    Task<PaginatedResult<PipelineRunDto>> GetRunsAsync(int pipelineId, PaginationRequest request, CancellationToken ct = default);
+    Task<PaginatedResult<PipelineRunDto>> GetRunsAsync(int pipelineId, PipelineRunPaginationRequest request, CancellationToken ct = default);
     Task<List<PipelineRunDto>> GetActiveRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
-    Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
+    Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, int? serverId = null, CancellationToken ct = default);
     Task<PipelineRunDto?> GetRunAsync(int runId, CancellationToken ct = default);
+    Task<PipelineRunQueueStateDto> GetRunQueueStateAsync(int runId, CancellationToken ct = default);
     Task<DryRunResultDto?> DryRunAsync(int pipelineId, Dictionary<string, string>? additionalVars = null, CancellationToken ct = default);
 
     /// <summary>Resolves each stage's target server without launching, so the caller can warn
@@ -62,6 +79,14 @@ public interface IPipelineRunService
     /// </summary>
     Task<PipelineRunDto?> TriggerAutomatedRunAsync(int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
 
+    /// <summary>Resolves and authorizes an automated run without persisting it. Callers that
+    /// coordinate replacement must complete this phase before cancelling an existing run.</summary>
+    Task<PipelineRunPreparation?> PrepareAutomatedRunAsync(
+        int pipelineId,
+        string triggerSource,
+        Dictionary<string, string>? additionalVariables = null,
+        CancellationToken ct = default);
+
     /// <summary>
     /// F-EXEC-1b (chaining): launch a child pipeline from a <c>trigger:</c> step or an <c>on_success:</c>
     /// hop. There is no caller principal at the chaining link, so the child run is authorized against the
@@ -72,18 +97,20 @@ public interface IPipelineRunService
     /// </summary>
     Task<PipelineRunDto?> TriggerChainedRunAsync(int childPipelineId, Dictionary<string, string> upstreamVariables, CancellationToken ct = default);
 
-    Task AdvanceStageAsync(int pipelineRunId, string completedStageName, CancellationToken ct = default);
+    /// <summary>
+    /// Atomically mirrors a terminal child run onto its waiting trigger step and advances the parent
+    /// run under the same per-run lock. This prevents parallel child completions from observing a
+    /// half-updated dependency graph and falsely declaring the parent deadlocked.
+    /// </summary>
+    Task<bool> ResolveCompletedTriggerStepAsync(
+        PipelineStepRun step,
+        PipelineStatus childStatus,
+        IReadOnlyDictionary<string, string> childOutputs,
+        CancellationToken ct = default);
 
     /// <summary>Re-evaluates an active run from persisted step state without requiring a new task
     /// completion callback. Used by the scheduler self-heal after a lost advancement signal.</summary>
     Task ReconcileRunAsync(int pipelineRunId, CancellationToken ct = default);
-
-    /// <summary>
-    /// S-TECH-ARCR: re-entry point invoked when a post-stage artifact-collection task completes. A
-    /// successful collection advances the run; every other terminal status fails it closed.
-    /// </summary>
-    Task ContinueAfterArtifactCollectionAsync(
-        int pipelineRunId, TaskExecutionStatus collectionStatus, CancellationToken ct = default);
 
     Task<bool> CancelRunAsync(int runId, CancellationToken ct = default);
 
@@ -104,6 +131,7 @@ public interface IPipelineRunService
     /// fresh run from the live definition; the snapshot modes replay the source run's captured YAML,
     /// pinned to the same commit or floated to the branch head. Null when the source run is unknown.</summary>
     Task<PipelineRunDto?> RerunAsync(int sourceRunId, RerunMode mode, CancellationToken ct = default);
+    Task<PipelineCheckpointResumePreviewDto?> GetCheckpointResumePreviewAsync(int sourceRunId, CancellationToken ct = default);
 
 
     /// <summary>Returns the pipeline id and owning project id for a run.

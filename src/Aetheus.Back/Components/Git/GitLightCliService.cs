@@ -3,8 +3,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Aetheus.Back.Configuration;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -12,6 +10,7 @@ public class GitLightCliService(
     GitProcessRunner git, GitLightCliWriter writer,
     ILogger<GitLightCliService> logger, TimeProvider timeProvider) : IGitLightCliService
 {
+    internal const int MaximumCommitPatchChars = 512 * 1024;
     private static readonly System.Diagnostics.Metrics.Meter s_meter = new("Aetheus.Git");
     private static readonly System.Diagnostics.Metrics.Counter<long> s_deepSkipCounter = s_meter.CreateCounter<long>(
         "git_deep_skip_total", description: "Count of git --skip calls past the deep threshold");
@@ -57,6 +56,12 @@ public class GitLightCliService(
 
     public Task<(bool Success, string? CommitSha, string? Error)> CommitFileChangesAsync(string diskPath, string branch, IReadOnlyList<(string RelativePath, string Content)> upserts, IReadOnlyList<string> deletions,
         string commitMessage, string authorName, string authorEmail, CancellationToken ct = default) => writer.CommitFileChangesAsync(diskPath, branch, upserts, deletions, commitMessage, authorName, authorEmail, ct);
+
+    public Task<(bool Success, string? CommitSha, string? Error)> ApplyPatchAsync(
+        string diskPath, string branch, string patch,
+        string commitMessage, string authorName, string authorEmail, CancellationToken ct = default) =>
+        writer.ApplyPatchAsync(
+            diskPath, branch, patch, commitMessage, authorName, authorEmail, ct);
     public Task<string?> DetectDefaultBranchAsync(string diskPath, CancellationToken ct = default)
         => writer.DetectDefaultBranchAsync(diskPath, ct);
 
@@ -99,6 +104,10 @@ public class GitLightCliService(
         }
         return commits;
     }
+
+    public Task<Dictionary<string, string>> GetCommitMessagesAsync(
+        string diskPath, IReadOnlyCollection<string> shas, CancellationToken ct = default) =>
+        GitCommitMessageReader.ReadAsync(git, diskPath, shas, ct);
 
     // Builds the `git log` argv for GetCommitsAsync. Cursor pagination (afterSha) skips git's O(N)
     // prologue; otherwise fall back to --skip and warn past the deep threshold. Extracted to keep the
@@ -424,11 +433,37 @@ public class GitLightCliService(
         };
     }
 
-    public async Task<string> GetCommitPatchAsync(string diskPath, string fromRef, string toRef, CancellationToken ct = default)
+    public async Task<GitPatchResult> GetCommitPatchAsync(
+        string diskPath,
+        string fromRef,
+        string toRef,
+        CancellationToken ct = default)
     {
         EnsureRefArgsSafe(fromRef, toRef);
-        var (exitCode, output, _) = await RunGitAsync(diskPath, ["diff", "--patch", fromRef, toRef], ct).ConfigureAwait(false);
-        return exitCode == 0 ? output : string.Empty;
+        var (exitCode, output, _, truncated) = await git.RunGitBoundedAsync(
+            diskPath,
+            ["diff", "--patch", fromRef, toRef],
+            MaximumCommitPatchChars,
+            ct).ConfigureAwait(false);
+        return exitCode == 0
+            ? new GitPatchResult(output, truncated)
+            : new GitPatchResult(string.Empty, false);
+    }
+
+    public async Task<GitPatchResult> GetRootCommitPatchAsync(
+        string diskPath,
+        string commitRef,
+        CancellationToken ct = default)
+    {
+        EnsureRefArgsSafe(commitRef);
+        var (exitCode, output, _, truncated) = await git.RunGitBoundedAsync(
+            diskPath,
+            ["show", "--format=", "--no-ext-diff", "--patch", commitRef],
+            MaximumCommitPatchChars,
+            ct).ConfigureAwait(false);
+        return exitCode == 0
+            ? new GitPatchResult(output, truncated)
+            : new GitPatchResult(string.Empty, false);
     }
 
     public async Task RunGcAsync(string diskPath, CancellationToken ct = default)
@@ -541,46 +576,7 @@ public class GitLightCliService(
         var (exitCode, output, _) = await RunGitAsync(diskPath, ["blame", "--porcelain", refName, "--", path], ct).ConfigureAwait(false);
         if (exitCode != 0) return [];
 
-        var lines = new List<GitLightBlameLine>();
-        var authors = new Dictionary<string, string>();
-        var dates = new Dictionary<string, DateTime>();
-        string? sha = null;
-        int lineNo = 0;
-
-        foreach (var raw in output.Split('\n'))
-        {
-            if (raw.Length == 0) continue;
-
-            if (raw[0] == '\t')
-            {
-                lines.Add(new GitLightBlameLine
-                {
-                    LineNumber = lineNo,
-                    Sha = sha ?? string.Empty,
-                    ShortSha = sha is { Length: >= 7 } ? sha[..7] : sha ?? string.Empty,
-                    AuthorName = sha is not null && authors.TryGetValue(sha, out var a) ? a : "unknown",
-                    AuthorDate = sha is not null && dates.TryGetValue(sha, out var d) ? d : default,
-                    Line = raw[1..]
-                });
-                continue;
-            }
-
-            if (raw.Length >= 40 && IsHexString(raw.AsSpan(0, 40)))
-            {
-                var parts = raw.Split(' ');
-                sha = parts[0];
-                if (parts.Length >= 3 && int.TryParse(parts[2], out var ln))
-                    lineNo = ln;
-                continue;
-            }
-
-            if (raw.StartsWith("author ") && sha is not null)
-                authors.TryAdd(sha, raw[7..]);
-            else if (raw.StartsWith("author-time ") && sha is not null && long.TryParse(raw[12..], out var ts))
-                dates.TryAdd(sha, DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime);
-        }
-
-        return lines;
+        return GitBlameParser.Parse(output);
     }
 
     private Task<(int ExitCode, string Output, string Error)> RunGitAsync(

@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -116,6 +110,17 @@ public class GitLightController(IGitLightService service, IResourceAuthorization
 
         var detail = await service.GetCommitDetailAsync(repoId, sha, ct);
         return detail is null ? NotFound() : Ok(detail);
+    }
+
+    [HttpPost("{repoId:int}/commit-messages")]
+    public async Task<ActionResult<Dictionary<string, string>>> GetCommitMessages(
+        int repoId, [FromBody] GitCommitMessagesRequest request, CancellationToken ct = default)
+    {
+        var (ok, fail) = await CheckRepoAccessAsync(repoId, Permission.Read, ct);
+        if (!ok) return fail!;
+        if (request.Shas.Count is < 1 or > 200 || request.Shas.Any(sha => !GitUnifiedDiffParser.IsSha(sha)))
+            return ValidationProblem("Between 1 and 200 hexadecimal commit SHAs are required.");
+        return Ok(await service.GetCommitMessagesAsync(repoId, request.Shas, ct));
     }
 
     // ── Branches ─────────────────────────────────────────────────────

@@ -14,8 +14,18 @@ public sealed class BackgroundServicesOptions
     /// <summary>A server is marked offline if no heartbeat is received for this long.</summary>
     public TimeSpan ServerHeartbeatTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
-    /// <summary>How often the task timeout sweep runs.</summary>
-    public TimeSpan TaskCheckInterval { get; set; } = BackendRuntimeDefaults.SchedulerCheckInterval;
+    /// <summary>
+    /// How often task recovery runs. This stays shorter than the general scheduler cadence so a new
+    /// authenticated agent session releases work orphaned by the previous process promptly.
+    /// </summary>
+    public TimeSpan TaskCheckInterval { get; set; } = BackendRuntimeDefaults.TaskRecoveryCheckInterval;
+
+    /// <summary>
+    /// Optional delay before the first task-recovery sweep. Normal hosts keep the zero default and
+    /// recover immediately. A disposable E2E host can delay the sweep while its guarded reset endpoint
+    /// recreates and migrates the schema, preventing a background query from racing the migration.
+    /// </summary>
+    public TimeSpan TaskStartupDelay { get; set; }
 
     /// <summary>
     /// A Running task past this duration is force-failed with status Timeout. Covers the case where an
@@ -37,6 +47,15 @@ public sealed class BackgroundServicesOptions
     /// unclaimed. Kept distinct (and shorter) from the run/claim timeout.
     /// </summary>
     public TimeSpan PendingTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How long a pipeline task may stay parked while its agent is offline before the run is failed
+    /// honestly. An infrastructure outage should suspend the work and let it resume when the agent
+    /// comes back, not kill a two-hour qualification; but "waiting forever" is not a result either,
+    /// so the parking is bounded. Only pipeline-linked tasks park: a one-off server task still ages
+    /// out on <see cref="PendingTimeout"/>, because nobody is waiting to resume it.
+    /// </summary>
+    public TimeSpan OfflineAgentGrace { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>How often the trigger-step reconcile sweep runs (orchestration self-heal).</summary>
     public TimeSpan TriggerReconcileInterval { get; set; } = BackendRuntimeDefaults.SchedulerCheckInterval;

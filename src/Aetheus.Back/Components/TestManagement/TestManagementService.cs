@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Xml.Linq;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.TestManagement;
 

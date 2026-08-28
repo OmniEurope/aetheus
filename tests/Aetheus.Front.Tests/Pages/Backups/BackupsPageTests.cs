@@ -55,6 +55,23 @@ public class BackupsPageTests : BunitContext
     }
 
     [Fact]
+    public void ProjectScope_FiltersPoliciesAndFixesTheProjectContext()
+    {
+        var handler = Wire(Policy(1, "project-nightly", enabled: true));
+
+        var cut = Render<BackupsPage>(parameters => parameters
+            .Add(component => component.ProjectId, 7));
+
+        cut.WaitForAssertion(() => Assert.Contains(handler.Requests, request =>
+            request.Method == "GET"
+            && request.Url.Contains("api/backups", StringComparison.Ordinal)
+            && request.Url.Contains("projectId=7", StringComparison.Ordinal)));
+        cut.FindAll("button").First(button => button.TextContent.Contains("BackupNewPolicy")).Click();
+
+        Assert.DoesNotContain(">Project<", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NewPolicy_OpensTheForm()
     {
         Wire();

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -111,6 +109,28 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<Dictionary<int, int>> GetActiveVisitorCountsAsync(
+        IReadOnlyCollection<int> appIds,
+        DateTime activeAfterUtc,
+        CancellationToken ct = default)
+    {
+        if (appIds.Count == 0)
+            return [];
+
+        return await db.AppAnalyticsSessions
+            .AsNoTracking()
+            .Where(session => appIds.Contains(session.MonitoredAppId)
+                && session.LastSeenAtUtc >= activeAfterUtc)
+            .GroupBy(session => session.MonitoredAppId)
+            .Select(group => new
+            {
+                AppId = group.Key,
+                Count = group.Select(session => session.SessionPseudonym).Distinct().Count()
+            })
+            .ToDictionaryAsync(item => item.AppId, item => item.Count, ct)
+            .ConfigureAwait(false);
+    }
+
     public async Task AddAppAsync(MonitoredApp app, CancellationToken ct = default)
     {
         db.MonitoredApps.Add(app);
@@ -160,6 +180,79 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
         return rows is null ? (0, 0) : (rows.Up, rows.Total);
     }
 
+    public async Task<Dictionary<int, AppUptimeWindowCounts>> GetUptimeWindowsAsync(
+        IReadOnlyCollection<int> appIds,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+    {
+        if (appIds.Count == 0)
+            return [];
+
+        var since24h = nowUtc.AddHours(-24);
+        var since7d = nowUtc.AddDays(-7);
+        var since90d = nowUtc.AddDays(-90);
+        var currentHourStart = new DateTime(
+            nowUtc.Year,
+            nowUtc.Month,
+            nowUtc.Day,
+            nowUtc.Hour,
+            0,
+            0,
+            DateTimeKind.Utc);
+
+        var raw24h = await db.AppHealthSamples
+            .AsNoTracking()
+            .Where(sample => appIds.Contains(sample.MonitoredAppId) && sample.Timestamp >= since24h)
+            .GroupBy(sample => sample.MonitoredAppId)
+            .Select(group => new
+            {
+                AppId = group.Key,
+                Up = group.Count(sample => sample.IsUp),
+                Total = group.Count(),
+                TailUp = group.Count(sample => sample.Timestamp >= currentHourStart && sample.IsUp),
+                TailTotal = group.Count(sample => sample.Timestamp >= currentHourStart)
+            })
+            .ToDictionaryAsync(
+                row => row.AppId,
+                row => (row.Up, row.Total, row.TailUp, row.TailTotal),
+                ct)
+            .ConfigureAwait(false);
+
+        var hourly = await db.AppHealthHourly
+            .AsNoTracking()
+            .Where(bucket => appIds.Contains(bucket.MonitoredAppId) && bucket.HourUtc >= since90d)
+            .GroupBy(bucket => bucket.MonitoredAppId)
+            .Select(group => new
+            {
+                AppId = group.Key,
+                Up7d = group.Sum(bucket => bucket.HourUtc >= since7d ? bucket.UpCount : 0),
+                Total7d = group.Sum(bucket => bucket.HourUtc >= since7d ? bucket.SampleCount : 0),
+                Up90d = group.Sum(bucket => bucket.UpCount),
+                Total90d = group.Sum(bucket => bucket.SampleCount)
+            })
+            .ToDictionaryAsync(
+                row => row.AppId,
+                row => (row.Up7d, row.Total7d, row.Up90d, row.Total90d),
+                ct)
+            .ConfigureAwait(false);
+
+        var result = new Dictionary<int, AppUptimeWindowCounts>(appIds.Count);
+        foreach (var appId in appIds)
+        {
+            raw24h.TryGetValue(appId, out var raw);
+            hourly.TryGetValue(appId, out var rollup);
+            result[appId] = new AppUptimeWindowCounts(
+                raw.Up,
+                raw.Total,
+                rollup.Up7d + raw.TailUp,
+                rollup.Total7d + raw.TailTotal,
+                rollup.Up90d + raw.TailUp,
+                rollup.Total90d + raw.TailTotal);
+        }
+
+        return result;
+    }
+
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -169,20 +262,74 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
     {
         var apps = await db.MonitoredApps
             .Where(a => a.Enabled && a.ProjectId == projectId
-                && (a.EnvironmentId == environmentId || a.EnvironmentId == null))
+                && (environmentId == null || a.EnvironmentId == environmentId || a.EnvironmentId == null))
             .ToListAsync(ct).ConfigureAwait(false);
         // Prefer an exact environment match, then a project-level (null environment) app.
         return apps.FirstOrDefault(a => a.EnvironmentId == environmentId && environmentId != null)
-            ?? apps.FirstOrDefault(a => a.EnvironmentId == null);
+            ?? apps.FirstOrDefault(a => a.EnvironmentId == null)
+            ?? (apps.Count == 1 ? apps[0] : null);
     }
 
-    public async Task<int?> GetAppIdByIngestKeyHashAsync(string ingestKeyHash, CancellationToken ct = default)
+    public async Task<IngestKeyResolution?> ResolveIngestKeyHashAsync(
+        string ingestKeyHash,
+        DateTime nowUtc,
+        CancellationToken ct = default)
     {
-        return await db.MonitoredApps
+        var match = await db.MonitoredApps
             .AsNoTracking()
-            .Where(a => a.Enabled && a.IngestKeyHash == ingestKeyHash)
-            .Select(a => (int?)a.Id)
+            .Where(a => a.Enabled
+                        && ((a.IngestKeyHash == ingestKeyHash
+                             && a.IngestKeyExpiresAt >= nowUtc)
+                            || (a.PreviousIngestKeyHash == ingestKeyHash
+                                && a.PreviousIngestKeyValidUntil >= nowUtc)))
+            .Select(a => new
+            {
+                a.Id,
+                IsCurrent = a.IngestKeyHash == ingestKeyHash,
+                a.PreviousIngestKeyValidUntil
+            })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        return match is null
+            ? null
+            : new IngestKeyResolution(
+                match.Id,
+                match.IsCurrent ? null : match.PreviousIngestKeyValidUntil);
+    }
+
+    public async Task<MonitoredApp?> GetAppByAnalyticsSiteIdAsync(
+        string siteId,
+        CancellationToken ct = default)
+    {
+        return await db.MonitoredApps.AsNoTracking()
+            .FirstOrDefaultAsync(
+                app => app.AnalyticsSiteId == siteId,
+                ct).ConfigureAwait(false);
+    }
+
+    public async Task<List<MonitoredApp>> GetAnalyticsKeyRotationCandidatesAsync(
+        DateTime createdBeforeUtc,
+        int maxCount,
+        CancellationToken ct = default)
+    {
+        return await db.MonitoredApps.AsNoTracking()
+            .Where(app => app.AnalyticsVaultName != null
+                          && (app.AnalyticsPendingPseudonymKeyVersion != null
+                              || app.AnalyticsPseudonymKeyCreatedAt <= createdBeforeUtc))
+            .OrderBy(app => app.Id)
+            .Take(Math.Clamp(maxCount, 1, 100))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<List<MonitoredApp>> GetAnalyticsConfiguredAppsPageAsync(
+        int afterId,
+        int maxCount,
+        CancellationToken ct = default)
+    {
+        return await db.MonitoredApps.AsNoTracking()
+            .Where(app => app.AnalyticsVaultName != null && app.Id > afterId)
+            .OrderBy(app => app.Id)
+            .Take(Math.Clamp(maxCount, 1, 100))
+            .ToListAsync(ct).ConfigureAwait(false);
     }
 
     public async Task TouchIngestAsync(int appId, long droppedDelta, DateTime now, CancellationToken ct = default)

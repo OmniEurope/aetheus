@@ -33,10 +33,14 @@ public class ControllerAuthorizationAuditTests
         // Git Smart HTTP: upload-pack (clone/fetch) is anonymous so pipeline checkouts work
         // without credentials; receive-pack (push) has [Authorize] per-endpoint.
         "Aetheus.Back.Components.Git.GitSmartHttpController",
-        // OTLP ingestion (PLAN-001 phase 2): authenticated by a per-app ingestion key in the
+        // OTLP ingestion (ADR-021 phase 2): authenticated by a per-app ingestion key in the
         // x-aetheus-ingest-key header (resolved to a MonitoredApp), not by a JWT - so a monitored
         // app can push telemetry without a user token. Rate-limited per key + tight body cap.
         "Aetheus.Back.Components.AppMonitoring.Ingest.IngestController",
+        // Browser analytics ingestion is intentionally anonymous. The public site id selects the
+        // application, declared origins are checked, identifiers are HMAC-derived server-side, and
+        // the route is protected by a dedicated per-site/per-address limiter and a 4 KiB body cap.
+        "Aetheus.Back.Components.AppMonitoring.PublicWebAnalyticsController",
     };
 
     /// <summary>
@@ -53,10 +57,17 @@ public class ControllerAuthorizationAuditTests
         "Aetheus.Back.Components.Auth.AuthController.Login",
         "Aetheus.Back.Components.Auth.AuthController.ExternalLogin",
         "Aetheus.Back.Components.Auth.AuthController.RefreshToken",
+        // Public login-page metadata. Returns one boolean only, contains no secret or user data,
+        // and must be available before authentication so credentials can be explained on the demo.
+        "Aetheus.Back.Components.Auth.AuthController.GetPublicDemoInfo",
         // Inbound git webhook - authenticated by HMAC signature (WebhookSecret), not by a JWT.
         "Aetheus.Back.Components.Pipelines.PipelinesController.HandleWebhook",
         // Inbound release webhook - authenticated by a shared secret (Webhook:Secret), not by a JWT.
         "Aetheus.Back.Components.Releases.ReleasesController.Webhook",
+        // NuGet v3 bootstrap document: clients must discover the authenticated protocol resources
+        // before they can attach source credentials or an X-NuGet-ApiKey. It contains URLs only;
+        // search, metadata, downloads and every write endpoint remain PAT-authenticated.
+        "Aetheus.Back.Components.PackageRegistry.NuGetRegistryController.GetServiceIndex",
     };
 
     [Fact]

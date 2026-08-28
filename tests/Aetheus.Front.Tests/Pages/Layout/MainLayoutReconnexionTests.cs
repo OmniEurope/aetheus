@@ -2,6 +2,8 @@
 using System.Reflection;
 using Aetheus.Front.Layout;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Aetheus.Front.Tests.Pages.Layout;
 
@@ -27,8 +29,15 @@ public class MainLayoutReconnexionTests : BunitContext
 {
     private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
     private static readonly Type LayoutType = typeof(MainLayout);
+    private readonly BunitTestHelper.TestHandler _handler;
+    private readonly FakeTimeProvider _time = new();
 
-    public MainLayoutReconnexionTests() => BunitTestHelper.RegisterServices(this, authenticated: false);
+    public MainLayoutReconnexionTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this, authenticated: false);
+        Services.AddSingleton<TimeProvider>(_time);
+        _handler.SetResponse(HttpMethod.Get, "health/live", System.Net.HttpStatusCode.ServiceUnavailable);
+    }
 
     private static void SetField(object instance, string name, object? value) =>
         LayoutType.GetField(name, Priv)!.SetValue(instance, value);
@@ -61,6 +70,7 @@ public class MainLayoutReconnexionTests : BunitContext
         // Drop: must NOT show immediately - the 2s grace period guards against a reload/blip flash.
         await InvokeHandleConnectionStateChanged(cut, false);
         Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
+        _time.Advance(TimeSpan.FromSeconds(2));
 
         // After the grace period elapses, the dialog appears. Wait on the MARKUP (not just the field) so
         // the child ConnectionLostDialog has actually re-rendered with Visible=true before asserting.
@@ -88,6 +98,7 @@ public class MainLayoutReconnexionTests : BunitContext
 
         await InvokeHandleConnectionStateChanged(cut, false);
         Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog")); // still within the grace period
+        _time.Advance(TimeSpan.FromSeconds(2));
 
         cut.WaitForAssertion(() => Assert.Contains("connection-lost-mask", cut.Markup), TimeSpan.FromSeconds(5));
         Assert.True(GetField<bool>(cut.Instance, "_showOfflineDialog"));
@@ -109,5 +120,41 @@ public class MainLayoutReconnexionTests : BunitContext
             Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
             Assert.DoesNotContain("connection-lost-mask", cut.Markup);
         }, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task SignalRDrop_WithHealthyHttpBackend_DoesNotDeclareBackendOffline()
+    {
+        _handler.SetResponse(HttpMethod.Get, "health/live", System.Net.HttpStatusCode.OK);
+        var cut = Render<MainLayout>();
+        SetField(cut.Instance, "_connectAttempted", true);
+
+        await InvokeHandleConnectionStateChanged(cut, false);
+        _time.Advance(TimeSpan.FromSeconds(2));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.True(cut.Instance.BackendConnected);
+            Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
+            Assert.DoesNotContain("connection-lost-mask", cut.Markup);
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Logout_CancelsPendingOfflineDialog_AndItStaysHidden()
+    {
+        var cut = Render<MainLayout>();
+        SetField(cut.Instance, "_connectAttempted", true);
+
+        await InvokeHandleConnectionStateChanged(cut, false);
+        Assert.NotNull(GetField<CancellationTokenSource>(cut.Instance, "_offlineDelayCts"));
+
+        await cut.InvokeAsync(() => cut.Instance.OnLogout());
+        _time.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
+        Assert.False(GetField<bool>(cut.Instance, "_connectAttempted"));
+        Assert.Null(GetField<CancellationTokenSource?>(cut.Instance, "_offlineDelayCts"));
+        Assert.DoesNotContain("connection-lost-mask", cut.Markup);
     }
 }

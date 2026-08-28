@@ -8,6 +8,7 @@ namespace Aetheus.Shared.DTOs;
 public sealed record CertbotDataDto
 {
     public bool IsInstalled { get; init; }
+    [StringLength(100)]
     public string Version { get; init; } = string.Empty;
     [MaxLength(2048)]
     public List<CertbotCertificateDto> Certificates { get; init; } = [];
@@ -17,11 +18,15 @@ public sealed record CertbotDataDto
 
 public sealed record CertbotCertificateDto
 {
+    [StringLength(255)]
     public string Name { get; init; } = string.Empty;
     [MaxLength(100)]
+    [Aetheus.Shared.Validation.MaxItemStringLength(253)]
     public List<string> Domains { get; init; } = [];
     public DateTime ExpiryDate { get; init; }
+    [StringLength(4096)]
     public string CertPath { get; init; } = string.Empty;
+    [StringLength(4096)]
     public string KeyPath { get; init; } = string.Empty;
     // "Expiring soon" is intentionally NOT a computed DTO property: it depends on the current
     // time, not on the payload, so it is evaluated by the consumer against ExpiryDate (the

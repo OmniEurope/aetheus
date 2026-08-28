@@ -2,8 +2,6 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.SystemLogs;
 
@@ -182,7 +180,8 @@ public class SystemLogService : ISystemLogService
         if (!string.IsNullOrWhiteSpace(search) &&
             !entry.Message.Contains(search, StringComparison.OrdinalIgnoreCase) &&
             !(entry.Category?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) &&
-            !(entry.Exception?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false))
+            !(entry.Exception?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) &&
+            !(entry.CorrelationId?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false))
             return false;
         return true;
     }

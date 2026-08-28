@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Projects;
 
@@ -39,26 +30,11 @@ public partial class ProjectFormDialog
 
     protected override void OnInitialized()
     {
-        _statusOptions =
-        [
-            new { Text = L["Active"].Value, Value = ProjectStatus.Active },
-            new { Text = L["Archived"].Value, Value = ProjectStatus.Archived }
-        ];
+        _statusOptions = ProjectFormModel.BuildStatusOptions(L);
 
         if (Project is not null)
         {
-            _model = new ProjectFormModel
-            {
-                Name = Project.Name,
-                Description = Project.Description,
-                RepositoryUrl = Project.RepositoryUrl ?? string.Empty,
-                DefaultBranch = Project.DefaultBranch ?? string.Empty,
-                Status = Project.Status,
-                TagsRaw = string.Join(", ", Project.Tags),
-                ArtifactRetentionDays = Project.ArtifactRetentionDays,
-                ArtifactLatestRetentionDays = Project.ArtifactLatestRetentionDays,
-                ReleaseNumberingPattern = Project.ReleaseNumberingPattern ?? string.Empty
-            };
+            _model = ProjectFormModel.From(Project);
         }
     }
 
@@ -74,34 +50,9 @@ public partial class ProjectFormDialog
     private async Task OnSubmit()
     {
         _saving = true;
-        var tags = _model.TagsRaw
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .ToList();
-
         var result = _isNew
-            ? await Api.CreateProjectAsync(new CreateProjectRequest
-            {
-                Name = _model.Name,
-                Description = _model.Description,
-                RepositoryUrl = Nullify(_model.RepositoryUrl),
-                DefaultBranch = Nullify(_model.DefaultBranch),
-                Tags = tags,
-                ArtifactRetentionDays = _model.ArtifactRetentionDays,
-                ArtifactLatestRetentionDays = _model.ArtifactLatestRetentionDays,
-                ReleaseNumberingPattern = Nullify(_model.ReleaseNumberingPattern)
-            })
-            : await Api.UpdateProjectAsync(Project!.Id, new UpdateProjectRequest
-            {
-                Name = _model.Name,
-                Description = _model.Description,
-                RepositoryUrl = Nullify(_model.RepositoryUrl),
-                DefaultBranch = Nullify(_model.DefaultBranch),
-                Status = _model.Status,
-                Tags = tags,
-                ArtifactRetentionDays = _model.ArtifactRetentionDays,
-                ArtifactLatestRetentionDays = _model.ArtifactLatestRetentionDays,
-                ReleaseNumberingPattern = Nullify(_model.ReleaseNumberingPattern)
-            });
+            ? await Api.Projects.CreateProjectAsync(_model.ToCreateRequest())
+            : await Api.Projects.UpdateProjectAsync(Project!.Id, _model.ToUpdateRequest());
         _saving = false;
 
         if (result is not null)
@@ -122,9 +73,10 @@ public partial class ProjectFormDialog
         var confirmed = await Confirm.ConfirmDeleteAsync("DeleteProjectConfirm", "Delete");
         if (confirmed != true) return;
 
-        var success = await Api.DeleteProjectAsync(Project.Id);
+        var success = await Api.Projects.DeleteProjectAsync(Project.Id);
         if (success)
         {
+            Toast.Success("Deleted", "Deleted");
             Dialog.Close();
             Nav.NavigateTo("/projects");
         }
@@ -134,30 +86,4 @@ public partial class ProjectFormDialog
         }
     }
 
-    private static string? Nullify(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
-
-    internal sealed class ProjectFormModel
-    {
-        // Default DataAnnotations messages - LocalizedDataAnnotationsValidator translates them.
-        [Required]
-        [StringLength(100)]
-        public string Name { get; set; } = string.Empty;
-
-        [StringLength(500)]
-        public string Description { get; set; } = string.Empty;
-
-        public string RepositoryUrl { get; set; } = string.Empty;
-        public string DefaultBranch { get; set; } = string.Empty;
-        public ProjectStatus Status { get; set; } = ProjectStatus.Active;
-        public string TagsRaw { get; set; } = string.Empty;
-
-        [Range(1, 3650)]
-        public int? ArtifactRetentionDays { get; set; }
-
-        [Range(1, 3650)]
-        public int? ArtifactLatestRetentionDays { get; set; }
-
-        [StringLength(100)]
-        public string ReleaseNumberingPattern { get; set; } = string.Empty;
-    }
 }

@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Deque.AxeCore.Playwright" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -15,6 +16,10 @@
     <PackageReference Include="NUnit" />
     <PackageReference Include="NUnit.Analyzers" />
     <PackageReference Include="NUnit3TestAdapter" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aetheus.WebAnalytics\Aetheus.WebAnalytics.csproj" />
   </ItemGroup>
 
   <ItemGroup>

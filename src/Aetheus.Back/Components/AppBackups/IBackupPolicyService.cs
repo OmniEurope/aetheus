@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.AppBackups;
 

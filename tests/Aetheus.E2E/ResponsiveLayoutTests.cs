@@ -162,7 +162,131 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
             await AuditMobilePathsAsync(representativePaths, viewportWidth);
     }
 
-    private async Task AuditMobilePathsAsync(IEnumerable<string> paths, int viewportWidth)
+    [Test]
+    public async Task TabletBand_UsesCompactOverlayAtEveryBoundaryWidth()
+    {
+        var representativePaths = new[] { "/", "/admin/audit", "/pipelines/1" };
+        foreach (var viewportWidth in new[] { 767, 769, 800, 1024 })
+            await AuditMobilePathsAsync(representativePaths, viewportWidth);
+    }
+
+    [Test]
+    public async Task AboveTabletBreakpoint_RestoresDesktopRail()
+    {
+        await Page.SetViewportSizeAsync(1025, 812);
+        await NavigateToAsync("/");
+        await WaitForNoSpinnerAsync();
+
+        var sidebar = Page.Locator(".rz-sidebar");
+        await Expect(sidebar).ToBeVisibleAsync();
+        await Expect(sidebar).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex("rz-sidebar-collapsed"));
+        var width = await sidebar.EvaluateAsync<double>("element => element.getBoundingClientRect().width");
+        Assert.That(width, Is.GreaterThan(200));
+        await Expect(Page.Locator(".sidebar-backdrop")).ToHaveCountAsync(0);
+    }
+
+    [Test]
+    public async Task MobileColdLoad_NeverPaintsAnOpenDrawerBeforeViewportHandshake()
+    {
+        await Page.SetViewportSizeAsync(390, 812);
+        await NavigateToAsync("/");
+        await Page.AddInitScriptAsync("""
+            window.__aetheusColdLoadViolations = [];
+            requestAnimationFrame(function sampleColdLoadFrame() {
+                const backdrop = document.querySelector('.sidebar-backdrop');
+                if (backdrop) {
+                    const style = getComputedStyle(backdrop);
+                    const rect = backdrop.getBoundingClientRect();
+                    if (style.display !== 'none' && style.visibility !== 'hidden'
+                        && rect.width > 0 && rect.height > 0) {
+                        window.__aetheusColdLoadViolations.push('visible backdrop');
+                    }
+                }
+
+                const sidebar = document.querySelector('.rz-sidebar');
+                if (sidebar) {
+                    const style = getComputedStyle(sidebar);
+                    const rect = sidebar.getBoundingClientRect();
+                    if (!sidebar.classList.contains('rz-sidebar-collapsed')
+                        && style.visibility !== 'hidden' && rect.width > 1) {
+                        window.__aetheusColdLoadViolations.push('open drawer');
+                    }
+                }
+
+                if (!document.querySelector('[data-viewport="ready"]')) {
+                    requestAnimationFrame(sampleColdLoadFrame);
+                }
+            });
+            """);
+
+        await Page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await Page.WaitForSelectorAsync("[data-viewport='ready']", new()
+        {
+            State = WaitForSelectorState.Attached,
+            Timeout = 10000
+        });
+        var violations = await Page.EvaluateAsync<string[]>(
+            "() => window.__aetheusColdLoadViolations ?? []");
+
+        Assert.That(violations, Is.Empty,
+            "The splash/viewport handshake must prevent an open mobile drawer or backdrop from painting.");
+    }
+
+    [Test]
+    public async Task MobileBackdrop_ClosesDrawerFromARealPointerClick()
+    {
+        await Page.SetViewportSizeAsync(390, 812);
+        await NavigateToAsync("/");
+        await Page.Locator("[aria-label='Toggle sidebar']").ClickAsync();
+        await Expect(Page.Locator(".sidebar-backdrop")).ToBeVisibleAsync();
+
+        const int exposedBackdropX = 350;
+        const int exposedBackdropY = 400;
+        var targetClass = await Page.EvaluateAsync<string>(
+            "() => document.elementFromPoint(350, 400)?.getAttribute('class') ?? ''");
+        Assert.That(targetClass, Does.Contain("sidebar-backdrop"));
+
+        await Page.Mouse.ClickAsync(exposedBackdropX, exposedBackdropY);
+
+        await Expect(Page.Locator(".sidebar-backdrop")).ToHaveCountAsync(0);
+    }
+
+    [Test]
+    public async Task MobileCurrentRouteLink_ClosesDrawer()
+    {
+        await Page.SetViewportSizeAsync(390, 812);
+        await NavigateToAsync("/");
+        await Page.Locator("[aria-label='Toggle sidebar']").ClickAsync();
+        await Expect(Page.Locator(".sidebar-backdrop")).ToBeVisibleAsync();
+
+        await SidebarNavItem("Dashboard").ClickAsync();
+
+        await Expect(Page.Locator(".sidebar-backdrop")).ToHaveCountAsync(0);
+    }
+
+    [Test]
+    public async Task RepresentativePages_RemainReadableInPhoneLandscape()
+        => await AuditMobilePathsAsync(["/", "/servers", "/projects"], 812, 390);
+
+    [Test]
+    public async Task UnauthenticatedLogin_RemainsReadableInPortraitAndLandscape()
+    {
+        await NavigateToAsync("/");
+        await Page.EvaluateAsync("() => localStorage.clear()");
+
+        foreach (var viewport in new[] { (Width: 390, Height: 812), (Width: 812, Height: 390) })
+        {
+            await Page.SetViewportSizeAsync(viewport.Width, viewport.Height);
+            await Page.GotoAsync($"{FrontendUrl}/login", new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+            await Expect(Page.Locator("input[name='Username']")).ToBeVisibleAsync();
+            var widths = await Page.EvaluateAsync<int[]>(
+                "() => [document.documentElement.scrollWidth, window.innerWidth]");
+            Assert.That(widths[0], Is.LessThanOrEqualTo(widths[1]),
+                $"The unauthenticated login must fit {viewport.Width}x{viewport.Height}.");
+        }
+    }
+
+    private async Task AuditMobilePathsAsync(IEnumerable<string> paths, int viewportWidth, int viewportHeight = 812)
     {
         var failures = new List<string>();
         var pendingApiRequests = new HashSet<IRequest>();
@@ -201,7 +325,7 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
             {
                 try
                 {
-                    await AuditMobilePathAsync(path, viewportWidth);
+                    await AuditMobilePathAsync(path, viewportWidth, viewportHeight);
                 }
                 catch (Exception exception) when (exception is AssertionException or PlaywrightException or TimeoutException)
                 {
@@ -212,14 +336,14 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
                         networkState = string.Join("; ", networkFailures.Concat(pending));
                         networkFailures.Clear();
                     }
-                    failures.Add($"{viewportWidth}px {path}: {exception.Message}"
+                    failures.Add($"{viewportWidth}x{viewportHeight} {path}: {exception.Message}"
                         + (string.IsNullOrEmpty(networkState) ? string.Empty : $" Network: {networkState}"));
                     var screenshotDirectory = Path.Combine(TestContext.CurrentContext.WorkDirectory, "mobile-audit-failures");
                     Directory.CreateDirectory(screenshotDirectory);
                     var safeName = path == "/" ? "dashboard" : string.Concat(path.Trim('/').Select(c => char.IsAsciiLetterOrDigit(c) ? c : '-'));
                     await Page.ScreenshotAsync(new()
                     {
-                        Path = Path.Combine(screenshotDirectory, $"{viewportWidth}-{safeName}.png"),
+                        Path = Path.Combine(screenshotDirectory, $"{viewportWidth}x{viewportHeight}-{safeName}.png"),
                         FullPage = false
                     });
 
@@ -250,9 +374,9 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         Assert.That(failures, Is.Empty, () => string.Join(Environment.NewLine, failures));
     }
 
-    private async Task AuditMobilePathAsync(string path, int viewportWidth)
+    private async Task AuditMobilePathAsync(string path, int viewportWidth, int viewportHeight)
     {
-        await Page.SetViewportSizeAsync(viewportWidth, 812);
+        await Page.SetViewportSizeAsync(viewportWidth, viewportHeight);
         await NavigateToAsync(path);
         await WaitForNoSpinnerAsync();
         await Page.WaitForSelectorAsync(".sidebar-backdrop", new()
@@ -397,8 +521,10 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         await NavigateToAsync("/projects/3/edit");
         await Page.SetViewportSizeAsync(375, 812);
 
-        var settingWidths = await Page.Locator(".project-ci-settings-row .rz-form-field")
-            .EvaluateAllAsync<double[]>("elements => elements.map(element => element.getBoundingClientRect().width)");
+        var settings = Page.Locator(".project-ci-settings-row .rz-form-field");
+        await Expect(settings).ToHaveCountAsync(3);
+        var settingWidths = await settings.EvaluateAllAsync<double[]>(
+            "elements => elements.map(element => element.getBoundingClientRect().width)");
         Assert.That(settingWidths, Has.Length.EqualTo(3));
         Assert.That(settingWidths, Has.All.GreaterThanOrEqualTo(280));
     }

@@ -159,7 +159,8 @@ public class ProjectServersSectionDeepTests : BunitContext
             () => typeof(ProjectServersSection).GetField("_servers", Priv)!.GetValue(cut.Instance) != null,
             TimeSpan.FromSeconds(2));
 
-        Assert.Contains("NoRecords", cut.Markup);
+        Assert.Contains("NoProjectServers", cut.Markup);
+        Assert.Contains("AddServer", cut.Markup);
     }
 
     // ── Test 9: Empty server list from API shows empty state ─────────────────
@@ -178,7 +179,8 @@ public class ProjectServersSectionDeepTests : BunitContext
             .GetField("_servers", Priv)!.GetValue(cut.Instance);
         Assert.NotNull(servers);
         Assert.Empty(servers);
-        Assert.Contains("NoRecords", cut.Markup);
+        Assert.Contains("NoProjectServers", cut.Markup);
+        Assert.Contains("AddServer", cut.Markup);
     }
 
     // ── Test 10: EnsureAgentServersAsync loads servers when null ─────────────

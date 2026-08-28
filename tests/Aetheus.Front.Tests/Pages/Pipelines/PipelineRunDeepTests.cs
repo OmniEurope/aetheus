@@ -16,6 +16,11 @@ public class PipelineRunDeepTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         _handler.SetJsonResponse(HttpMethod.Get, "api/releases/by-run/", new List<ReleaseDto>());
+        _handler.SetPaginatedJsonResponse<AiRunResultDto>(
+            HttpMethod.Get,
+            "api/ai/results",
+            []);
+        _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/", System.Net.HttpStatusCode.NoContent);
     }
 
     private static PipelineRunDto MakeRun(PipelineStatus status, List<PipelineStepRunDto>? steps = null) =>

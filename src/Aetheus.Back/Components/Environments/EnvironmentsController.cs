@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Environments;
 
@@ -37,6 +32,12 @@ public class EnvironmentsController(IEnvironmentService environmentService, IRes
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Environment, null, Permission.Write, ct))
             return Forbid();
+        if (request.SourceEnvironmentId is { } sourceEnvironmentId
+            && !await authz.HasPermissionAsync(
+                User, ResourceType.Environment, sourceEnvironmentId, Permission.Read, ct))
+            return Forbid();
+        if (!await authz.CanAccessAllAsync(User, ResourceType.Server, Permission.Write, request.ServerIds, ct))
+            return Forbid();
         var env = await environmentService.CreateEnvironmentAsync(request, ct);
         return CreatedAtAction(nameof(GetEnvironment), new { id = env.Id }, env);
     }
@@ -46,6 +47,8 @@ public class EnvironmentsController(IEnvironmentService environmentService, IRes
         int id, [FromBody] UpdateEnvironmentRequest request, CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Environment, id, Permission.Write, ct))
+            return Forbid();
+        if (!await authz.CanAccessAllAsync(User, ResourceType.Server, Permission.Write, request.ServerIds, ct))
             return Forbid();
         var env = await environmentService.UpdateEnvironmentAsync(id, request, ct);
         if (env is null) return NotFound();

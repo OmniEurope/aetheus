@@ -41,7 +41,7 @@ public class ServerConfigSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task ValidateConfigAsync_WithEmptyYaml_DoesNothing()
+    public async Task ValidateConfigAsync_WithEmptyYaml_MakesNoRequest()
     {
         var cut = RenderConfigSection();
         typeof(ServerConfigSection).GetField("_configImportYaml", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
@@ -65,7 +65,7 @@ public class ServerConfigSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task PreviewConfigAsync_WithEmptyYaml_DoesNothing()
+    public async Task PreviewConfigAsync_WithEmptyYaml_MakesNoRequest()
     {
         var cut = RenderConfigSection();
         typeof(ServerConfigSection).GetField("_configImportYaml", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
@@ -89,7 +89,7 @@ public class ServerConfigSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task DeployConfigAsync_WithEmptyYaml_DoesNothing()
+    public async Task DeployConfigAsync_WithEmptyYaml_MakesNoRequest()
     {
         var cut = RenderConfigSection();
         typeof(ServerConfigSection).GetField("_configImportYaml", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
@@ -120,7 +120,7 @@ public class ServerConfigSectionTests : BunitContext
     [InlineData("enable", BadgeStyle.Success)]
     [InlineData("update", BadgeStyle.Info)]
     [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("unknown", BadgeStyle.Secondary)]
+    [InlineData("unknown", BadgeStyle.Light)]
     public void GetChangeBadgeStyle_ReturnsCorrectStyle(string action, BadgeStyle expected)
     {
         var method = typeof(ServerConfigSection).GetMethod("GetChangeBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;

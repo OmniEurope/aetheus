@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Services;
@@ -88,6 +87,10 @@ public sealed class ResourceAuthorizationService(IPermissionRepository permissio
         if (rolePermitted is null) return null;
 
         if (!IsOrgScoped(resourceType)) return rolePermitted;
+
+        // Organization membership grants read access only. Write/Admin must come from an
+        // explicit role permission, matching HasPermissionAsync for a single resource.
+        if (required != Permission.Read) return rolePermitted;
 
         var orgIds = await GetCachedOrganizationIdsAsync(username, ct).ConfigureAwait(false);
         if (orgIds.Count == 0) return rolePermitted;

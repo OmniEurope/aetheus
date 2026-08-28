@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -16,13 +10,32 @@ internal sealed class PipelineRunLauncher(
     NotifyHelper toast,
     IStringLocalizer<AppStrings> localizer)
 {
+    /// <summary>
+    /// A plain launch: the declared parameters are taken at their defaults and no dialog opens, unless
+    /// a required parameter has no default and the run genuinely cannot be built without an answer.
+    /// </summary>
     public async Task<PipelineRunLaunchResult?> LaunchAsync(int pipelineId, string? sourceBranch)
     {
         if (!await runGate.ConfirmPreflightAsync(pipelineId, sourceBranch)) return null;
-        var (proceed, parameters) = await dialogs.CollectParametersAsync(pipelineId, sourceBranch);
+        var (proceed, parameters) = await dialogs.ResolveDefaultParametersAsync(pipelineId, sourceBranch);
         if (!proceed) return null;
+        return await TriggerAsync(pipelineId, sourceBranch, parameters);
+    }
 
-        var outcome = await api.TriggerPipelineRunAsync(pipelineId, parameters, sourceBranch);
+    /// <summary>
+    /// A launch the user already configured in the unified dialog: branch and parameters are taken as
+    /// chosen, with no second prompt.
+    /// </summary>
+    public async Task<PipelineRunLaunchResult?> LaunchAsync(int pipelineId, PipelineLaunchChoice choice)
+    {
+        if (!await runGate.ConfirmPreflightAsync(pipelineId, choice.SourceBranch)) return null;
+        return await TriggerAsync(pipelineId, choice.SourceBranch, choice.Parameters);
+    }
+
+    private async Task<PipelineRunLaunchResult?> TriggerAsync(
+        int pipelineId, string? sourceBranch, Dictionary<string, string>? parameters)
+    {
+        var outcome = await api.Pipelines.TriggerPipelineRunAsync(pipelineId, parameters, sourceBranch);
         if (outcome.Value is not null)
         {
             navigation.NavigateTo(navigation.GetUriWithQueryParameter("tab", (string?)null));
@@ -31,14 +44,14 @@ internal sealed class PipelineRunLauncher(
             PipelineDto? pipeline = null;
             try
             {
-                runs = await api.GetPipelineRunsPagedAsync(pipelineId, page: 1, pageSize: 25);
+                runs = await api.Pipelines.GetPipelineRunsPagedAsync(pipelineId, page: 1, pageSize: 25);
             }
             catch (HttpRequestException)
             {
             }
             try
             {
-                pipeline = await api.GetPipelineAsync(pipelineId);
+                pipeline = await api.Pipelines.GetPipelineAsync(pipelineId);
             }
             catch (HttpRequestException)
             {

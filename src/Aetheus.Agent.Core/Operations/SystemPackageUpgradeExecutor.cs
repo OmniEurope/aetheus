@@ -2,16 +2,11 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Aetheus.Agent.Core.Collectors;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
 /// <summary>
-/// PLAN-006 4.1: applies pending OS updates via the controlled-sudo recipe. Two modes ride in
+/// ADR-024 4.1: applies pending OS updates via the controlled-sudo recipe. Two modes ride in
 /// <see cref="PatchingConstants.DryRunEnvVar"/>. In BOTH modes the executor first runs the non-mutating
 /// <c>apt-get -s upgrade</c> simulation and reports exactly what would change; it then ABORTS honestly
 /// (exit 1, real log) if any <see cref="CriticalPackages"/> - or a per-server override - would be
@@ -91,31 +86,13 @@ public sealed class SystemPackageUpgradeExecutor(
             }
 
             // 3) Apply via controlled-sudo (argv-exact against the aetheus-patch drop-in).
-            return await RunSudoAsync(BuildAptUpgradeArgv(), timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
+            return await AptProcessRunner.RunSudoAsync(
+                BuildAptUpgradeArgv(), timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             AptLock.Gate.Release();
         }
-    }
-
-    private async Task<ExecutorResult> RunSudoAsync(
-        IReadOnlyList<string> argv, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.Environment["DEBIAN_FRONTEND"] = "noninteractive";
-        foreach (var arg in argv)
-            psi.ArgumentList.Add(arg);
-
-        return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
     }
 
     // `sudo -n /usr/bin/apt-get upgrade -y` - argv-exact, matches the aetheus-patch allow-list one-to-one.

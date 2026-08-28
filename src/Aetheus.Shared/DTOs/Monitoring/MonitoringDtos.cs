@@ -6,8 +6,10 @@ namespace Aetheus.Shared.DTOs;
 
 public sealed record ServiceInfoDto
 {
+    [StringLength(200)]
     public string Name { get; init; } = string.Empty;
     public ServiceType Type { get; init; }
+    [StringLength(100)]
     public string Status { get; init; } = string.Empty;
     public bool IsRunning { get; init; }
     public bool IsManageable { get; init; }
@@ -62,7 +64,7 @@ public sealed record ServiceTaskResponse
     public int TaskId { get; init; }
 }
 
-public sealed record ServerMetricDto
+public sealed record ServerMetricDto : StorageUsageDto
 {
     public int ServerId { get; init; }
     public double CpuPercent { get; init; }
@@ -70,17 +72,6 @@ public sealed record ServerMetricDto
     public double MemoryTotalMb { get; init; }
     public double DiskUsedGb { get; init; }
     public double DiskTotalGb { get; init; }
-    public bool BuildCacheAvailable { get; init; }
-    public bool DockerInventoryAvailable { get; init; }
-    public long BuildCacheBytes { get; init; }
-    public long BuildCacheReclaimableBytes { get; init; }
-    public long DockerImagesBytes { get; init; }
-    public long DockerContainersBytes { get; init; }
-    public long DockerVolumesBytes { get; init; }
-    public long AgentWorkDirectoryBytes { get; init; }
-    public long AgentInstallDirectoryBytes { get; init; }
-    public long NuGetCacheBytes { get; init; }
-    public long JournalBytes { get; init; }
     public bool StorageMaintenanceDryRun { get; init; }
     public bool DeploymentOnly { get; init; }
     public bool BuildActive { get; init; }
@@ -106,7 +97,7 @@ public sealed record AlertRuleDto
     public DateTime CreatedAt { get; init; }
 }
 
-public sealed record CreateAlertRuleRequest
+public abstract record AlertRuleRequest
 {
     [Required]
     [StringLength(100)]
@@ -134,33 +125,9 @@ public sealed record CreateAlertRuleRequest
     public bool IsEnabled { get; set; } = true; // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
 }
 
-public sealed record UpdateAlertRuleRequest
-{
-    [Required]
-    [StringLength(100)]
-    public string Name { get; set; } = string.Empty; // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
+public sealed record CreateAlertRuleRequest : AlertRuleRequest;
 
-    public int? ServerId { get; set; } // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    [Required]
-    public MetricType Metric { get; set; } // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    [Required]
-    public ComparisonOperator Operator { get; set; } // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    [Required]
-    [Range(0, double.MaxValue)]
-    public double Threshold { get; set; } // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    [Range(10, 3600)]
-    public int SustainedSeconds { get; set; } = 60; // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    public AlertSeverity Severity { get; set; } = AlertSeverity.Warning; // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    public bool IsEnabled { get; set; } = true; // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-
-    public int? NotificationChannelId { get; set; } // audit: kept set; (mutated post-construction by Pages/Alerts/Alerts.razor @bind)
-}
+public sealed record UpdateAlertRuleRequest : AlertRuleRequest;
 
 public sealed record EnvironmentCheckDto
 {

@@ -26,6 +26,11 @@ public class ProjectServiceTests
         // No git activity by default; the projects-list test overrides this with a specific date.
         _repo.GetLastGitUpdatesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, DateTime?>());
+        _repo.GetInternalRepositoryIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, int>());
+        _repo.GetProjectListInsightsAsync(
+                Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, ProjectListInsight>());
         _repo.GetActiveRunStepLabelsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, string>());
         _sut = new ProjectService(_repo, Substitute.For<IAuditService>(), Substitute.For<IEntityChangeNotifier>(), orgService, _serverService, TimeProvider.System, Substitute.For<IMemoryCache>());
@@ -44,6 +49,17 @@ public class ProjectServiceTests
         var gitDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
         _repo.GetLastGitUpdatesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, DateTime?> { [1] = gitDate });
+        _repo.GetInternalRepositoryIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, int> { [1] = 41 });
+        _repo.GetProjectListInsightsAsync(
+                Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, ProjectListInsight>
+            {
+                [1] = new(
+                    1, 81, "0123456789abcdef", "Ship portfolio view", gitDate,
+                    91, "Deploy", PipelineStatus.Success, gitDate.AddMinutes(1),
+                    90, "Release", AnalysisGrade.B, ProjectProductionStatus.Online, 7)
+            });
 
         var result = await _sut.GetProjectsAsync(new ProjectPaginationRequest { Page = 1, PageSize = 25 }, ct: TestContext.Current.CancellationToken);
 
@@ -52,6 +68,13 @@ public class ProjectServiceTests
         Assert.Equal("Proj1", result.Items[0].Name);
         // The latest git activity is grafted onto the matching project; others stay null.
         Assert.Equal(gitDate, result.Items[0].LastGitUpdateAt);
+        Assert.Equal(41, result.Items[0].InternalRepositoryId);
+        Assert.Equal(81, result.Items[0].LastCommitId);
+        Assert.Equal(91, result.Items[0].LastRunId);
+        Assert.Equal(90, result.Items[0].ParentRunId);
+        Assert.Equal(AnalysisGrade.B, result.Items[0].LatestGateGrade);
+        Assert.Equal(ProjectProductionStatus.Online, result.Items[0].ProductionStatus);
+        Assert.Equal(7, result.Items[0].OnlineUserCount);
         Assert.Null(result.Items[1].LastGitUpdateAt);
     }
 
@@ -80,6 +103,17 @@ public class ProjectServiceTests
             ]
         };
         _repo.GetProjectDetailAsync(1, TestContext.Current.CancellationToken).Returns(project);
+        _repo.GetProjectListInsightsAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 1 })),
+                Arg.Any<DateTime>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, ProjectListInsight>
+            {
+                [1] = new(
+                    1, null, null, null, null,
+                    null, null, null, null,
+                    null, null, AnalysisGrade.C, ProjectProductionStatus.Unavailable, null)
+            });
 
         var result = await _sut.GetProjectDetailAsync(1, ct: TestContext.Current.CancellationToken);
 
@@ -88,6 +122,7 @@ public class ProjectServiceTests
         Assert.Single(result.Pipelines);
         Assert.Equal(PipelineStatus.Success, result.Pipelines[0].LastRunStatus);
         Assert.Equal(2, result.Tags.Count);
+        Assert.Equal(AnalysisGrade.C, result.LatestGateGrade);
     }
 
     [Fact]

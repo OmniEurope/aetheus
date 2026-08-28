@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.Audit;
@@ -58,13 +56,15 @@ public class AuditService(IAuditRepository repo, IHttpContextAccessor httpContex
         }
     }
 
-    public async Task<PaginatedResult<AuditLogDto>> GetLogsPagedAsync(int page, int pageSize, string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default)
+    public async Task<PaginatedResult<AuditLogDto>> GetLogsPagedAsync(int page, int pageSize, string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true)
     {
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, PaginationRequest.MaxPageSize);
         var skip = (page - 1) * pageSize;
         var totalCount = await repo.CountAsync(search, action, entityType, entityId, dateFrom, dateTo, ct).ConfigureAwait(false);
-        var pageItems = await repo.GetPagedAsync(skip, pageSize, search, action, entityType, entityId, dateFrom, dateTo, ct).ConfigureAwait(false);
+        var pageItems = await repo.GetPagedAsync(skip, pageSize, search, action, entityType, entityId, dateFrom, dateTo, ct,
+            sortBy, sortDescending).ConfigureAwait(false);
 
         var items = pageItems.Select(l => new AuditLogDto
         {

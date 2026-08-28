@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -31,9 +30,24 @@ public class PipelineRun
     /// default branch or the triggering push). Null for runs created before git context existed.</summary>
     public string? BranchName { get; set; }
 
-    /// <summary>Commit SHA this run built against, resolved best-effort at trigger time from the
-    /// project repo's branch head. Null when the repo/commit could not be resolved.</summary>
+    /// <summary>Commit SHA this run built against. Workspace runs require a full immutable SHA
+    /// before creation; null is reserved for pipelines that do not need a repository workspace.</summary>
     public string? CommitHash { get; set; }
+
+    /// <summary>The canonical clone URL selected together with the authoritative pipeline YAML.
+    /// Snapshotted so every stage checkout uses the same repository even if project settings change.</summary>
+    public string? RepositoryUrl { get; set; }
+
+    /// <summary>Caller-supplied key used to return the original run when a launch request is replayed.</summary>
+    public string? IdempotencyKey { get; set; }
+
+    /// <summary>
+    /// Per-pipeline sequential build number reserved from <see cref="Pipeline.BuildCounter"/> at
+    /// launch, exposed to steps as <c>BUILD_PIPELINE_RUNNUMBER</c>. Unlike the globally monotonic
+    /// run id (<c>BUILD_BUILDID</c>) this increments by exactly one per run of the same pipeline,
+    /// which is what an application version pattern needs. 0 for runs created before it existed.
+    /// </summary>
+    public int BuildNumber { get; set; }
 
     // Navigation
     public Pipeline Pipeline { get; set; } = null!;
@@ -44,4 +58,9 @@ public class PipelineRun
     public List<LintResult> LintResults { get; set; } = [];
     public List<RunMetric> RunMetrics { get; set; } = [];
     public List<PipelineArtifact> Artifacts { get; set; } = [];
+
+    /// <summary>Analysis evaluations recorded against this run. The inverse of an existing foreign key,
+    /// so it adds no column and no migration; it exists so run listings can project the gate grade in
+    /// the same query instead of computing a gate per row.</summary>
+    public List<AnalysisEvaluation> AnalysisEvaluations { get; set; } = [];
 }

@@ -4,7 +4,6 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using Aetheus.Back.Components.PersonalAccessTokens;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
@@ -41,99 +40,109 @@ public class GitBasicAuthenticationHandler(
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!Request.Headers.TryGetValue("Authorization", out var authHeader))
+        if (!AuthorizationHeaderParser.TryGetCredentials(Request, "Basic", out var credentials))
             return AuthenticateResult.NoResult();
 
-        var header = authHeader.ToString();
-        if (!header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-            return AuthenticateResult.NoResult();
-
-        string username;
-        string password;
-        try
-        {
-            var encoded = header["Basic ".Length..].Trim();
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            var colonIndex = decoded.IndexOf(':');
-            if (colonIndex < 0)
-                return AuthenticateResult.Fail("Malformed Basic credentials.");
-
-            username = decoded[..colonIndex];
-            password = decoded[(colonIndex + 1)..];
-        }
-        catch (FormatException)
-        {
-            return AuthenticateResult.Fail("Invalid Base64 in Authorization header.");
-        }
+        var decoded = DecodeCredentials("Basic " + credentials);
+        if (decoded.Error is not null) return AuthenticateResult.Fail(decoded.Error);
+        var username = decoded.Username!;
+        var password = decoded.Password!;
+        if (username.StartsWith(GitAiCloneToken.UsernamePrefix, StringComparison.Ordinal))
+            return AuthenticateAiCloneToken(username, password);
 
         // Pipeline-run clone token: stateless, project-scoped, self-expiring (see GitRunCloneToken).
         // Validated against the route's projectId so a token can only clone the repo it was minted for,
         // then gated on the run still being active so a token leaked after the run ends is inert before
         // its 6h HMAC expiry.
         if (username.StartsWith(GitRunCloneToken.UsernamePrefix, StringComparison.Ordinal))
-        {
-            if (TryGetRouteProjectId(out var routeProjectId)
-                && GitRunCloneToken.Validate(configuration, username, password, routeProjectId,
-                    timeProvider.GetUtcNow().UtcDateTime) is { } tokenRunId
-                && await IsRunActiveOrDbDegradedAsync(tokenRunId).ConfigureAwait(false))
-            {
-                var runIdentity = new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.Name, username),
-                        new Claim(RunScopeClaim, routeProjectId.ToString()),
-                    ], SchemeName);
-                return AuthenticateResult.Success(
-                    new AuthenticationTicket(new ClaimsPrincipal(runIdentity), SchemeName));
-            }
-            return AuthenticateResult.Fail("Invalid or out-of-scope Git run token.");
-        }
+            return await AuthenticateRunCloneTokenAsync(username, password).ConfigureAwait(false);
 
         // Personal access tokens are the non-interactive credential for Git clients.  The HTTP
         // Basic username is retained so standard git tooling can use `username:PAT`; bind it to
         // the token owner so a copied token cannot masquerade as another account in audit trails.
         if (password.StartsWith(PatConstants.TokenPrefix, StringComparison.Ordinal))
-        {
-            var patPrincipal = await personalAccessTokens.ValidateAsync(password, Context.RequestAborted)
-                .ConfigureAwait(false);
-            if (patPrincipal is null
-                || !string.Equals(username, patPrincipal.Username, StringComparison.OrdinalIgnoreCase))
-            {
-                return AuthenticateResult.Fail("Invalid Git personal access token.");
-            }
-
-            var scope = patPrincipal.Scope == PatScope.ReadOnly
-                ? PatConstants.ReadOnlyScopeValue
-                : PatConstants.ReadWriteScopeValue;
-            var patClaims = new List<Claim>
-            {
-                new(ClaimTypes.Name, patPrincipal.Username),
-                new(ClaimTypes.NameIdentifier, patPrincipal.UserId.ToString()),
-                new(PatConstants.ScopeClaimType, scope),
-                new(PatConstants.TokenIdClaimType, patPrincipal.TokenId.ToString())
-            };
-            patClaims.AddRange(patPrincipal.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
-
-            var patIdentity = new ClaimsIdentity(patClaims, SchemeName);
-            return AuthenticateResult.Success(
-                new AuthenticationTicket(new ClaimsPrincipal(patIdentity), SchemeName));
-        }
-
+            return await AuthenticatePersonalAccessTokenAsync(username, password).ConfigureAwait(false);
         var valid = await smartHttp.ValidateBasicAuthAsync(username, password, Context.RequestAborted)
             .ConfigureAwait(false);
         if (!valid)
             return AuthenticateResult.Fail("Invalid Git credentials.");
 
-        var claims = new[]
-        {
+        return Success(
             new Claim(ClaimTypes.Name, username),
-            new Claim(ClaimTypes.Role, "GitUser"),
-        };
-        var identity = new ClaimsIdentity(claims, SchemeName);
-        var principal = new ClaimsPrincipal(identity);
-        var ticket = new AuthenticationTicket(principal, SchemeName);
-
-        return AuthenticateResult.Success(ticket);
+            new Claim(ClaimTypes.Role, "GitUser"));
     }
+
+    private static DecodedCredentials DecodeCredentials(string header)
+    {
+        try
+        {
+            var encoded = header["Basic ".Length..].Trim();
+            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+            var colonIndex = decoded.IndexOf(':');
+            return colonIndex < 0
+                ? new(null, null, "Malformed Basic credentials.")
+                : new(decoded[..colonIndex], decoded[(colonIndex + 1)..], null);
+        }
+        catch (FormatException)
+        {
+            return new(null, null, "Invalid Base64 in Authorization header.");
+        }
+    }
+
+    private AuthenticateResult AuthenticateAiCloneToken(string username, string password)
+    {
+        if (!TryGetRouteProjectId(out var projectId)
+            || GitAiCloneToken.Validate(
+                configuration, username, password, projectId, timeProvider.GetUtcNow().UtcDateTime) is null)
+            return AuthenticateResult.Fail("Invalid or out-of-scope AI Git token.");
+        return Success(
+            new Claim(ClaimTypes.Name, username),
+            new Claim(RunScopeClaim, projectId.ToString()));
+    }
+
+    private async Task<AuthenticateResult> AuthenticateRunCloneTokenAsync(string username, string password)
+    {
+        if (!TryGetRouteProjectId(out var projectId))
+            return AuthenticateResult.Fail("Invalid or out-of-scope Git run token.");
+        var runId = GitRunCloneToken.Validate(
+            configuration, username, password, projectId, timeProvider.GetUtcNow().UtcDateTime);
+        if (runId is null || !await IsRunActiveOrDbDegradedAsync(runId.Value).ConfigureAwait(false))
+            return AuthenticateResult.Fail("Invalid or out-of-scope Git run token.");
+        return Success(
+            new Claim(ClaimTypes.Name, username),
+            new Claim(RunScopeClaim, projectId.ToString()));
+    }
+
+    private async Task<AuthenticateResult> AuthenticatePersonalAccessTokenAsync(
+        string username, string password)
+    {
+        var principal = await personalAccessTokens.ValidateAsync(password, Context.RequestAborted)
+            .ConfigureAwait(false);
+        if (principal is null
+            || !string.Equals(username, principal.Username, StringComparison.OrdinalIgnoreCase))
+            return AuthenticateResult.Fail("Invalid Git personal access token.");
+        var scope = principal.Scope == PatScope.ReadOnly
+            ? PatConstants.ReadOnlyScopeValue
+            : PatConstants.ReadWriteScopeValue;
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Name, principal.Username),
+            new(ClaimTypes.NameIdentifier, principal.UserId.ToString()),
+            new(PatConstants.ScopeClaimType, scope),
+            new(PatConstants.TokenIdClaimType, principal.TokenId.ToString())
+        };
+        claims.AddRange(principal.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
+        return Success([.. claims]);
+    }
+
+    private static AuthenticateResult Success(params Claim[] claims)
+    {
+        var identity = new ClaimsIdentity(claims, SchemeName);
+        return AuthenticateResult.Success(
+            new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
+    }
+
+    private sealed record DecodedCredentials(string? Username, string? Password, string? Error);
 
     /// <summary>
     /// Liveness gate around <see cref="IGitSmartHttpService.IsRunActiveAsync"/>. The gate makes a leaked

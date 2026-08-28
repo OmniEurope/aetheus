@@ -1,4 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits Aetheus.Front.Shared.RealtimeAdminGridPageBase<PackageFeedDto>
 @page "/admin/package-feeds"
 @using Aetheus.Shared.Enums
 
@@ -16,7 +17,7 @@
 </Aetheus.Front.Shared.PageHeader>
 
 <AetheusDataGrid @ref="_grid" Data="@_feeds" TItem="PackageFeedDto" Count="@_totalCount"
-    IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="25" AllowFiltering="false"
+    IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="25"
     class="rz-mt-4" FullHeight="true">
     <EmptyTemplate>
         <EmptyState Icon="inventory" Title="@L["NoPackageFeeds"]" Description="@L["NoPackageFeedsDescription"]" />
@@ -33,7 +34,7 @@
         <RadzenDataGridColumn TItem="PackageFeedDto" Title="@L["Actions"]" Width="200px" Sortable="false">
             <Template Context="f">
                 <RadzenButton Icon="inventory_2" Size="ButtonSize.ExtraSmall" Text="@L["ManagePackages"]"
-                    Click="@(() => ManagePackagesAsync(f))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    Click="@(() => ManagePackagesAsync(f))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => DeleteAsync(f))" title="@L["Delete"]" aria-label="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
             </Template>
         </RadzenDataGridColumn>

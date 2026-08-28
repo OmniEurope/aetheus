@@ -1,14 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Environments;
 
@@ -31,6 +21,8 @@ public partial class EnvironmentEdit
     private EnvironmentModel _model = new();
     private List<ProjectDto> _projects = [];
     private List<ServerDto> _servers = [];
+    private List<EnvironmentCopySource> _copySources = [];
+    private int? _sourceEnvironmentId;
     private bool _isNew => Id is null or 0;
     private bool _saving;
     private int? _previousId = int.MinValue;
@@ -40,6 +32,7 @@ public partial class EnvironmentEdit
     private List<EnvironmentTypeOption> _typeOptions = [];
 
     private readonly record struct EnvironmentTypeOption(string Text, EnvironmentType Value);
+    private readonly record struct EnvironmentCopySource(int Id, string Label, EnvironmentDto Environment);
 
     protected override void OnInitialized()
     {
@@ -57,11 +50,13 @@ public partial class EnvironmentEdit
 
         _detail = null;
         _model = new EnvironmentModel();
+        _sourceEnvironmentId = null;
+        _copySources = [];
 
         try
         {
-            var projectsTask = Api.GetAllProjectsAsync();
-            var serversTask = Api.GetAllServersAsync();
+            var projectsTask = Api.Projects.GetAllProjectsAsync();
+            var serversTask = Api.Servers.GetAllServersAsync();
             await Task.WhenAll(projectsTask, serversTask);
             if (generation != _loadGeneration) return;
             _projects = await projectsTask;
@@ -69,7 +64,7 @@ public partial class EnvironmentEdit
 
             if (!_isNew)
             {
-                _detail = await Api.GetEnvironmentAsync(Id!.Value);
+                _detail = await Api.Servers.GetEnvironmentAsync(Id!.Value);
                 if (generation != _loadGeneration) return;
                 if (_detail is not null)
                 {
@@ -82,6 +77,10 @@ public partial class EnvironmentEdit
                         RequireApproval = _detail.RequireApproval,
                         ApprovalTimeoutMinutes = _detail.ApprovalTimeoutMinutes,
                         ApprovalInstructions = _detail.ApprovalInstructions,
+                        DastEnabled = _detail.DastEnabled,
+                        DastIsEphemeral = _detail.DastIsEphemeral,
+                        DastContainsRealData = _detail.DastContainsRealData,
+                        DastAllowedHosts = _detail.DastAllowedHosts,
                         ServerIds = _detail.Servers.Select(s => s.ServerId).ToList()
                     };
                 }
@@ -90,14 +89,87 @@ public partial class EnvironmentEdit
             {
                 _model.ProjectId = ProjectId;
             }
+
+            if (_isNew)
+            {
+                await LoadCopySourcesAsync(generation);
+            }
         }
         catch (HttpRequestException) { } // 401 on expired JWT - redirect handled by AuthProvider
 
         ProjectNav.Set(_model.ProjectId);
 
-        Breadcrumb.Set(
-            new BreadcrumbItem(L["Environments"], "/environments"),
-            new BreadcrumbItem(_isNew ? L["NewEnvironment"] : _detail?.Name ?? L["Environment"]));
+        ReassertBreadcrumb();
+    }
+
+    private async Task LoadCopySourcesAsync(int generation)
+    {
+        try
+        {
+            var environments = await Api.Servers.GetAllEnvironmentsAsync();
+            if (generation != _loadGeneration) return;
+            _copySources = environments
+                .OrderBy(environment => environment.ProjectName ?? string.Empty)
+                .ThenBy(environment => environment.Name)
+                .Select(environment => new EnvironmentCopySource(
+                    environment.Id,
+                    $"{environment.Name} · {environment.ProjectName ?? L["NoProject"]}",
+                    environment))
+                .ToList();
+        }
+        catch (HttpRequestException)
+        {
+            // Expired authentication is handled centrally. The empty-create flow remains usable
+            // when the optional source catalogue cannot be loaded.
+        }
+    }
+
+    private void OnSourceEnvironmentChanged(object? value)
+    {
+        _sourceEnvironmentId = value switch
+        {
+            int id => id,
+            long id => checked((int)id),
+            string text when int.TryParse(text, out var id) => id,
+            _ => null
+        };
+
+        var targetProjectId = _model.ProjectId;
+        var source = _copySources.FirstOrDefault(option => option.Id == _sourceEnvironmentId).Environment;
+        if (source is null)
+        {
+            _model = new EnvironmentModel { ProjectId = targetProjectId };
+        }
+        else
+        {
+            _model = new EnvironmentModel
+            {
+                Name = source.ProjectId == targetProjectId ? $"{source.Name} (copy)" : source.Name,
+                Description = source.Description,
+                Type = source.Type,
+                ProjectId = targetProjectId,
+                RequireApproval = source.RequireApproval,
+                ApprovalTimeoutMinutes = source.ApprovalTimeoutMinutes,
+                ApprovalInstructions = source.ApprovalInstructions,
+                DastEnabled = source.DastEnabled,
+                DastIsEphemeral = source.DastIsEphemeral,
+                DastContainsRealData = source.DastContainsRealData,
+                DastAllowedHosts = source.DastAllowedHosts,
+                ServerIds = source.Servers.Select(server => server.ServerId).ToList()
+            };
+        }
+
+        ProjectNav.Set(_model.ProjectId);
+        ReassertBreadcrumb();
+    }
+
+    private void ReassertBreadcrumb()
+    {
+        var current = new BreadcrumbItem(_isNew ? L["NewEnvironment"] : _detail?.Name ?? L["Environment"]);
+        Breadcrumb.SetProjectResource(
+            _model.ProjectId, _detail?.ProjectName, _projects,
+            L["Projects"], L["Project"], L["Environments"],
+            "environments", "/environments", current);
     }
 
     private async Task OnSubmit()
@@ -105,17 +177,11 @@ public partial class EnvironmentEdit
         _saving = true;
         if (_isNew)
         {
-            var created = await Api.CreateEnvironmentAsync(new CreateEnvironmentRequest
+            var request = BuildRequest<CreateEnvironmentRequest>() with
             {
-                Name = _model.Name,
-                Description = _model.Description,
-                Type = _model.Type,
-                ProjectId = _model.ProjectId,
-                RequireApproval = _model.RequireApproval,
-                ApprovalTimeoutMinutes = _model.ApprovalTimeoutMinutes,
-                ApprovalInstructions = _model.ApprovalInstructions,
-                ServerIds = _model.ServerIds.ToList()
-            });
+                SourceEnvironmentId = _sourceEnvironmentId
+            };
+            var created = await Api.Servers.CreateEnvironmentAsync(request);
             if (created is not null)
             {
                 Toast.Success("Created", "EnvironmentCreated");
@@ -124,17 +190,8 @@ public partial class EnvironmentEdit
         }
         else
         {
-            var updated = await Api.UpdateEnvironmentAsync(Id!.Value, new UpdateEnvironmentRequest
-            {
-                Name = _model.Name,
-                Description = _model.Description,
-                Type = _model.Type,
-                ProjectId = _model.ProjectId,
-                RequireApproval = _model.RequireApproval,
-                ApprovalTimeoutMinutes = _model.ApprovalTimeoutMinutes,
-                ApprovalInstructions = _model.ApprovalInstructions,
-                ServerIds = _model.ServerIds.ToList()
-            });
+            var updated = await Api.Servers.UpdateEnvironmentAsync(
+                Id!.Value, BuildRequest<UpdateEnvironmentRequest>());
             if (updated is not null)
             {
                 Toast.Success("Saved", "EnvironmentSaved");
@@ -144,15 +201,40 @@ public partial class EnvironmentEdit
         _saving = false;
     }
 
+    private TRequest BuildRequest<TRequest>()
+        where TRequest : EnvironmentRequest, new() => new()
+        {
+            Name = _model.Name,
+            Description = _model.Description,
+            Type = _model.Type,
+            ProjectId = _model.ProjectId,
+            RequireApproval = _model.RequireApproval,
+            ApprovalTimeoutMinutes = _model.ApprovalTimeoutMinutes,
+            ApprovalInstructions = _model.ApprovalInstructions,
+            DastEnabled = _model.DastEnabled,
+            DastIsEphemeral = _model.DastIsEphemeral,
+            DastContainsRealData = _model.DastContainsRealData,
+            DastAllowedHosts = _model.DastAllowedHosts,
+            ServerIds = _model.ServerIds.ToList()
+        };
+
     private async Task OnDelete()
     {
         var confirmed = await Dialog.Confirm(L["DeleteEnvironmentConfirm"].Value, L["Delete"].Value,
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        await Api.DeleteEnvironmentAsync(Id!.Value);
-        Cache.InvalidatePrefix("environments:"); // S-TECH-SWIV
-        Nav.NavigateTo("/environments");
+        var status = await Api.Servers.DeleteEnvironmentAsync(Id!.Value);
+        if (status.Success)
+        {
+            Cache.InvalidatePrefix("environments:"); // S-TECH-SWIV
+            Toast.Success("Deleted", "Deleted");
+            Nav.NavigateTo("/environments");
+        }
+        else
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
     }
 
     private static BadgeStyle TypeStyle(EnvironmentType type) => type switch
@@ -185,6 +267,13 @@ public partial class EnvironmentEdit
 
         [StringLength(1000)]
         public string? ApprovalInstructions { get; set; }
+
+        public bool DastEnabled { get; set; }
+        public bool DastIsEphemeral { get; set; }
+        public bool DastContainsRealData { get; set; }
+
+        [StringLength(2000)]
+        public string DastAllowedHosts { get; set; } = string.Empty;
 
         public IEnumerable<int> ServerIds { get; set; } = [];
     }

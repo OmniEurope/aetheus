@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs.Organizations;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Organizations;
 
@@ -20,12 +12,14 @@ public partial class Organizations : IAsyncDisposable
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
+    [Inject] private NotifyHelper Notify { get; set; } = default!;
 
     private List<OrganizationDto> _items = [];
     private Aetheus.Front.Shared.AetheusDataGrid<OrganizationDto>? _grid;
     private int _totalCount;
     private string _search = string.Empty;
     private bool _loading;
+    private int _silentRefreshDepth;
     // RT4M: shared admin-hub subscription wrapper, owned and disposed by this page.
     private AdminEntitySubscription? _adminRt;
 
@@ -46,7 +40,7 @@ public partial class Organizations : IAsyncDisposable
         _adminRt = new AdminEntitySubscription(HubFactory);
         await _adminRt.StartAsync(AdminEntities.Organization, () => InvokeAsync(async () =>
         {
-            if (_grid is not null) await _grid.Reload();
+            await RefreshSilentlyAsync();
             StateHasChanged();
         }));
     }
@@ -54,28 +48,37 @@ public partial class Organizations : IAsyncDisposable
     private async Task LoadDataAsync(LoadDataArgs args)
     {
         var (page, pageSize) = args.ToPageRequest();
-        var (sortBy, sortDescending) = GetSort(args);
-        _loading = true;
+        var (sortBy, sortDescending) = args.ToSortRequest("Name");
+        var showLoading = _silentRefreshDepth == 0;
+        if (showLoading) _loading = true;
         try
         {
-            var result = await Api.GetOrganizationsAsync(_search, page, pageSize, sortBy, sortDescending);
+            var result = await Api.Servers.GetOrganizationsAsync(_search, page, pageSize, sortBy, sortDescending);
             _items = result?.Items ?? [];
             _totalCount = result?.TotalCount ?? 0;
         }
-        finally { _loading = false; }
+        finally
+        {
+            if (showLoading) _loading = false;
+        }
     }
 
     private Task ReloadAsync() => _grid?.Reload() ?? Task.CompletedTask;
 
-    private Task ResetSearchAsync() => _grid?.GoToPage(0) ?? Task.CompletedTask;
-
-    private static (string SortBy, bool Descending) GetSort(LoadDataArgs args)
+    private async Task RefreshSilentlyAsync()
     {
-        if (string.IsNullOrWhiteSpace(args.OrderBy)) return ("Name", false);
-        var parts = args.OrderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return (parts[0], parts.Length > 1
-            && parts[1].Equals("desc", StringComparison.OrdinalIgnoreCase));
+        _silentRefreshDepth++;
+        try
+        {
+            await ReloadAsync();
+        }
+        finally
+        {
+            _silentRefreshDepth--;
+        }
     }
+
+    private Task ResetSearchAsync() => _grid?.GoToPage(0) ?? Task.CompletedTask;
 
     private void OnRowClick(DataGridRowMouseEventArgs<OrganizationDto> args)
     {
@@ -88,7 +91,7 @@ public partial class Organizations : IAsyncDisposable
         // Creation stays a lightweight dialog; on success go straight to the new org's detail page.
         var result = await Dialog.OpenAsync<OrganizationDialog>(L["NewOrganization"],
             new Dictionary<string, object?>(),
-            new DialogOptions { Width = "560px", CloseDialogOnOverlayClick = false });
+            new DialogOptions { Width = "560px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
         if (result is OrganizationDto created)
             Nav.NavigateTo($"/admin/organizations/{created.Id}");
     }
@@ -103,7 +106,15 @@ public partial class Organizations : IAsyncDisposable
             L["Delete"],
             new ConfirmOptions { OkButtonText = L["Delete"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
-        if (await Api.DeleteOrganizationAsync(org.Id)) await ReloadAsync();
+        if (await Api.Servers.DeleteOrganizationAsync(org.Id))
+        {
+            await RefreshSilentlyAsync();
+            Notify.Success("Deleted", "Deleted");
+        }
+        else
+        {
+            Notify.Error("Error", "DeleteFailed");
+        }
     }
 
     public async ValueTask DisposeAsync()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages;
+using Aetheus.Front.Shared;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
@@ -38,7 +39,6 @@ public class RoleEditTests : BunitContext
     private IRenderedComponent<RoleEdit> RenderRole(int id = 1)
     {
         _handler.SetJsonResponse($"api/roles/{id}", MakeRole(id));
-        _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto> { Items = [], TotalCount = 0 });
         _handler.SetJsonResponse($"api/roles/{id}/permissions", true);
         _handler.SetJsonResponse("api/roles", new RoleDto { Id = id, Name = "Admin", Description = "Updated" });
         return Render<RoleEdit>(p => p.Add(x => x.Id, id));
@@ -109,7 +109,6 @@ public class RoleEditTests : BunitContext
                 new ResourcePermissionDto { ResourceType = ResourceType.Project, Permission = Permission.Read }
             ]
         });
-        _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto> { Items = [], TotalCount = 0 });
         var cut = Render<RoleEdit>(p => p.Add(x => x.Id, 2));
         cut.WaitForState(() =>
         {
@@ -198,7 +197,7 @@ public class RoleEditTests : BunitContext
     // --- OnApplyBulk ---
 
     [Fact]
-    public void OnApplyBulk_NullPermission_DoesNothing()
+    public async Task OnApplyBulk_NullPermission_LeavesTheStateUnchanged()
     {
         var cut = RenderRole();
         cut.WaitForState(() =>
@@ -214,7 +213,7 @@ public class RoleEditTests : BunitContext
         var before = rows.Select(r => (r.Scope, r.CanRead, r.CanWrite, r.CanAdmin)).ToList();
 
         var method = typeof(RoleEdit).GetMethod("OnApplyBulk", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, []);
+        await (Task)method.Invoke(cut.Instance, [])!;
 
         // Null bulk permission is a no-op - every row keeps its loaded scope/level.
         var after = rows.Select(r => (r.Scope, r.CanRead, r.CanWrite, r.CanAdmin)).ToList();
@@ -222,13 +221,13 @@ public class RoleEditTests : BunitContext
     }
 
     [Fact]
-    public void OnApplyBulk_WritePermission_SetsAllRowsToWrite()
+    public async Task OnApplyBulk_WritePermission_SetsAllRowsToWriteAndPersists()
     {
         var cut = RenderRole();
         typeof(RoleEdit).GetField("_bulkPermission", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, (Permission?)Permission.Write);
 
         var method = typeof(RoleEdit).GetMethod("OnApplyBulk", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, []);
+        await (Task)method.Invoke(cut.Instance, [])!;
 
         var rows = (System.Collections.IList)typeof(RoleEdit).GetField("_permissionRows", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         foreach (var row in rows)
@@ -238,6 +237,8 @@ public class RoleEditTests : BunitContext
             Assert.False((bool)row.GetType().GetProperty("CanAdmin")!.GetValue(row)!);
             Assert.Equal("All", (string)row.GetType().GetProperty("Scope")!.GetValue(row)!);
         }
+        Assert.Contains(_handler.Requests, request =>
+            request.Method == "PUT" && request.Url.Contains("api/roles/1/permissions", StringComparison.Ordinal));
     }
 
     // --- OnSave ---
@@ -290,8 +291,6 @@ public class RoleEditTests : BunitContext
             Permissions = Enum.GetValues<ResourceType>().Select(rt =>
                 new ResourcePermissionDto { ResourceType = rt, Permission = Permission.Admin }).ToList()
         });
-        _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto> { Items = [], TotalCount = 0 });
-
         var cut = Render<RoleEdit>(p => p.Add(x => x.Id, 3));
         cut.WaitForState(() =>
         {
@@ -312,7 +311,7 @@ public class RoleEditTests : BunitContext
     }
 
     [Fact]
-    public void Renders_WithAuditLogs()
+    public void AuditTab_UsesSharedEntityAuditTrail()
     {
         _handler.SetJsonResponse("api/roles/4", new RoleDto
         {
@@ -331,19 +330,18 @@ public class RoleEditTests : BunitContext
             TotalCount = 2
         });
 
-        // Audit is now lazy-loaded on tab activation; deep-link to ?tab=audit so OnInitializedAsync
-        // loads it (the server-side entityId filter returns both stubbed entries).
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         nav.NavigateTo("/admin/roles/4?tab=audit");
         var cut = Render<RoleEdit>(p => p.Add(x => x.Id, 4));
-        cut.WaitForState(() =>
-            typeof(RoleEdit).GetField("_auditLogs", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance) is not null,
-            TimeSpan.FromSeconds(3));
+        var auditTrail = cut.FindComponent<EntityAuditTrail>();
 
-        var auditLogs = (List<AuditLogDto>?)typeof(RoleEdit)
-            .GetField("_auditLogs", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
-        Assert.NotNull(auditLogs);
-        Assert.Equal(2, auditLogs!.Count);
+        Assert.Equal("Role", auditTrail.Instance.EntityType);
+        Assert.Equal(4, auditTrail.Instance.EntityId);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            request.Method == "GET"
+            && request.Url.Contains("api/audit", StringComparison.Ordinal)
+            && request.Url.Contains("entityType=Role", StringComparison.Ordinal)
+            && request.Url.Contains("entityId=4", StringComparison.Ordinal)));
     }
 
     [Fact]

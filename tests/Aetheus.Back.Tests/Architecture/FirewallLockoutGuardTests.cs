@@ -5,7 +5,7 @@ using Aetheus.Shared.Enums;
 namespace Aetheus.Back.Tests.Architecture;
 
 /// <summary>
-/// PLAN-006 4.2: the anti-lockout guard must refuse any operation that would close the administration
+/// ADR-024 4.2: the anti-lockout guard must refuse any operation that would close the administration
 /// (SSH) port. Pure logic shared by the backend and the agent.
 /// </summary>
 public class FirewallLockoutGuardTests

@@ -4,8 +4,6 @@ using System.Text.RegularExpressions;
 using Aetheus.Back.Components.ExternalRepos;
 using Aetheus.Back.Components.Settings;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -14,7 +12,8 @@ public partial class PipelineWebhookService(
     IPipelineRunService runService,
     ISettingsService settingsService,
     ILogger<PipelineWebhookService> logger,
-    IPipelineGitService? pipelineGitService = null) : IPipelineWebhookService
+    IPipelineGitService? pipelineGitService = null,
+    IDbTransactionScope? transaction = null) : IPipelineWebhookService
 {
     // WEBHOOK_REF / WEBHOOK_REPO become $(VAR)-substitutable text in step shell scripts
     // (PipelineCommandBuilder.Substitute splices values verbatim), so anyone holding the
@@ -35,101 +34,116 @@ public partial class PipelineWebhookService(
 
     public async Task<bool> HandleWebhookAsync(string rawBody, string? signature, CancellationToken ct = default)
     {
-        // F-07: webhook secret is mandatory; refuse fail-open when not configured.
         var secret = await settingsService.GetSettingValueAsync("WebhookSecret", ct).ConfigureAwait(false);
+        var payload = ValidateWebhook(secret, signature, rawBody);
+        if (payload is null) return false;
+        var webhookPipelines = await pipelineRepo.GetWebhookTriggeredPipelinesWithProjectAsync(ct).ConfigureAwait(false);
+        var triggered = false;
+        foreach (var pipeline in webhookPipelines)
+            triggered |= await TryTriggerPipelineAsync(pipeline, payload, ct).ConfigureAwait(false);
+
+        return triggered || !string.IsNullOrEmpty(secret);
+    }
+
+    private WebhookInfo? ValidateWebhook(string? secret, string? signature, string rawBody)
+    {
         if (string.IsNullOrEmpty(secret))
         {
             logger.LogWarning("Webhook rejected: WebhookSecret is not configured.");
-            return false;
+            return null;
         }
-
         if (!WebhookSignatureValidator.Validate(signature, secret, rawBody))
         {
             logger.LogWarning("Invalid webhook signature");
-            return false;
+            return null;
         }
-
-        // Parse the payload to extract repo URL and branch
         var payload = ParsePayload(rawBody);
         if (payload is null)
         {
             logger.LogWarning("Could not parse webhook payload");
+            return null;
+        }
+        if (SafeRepoUrlRegex().IsMatch(payload.RepositoryUrl)
+            && (payload.Ref.Length == 0 || SafeGitRefRegex().IsMatch(payload.Ref))) return payload;
+        logger.LogWarning("Webhook rejected: repository URL or ref contains characters outside the allowed git shapes.");
+        return null;
+    }
+
+    private async Task<bool> TryTriggerPipelineAsync(
+        Pipeline pipeline, WebhookInfo payload, CancellationToken ct)
+    {
+        if (!MatchesRepository(pipeline, payload.RepositoryUrl)) return false;
+        var authoritativeYaml = await ReadAuthoritativeYamlAsync(pipeline, ct).ConfigureAwait(false);
+        var definition = YamlParsingHelper.ParseAndValidate(authoritativeYaml, logger);
+        if (!HasValidBranchFilter(pipeline, authoritativeYaml, definition)) return false;
+        if (!PipelineBranchFilter.Matches(definition?.Branches ?? [], payload.Ref, logger))
+        {
+            logger.LogDebug("Webhook skipped pipeline {PipelineId}: ref '{Ref}' does not match its branch filter",
+                pipeline.Id, payload.Ref);
             return false;
         }
-
-        if (!SafeRepoUrlRegex().IsMatch(payload.RepositoryUrl)
-            || (payload.Ref.Length > 0 && !SafeGitRefRegex().IsMatch(payload.Ref)))
+        var variables = new Dictionary<string, string>
         {
-            logger.LogWarning("Webhook rejected: repository URL or ref contains characters outside the allowed git shapes.");
+            ["WEBHOOK_REF"] = payload.Ref,
+            ["WEBHOOK_REPO"] = payload.RepositoryUrl
+        };
+        using var pipelineLock = await PipelineTriggerLocks.AcquireAsync(pipeline.Id, ct).ConfigureAwait(false);
+        Task<bool> ReplaceAsync() => ReplaceRunAsync(pipeline, definition, variables, ct);
+        return transaction is { IsRelational: true }
+            ? await transaction.ExecuteInTransactionAsync(ReplaceAsync, ct).ConfigureAwait(false)
+            : await ReplaceAsync().ConfigureAwait(false);
+    }
+
+    private async Task<string> ReadAuthoritativeYamlAsync(Pipeline pipeline, CancellationToken ct)
+    {
+        if (pipelineGitService is null || pipeline.ProjectId is not { } projectId)
+            return pipeline.YamlDefinition;
+        var gitYaml = await pipelineGitService.ReadProjectPipelineYamlAsync(
+            projectId, pipeline.Name, ct, pipeline.SourceBranch, pipeline.SourceRepositoryId).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(gitYaml) ? pipeline.YamlDefinition : gitYaml;
+    }
+
+    private bool HasValidBranchFilter(
+        Pipeline pipeline, string yaml, PipelineYamlDefinition? definition)
+    {
+        if (!PipelineBranchFilter.DeclaresFilter(yaml)
+            || definition is not null && (definition.Branches ?? []).Any(branch => !string.IsNullOrWhiteSpace(branch)))
+            return true;
+        logger.LogWarning(
+            "Webhook skipped pipeline {PipelineId}: YAML declares a branches filter but contains no recoverable branch patterns; failing closed instead of matching every branch",
+            pipeline.Id);
+        return false;
+    }
+
+    private async Task<bool> ReplaceRunAsync(
+        Pipeline pipeline,
+        PipelineYamlDefinition? definition,
+        Dictionary<string, string> variables,
+        CancellationToken ct)
+    {
+        if (transaction is { IsRelational: true }
+            && !await pipelineRepo.LockPipelineForWebhookAsync(pipeline.Id, ct).ConfigureAwait(false))
             return false;
-        }
-
-        // Find pipelines with webhook trigger matching this repository
-        var webhookPipelines = await pipelineRepo.GetWebhookTriggeredPipelinesWithProjectAsync(ct).ConfigureAwait(false);
-
-        var triggered = false;
-
-        foreach (var pipeline in webhookPipelines)
-        {
-            // Match the incoming repo URL against the project's internal repo URL OR, for an
-            // External-Git project, against its reconstructed external remote (RepositoryUrl then
-            // holds the internal mirror URL, which never equals the external webhook URL).
-            if (!MatchesRepository(pipeline, payload.RepositoryUrl)) continue;
-
-            // Optional branch filter: a pipeline whose YAML declares `branches:` only fires when the
-            // pushed ref matches one of the patterns. No filter => any branch (backward-compatible).
-            var authoritativeYaml = pipeline.YamlDefinition;
-            if (pipelineGitService is not null && pipeline.ProjectId is { } projectId)
-            {
-                var gitYaml = await pipelineGitService.ReadProjectPipelineYamlAsync(
-                        projectId, pipeline.Name, ct, pipeline.SourceBranch)
-                    .ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(gitYaml))
-                    authoritativeYaml = gitYaml;
-            }
-
-            var definition = YamlParsingHelper.ParseAndValidate(authoritativeYaml, logger);
-            if (definition is null && PipelineBranchFilter.DeclaresFilter(authoritativeYaml))
-            {
-                // Fail-closed: the stored YAML declares a branches: filter but can no longer be parsed
-                // to recover the patterns. Falling back to an empty filter here would match on EVERY
-                // branch - the opposite of the author's declared intent - so skip instead.
-                logger.LogWarning(
-                    "Webhook skipped pipeline {PipelineId}: YAML declares a branches filter but failed to parse; failing closed instead of matching every branch",
-                    pipeline.Id);
-                continue;
-            }
-
-            var branches = definition?.Branches ?? [];
-            if (!PipelineBranchFilter.Matches(branches, payload.Ref, logger))
-            {
-                logger.LogDebug("Webhook skipped pipeline {PipelineId}: ref '{Ref}' does not match its branch filter",
-                    pipeline.Id, payload.Ref);
-                continue;
-            }
-
-            // Check if there's already a running run
-            var hasActiveRun = await pipelineRepo.HasActiveRunAsync(pipeline.Id, ct).ConfigureAwait(false);
-
-            if (hasActiveRun) continue;
-
-            logger.LogInformation("Webhook triggering pipeline {PipelineId} ({PipelineName})",
-                pipeline.Id, pipeline.Name);
-
-            var variables = new Dictionary<string, string>
-            {
-                ["WEBHOOK_REF"] = payload.Ref,
-                ["WEBHOOK_REPO"] = payload.RepositoryUrl
-            };
-
-            // F-EXEC-1b: no caller principal - TriggerAutomatedRunAsync authorizes the pipeline
-            // owner and fail-closes (returns null) if the pipeline is unowned or the owner lacks
-            // Server.Admin on a target.
-            await runService.TriggerAutomatedRunAsync(pipeline.Id, "Webhook", variables, ct).ConfigureAwait(false);
-            triggered = true;
-        }
-
-        return triggered || !string.IsNullOrEmpty(secret);
+        var hasActiveRun = await pipelineRepo.HasActiveRunAsync(pipeline.Id, ct).ConfigureAwait(false);
+        if (hasActiveRun && definition?.SupersedeRunning != true) return false;
+        if (!hasActiveRun)
+            return await runService.TriggerAutomatedRunAsync(
+                pipeline.Id, "Webhook", variables, ct).ConfigureAwait(false) is not null;
+        var preparation = await runService.PrepareAutomatedRunAsync(
+            pipeline.Id, "Webhook", variables, ct).ConfigureAwait(false);
+        if (preparation is null) return false;
+        var activeRunIds = await pipelineRepo.GetActiveRunIdsAsync(pipeline.Id, ct).ConfigureAwait(false);
+        foreach (var activeRunId in activeRunIds)
+            await runService.CancelRunAsync(activeRunId, ct).ConfigureAwait(false);
+        logger.LogInformation(
+            "Webhook latest-wins requested cancellation of {Count} superseded run(s) for pipeline {PipelineId}",
+            activeRunIds.Count, pipeline.Id);
+        logger.LogInformation("Webhook triggering pipeline {PipelineId} ({PipelineName})", pipeline.Id, pipeline.Name);
+        var replacement = await runService.TriggerPreparedRunAsync(
+            preparation, variables, ct: ct).ConfigureAwait(false);
+        return replacement is not null
+            ? true
+            : throw new ConflictException($"Webhook replacement for pipeline {pipeline.Id} could not be persisted.");
     }
 
     // External-Git webhooks: a mirror-backed project's RepositoryUrl is the internal mirror URL, so
@@ -176,33 +190,29 @@ public partial class PipelineWebhookService(
         {
             using var doc = JsonDocument.Parse(rawBody);
             var root = doc.RootElement;
-
-            // GitHub format
-            if (root.TryGetProperty("repository", out var repo))
-            {
-                var repoUrl = repo.TryGetProperty("html_url", out var url) ? url.GetString() ?? ""
-                            : repo.TryGetProperty("clone_url", out var clone) ? clone.GetString() ?? "" : "";
-                var refVal = root.TryGetProperty("ref", out var r) ? r.GetString() ?? "" : "";
-                if (!string.IsNullOrEmpty(repoUrl))
-                    return new WebhookInfo(repoUrl, refVal);
-            }
-
-            // GitLab format
-            if (root.TryGetProperty("project", out var project))
-            {
-                var repoUrl = project.TryGetProperty("web_url", out var url) ? url.GetString() ?? ""
-                            : project.TryGetProperty("git_http_url", out var git) ? git.GetString() ?? "" : "";
-                var refVal = root.TryGetProperty("ref", out var r) ? r.GetString() ?? "" : "";
-                if (!string.IsNullOrEmpty(repoUrl))
-                    return new WebhookInfo(repoUrl, refVal);
-            }
-
-            return null;
+            return TryReadWebhook(root, "repository", "html_url", "clone_url")
+                   ?? TryReadWebhook(root, "project", "web_url", "git_http_url");
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    private static WebhookInfo? TryReadWebhook(
+        JsonElement root, string ownerProperty, string primaryUrlProperty, string fallbackUrlProperty)
+    {
+        if (!root.TryGetProperty(ownerProperty, out var owner)) return null;
+        var repositoryUrl = owner.TryGetProperty(primaryUrlProperty, out var primaryUrl)
+            ? primaryUrl.GetString() ?? string.Empty
+            : owner.TryGetProperty(fallbackUrlProperty, out var fallbackUrl)
+                ? fallbackUrl.GetString() ?? string.Empty
+                : string.Empty;
+        if (string.IsNullOrEmpty(repositoryUrl)) return null;
+        var reference = root.TryGetProperty("ref", out var refValue)
+            ? refValue.GetString() ?? string.Empty
+            : string.Empty;
+        return new WebhookInfo(repositoryUrl, reference);
     }
 
     private sealed record WebhookInfo(string RepositoryUrl, string Ref);

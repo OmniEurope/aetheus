@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Pages.Shared;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -16,7 +12,7 @@ internal sealed class PipelineYamlEditorCoordinator(
 {
     public async Task<bool> ValidateAsync(string yaml, MonacoEditor? editor)
     {
-        var valid = await api.ValidatePipelineYamlAsync(yaml) is not null;
+        var valid = await api.Packages.ValidatePipelineYamlAsync(yaml) is not null;
         if (editor is null) return valid;
         if (valid)
         {
@@ -35,9 +31,9 @@ internal sealed class PipelineYamlEditorCoordinator(
     public async Task<(List<string> ServerNames, List<string> LibraryNames, List<string> VaultNames)>
         LoadSuggestionsAsync(int? projectId, MonacoEditor? editor)
     {
-        var libraryNamesTask = api.GetVariableLibraryNamesAsync(projectId);
-        var vaultNamesTask = api.GetVaultNamesAsync(projectId);
-        var serverNamesTask = api.GetServerNamesAsync();
+        var libraryNamesTask = api.Variables.GetVariableLibraryNamesAsync(projectId);
+        var vaultNamesTask = api.Variables.GetVaultNamesAsync(projectId);
+        var serverNamesTask = api.Servers.GetServerNamesAsync();
         var variableKeysTask = LoadVariableKeysAsync(projectId);
         await Task.WhenAll(libraryNamesTask, vaultNamesTask, serverNamesTask, variableKeysTask);
 
@@ -61,7 +57,7 @@ internal sealed class PipelineYamlEditorCoordinator(
         var keys = new List<string>();
         for (var page = 1; ; page++)
         {
-            var result = await api.GetVariableSuggestionKeysAsync(page, pageSize, projectId);
+            var result = await api.Variables.GetVariableSuggestionKeysAsync(page, pageSize, projectId);
             keys.AddRange(result.Items);
             if (keys.Count >= result.TotalCount || result.Items.Count == 0) return keys;
         }

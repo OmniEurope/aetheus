@@ -1,0 +1,14 @@
+package com.aetheus.toto;
+
+public final class TodoTitle {
+    private TodoTitle() {
+    }
+
+    public static String normalize(String value) {
+        var normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("A todo title is required.");
+        }
+        return normalized;
+    }
+}

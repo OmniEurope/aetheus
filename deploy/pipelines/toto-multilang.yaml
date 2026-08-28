@@ -1,0 +1,186 @@
+# Toto multilangage: every application SDK comes from the repository lock manifest.
+name: toto-multilang
+trigger: manual
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_FUND: "false"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+stages:
+  - name: DotnetRestore
+    group: Build
+    execution_role: build
+    os: linux
+    isolation:
+      mode: container
+      toolchain: dotnet
+      network: bridge
+    steps:
+      - name: Restore .NET dependencies
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        shell: dotnet restore Toto.slnx --verbosity minimal
+        timeout_seconds: 900
+
+  - name: DotnetTest
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [DotnetRestore]
+    isolation:
+      mode: container
+      toolchain: dotnet
+      network: none
+    artifacts:
+      - "artifacts/dotnet/*.trx"
+    steps:
+      - name: Build and test .NET offline
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          mkdir -p artifacts/dotnet
+          dotnet build Toto.slnx --configuration Release --no-restore --verbosity minimal
+          dotnet test Toto.slnx --configuration Release --no-build --verbosity minimal \
+            --logger "trx;LogFileName=toto-dotnet.trx" \
+            --results-directory artifacts/dotnet
+        timeout_seconds: 900
+
+  - name: AngularRestore
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [DotnetTest]
+    isolation:
+      mode: container
+      toolchain: node
+      network: bridge
+    steps:
+      - name: Restore Angular dependencies from lockfile
+        working_directory: "$(WORKSPACE)/toolchains/node"
+        shell: npm ci --ignore-scripts --no-audit --no-fund
+        timeout_seconds: 900
+
+  - name: AngularTest
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [AngularRestore]
+    isolation:
+      mode: container
+      toolchain: node
+      network: none
+    artifacts:
+      - "toolchains/node/artifacts/node-unit.xml"
+      - "toolchains/node/dist/**"
+    steps:
+      - name: Build and unit-test Angular offline
+        working_directory: "$(WORKSPACE)/toolchains/node"
+        shell: |
+          set -eu
+          mkdir -p artifacts
+          npm run build
+          node --test --test-reporter=junit tests/*.test.mjs > artifacts/node-unit.xml
+          test -s dist/toto-angular/browser/index.html
+        timeout_seconds: 900
+
+  - name: AngularE2E
+    group: Test
+    execution_role: build
+    os: linux
+    depends_on: [AngularTest]
+    isolation:
+      mode: container
+      image: "mcr.microsoft.com/playwright:v1.61.0-noble@sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a"
+      shell: bash
+      network: none
+    artifacts:
+      - "toolchains/node/artifacts/playwright.xml"
+      - "toolchains/node/test-results/**"
+    steps:
+      - name: Exercise Angular in Chromium
+        working_directory: "$(WORKSPACE)/toolchains/node"
+        shell: |
+          set -eu
+          mkdir -p artifacts
+          npx --no-install playwright test
+        timeout_seconds: 900
+
+  - name: JavaRestore
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [AngularE2E]
+    isolation:
+      mode: container
+      toolchain: java
+      network: bridge
+    steps:
+      - name: Restore Maven Wrapper and dependencies
+        working_directory: "$(WORKSPACE)/toolchains/java"
+        shell: |
+          set -eu
+          sh ./mvnw --batch-mode --no-transfer-progress dependency:go-offline
+          sh ./mvnw --batch-mode --no-transfer-progress dependency:get \
+            -Dartifact=org.apache.maven.surefire:surefire-junit-platform:3.5.3
+          sh ./mvnw --batch-mode --no-transfer-progress dependency:get \
+            -Dartifact=org.junit.platform:junit-platform-launcher:1.13.4
+        timeout_seconds: 900
+
+  - name: JavaTest
+    group: Test
+    execution_role: build
+    os: linux
+    depends_on: [JavaRestore]
+    isolation:
+      mode: container
+      toolchain: java
+      network: none
+    artifacts:
+      - "toolchains/java/target/surefire-reports/*.xml"
+      - "toolchains/java/target/toto-java-1.0.0.jar"
+    steps:
+      - name: Build, test and package Java offline
+        working_directory: "$(WORKSPACE)/toolchains/java"
+        shell: sh ./mvnw --offline --batch-mode --no-transfer-progress package
+        timeout_seconds: 900
+
+  - name: PythonRestore
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [JavaTest]
+    isolation:
+      mode: container
+      toolchain: python
+      network: bridge
+    steps:
+      - name: Restore Python requirements from lockfile
+        working_directory: "$(WORKSPACE)/toolchains/python"
+        shell: python -m pip install --require-hashes --requirement requirements.lock
+        timeout_seconds: 300
+
+  - name: PythonTest
+    group: Test
+    execution_role: build
+    os: linux
+    depends_on: [PythonRestore]
+    isolation:
+      mode: container
+      toolchain: python
+      network: none
+    artifacts:
+      - "toolchains/python/artifacts/python-tests.txt"
+      - "toolchains/python/artifacts/toto-python.zip"
+    steps:
+      - name: Test and package Python offline
+        working_directory: "$(WORKSPACE)/toolchains/python"
+        shell: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python -m compileall -q toto_math.py tests
+          python -m unittest discover -s tests -v 2>&1 | tee artifacts/python-tests.txt
+          python -m zipfile -c artifacts/toto-python.zip toto_math.py pyproject.toml
+          test -s artifacts/toto-python.zip
+        timeout_seconds: 300

@@ -12,12 +12,15 @@ public interface IGitRepository
     Task RemoveConnectionAsync(GitConnection connection, CancellationToken ct = default);
     Task<(List<PullRequest> Items, int TotalCount)> GetPullRequestsPagedAsync(
         int gitConnectionId, string? search, int page, int pageSize,
-        Aetheus.Shared.Enums.PullRequestStatus? status = null, CancellationToken ct = default);
+        Aetheus.Shared.Enums.PullRequestStatus? status = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true);
     Task<PullRequest?> FindPullRequestByExternalIdAsync(int gitConnectionId, int externalId, CancellationToken ct = default);
     Task AddPullRequestAsync(PullRequest pr, CancellationToken ct = default);
     Task<List<BranchPolicy>> GetBranchPoliciesAsync(int gitConnectionId, CancellationToken ct = default);
     Task<BranchPolicy?> FindBranchPolicyAsync(int id, CancellationToken ct = default);
     Task AddBranchPolicyAsync(BranchPolicy policy, CancellationToken ct = default);
     Task RemoveBranchPolicyAsync(BranchPolicy policy, CancellationToken ct = default);
+    /// <summary>Own-read over PipelineRun; see the implementation for why it lives here.</summary>
+    Task<int?> GetRunProjectIdAsync(int pipelineRunId, CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
 }

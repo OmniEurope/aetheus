@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Shared.DTOs;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Pipelines;
 

@@ -18,15 +18,15 @@
         }
         else
         {
-            <RadzenButton Icon="download" Text="@L["Install"]" Size="ButtonSize.Small" Click="@(() => FireBulkAsync("Install"))" Disabled="@(!ServerOnline || (!CanManagePackages && !CanInstallTeamspeak))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            <RadzenButton Icon="download" Text="@L["Install"]" Size="ButtonSize.Small" Click="@(() => FireBulkAsync("Install"))" Disabled="@(!ServerOnline || (!CanManagePackages && !CanInstallTeamspeak))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         }
         <RadzenButton Icon="clear" Text="@L["ClearSelection"]" Size="ButtonSize.Small" Click="@ClearSelection" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
     </RadzenStack>
 }
 
-<RadzenDataGrid Data="@Services" TItem="ServiceInfoDto" Density="Density.Compact" AllowAlternatingRows="true"
+<RadzenDataGrid Responsive="false" Data="@Services" TItem="ServiceInfoDto" Density="Density.Compact" AllowAlternatingRows="true"
     RowRender="@OnRowRenderInternal" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-    AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+    AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
     <Columns>
         <RadzenDataGridColumn TItem="ServiceInfoDto" Width="46px" Sortable="false" Filterable="false">
             <HeaderTemplate>
@@ -40,13 +40,22 @@
             <Template Context="svc">
                 @if (Installed && ShowModuleLink)
                 {
-                    <RadzenButton Text="@svc.Name" Size="ButtonSize.Small"
-                        Icon="open_in_new" Click="@(() => OnOpenModule.InvokeAsync(svc.Name))" title="@L["OpenModule"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                        <span>@svc.Name</span>
+                        <RadzenButton Text="@svc.Name" Size="ButtonSize.ExtraSmall"
+                            Icon="open_in_new" Click="@(() => OnOpenModule.InvokeAsync(svc.Name))"
+                            title="@($"{L["OpenModule"]}: {svc.Name}")" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                    </RadzenStack>
                 }
                 else if (Installed)
                 {
-                    <RadzenButton Text="@svc.Name" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
-                        Click="@(() => OnLogs.InvokeAsync(svc.Name))" title="@L["ViewLogs"]" />
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                        <span>@svc.Name</span>
+                        <RadzenButton Text="@svc.Name" Icon="article" Variant="Variant.Filled"
+                            ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall"
+                            Click="@(() => OnLogs.InvokeAsync(svc.Name))"
+                            title="@($"{L["ViewLogs"]}: {svc.Name}")" />
+                    </RadzenStack>
                 }
                 else
                 {
@@ -88,7 +97,7 @@
                         }
                         <RadzenButton Icon="restart_alt" Size="ButtonSize.ExtraSmall" Click="@(() => OnRestart.InvokeAsync(svc.Name))"
                             IsBusy="@(BusyService == svc.Name)" Disabled="@(!ServerOnline)" title="@ActionTitle(L["Restart"].Value)" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
-                        <RadzenButton Icon="article" Size="ButtonSize.ExtraSmall" Click="@(() => OnLogs.InvokeAsync(svc.Name))" title="@L["ViewLogs"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        <RadzenButton Icon="article" Size="ButtonSize.ExtraSmall" Click="@(() => OnLogs.InvokeAsync(svc.Name))" title="@L["ViewLogs"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                         <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => OnUninstall.InvokeAsync(svc.Name))"
                             IsBusy="@(BusyService == svc.Name)" Disabled="@(!ServerOnline || !CanManagePackages)"
                             title="@(!ServerOnline ? L["AgentOfflineActionBlocked"].Value : CanManagePackages ? L["Uninstall"].Value : L["ServiceInstallCapabilityDisabled"].Value)" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
@@ -98,7 +107,7 @@
                 {
                     <RadzenButton Icon="download" Size="ButtonSize.ExtraSmall" Click="@(() => OnInstall.InvokeAsync(svc.Name))"
                         IsBusy="@(BusyService == svc.Name)" Disabled="@(!ServerOnline || !CanInstall(svc.Name))"
-                        title="@(!ServerOnline ? L["AgentOfflineActionBlocked"].Value : InstallTitle(svc.Name))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        title="@(!ServerOnline ? L["AgentOfflineActionBlocked"].Value : InstallTitle(svc.Name))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 }
             </Template>
         </RadzenDataGridColumn>

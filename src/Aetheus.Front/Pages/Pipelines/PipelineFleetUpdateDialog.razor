@@ -1,8 +1,9 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineFleetUpdateBase
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else if (_preview is not null)
 {
@@ -27,7 +28,7 @@ else if (_preview is not null)
         <DialogFooter OnCancel="@Cancel">
             <RadzenButton Text="@L["ConfirmUpdate"]" Icon="system_update_alt" Click="@ConfirmAsync"
                           IsBusy="@_saving" Disabled="@(_saving || (_preview.RequiresOrphanAcknowledgement && !_acknowledged))"
-                          ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                          ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         </DialogFooter>
     </RadzenStack>
 }

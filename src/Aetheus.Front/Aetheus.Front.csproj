@@ -22,31 +22,40 @@
     <PublishTrimmed>true</PublishTrimmed>
     <!-- PRM001 (TimeProvider) is a false positive in WASM: the client runs in the browser
          where DateTime.Now IS the correct local clock — there is no DI-injectable system
-         clock to inject. Frontend elapsed-time math therefore uses DateTime.Now. -->
+         clock to inject. See CLAUDE.md: "use DateTime.Now for elapsed-time math in front code". -->
     <NoWarn>$(NoWarn);PRM001</NoWarn>
   </PropertyGroup>
 
   <Target Name="PinBrowserRuntimePacks" BeforeTargets="ProcessFrameworkReferences">
     <ItemGroup>
-      <!-- Workload manifests are machine-global and may drift ahead of global.json. Pin only the
-           browser packs to the production runtime patch; the SDK-bundled linker must keep using
-           its own runtime-compatible version. -->
+      <!-- Workload manifests are machine-global and may drift ahead of global.json, so every pack
+           whose version reaches packages.lock.json has to be pinned by the repository instead of
+           by whatever the build machine happens to have installed.
+           The linker is pinned too, but to the SDK's own runtime rather than the production one:
+           it is a build tool that runs on the SDK image's shared framework. Left implicit, its
+           version came from machine-global workload manifests and leaked into packages.lock.json,
+           so a machine with a newer manifest wrote 10.0.11 while a clean agent resolved 10.0.6 and
+           failed locked-mode restore with NU1004. Pinning it to the production runtime instead is
+           equally wrong: the SDK image has no such runtime and publish dies with NETSDK1144. -->
       <KnownWebAssemblySdkPack Update="Microsoft.NET.Sdk.WebAssembly.Pack"
                                WebAssemblySdkPackVersion="$(AetheusRuntimeImageVersion)" />
       <KnownAspNetCorePack Update="Microsoft.AspNetCore.App.Internal.Assets"
                            AspNetCorePackVersion="$(AetheusRuntimeImageVersion)" />
+      <KnownILLinkPack Update="Microsoft.NET.ILLink.Tasks"
+                       ILLinkPackVersion="$(AetheusLinkerPackVersion)" />
     </ItemGroup>
   </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Aetheus.Front.Tests" />
+    <StaticWebAssetFingerprintPattern Include="AetheusCss"
+                                      Pattern="css/*.css"
+                                      Expression="#[.{fingerprint}]!" />
   </ItemGroup>
 
-  <!-- S-TECH-18: Feed .razor files to PRM002 (NoInlineCodeBlock) via AdditionalFiles -->
   <ItemGroup>
     <ProjectReference Include="..\Aetheus.Analyzers\Aetheus.Analyzers.csproj"
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <AdditionalFiles Include="**\*.razor" />
   </ItemGroup>
 
   <ItemGroup>

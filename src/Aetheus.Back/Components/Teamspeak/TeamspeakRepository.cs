@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Teamspeak;
 
@@ -104,9 +102,6 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
         return (items, total);
     }
 
-    public async Task AddTaskAsync(ServerTask task, CancellationToken ct = default)
-    {
-        db.Tasks.Add(task);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+    public Task AddTaskAsync(ServerTask task, CancellationToken ct = default) =>
+        ServerTaskRepositoryOperations.AddTaskAsync(db, task, ct);
 }

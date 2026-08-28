@@ -121,7 +121,7 @@ public class AgentUpdateProgressCardTests
     // === HandleHeartbeat ===
 
     [Fact]
-    public void HandleHeartbeat_NotInUpdatePhase_DoesNothing()
+    public void HandleHeartbeat_NotInUpdatePhase_LeavesItNull()
     {
         var instance = CreateInstance();
         SetField(instance, "_phase", null);
@@ -132,29 +132,28 @@ public class AgentUpdateProgressCardTests
     }
 
     [Fact]
-    public void HandleHeartbeat_SameVersion_StillTransitionsToDone()
+    public void HandleHeartbeat_SameVersion_DoesNotConfirmUpdate()
     {
         var instance = CreateInstance();
         SetField(instance, "_phase", AgentUpdatePhase.AgentOffline);
-        SetField(instance, "_versionAtLaunch", "1.0.0");
 
-        try { instance.HandleHeartbeat("1.0.0"); }
-        catch (InvalidOperationException) { }
+        instance.HandleHeartbeat("1.0.0");
 
-        Assert.Equal(AgentUpdatePhase.Done, GetField<AgentUpdatePhase?>(instance, "_phase"));
+        Assert.Equal(AgentUpdatePhase.AgentOffline, GetField<AgentUpdatePhase?>(instance, "_phase"));
     }
 
     [Fact]
-    public void HandleHeartbeat_NullVersionAtLaunch_StillTransitionsToDone()
+    public void HandleConfirmed_TransitionsToDone()
     {
         var instance = CreateInstance();
         SetField(instance, "_phase", AgentUpdatePhase.AgentOffline);
-        SetField(instance, "_versionAtLaunch", null);
 
-        try { instance.HandleHeartbeat("2.0.0"); }
+        try { instance.HandleConfirmed(42, "2.0.0"); }
         catch (InvalidOperationException) { }
 
         Assert.Equal(AgentUpdatePhase.Done, GetField<AgentUpdatePhase?>(instance, "_phase"));
+        Assert.Equal(100, GetField<int>(instance, "_percent"));
+        Assert.Equal(42, GetField<int?>(instance, "_requestId"));
     }
 
     // === DisposeAsync ===

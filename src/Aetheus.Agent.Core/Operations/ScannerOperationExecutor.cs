@@ -1,0 +1,595 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
+using System.Globalization;
+using System.IO.Compression;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using static Aetheus.Agent.Core.Operations.ScannerOperationSupport;
+
+namespace Aetheus.Agent.Core.Operations;
+
+public sealed class ScannerOperationExecutor(
+    IServerApiClient apiClient,
+    IHttpClientFactory httpClientFactory,
+    IOptions<AetheusAgentOptions> options,
+    IScannerProcessRunner processRunner,
+    ScannerSourceProjectionManager sourceProjectionManager,
+    TimeProvider timeProvider,
+    ILogger<ScannerOperationExecutor> logger) : IOperationExecutor
+{
+    private readonly AetheusAgentOptions _options = options.Value;
+    private readonly ScannerReportPublisher _reportPublisher = new(apiClient, timeProvider);
+    public bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineRunScanner;
+    public Task<ExecutorResult> ExecuteAsync(
+        OperationKind kind,
+        string target,
+        int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
+
+    public async Task<ExecutorResult> ExecuteAsync(
+        OperationKind kind,
+        string target,
+        IReadOnlyDictionary<string, string> envVars,
+        int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken cancellationToken)
+    {
+        if (kind != OperationKind.PipelineRunScanner) return new ExecutorResult(-1, false);
+        var scanner = ScannerManifestCatalog.Find(target);
+        if (scanner is null)
+        {
+            await onOutput("Scanner refused: key is absent from the immutable manifest.", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
+        if (!TryPositiveInt(envVars, "AETHEUS_RUN_ID", out var runId))
+        {
+            await onOutput("Scanner refused: pipeline run identity is missing.", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
+
+        timeoutSeconds = Math.Max(1, timeoutSeconds);
+        var startedAt = timeProvider.GetUtcNow().UtcDateTime;
+        using var operationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        operationTimeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        var operationToken = operationTimeout.Token;
+        var scanRoot = Path.Combine(_options.WorkDirectory, "scans", $"{runId}-{scanner.Key}-{Guid.NewGuid():N}");
+        var outputDirectory = Path.Combine(scanRoot, "output");
+        Directory.CreateDirectory(outputDirectory);
+        ScannerFileSecurity.TrySetOwnerOnly(scanRoot);
+        ScannerFileSecurity.TrySetOwnerOnly(outputDirectory);
+        var resources = new ScannerExecutionResources();
+        var invocation = new ScanInvocation(
+            scanner, runId, envVars, timeoutSeconds, startedAt, scanRoot, outputDirectory, onOutput, operationToken);
+
+        try
+        {
+            return await ExecuteScanCoreAsync(invocation, resources).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            EnsureOperationTimedOut(cancellationToken, operationTimeout);
+            return await _reportPublisher.PublishFailureAsync(
+                scanner,
+                runId,
+                envVars,
+                startedAt,
+                AnalysisReportStatus.TimedOut,
+                $"Scanner timed out after {timeoutSeconds} seconds including resource admission and preparation.",
+                onOutput,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await CleanupAsync(
+                    runId, scanRoot, resources.SourceProjection, resources.Egress, onOutput).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (resources.ResourceReservation is not null)
+                    await resources.ResourceReservation.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<ExecutorResult> ExecuteScanCoreAsync(
+        ScanInvocation invocation,
+        ScannerExecutionResources resources)
+    {
+        await AcquireResourceBudgetAsync(invocation, resources).ConfigureAwait(false);
+        var configuredSourceDirectory = ScannerOperationSupport.ResolveSourceDirectory(
+            _options.WorkDirectory, invocation.RunId, invocation.Environment);
+        var workspaceFailure = await ValidateWorkspaceAsync(
+            invocation.Scanner, configuredSourceDirectory, invocation.RunId, invocation.Environment,
+            invocation.StartedAt, invocation.OnOutput, invocation.CancellationToken).ConfigureAwait(false);
+        if (workspaceFailure is not null) return workspaceFailure;
+
+        var effectiveEnvironment = await GitleaksHistoryModeResolver.ResolveEnvironmentAsync(
+            invocation.Scanner, configuredSourceDirectory, invocation.Environment,
+            invocation.OnOutput, invocation.CancellationToken).ConfigureAwait(false);
+        var sourceDirectory = await AcquireSourceProjectionAsync(
+            invocation, configuredSourceDirectory, resources).ConfigureAwait(false);
+        var scannerVersion = ScannerOperationValidator.ResolveScannerVersion(invocation.Scanner, sourceDirectory);
+        if (scannerVersion is null)
+            return await FailAsync(invocation, AnalysisReportStatus.Unavailable,
+                $"Scanner is unavailable: project package '{invocation.Scanner.VersionPackage}' is not present in the immutable dependency lock.")
+                .ConfigureAwait(false);
+        if (!ScannerOperationValidator.ValidateDastTarget(
+                invocation.Scanner, invocation.Environment, timeProvider, out var dastError))
+            return await FailAsync(invocation, AnalysisReportStatus.Error, dastError).ConfigureAwait(false);
+        if (!await ValidateImageAssociationAsync(
+                invocation.Scanner, sourceDirectory, invocation.Environment, invocation.CancellationToken).ConfigureAwait(false))
+            return await FailAsync(invocation, AnalysisReportStatus.Error,
+                "Built-artifact analysis refused: archive revision does not match the pipeline source commit.").ConfigureAwait(false);
+
+        resources.Egress = await RestrictedScannerEgress.StartAsync(
+            invocation.Scanner, invocation.Environment, processRunner,
+            invocation.OnOutput, invocation.CancellationToken).ConfigureAwait(false);
+        var cacheDirectory = PrepareScannerCache(invocation.Scanner);
+        var reportPath = Path.GetFullPath(Path.Combine(invocation.OutputDirectory, invocation.Scanner.ReportPath));
+        if (!IsChildPath(invocation.OutputDirectory, reportPath))
+            return await FailAsync(invocation, AnalysisReportStatus.Error,
+                "Scanner manifest report path escapes its output directory.").ConfigureAwait(false);
+
+        var rulesDirectory = await ExtractEmbeddedRulesAsync(
+            invocation.Scanner, invocation.ScanRoot, invocation.CancellationToken).ConfigureAwait(false);
+        var trustedHarnessPath = await ScannerContainerProcessBuilder.ExtractEmbeddedHarnessAsync(
+            invocation.Scanner, invocation.ScanRoot, invocation.CancellationToken).ConfigureAwait(false);
+        var process = await CreateScannerProcessAsync(
+            invocation, sourceDirectory, reportPath, rulesDirectory, cacheDirectory,
+            trustedHarnessPath, effectiveEnvironment, resources.Egress).ConfigureAwait(false);
+        return process.Failure ?? await RunAndPublishAsync(
+            invocation, process.Process!, sourceDirectory, reportPath, rulesDirectory,
+            cacheDirectory, scannerVersion, effectiveEnvironment).ConfigureAwait(false);
+    }
+
+    private async Task AcquireResourceBudgetAsync(
+        ScanInvocation invocation,
+        ScannerExecutionResources resources)
+    {
+        await invocation.OnOutput(
+            $"Scanner resource request: memory={invocation.Scanner.Memory}, cpus={invocation.Scanner.Cpus}; " +
+            "candidate budget=6.5GiB/7CPU, at most one heavy scanner.",
+            TaskLogLevel.Info).ConfigureAwait(false);
+        var timer = Stopwatch.StartNew();
+        resources.ResourceReservation = await ScannerResourceBudget.Shared.AcquireAsync(
+            invocation.Scanner, invocation.CancellationToken).ConfigureAwait(false);
+        timer.Stop();
+        await invocation.OnOutput(
+            "##aetheus[pipelinemetric key=scanner.budget.wait;type=Duration;unit=s]" +
+            timer.Elapsed.TotalSeconds.ToString("0.######", CultureInfo.InvariantCulture),
+            TaskLogLevel.Info).ConfigureAwait(false);
+        await invocation.OnOutput(
+            $"Scanner resource budget admitted {invocation.Scanner.Key} after {timer.Elapsed.TotalSeconds:0.###}s.",
+            TaskLogLevel.Info).ConfigureAwait(false);
+    }
+
+    private async Task<string> AcquireSourceProjectionAsync(
+        ScanInvocation invocation,
+        string configuredSourceDirectory,
+        ScannerExecutionResources resources)
+    {
+        var timer = Stopwatch.StartNew();
+        resources.SourceProjection = await sourceProjectionManager.AcquireAsync(
+            invocation.RunId,
+            configuredSourceDirectory,
+            _options.WorkDirectory,
+            !string.IsNullOrWhiteSpace(invocation.Scanner.VersionPackage),
+            invocation.CancellationToken).ConfigureAwait(false);
+        timer.Stop();
+        await invocation.OnOutput(
+            "##aetheus[pipelinemetric key=scanner.projection;type=Duration;unit=s]" +
+            timer.Elapsed.TotalSeconds.ToString("0.######", CultureInfo.InvariantCulture),
+            TaskLogLevel.Info).ConfigureAwait(false);
+        return resources.SourceProjection.SourceDirectory;
+    }
+
+    private async Task<ProcessCreation> CreateScannerProcessAsync(
+        ScanInvocation invocation,
+        string sourceDirectory,
+        string reportPath,
+        string? rulesDirectory,
+        string? cacheDirectory,
+        string? trustedHarnessPath,
+        IReadOnlyDictionary<string, string> effectiveEnvironment,
+        RestrictedScannerEgress? egress)
+    {
+        try
+        {
+            var process = string.Equals(invocation.Scanner.Execution, "container", StringComparison.Ordinal)
+                ? ScannerContainerProcessBuilder.Build(
+                    invocation.Scanner, sourceDirectory, invocation.OutputDirectory, cacheDirectory,
+                    trustedHarnessPath, effectiveEnvironment, egress)
+                : await BuildBinaryProcessAsync(
+                    invocation.Scanner, sourceDirectory, reportPath, rulesDirectory,
+                    invocation.CancellationToken).ConfigureAwait(false);
+            return new ProcessCreation(process, null);
+        }
+        catch (HttpRequestException ex)
+        {
+            return await ScannerUnavailableAsync(invocation, ex).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
+        {
+            return await ScannerUnavailableAsync(invocation, ex).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<ProcessCreation> ScannerUnavailableAsync(ScanInvocation invocation, Exception exception)
+    {
+        logger.LogWarning(exception, "Scanner {ScannerKey} is unavailable", invocation.Scanner.Key);
+        var failure = await FailAsync(
+            invocation, AnalysisReportStatus.Unavailable, GetScannerUnavailableMessage(exception)).ConfigureAwait(false);
+        return new ProcessCreation(null, failure);
+    }
+
+    private async Task<ExecutorResult> RunAndPublishAsync(
+        ScanInvocation invocation,
+        ProcessStartInfo process,
+        string sourceDirectory,
+        string reportPath,
+        string? rulesDirectory,
+        string? cacheDirectory,
+        string scannerVersion,
+        IReadOnlyDictionary<string, string> effectiveEnvironment)
+    {
+        await invocation.OnOutput(
+            $"Scanner {invocation.Scanner.Name} {scannerVersion} started ({invocation.Scanner.Execution}, network={invocation.Scanner.Network}).",
+            TaskLogLevel.Info).ConfigureAwait(false);
+        var executionRunner = new ScannerProcessExecutionRunner(processRunner, timeProvider);
+        var (result, outputQuotaExceeded) = await executionRunner.RunAsync(
+            invocation.Scanner, process, reportPath, invocation.OutputDirectory, cacheDirectory,
+            invocation.TimeoutSeconds, invocation.OnOutput, invocation.CancellationToken).ConfigureAwait(false);
+        if (outputQuotaExceeded)
+            return await FailAsync(invocation, AnalysisReportStatus.Error,
+                "Scanner output or persistent cache exceeded its configured quota.").ConfigureAwait(false);
+        if (result.TimedOut)
+            return await FailAsync(invocation, AnalysisReportStatus.TimedOut,
+                $"Scanner timed out after {invocation.TimeoutSeconds} seconds.").ConfigureAwait(false);
+        if (result.ExitCode != 0 && !invocation.Scanner.FindingExitCodes.Contains(result.ExitCode))
+            return await FailAsync(invocation, AnalysisReportStatus.Error,
+                $"Scanner exited with code {result.ExitCode}.").ConfigureAwait(false);
+
+        var preparationError = await PrepareReportForPublicationAsync(
+            invocation.Scanner, reportPath, effectiveEnvironment, invocation.CancellationToken).ConfigureAwait(false);
+        if (preparationError is not null)
+            return await FailAsync(invocation, AnalysisReportStatus.Error, preparationError).ConfigureAwait(false);
+        var file = new FileInfo(reportPath);
+        if (file.Length <= 0 || file.Length > invocation.Scanner.MaxReportBytes)
+            return await FailAsync(invocation, AnalysisReportStatus.Error,
+                $"Scanner report size {file.Length} is outside the allowed range.").ConfigureAwait(false);
+        if (!await ValidateReportStructureAsync(
+                invocation.Scanner, reportPath, invocation.CancellationToken).ConfigureAwait(false))
+            return await FailAsync(invocation, AnalysisReportStatus.Error,
+                "Scanner report does not match its declared format.").ConfigureAwait(false);
+        return await PublishSuccessfulReportAsync(
+            invocation, reportPath, rulesDirectory, scannerVersion, result.ExitCode).ConfigureAwait(false);
+    }
+
+    private async Task<ExecutorResult> PublishSuccessfulReportAsync(
+        ScanInvocation invocation,
+        string reportPath,
+        string? rulesDirectory,
+        string scannerVersion,
+        int exitCode)
+    {
+        var artifactId = await UploadRawReportAsync(
+            invocation.Scanner, invocation.RunId, invocation.Environment, reportPath,
+            invocation.ScanRoot, invocation.CancellationToken).ConfigureAwait(false);
+        var reportContent = await File.ReadAllTextAsync(reportPath, invocation.CancellationToken).ConfigureAwait(false);
+        var request = CreatePublishRequest(
+            invocation, rulesDirectory, scannerVersion, exitCode, artifactId, reportContent);
+        var published = await apiClient.PublishAnalysisReportAsync(
+            invocation.RunId, request, invocation.CancellationToken).ConfigureAwait(false);
+        if (published is null)
+        {
+            await invocation.OnOutput(
+                "Scanner report publication returned no result.", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
+        var level = published.GateStatus is AnalysisGateStatus.Blocked or AnalysisGateStatus.Error
+            ? TaskLogLevel.Warning
+            : TaskLogLevel.Info;
+        await invocation.OnOutput(
+            $"Scanner report published: gate={published.GateStatus}, findings={published.FindingCount}, new={published.NewFindingCount}.",
+            level).ConfigureAwait(false);
+        return new ExecutorResult(0, false);
+    }
+
+    private PublishAnalysisReportRequest CreatePublishRequest(
+        ScanInvocation invocation,
+        string? rulesDirectory,
+        string scannerVersion,
+        int exitCode,
+        int artifactId,
+        string reportContent) => new()
+        {
+            ScannerKey = invocation.Scanner.Key,
+            ScannerName = invocation.Scanner.Name,
+            ScannerVersion = scannerVersion,
+            Category = Enum.Parse<AnalysisCategory>(invocation.Scanner.Category, ignoreCase: true),
+            Status = exitCode == 0 ? AnalysisReportStatus.Passed : AnalysisReportStatus.Failed,
+            Format = Enum.Parse<AnalysisReportFormat>(invocation.Scanner.ReportFormat, ignoreCase: true),
+            ReportContent = reportContent,
+            ReportPath = invocation.Scanner.ReportPath,
+            PipelineArtifactId = artifactId,
+            StageName = Value(invocation.Environment, "AETHEUS_STAGE_NAME"),
+            StepName = Value(invocation.Environment, "AETHEUS_STEP_NAME"),
+            EnvironmentName = Value(invocation.Environment, "AETHEUS_SCANNER_ENVIRONMENT_NAME"),
+            RuleSetHash = ScannerOperationValidator.ComputeRuleSetHash(rulesDirectory, invocation.Scanner),
+            DastLeaseToken = Value(invocation.Environment, "AETHEUS_SCANNER_DAST_LEASE_TOKEN"),
+            DastTargetUrl = Value(invocation.Environment, "AETHEUS_SCANNER_TARGET_URL"),
+            StartedAt = invocation.StartedAt,
+            CompletedAt = timeProvider.GetUtcNow().UtcDateTime
+        };
+
+    private Task<ExecutorResult> FailAsync(
+        ScanInvocation invocation,
+        AnalysisReportStatus status,
+        string message) => _reportPublisher.PublishFailureAsync(
+        invocation.Scanner,
+        invocation.RunId,
+        invocation.Environment,
+        invocation.StartedAt,
+        status,
+        message,
+        invocation.OnOutput,
+        invocation.CancellationToken);
+
+    private static bool IsChildPath(string parentDirectory, string path) =>
+        path.StartsWith(
+            Path.GetFullPath(parentDirectory) + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal);
+
+    private static void EnsureOperationTimedOut(
+        CancellationToken cancellationToken,
+        CancellationTokenSource operationTimeout)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!operationTimeout.IsCancellationRequested)
+            throw new OperationCanceledException(operationTimeout.Token);
+    }
+
+    private async Task<ExecutorResult?> ValidateWorkspaceAsync(
+        ScannerManifestEntry scanner,
+        string sourceDirectory,
+        int runId,
+        IReadOnlyDictionary<string, string> envVars,
+        DateTime startedAt,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(sourceDirectory))
+            return await _reportPublisher.PublishFailureAsync(scanner, runId, envVars, startedAt,
+                AnalysisReportStatus.Unavailable, "Scanner workspace is unavailable.", onOutput, cancellationToken)
+                .ConfigureAwait(false);
+        if (!ScannerOperationValidator.HasApplicableSource(scanner, sourceDirectory))
+            return await _reportPublisher.PublishStatusAsync(scanner, scanner.Version, runId, envVars, startedAt,
+                AnalysisReportStatus.NotApplicable,
+                "Scanner is not applicable: no supported source file was detected.",
+                onOutput, cancellationToken).ConfigureAwait(false);
+        return null;
+    }
+
+    private static async Task<string?> PrepareReportForPublicationAsync(
+        ScannerManifestEntry scanner,
+        string reportPath,
+        IReadOnlyDictionary<string, string> effectiveEnvVars,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(reportPath))
+            return "Scanner completed without producing the required report.";
+
+        return await GitleaksHistoryReportAnnotator.AnnotateAsync(
+                scanner, reportPath, effectiveEnvVars, cancellationToken).ConfigureAwait(false)
+            ? null
+            : "Gitleaks history report metadata is missing or invalid.";
+    }
+
+    private async Task CleanupAsync(
+        int runId,
+        string scanRoot,
+        ScannerSourceProjectionLease? sourceProjection,
+        RestrictedScannerEgress? egress,
+        Func<string, TaskLogLevel, Task> onOutput)
+    {
+        Exception? cleanupError = null;
+        if (sourceProjection is not null)
+        {
+            try { await sourceProjection.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex)
+            {
+                cleanupError = ex;
+                logger.LogError(ex, "Shared scanner source projection release failed for run {RunId}", runId);
+            }
+        }
+        if (egress is not null)
+        {
+            try { await egress.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex)
+            {
+                cleanupError = ex;
+                logger.LogError(ex, "Scanner network cleanup failed for {ScanRoot}", scanRoot);
+            }
+        }
+        try
+        {
+            if (Directory.Exists(scanRoot)) Directory.Delete(scanRoot, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            cleanupError ??= ex;
+            logger.LogError(ex, "Scanner workspace cleanup failed for {ScanRoot}", scanRoot);
+        }
+        if (cleanupError is null)
+            return;
+        await onOutput("Scanner workspace cleanup failed; operator intervention is required.", TaskLogLevel.Error)
+            .ConfigureAwait(false);
+        throw new IOException("Scanner resource cleanup failed.", cleanupError);
+    }
+
+    private async Task<ProcessStartInfo> BuildBinaryProcessAsync(
+        ScannerManifestEntry scanner,
+        string sourceDirectory,
+        string reportPath,
+        string? rulesDirectory,
+        CancellationToken ct)
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+            throw new PlatformNotSupportedException("This verified scanner binary is available only for Linux x64.");
+        if (!Uri.TryCreate(scanner.DownloadUriLinuxAmd64, UriKind.Absolute, out var downloadUri)
+            || downloadUri.Scheme != Uri.UriSchemeHttps || scanner.Sha256LinuxAmd64?.Length != 64)
+            throw new IOException("Binary scanner manifest entry is incomplete.");
+
+        var binaryDirectory = Path.Combine(_options.WorkDirectory, "scanners", scanner.Key, scanner.Version);
+        var binaryPath = Path.Combine(binaryDirectory, scanner.Key);
+        Directory.CreateDirectory(binaryDirectory);
+        await EnsureScannerBinaryAsync(
+            scanner, downloadUri, binaryPath, ct).ConfigureAwait(false);
+        if (string.Equals(scanner.Key, "opengrep", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(rulesDirectory))
+            throw new IOException("Embedded versioned OpenGrep rules are unavailable.");
+        if (string.IsNullOrWhiteSpace(scanner.RuntimeImage)
+            || !scanner.RuntimeImage.Contains("@sha256:", StringComparison.Ordinal))
+            throw new IOException("Binary scanner runtime image is not pinned by digest.");
+        var outputDirectory = Path.GetDirectoryName(reportPath)
+            ?? throw new IOException("Binary scanner report directory is unavailable.");
+        return BuildBinaryDockerProcess(
+            scanner, binaryPath, sourceDirectory, outputDirectory, rulesDirectory);
+    }
+
+    private async Task EnsureScannerBinaryAsync(
+        ScannerManifestEntry scanner,
+        Uri downloadUri,
+        string binaryPath,
+        CancellationToken ct)
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("Scanner binary installation requires Linux.");
+        if (File.Exists(binaryPath)
+            && await HasExpectedHashAsync(binaryPath, scanner.Sha256LinuxAmd64!, ct).ConfigureAwait(false))
+            return;
+        var tempPath = binaryPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using var client = httpClientFactory.CreateClient("AetheusScannerDownload");
+            await using var source = await client.GetStreamAsync(downloadUri, ct).ConfigureAwait(false);
+            await using (var destination = new FileStream(
+                tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                await source.CopyToAsync(destination, ct).ConfigureAwait(false);
+            if (!await HasExpectedHashAsync(tempPath, scanner.Sha256LinuxAmd64!, ct).ConfigureAwait(false))
+                throw new IOException("Downloaded scanner binary failed SHA-256 verification.");
+            File.SetUnixFileMode(
+                tempPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.Move(tempPath, binaryPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    private static ProcessStartInfo BuildBinaryDockerProcess(
+        ScannerManifestEntry scanner,
+        string binaryPath,
+        string sourceDirectory,
+        string outputDirectory,
+        string? rulesDirectory)
+    {
+        var psi = BaseProcess("docker");
+        var args = psi.ArgumentList;
+        args.Add("run"); args.Add("--rm");
+        args.Add("--name"); args.Add($"aetheus-scan-{Guid.NewGuid():N}");
+        args.Add("--cap-drop"); args.Add("ALL");
+        args.Add("--security-opt"); args.Add("no-new-privileges");
+        args.Add("--pids-limit"); args.Add(ScannerContainerProcessBuilder.PidsLimit.ToString());
+        args.Add("--memory"); args.Add(scanner.Memory);
+        args.Add("--cpus"); args.Add(scanner.Cpus);
+        args.Add("--read-only");
+        args.Add("--network"); args.Add("none");
+        args.Add("--tmpfs"); args.Add("/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777");
+        args.Add("--tmpfs"); args.Add("/opengrep-home:rw,exec,nosuid,nodev,size=512m,mode=1777");
+        args.Add("--env"); args.Add("HOME=/opengrep-home");
+        ScannerContainerProcessBuilder.AddCurrentUser(args);
+        args.Add("--mount"); args.Add($"type=bind,src={binaryPath},dst=/scanner/opengrep,readonly");
+        args.Add("--mount"); args.Add($"type=bind,src={sourceDirectory},dst=/src,readonly");
+        args.Add("--mount"); args.Add($"type=bind,src={outputDirectory},dst=/out");
+        if (!string.IsNullOrWhiteSpace(rulesDirectory))
+        {
+            args.Add("--mount"); args.Add($"type=bind,src={rulesDirectory},dst=/rules,readonly");
+        }
+        args.Add("--entrypoint"); args.Add("/scanner/opengrep");
+        args.Add("--"); args.Add(scanner.RuntimeImage!);
+        foreach (var argument in ScannerOperationValidator.ResolveArguments(scanner.Arguments, new Dictionary<string, string>(), "/src",
+                     "/out/" + scanner.ReportPath, "/rules", "/out"))
+            args.Add(argument);
+        return psi;
+    }
+
+    private static async Task<string?> ExtractEmbeddedRulesAsync(
+        ScannerManifestEntry scanner,
+        string scanRoot,
+        CancellationToken ct)
+    {
+        if (!string.Equals(scanner.Key, "opengrep", StringComparison.OrdinalIgnoreCase)) return null;
+        const string resourceName = "Aetheus.Agent.Core.AnalysisRules.opengrep.aetheus-security.yml";
+        var assembly = typeof(ScannerOperationExecutor).Assembly;
+        await using var source = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new IOException("Embedded OpenGrep rules resource is missing.");
+        var directory = Path.Combine(scanRoot, "rules");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "aetheus-security.yml");
+        await using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
+        await source.CopyToAsync(destination, ct).ConfigureAwait(false);
+        return directory;
+    }
+
+    private async Task<int> UploadRawReportAsync(
+        ScannerManifestEntry scanner,
+        int runId,
+        IReadOnlyDictionary<string, string> envVars,
+        string reportPath,
+        string scanRoot,
+        CancellationToken ct)
+    {
+        var zipPath = Path.Combine(scanRoot, "report.zip");
+        await using (var zipStream = new FileStream(zipPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, true))
+        {
+            using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var entry = archive.CreateEntry(scanner.ReportPath, CompressionLevel.SmallestSize);
+                await using var entryStream = entry.Open();
+                await using var source = new FileStream(reportPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                await source.CopyToAsync(entryStream, ct).ConfigureAwait(false);
+            }
+            zipStream.Position = 0;
+            var artifact = await apiClient.UploadArtifactAsync(
+                runId, ScannerOperationSupport.BuildRawArtifactName(scanner, envVars),
+                Value(envVars, "AETHEUS_STAGE_NAME"), zipStream, ct).ConfigureAwait(false);
+            return artifact?.Id
+                ?? throw new InvalidOperationException($"Scanner report artifact '{scanner.Key}' upload returned no artifact.");
+        }
+    }
+
+    private string? PrepareScannerCache(ScannerManifestEntry scanner)
+    {
+        if (string.IsNullOrWhiteSpace(scanner.CacheDirectoryName)) return null;
+        var path = Path.Combine(_options.WorkDirectory, "scanner-cache", scanner.CacheDirectoryName);
+        Directory.CreateDirectory(path);
+        ScannerFileSecurity.TrySetOwnerOnly(path);
+        if (ScannerProcessExecutionRunner.DirectorySize(path, scanner.MaxCacheBytes) > scanner.MaxCacheBytes)
+            throw new IOException($"Scanner cache '{scanner.CacheDirectoryName}' exceeds its configured quota.");
+        return path;
+    }
+
+    internal static string GetScannerUnavailableMessage(Exception exception) =>
+        ScannerOperationSupport.ScannerUnavailableMessage(exception);
+
+    internal static Task<bool> ValidateReportStructureAsync(
+        ScannerManifestEntry scanner, string path, CancellationToken ct) =>
+        ScannerOperationSupport.ValidateReportStructureAsync(scanner, path, ct);
+
+}

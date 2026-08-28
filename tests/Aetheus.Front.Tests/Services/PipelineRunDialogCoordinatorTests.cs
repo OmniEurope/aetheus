@@ -2,6 +2,7 @@
 using Aetheus.Front.Services;
 using Aetheus.Front.Tests.TestDoubles;
 using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Radzen;
@@ -11,7 +12,7 @@ namespace Aetheus.Front.Tests.Services;
 public sealed class PipelineRunDialogCoordinatorTests : BunitContext
 {
     [Fact]
-    public async Task ChooseBranchAsync_RefreshesBranchesAndSelectsRepositoryDefault()
+    public async Task ConfigureLaunchAsync_RefreshesBranchesAndSelectsRepositoryDefault()
     {
         var handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
@@ -20,6 +21,7 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             RepositoryId = 9,
             Branch = "develop"
         });
+        handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "app-ci" });
         handler.SetJsonResponse(
             HttpMethod.Get,
             "api/git/repos/9",
@@ -32,9 +34,10 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
                 new() { Name = "develop" },
                 new() { Name = "main", IsDefault = true }
             });
+        handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>());
 
         var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
-        await Services.GetRequiredService<PipelineRunDialogCoordinator>().ChooseBranchAsync(5);
+        await Services.GetRequiredService<PipelineRunDialogCoordinator>().ConfigureLaunchAsync(5);
         var openedParameters = dialog.LastParameters;
 
         Assert.NotNull(openedParameters);
@@ -55,17 +58,138 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             && request.Url.Contains("pageSize=100", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The unified dialog carries the parameters too, so a user who only wants to change one no longer
+    /// has to walk through a separate branch step first.
+    /// </summary>
     [Fact]
-    public async Task CollectParametersAsync_RequestFailure_BlocksPipelineLaunch()
+    public async Task ConfigureLaunchAsync_CarriesTheDeclaredParametersIntoTheSameDialog()
+    {
+        var handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        handler.SetJsonResponse("api/pipelines/5/source", new PipelineSourceDto { RepositoryId = 0 });
+        handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "app-ci" });
+        handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>
+        {
+            new() { Name = "flavour", DisplayName = "Flavour", Type = "string", Default = "fast" }
+        });
+
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        await Services.GetRequiredService<PipelineRunDialogCoordinator>().ConfigureLaunchAsync(5);
+
+        var declared = Assert.IsType<List<PipelineRunParameterDto>>(dialog.LastParameters!["Parameters"]);
+        Assert.Equal("flavour", Assert.Single(declared).Name);
+    }
+
+    [Fact]
+    public async Task ResolveDefaultParametersAsync_RequestFailure_BlocksPipelineLaunch()
     {
         var handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
         handler.SetResponse("api/pipelines/5/parameters", System.Net.HttpStatusCode.BadGateway);
 
         var result = await Services.GetRequiredService<PipelineRunDialogCoordinator>()
-            .CollectParametersAsync(5);
+            .ResolveDefaultParametersAsync(5);
 
         Assert.False(result.Proceed);
         Assert.Null(result.Parameters);
+    }
+
+    /// <summary>
+    /// The point of the change: a pipeline whose parameters all have defaults launches straight away,
+    /// with those defaults, and nothing is asked of the user.
+    /// </summary>
+    [Fact]
+    public async Task ResolveDefaultParametersAsync_AllDefaulted_TakesThemWithoutAsking()
+    {
+        var handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>
+        {
+            new() { Name = "flavour", DisplayName = "Flavour", Type = "string", Default = "fast" },
+            new() { Name = "dryRun", DisplayName = "Dry run", Type = "boolean", Default = "false", Required = true }
+        });
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+
+        var result = await Services.GetRequiredService<PipelineRunDialogCoordinator>()
+            .ResolveDefaultParametersAsync(5);
+
+        Assert.True(result.Proceed);
+        Assert.Null(dialog.LastComponent);
+        Assert.Equal("fast", result.Parameters!["flavour"]);
+        Assert.Equal("false", result.Parameters["dryRun"]);
+    }
+
+    /// <summary>
+    /// M-051: the Deploy contract declares candidateVersion required with no default, so the launch
+    /// still stops for an explicit choice. Nothing is ever selected silently on the user's behalf.
+    /// </summary>
+    [Fact]
+    public async Task ResolveDefaultParametersAsync_RequiredWithoutDefault_StillAsks()
+    {
+        var handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>
+        {
+            new() { Name = "candidateVersion", DisplayName = "Candidate", Type = "string", Required = true }
+        });
+        handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "deploy" });
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        dialog.OpenResult = null;
+
+        var result = await Services.GetRequiredService<PipelineRunDialogCoordinator>()
+            .ResolveDefaultParametersAsync(5);
+
+        Assert.NotNull(dialog.LastComponent);
+        Assert.False(result.Proceed);
+    }
+
+    /// <summary>
+    /// The deploy dialog shows the project's recent releases next to the version field: the value
+    /// stays typed and confirmed (M-051), the list is a picking aid.
+    /// </summary>
+    [Fact]
+    public async Task ResolveDefaultParametersAsync_ProjectPipeline_OffersItsReleases()
+    {
+        var handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>
+        {
+            new() { Name = "candidateVersion", DisplayName = "Candidate", Type = "string", Required = true }
+        });
+        handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "deploy", ProjectId = 3 });
+        handler.SetJsonResponse("api/releases", new PaginatedResult<ReleaseDto>
+        {
+            Items = [new ReleaseDto { Id = 1, Version = "1.1.482", Status = ReleaseStatus.Published }],
+            TotalCount = 1
+        });
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        dialog.OpenResult = null;
+
+        await Services.GetRequiredService<PipelineRunDialogCoordinator>().ResolveDefaultParametersAsync(5);
+
+        var offered = Assert.IsType<List<ReleaseDto>>(dialog.LastParameters!["AvailableReleases"]);
+        Assert.Equal("1.1.482", Assert.Single(offered).Version);
+        Assert.Contains(handler.Requests, r => r.Url.Contains("api/releases") && r.Url.Contains("projectId=3"));
+    }
+
+    /// <summary>A pipeline without a project shows nothing and, above all, fetches nothing.</summary>
+    [Fact]
+    public async Task ResolveDefaultParametersAsync_NoProject_FetchesNoRelease()
+    {
+        var handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>
+        {
+            new() { Name = "note", DisplayName = "Note", Type = "string", Required = true }
+        });
+        handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "ci" });
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        dialog.OpenResult = null;
+
+        await Services.GetRequiredService<PipelineRunDialogCoordinator>().ResolveDefaultParametersAsync(5);
+
+        Assert.Empty(Assert.IsType<List<ReleaseDto>>(dialog.LastParameters!["AvailableReleases"]));
+        Assert.DoesNotContain(handler.Requests, r => r.Url.Contains("api/releases"));
     }
 }

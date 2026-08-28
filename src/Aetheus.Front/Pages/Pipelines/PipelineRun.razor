@@ -5,11 +5,11 @@
 @using static Aetheus.Front.Pages.Pipelines.PipelineRunFormatting
 @using static Aetheus.Front.Pages.Pipelines.PipelineRunLogView
 
-<PageTitle>@(L["Run"]) #@RunId - Aetheus</PageTitle>
+<PageTitle>@(L["PipelineRun"]) #@RunId - Aetheus</PageTitle>
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else if (_run is null)
 {
@@ -19,7 +19,7 @@ else
 {
     <PipelineRunHeader Run="@_run" PipelineHref="@PipelineHref" GitBranch="@GitBranch"
         BlockingWarningCount="@BlockingWarnings.Count" InfoWarningCount="@InfoWarnings.Count"
-        RunInProgress="@RunInProgress" CanRerun="@CanRerun" HasFailedSteps="@HasFailedSteps"
+        RunInProgress="@(RunInProgress && !_run.CancellationRequested)" CanRerun="@CanRerun" HasFailedSteps="@HasFailedSteps"
         Cancelling="@_cancelling" Rerunning="@_rerunning" Retrying="@_retrying"
         VariablesRequested="@ShowVariables" EditRequested="@(() => Nav.NavigateTo(PipelineHref))"
         CancelRequested="@CancelRunAsync" RerunRequested="@OnRerunClick" RetryFailedRequested="@RetryFailedAsync" />
@@ -47,6 +47,20 @@ else
             @foreach (var warning in InfoWarnings) { <div>@warning</div> }
         </RadzenAlert>
     }
+    @if (_run.CancellationRequested && RunInProgress)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Shade="Shade.Lighter" AllowClose="false"
+                     Icon="pending_actions" Title="@L["CancellationAcceptedTitle"]" class="rz-mt-2">
+            @L["CancellationAcceptedDetail"]
+        </RadzenAlert>
+    }
+    @if (_gateState.IsIncomplete)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Warning" Shade="Shade.Lighter" AllowClose="false"
+                     Icon="warning" Title="@L["AnalysisGateIncompleteTitle"]" class="rz-mt-2">
+            @string.Format(L["AnalysisGateIncompleteDetail"], string.Join(", ", _gateState.FailedRunIds))
+        </RadzenAlert>
+    }
     @* S-UX-RUNB: surface WHY a run failed at the top of the page (failed step names + exit codes), so the
        "why" reads at a glance without opening the Overview tab or drilling into a step. *@
     @if (_run.Status == PipelineStatus.Failed && FailedSteps.Count > 0)
@@ -58,11 +72,12 @@ else
     }
 
     @* Tabs *@
-    <UrlSyncedTabs class="rz-mt-4" Slugs="@TabSlugs()" @bind-SelectedIndex="_selectedTab">
+    <UrlSyncedTabs class="pipeline-run-tabs rz-mt-4" Slugs="@TabSlugs()" @bind-SelectedIndex="_selectedTab">
         <Tabs>
             @* Tab 1: Overview *@
             <RadzenTabsItem Text="@L["Overview"]" Icon="dashboard">
                 <div class="run-overview rz-mt-3">
+                    <PipelineRunAiResultsCard Results="@_aiResults" OnView="@OpenAiResultAsync" />
                     @* S-UX-28: inline error logs for failed steps, surfaced directly on the Overview *@
                     @if (FailedSteps.Count > 0)
                     {
@@ -98,23 +113,6 @@ else
                         </RadzenCard>
                     }
 
-                    @* S-DES-W3F8: run parameters as a dedicated small table (was a single badge + tooltip). *@
-                    @if (_run.Parameters.Count > 0)
-                    {
-                        <RadzenCard class="rz-p-3 rz-mb-4">
-                            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">
-                                <RadzenIcon Icon="tune" class="run-tile-icon" /> @L["RunParameters"]
-                            </RadzenText>
-                            <RadzenDataGrid Data="@_run.Parameters" TItem="KeyValuePair<string, string>" Density="Density.Compact"
-                                AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" class="run-params-grid">
-                                <Columns>
-                                    <RadzenDataGridColumn TItem="KeyValuePair<string, string>" Property="Key" Title="@L["Parameter"]" Width="40%" />
-                                    <RadzenDataGridColumn TItem="KeyValuePair<string, string>" Property="Value" Title="@L["Value"]" />
-                                </Columns>
-                            </RadzenDataGrid>
-                        </RadzenCard>
-                    }
-
                     @{
                         var envNames = _run.Steps
                             .SelectMany(s => s.OutputVariables)
@@ -130,27 +128,71 @@ else
                                 .ToList();
                         var parentPipeline = UpstreamPipeline(_run.ResolvedVariables);
                         var parentRunId = UpstreamRunId(_run.ResolvedVariables);
+                        var compatibilityOutputs = _run.Steps
+                            .SelectMany(step => step.OutputVariables)
+                            .Where(output => output.Key is "CompatibilityMode" or "PreviousVersionTested" or "CompatibilityVerdict")
+                            .GroupBy(output => output.Key, StringComparer.Ordinal)
+                            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal);
+                        var stepProgress = PipelineRunPresentation.StepProgress(_run);
+                    }
+                    @if (compatibilityOutputs.TryGetValue("CompatibilityMode", out var compatibilityMode))
+                    {
+                        <RadzenCard class="rz-p-3 rz-mb-4">
+                            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">
+                                <RadzenIcon Icon="verified" class="run-tile-icon" /> @L["CompatibilityAttestation"]
+                            </RadzenText>
+                            <RadzenText TextStyle="TextStyle.Body2">
+                                @L["CompatibilityMode"]: <strong>@compatibilityMode</strong>
+                            </RadzenText>
+                            <RadzenText TextStyle="TextStyle.Body2">
+                                @L["PreviousVersionTested"]:
+                                <strong>@compatibilityOutputs.GetValueOrDefault("PreviousVersionTested", "false")</strong>
+                            </RadzenText>
+                            <RadzenText TextStyle="TextStyle.Body2">
+                                @L["CompatibilityVerdict"]:
+                                <strong>@compatibilityOutputs.GetValueOrDefault("CompatibilityVerdict", "")</strong>
+                            </RadzenText>
+                        </RadzenCard>
                     }
                     @* All run facts + produced outputs (release/artifact/env) share ONE responsive, equal-height
                        grid so every tile sits on the same line and only wraps when the viewport narrows. *@
                     <div class="run-overview-tiles rz-mb-4">
-                        <RadzenCard class="run-overview-card">
-                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="info" class="run-tile-icon" /> @L["Status"]</RadzenText>
-                            <RadzenBadge BadgeStyle="@GetRunBadge(_run.Status)" Text="@L.Localize(_run.Status)" />
-                        </RadzenCard>
-                        <RadzenCard class="run-overview-card">
-                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="schedule" class="run-tile-icon" /> @L["Duration"]</RadzenText>
-                            <RadzenText TextStyle="TextStyle.Body1">@(FormatDuration(_run.StartedAt, _run.CompletedAt) is var dur && !string.IsNullOrEmpty(dur) ? dur : "...")</RadzenText>
-                        </RadzenCard>
+                        @* Status and step progress answer the same question ("where does the run stand?"),
+                           so they share one tile that jumps to the step logs. *@
                         <div class="run-tile-link" role="button" tabindex="0" @onclick="GoToLogsTab"
                              @onkeydown="@(e => { if (e.Key == "Enter" || e.Key == " ") GoToLogsTab(); })">
                             <RadzenCard class="run-overview-card">
-                                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="list_alt" class="run-tile-icon" /> @L["Steps"]</RadzenText>
-                                <RadzenText TextStyle="TextStyle.Body1">
-                                    @_run.Steps.Count(s => !s.IsSystem && s.Status == TaskExecutionStatus.Success) / @_run.Steps.Count(s => !s.IsSystem)
-                                </RadzenText>
+                                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="info" class="run-tile-icon" /> @L["Status"]</RadzenText>
+                                <RadzenBadge BadgeStyle="@GetRunBadge(_run.Status)" Text="@L.Localize(_run.Status)" />
+                                <span class="run-tile-subrow">
+                                    <span class="run-tile-sublabel"><RadzenIcon Icon="list_alt" class="run-tile-icon" /> @L["Steps"]</span>
+                                    <span class="run-tile-value">@stepProgress.Completed / @stepProgress.Total</span>
+                                </span>
                             </RadzenCard>
                         </div>
+                        @* Start instant and elapsed time are one timing fact, read together. *@
+                        <RadzenCard class="run-overview-card">
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="event" class="run-tile-icon" /> @L["Started"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.Body1" title="@_run.StartedAt.ToString("F")">@_run.StartedAt.ToString("g")</RadzenText>
+                            <span class="run-tile-subrow">
+                                <span class="run-tile-sublabel"><RadzenIcon Icon="schedule" class="run-tile-icon" /> @L["Duration"]</span>
+                                <span><PipelineRunLiveDuration StartedAt="@_run.StartedAt" CompletedAt="@_run.CompletedAt" IsRunning="@RunInProgress" /></span>
+                            </span>
+                        </RadzenCard>
+                        @if (ShowGateTab && _gateState.Result is { } gate)
+                        {
+                            <PipelineRunGateOverview Gate="@gate" GateRequested="@(() => NavigateToTab("gate"))" />
+                        }
+                        @if (_run.Parameters.Count > 0)
+                        {
+                            <div class="run-tile-link run-parameters-tile" role="button" tabindex="0" @onclick="ShowParameters"
+                                 @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await ShowParameters(); })">
+                                <RadzenCard class="run-overview-card">
+                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="tune" class="run-tile-icon" /> @L["RunParameters"]</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Body1">@string.Format(L["RunParametersCount"], _run.Parameters.Count)</RadzenText>
+                                </RadzenCard>
+                            </div>
+                        }
                         @if (parentPipeline is not null)
                         {
                             @if (parentRunId is { } parentId)
@@ -159,7 +201,7 @@ else
                                     <RadzenCard class="run-overview-card">
                                         <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="conversion_path" class="run-tile-icon" /> @L["ParentPipeline"]</RadzenText>
                                         <RadzenText TextStyle="TextStyle.Body1">@parentPipeline</RadzenText>
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Run"] #@parentId</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["PipelineRun"] #@parentId</RadzenText>
                                     </RadzenCard>
                                 </a>
                             }
@@ -171,68 +213,64 @@ else
                                 </RadzenCard>
                             }
                         }
-                        @if (_run.Branches.Count > 0)
-                        {
-                            @foreach (var branch in _run.Branches)
+                        @* Repository / branch / commit are one answer - "which source did this run build?" -
+                           so they share a single tile with one link per line instead of three tiles. *@
+                        @{
+                            var repositoryHref = _repoId is { } sourceRepoId
+                                ? $"/git-repositories/{sourceRepoId}"
+                                : _run.ProjectId is { } sourceProjectId ? $"/git-repositories?projectId={sourceProjectId}" : null;
+                            var commitHref = _run.Commits.Count > 0
+                                ? PipelineRunRepositoryResolver.CommitHref(_repoId, _run.Commits[0])
+                                : !string.IsNullOrEmpty(_run.CommitHash)
+                                    ? _repoId is { } commitRepoId
+                                        ? $"/git-repositories/{commitRepoId}/commits/{Uri.EscapeDataString(_run.CommitHash)}"
+                                        : _run.ProjectId is { } commitProjectId ? $"/git-repositories?projectId={commitProjectId}" : null
+                                    : null;
+                            var commitSha = _run.Commits.Count > 0 ? _run.Commits[0].Sha : _run.CommitHash;
+                            var branchLinks = new List<(string Name, string Href)>();
+                            if (_run.Branches.Count > 0)
                             {
-                                <a href="/git/branches/@branch.Id" class="run-tile-link">
-                                    <RadzenCard class="run-overview-card">
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="account_tree" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                                        <RadzenText TextStyle="TextStyle.Body1">@branch.Name</RadzenText>
-                                    </RadzenCard>
-                                </a>
+                                branchLinks.AddRange(_run.Branches.Select(b => (b.Name, PipelineRunRepositoryResolver.BranchHref(_repoId, b))));
                             }
-                        }
-                        else if (!string.IsNullOrEmpty(_run.BranchName))
-                        {
-                            <RadzenCard class="run-overview-card">
-                                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="account_tree" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                                <RadzenText TextStyle="TextStyle.Body1">@_run.BranchName</RadzenText>
-                            </RadzenCard>
-                        }
-                        @if (_run.Commits.Count > 0)
-                        {
-                            @foreach (var commit in _run.Commits)
+                            else if (!string.IsNullOrEmpty(_run.BranchName))
                             {
-                                <a href="/git/commits/@commit.Id" class="run-tile-link">
-                                    <RadzenCard class="run-overview-card">
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
-                                        <span class="cross-link-sha" title="@commit.Sha">@ShortSha(commit.Sha)</span>
-                                    </RadzenCard>
-                                </a>
+                                branchLinks.Add((_run.BranchName, PipelineRunRepositoryResolver.BranchHref(_repoId, _run.ProjectId, _run.BranchName)));
                             }
+                            var hasSourceFacts = repositoryHref is not null || branchLinks.Count > 0 || !string.IsNullOrEmpty(commitSha);
                         }
-                        else if (!string.IsNullOrEmpty(_run.CommitHash))
+                        @if (hasSourceFacts)
                         {
-                            <RadzenCard class="run-overview-card">
-                                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
-                                @if (CommitUrl is not null)
+                            <RadzenCard class="run-overview-card run-source-tile">
+                                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="folder_open" class="run-tile-icon" /> @L["Source"]</RadzenText>
+                                @if (repositoryHref is not null)
                                 {
-                                    <a href="@CommitUrl" target="_blank" rel="noopener noreferrer" class="pipeline-name-link cross-link-sha" title="@_run.CommitHash">@ShortSha(_run.CommitHash)</a>
+                                    <span class="run-tile-subrow">
+                                        <span class="run-tile-sublabel">@L["Repository"]</span>
+                                        <a href="@repositoryHref" class="pipeline-name-link run-tile-value" title="@(_run.ProjectName ?? L["Repository"].Value)">@(_run.ProjectName ?? L["Repository"].Value)</a>
+                                    </span>
                                 }
-                                else
+                                @foreach (var branch in branchLinks)
                                 {
-                                    <span class="cross-link-sha" title="@_run.CommitHash">@ShortSha(_run.CommitHash)</span>
+                                    <span class="run-tile-subrow">
+                                        <span class="run-tile-sublabel"><RadzenIcon Icon="account_tree" class="run-tile-icon" /> @L["Branch"]</span>
+                                        <a href="@branch.Href" class="pipeline-name-link run-tile-value" title="@branch.Name">@branch.Name</a>
+                                    </span>
+                                }
+                                @if (!string.IsNullOrEmpty(commitSha))
+                                {
+                                    <span class="run-tile-subrow">
+                                        <span class="run-tile-sublabel"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</span>
+                                        @if (commitHref is not null)
+                                        {
+                                            <a href="@commitHref" class="pipeline-name-link cross-link-sha run-tile-value" title="@commitSha">@ShortSha(commitSha)</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="cross-link-sha" title="@commitSha">@ShortSha(commitSha)</span>
+                                        }
+                                    </span>
                                 }
                             </RadzenCard>
-                        }
-                        @if (_repoId is { } repoId)
-                        {
-                            <a href="/git-repositories/@repoId" class="run-tile-link">
-                                <RadzenCard class="run-overview-card">
-                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="folder_open" class="run-tile-icon" /> @L["Repository"]</RadzenText>
-                                    <RadzenText TextStyle="TextStyle.Body1">@(_run.ProjectName ?? L["Repository"])</RadzenText>
-                                </RadzenCard>
-                            </a>
-                        }
-                        else if (SafeRepoUrl is not null)
-                        {
-                            <a href="@SafeRepoUrl" target="_blank" rel="noopener noreferrer" class="run-tile-link">
-                                <RadzenCard class="run-overview-card">
-                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="folder_open" class="run-tile-icon" /> @L["Repository"]</RadzenText>
-                                    <RadzenText TextStyle="TextStyle.Body1">@(_run.ProjectName ?? L["Repository"])</RadzenText>
-                                </RadzenCard>
-                            </a>
                         }
                         @* Optional quality metrics - placed last, only when the run produced them. *@
                         @if (_run.CoverageSummary is { } covTile)
@@ -261,28 +299,31 @@ else
                                 <a href="/releases/@release.Id" class="run-tile-link">
                                     <RadzenCard class="run-overview-card">
                                         <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="new_releases" class="run-tile-icon rz-color-success" /> @L["Release"]</RadzenText>
-                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
-                                            <span>@release.Version</span>
+                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem" Wrap="FlexWrap.Wrap">
+                                            @* A commit-derived release name is a full 40-char sha; middle-truncate it so the
+                                               tile keeps its column width instead of forcing the grid to scroll sideways. *@
+                                            <span class="run-tile-value run-release-version" title="@release.Version">@TruncateMiddle(release.Version)</span>
                                             <RadzenBadge BadgeStyle="@ReleaseHelper.GetReleaseBadge(release.Status)" Text="@L[release.Status.ToString()]" />
                                         </RadzenStack>
+                                        @if (AppVersion is { Length: > 0 } appVersion)
+                                        {
+                                            <span class="run-tile-subrow">
+                                                <span class="run-tile-sublabel"><RadzenIcon Icon="sell" class="run-tile-icon" /> @L["Version"]</span>
+                                                <span class="run-release-app-version" title="@appVersion">@appVersion</span>
+                                            </span>
+                                        }
                                     </RadzenCard>
                                 </a>
                             }
-                            @foreach (var artifact in _run.Artifacts)
+                            @if (_run.Artifacts.Count > 0)
                             {
-                                <a href="/artifacts/@artifact.Id" class="run-tile-link">
+                                <div class="run-tile-link run-artifacts-tile" role="button" tabindex="0" @onclick="GoToArtifactsTab"
+                                     @onkeydown="@(e => { if (e.Key == "Enter" || e.Key == " ") GoToArtifactsTab(); })">
                                     <RadzenCard class="run-overview-card">
-                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
-                                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-flex-grow-1"><RadzenIcon Icon="inventory_2" class="run-tile-icon rz-color-info" /> @L["Artifact"]</RadzenText>
-                                            <span @onclick:stopPropagation="true" @onclick:preventDefault="true">
-                                                <RadzenButton Icon="download" Size="ButtonSize.ExtraSmall"
-                                                    Click="@(() => DownloadArtifactAsync(artifact))" title="@L["Download"]" aria-label="@L["Download"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                                            </span>
-                                        </RadzenStack>
-                                        <RadzenText TextStyle="TextStyle.Body1">@artifact.Name</RadzenText>
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@FormatSize(artifact.SizeBytes)</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="inventory_2" class="run-tile-icon rz-color-info" /> @L["Artifacts"]</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1">@_run.Artifacts.Count</RadzenText>
                                     </RadzenCard>
-                                </a>
+                                </div>
                             }
                             @foreach (var env in envNames)
                             {
@@ -436,9 +477,16 @@ else
                                         <span>@GetPendingReason(_selectedStep, _stages, _run, L)</span>
                                     </div>
                                 }
+                                else if (_selectedStep.Status == TaskExecutionStatus.Assigned)
+                                {
+                                    <div class="step-log-empty">
+                                        <RadzenIcon Icon="pending_actions" class="step-log-empty-icon" />
+                                        <span>@GetQueueReason(_selectedStep, L)</span>
+                                    </div>
+                                }
                                 else if (_logsLoading && _selectedStep.TaskId.HasValue && !_stepLogsCache.ContainsKey(_selectedStep.TaskId.Value))
                                 {
-                                    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+                                    <AetheusLoader Size="AetheusLoaderSize.Small" />
                                 }
                                 else
                                 {
@@ -474,6 +522,13 @@ else
                     </div>
                 </div>
             </RadzenTabsItem>
+
+            @if (ShowGateTab && _gateState.Result is { } gateResult)
+            {
+                <RadzenTabsItem Text="@L["AnalysisGateTab"]" Icon="rule">
+                    <PipelineRunGateFindings Gate="@gateResult" ProjectId="@EffectiveProjectId" />
+                </RadzenTabsItem>
+            }
 
             @* G0: structural tab - YAML snapshot sits right after Journaux, before the data-driven tabs. *@
             @if (!string.IsNullOrEmpty(_run.YamlSnapshot))
@@ -511,6 +566,7 @@ else
 
             <PipelineRunResultsTabs Run="@_run" Metrics="@_metrics" StepLogs="@_stepLogsCache"
                 LintSteps="@LintSteps" HasLintTab="@HasLintTab"
+                ArtifactDownloadRequested="@DownloadArtifactAsync"
                 CoverageLogsRequested="@LoadCoverageLogsAsync" LintLogsRequested="@LoadLintLogsAsync" />
        </Tabs>
     </UrlSyncedTabs>

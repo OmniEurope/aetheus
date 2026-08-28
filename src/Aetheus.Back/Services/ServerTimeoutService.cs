@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Servers.Events;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 
@@ -21,8 +20,13 @@ public sealed class ServerTimeoutService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // A backend restart makes every persisted heartbeat look stale until the agents complete
+        // their next scheduled POST. Give them one full freshness window before the first sweep;
+        // otherwise a normal deploy produces a fleet-wide Offline transition and false warning
+        // toasts seconds before the agents reconnect.
+        await WaitForStartupGraceAsync(stoppingToken).ConfigureAwait(false);
+
         using var timer = new PeriodicTimer(_checkInterval);
-        // do..while: check immediately on startup, then every interval
         do
         {
             try
@@ -33,12 +37,17 @@ public sealed class ServerTimeoutService(
             {
                 throw;
             }
-            catch (Exception ex) when (ex is Microsoft.EntityFrameworkCore.DbUpdateException or InvalidOperationException or TimeoutException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                logger.LogError(ex, "Recoverable error in ServerTimeoutService");
+                logger.LogCritical(
+                    ex,
+                    "Server timeout sweep failed; the next sweep will retry without stopping the backend");
             }
         } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
     }
+
+    internal Task WaitForStartupGraceAsync(CancellationToken ct) =>
+        Task.Delay(_heartbeatTimeout, _timeProvider, ct);
 
     internal async Task CheckServerTimeouts(CancellationToken ct)
     {
@@ -51,20 +60,19 @@ public sealed class ServerTimeoutService(
 
         foreach (var server in staleServers)
         {
-            server.Status = ServerStatus.Offline;
+            // A heartbeat may have landed after the stale candidate query. Claim the transition
+            // with the observed timestamp so that fresh presence can never be overwritten by this
+            // sweep, and only broadcast when the conditional update actually won.
+            if (!await serverRepo.TryMarkOfflineIfStaleAsync(
+                    server.Id, server.LastHeartbeat, _heartbeatTimeout, ct).ConfigureAwait(false))
+                continue;
+
             logger.LogWarning("Server {ServerName} (#{ServerId}) marked offline - no heartbeat since {LastHeartbeat}",
                 server.Name, server.Id, server.LastHeartbeat);
-        }
-
-        if (staleServers.Count > 0)
-        {
-            await serverRepo.SaveChangesAsync(ct).ConfigureAwait(false);
-            foreach (var server in staleServers)
-            {
-                await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(server.Id)]).SendAsync("ServerOffline", server.Id, ct).ConfigureAwait(false);
-                // Audit + downstream observers run on the background queue: not on the hot path.
-                domainEvents.Publish(new ServerWentOfflineEvent(server.Id, server.Name, server.LastHeartbeat));
-            }
+            await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(server.Id)])
+                .SendAsync("ServerOffline", server.Id, ct).ConfigureAwait(false);
+            // Audit + downstream observers run on the background queue: not on the hot path.
+            domainEvents.Publish(new ServerWentOfflineEvent(server.Id, server.Name, server.LastHeartbeat));
         }
     }
 }

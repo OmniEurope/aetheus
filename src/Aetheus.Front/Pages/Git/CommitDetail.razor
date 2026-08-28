@@ -1,104 +1,16 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @page "/git/commits/{CommitId:int}"
-@using Aetheus.Shared.Enums
+@page "/git-repositories/commits/{CommitId:int}"
 
-<PageTitle>@(_commit is null ? L["Commit"] : ShortSha(_commit.Sha)) - Aetheus</PageTitle>
+<PageTitle>@L["Commit"] - Aetheus</PageTitle>
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
-}
-else if (_commit is null)
-{
-    <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["CommitNotFound"]</RadzenText>
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else
 {
-    <Aetheus.Front.Shared.PageHeader Title="@ShortSha(_commit.Sha)" Icon="commit"
-        BackHref="@($"/projects/{_commit.ProjectId}")">
-        <ChildContent>
-            @if (!string.IsNullOrEmpty(_commit.ProjectName))
-            {
-                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@_commit.ProjectName" />
-            }
-        </ChildContent>
-        <Actions>
-            @if (CommitUrl is not null)
-            {
-                <a href="@CommitUrl" target="_blank" rel="noopener noreferrer" class="external-action-link">
-                    <RadzenIcon Icon="open_in_new" />
-                    <span>@L["OpenInRepository"]</span>
-                </a>
-            }
-        </Actions>
-    </Aetheus.Front.Shared.PageHeader>
-
-    @* Commit metadata *@
-    <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" Wrap="FlexWrap.Wrap" class="rz-mt-4">
-        <RadzenCard class="run-overview-card">
-            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Sha"]</RadzenText>
-            <RadzenText TextStyle="TextStyle.Body2" class="text-mono">@_commit.Sha</RadzenText>
-        </RadzenCard>
-        @if (!string.IsNullOrEmpty(_commit.Author))
-        {
-            <RadzenCard class="run-overview-card">
-                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="person" class="run-tile-icon" /> @L["Author"]</RadzenText>
-                <RadzenText TextStyle="TextStyle.Body1">@_commit.Author</RadzenText>
-            </RadzenCard>
-        }
-        @if (_commit.CommittedAt.HasValue)
-        {
-            <RadzenCard class="run-overview-card">
-                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="schedule" class="run-tile-icon" /> @L["CommittedAt"]</RadzenText>
-                <RadzenText TextStyle="TextStyle.Body1">@_commit.CommittedAt.Value.ToString("g")</RadzenText>
-            </RadzenCard>
-        }
-    </RadzenStack>
-
-    @if (!string.IsNullOrEmpty(_commit.Message))
-    {
-        <RadzenCard class="rz-mt-4 rz-p-3">
-            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="notes" class="run-tile-icon" /> @L["Message"]</RadzenText>
-            <RadzenText TextStyle="TextStyle.Body1">@_commit.Message</RadzenText>
-        </RadzenCard>
-    }
-
-    @* Cross-link tiles *@
-    <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" Wrap="FlexWrap.Wrap" class="rz-mt-4">
-        @foreach (var branch in _commit.Branches)
-        {
-            <a href="/git/branches/@branch.Id" class="run-tile-link">
-                <RadzenCard class="run-overview-card">
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="account_tree" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                    <RadzenText TextStyle="TextStyle.Body1">@branch.Name</RadzenText>
-                </RadzenCard>
-            </a>
-        }
-        @foreach (var release in _commit.Releases)
-        {
-            <a href="/releases/@release.Id" class="run-tile-link">
-                <RadzenCard class="run-overview-card">
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="new_releases" class="run-tile-icon rz-color-success" /> @L["Release"]</RadzenText>
-                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
-                        <span>@release.Version</span>
-                        <RadzenBadge BadgeStyle="@ReleaseHelper.GetReleaseBadge(release.Status)" Text="@L[release.Status.ToString()]" />
-                    </RadzenStack>
-                </RadzenCard>
-            </a>
-        }
-        @foreach (var artifact in _commit.Artifacts)
-        {
-            <a href="/artifacts/@artifact.Id" class="run-tile-link">
-                <RadzenCard class="run-overview-card">
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="inventory_2" class="run-tile-icon rz-color-info" /> @L["Artifact"]</RadzenText>
-                    <RadzenText TextStyle="TextStyle.Body1">@artifact.Name</RadzenText>
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@FormatSize(artifact.SizeBytes)</RadzenText>
-                </RadzenCard>
-            </a>
-        }
-        @if (_commit.Branches.Count == 0 && _commit.Releases.Count == 0 && _commit.Artifacts.Count == 0)
-        {
-            <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoLinkedItems"]</RadzenText>
-        }
-    </RadzenStack>
+    <Aetheus.Front.Shared.PageHeader Title="@L["Commit"]" Icon="commit"
+        BackHref="@($"/git-repositories?projectId={_projectId}")" />
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat">@L["NotFound"]</RadzenAlert>
 }

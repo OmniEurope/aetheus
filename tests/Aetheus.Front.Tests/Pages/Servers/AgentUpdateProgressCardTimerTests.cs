@@ -86,7 +86,7 @@ public class AgentUpdateProgressCardTimerTests
     }
 
     [Fact]
-    public void CancelStaleTimer_WhenAlreadyNull_DoesNotThrow()
+    public void CancelStaleTimer_WhenAlreadyNull_LeavesItNull()
     {
         var instance = CreateInstance();
         // _staleTimer starts as null before any update is launched.
@@ -95,19 +95,18 @@ public class AgentUpdateProgressCardTimerTests
         Assert.Null(GetField<System.Threading.Timer?>(instance, "_staleTimer"));
     }
 
-    // ── HandleHeartbeat: AgentOffline + version changed → Done ───────────────
+    // ── Backend confirmation is the only transition to Done ─────────────────
 
     [Fact]
-    public void HandleHeartbeat_AgentOffline_VersionChanged_TransitionsToDone()
+    public void HandleConfirmed_AgentOffline_TransitionsToDone()
     {
         var instance = CreateInstance();
         SetField(instance, "_phase", AgentUpdatePhase.AgentOffline);
-        SetField(instance, "_versionAtLaunch", "1.0.0");
 
-        // HandleHeartbeat sets _phase = Done and _percent = 100 BEFORE calling
+        // HandleConfirmed sets _phase = Done and _percent = 100 BEFORE calling
         // InvokeAsync. Without a renderer the InvokeAsync call throws
         // InvalidOperationException, but the field assignments already happened.
-        try { instance.HandleHeartbeat("2.0.0"); }
+        try { instance.HandleConfirmed(12, "2.0.0"); }
         catch (InvalidOperationException) { /* render handle not assigned - expected */ }
 
         var phase = GetField<AgentUpdatePhase?>(instance, "_phase");
@@ -116,17 +115,15 @@ public class AgentUpdateProgressCardTimerTests
     }
 
     [Fact]
-    public void HandleHeartbeat_LaunchingUpdater_VersionChanged_TransitionsToDone()
+    public void HandleHeartbeat_LaunchingUpdater_DoesNotConfirmUpdate()
     {
         var instance = CreateInstance();
         SetField(instance, "_phase", AgentUpdatePhase.LaunchingUpdater);
-        SetField(instance, "_versionAtLaunch", "3.0.0");
 
-        try { instance.HandleHeartbeat("3.1.0"); }
-        catch (InvalidOperationException) { /* render handle not assigned - expected */ }
+        instance.HandleHeartbeat("3.1.0");
 
         var phase = GetField<AgentUpdatePhase?>(instance, "_phase");
-        Assert.Equal(AgentUpdatePhase.Done, phase);
+        Assert.Equal(AgentUpdatePhase.LaunchingUpdater, phase);
     }
 
     [Fact]
@@ -135,7 +132,6 @@ public class AgentUpdateProgressCardTimerTests
         var instance = CreateInstance();
         // Neither AgentOffline nor LaunchingUpdater
         SetField(instance, "_phase", AgentUpdatePhase.Downloading);
-        SetField(instance, "_versionAtLaunch", "1.0.0");
 
         instance.HandleHeartbeat("2.0.0");
 

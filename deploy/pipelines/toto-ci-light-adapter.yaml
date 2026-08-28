@@ -1,0 +1,133 @@
+# Project adapter for fast feedback. This pipeline never creates a candidate or a release.
+name: toto-ci-light-adapter
+trigger: manual
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+stages:
+  - name: Build
+    group: Build
+    execution_role: build
+    os: linux
+    steps:
+      - name: Build affected Toto solution
+        checkout: true
+        shell: dotnet build Toto.slnx --configuration Release --verbosity minimal
+        timeout_seconds: 600
+
+  - name: Test
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [Build]
+    steps:
+      - name: Run fast unit tests
+        shell: dotnet test Toto.slnx --configuration Release --no-build --verbosity minimal
+        timeout_seconds: 600
+
+  - name: LightQuality
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [Test]
+    steps:
+      - name: Check formatting
+        shell: dotnet format Toto.slnx --no-restore --verify-no-changes --verbosity minimal
+        continue_on_error: true
+        timeout_seconds: 300
+      - name: Publish complexity and architecture grade inputs
+        type: complexity
+        continue_on_error: true
+
+  - name: LightQualityGate
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [LightQuality]
+    steps:
+      - name: Publish the light quality grade
+        type: analysis-gate
+        analysis_scope: quality
+        analysis_grading:
+          version: 1
+          minimum_grade: F
+          required_domains:
+            - code-quality
+            - architecture
+          rules:
+            - key: grade.complexity.maximum
+              domain: code-quality
+              metric: complexity.cyclomatic.maximum
+              category: code-quality
+              direction: lower-is-better
+              a: 15
+              b: 20
+              c: 25
+              d: 35
+              e: 50
+            - key: grade.architecture.cycles
+              domain: architecture
+              metric: architecture.cycles
+              category: architecture
+              direction: lower-is-better
+              a: 0
+              b: 1
+              c: 2
+              d: 4
+              e: 8
+        continue_on_error: true
+        timeout_seconds: 300
+
+  - name: LightSecurity
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [Build]
+    steps:
+      - name: Scan changed source for secrets
+        type: scanner
+        scanner: gitleaks
+        continue_on_error: true
+        timeout_seconds: 300
+      - name: Run light SAST
+        type: scanner
+        scanner: opengrep
+        continue_on_error: true
+        timeout_seconds: 600
+
+  - name: LightSecurityGate
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [LightSecurity]
+    steps:
+      - name: Publish the light security grade
+        type: analysis-gate
+        analysis_scope: security
+        analysis_grading:
+          version: 1
+          minimum_grade: F
+          required_domains:
+            - security
+          rules:
+            - key: grade.security.critical
+              domain: security
+              severity: critical
+              direction: lower-is-better
+              a: 0
+              b: 0
+              c: 0
+              d: 0
+              e: 0
+            - key: grade.security.high
+              domain: security
+              severity: high
+              direction: lower-is-better
+              a: 0
+              b: 1
+              c: 3
+              d: 5
+              e: 10
+        continue_on_error: true
+        timeout_seconds: 300

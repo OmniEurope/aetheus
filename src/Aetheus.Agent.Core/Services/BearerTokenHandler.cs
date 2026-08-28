@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http.Headers;
-using Aetheus.Agent.Core.Configuration;
 
 namespace Aetheus.Agent.Core.Services;
 

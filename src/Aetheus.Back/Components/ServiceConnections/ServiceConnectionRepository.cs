@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.ServiceConnections;
 
 public class ServiceConnectionRepository(AppDbContext db) : IServiceConnectionRepository
 {
     public async Task<(List<ServiceConnection> Items, int TotalCount)> GetPagedAsync(
-        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
+        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false)
     {
         var query = db.ServiceConnections.AsNoTracking().AsQueryable();
 
@@ -25,7 +24,7 @@ public class ServiceConnectionRepository(AppDbContext db) : IServiceConnectionRe
 
         var items = await query
             .Include(sc => sc.Project)
-            .OrderBy(sc => sc.Name)
+            .OrderByProperty(sortBy, sortDescending, sc => sc.Name, fallbackDescending: false)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);

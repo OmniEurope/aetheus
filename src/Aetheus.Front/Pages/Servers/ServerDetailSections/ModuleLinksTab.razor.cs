@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -58,7 +49,7 @@ public partial class ModuleLinksTab
                 return;
             }
 
-            var result = await Api.GetModuleLinksPageAsync(ServerId, new ModuleLinkPageRequest
+            var result = await Api.Servers.GetModuleLinksPageAsync(ServerId, new ModuleLinkPageRequest
             {
                 SourceType = SourceType,
                 ResourceIdentifiers = resourceIdentifiers,
@@ -106,7 +97,7 @@ public partial class ModuleLinksTab
         _detecting = true;
         try
         {
-            var success = await Api.AutoDetectModuleLinksAsync(ServerId);
+            var success = await Api.Servers.AutoDetectModuleLinksAsync(ServerId);
             if (success)
             {
                 Toast.Success(L["AutoDetectComplete"]);
@@ -136,7 +127,7 @@ public partial class ModuleLinksTab
                 { "TargetTypes", _targetTypes },
                 { "Resources", Resources }
             },
-            new DialogOptions { Width = "400px" });
+            new DialogOptions { Width = "400px", AutoFocusFirstElement = false });
 
         if (dialogResult is AddModuleLinkResult result)
         {
@@ -148,7 +139,7 @@ public partial class ModuleLinksTab
     {
         try
         {
-            var result = await Api.CreateModuleLinkAsync(ServerId, new CreateModuleLinkRequest
+            var result = await Api.Servers.CreateModuleLinkAsync(ServerId, new CreateModuleLinkRequest
             {
                 SourceType = SourceType,
                 SourceIdentifier = request.SourceIdentifier,
@@ -173,7 +164,7 @@ public partial class ModuleLinksTab
 
     private async Task DeleteLinkAsync(int linkId)
     {
-        var success = await Api.DeleteModuleLinkAsync(ServerId, linkId);
+        var success = await Api.Servers.DeleteModuleLinkAsync(ServerId, linkId);
         if (success)
         {
             Toast.Success(L["LinkDeleted"]);

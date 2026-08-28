@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -14,24 +12,48 @@ internal static class PipelineRunChildAggregator
     /// <paramref name="run"/> with the children's summaries merged in (the parent's own values win when set).
     /// On a transient fetch failure the original run is returned with whatever children were cached.</summary>
     public static async Task<(Dictionary<int, PipelineRunDto> Children, PipelineRunDto Run)> LoadAsync(
-        PipelineRunDto run, ApiClient api, CancellationToken ct = default)
+        PipelineRunDto run,
+        ApiClient api,
+        PipelineRunPageCache? pageCache = null,
+        CancellationToken ct = default)
     {
         var cache = new Dictionary<int, PipelineRunDto>();
-        var childIds = run.Steps.Where(s => s.TriggeredRunId is not null)
-            .Select(s => s.TriggeredRunId!.Value).Distinct().ToList();
-        if (childIds.Count == 0) return (cache, run);
-
-        var fetched = new PipelineRunDto?[childIds.Count];
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, childIds.Count),
-            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
-            async (index, cancellationToken) =>
+        var seen = new HashSet<int> { run.Id };
+        var pending = new Queue<int>(TriggeredRunIds(run).Where(seen.Add));
+        while (pending.Count > 0)
         {
-            try { fetched[index] = await api.GetPipelineRunAsync(childIds[index], cancellationToken); }
-            catch (HttpRequestException) { /* preserve successfully fetched children */ }
-        });
-        foreach (var child in fetched)
-            if (child is not null) cache[child.Id] = child;
+            var childIds = Enumerable.Range(0, pending.Count)
+                .Select(_ => pending.Dequeue())
+                .ToArray();
+            var fetched = new PipelineRunDto?[childIds.Length];
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, childIds.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
+                async (index, cancellationToken) =>
+                {
+                    if (pageCache?.TryGetRun(childIds[index], out var cached) == true)
+                    {
+                        fetched[index] = cached;
+                        return;
+                    }
+
+                    try
+                    {
+                        fetched[index] = await api.Pipelines.GetPipelineRunAsync(childIds[index], cancellationToken);
+                        if (fetched[index] is { } child)
+                            pageCache?.StoreRun(child);
+                    }
+                    catch (HttpRequestException) { /* preserve successfully fetched descendants */ }
+                });
+            foreach (var child in fetched)
+            {
+                if (child is null) continue;
+                cache[child.Id] = child;
+                foreach (var descendantId in TriggeredRunIds(child))
+                    if (seen.Add(descendantId))
+                        pending.Enqueue(descendantId);
+            }
+        }
 
         var children = cache.Values.ToList();
         if (children.Count == 0) return (cache, run);
@@ -45,6 +67,12 @@ internal static class PipelineRunChildAggregator
         };
         return (cache, merged);
     }
+
+    private static IEnumerable<int> TriggeredRunIds(PipelineRunDto run) =>
+        run.Steps
+            .Where(step => step.TriggeredRunId is not null)
+            .Select(step => step.TriggeredRunId!.Value)
+            .Distinct();
 
     private static PipelineTestResultSummaryDto? AggregateTestResults(List<PipelineRunDto> children)
     {

@@ -12,14 +12,20 @@ public class NotificationServiceSendEventTests
     private readonly INotificationRepository _repo = Substitute.For<INotificationRepository>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
     private readonly IHttpClientFactory _httpFactory = Substitute.For<IHttpClientFactory>();
+    private readonly Aetheus.Back.Services.IEncryptionService _encryption =
+        Substitute.For<Aetheus.Back.Services.IEncryptionService>();
     private readonly NotificationService _sut;
 
     public NotificationServiceSendEventTests()
     {
+        _encryption.EncryptValue(Arg.Any<string>()).Returns(call => "enc:" + call.Arg<string>());
+        _encryption.DecryptValue(Arg.Any<string>()).Returns(call => call.Arg<string>()["enc:".Length..]);
         _sut = new NotificationService(
             _repo, _audit,
+            Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>(),
             _httpFactory,
             Substitute.For<Microsoft.Extensions.Logging.ILogger<NotificationService>>(),
+            _encryption,
             TimeProvider.System);
     }
 
@@ -61,6 +67,55 @@ public class NotificationServiceSendEventTests
     }
 
     [Fact]
+    public async Task SendEventAsync_AiDispatchFailure_DoesNotBlockNormalChannel()
+    {
+        var dispatcher = Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>();
+        // The observer dispatch itself is what isolates a failing subscriber, so the stub throws from
+        // the dispatch the service now calls.
+        dispatcher.DispatchAsync(
+                Arg.Any<Aetheus.Back.Components.Notifications.Events.NotificationEventRaisedEvent>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("AI store unavailable")));
+        var handler = new FakeHandler();
+        _httpFactory.CreateClient(Arg.Any<string>()).Returns(
+            new HttpClient(handler) { BaseAddress = new Uri("http://93.184.216.34/") });
+        _repo.GetRulesForEventAsync("deploy", Arg.Any<CancellationToken>()).Returns(
+        [
+            new NotificationRule
+            {
+                Id = 1,
+                EventType = "deploy",
+                NotificationChannelId = 1,
+                Channel = new NotificationChannel
+                {
+                    Id = 1,
+                    Name = "slack",
+                    Type = NotificationChannelType.Slack,
+                    ConfigurationJson = """{"webhookUrl":"http://93.184.216.34/slack"}"""
+                }
+            }
+        ]);
+        var service = new NotificationService(
+            _repo,
+            _audit,
+            dispatcher,
+            _httpFactory,
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<NotificationService>>(),
+            _encryption,
+            TimeProvider.System);
+
+        await service.SendEventAsync(
+            "deploy",
+            new { Version = "1.0" },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(handler.LastRequest);
+        Assert.Equal(
+            "http://93.184.216.34/slack",
+            handler.LastRequest!.RequestUri!.ToString());
+    }
+
+    [Fact]
     public async Task SendEventAsync_SlackChannel_PostsToWebhookUrl()
     {
         var handler = new FakeHandler();
@@ -72,7 +127,7 @@ public class NotificationServiceSendEventTests
             Id = 1,
             Name = "slack",
             Type = NotificationChannelType.Slack,
-            ConfigurationJson = """{"webhookUrl":"http://93.184.216.34/slack"}""",
+            ConfigurationJson = """enc:{"webhookUrl":"http://93.184.216.34/slack"}""",
             Rules = []
         };
         var rule = new NotificationRule

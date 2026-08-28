@@ -1,7 +1,7 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @if (_apps is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
@@ -36,7 +36,7 @@ else
     @if (_addVisible)
     {
         <RadzenCard class="rz-mt-4">
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["AddApplication"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["AddApplication"]</RadzenText>
             <RadzenRow Gap="1rem">
                 <RadzenColumn SizeMD="3" Size="12">
                     <RadzenFormField Text="@L["Name"]">

@@ -2,6 +2,8 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.PackageFeeds;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Services;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using NSubstitute;
@@ -14,11 +16,13 @@ public class PackageFeedServiceTests
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
     private readonly IPackageVersionResolver _resolver = Substitute.For<IPackageVersionResolver>();
     private readonly PackageFeedSyncGate _gate = new();
+    private readonly IAdminChangeNotifier _notifier = Substitute.For<IAdminChangeNotifier>();
     private readonly PackageFeedService _sut;
 
     public PackageFeedServiceTests()
     {
-        _sut = new PackageFeedService(_repo, _audit, _resolver, _gate, TimeProvider.System);
+        _sut = new PackageFeedService(
+            _repo, _audit, _resolver, _gate, TimeProvider.System, _notifier);
     }
 
     [Fact]
@@ -69,6 +73,8 @@ public class PackageFeedServiceTests
         Assert.Equal(1, result!.Synced);
         Assert.Equal("13.0.3", entry.LatestVersion);
         await _repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _notifier.Received(1).BroadcastAsync(
+            AdminEntities.PackageFeed, 1, EntityChangeOps.Updated, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -87,6 +93,47 @@ public class PackageFeedServiceTests
         Assert.Equal(1, result.Unsupported);
         Assert.Equal(string.Empty, entry.LatestVersion); // never fabricated
         Assert.NotNull(result.Message);
+    }
+
+    [Fact]
+    public async Task SyncFeedAsync_RateLimited_StopsFeedAndDefersNextAttempt()
+    {
+        const int feedId = 77;
+        _repo.FindFeedAsync(feedId, Arg.Any<CancellationToken>())
+            .Returns(new PackageFeed
+            {
+                Id = feedId,
+                Name = "npm",
+                FeedType = PackageFeedType.Npm,
+                UpstreamUrl = "https://registry.npmjs.org"
+            });
+        _repo.GetTrackedPackagesAsync(feedId, Arg.Any<CancellationToken>()).Returns(
+        [
+            new PackageEntry { Id = 1, PackageFeedId = feedId, Name = "first", LatestVersion = "" },
+            new PackageEntry { Id = 2, PackageFeedId = feedId, Name = "second", LatestVersion = "" }
+        ]);
+        _resolver.ResolveLatestAsync(
+                PackageFeedType.Npm,
+                "https://registry.npmjs.org",
+                "first",
+                Arg.Any<CancellationToken>())
+            .Returns(new PackageResolveResult(
+                PackageResolveOutcome.RateLimited,
+                null,
+                null,
+                TimeSpan.FromMinutes(2)));
+
+        var first = await _sut.SyncFeedAsync(feedId, ct: TestContext.Current.CancellationToken);
+        var second = await _sut.SyncFeedAsync(feedId, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, first!.Failed);
+        Assert.Contains("rate limit", first.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rate limit", second!.Message, StringComparison.OrdinalIgnoreCase);
+        await _resolver.Received(1).ResolveLatestAsync(
+            Arg.Any<PackageFeedType>(),
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -180,6 +227,8 @@ public class PackageFeedServiceTests
         Assert.Equal("docker-feed", result.Name);
         await _repo.Received(1).AddFeedAsync(Arg.Any<PackageFeed>(), Arg.Any<CancellationToken>());
         await _audit.Received(1).LogAsync("Created", "PackageFeed", Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _notifier.Received(1).BroadcastAsync(
+            AdminEntities.PackageFeed, Arg.Any<int>(), EntityChangeOps.Created, Arg.Any<CancellationToken>());
     }
 
     [Fact]

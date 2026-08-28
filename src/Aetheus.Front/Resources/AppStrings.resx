@@ -17,6 +17,9 @@
     </xsd:element>
   </xsd:schema>
   <data name="Dashboard" xml:space="preserve"><value>Dashboard</value></data>
+  <data name="BreadcrumbNavigation" xml:space="preserve"><value>Breadcrumb</value></data>
+  <data name="New" xml:space="preserve"><value>New</value></data>
+  <data name="ServerUpdates" xml:space="preserve"><value>Updates</value></data>
   <data name="CapBuild" xml:space="preserve"><value>Build pipeline</value></data>
   <data name="CapDeploy" xml:space="preserve"><value>Deployment pipeline</value></data>
   <data name="CapManage" xml:space="preserve"><value>Management pipeline</value></data>
@@ -31,6 +34,8 @@
   <data name="Logs" xml:space="preserve"><value>Logs</value></data>
   <data name="Settings" xml:space="preserve"><value>Settings</value></data>
   <data name="Login" xml:space="preserve"><value>Login</value></data>
+  <data name="PublicDemo" xml:space="preserve"><value>Public demo</value></data>
+  <data name="PublicDemoCredentials" xml:space="preserve"><value>Username: admin · Password: aetheus-demo</value></data>
   <data name="Logout" xml:space="preserve"><value>Logout</value></data>
   <data name="Username" xml:space="preserve"><value>Username</value></data>
   <data name="About" xml:space="preserve"><value>About</value></data>
@@ -44,6 +49,7 @@
   <data name="DeleteServer" xml:space="preserve"><value>Delete server</value></data>
   <data name="DeleteServerConfirm" xml:space="preserve"><value>Are you sure you want to delete the server '{0}'? This action cannot be undone.</value></data>
   <data name="ServerDeleted" xml:space="preserve"><value>Server deleted</value></data>
+  <data name="Deleting" xml:space="preserve"><value>Deleting...</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Create" xml:space="preserve"><value>Create</value></data>
   <data name="Online" xml:space="preserve"><value>Online</value></data>
@@ -52,6 +58,9 @@
   <data name="PendingTasks" xml:space="preserve"><value>Pending Tasks</value></data>
   <data name="RunningPipelines" xml:space="preserve"><value>Running Pipelines</value></data>
   <data name="NewPipeline" xml:space="preserve"><value>New Pipeline</value></data>
+  <data name="AddPipelineToFavorites" xml:space="preserve"><value>Add pipeline to favorites</value></data>
+  <data name="RemovePipelineFromFavorites" xml:space="preserve"><value>Remove pipeline from favorites</value></data>
+  <data name="FavoriteUpdateFailed" xml:space="preserve"><value>The favorite could not be updated.</value></data>
   <data name="RecentRuns" xml:space="preserve"><value>Recent Pipeline Runs</value></data>
   <data name="NoRecentRuns" xml:space="preserve"><value>No recent runs</value></data>
   <data name="NoRunningPipelines" xml:space="preserve"><value>No running pipelines</value></data>
@@ -152,6 +161,8 @@
   <data name="Image" xml:space="preserve"><value>Image</value></data>
   <data name="Ports" xml:space="preserve"><value>Ports</value></data>
   <data name="Actions" xml:space="preserve"><value>Actions</value></data>
+  <data name="GateGrade" xml:space="preserve"><value>Gate grade</value></data>
+  <data name="OpenRun" xml:space="preserve"><value>Open run</value></data>
   <data name="Name" xml:space="preserve"><value>Name</value></data>
   <data name="Status" xml:space="preserve"><value>Status</value></data>
   <data name="DockerPrune" xml:space="preserve"><value>Prune</value></data>
@@ -215,6 +226,9 @@
   <data name="Rerun" xml:space="preserve"><value>Re-run</value></data>
   <data name="ExpandAll" xml:space="preserve"><value>Expand all</value></data>
   <data name="ExpandChildItem" xml:space="preserve"><value>Expand child item</value></data>
+  <data name="ExpandLinkedPipelineRuns" xml:space="preserve"><value>Show linked pipeline runs</value></data>
+  <data name="CollapseLinkedPipelineRuns" xml:space="preserve"><value>Hide linked pipeline runs</value></data>
+  <data name="LinkedPipelineRuns" xml:space="preserve"><value>Linked pipeline runs</value></data>
   <data name="CollapseAll" xml:space="preserve"><value>Collapse all</value></data>
   <data name="RerunFailedSteps" xml:space="preserve"><value>Retry failed</value></data>
   <data name="ConfigFailureHint" xml:space="preserve"><value>Configuration failure - no matching agent or blocked dependency</value></data>
@@ -317,6 +331,11 @@
   <data name="Connected" xml:space="preserve"><value>Connected</value></data>
   <data name="ConnectedToBackend" xml:space="preserve"><value>Connected to backend</value></data>
   <data name="NotConnectedToBackend" xml:space="preserve"><value>Not connected to backend</value></data>
+  <data name="DeactivateUserConfirm" xml:space="preserve"><value>Deactivate {0}? This user will no longer be able to sign in.</value></data>
+  <data name="DeactivateUser" xml:space="preserve"><value>Deactivate user</value></data>
+  <data name="Deactivate" xml:space="preserve"><value>Deactivate</value></data>
+  <data name="AddedToFavorites" xml:space="preserve"><value>Added to favorites.</value></data>
+  <data name="RemovedFromFavorites" xml:space="preserve"><value>Removed from favorites.</value></data>
   <data name="Clear" xml:space="preserve"><value>Clear</value></data>
   <data name="NotFound" xml:space="preserve"><value>Not Found</value></data>
   <data name="NotFoundMessage" xml:space="preserve"><value>Sorry, the content you are looking for does not exist.</value></data>
@@ -337,6 +356,10 @@
   <data name="Saved" xml:space="preserve"><value>Saved</value></data>
   <data name="SettingSaved" xml:space="preserve"><value>Setting '{0}' updated.</value></data>
   <data name="SecretAdded" xml:space="preserve"><value>Secret added.</value></data>
+  <data name="SecretValueGenerated" xml:space="preserve"><value>A secure value has been generated.</value></data>
+  <data name="SecretValueGeneratedForKey" xml:space="preserve"><value>A secure value has been generated using the recipe for this key.</value></data>
+  <data name="GenerateSecretValue" xml:space="preserve"><value>Generate a secure value</value></data>
+  <data name="GenerateSecretValueForKey" xml:space="preserve"><value>Generate a secure value using the {0} recipe</value></data>
   <data name="SecretDeleted" xml:space="preserve"><value>Secret deleted.</value></data>
   <data name="DeleteSecretConfirm" xml:space="preserve"><value>Are you sure you want to delete this secret?</value></data>
   <data name="DeleteSecret" xml:space="preserve"><value>Delete Secret</value></data>
@@ -408,6 +431,10 @@
   <data name="Environments" xml:space="preserve"><value>Environments</value></data>
   <data name="Environment" xml:space="preserve"><value>Environment</value></data>
   <data name="NewEnvironment" xml:space="preserve"><value>New</value></data>
+  <data name="StartFromExistingEnvironment" xml:space="preserve"><value>Start from an existing environment</value></data>
+  <data name="StartFromExistingEnvironmentHint" xml:space="preserve"><value>Copy its complete configuration, even from another project. You can edit every field before creating.</value></data>
+  <data name="SourceEnvironment" xml:space="preserve"><value>Source environment</value></data>
+  <data name="CreateEnvironmentFromScratch" xml:space="preserve"><value>Create from scratch</value></data>
   <data name="SearchEnvironments" xml:space="preserve"><value>Search environments...</value></data>
   <data name="NoEnvironmentsFound" xml:space="preserve"><value>No environments.</value></data>
   <data name="EnvironmentCreated" xml:space="preserve"><value>Environment created.</value></data>
@@ -500,6 +527,11 @@
   <data name="RunId" xml:space="preserve"><value>Run ID</value></data>
   <data name="RunParameters" xml:space="preserve"><value>Run parameters</value></data>
   <data name="RunParametersCount" xml:space="preserve"><value>{0} parameter(s)</value></data>
+  <data name="CompatibilityAttestation" xml:space="preserve"><value>Compatibility attestation</value></data>
+  <data name="CompatibilityMode" xml:space="preserve"><value>Compatibility mode</value></data>
+  <data name="PreviousVersionTested" xml:space="preserve"><value>Previous version tested</value></data>
+  <data name="CompatibilityVerdict" xml:space="preserve"><value>Compatibility verdict</value></data>
+  <data name="PackageFeedCreationSupportedTypes" xml:space="preserve"><value>Creation is currently supported for NuGet, npm and PyPI feeds. Maven, Docker and Generic feeds are not supported.</value></data>
   <data name="Parameter" xml:space="preserve"><value>Parameter</value></data>
   <data name="RunParameterRequired" xml:space="preserve"><value>Parameter "{0}" is required.</value></data>
   <data name="SecretsImported" xml:space="preserve"><value>{0} secrets imported.</value></data>
@@ -651,9 +683,16 @@
   <data name="PipelineRun" xml:space="preserve"><value>Pipeline Run</value></data>
   <data name="NoRecords" xml:space="preserve"><value>No records.</value></data>
   <data name="NoLogs" xml:space="preserve"><value>No output logs available.</value></data>
-  <data name="NoOutputLogs" xml:space="preserve"><value>This step ran but produced no log output.</value></data>
+  <data name="LogsFailureDiagnostic" xml:space="preserve"><value>Agent failure {0}: {1}</value></data>
+  <data name="LogsSuccessfulNoOutput" xml:space="preserve"><value>The step completed successfully (exit code {0}); the command wrote nothing to standard output or standard error.</value></data>
+  <data name="LogsFailedNoOutput" xml:space="preserve"><value>The command failed with exit code {0} before writing anything to standard output or standard error.</value></data>
+  <data name="LogsTimeoutNoOutput" xml:space="preserve"><value>The step timed out before writing anything to standard output or standard error.</value></data>
+  <data name="LogsCancelledNoOutput" xml:space="preserve"><value>The step was cancelled before writing anything to standard output or standard error.</value></data>
+  <data name="LogsAwaitingOutput" xml:space="preserve"><value>The step is still active; no standard output or error has been received yet.</value></data>
   <data name="LogsNotRetained" xml:space="preserve"><value>Logs for this step were not retained.</value></data>
   <data name="LogsNeverProduced" xml:space="preserve"><value>This step never ran, so it produced no logs.</value></data>
+  <data name="LogsConditionNotMet" xml:space="preserve"><value>This step did not run because condition "{0}" evaluated to false. Evaluated values: {1}.</value></data>
+  <data name="ConditionHadNoVariables" xml:space="preserve"><value>no variables</value></data>
   <data name="SelectStepToViewLogs" xml:space="preserve"><value>Select a step to view its logs</value></data>
   <data name="OpenChildRun" xml:space="preserve"><value>Open this run</value></data>
   <data name="PeekPipelineDefinition" xml:space="preserve"><value>View pipeline definition</value></data>
@@ -678,10 +717,10 @@
   <data name="Essentials" xml:space="preserve"><value>Essentials</value></data>
   <data name="IpAddress" xml:space="preserve"><value>IP Address</value></data>
   <data name="AgentVersion" xml:space="preserve"><value>Agent Version</value></data>
+  <data name="AgentVersionUpdateAvailable" xml:space="preserve"><value>{0} → target {1}</value></data>
   <data name="LastUpdated" xml:space="preserve"><value>Last updated: {0}</value></data>
   <data name="LastUpdate" xml:space="preserve"><value>Last update</value></data>
   <data name="AgentInstalledAtNullHint" xml:space="preserve"><value>Marker not yet written (agent predates installer change)</value></data>
-  <data name="HiddenColumnsHint" xml:space="preserve"><value>Some columns are hidden at this screen width</value></data>
   <data name="InheritedFrom" xml:space="preserve"><value>Inherited from {0}: {1}</value></data>
   <data name="OwnerType" xml:space="preserve"><value>Scope</value></data>
   <data name="Global" xml:space="preserve"><value>Global</value></data>
@@ -690,7 +729,7 @@
   <data name="ChooseColumns" xml:space="preserve"><value>Choose columns</value></data>
   <data name="PipelineRunner" xml:space="preserve"><value>Pipeline runner</value></data>
   <data name="PipelineToolchain" xml:space="preserve"><value>Toolchain</value></data>
-  <data name="PipelineToolchainHint" xml:space="preserve"><value>Capability: whether the pipeline toolchain (.NET SDK, git) is detected on the agent. Distinct from the admin authorization toggle below.</value></data>
+  <data name="PipelineToolchainHint" xml:space="preserve"><value>Capability: whether Git workspace preparation is available. Application SDKs are supplied by locked container images; Docker is reported separately.</value></data>
   <data name="ToolchainInstalled" xml:space="preserve"><value>Installed</value></data>
   <data name="ToolchainMissing" xml:space="preserve"><value>Not detected</value></data>
   <data name="ToolchainUnknown" xml:space="preserve"><value>Unknown</value></data>
@@ -738,6 +777,11 @@
   <data name="TaskStatus_Success" xml:space="preserve"><value>Success</value></data>
   <data name="TaskStatus_Failed" xml:space="preserve"><value>Failed</value></data>
   <data name="TaskStatus_Cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="CancelTask" xml:space="preserve"><value>Cancel task</value></data>
+  <data name="CancelTaskConfirm" xml:space="preserve"><value>Cancel task #{0} “{1}”? Its execution will be stopped and cannot be resumed.</value></data>
+  <data name="CancelTaskFailed" xml:space="preserve"><value>The task could not be cancelled.</value></data>
+  <data name="TaskCancelled" xml:space="preserve"><value>Task cancelled</value></data>
+  <data name="TaskCancelledDetail" xml:space="preserve"><value>Task #{0} was cancelled.</value></data>
   <data name="DkimSelector" xml:space="preserve"><value>DKIM Selector</value></data>
   <data name="MxRecord" xml:space="preserve"><value>MX Record</value></data>
   <data name="StepsCount" xml:space="preserve"><value>{0} steps</value></data>
@@ -853,6 +897,7 @@
   <data name="Enum_ReleaseStatus_Failed" xml:space="preserve"><value>Failed</value></data>
   <data name="Enum_ReleaseStatus_RolledBack" xml:space="preserve"><value>Rolled Back</value></data>
   <data name="Enum_ReleaseStatus_Promoted" xml:space="preserve"><value>Promoted</value></data>
+  <data name="Enum_ReleaseStatus_Superseded" xml:space="preserve"><value>Superseded</value></data>
   <data name="SkipToContent" xml:space="preserve"><value>Skip to content</value></data>
   <data name="SearchAuditLogs" xml:space="preserve"><value>Search audit logs...</value></data>
   <data name="FilterByAction" xml:space="preserve"><value>Filter by action</value></data>
@@ -866,6 +911,10 @@
   <data name="TotpCode" xml:space="preserve"><value>Authenticator code</value></data>
   <data name="TotpCodePlaceholder" xml:space="preserve"><value>123456</value></data>
   <data name="TotpRecoveryHint" xml:space="preserve"><value>Lost your authenticator? Use a recovery code instead.</value></data>
+  <data name="TotpRecoveryCode" xml:space="preserve"><value>Recovery code</value></data>
+  <data name="TotpRecoveryCodePlaceholder" xml:space="preserve"><value>ABCDE-12345</value></data>
+  <data name="TotpUseRecoveryCode" xml:space="preserve"><value>Use a recovery code</value></data>
+  <data name="TotpUseAuthenticatorCode" xml:space="preserve"><value>Use an authenticator code</value></data>
   <data name="TotpSetup" xml:space="preserve"><value>Two-factor authentication</value></data>
   <data name="TotpEnable" xml:space="preserve"><value>Enable 2FA</value></data>
   <data name="TotpDisable" xml:space="preserve"><value>Disable 2FA</value></data>
@@ -915,6 +964,8 @@
   <data name="CoverageByFile" xml:space="preserve"><value>Coverage by file</value></data>
   <data name="CoverageByAssembly" xml:space="preserve"><value>Coverage by assembly</value></data>
   <data name="Assembly" xml:space="preserve"><value>Assembly</value></data>
+  <data name="Namespace" xml:space="preserve"><value>Namespace</value></data>
+  <data name="AnalysisArchitectureLevel" xml:space="preserve"><value>Graph level</value></data>
   <data name="File" xml:space="preserve"><value>File</value></data>
   <data name="CodeQuality" xml:space="preserve"><value>Code quality</value></data>
   <data name="AvgComplexity" xml:space="preserve"><value>Avg. complexity</value></data>
@@ -1107,8 +1158,12 @@
   <data name="StopFollow" xml:space="preserve"><value>Stop</value></data>
   <data name="CancelRun" xml:space="preserve"><value>Cancel run</value></data>
   <data name="CancelRunConfirm" xml:space="preserve"><value>Cancel this run? Its running steps will be stopped.</value></data>
-  <data name="RunCancelled" xml:space="preserve"><value>Run cancelled</value></data>
-  <data name="RunCancelledDetail" xml:space="preserve"><value>The run was cancelled and its running steps stopped.</value></data>
+  <data name="RunCancelled" xml:space="preserve"><value>Cancellation accepted</value></data>
+  <data name="RunCancelledDetail" xml:space="preserve"><value>The cancellation request was recorded. Mandatory teardown will finish before the run becomes Cancelled.</value></data>
+  <data name="CancellationAcceptedTitle" xml:space="preserve"><value>Cancellation accepted</value></data>
+  <data name="CancellationAcceptedDetail" xml:space="preserve"><value>No new work will start. Running work is stopping and mandatory teardown will finish before the run becomes Cancelled.</value></data>
+  <data name="TaskQueuePositionLive" xml:space="preserve"><value>Waiting on {0} · position {1} of {2} in the queue (live).</value></data>
+  <data name="TaskQueuePositionPending" xml:space="preserve"><value>Assigned to {0} · calculating the live queue position…</value></data>
   <data name="ScrollToTop" xml:space="preserve"><value>Jump to top</value></data>
   <data name="ScrollToBottom" xml:space="preserve"><value>Jump to bottom</value></data>
   <data name="ConfirmServiceAction" xml:space="preserve"><value>Are you sure you want to {0} the service "{1}"?</value></data>
@@ -1132,6 +1187,10 @@
   <data name="TaskQueued" xml:space="preserve"><value>Task queued.</value></data>
   <data name="TaskAgentOffline" xml:space="preserve"><value>Agent offline</value></data>
   <data name="TaskAgentOfflineHint" xml:space="preserve"><value>The target server's agent is offline, so this task cannot run. It will time out after 30 minutes unless the agent reconnects.</value></data>
+  <data name="InfrastructureMismatch" xml:space="preserve"><value>Infrastructure mismatch</value></data>
+  <data name="ToolError" xml:space="preserve"><value>Tool error</value></data>
+  <data name="BuildFailed" xml:space="preserve"><value>Build failed</value></data>
+  <data name="TestsFailed" xml:space="preserve"><value>Tests failed</value></data>
   <data name="AgentOfflineActionBlocked" xml:space="preserve"><value>The server's agent is offline, so this action cannot be queued. Reconnect the agent and try again.</value></data>
   <data name="TaskSucceeded" xml:space="preserve"><value>Task completed.</value></data>
   <data name="TaskFailed" xml:space="preserve"><value>Task failed.</value></data>
@@ -1150,6 +1209,7 @@
   <data name="Enabled" xml:space="preserve"><value>Enabled</value></data>
   <data name="Applications" xml:space="preserve"><value>Applications</value></data>
   <data name="Source" xml:space="preserve"><value>Source</value></data>
+  <data name="AnalysisExcerpt" xml:space="preserve"><value>Bounded excerpt</value></data>
   <data name="LoadMore" xml:space="preserve"><value>Load more</value></data>
   <data name="Loading" xml:space="preserve"><value>Loading…</value></data>
   <data name="LogsShownCount" xml:space="preserve"><value>{0} of {1} entries shown</value></data>
@@ -1202,6 +1262,7 @@
   <data name="GitRepositories" xml:space="preserve"><value>Git Repositories</value></data>
   <data name="GitRepository" xml:space="preserve"><value>Git Repository</value></data>
   <data name="NewRepository" xml:space="preserve"><value>New</value></data>
+  <data name="AddGitRepository" xml:space="preserve"><value>Add repository</value></data>
   <data name="SelectProjectToViewRepos" xml:space="preserve"><value>Select a project to view its repositories.</value></data>
   <data name="NoRepositoriesFound" xml:space="preserve"><value>No repositories found.</value></data>
   <data name="CloneUrl" xml:space="preserve"><value>Clone URL</value></data>
@@ -1296,6 +1357,11 @@
   <data name="PermissionLevel" xml:space="preserve"><value>Permission level</value></data>
   <data name="EffectivePermissions" xml:space="preserve"><value>Effective Permissions</value></data>
   <data name="NoPermissionsAssigned" xml:space="preserve"><value>No permissions assigned</value></data>
+  <data name="RoleAssignmentHint" xml:space="preserve"><value>Search and page through all roles without loading the complete collection.</value></data>
+  <data name="SearchRoles" xml:space="preserve"><value>Search roles...</value></data>
+  <data name="AssignedRolesOnly" xml:space="preserve"><value>Assigned only</value></data>
+  <data name="SelectedRoles" xml:space="preserve"><value>Selected roles</value></data>
+  <data name="SelectedRolesCount" xml:space="preserve"><value>{0} selected</value></data>
   <data name="GrantedByRole" xml:space="preserve"><value>Granted by</value></data>
   <data name="AgentPool" xml:space="preserve"><value>Agent Pool</value></data>
   <data name="ServiceConnection" xml:space="preserve"><value>Service Connection</value></data>
@@ -1577,7 +1643,9 @@
   <data name="DurationDaysShort" xml:space="preserve"><value>{0} d</value></data>
   <data name="UpdateAgent" xml:space="preserve"><value>Update agent</value></data>
   <data name="UpdateAllAgents" xml:space="preserve"><value>Update all agents</value></data>
-  <data name="UpdateAgentConfirm" xml:space="preserve"><value>Queue an agent self-update for '{0}'? The agent will download the latest build and restart on it.</value></data>
+  <data name="UpdateAgentConfirm" xml:space="preserve"><value>Update agent '{0}' from version {1} to version {2}? The agent will restart.</value></data>
+  <data name="AgentUpdateVersionTransition" xml:space="preserve"><value>Version {0} → {1}</value></data>
+  <data name="AgentAlreadyUpToDate" xml:space="preserve"><value>The agent is already on version {0}; no update was queued.</value></data>
   <data name="UpdateAllAgentsConfirm" xml:space="preserve"><value>Queue an agent self-update for every server you can administer?</value></data>
   <data name="UpdateAgentQueued" xml:space="preserve"><value>Agent self-update queued for '{0}'.</value></data>
   <data name="UpdateAllAgentsQueued" xml:space="preserve"><value>Agent self-update queued for {0} server(s).</value></data>
@@ -1627,7 +1695,7 @@
   <data name="OperatingSystem" xml:space="preserve"><value>Operating system</value></data>
   <data name="OsAny" xml:space="preserve"><value>Any OS</value></data>
   <data name="WizardModules" xml:space="preserve"><value>Capabilities to install</value></data>
-  <data name="WizardModulePipelineRunner" xml:space="preserve"><value>Pipeline runner (.NET SDK, git, sshpass)</value></data>
+  <data name="WizardModulePipelineRunner" xml:space="preserve"><value>Pipeline runner (Git, sshpass; SDKs in locked containers)</value></data>
   <data name="WizardModulePipelineRunnerHint" xml:space="preserve"><value>Installs the build/deploy toolchain so this agent can run pipelines. No elevated privileges.</value></data>
   <data name="WizardModuleServerManagement" xml:space="preserve"><value>Server management (Apache, Docker, RKHunter, Certbot, Cron, Portsentry)</value></data>
   <data name="WizardModuleServerManagementHint" xml:space="preserve"><value>Grants the agent the privileges needed to administer services. Linux only for now.</value></data>
@@ -1671,6 +1739,10 @@
   <data name="RerunCurrent" xml:space="preserve"><value>Rerun (current definition)</value></data>
   <data name="RerunSameCommit" xml:space="preserve"><value>Rerun (same commit)</value></data>
   <data name="RerunBranchHead" xml:space="preserve"><value>Rerun (branch head)</value></data>
+  <data name="ResumeCheckpoints" xml:space="preserve"><value>Resume with verified checkpoints</value></data>
+  <data name="Resume" xml:space="preserve"><value>Resume</value></data>
+  <data name="CheckpointWillBeRevalidated" xml:space="preserve"><value>will be reused if final validation passes</value></data>
+  <data name="CheckpointWillReplay" xml:space="preserve"><value>will be replayed</value></data>
   <data name="Provenance" xml:space="preserve"><value>Provenance</value></data>
   <data name="Distribution" xml:space="preserve"><value>Distribution</value></data>
   <data name="Deliverables" xml:space="preserve"><value>Deliverables</value></data>
@@ -1826,6 +1898,12 @@
   <data name="Availability" xml:space="preserve"><value>Availability</value></data>
   <data name="Telemetry" xml:space="preserve"><value>Telemetry</value></data>
   <data name="Metrics" xml:space="preserve"><value>Metrics</value></data>
+  <data name="Visitors" xml:space="preserve"><value>Visitors</value></data>
+  <data name="CurrentVisitors" xml:space="preserve"><value>Current visitors</value></data>
+  <data name="UniqueVisitorsToday" xml:space="preserve"><value>Unique visitors today</value></data>
+  <data name="DailyUniqueVisitors" xml:space="preserve"><value>Daily unique visitors</value></data>
+  <data name="NoVisitorDataYet" xml:space="preserve"><value>No visitor data yet</value></data>
+  <data name="CookieLessDailyVisitorsHint" xml:space="preserve"><value>Cookie-free daily estimate; no raw IP or user agent is stored.</value></data>
   <data name="Errors" xml:space="preserve"><value>Errors</value></data>
   <data name="Ingestion" xml:space="preserve"><value>Ingestion</value></data>
   <data name="Application" xml:space="preserve"><value>Application</value></data>
@@ -1875,17 +1953,24 @@
   <data name="ReviewPipelineChange" xml:space="preserve"><value>Review pipeline change</value></data>
   <data name="CommitBranch" xml:space="preserve"><value>Commit branch</value></data>
   <data name="PipelineSaveCommitPreview" xml:space="preserve"><value>Saving commits this definition to the selected branch before updating the pipeline.</value></data>
-  <data name="ChooseBranch" xml:space="preserve"><value>Choose branch</value></data>
+  <data name="RunWithOptions" xml:space="preserve"><value>Run with options</value></data>
+  <data name="AvailableReleases" xml:space="preserve"><value>Available releases</value></data>
+  <data name="AvailableReleasesClickToFill" xml:space="preserve"><value>Available releases (click to fill the version)</value></data>
+  <data name="NoRunOptions" xml:space="preserve"><value>This pipeline has no branch or parameter to choose.</value></data>
   <data name="RunFromBranch" xml:space="preserve"><value>Run from a branch</value></data>
   <data name="BranchListRefreshedHint" xml:space="preserve"><value>The current branches were just refreshed. The repository's default branch is selected first.</value></data>
   <data name="SetDefaultBranch" xml:space="preserve"><value>Set as default branch</value></data>
   <data name="DefaultBranchUpdated" xml:space="preserve"><value>Default branch updated.</value></data>
   <data name="PreparingRun" xml:space="preserve"><value>Preparing run</value></data>
   <data name="PipelineFleet" xml:space="preserve"><value>Pipeline fleet</value></data>
+  <data name="UsedPipelines" xml:space="preserve"><value>Used pipelines</value></data>
+  <data name="AutonomousPipeline" xml:space="preserve"><value>Autonomous</value></data>
+  <data name="ViewPipelinesUsingTemplate" xml:space="preserve"><value>View pipelines using {0}</value></data>
   <data name="AllTemplates" xml:space="preserve"><value>All templates</value></data>
   <data name="Current" xml:space="preserve"><value>Current</value></data>
   <data name="Outdated" xml:space="preserve"><value>Outdated</value></data>
-  <data name="OffCatalog" xml:space="preserve"><value>Off catalog</value></data>
+  <data name="Update" xml:space="preserve"><value>Update</value></data>
+  <data name="OffCatalog" xml:space="preserve"><value>Autonomous</value></data>
   <data name="Owner" xml:space="preserve"><value>Owner</value></data>
   <data name="PinnedVersion" xml:space="preserve"><value>Pinned version</value></data>
   <data name="LegacyLatest" xml:space="preserve"><value>Legacy latest</value></data>
@@ -1927,4 +2012,463 @@
   <data name="Reclaimable" xml:space="preserve"><value>Reclaimable</value></data>
   <data name="Growth24Hours" xml:space="preserve"><value>24-hour growth</value></data>
   <data name="AgentAndNuGet" xml:space="preserve"><value>Agent and NuGet</value></data>
+  <data name="DastEnabled" xml:space="preserve"><value>Allow DAST scans</value></data>
+  <data name="DastEphemeral" xml:space="preserve"><value>Ephemeral target (required for every DAST scan)</value></data>
+  <data name="DastContainsRealData" xml:space="preserve"><value>Contains real data</value></data>
+  <data name="DastAllowedHosts" xml:space="preserve"><value>DAST allowed hosts</value></data>
+  <data name="DastAllowedHostsHelp" xml:space="preserve"><value>One exact hostname per line; URLs and wildcards are refused.</value></data>
+  <data name="AnalysisOverview" xml:space="preserve"><value>Overview</value></data>
+  <data name="AnalysisOpenFindings" xml:space="preserve"><value>Open findings</value></data>
+  <data name="AnalysisNewFindings" xml:space="preserve"><value>New findings</value></data>
+  <data name="AnalysisLastRun" xml:space="preserve"><value>Last analysis</value></data>
+  <data name="AnalysisFindings" xml:space="preserve"><value>Findings</value></data>
+  <data name="AnalysisMetrics" xml:space="preserve"><value>Metrics</value></data>
+  <data name="AnalysisComponents" xml:space="preserve"><value>Components and SBOM</value></data>
+  <data name="AnalysisReports" xml:space="preserve"><value>Reports</value></data>
+  <data name="AnalysisGovernance" xml:space="preserve"><value>Governance</value></data>
+  <data name="AnalysisPolicies" xml:space="preserve"><value>Policies</value></data>
+  <data name="AnalysisExceptions" xml:space="preserve"><value>Exceptions</value></data>
+  <data name="AnalysisRule" xml:space="preserve"><value>Rule</value></data>
+  <data name="AnalysisMetricKey" xml:space="preserve"><value>Metric key</value></data>
+  <data name="AnalysisTool" xml:space="preserve"><value>Tool</value></data>
+  <data name="AnalysisScanner" xml:space="preserve"><value>Scanner</value></data>
+  <data name="AnalysisDirectDependency" xml:space="preserve"><value>Direct dependency</value></data>
+  <data name="Critical" xml:space="preserve"><value>Critical</value></data>
+  <data name="High" xml:space="preserve"><value>High</value></data>
+  <data name="Fixed" xml:space="preserve"><value>Fixed</value></data>
+  <data name="Unit" xml:space="preserve"><value>Unit</value></data>
+  <data name="Symbol" xml:space="preserve"><value>Symbol</value></data>
+  <data name="Behavior" xml:space="preserve"><value>Behavior</value></data>
+  <data name="RevokedAt" xml:space="preserve"><value>Revoked at</value></data>
+  <data name="AnalysisFindingDetail" xml:space="preserve"><value>Finding details</value></data>
+  <data name="AnalysisProblemSummary" xml:space="preserve"><value>What was detected?</value></data>
+  <data name="AnalysisExactLocation" xml:space="preserve"><value>Exact location</value></data>
+  <data name="AnalysisLocationUnavailable" xml:space="preserve"><value>The scanner did not provide an exact file location.</value></data>
+  <data name="AnalysisScannerMessage" xml:space="preserve"><value>Scanner message</value></data>
+  <data name="AnalysisFindingNotFound" xml:space="preserve"><value>This finding does not exist or is not accessible.</value></data>
+  <data name="AnalysisDecision" xml:space="preserve"><value>Decision</value></data>
+  <data name="AnalysisDecisionHelp" xml:space="preserve"><value>Record the review outcome and explain why this finding is accepted, mitigated, or considered a false positive.</value></data>
+  <data name="AnalysisDecisionSaved" xml:space="preserve"><value>The governance decision was saved.</value></data>
+  <data name="AnalysisDecisionChooseOutcome" xml:space="preserve"><value>Choose the review outcome</value></data>
+  <data name="AnalysisDecisionAcceptedDescription" xml:space="preserve"><value>The risk is understood and consciously accepted.</value></data>
+  <data name="AnalysisDecisionFalsePositiveDescription" xml:space="preserve"><value>The reported issue does not apply to this code or context.</value></data>
+  <data name="AnalysisDecisionMitigatedDescription" xml:space="preserve"><value>A compensating control reduces the risk without removing the finding.</value></data>
+  <data name="AnalysisDecisionReasonPlaceholder" xml:space="preserve"><value>Document the evidence, context and owner of this decision…</value></data>
+  <data name="AnalysisDecisionReasonHint" xml:space="preserve"><value>Required: 10 to 2,000 characters. Explain the evidence so the decision remains auditable.</value></data>
+  <data name="AnalysisDecisionExpirationHint" xml:space="preserve"><value>Optional. Set a future date when this decision must be reviewed again.</value></data>
+  <data name="AnalysisDecisionExpirationFuture" xml:space="preserve"><value>The expiration date must be in the future.</value></data>
+  <data name="AnalysisDecisionSelected" xml:space="preserve"><value>Selected outcome:</value></data>
+  <data name="AnalysisSaveDecision" xml:space="preserve"><value>Save decision</value></data>
+  <data name="AnalysisOpenSourceFile" xml:space="preserve"><value>Open file</value></data>
+  <data name="AnalysisOccurrences" xml:space="preserve"><value>Occurrences</value></data>
+  <data name="AnalysisDecisionHistory" xml:space="preserve"><value>Decision history</value></data>
+  <data name="AnalysisContinuousVulnerabilities" xml:space="preserve"><value>Continuous vulnerabilities</value></data>
+  <data name="AnalysisTrackingDisabled" xml:space="preserve"><value>Continuous tracking is not configured</value></data>
+  <data name="AnalysisTrackingDisabledHelp" xml:space="preserve"><value>Enable Dependency-Track to monitor vulnerabilities discovered after the original build.</value></data>
+  <data name="AnalysisTrackingStatus" xml:space="preserve"><value>Synchronization</value></data>
+  <data name="AnalysisVulnerabilities" xml:space="preserve"><value>vulnerabilities</value></data>
+  <data name="AnalysisContinuous" xml:space="preserve"><value>Continuous observation</value></data>
+  <data name="AnalysisAddPolicy" xml:space="preserve"><value>Add policy</value></data>
+  <data name="AnalysisAddException" xml:space="preserve"><value>Add exception</value></data>
+  <data name="AnalysisPolicySaved" xml:space="preserve"><value>The analysis policy was saved.</value></data>
+  <data name="AnalysisExceptionCreated" xml:space="preserve"><value>The analysis exception was created.</value></data>
+  <data name="AnalysisExceptionRevoked" xml:space="preserve"><value>The analysis exception was revoked.</value></data>
+  <data name="AnalysisOperator" xml:space="preserve"><value>Operator</value></data>
+  <data name="AnalysisThreshold" xml:space="preserve"><value>Threshold</value></data>
+  <data name="AnalysisPortfolio" xml:space="preserve"><value>Quality</value></data>
+  <data name="Posture" xml:space="preserve"><value>Posture</value></data>
+  <data name="From" xml:space="preserve"><value>From</value></data>
+  <data name="To" xml:space="preserve"><value>To</value></data>
+  <data name="AnalysisArchitecture" xml:space="preserve"><value>Architecture</value></data>
+  <data name="AnalysisNoArchitectureGraph" xml:space="preserve"><value>No architecture graph</value></data>
+  <data name="AnalysisNoArchitectureGraphHelp" xml:space="preserve"><value>Run the .NET architecture analysis to generate the dependency matrix.</value></data>
+  <data name="AnalysisDsmHelp" xml:space="preserve"><value>Rows are source elements at the selected level and columns are their targets. Select an edge to inspect its symbols and history.</value></data>
+  <data name="AnalysisDsmSparseHelp" xml:space="preserve"><value>This graph has more than 60 nodes. A complete paginated edge list is shown to keep the page responsive.</value></data>
+  <data name="AnalysisNewness" xml:space="preserve"><value>Newness</value></data>
+  <data name="AnalysisNewOnly" xml:space="preserve"><value>New findings</value></data>
+  <data name="AnalysisExistingOnly" xml:space="preserve"><value>Existing findings</value></data>
+  <data name="AnalysisResponsible" xml:space="preserve"><value>Responsible</value></data>
+  <data name="AnalysisSelectedArchitectureEdge" xml:space="preserve"><value>Selected dependency edge</value></data>
+  <data name="AnalysisCreateTicket" xml:space="preserve"><value>Create ticket</value></data>
+  <data name="AnalysisTicket" xml:space="preserve"><value>Ticket</value></data>
+  <data name="AnalysisTicketCreated" xml:space="preserve"><value>The work item was created from this finding.</value></data>
+  <data name="AnalysisScannerCapabilities" xml:space="preserve"><value>Analysis scanner capabilities</value></data>
+  <data name="AnalysisScannerCapabilitiesUnknown" xml:space="preserve"><value>This agent has not reported scanner capabilities yet.</value></data>
+  <data name="AnalysisScannerUnavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="AnalysisScannerOnDemand" xml:space="preserve"><value>On demand</value></data>
+  <data name="AnalysisScannerReady" xml:space="preserve"><value>Ready</value></data>
+  <data name="PackageRegistry" xml:space="preserve"><value>Package registry</value></data>
+  <data name="RegistryNuGetHelp" xml:space="preserve"><value>Use this authenticated NuGet v3 source to publish and restore internal packages.</value></data>
+  <data name="RegistryNpmHelp" xml:space="preserve"><value>Use this authenticated npm registry to publish and install internal packages.</value></data>
+  <data name="NoRegistryPackages" xml:space="preserve"><value>No internal packages</value></data>
+  <data name="NoRegistryPackagesDescription" xml:space="preserve"><value>Publish a NuGet or npm package with a read-write personal access token to populate the registry.</value></data>
+  <data name="UpdatedAt" xml:space="preserve"><value>Updated</value></data>
+  <data name="PublishedBy" xml:space="preserve"><value>Published by</value></data>
+  <data name="PublishedAt" xml:space="preserve"><value>Published</value></data>
+  <data name="Unlist" xml:space="preserve"><value>Unlist</value></data>
+  <data name="Relist" xml:space="preserve"><value>Relist</value></data>
+  <data name="NoWebAnalyticsDataYet" xml:space="preserve"><value>No audience data yet</value></data>
+  <data name="UniqueVisitorsThisWeek" xml:space="preserve"><value>Unique visitors this week</value></data>
+  <data name="UniqueVisitorsThisMonth" xml:space="preserve"><value>Unique visitors this month</value></data>
+  <data name="SessionsThisMonth" xml:space="preserve"><value>Sessions this month</value></data>
+  <data name="ReturningVisitorsThisMonth" xml:space="preserve"><value>Returning visitors this month</value></data>
+  <data name="PageViewsThisMonth" xml:space="preserve"><value>Page views this month</value></data>
+  <data name="AuthenticatedUniqueThisMonth" xml:space="preserve"><value>Authenticated unique visitors this month</value></data>
+  <data name="BrowserPerformanceSamplesLast30Days" xml:space="preserve"><value>Browser performance samples (30 days)</value></data>
+  <data name="AverageBrowserNavigationDuration" xml:space="preserve"><value>Average browser navigation</value></data>
+  <data name="P95BrowserNavigationDuration" xml:space="preserve"><value>P95 browser navigation</value></data>
+  <data name="BrowserErrorsLast30Days" xml:space="preserve"><value>Browser errors (30 days)</value></data>
+  <data name="AnalyticsIngestionHealth" xml:space="preserve"><value>Audience ingestion health</value></data>
+  <data name="LastAnalyticsIngest" xml:space="preserve"><value>Last event received: {0}</value></data>
+  <data name="NoAnalyticsIngestYet" xml:space="preserve"><value>No event has been received yet.</value></data>
+  <data name="AnalyticsStorageQuota" xml:space="preserve"><value>Storage quota: {0}%</value></data>
+  <data name="AnalyticsStorageUsage" xml:space="preserve"><value>{0} used of {1}</value></data>
+  <data name="RejectedAnalyticsEvents" xml:space="preserve"><value>{0:N0} rejected events</value></data>
+  <data name="AudienceLast30Days" xml:space="preserve"><value>Audience over the last 30 days</value></data>
+  <data name="UniqueVisitors" xml:space="preserve"><value>Unique visitors</value></data>
+  <data name="PageViews" xml:space="preserve"><value>Page views</value></data>
+  <data name="TopPagesThisMonth" xml:space="preserve"><value>Top pages this month</value></data>
+  <data name="Route" xml:space="preserve"><value>Route</value></data>
+  <data name="WebAnalyticsConfiguration" xml:space="preserve"><value>No-banner audience measurement</value></data>
+  <data name="EnableWebAnalytics" xml:space="preserve"><value>Enable audience measurement</value></data>
+  <data name="EnablePublicWebAnalyticsIngest" xml:space="preserve"><value>Enable public browser ingestion</value></data>
+  <data name="AnalyticsSiteId" xml:space="preserve"><value>Public site identifier</value></data>
+  <data name="AnalyticsAllowedOrigins" xml:space="preserve"><value>Allowed origins</value></data>
+  <data name="AnalyticsAllowedOriginsHint" xml:space="preserve"><value>One HTTPS origin per line. Paths, query strings and wildcards are rejected.</value></data>
+  <data name="AnalyticsStorageBudgetBytes" xml:space="preserve"><value>Storage budget (bytes)</value></data>
+  <data name="AnalyticsKeyVersion" xml:space="preserve"><value>Pseudonymization key version {0}, created {1}</value></data>
+  <data name="RotateAnalyticsKey" xml:space="preserve"><value>Rotate pseudonymization key</value></data>
+  <data name="RotateAnalyticsKeyConfirm" xml:space="preserve"><value>Rotate this application's pseudonymization key? The previous generation remains readable for at most 31 days.</value></data>
+  <data name="WebAnalyticsConfigurationSaved" xml:space="preserve"><value>Audience measurement configuration saved.</value></data>
+  <data name="AnalyticsKeyRotated" xml:space="preserve"><value>Pseudonymization key rotated.</value></data>
+  <data name="EmptyEnvironmentsHint" xml:space="preserve"><value>Create an environment to group deployment targets and approvals.</value></data>
+  <data name="EmptyMonitoredAppsHint" xml:space="preserve"><value>Add an application to monitor its availability and response time.</value></data>
+  <data name="NoProjectServers" xml:space="preserve"><value>No server is attached to this project.</value></data>
+  <data name="EmptyProjectServersHint" xml:space="preserve"><value>Attach an agent server or declare an external host.</value></data>
+  <data name="AddServer" xml:space="preserve"><value>Add a server</value></data>
+  <data name="ProjectGettingStartedTitle" xml:space="preserve"><value>Get this project ready</value></data>
+  <data name="ProjectGettingStartedDescription" xml:space="preserve"><value>Connect the source, define optional deployment environments, and automate the project.</value></data>
+  <data name="CreateGitRepository" xml:space="preserve"><value>Create the Git repository</value></data>
+  <data name="CreateGitRepositoryHint" xml:space="preserve"><value>Centralize the source code and define the main branch.</value></data>
+  <data name="CreateEnvironment" xml:space="preserve"><value>Create an environment</value></data>
+  <data name="CreateEnvironmentHint" xml:space="preserve"><value>Pipeline runs can deploy directly. Create an environment to group targets and approvals.</value></data>
+  <data name="CreatePipeline" xml:space="preserve"><value>Create a pipeline</value></data>
+  <data name="CreatePipelineHint" xml:space="preserve"><value>Automate validation and deployment, from scratch or from a template.</value></data>
+  <data name="Ready" xml:space="preserve"><value>Ready</value></data>
+  <data name="Configure" xml:space="preserve"><value>Configure</value></data>
+  <data name="EmptyRepositoriesHint" xml:space="preserve"><value>Create a repository for this project and start from its main branch.</value></data>
+  <data name="SelectProjectToCreateRepository" xml:space="preserve"><value>Select a project to create its first repository.</value></data>
+  <data name="UseTemplate" xml:space="preserve"><value>Use template</value></data>
+  <data name="EmptyTemplatesHint" xml:space="preserve"><value>Create a reusable, versioned pipeline definition.</value></data>
+  <data name="InitialTemplateVersion" xml:space="preserve"><value>Initial version</value></data>
+  <data name="QualityGates" xml:space="preserve"><value>Quality gates</value></data>
+  <data name="QualityGatesInheritanceHelp" xml:space="preserve"><value>Project rules override organization rules, which override global and system defaults.</value></data>
+  <data name="QualityGateAddRule" xml:space="preserve"><value>Add rule</value></data>
+  <data name="QualityGateRuleType" xml:space="preserve"><value>Rule type</value></data>
+  <data name="QualityGatePolicyKey" xml:space="preserve"><value>Stable key</value></data>
+  <data name="QualityGateNewFindingsOnly" xml:space="preserve"><value>New findings only</value></data>
+  <data name="QualityGatePreview" xml:space="preserve"><value>Preview effective rules</value></data>
+  <data name="QualityGateEffectivePreview" xml:space="preserve"><value>Effective rule preview</value></data>
+  <data name="QualityGateSnapshotHash" xml:space="preserve"><value>Snapshot hash</value></data>
+  <data name="QualityGateEffectiveRuleCount" xml:space="preserve"><value>{0} effective rule(s)</value></data>
+  <data name="QualityGateOrigin" xml:space="preserve"><value>Origin</value></data>
+  <data name="QualityGateOverride" xml:space="preserve"><value>Override</value></data>
+  <data name="QualityGateCriterion" xml:space="preserve"><value>Criterion</value></data>
+  <data name="QualityGateScopeSystem" xml:space="preserve"><value>System</value></data>
+  <data name="QualityGateScopeGlobal" xml:space="preserve"><value>Global</value></data>
+  <data name="QualityGateScopeOrganization" xml:space="preserve"><value>Organization</value></data>
+  <data name="QualityGateScopeProject" xml:space="preserve"><value>Project</value></data>
+  <data name="QualityGateFindingRule" xml:space="preserve"><value>Finding or severity</value></data>
+  <data name="QualityGateMetricRule" xml:space="preserve"><value>Metric threshold</value></data>
+  <data name="QualityGateNewOnlyShort" xml:space="preserve"><value>new only</value></data>
+  <data name="QualityGateRecommended" xml:space="preserve"><value>Recommended preset</value></data>
+  <data name="QualityGateStrict" xml:space="preserve"><value>Strict preset</value></data>
+  <data name="QualityGateRecommendedApplied" xml:space="preserve"><value>The recommended quality-gate rules were copied into this scope.</value></data>
+  <data name="QualityGateStrictApplied" xml:space="preserve"><value>The strict quality-gate rules were copied into this scope.</value></data>
+  <data name="QualityGateImportInvalid" xml:space="preserve"><value>The quality-gate JSON file is invalid or unsupported.</value></data>
+  <data name="QualityGateImported" xml:space="preserve"><value>{0} quality-gate rule(s) imported.</value></data>
+  <data name="QualityGateHistory" xml:space="preserve"><value>Revision history</value></data>
+  <data name="QualityGateHistoryFor" xml:space="preserve"><value>Revision history: {0}</value></data>
+  <data name="QualityGateRevisionRestored" xml:space="preserve"><value>Revision {0} was restored as a new version.</value></data>
+  <data name="QualityGateExpectedProducers" xml:space="preserve"><value>Expected producers</value></data>
+  <data name="QualityGateConflicts" xml:space="preserve"><value>Conflicts to resolve</value></data>
+  <data name="QualityGateLatestRunVerdict" xml:space="preserve"><value>Latest run #{0}</value></data>
+  <data name="QualityGateOptionalBadge" xml:space="preserve"><value>Optional</value></data>
+  <data name="QualityGateOptionalTitle" xml:space="preserve"><value>Activate a gate only where it matters</value></data>
+  <data name="QualityGateOptionalDescription" xml:space="preserve"><value>A pipeline is blocked only when its YAML contains an analysis-gate step. Inherited rules provide safe defaults, while presets and analysis_rules make each pipeline explicit and reproducible.</value></data>
+  <data name="QualityGateYamlExample" xml:space="preserve"><value>Pipeline YAML example</value></data>
+  <data name="QualityGateCopyYaml" xml:space="preserve"><value>Copy YAML</value></data>
+  <data name="QualityGateYamlCopied" xml:space="preserve"><value>The quality-gate YAML example was copied.</value></data>
+  <data name="QualityGateRuleCount" xml:space="preserve"><value>rules</value></data>
+  <data name="QualityGateInheritedCount" xml:space="preserve"><value>inherited</value></data>
+  <data name="QualityGateLocalCount" xml:space="preserve"><value>local</value></data>
+  <data name="QualityGateScopePipeline" xml:space="preserve"><value>Pipeline</value></data>
+  <data name="QualityGateCategorySast" xml:space="preserve"><value>SAST</value></data>
+  <data name="QualityGateCategorySecrets" xml:space="preserve"><value>Secrets</value></data>
+  <data name="QualityGateCategoryDependencies" xml:space="preserve"><value>Dependencies</value></data>
+  <data name="QualityGateCategoryContainer" xml:space="preserve"><value>Container</value></data>
+  <data name="QualityGateCategoryInfrastructureAsCode" xml:space="preserve"><value>Infrastructure as code</value></data>
+  <data name="QualityGateCategorySbom" xml:space="preserve"><value>SBOM</value></data>
+  <data name="QualityGateCategoryDast" xml:space="preserve"><value>DAST</value></data>
+  <data name="QualityGateCategoryCodeQuality" xml:space="preserve"><value>Code quality</value></data>
+  <data name="QualityGateCategoryCoverage" xml:space="preserve"><value>Coverage</value></data>
+  <data name="QualityGateCategoryDuplication" xml:space="preserve"><value>Duplication</value></data>
+  <data name="QualityGateCategoryArchitecture" xml:space="preserve"><value>Architecture</value></data>
+  <data name="QualityGateSeverityNone" xml:space="preserve"><value>None</value></data>
+  <data name="QualityGateSeverityInfo" xml:space="preserve"><value>Information</value></data>
+  <data name="QualityGateSeverityLow" xml:space="preserve"><value>Low</value></data>
+  <data name="QualityGateSeverityMedium" xml:space="preserve"><value>Medium</value></data>
+  <data name="QualityGateSeverityHigh" xml:space="preserve"><value>High</value></data>
+  <data name="QualityGateSeverityCritical" xml:space="preserve"><value>Critical</value></data>
+  <data name="QualityGateOperatorGreaterThan" xml:space="preserve"><value>Greater than (&gt;)</value></data>
+  <data name="QualityGateOperatorGreaterThanOrEqual" xml:space="preserve"><value>Greater than or equal (≥)</value></data>
+  <data name="QualityGateOperatorLessThan" xml:space="preserve"><value>Less than (&lt;)</value></data>
+  <data name="QualityGateOperatorLessThanOrEqual" xml:space="preserve"><value>Less than or equal (≤)</value></data>
+  <data name="QualityGateOperatorEquals" xml:space="preserve"><value>Equals</value></data>
+  <data name="QualityGateOperatorChanged" xml:space="preserve"><value>Changed by threshold</value></data>
+  <data name="QualityGateOperatorDegraded" xml:space="preserve"><value>Degraded from baseline</value></data>
+  <data name="QualityGateBehaviorWarn" xml:space="preserve"><value>Warn</value></data>
+  <data name="QualityGateBehaviorBlock" xml:space="preserve"><value>Block</value></data>
+  <data name="AnalysisGrade" xml:space="preserve"><value>Grade</value></data>
+  <data name="AnalysisGlobalGrade" xml:space="preserve"><value>Global application grade</value></data>
+  <data name="AnalysisGradeNotConfigured" xml:space="preserve"><value>No A–F grading profile is configured yet.</value></data>
+  <data name="AnalysisGradeIncomplete" xml:space="preserve"><value>Required evidence is incomplete; no misleading grade is shown.</value></data>
+  <data name="AnalysisGateIncompleteTitle" xml:space="preserve"><value>Analysis gate incomplete</value></data>
+  <data name="AnalysisGateIncompleteDetail" xml:space="preserve"><value>Evidence could not be loaded for pipeline run(s) {0}. The displayed gate is incomplete and must not be treated as passed.</value></data>
+  <data name="UserRolesSavedPermissionRefreshUnauthorized" xml:space="preserve"><value>Roles were saved, but your effective permissions could not be refreshed because your session must be renewed.</value></data>
+  <data name="UserRolesSavedPermissionRefreshFailed" xml:space="preserve"><value>Roles were saved, but effective permissions could not be refreshed.</value></data>
+  <data name="AnalysisLimitingDomain" xml:space="preserve"><value>Limiting domain</value></data>
+  <data name="AnalysisReliability" xml:space="preserve"><value>Reliability and tests</value></data>
+  <data name="AnalysisApplicationSecurity" xml:space="preserve"><value>Application security</value></data>
+  <data name="AnalysisCodeQualityAndTests" xml:space="preserve"><value>Code quality and tests</value></data>
+  <data name="AnalysisCodeArchitecture" xml:space="preserve"><value>Code architecture</value></data>
+  <data name="AnalysisRuntimePerformance" xml:space="preserve"><value>Runtime performance</value></data>
+  <data name="AnalysisCriticalVulnerabilities" xml:space="preserve"><value>Critical vulnerabilities</value></data>
+  <data name="AnalysisHighVulnerabilities" xml:space="preserve"><value>High-severity vulnerabilities</value></data>
+  <data name="AnalysisMediumVulnerabilities" xml:space="preserve"><value>Medium-severity vulnerabilities</value></data>
+  <data name="AnalysisTestedLines" xml:space="preserve"><value>Lines covered by tests</value></data>
+  <data name="AnalysisTestedBranches" xml:space="preserve"><value>Code branches covered by tests</value></data>
+  <data name="AnalysisMaximumComplexity" xml:space="preserve"><value>Most complex code path</value></data>
+  <data name="AnalysisDuplicatedCode" xml:space="preserve"><value>Duplicated code</value></data>
+  <data name="AnalysisDependencyCycles" xml:space="preserve"><value>Dependency cycles between components</value></data>
+  <data name="AnalysisCrapAverage" xml:space="preserve"><value>Average CRAP score (complexity × missing tests)</value></data>
+  <data name="AnalysisCrapExplanation" xml:space="preserve"><value>Risk indicator combining code complexity and insufficient test coverage; lower is better.</value></data>
+  <data name="AnalysisRequired" xml:space="preserve"><value>Required</value></data>
+  <data name="AnalysisAdvisory" xml:space="preserve"><value>Advisory</value></data>
+  <data name="AnalysisFreshness" xml:space="preserve"><value>Freshness</value></data>
+  <data name="AnalysisDistanceToGrade" xml:space="preserve"><value>{0} to reach grade {1}</value></data>
+  <data name="Complete" xml:space="preserve"><value>Complete</value></data>
+  <data name="Incomplete" xml:space="preserve"><value>Incomplete</value></data>
+  <data name="Performance" xml:space="preserve"><value>Performance</value></data>
+  <data name="GitPatchTruncated" xml:space="preserve"><value>This patch was truncated to keep the page responsive.</value></data>
+  <data name="GitMergeDiffFirstParent" xml:space="preserve"><value>This merge commit diff is compared with its first parent.</value></data>
+  <data name="AiRunnerProfile" xml:space="preserve"><value>AI runner profile</value></data>
+  <data name="AiRunnerProfiles" xml:space="preserve"><value>AI runner profiles</value></data>
+  <data name="AiRunnerProfilesDescription" xml:space="preserve"><value>Configure approved local CLI tools used for AI-assisted jobs.</value></data>
+  <data name="AiTasks" xml:space="preserve"><value>AI tasks</value></data>
+  <data name="AiRunResult" xml:space="preserve"><value>AI run result</value></data>
+  <data name="AiRunResults" xml:space="preserve"><value>AI run results</value></data>
+  <data name="Verdict" xml:space="preserve"><value>Verdict</value></data>
+  <data name="ArgumentTemplate" xml:space="preserve"><value>Argument template</value></data>
+  <data name="AiArgumentTemplateHint" xml:space="preserve"><value>One argument per line. Supported tokens: {prompt_file}, {workdir}, {output_file}.</value></data>
+  <data name="EnvironmentVariables" xml:space="preserve"><value>Environment variables</value></data>
+  <data name="AiEnvironmentHint" xml:space="preserve"><value>One NAME=VALUE entry per line. Values are encrypted at rest.</value></data>
+  <data name="AiEnvironmentFormatError" xml:space="preserve"><value>Each environment variable must use the NAME=VALUE format.</value></data>
+  <data name="AiScheduleHint" xml:space="preserve"><value>Optional six-part cron expression including seconds.</value></data>
+  <data name="AiEventTypesHint" xml:space="preserve"><value>Optional event identifiers separated by commas.</value></data>
+  <data name="Binary" xml:space="preserve"><value>Binary</value></data>
+  <data name="ExternalData" xml:space="preserve"><value>Sends data externally</value></data>
+  <data name="Timeout" xml:space="preserve"><value>Timeout</value></data>
+  <data name="MaxOutputBytes" xml:space="preserve"><value>Maximum output (bytes)</value></data>
+  <data name="PromptTemplate" xml:space="preserve"><value>Prompt template</value></data>
+  <data name="EventTypes" xml:space="preserve"><value>Event types</value></data>
+  <data name="RunsLastSevenDays" xml:space="preserve"><value>Runs in the last 7 days</value></data>
+  <data name="FailedRuns" xml:space="preserve"><value>Failed runs</value></data>
+  <data name="ExecutionTime" xml:space="preserve"><value>Execution time</value></data>
+  <data name="RunNow" xml:space="preserve"><value>Run now</value></data>
+  <data name="Results" xml:space="preserve"><value>Results</value></data>
+  <data name="Report" xml:space="preserve"><value>Report</value></data>
+  <data name="Diff" xml:space="preserve"><value>Diff</value></data>
+  <data name="DownloadPatch" xml:space="preserve"><value>Download patch</value></data>
+  <data name="ApplyOnProposedBranch" xml:space="preserve"><value>Apply on a proposed branch</value></data>
+  <data name="ProposedBranchCreated" xml:space="preserve"><value>The dedicated AI-proposed branch was created. Merging remains a human action.</value></data>
+  <data name="Truncated" xml:space="preserve"><value>Truncated</value></data>
+  <data name="NoAiRunnerProfiles" xml:space="preserve"><value>No AI runner profile</value></data>
+  <data name="NoAiRunnerProfilesDescription" xml:space="preserve"><value>Create a profile to authorize a local mock or AI CLI.</value></data>
+  <data name="NoAiTasks" xml:space="preserve"><value>No AI task</value></data>
+  <data name="NoAiTasksDescription" xml:space="preserve"><value>Create a manual, scheduled, or event-triggered AI task.</value></data>
+  <data name="NoAiResults" xml:space="preserve"><value>No AI result</value></data>
+  <data name="NoAiResultsDescription" xml:space="preserve"><value>Run this task to generate its first report.</value></data>
+  <data name="DeleteAiRunnerProfileConfirm" xml:space="preserve"><value>Delete AI runner profile "{0}"?</value></data>
+  <data name="DeleteAiTaskConfirm" xml:space="preserve"><value>Delete AI task "{0}"?</value></data>
+  <data name="Queued" xml:space="preserve"><value>Queued</value></data>
+  <data name="AiRunQueued" xml:space="preserve"><value>The AI run is still executing. Its result will appear in the results view.</value></data>
+   <data name="AgentCompatibility_UpToDate" xml:space="preserve"><value>Up to date</value></data>
+  <data name="AgentCompatibility_UpdateRecommended" xml:space="preserve"><value>Update recommended</value></data>
+  <data name="AgentCompatibility_UpdateRequired" xml:space="preserve"><value>Update required</value></data>
+  <data name="AgentCompatibility_Unknown" xml:space="preserve"><value>Unknown compatibility</value></data>
+  <data name="AgentUpdateWaitingForTasks" xml:space="preserve"><value>Waiting for {0} task(s) to finish</value></data>
+  <data name="UpdateAllAgentsPreview" xml:space="preserve"><value>Target version: {0}. Agents concerned: {1}; already up to date: {2}; offline: {3}; incompatible: {4}; waiting for work: {5}. Start the safe updates?</value></data>
+  <data name="AgentCompatibilityFilter" xml:space="preserve"><value>Agent compatibility</value></data>
+  <data name="SortProjects" xml:space="preserve"><value>Sort projects</value></data>
+  <data name="SortByActivity" xml:space="preserve"><value>Recent activity</value></data>
+  <data name="SortNameAscending" xml:space="preserve"><value>Name: A to Z</value></data>
+  <data name="SortNameDescending" xml:space="preserve"><value>Name: Z to A</value></data>
+  <data name="FavoritesOnly" xml:space="preserve"><value>Favorites only</value></data>
+  <data name="ProjectViewMode" xml:space="preserve"><value>Project view mode</value></data>
+  <data name="ComfortableView" xml:space="preserve"><value>Comfortable cards</value></data>
+  <data name="DenseView" xml:space="preserve"><value>Dense view</value></data>
+  <data name="RemoveFromFavorites" xml:space="preserve"><value>Remove from favorites</value></data>
+  <data name="AddToFavorites" xml:space="preserve"><value>Add to favorites</value></data>
+  <data name="Production" xml:space="preserve"><value>Production</value></data>
+  <data name="ProductionOnline" xml:space="preserve"><value>Online</value></data>
+  <data name="ProductionOffline" xml:space="preserve"><value>Offline</value></data>
+  <data name="ProductionUnavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="OnlineUsersAvailable" xml:space="preserve"><value>Active users measured from web analytics</value></data>
+  <data name="OnlineUsers" xml:space="preserve"><value>{0} online</value></data>
+  <data name="OnlineUsersHeader" xml:space="preserve"><value>Online</value></data>
+  <data name="ChildOf" xml:space="preserve"><value>Child of</value></data>
+  <data name="NoDescription" xml:space="preserve"><value>No description</value></data>
+  <data name="Unavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="FavoritePipelines" xml:space="preserve"><value>Favorite pipelines</value></data>
+  <data name="FavoritePipelinesHint" xml:space="preserve"><value>Star the pipelines you use most to keep them within reach.</value></data>
+  <data name="PipelineCatalog" xml:space="preserve"><value>Pipeline catalog</value></data>
+  <data name="ChildPipelinesCount" xml:space="preserve"><value>Children: {0}</value></data>
+  <data name="ParentPipelinesCount" xml:space="preserve"><value>Parents: {0}</value></data>
+  <data name="StandalonePipeline" xml:space="preserve"><value>No parent pipeline</value></data>
+  <data name="DurationDaysHoursFormat" xml:space="preserve"><value>{0}d {1}h</value></data>
+  <data name="DurationHoursMinutesFormat" xml:space="preserve"><value>{0}h {1}m</value></data>
+  <data name="DurationMinutesSecondsFormat" xml:space="preserve"><value>{0}m {1}s</value></data>
+  <data name="DurationSecondsFormat" xml:space="preserve"><value>{0}s</value></data>
+  <data name="AnalysisGateOverview" xml:space="preserve"><value>Gate overview</value></data>
+  <data name="AnalysisGateTab" xml:space="preserve"><value>Gate</value></data>
+  <data name="AnalysisGateDescription" xml:space="preserve"><value>Gate verdict and findings produced by this run and its triggered pipelines.</value></data>
+  <data name="AnalysisGateFindingsCount" xml:space="preserve"><value>{0} finding(s)</value></data>
+  <data name="AnalysisGateFindings" xml:space="preserve"><value>Findings</value></data>
+  <data name="AnalysisGateNewFindings" xml:space="preserve"><value>New findings</value></data>
+  <data name="AnalysisGateViolations" xml:space="preserve"><value>Violations</value></data>
+  <data name="AnalysisGateLine" xml:space="preserve"><value>Line</value></data>
+  <data name="AnalysisGateNewBadge" xml:space="preserve"><value>New</value></data>
+  <data name="AnalysisGateOpenFinding" xml:space="preserve"><value>Open finding details</value></data>
+  <data name="AnalysisFindingsReport" xml:space="preserve"><value>Findings report</value></data>
+  <data name="AnalysisBlockers" xml:space="preserve"><value>Blockers</value></data>
+  <data name="AnalysisMissingProducers" xml:space="preserve"><value>Missing evidence producers</value></data>
+  <data name="AnalysisRunFindingsDescription" xml:space="preserve"><value>Findings produced by this run and its triggered pipelines.</value></data>
+  <data name="AnalysisNoFindings" xml:space="preserve"><value>No findings</value></data>
+  <data name="AnalysisNoFindingsDescription" xml:space="preserve"><value>The gate did not report any finding for this run.</value></data>
+  <data name="AnalysisOpenFinding" xml:space="preserve"><value>Open finding details</value></data>
+  <data name="AnalysisFindingsReportDescription" xml:space="preserve"><value>A readable report grouped by analysis category and ordered by severity.</value></data>
+  <data name="AnalysisGateStatusPassed" xml:space="preserve"><value>Passed</value></data>
+  <data name="AnalysisGateStatusWarning" xml:space="preserve"><value>Warning</value></data>
+  <data name="AnalysisGateStatusBlocked" xml:space="preserve"><value>Blocked</value></data>
+  <data name="AnalysisGateStatusError" xml:space="preserve"><value>Error</value></data>
+  <data name="AnalysisSeverityNone" xml:space="preserve"><value>None</value></data>
+  <data name="AnalysisSeverityInfo" xml:space="preserve"><value>Info</value></data>
+  <data name="AnalysisSeverityLow" xml:space="preserve"><value>Low</value></data>
+  <data name="AnalysisSeverityMedium" xml:space="preserve"><value>Medium</value></data>
+  <data name="AnalysisSeverityHigh" xml:space="preserve"><value>High</value></data>
+  <data name="AnalysisSeverityCritical" xml:space="preserve"><value>Critical</value></data>
+  <data name="AnalysisAiPrompt" xml:space="preserve"><value>AI remediation prompt</value></data>
+  <data name="AnalysisAiPromptTab" xml:space="preserve"><value>AI prompt</value></data>
+  <data name="AnalysisAiPromptDescription" xml:space="preserve"><value>Copy or download the complete Markdown context, then preview exactly what will be sent to an AI.</value></data>
+  <data name="CopyAiPrompt" xml:space="preserve"><value>Copy AI prompt</value></data>
+  <data name="AnalysisExportAllAiPrompt" xml:space="preserve"><value>Export all as AI prompt</value></data>
+  <data name="AnalysisOpenProjectQuality" xml:space="preserve"><value>Open project quality</value></data>
+  <data name="AnalysisBulkAiPromptTitle" xml:space="preserve"><value>Findings to remediate</value></data>
+  <data name="AnalysisBulkAiPromptCount" xml:space="preserve"><value>Findings included</value></data>
+  <data name="DownloadMarkdown" xml:space="preserve"><value>Download .md</value></data>
+  <data name="AnalysisPromptSource" xml:space="preserve"><value>Markdown source</value></data>
+  <data name="AnalysisPromptPreview" xml:space="preserve"><value>Preview</value></data>
+  <data name="AnalysisAiPromptTitle" xml:space="preserve"><value>Finding to remediate</value></data>
+  <data name="AnalysisAiPromptContext" xml:space="preserve"><value>Context</value></data>
+  <data name="AnalysisAiPromptEvidence" xml:space="preserve"><value>Evidence</value></data>
+  <data name="AnalysisAiPromptInstructions" xml:space="preserve"><value>Instructions</value></data>
+  <data name="AnalysisAiPromptInstructionBody" xml:space="preserve"><value>Analyze the root cause, propose the smallest safe correction, identify the affected tests, and return an implementation plan followed by a patch. Preserve existing behavior and do not weaken gates, analyzers, or tests.</value></data>
+  <data name="AnalysisPromptCopied" xml:space="preserve"><value>The AI prompt was copied.</value></data>
+  <data name="AnalysisFindingStatusOpen" xml:space="preserve"><value>Open</value></data>
+  <data name="AnalysisFindingStatusFixed" xml:space="preserve"><value>Fixed</value></data>
+  <data name="AnalysisFindingStatusAccepted" xml:space="preserve"><value>Accepted</value></data>
+  <data name="AnalysisFindingStatusFalsePositive" xml:space="preserve"><value>False positive</value></data>
+  <data name="AnalysisFindingStatusMitigated" xml:space="preserve"><value>Mitigated</value></data>
+  <data name="TaskNotFound" xml:space="preserve"><value>Task not found.</value></data>
+  <data name="FailureReason" xml:space="preserve"><value>Failure reason</value></data>
+  <data name="LoginRateLimited" xml:space="preserve"><value>Too many login attempts. Wait a few moments and try again.</value></data>
+  <data name="LoginUnavailable" xml:space="preserve"><value>The authentication service is temporarily unavailable. Try again shortly.</value></data>
+  <data name="AuditAction_LoginFailed.Inactive" xml:space="preserve"><value>Login rejected: inactive account</value></data>
+  <data name="AuditAction_LoginFailed.LockedOut" xml:space="preserve"><value>Login rejected: locked account</value></data>
+  <data name="AuditAction_LoginFailed.InvalidCredentials" xml:space="preserve"><value>Login rejected: invalid credentials</value></data>
+  <data name="AuditAction_LoginFailed.InvalidRequest" xml:space="preserve"><value>Login rejected: invalid request</value></data>
+  <data name="AuditAction_LoginFailed.InvalidSecondFactor" xml:space="preserve"><value>Login rejected: invalid second factor</value></data>
+  <data name="AuditAction_LoginFailed.RateLimited" xml:space="preserve"><value>Login rejected: rate limited</value></data>
+  <data name="AuditAction_LoginFailed.Error" xml:space="preserve"><value>Login error</value></data>
+  <data name="AuditAction_Organization.Created" xml:space="preserve"><value>Organization created</value></data>
+  <data name="AuditAction_Organization.Updated" xml:space="preserve"><value>Organization updated</value></data>
+  <data name="AuditAction_Organization.Deleted" xml:space="preserve"><value>Organization deleted</value></data>
+  <data name="AuditAction_Organization.MemberAdded" xml:space="preserve"><value>Member added</value></data>
+  <data name="AuditAction_Organization.MemberRoleUpdated" xml:space="preserve"><value>Member role updated</value></data>
+  <data name="AuditAction_Organization.MemberRemoved" xml:space="preserve"><value>Member removed</value></data>
+  <data name="AuditAction_Organization.ProjectsAssigned" xml:space="preserve"><value>Projects assigned</value></data>
+  <data name="NoProjectReadme" xml:space="preserve"><value>No README yet</value></data>
+  <data name="NoProjectReadmeHint" xml:space="preserve"><value>Add a README.md at the root of the main repository to document this project.</value></data>
+  <data name="NoProjectChangelog" xml:space="preserve"><value>No changelog yet</value></data>
+  <data name="NoProjectChangelogHint" xml:space="preserve"><value>Release notes will appear here as soon as a project release contains a changelog.</value></data>
+  <data name="LatestRunShort" xml:space="preserve"><value>Latest run</value></data>
+  <data name="VersionShort" xml:space="preserve"><value>Ver.</value></data>
+  <data name="AllBranches" xml:space="preserve"><value>All branches</value></data>
+  <data name="ProjectGitDefaultBranchMismatch" xml:space="preserve"><value>The project default branch ({0}) differs from the Git repository default branch ({1}). They can be configured independently, but usually should match.</value></data>
+  <data name="PipelineSetupWizard" xml:space="preserve"><value>Pipeline setup wizard</value></data>
+  <data name="CreatePipelines" xml:space="preserve"><value>Create pipelines</value></data>
+  <data name="SelectPipelineProject" xml:space="preserve"><value>Select the project that will own the generated pipelines.</value></data>
+  <data name="PipelinePrefix" xml:space="preserve"><value>Pipeline prefix</value></data>
+  <data name="PipelinePrefixHint" xml:space="preserve"><value>The wizard uses this stable prefix for names and cross-pipeline references.</value></data>
+  <data name="ApplicationArchitecture" xml:space="preserve"><value>Application architecture</value></data>
+  <data name="Frontend" xml:space="preserve"><value>Frontend</value></data>
+  <data name="Database" xml:space="preserve"><value>Database</value></data>
+  <data name="FrontendPipelineHint" xml:space="preserve"><value>Build and validate a browser or UI application.</value></data>
+  <data name="BackendPipelineHint" xml:space="preserve"><value>Build and validate an API or server application.</value></data>
+  <data name="DatabasePipelineHint" xml:space="preserve"><value>Include schema migration and compatibility checks.</value></data>
+  <data name="SelectPipelineCapabilities" xml:space="preserve"><value>Select the assurance and delivery capabilities to generate.</value></data>
+  <data name="CiPipelineHint" xml:space="preserve"><value>Compile, test and produce immutable artifacts.</value></data>
+  <data name="QualityPipelineHint" xml:space="preserve"><value>Coverage, tests, formatting and code-quality evidence.</value></data>
+  <data name="SecurityPipelineHint" xml:space="preserve"><value>Secrets, dependencies, SAST, container and SBOM checks.</value></data>
+  <data name="QaPipelineHint" xml:space="preserve"><value>Disposable environment and dynamic validation.</value></data>
+  <data name="Candidate" xml:space="preserve"><value>Candidate</value></data>
+  <data name="CandidatePipelineHint" xml:space="preserve"><value>Coordinate the complete qualified candidate flow.</value></data>
+  <data name="Nightly" xml:space="preserve"><value>Nightly</value></data>
+  <data name="NightlyPipelineHint" xml:space="preserve"><value>Schedule complete assurance and drift checks.</value></data>
+  <data name="ProductionDeployment" xml:space="preserve"><value>Production deployment</value></data>
+  <data name="ProductionPipelineHint" xml:space="preserve"><value>Deploy a qualified candidate and verify readiness.</value></data>
+  <data name="FastDeploy" xml:space="preserve"><value>Fast deployment</value></data>
+  <data name="FastPipelineHint" xml:space="preserve"><value>Add an optional shortened build and deploy path.</value></data>
+  <data name="RollbackPipelineHint" xml:space="preserve"><value>Keep rollback verification and recovery enabled.</value></data>
+  <data name="PackagesPipelineHint" xml:space="preserve"><value>Add the internal observability package set.</value></data>
+  <data name="PipelinesToCreate" xml:space="preserve"><value>Pipelines to create</value></data>
+  <data name="GeneratedPipelineDescription" xml:space="preserve"><value>Generated from the {0} template.</value></data>
+  <data name="PipelinesCreated" xml:space="preserve"><value>{0} pipelines created.</value></data>
+  <data name="PreflightBlockedSummary" xml:space="preserve"><value>{0} stage(s) cannot run: no agent matches their target.</value></data>
+  <data name="PreflightUnknownReason" xml:space="preserve"><value>Unspecified reason.</value></data>
+  <data name="PreflightFixEnvironmentHint" xml:space="preserve"><value>Often the environment has no server attached.</value></data>
+  <data name="PreflightFixEnvironmentAction" xml:space="preserve"><value>Open environments</value></data>
+  <data name="PreflightFixServerHint" xml:space="preserve"><value>Check that the target agent is online.</value></data>
+  <data name="PreflightFixServerAction" xml:space="preserve"><value>Open servers</value></data>
+  <data name="LatestGrade" xml:space="preserve"><value>Latest grade</value></data>
+  <data name="SuccessRate" xml:space="preserve"><value>Success rate</value></data>
+  <data name="AverageDuration" xml:space="preserve"><value>Average duration</value></data>
+  <data name="LastSuccess" xml:space="preserve"><value>Last success</value></data>
+  <data name="NotAvailableShort" xml:space="preserve"><value>N/A</value></data>
+  <data name="Latest" xml:space="preserve">
+    <value>Latest</value>
+  </data>
+  <data name="Average" xml:space="preserve">
+    <value>Average</value>
+  </data>
+  <data name="Peak" xml:space="preserve">
+    <value>Peak</value>
+  </data>
+  <data name="Min" xml:space="preserve">
+    <value>Min</value>
+  </data>
+  <data name="Max" xml:space="preserve">
+    <value>Max</value>
+  </data>
 </root>

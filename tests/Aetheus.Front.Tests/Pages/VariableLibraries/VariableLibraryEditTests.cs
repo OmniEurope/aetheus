@@ -71,6 +71,27 @@ public class VariableLibraryEditTests : BunitContext
     }
 
     [Fact]
+    public void NewLibrary_InputEventsSubmitTheVisibleValues()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
+        _handler.SetJsonResponse("api/variable-libraries",
+            new VariableLibraryDto { Id = 5, Name = "browser-lib" });
+
+        var cut = Render<VariableLibraryEdit>();
+        cut.Find("input[name='Name']").Input("browser-lib");
+        cut.Find("textarea[name='Description']").Input("Created from the browser");
+        cut.Find("button[type='submit']").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            var request = Assert.Single(_handler.RequestDetails, r =>
+                r.Method == "POST" && r.Url.EndsWith("api/variable-libraries", StringComparison.Ordinal));
+            Assert.Contains("\"name\":\"browser-lib\"", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\"description\":\"Created from the browser\"", request.Body, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void Renders_LibraryWithMultipleEntries()
     {
         SetupEditMocks();
@@ -121,7 +142,7 @@ public class VariableLibraryEditTests : BunitContext
     }
 
     [Fact]
-    public async Task AddEntry_EmptyKey_DoesNothing()
+    public async Task AddEntry_EmptyKey_MakesNoRequest()
     {
         SetupEditMocks();
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));

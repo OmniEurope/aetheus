@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Users;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Auth;
 
@@ -169,16 +163,7 @@ public class RoleService(
         var user = await userService.GetUserDetailAsync(userId, ct).ConfigureAwait(false);
         if (user is null) return null;
 
-        var effective = await roleRepo.GetEffectivePermissionsAsync(userId, ct).ConfigureAwait(false);
-        await AppendOrganizationMembershipPermissionsAsync(user.Username, effective, ct).ConfigureAwait(false);
-
-        return new UserPermissionSummaryDto
-        {
-            UserId = user.Id,
-            Username = user.Username,
-            Roles = user.Roles,
-            EffectivePermissions = effective
-        };
+        return await BuildPermissionSummaryAsync(user, ct).ConfigureAwait(false);
     }
 
     public async Task<UserPermissionSummaryDto?> GetMyPermissionsAsync(string username, CancellationToken ct = default)
@@ -186,9 +171,13 @@ public class RoleService(
         var user = await userService.GetCurrentUserAsync(ct).ConfigureAwait(false);
         if (user is null) return null;
 
+        return await BuildPermissionSummaryAsync(user, ct).ConfigureAwait(false);
+    }
+
+    private async Task<UserPermissionSummaryDto> BuildPermissionSummaryAsync(UserDto user, CancellationToken ct)
+    {
         var effective = await roleRepo.GetEffectivePermissionsAsync(user.Id, ct).ConfigureAwait(false);
         await AppendOrganizationMembershipPermissionsAsync(user.Username, effective, ct).ConfigureAwait(false);
-
         return new UserPermissionSummaryDto
         {
             UserId = user.Id,

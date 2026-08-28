@@ -7,6 +7,27 @@ namespace Aetheus.Back.Tests;
 public sealed class JsonFileLoggerProviderTests
 {
     [Fact]
+    public void StructuredCorrelationId_IsWrittenAsDedicatedJsonProperty()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"aetheus-logger-{Guid.NewGuid():N}");
+        try
+        {
+            using (var provider = new JsonFileLoggerProvider(directory, LogLevel.Information))
+            {
+                var logger = provider.CreateLogger("CorrelationTest");
+                logger.LogError("Failure; correlation {CorrelationId}", "request-42");
+            }
+
+            var content = string.Join(Environment.NewLine, Directory.GetFiles(directory).Select(File.ReadAllText));
+            Assert.Contains("\"CorrelationId\":\"request-42\"", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Saturation_IncrementsCounter_AndWritesAggregatedWarning()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"aetheus-logger-{Guid.NewGuid():N}");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
 using Aetheus.Shared.Enums;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,8 @@ public class PipelineTriggerReconcileServiceTests
             .Returns([]);
         _repo.GetStalledSchedulableRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns([]);
+        _repo.GetStalledCancellationRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([]);
         _repo.GetStuckRunningRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
@@ -65,14 +68,26 @@ public class PipelineTriggerReconcileServiceTests
             .Returns([step]);
         _repo.GetRunStatusesByIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, PipelineStatus> { [99] = PipelineStatus.Success });
+        _repo.GetSuccessfulStepOutputsAsync(99, Arg.Any<CancellationToken>()).Returns(
+            new List<StepOutputProjection>
+            {
+                new("CI", "Build", "{\"CANDIDATE_VERSION\":\"c-source-123\"}")
+            });
+        _runService.ResolveCompletedTriggerStepAsync(
+                step,
+                PipelineStatus.Success,
+                Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(true);
 
         await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(TaskExecutionStatus.Success, step.Status);
-        Assert.Equal(0, step.ExitCode);
-        Assert.NotNull(step.CompletedAt);
-        await _repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
-        await _runService.Received(1).AdvanceStageAsync(1, "orchestrate", Arg.Any<CancellationToken>());
+        await _runService.Received(1).ResolveCompletedTriggerStepAsync(
+            step,
+            PipelineStatus.Success,
+            Arg.Is<IReadOnlyDictionary<string, string>>(outputs =>
+                outputs["CANDIDATE_VERSION"] == "c-source-123"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -86,9 +101,12 @@ public class PipelineTriggerReconcileServiceTests
 
         await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(TaskExecutionStatus.Failed, step.Status);
-        Assert.Equal(1, step.ExitCode);
-        await _runService.Received(1).AdvanceStageAsync(1, "orchestrate", Arg.Any<CancellationToken>());
+        await _runService.Received(1).ResolveCompletedTriggerStepAsync(
+            step,
+            PipelineStatus.Failed,
+            Arg.Is<IReadOnlyDictionary<string, string>>(outputs => outputs.Count == 0),
+            Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().GetSuccessfulStepOutputsAsync(99, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -103,8 +121,11 @@ public class PipelineTriggerReconcileServiceTests
 
         await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(TaskExecutionStatus.Failed, step.Status);
-        await _runService.Received(1).AdvanceStageAsync(1, "orchestrate", Arg.Any<CancellationToken>());
+        await _runService.Received(1).ResolveCompletedTriggerStepAsync(
+            step,
+            PipelineStatus.Failed,
+            Arg.Is<IReadOnlyDictionary<string, string>>(outputs => outputs.Count == 0),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -120,7 +141,11 @@ public class PipelineTriggerReconcileServiceTests
 
         // Child not terminal and within the hard ceiling → nothing resolved, no advance.
         Assert.Equal(TaskExecutionStatus.Running, step.Status);
-        await _runService.DidNotReceive().AdvanceStageAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().ResolveCompletedTriggerStepAsync(
+            Arg.Any<PipelineStepRun>(),
+            Arg.Any<PipelineStatus>(),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -147,13 +172,59 @@ public class PipelineTriggerReconcileServiceTests
     }
 
     [Fact]
+    public async Task CancellationRecovery_NoInflightWork_ReappliesCancellation()
+    {
+        _repo.GetStalledCancellationRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([1524]);
+        _runService.CancelRunAsync(1524, Arg.Any<CancellationToken>()).Returns(true);
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).CancelRunAsync(1524, Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().FailStuckRunAsync(1524, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SchedulerRecovery_OneRunThrows_ContinuesWithOtherRuns()
+    {
+        _repo.GetStalledSchedulableRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([220, 221]);
+        _runService.ReconcileRunAsync(220, Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new BadRequestException("invalid recovery state"));
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).ReconcileRunAsync(220, Arg.Any<CancellationToken>());
+        await _runService.Received(1).ReconcileRunAsync(221, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StuckRunFinalization_OneRunThrows_ContinuesWithOtherRuns()
+    {
+        _repo.GetStuckRunningRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([7, 8]);
+        _runService.FailStuckRunAsync(7, Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("invalid terminal state"));
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).FailStuckRunAsync(7, Arg.Any<CancellationToken>());
+        await _runService.Received(1).FailStuckRunAsync(8, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Reconcile_NothingStuck_TouchesNothing()
     {
         await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
 
         await _repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
-        await _runService.DidNotReceive().AdvanceStageAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().ResolveCompletedTriggerStepAsync(
+            Arg.Any<PipelineStepRun>(),
+            Arg.Any<PipelineStatus>(),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
         await _runService.DidNotReceive().ReconcileRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().CancelRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _runService.DidNotReceive().FailStuckRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 }

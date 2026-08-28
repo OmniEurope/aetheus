@@ -73,7 +73,7 @@ window.visualPipeline = {
         return result;
     },
 
-    initCanvas: function (elementId, dotNetRef, isDark) {
+    initCanvas: function (elementId, dotNetRef, _isDark) {
         const container = document.getElementById(elementId);
         if (!container) return;
 
@@ -311,12 +311,12 @@ window.visualPipeline = {
 
     // S-FEAT-VPNP: persist manually-arranged node positions per pipeline in localStorage.
     saveLayout: function (pipelineId, positions) {
-        try { localStorage.setItem('vp-layout-' + pipelineId, JSON.stringify(positions)); } catch (e) { /* quota/private mode */ }
+        try { localStorage.setItem('vp-layout-' + pipelineId, JSON.stringify(positions)); } catch { /* quota/private mode */ }
     },
 
     loadLayout: function (pipelineId) {
         try { const raw = localStorage.getItem('vp-layout-' + pipelineId); return raw ? JSON.parse(raw) : null; }
-        catch (e) { return null; }
+        catch { return null; }
     },
 
     dispose: function (elementId) {

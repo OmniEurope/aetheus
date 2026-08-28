@@ -14,8 +14,14 @@ public class OnInitApiCallGuardTests
     private static readonly Regex OnInitRegex = new(
         @"\b(?:protected|private|public|internal)\s+(?:override\s+)?(?:async\s+)?Task\s+OnInitializedAsync\s*\(",
         RegexOptions.Compiled);
+    /// <summary>
+    /// Matches both call shapes the typed client can take: the flat <c>Api.XAsync(</c> and the
+    /// per-domain <c>Api.Domain.XAsync(</c>. The optional middle segment is what keeps this guard
+    /// honest once the client is split into sub-clients - without it the scanner would silently stop
+    /// seeing the calls it exists to protect, and report a green it did not earn.
+    /// </summary>
     private static readonly Regex ApiCallRegex = new(
-        @"\b(?:Api|_api|Http|_http|ApiClient)\s*\.\s*\w+Async\s*(?:<|\()",
+        @"\b(?:Api|_api|Http|_http|ApiClient)\s*\.\s*(?:\w+\s*\.\s*)?\w+Async\s*(?:<|\()",
         RegexOptions.Compiled);
     private static readonly Regex TryRegex = new(@"\btry\b", RegexOptions.Compiled);
     private static readonly Regex HttpRequestCatchRegex = new(
@@ -31,7 +37,7 @@ public class OnInitApiCallGuardTests
         var violations = new List<string>();
         var callsScanned = 0;
 
-        foreach (var file in Directory.EnumerateFiles(pagesDir, "*.razor.cs", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(pagesDir, "*.razor.cs"))
         {
             var source = File.ReadAllText(file);
             var unguardedCalls = FindUnguardedApiCalls(source, out var scannedInFile);
@@ -84,6 +90,32 @@ public class OnInitApiCallGuardTests
 
         Assert.Equal(1, callsScanned);
         Assert.Equal("Api.GetRealAsync(", Assert.Single(violations).Expression);
+    }
+
+    /// <summary>
+    /// The scanner must see a per-domain call exactly as it sees a flat one. This is the self-test that
+    /// makes the sub-client split safe: if the regex ever loses the middle segment, this fails instead
+    /// of the suite quietly scanning nothing.
+    /// </summary>
+    [Fact]
+    public void Scanner_Sees_SubClient_Calls_As_Well_As_Flat_Ones()
+    {
+        const string source = """
+            protected override async Task OnInitializedAsync()
+            {
+                try { await Api.Pipelines.GetGuardedAsync(); }
+                catch (HttpRequestException) { }
+                await Api.Servers.GetUnguardedAsync();
+                await Api.GetFlatUnguardedAsync();
+            }
+            """;
+
+        var violations = FindUnguardedApiCalls(source, out var callsScanned);
+
+        Assert.Equal(3, callsScanned);
+        Assert.Equal(
+            ["Api.Servers.GetUnguardedAsync(", "Api.GetFlatUnguardedAsync("],
+            violations.Select(violation => violation.Expression));
     }
 
     private static List<UnguardedCall> FindUnguardedApiCalls(string source, out int callsScanned)
@@ -243,14 +275,5 @@ public class OnInitApiCallGuardTests
     private sealed record SourceRange(int Start, int End);
     private sealed record UnguardedCall(int Line, string Expression);
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(OnInitApiCallGuardTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

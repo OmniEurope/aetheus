@@ -1,0 +1,74 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_loading)
+{
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
+}
+else if (_results.Count == 0)
+{
+    <EmptyState Icon="description" Title="@L["NoAiResults"]" Description="@L["NoAiResultsDescription"]" />
+}
+else
+{
+    <RadzenRow Gap="1rem">
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenListBox @bind-Value="_selectedId" Data="@_results" TextProperty="DisplayName"
+                           ValueProperty="Id" Change="@(_ => SelectResult())" class="rz-w-100" />
+            @if (InitialResult is null && _totalCount > PageSize)
+            {
+                <RadzenPager Count="@_totalCount" PageSize="@PageSize"
+                             PageChanged="@OnPageChangedAsync" class="rz-mt-2" />
+            }
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="8">
+            @if (_selected is not null)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"
+                             class="rz-mb-3">
+                    <RadzenBadge BadgeStyle="@VerdictStyle(_selected)" Text="@_selected.Verdict.ToString()" />
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                        @_selected.ProfileName · @FormatDuration(_selected.DurationMs) · @_selected.CreatedAt.ToLocalTime().ToString("g")
+                    </RadzenText>
+                    @if (_selected.SendsDataExternally)
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@L["ExternalData"]" />
+                    }
+                    @if (_selected.Truncated)
+                    {
+                        <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@L["Truncated"]" />
+                    }
+                </RadzenStack>
+                <RadzenTabs>
+                    <Tabs>
+                        <RadzenTabsItem Text="@L["Report"]" Icon="description">
+                            <div class="markdown-content rz-p-3">@((MarkupString)_reportHtml)</div>
+                        </RadzenTabsItem>
+                        <RadzenTabsItem Text="@L["Diff"]" Icon="difference" Disabled="@string.IsNullOrWhiteSpace(_selected.DiffPatch)">
+                            @if (!string.IsNullOrWhiteSpace(_selected.DiffPatch))
+                            {
+                                <RadzenButton Text="@L["DownloadPatch"]" Icon="download" Size="ButtonSize.Small"
+                                              Click="@DownloadPatchAsync" class="rz-mb-2"
+                                              ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                                @if (_selected.ProjectId.HasValue)
+                                {
+                                    <RadzenButton Text="@L["ApplyOnProposedBranch"]" Icon="publish"
+                                                  Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Success"
+                                                  Variant="Variant.Filled" IsBusy="@_applying"
+                                                  Click="@ApplyPatchAsync" class="rz-mb-2 rz-ml-2" />
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_selected.ProposedBranchName))
+                                {
+                                    <RadzenAlert AlertStyle="AlertStyle.Success" AllowClose="false" class="rz-mb-2">
+                                        @L["ProposedBranchCreated"]: <a href="/git-repositories/@_selected.ProposedRepositoryId">@_selected.ProposedBranchName</a>
+                                    </RadzenAlert>
+                                }
+                                <MonacoDiffViewer OriginalValue="" ModifiedValue="@_selected.DiffPatch" />
+                            }
+                        </RadzenTabsItem>
+                    </Tabs>
+                </RadzenTabs>
+            }
+        </RadzenColumn>
+    </RadzenRow>
+}
+
+<DialogFooter OnCancel="@Close" CancelText="@L["Close"]" />

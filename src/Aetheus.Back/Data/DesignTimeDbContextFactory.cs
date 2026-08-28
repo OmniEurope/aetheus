@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
 

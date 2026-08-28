@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <PackageId>Aetheus.WebAnalytics</PackageId>
+    <Version>0.1.0</Version>
+    <StaticAssetVersion>0.1.0</StaticAssetVersion>
+    <Authors>Aetheus</Authors>
+    <Description>Optional no-banner audience measurement for ASP.NET Core applications monitored by Aetheus.</Description>
+    <PackageTags>analytics;privacy;razor;aspnetcore;aetheus</PackageTags>
+    <PackageLicenseExpression>EUPL-1.2</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/aetheus/aetheus</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aetheus.WebAnalytics.Tests" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <AetheusWebAnalyticsStaticAsset
+      Include="..\..\packages\aetheus-web-analytics\src\aetheus-web-analytics.js">
+      <TargetPath>aetheus-web-analytics.js</TargetPath>
+    </AetheusWebAnalyticsStaticAsset>
+  </ItemGroup>
+
+  <Target Name="ResolveAetheusWebAnalyticsStaticAssets"
+          BeforeTargets="ResolveProjectStaticWebAssets">
+    <DefineStaticWebAssets
+      CandidateAssets="@(AetheusWebAnalyticsStaticAsset)"
+      FingerprintCandidates="$(StaticWebAssetsFingerprintContent)"
+      FingerprintPatterns="@(StaticWebAssetFingerprintPattern)"
+      RelativePathPattern="**"
+      SourceType="Discovered"
+      SourceId="$(PackageId)"
+      ContentRoot="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\packages\aetheus-web-analytics\src\'))"
+      BasePath="$(StaticWebAssetBasePath)/$(StaticAssetVersion)">
+      <Output TaskParameter="Assets" ItemName="StaticWebAsset" />
+      <Output TaskParameter="Assets" ItemName="_CurrentProjectStaticWebAsset" />
+    </DefineStaticWebAssets>
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aetheus.Analyzers\Aetheus.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

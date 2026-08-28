@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Services;
 

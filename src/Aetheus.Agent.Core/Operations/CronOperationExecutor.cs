@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -69,14 +64,7 @@ public sealed class CronOperationExecutor(
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         psi.ArgumentList.Add("-n"); // never prompt - NOPASSWD is required by the sudoers rule
         psi.ArgumentList.Add(HelperPath);
 

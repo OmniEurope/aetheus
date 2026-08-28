@@ -14,6 +14,9 @@
             <RadzenFormField Text="@L["Type"]" class="rz-w-100">
                 <RadzenDropDown @bind-Value="_model.FeedType" Data="@_types" TextProperty="Text" ValueProperty="Value" Change="@OnTypeChanged" />
             </RadzenFormField>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                @L["PackageFeedCreationSupportedTypes"]
+            </RadzenText>
         </RadzenColumn>
         <RadzenColumn Size="12">
             <RadzenFormField Text="@L["UpstreamUrl"]" class="rz-w-100">

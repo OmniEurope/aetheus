@@ -13,7 +13,10 @@ public class PackageVersionResolverTests
     {
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient("package-feeds").Returns(new HttpClient(new StubHandler(status, body)));
-        return new PackageVersionResolver(factory, NullLogger<PackageVersionResolver>.Instance);
+        return new PackageVersionResolver(
+            factory,
+            NullLogger<PackageVersionResolver>.Instance,
+            TimeProvider.System);
     }
 
     [Theory]
@@ -91,20 +94,51 @@ public class PackageVersionResolverTests
         Assert.Null(result.LatestVersion);
     }
 
-    [Theory]
-    [InlineData(HttpStatusCode.InternalServerError)]
-    [InlineData((HttpStatusCode)429)]
-    public async Task Resolve_ServerErrorOrRateLimited_ReturnsError(HttpStatusCode status)
+    [Fact]
+    public async Task Resolve_ServerError_ReturnsError()
     {
-        var sut = Build(status, "");
+        var sut = Build(HttpStatusCode.InternalServerError, "");
         var result = await sut.ResolveLatestAsync(PackageFeedType.Npm, "https://registry.npmjs.org", "throttled", ct: TestContext.Current.CancellationToken);
         Assert.Equal(PackageResolveOutcome.Error, result.Outcome);
         Assert.Null(result.LatestVersion);
+    }
+
+    [Fact]
+    public async Task Resolve_RateLimited_PreservesRetryAfter()
+    {
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient("package-feeds").Returns(new HttpClient(new RateLimitedHandler()));
+        var sut = new PackageVersionResolver(
+            factory,
+            NullLogger<PackageVersionResolver>.Instance,
+            TimeProvider.System);
+
+        var result = await sut.ResolveLatestAsync(
+            PackageFeedType.Npm,
+            "https://registry.npmjs.org",
+            "throttled",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(PackageResolveOutcome.RateLimited, result.Outcome);
+        Assert.Equal(TimeSpan.FromSeconds(120), result.RetryAfter);
     }
 
     private sealed class StubHandler(HttpStatusCode status, string body) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+    }
+
+    private sealed class RateLimitedHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+                TimeSpan.FromSeconds(120));
+            return Task.FromResult(response);
+        }
     }
 }

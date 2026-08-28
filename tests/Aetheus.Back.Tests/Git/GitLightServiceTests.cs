@@ -8,6 +8,7 @@ using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -53,6 +54,7 @@ public class GitLightServiceTests
             new Microsoft.Extensions.Caching.Memory.MemoryCache(
                 new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
             new GitBranchProtectionService(_lightRepoMock, _cliMock, _auditMock, options),
+            new GitAiPatchService(_lightRepoMock, _cliMock, _auditMock, options),
             Substitute.For<ILogger<GitLightService>>(),
             TimeProvider.System);
     }
@@ -106,6 +108,71 @@ public class GitLightServiceTests
         Assert.NotNull(result);
         Assert.Equal("Repo", result.Name);
         Assert.Contains("repo.git", result.CloneUrl);
+    }
+
+    [Fact]
+    public async Task GetCommitMessagesAsync_UsesSingleBatchCliCall()
+    {
+        var shas = new[] { "abcdef12", "12345678" };
+        _lightRepoMock.FindByIdAsync(1, TestContext.Current.CancellationToken)
+            .Returns(CreateRepoEntity());
+        _cliMock.GetCommitMessagesAsync(
+                Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), TestContext.Current.CancellationToken)
+            .Returns(new Dictionary<string, string> { [shas[0]] = "feat: one", [shas[1]] = "fix: two" });
+
+        var result = await _sut.GetCommitMessagesAsync(1, shas, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.Count);
+        await _cliMock.Received(1).GetCommitMessagesAsync(
+            Arg.Any<string>(), Arg.Is<IReadOnlyCollection<string>>(values => values.Count == 2),
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetCommitDetailAsync_UppercaseRootSha_NormalizesAndUsesFormatIndependentRootPatch()
+    {
+        const string routeSha = "ABCDEF12";
+        const string normalizedSha = "abcdef12";
+        _lightRepoMock.FindByIdAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new GitInternalRepo { Id = 1, ProjectId = 1, Slug = "repo" });
+        _cliMock.GetCommitsAsync(
+                Arg.Any<string>(),
+                normalizedSha,
+                0,
+                1,
+                null,
+                null,
+                TestContext.Current.CancellationToken)
+            .Returns(
+            [
+                new GitLightCommitDto
+                {
+                    Sha = normalizedSha,
+                    ShortSha = normalizedSha,
+                    ParentShas = []
+                }
+            ]);
+        _cliMock.GetRootCommitPatchAsync(
+                Arg.Any<string>(),
+                normalizedSha,
+                TestContext.Current.CancellationToken)
+            .Returns(new GitPatchResult(string.Empty, false));
+
+        var result = await _sut.GetCommitDetailAsync(
+            1,
+            routeSha,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        await _cliMock.Received(1).GetRootCommitPatchAsync(
+            Arg.Any<string>(),
+            normalizedSha,
+            TestContext.Current.CancellationToken);
+        await _cliMock.DidNotReceiveWithAnyArgs().GetCommitPatchAsync(
+            default!,
+            default!,
+            default!,
+            TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -163,6 +230,28 @@ public class GitLightServiceTests
     }
 
     [Fact]
+    public async Task EnsureRepositoryInitializedAsync_ReinitializesTrackedRepositoryIdempotently()
+    {
+        _lightRepoMock.FindByIdAsync(7, TestContext.Current.CancellationToken)
+            .Returns(new GitInternalRepo
+            {
+                Id = 7,
+                ProjectId = 3,
+                Slug = "demo",
+                DefaultBranch = "main"
+            });
+
+        await _sut.EnsureRepositoryInitializedAsync(7, TestContext.Current.CancellationToken);
+
+        await _cliMock.Received(1).InitBareRepoAsync(
+            Arg.Is<string>(path =>
+                path.EndsWith(Path.Combine("3", "demo.git"), StringComparison.Ordinal)
+                && path.Contains("test-repos", StringComparison.Ordinal)),
+            "main",
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task DeleteRepositoryAsync_NotFound_ReturnsFalse()
     {
         _lightRepoMock.FindByIdAsync(99, TestContext.Current.CancellationToken)
@@ -208,6 +297,52 @@ public class GitLightServiceTests
 
         Assert.Empty(result.Items);
         Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task GetCommitsAsync_AllBranchesSentinel_WalksEveryRef()
+    {
+        _lightRepoMock.FindByIdAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new GitInternalRepo
+            {
+                Id = 1,
+                ProjectId = 1,
+                Slug = "test",
+                DefaultBranch = "main"
+            });
+        _cliMock.GetCommitsAsync(
+                Arg.Any<string>(),
+                Arg.Is<string?>(value => value == null),
+                Arg.Is(0),
+                Arg.Is(30),
+                Arg.Is<string?>(value => value == null),
+                Arg.Is<string?>(value => value == null),
+                Arg.Is(TestContext.Current.CancellationToken))
+            .Returns([new GitLightCommitDto { Sha = "abcdef12", ShortSha = "abcdef1" }]);
+        _cliMock.GetCommitCountAsync(
+                Arg.Any<string>(),
+                Arg.Is<string?>(value => value == null),
+                Arg.Is<string?>(value => value == null),
+                Arg.Is(TestContext.Current.CancellationToken))
+            .Returns(1);
+
+        var result = await _sut.GetCommitsAsync(
+            1,
+            GitReference.AllBranches,
+            1,
+            30,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Single(result.Items);
+        Assert.Equal(1, result.TotalCount);
+        await _cliMock.Received(1).GetCommitsAsync(
+            Arg.Any<string>(),
+            Arg.Is<string?>(value => value == null),
+            Arg.Is(0),
+            Arg.Is(30),
+            Arg.Is<string?>(value => value == null),
+            Arg.Is<string?>(value => value == null),
+            Arg.Is(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -291,6 +426,33 @@ public class GitLightServiceTests
     }
 
     [Fact]
+    public async Task UpdateRepositoryAsync_DefaultBranchCase_IsNormalizedToRepositoryBranch()
+    {
+        var entity = new GitInternalRepo
+        {
+            Id = 1,
+            ProjectId = 1,
+            Slug = "repo",
+            DefaultBranch = "develop",
+            IsEmpty = false,
+            Project = new Project { Id = 1, Name = "Project" }
+        };
+        _lightRepoMock.FindByIdAsync(1, TestContext.Current.CancellationToken).Returns(entity);
+        _lightRepoMock.FindByIdWithProjectAsync(1, TestContext.Current.CancellationToken).Returns(entity);
+        _cliMock.GetBranchesAsync(Arg.Any<string>(), "develop", TestContext.Current.CancellationToken).Returns(
+            [new GitLightBranchDto { Name = "Main" }]);
+
+        var result = await _sut.UpdateRepositoryAsync(
+            1, new UpdateGitLightRepoRequest { DefaultBranch = "main" },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("Main", result!.DefaultBranch);
+        Assert.Equal("Main", entity.DefaultBranch);
+        await _cliMock.Received(1).SetHeadAsync(
+            Arg.Any<string>(), "Main", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public void BuildCloneUrl_ReturnsCorrectUrl()
     {
         var url = _sut.BuildCloneUrl(1, "my-repo");
@@ -327,12 +489,52 @@ public class GitLightServiceTests
             new GitBranchProtectionService(
                 _lightRepoMock, _cliMock, _auditMock,
                 Options.Create(new GitLightOptions { RepositoriesPath = "/tmp/test-repos" })),
+            new GitAiPatchService(
+                _lightRepoMock, _cliMock, _auditMock,
+                Options.Create(new GitLightOptions { RepositoriesPath = "/tmp/test-repos" })),
             Substitute.For<ILogger<GitLightService>>(),
             TimeProvider.System);
 
         var url = sut.BuildCloneUrl(1, "my-repo");
 
         Assert.Equal("https://aetheus-api.example.com/git/1/my-repo.git", url);
+    }
+
+    [Fact]
+    public void BuildCloneUrl_ConfiguredBaseWorksWithoutHttpContext()
+    {
+        var httpAccessor = Substitute.For<IHttpContextAccessor>();
+        httpAccessor.HttpContext.Returns((HttpContext?)null);
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["GitLight:CloneBaseUrl"] = "https://runner-reachable.example.test/"
+            })
+            .Build();
+        var options = Options.Create(new GitLightOptions { RepositoriesPath = "/tmp/test-repos" });
+        var sut = new GitLightService(
+            _lightRepoMock,
+            _gitRepoMock,
+            _cliMock,
+            _auditMock,
+            options,
+            httpAccessor,
+            config,
+            _hubMock,
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            new GitBranchProtectionService(
+                _lightRepoMock, _cliMock, _auditMock, options),
+            new GitAiPatchService(
+                _lightRepoMock, _cliMock, _auditMock, options),
+            Substitute.For<ILogger<GitLightService>>(),
+            TimeProvider.System);
+
+        var url = sut.BuildCloneUrl(2, "toto-conformance");
+
+        Assert.Equal(
+            "https://runner-reachable.example.test/git/2/toto-conformance.git",
+            url);
     }
 
     [Fact]
@@ -714,7 +916,7 @@ public class GitLightServiceTests
             Status = PullRequestStatus.Open,
             ExternalCreatedAt = DateTime.UtcNow
         };
-        _gitRepoMock.GetPullRequestsPagedAsync(10, null, 1, 25, null, TestContext.Current.CancellationToken)
+        _gitRepoMock.GetPullRequestsPagedAsync(10, null, 1, 25, null, TestContext.Current.CancellationToken, null, false)
             .Returns(([pr], 1));
 
         var result = await _sut.GetPullRequestsAsync(1, new PullRequestPaginationRequest(), ct: TestContext.Current.CancellationToken);

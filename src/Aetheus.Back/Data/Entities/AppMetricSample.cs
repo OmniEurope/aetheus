@@ -2,7 +2,7 @@
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// A raw application metric data point ingested via OTLP (PLAN-001 phase 2, 7-day retention).
+/// A raw application metric data point ingested via OTLP (ADR-021 phase 2, 7-day retention).
 /// <see cref="Timestamp"/> is emit-sourced (from the OTLP data point), so it is excluded from the
 /// auto-stamping in <c>AppDbContext.SaveChangesAsync</c>.
 /// </summary>

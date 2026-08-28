@@ -22,7 +22,7 @@ public static class PatScopeEnforcement
 }
 
 /// <summary>
-/// Enforces the read-only scope of a Personal Access Token (PLAN-006 4.5). Runs after authorization,
+/// Enforces the read-only scope of a Personal Access Token (ADR-024 4.5). Runs after authorization,
 /// so <c>HttpContext.User</c> already carries the PAT principal on every <c>[Authorize]</c> endpoint.
 /// If the principal was minted from a read-only PAT and the request is mutating, it is refused 403
 /// before the action executes - so a read-only token can never write, regardless of the user's RBAC.

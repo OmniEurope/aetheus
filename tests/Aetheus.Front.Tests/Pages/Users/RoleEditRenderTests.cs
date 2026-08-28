@@ -30,7 +30,6 @@ public class RoleEditRenderTests : BunitContext
     private void StubRole(int id)
     {
         _handler.SetJsonResponse($"api/roles/{id}", BuildRole(id));
-        _handler.SetJsonResponse("api/audit-logs", new PaginatedResult<AuditLogDto> { Items = [], TotalCount = 0 });
     }
 
     [Fact]
@@ -170,7 +169,7 @@ public class RoleEditRenderTests : BunitContext
     }
 
     [Fact]
-    public void OnApplyBulk_NullBulkPermission_DoesNothing()
+    public void OnApplyBulk_NullBulkPermission_LeavesTheStateUnchanged()
     {
         StubRole(1);
         var cut = Render<RoleEdit>(p => p.Add(x => x.Id, 1));

@@ -1,0 +1,8 @@
+Synthetic credentials for the isolated Toto Vulnerable scanner laboratory.
+They are generated during seeding and are never valid credentials.
+
+github_pat=__TOTO_VULNERABLE_GITHUB_TOKEN__
+aws_access_key=__TOTO_VULNERABLE_AWS_ACCESS_KEY__
+slack_token=__TOTO_VULNERABLE_SLACK_TOKEN__
+
+__TOTO_VULNERABLE_PRIVATE_KEY_BLOCK__

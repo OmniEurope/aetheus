@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: application-qa-template
+trigger: manual
+parameters:
+  - name: performance
+    display_name: Run the optional performance smoke
+    type: boolean
+    default: "false"
+variables:
+  APPLICATION_CI_PIPELINE: application-ci
+  APPLICATION_ROLLBACK_ENABLED: "true"
+  APPLICATION_PERFORMANCE_ENABLED: "${{ parameters.performance }}"
+
+stages:
+  - name: QA
+    group: QA
+    execution_role: build
+    os: linux
+    steps:
+      - name: Restore immutable CI payload
+        type: restore-artifacts
+        artifact: ApplicationPayload-artifacts
+        artifact_source_pipeline: "$(APPLICATION_CI_PIPELINE)"
+        timeout_seconds: 1800
+      - name: Run project QA adapter
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/qa.sh
+          APPLICATION_ROLLBACK_ENABLED="$(APPLICATION_ROLLBACK_ENABLED)" \
+          APPLICATION_PERFORMANCE_ENABLED="$(APPLICATION_PERFORMANCE_ENABLED)" \
+            sh .pipeline/scripts/qa.sh
+        timeout_seconds: 18000

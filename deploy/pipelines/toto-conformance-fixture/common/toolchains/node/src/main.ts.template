@@ -1,0 +1,20 @@
+import 'zone.js';
+import { bootstrapApplication } from '@angular/platform-browser';
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  template: `
+    <main>
+      <h1>{{ title }}</h1>
+      <p data-testid="toolchain">Angular fonctionne avec Node {{ nodeVersion }}.</p>
+    </main>
+  `
+})
+class AppComponent {
+  readonly title = 'Toto multilangage';
+  readonly nodeVersion = '24.4.1';
+}
+
+bootstrapApplication(AppComponent).catch(error => console.error(error));

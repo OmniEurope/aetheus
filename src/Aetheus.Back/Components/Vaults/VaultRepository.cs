@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Vaults;
 
 public class VaultRepository(AppDbContext db, TimeProvider timeProvider) : IVaultRepository
 {
     public async Task<(List<Vault> Items, int TotalCount)> GetVaultsPagedAsync(
-        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
+        string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false)
     {
         var query = db.Vaults.AsNoTracking().AsQueryable();
 
@@ -32,7 +31,7 @@ public class VaultRepository(AppDbContext db, TimeProvider timeProvider) : IVaul
             .Include(v => v.Environment)
             .Include(v => v.ProjectServer)
             .Include(v => v.Secrets)
-            .OrderBy(v => v.Name)
+            .OrderByProperty(sortBy, sortDescending, v => v.Name, fallbackDescending: false)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsSplitQuery()
@@ -154,6 +153,42 @@ public class VaultRepository(AppDbContext db, TimeProvider timeProvider) : IVaul
             .OrderByDescending(v => v.Version)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
+
+    public async Task<int> PurgeHistoricalSecretVersionsAsync(
+        int secretId,
+        DateTime cutoffUtc,
+        int maxCount,
+        CancellationToken ct = default)
+    {
+        var currentVersion = await db.VaultSecretVersions
+            .Where(version => version.VaultSecretId == secretId)
+            .MaxAsync(version => (int?)version.Version, ct)
+            .ConfigureAwait(false);
+        if (currentVersion is null)
+            return 0;
+
+        var expiredIds = await db.VaultSecretVersions
+            .Where(version =>
+                version.VaultSecretId == secretId
+                && version.Version != currentVersion.Value
+                && version.ChangedAt < cutoffUtc)
+            .OrderBy(version => version.ChangedAt)
+            .ThenBy(version => version.Id)
+            .Select(version => version.Id)
+            .Take(Math.Clamp(maxCount, 1, 1000))
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (expiredIds.Count == 0)
+            return 0;
+
+        var expired = db.VaultSecretVersions.Where(version => expiredIds.Contains(version.Id));
+        if (db.Database.IsRelational())
+            return await expired.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        var rows = await expired.ToListAsync(ct).ConfigureAwait(false);
+        db.VaultSecretVersions.RemoveRange(rows);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return rows.Count;
     }
 
     public async Task<int> GetNextVersionAsync(int secretId, CancellationToken ct = default)

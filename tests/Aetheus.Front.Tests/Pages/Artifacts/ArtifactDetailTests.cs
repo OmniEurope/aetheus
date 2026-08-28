@@ -22,6 +22,7 @@ public class ArtifactDetailTests : BunitContext
         PipelineId = 1,
         PipelineName = "CI",
         PipelineRunId = 42,
+        FilePath = "/srv/aetheus/artifacts/build-output.zip",
         SizeBytes = 2_097_152,
         RetentionPolicy = ArtifactRetentionPolicy.Released,
         CreatedAt = new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc),
@@ -89,5 +90,81 @@ public class ArtifactDetailTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.Contains("second-artifact", cut.Markup));
         Assert.DoesNotContain("first-artifact", cut.Markup);
+    }
+
+    [Fact]
+    public void Panels_RenderProvenanceAndOnlyRenderDistributionWhenItHasContent()
+    {
+        _handler.SetJsonResponse("api/artifacts/5", Sample());
+        _handler.SetJsonResponse("api/artifacts/6", Sample(6) with
+        {
+            ProjectId = null,
+            ProjectName = null,
+            EnvironmentName = null,
+            Releases = []
+        });
+
+        var withDistribution = Render<ArtifactDetail>(p => p.Add(c => c.ArtifactId, 5));
+        withDistribution.WaitForAssertion(() =>
+        {
+            Assert.Contains("Provenance", withDistribution.Markup);
+            Assert.Contains("Distribution", withDistribution.Markup);
+        });
+
+        var withoutDistribution = Render<ArtifactDetail>(p => p.Add(c => c.ArtifactId, 6));
+        withoutDistribution.WaitForAssertion(() =>
+        {
+            Assert.Contains("Provenance", withoutDistribution.Markup);
+            Assert.DoesNotContain("Distribution", withoutDistribution.Markup);
+        });
+    }
+
+    [Fact]
+    public void GitProvenanceLinks_UseOnlyCanonicalGitSectionRoutes()
+    {
+        _handler.SetJsonResponse("api/artifacts/5", Sample() with
+        {
+            Branches = [new BranchLinkDto { Id = 11, Name = "main" }],
+            Commits = [new CommitLinkDto { Id = 22, Sha = "abcdef1234567890" }]
+        });
+
+        var cut = Render<ArtifactDetail>(parameters => parameters.Add(component => component.ArtifactId, 5));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("href=\"/git-repositories/branches/11\"", cut.Markup);
+            Assert.Contains("href=\"/git-repositories/commits/22\"", cut.Markup);
+            Assert.DoesNotContain("href=\"/git/", cut.Markup);
+        });
+    }
+
+    [Fact]
+    public void GitProvenanceLinks_WithSourceRepository_GoDirectlyToBranchAndCommit()
+    {
+        _handler.SetJsonResponse("api/artifacts/5", Sample() with { SourceRepositoryId = 17 });
+
+        var cut = Render<ArtifactDetail>(parameters => parameters.Add(component => component.ArtifactId, 5));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("href=\"/git-repositories/17?tab=branches&amp;branch=main\"", cut.Markup);
+            Assert.Contains("href=\"/git-repositories/17?tab=commits&amp;search=abcdef1234567890\"", cut.Markup);
+        });
+    }
+
+    [Fact]
+    public void CopyPathButton_WritesExactArtifactPathToClipboard()
+    {
+        JSInterop.SetupVoid("navigator.clipboard.writeText", _ => true);
+        _handler.SetJsonResponse("api/artifacts/5", Sample());
+        var cut = Render<ArtifactDetail>(p => p.Add(c => c.ArtifactId, 5));
+        cut.WaitForState(() => cut.Markup.Contains("build-output"));
+
+        cut.FindAll("button[aria-label='Copy']")[0].Click();
+
+        var invocation = Assert.Single(
+            JSInterop.Invocations,
+            call => call.Identifier == "navigator.clipboard.writeText");
+        Assert.Equal("/srv/aetheus/artifacts/build-output.zip", invocation.Arguments[0]);
     }
 }

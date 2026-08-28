@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -104,99 +99,86 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
             return Task.FromResult(new ServerConfigValidationResult { IsValid = false, Errors = errors });
         }
 
-        if (config.Server is null)
-            errors.Add("Missing required 'server' section.");
-
-        if (string.IsNullOrWhiteSpace(config.Server?.Name))
-            errors.Add("Server name is required.");
-        else if (!ServerNameRegex().IsMatch(config.Server.Name))
-            errors.Add($"Server name '{config.Server.Name}' contains invalid characters.");
-
-        if (config.Server is not null && !Enum.TryParse<ServerType>(config.Server.Type, true, out _))
-            errors.Add($"Invalid server type: '{config.Server.Type}'. Valid: Normal, Build, Docker.");
-
-        if (config.Docker?.Containers is not null)
-        {
-            foreach (var container in config.Docker.Containers)
-            {
-                if (string.IsNullOrWhiteSpace(container.Image))
-                    errors.Add($"Container '{container.Name}' is missing an image.");
-                else if (!DockerImageRegex().IsMatch(container.Image))
-                    errors.Add($"Container image '{container.Image}' contains invalid characters.");
-
-                if (string.IsNullOrWhiteSpace(container.Name))
-                    errors.Add("Container name is required.");
-                else if (!DockerNameRegex().IsMatch(container.Name))
-                    errors.Add($"Container name '{container.Name}' contains invalid characters.");
-
-                if (!string.IsNullOrWhiteSpace(container.Restart) && !RestartPolicyRegex().IsMatch(container.Restart))
-                    errors.Add($"Container '{container.Name}' has invalid restart policy '{container.Restart}'.");
-
-                foreach (var port in container.Ports)
-                    if (!PortMappingRegex().IsMatch(port))
-                        errors.Add($"Container '{container.Name}' has invalid port mapping '{port}'.");
-
-                foreach (var vol in container.Volumes)
-                    if (!VolumeMappingRegex().IsMatch(vol))
-                        errors.Add($"Container '{container.Name}' has invalid volume mapping '{vol}'.");
-
-                foreach (var (k, v) in container.Env)
-                {
-                    if (!EnvKeyRegex().IsMatch(k))
-                        errors.Add($"Container '{container.Name}' has invalid env key '{k}'.");
-                    if (v is not null && ShellMetaInValueRegex().IsMatch(v))
-                        errors.Add($"Container '{container.Name}' env '{k}' contains shell metacharacters.");
-                }
-            }
-        }
-
-        if (config.Docker?.Images is not null)
-        {
-            foreach (var image in config.Docker.Images)
-                if (!DockerImageRegex().IsMatch(image))
-                    errors.Add($"Docker image '{image}' contains invalid characters.");
-        }
-
-        if (config.Docker?.ComposeStacks is not null)
-        {
-            foreach (var stack in config.Docker.ComposeStacks)
-            {
-                if (string.IsNullOrWhiteSpace(stack.Name))
-                    errors.Add("Compose stack name is required.");
-                else if (!StackNameRegex().IsMatch(stack.Name))
-                    errors.Add($"Compose stack name '{stack.Name}' contains invalid characters.");
-
-                if (string.IsNullOrWhiteSpace(stack.Content))
-                    errors.Add($"Compose stack '{stack.Name}' is missing content.");
-            }
-        }
-
-        if (config.Services?.Systemd is not null)
-        {
-            foreach (var svc in config.Services.Systemd)
-            {
-                if (string.IsNullOrWhiteSpace(svc.Name))
-                    errors.Add("Systemd service name is required.");
-                else if (!ServiceNameRegex().IsMatch(svc.Name))
-                    errors.Add($"Systemd service name '{svc.Name}' contains invalid characters.");
-            }
-        }
+        ValidateServerSection(config, errors);
+        ValidateDockerSection(config, errors);
+        ValidateServiceSection(config, errors);
 
         return Task.FromResult(new ServerConfigValidationResult { IsValid = errors.Count == 0, Errors = errors });
     }
 
+    private static void ValidateServerSection(ServerConfigYaml config, ICollection<string> errors)
+    {
+        if (config.Server is null)
+            errors.Add("Missing required 'server' section.");
+        if (string.IsNullOrWhiteSpace(config.Server?.Name))
+            errors.Add("Server name is required.");
+        else if (!ServerNameRegex().IsMatch(config.Server.Name))
+            errors.Add($"Server name '{config.Server.Name}' contains invalid characters.");
+        if (config.Server is not null && !Enum.TryParse<ServerType>(config.Server.Type, true, out _))
+            errors.Add($"Invalid server type: '{config.Server.Type}'. Valid: Normal, Build, Docker.");
+    }
+
+    private static void ValidateDockerSection(ServerConfigYaml config, ICollection<string> errors)
+    {
+        foreach (var container in config.Docker?.Containers ?? [])
+            ValidateContainer(container, errors);
+        foreach (var image in config.Docker?.Images ?? [])
+            if (!DockerImageRegex().IsMatch(image))
+                errors.Add($"Docker image '{image}' contains invalid characters.");
+        foreach (var stack in config.Docker?.ComposeStacks ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(stack.Name))
+                errors.Add("Compose stack name is required.");
+            else if (!StackNameRegex().IsMatch(stack.Name))
+                errors.Add($"Compose stack name '{stack.Name}' contains invalid characters.");
+            if (string.IsNullOrWhiteSpace(stack.Content))
+                errors.Add($"Compose stack '{stack.Name}' is missing content.");
+        }
+    }
+
+    private static void ValidateContainer(ServerConfigContainer container, ICollection<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(container.Image))
+            errors.Add($"Container '{container.Name}' is missing an image.");
+        else if (!DockerImageRegex().IsMatch(container.Image))
+            errors.Add($"Container image '{container.Image}' contains invalid characters.");
+        if (string.IsNullOrWhiteSpace(container.Name))
+            errors.Add("Container name is required.");
+        else if (!DockerNameRegex().IsMatch(container.Name))
+            errors.Add($"Container name '{container.Name}' contains invalid characters.");
+        if (!string.IsNullOrWhiteSpace(container.Restart) && !RestartPolicyRegex().IsMatch(container.Restart))
+            errors.Add($"Container '{container.Name}' has invalid restart policy '{container.Restart}'.");
+        foreach (var port in container.Ports)
+            if (!PortMappingRegex().IsMatch(port))
+                errors.Add($"Container '{container.Name}' has invalid port mapping '{port}'.");
+        foreach (var volume in container.Volumes)
+            if (!VolumeMappingRegex().IsMatch(volume))
+                errors.Add($"Container '{container.Name}' has invalid volume mapping '{volume}'.");
+        foreach (var (key, value) in container.Env)
+        {
+            if (!EnvKeyRegex().IsMatch(key))
+                errors.Add($"Container '{container.Name}' has invalid env key '{key}'.");
+            if (value is not null && ShellMetaInValueRegex().IsMatch(value))
+                errors.Add($"Container '{container.Name}' env '{key}' contains shell metacharacters.");
+        }
+    }
+
+    private static void ValidateServiceSection(ServerConfigYaml config, ICollection<string> errors)
+    {
+        foreach (var service in config.Services?.Systemd ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(service.Name))
+                errors.Add("Systemd service name is required.");
+            else if (!ServiceNameRegex().IsMatch(service.Name))
+                errors.Add($"Systemd service name '{service.Name}' contains invalid characters.");
+        }
+    }
+
     public async Task<ServerConfigPreviewDto?> PreviewImportAsync(int serverId, string yaml, CancellationToken ct = default)
     {
-        var validation = await ValidateConfigurationAsync(yaml, ct).ConfigureAwait(false);
-        if (!validation.IsValid)
-            return null;
-
-        var config = YamlParsingHelper.Deserializer.Deserialize<ServerConfigYaml>(yaml);
-
-        var server = await repo.GetServerWithDockerAndServicesReadOnlyAsync(serverId, ct).ConfigureAwait(false);
-
-        if (server is null)
-            return null;
+        var loaded = await LoadConfigurationAsync(serverId, yaml, tracked: false, ct).ConfigureAwait(false);
+        if (loaded is null) return null;
+        var (server, config) = loaded.Value;
 
         var changes = ComputeChanges(server, config);
 
@@ -210,33 +192,52 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
 
     public async Task<ServerConfigDeployResultDto?> DeployConfigurationAsync(int serverId, string yaml, CancellationToken ct = default)
     {
+        var loaded = await LoadConfigurationAsync(serverId, yaml, tracked: true, ct).ConfigureAwait(false);
+        if (loaded is null) return null;
+        var (server, config) = loaded.Value;
+
+        ApplyServerMetadata(server, config);
+        var taskNames = new List<string>();
+        await QueueImageTasksAsync(serverId, server, config, taskNames).ConfigureAwait(false);
+        await QueueContainerTasksAsync(serverId, server, config, taskNames).ConfigureAwait(false);
+        await QueueComposeTasksAsync(serverId, server, config, taskNames).ConfigureAwait(false);
+        await QueueServiceTasksAsync(serverId, config, taskNames).ConfigureAwait(false);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        return new ServerConfigDeployResultDto
+        {
+            TasksCreated = taskNames.Count,
+            TaskNames = taskNames
+        };
+    }
+
+    private async Task<(Server Server, ServerConfigYaml Config)?> LoadConfigurationAsync(
+        int serverId, string yaml, bool tracked, CancellationToken ct)
+    {
         var validation = await ValidateConfigurationAsync(yaml, ct).ConfigureAwait(false);
-        if (!validation.IsValid)
-            return null;
-
+        if (!validation.IsValid) return null;
         var config = YamlParsingHelper.Deserializer.Deserialize<ServerConfigYaml>(yaml);
+        var server = tracked
+            ? await repo.GetServerWithDockerAndServicesAsync(serverId, ct).ConfigureAwait(false)
+            : await repo.GetServerWithDockerAndServicesReadOnlyAsync(serverId, ct).ConfigureAwait(false);
+        return server is null ? null : (server, config);
+    }
 
-        var server = await repo.GetServerWithDockerAndServicesAsync(serverId, ct).ConfigureAwait(false);
-
-        if (server is null)
-            return null;
-
-        // Update server metadata
+    private void ApplyServerMetadata(Server server, ServerConfigYaml config)
+    {
         if (!string.IsNullOrWhiteSpace(config.Server.Name))
             server.Name = config.Server.Name;
         if (Enum.TryParse<ServerType>(config.Server.Type, true, out var serverType))
             server.Type = serverType;
         server.Tags = JsonSerializer.Serialize(config.Server.Tags ?? []);
         server.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+    }
 
-        var taskNames = new List<string>();
-
-        // Docker images to pull
+    private async Task QueueImageTasksAsync(
+        int serverId, Server server, ServerConfigYaml config, ICollection<string> taskNames)
+    {
         if (config.Docker?.Images is not null)
         {
-            var existingImages = server.DockerImages
-                .Select(i => $"{i.Repository}:{i.Tag}".TrimEnd(':'))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingImages = ExistingImages(server);
 
             foreach (var image in config.Docker.Images)
             {
@@ -248,13 +249,14 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                 }
             }
         }
+    }
 
-        // Docker containers to create
+    private async Task QueueContainerTasksAsync(
+        int serverId, Server server, ServerConfigYaml config, ICollection<string> taskNames)
+    {
         if (config.Docker?.Containers is not null)
         {
-            var existingContainers = server.DockerContainers
-                .Select(c => c.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingContainers = ExistingContainers(server);
 
             foreach (var container in config.Docker.Containers)
             {
@@ -267,13 +269,14 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                 }
             }
         }
+    }
 
-        // Compose stacks to deploy
+    private async Task QueueComposeTasksAsync(
+        int serverId, Server server, ServerConfigYaml config, ICollection<string> taskNames)
+    {
         if (config.Docker?.ComposeStacks is not null)
         {
-            var existingStacks = server.DockerComposeStacks
-                .Select(s => s.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingStacks = ExistingStacks(server);
 
             foreach (var stack in config.Docker.ComposeStacks)
             {
@@ -281,27 +284,24 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                     ? $"Update compose - {stack.Name}"
                     : $"Deploy compose - {stack.Name}";
 
-                // No generic WriteFile OperationKind exists (only the Apache-specific ApacheSaveConfig),
-                // so per audit-360 C-1 we keep the printf-in-shell path but make the single-quote
-                // escaping bulletproof: the content is wrapped in single quotes (which suppress ALL
-                // shell expansion - $, `, \, etc.), and each embedded ' is closed-escaped-reopened as
-                // '\'' so the string cannot break out of the quoting. A NUL byte cannot survive a
-                // C-string argv anyway, so reject it outright rather than silently truncating the file.
-                if (stack.Content.Contains('\0'))
-                    throw new BadRequestException($"Compose stack '{stack.Name}' content contains a NUL byte.");
-                var escapedContent = stack.Content.Replace("'", "'\\''");
-                var command = $"mkdir -p /opt/compose/{stack.Name} && printf '%s' '{escapedContent}' > /opt/compose/{stack.Name}/docker-compose.yml && cd /opt/compose/{stack.Name} && docker compose up -d";
-
+                var command = BuildComposeDeployCommand(stack);
                 await QueueTaskAsync(ServerTaskFactory.Shell(serverId, taskName, command, 120));
                 taskNames.Add(taskName);
             }
         }
+    }
 
-        // Systemd services to enable (Phase 3, option B). Migrated from a free-form
-        // `sudo systemctl enable --now <unit>` shell task - which CommandValidator/sudoers never
-        // actually permitted (systemctl enable is forbidden outside the controlled recipe) - to a
-        // typed ServiceEnable operation. The agent runs `sudo -n systemctl enable --now <unit>`
-        // against the argv-exact, fixed-unit /etc/sudoers.d/aetheus-service-enable allow-list.
+    private static string BuildComposeDeployCommand(ServerConfigComposeStack stack)
+    {
+        if (stack.Content.Contains('\0'))
+            throw new BadRequestException($"Compose stack '{stack.Name}' content contains a NUL byte.");
+        var escapedContent = stack.Content.Replace("'", "'\\''");
+        return $"mkdir -p /opt/compose/{stack.Name} && printf '%s' '{escapedContent}' > /opt/compose/{stack.Name}/docker-compose.yml && cd /opt/compose/{stack.Name} && docker compose up -d";
+    }
+
+    private async Task QueueServiceTasksAsync(
+        int serverId, ServerConfigYaml config, ICollection<string> taskNames)
+    {
         if (config.Services?.Systemd is not null)
         {
             foreach (var svc in config.Services.Systemd.Where(s => s.Enabled))
@@ -311,14 +311,6 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                 taskNames.Add(taskName);
             }
         }
-
-        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return new ServerConfigDeployResultDto
-        {
-            TasksCreated = taskNames.Count,
-            TaskNames = taskNames
-        };
     }
 
     private static ServerConfigDockerSection? BuildDockerSection(Server server)
@@ -368,20 +360,42 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
     private static List<ServerConfigChange> ComputeChanges(Server server, ServerConfigYaml config)
     {
         var changes = new List<ServerConfigChange>();
+        AddServerChanges(changes, server, config);
+        AddImageChanges(changes, server, config);
+        AddContainerChanges(changes, server, config);
+        AddStackChanges(changes, server, config);
+        AddServiceChanges(changes, server, config);
+        return changes;
+    }
 
-        // Server metadata
+    private static HashSet<string> ExistingImages(Server server) =>
+        server.DockerImages.Select(image => $"{image.Repository}:{image.Tag}".TrimEnd(':'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static HashSet<string> ExistingContainers(Server server) =>
+        server.DockerContainers.Select(container => container.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static HashSet<string> ExistingStacks(Server server) =>
+        server.DockerComposeStacks.Select(stack => stack.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static void AddServerChanges(
+        ICollection<ServerConfigChange> changes, Server server, ServerConfigYaml config)
+    {
         if (!string.Equals(server.Name, config.Server.Name, StringComparison.Ordinal))
             changes.Add(new ServerConfigChange { Category = "Server", Action = "update", Description = $"Rename '{server.Name}' → '{config.Server.Name}'" });
 
         if (Enum.TryParse<ServerType>(config.Server.Type, true, out var newType) && server.Type != newType)
             changes.Add(new ServerConfigChange { Category = "Server", Action = "update", Description = $"Change type {server.Type} → {newType}" });
+    }
 
-        // Docker images
+    private static void AddImageChanges(
+        ICollection<ServerConfigChange> changes, Server server, ServerConfigYaml config)
+    {
         if (config.Docker?.Images is not null)
         {
-            var existingImages = server.DockerImages
-                .Select(i => $"{i.Repository}:{i.Tag}".TrimEnd(':'))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingImages = ExistingImages(server);
 
             foreach (var image in config.Docker.Images)
             {
@@ -390,13 +404,14 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                     : new ServerConfigChange { Category = "Docker Image", Action = "pull", Description = image });
             }
         }
+    }
 
-        // Docker containers
+    private static void AddContainerChanges(
+        ICollection<ServerConfigChange> changes, Server server, ServerConfigYaml config)
+    {
         if (config.Docker?.Containers is not null)
         {
-            var existingContainers = server.DockerContainers
-                .Select(c => c.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingContainers = ExistingContainers(server);
 
             foreach (var container in config.Docker.Containers)
             {
@@ -405,13 +420,14 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                     : new ServerConfigChange { Category = "Docker Container", Action = "create", Description = $"{container.Name} ({container.Image})" });
             }
         }
+    }
 
-        // Compose stacks
+    private static void AddStackChanges(
+        ICollection<ServerConfigChange> changes, Server server, ServerConfigYaml config)
+    {
         if (config.Docker?.ComposeStacks is not null)
         {
-            var existingStacks = server.DockerComposeStacks
-                .Select(s => s.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingStacks = ExistingStacks(server);
 
             foreach (var stack in config.Docker.ComposeStacks)
             {
@@ -420,8 +436,11 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                     : new ServerConfigChange { Category = "Compose Stack", Action = "deploy", Description = stack.Name });
             }
         }
+    }
 
-        // Systemd services
+    private static void AddServiceChanges(
+        ICollection<ServerConfigChange> changes, Server server, ServerConfigYaml config)
+    {
         if (config.Services?.Systemd is not null)
         {
             var existingServices = server.Services
@@ -436,8 +455,6 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
                     : new ServerConfigChange { Category = "Systemd Service", Action = "enable", Description = svc.Name });
             }
         }
-
-        return changes;
     }
 
     private static string BuildDockerRunCommand(ServerConfigContainer container)

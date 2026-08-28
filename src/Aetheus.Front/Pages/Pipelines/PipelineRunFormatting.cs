@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -31,8 +26,9 @@ internal static class PipelineRunFormatting
     public static string FormatDuration(DateTime? started, DateTime? completed)
     {
         if (started is null) return string.Empty;
-        var end = completed ?? DateTime.Now;
+        var end = completed ?? (started.Value.Kind == DateTimeKind.Utc ? DateTime.UtcNow : DateTime.Now);
         var duration = end - started.Value;
+        if (duration < TimeSpan.Zero) duration = TimeSpan.Zero;
         return duration.TotalMinutes >= 1
             ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s"
             : $"{duration.Seconds}s";
@@ -95,6 +91,35 @@ internal static class PipelineRunFormatting
             : 0;
 
     public static string ShortSha(string commitHash) => commitHash[..Math.Min(8, commitHash.Length)];
+
+    /// <summary>Middle-truncates an unbreakable identifier (a release named after a full commit sha,
+    /// for instance) so it fits a fixed-width tile: <c>c-aad83…19fe4</c>. The caller keeps the full
+    /// value on the element's title so nothing is lost.</summary>
+    public static string TruncateMiddle(string value, int head = 7, int tail = 5)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= head + tail + 1) return value;
+        return $"{value[..head]}…{value[^tail..]}";
+    }
+
+    // Every delivery pipeline stamps the built application version into APP_VERSION (see .pipeline/*.yaml),
+    // so the run view can name the version a release actually shipped instead of only its release name.
+    public const string AppVersionVar = "APP_VERSION";
+
+    /// <summary>The application version this run built, read from the resolved <c>APP_VERSION</c>
+    /// variable and falling back to the last step that emitted it as an output. Null when the run's
+    /// pipeline does not stamp a version.</summary>
+    public static string? BuiltAppVersion(PipelineRunDto run)
+    {
+        if (run.ResolvedVariables.TryGetValue(AppVersionVar, out var resolved) && !string.IsNullOrWhiteSpace(resolved))
+            return resolved.Trim();
+        var emitted = run.Steps
+            .SelectMany(step => step.OutputVariables)
+            .Where(output => string.Equals(output.Key, AppVersionVar, StringComparison.Ordinal)
+                             && !string.IsNullOrWhiteSpace(output.Value))
+            .Select(output => output.Value.Trim())
+            .LastOrDefault();
+        return emitted;
+    }
 
     public static string FormatPercent(double rate) => $"{rate * 100:F1}%";
 

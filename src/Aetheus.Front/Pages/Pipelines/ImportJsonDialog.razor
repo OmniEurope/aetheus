@@ -3,6 +3,6 @@
     <RadzenText TextStyle="TextStyle.Body2">@L["PasteJsonBelow"]</RadzenText>
     <RadzenTextArea @bind-Value="_json" Rows="12" class="w-100" />
     <DialogFooter OnCancel="@(() => Dialog.Close())">
-        <RadzenButton Text="@L["Import"]" Icon="upload" Click="@(() => Dialog.Close(_json))" Disabled="@string.IsNullOrWhiteSpace(_json)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Text="@L["Import"]" Icon="upload" Click="@(() => Dialog.Close(_json))" Disabled="@string.IsNullOrWhiteSpace(_json)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
     </DialogFooter>
 </RadzenStack>

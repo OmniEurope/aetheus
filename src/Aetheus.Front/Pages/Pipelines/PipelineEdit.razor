@@ -27,15 +27,15 @@
                 <RadzenButton Icon="refresh" Size="ButtonSize.ExtraSmall"
                     Click="@OnRefresh" aria-label="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                 <RadzenSplitButton Text="@L["Run"]" Icon="play_arrow" Click="@OnRunClick" Size="ButtonSize.Small" IsBusy="@_running" BusyText="@L["Run"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled">
-                    <RadzenSplitButtonItem Text="@L["ChooseBranch"]" Value="branch" Icon="account_tree" />
+                    <RadzenSplitButtonItem Text="@L["RunWithOptions"]" Value="options" Icon="tune" />
                 </RadzenSplitButton>
                 <RadzenButton Text="@L["Edit"]" Icon="edit" Click="@(() => _selectedTab = 1)" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-                <RadzenButton Text="@L["DryRun"]" Icon="science" Click="@OnDryRun" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["DryRun"]" Icon="science" Click="@OnDryRun" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 @if (_fleetItem is { Freshness: PipelineFleetFreshness.Outdated, LatestVersion: not null }
                     && Permissions.CanWrite(ResourceType.Pipeline, Id))
                 {
                     <RadzenButton Text="@L["UpdatePipelineTemplate"]" Icon="system_update_alt" Click="@OnUpdateTemplate"
-                                  Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                  Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 }
                 @if (_canTemplateWrite)
                 {
@@ -83,6 +83,12 @@
                         </RadzenFormField>
                     </RadzenStack>
                 </RadzenColumn>
+                <RadzenColumn Size="12" SizeMD="6">
+                    <OwnerTypeSelector Projects="@_projects"
+                        @bind-ProjectId="_model.ProjectId"
+                        @bind-EnvironmentId="_model.EnvironmentId"
+                        @bind-ProjectServerId="_model.ProjectServerId" />
+                </RadzenColumn>
             </RadzenRow>
 
             <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mt-4 rz-mb-1">@L["YamlDefinition"]</RadzenText>
@@ -95,10 +101,49 @@
                         Change="@OnTemplateSelected" class="tpl-select" />
                 </RadzenStack>
             }
+            @if (_templateParameters.Selection?.Parameters.Count > 0)
+            {
+                <RadzenCard class="rz-mb-3">
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["TemplateParameters"]</RadzenText>
+                    <RadzenRow Gap="1rem">
+                        @foreach (var parameter in _templateParameters.Selection.Parameters)
+                        {
+                            <RadzenColumn Size="12" SizeMD="6">
+                                <RadzenFormField Text="@(parameter.DisplayName ?? parameter.Name)" class="rz-w-100">
+                                    @if (parameter.AllowedValues.Count > 0)
+                                    {
+                                        <RadzenDropDown TValue="string" Data="@parameter.AllowedValues"
+                                            Value="@TemplateParameterValue(parameter.Name)"
+                                            ValueChanged="@(value => OnTemplateParameterChanged(parameter.Name, value))"
+                                            AllowClear="@(!parameter.Required)" class="rz-w-100" />
+                                    }
+                                    else if (string.Equals(parameter.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <RadzenDropDown TValue="string" Data="@(new[] { "true", "false" })"
+                                            Value="@TemplateParameterValue(parameter.Name)"
+                                            ValueChanged="@(value => OnTemplateParameterChanged(parameter.Name, value))"
+                                            class="rz-w-100" />
+                                    }
+                                    else
+                                    {
+                                        <RadzenTextBox Value="@TemplateParameterValue(parameter.Name)"
+                                            ValueChanged="@(value => OnTemplateParameterChanged(parameter.Name, value))"
+                                            class="rz-w-100" />
+                                    }
+                                </RadzenFormField>
+                                @if (!string.IsNullOrWhiteSpace(parameter.Description))
+                                {
+                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@parameter.Description</RadzenText>
+                                }
+                            </RadzenColumn>
+                        }
+                    </RadzenRow>
+                </RadzenCard>
+            }
             <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" class="rz-mb-2">
                 <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Create"]" Icon="add" IsBusy="@_saving" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                <RadzenButton Text="@L["ValidateYaml"]" Icon="check_circle" Click="@OnValidateYaml" IsBusy="@_validating" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                <RadzenButton Text="@L["FormatYaml"]" Icon="format_align_left" Click="@OnFormatYaml" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["ValidateYaml"]" Icon="check_circle" Click="@OnValidateYaml" IsBusy="@_validating" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["FormatYaml"]" Icon="format_align_left" Click="@OnFormatYaml" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 @if (_yamlValid.HasValue)
                 {
                     <RadzenBadge BadgeStyle="@(_yamlValid.Value ? BadgeStyle.Success : BadgeStyle.Danger)"
@@ -114,7 +159,7 @@
 }
 else if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" class="rz-mt-4" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" Class="rz-mt-4" />
 }
 else
 {
@@ -122,6 +167,46 @@ else
     <UrlSyncedTabs Slugs="@(new[] { "runs", "edit", "visual", "settings" })" @bind-SelectedIndex="_selectedTab" class="pipeline-detail-tabs rz-mt-2">
         <Tabs>
             <RadzenTabsItem Text="@L["Runs"]" Icon="history">
+                @* Tiles read from the loaded page of runs, so they answer "what is the state of this
+                   pipeline right now" without opening a run: the sealed grade of the latest run, how
+                   often it passes, how long it takes, and when it last went green. *@
+                <RadzenRow Gap="0.75rem" class="rz-mt-2">
+                    <RadzenColumn Size="12" SizeSM="6" SizeMD="3">
+                        <RadzenCard class="analysis-summary-card">
+                            <RadzenIcon Icon="grade" />
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["LatestGrade"]</RadzenText>
+                            @if (RunsSummary.LatestGrade is { } grade)
+                            {
+                                <RadzenBadge BadgeStyle="@PipelineHelper.GetGradeBadge(grade)" Text="@grade.ToString()" />
+                            }
+                            else
+                            {
+                                <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["NotAvailableShort"]</RadzenText>
+                            }
+                        </RadzenCard>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeSM="6" SizeMD="3">
+                        <RadzenCard class="analysis-summary-card">
+                            <RadzenIcon Icon="check_circle" />
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["SuccessRate"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.H6">@RunsSummary.SuccessRateLabel(L["NotAvailableShort"])</RadzenText>
+                        </RadzenCard>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeSM="6" SizeMD="3">
+                        <RadzenCard class="analysis-summary-card">
+                            <RadzenIcon Icon="schedule" />
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["AverageDuration"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.H6">@RunsSummary.AverageDurationLabel(L["NotAvailableShort"])</RadzenText>
+                        </RadzenCard>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeSM="6" SizeMD="3">
+                        <RadzenCard class="analysis-summary-card">
+                            <RadzenIcon Icon="event_available" />
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["LastSuccess"]</RadzenText>
+                            <RadzenText TextStyle="TextStyle.H6">@RunsSummary.LastSuccessLabel(L["NotAvailableShort"])</RadzenText>
+                        </RadzenCard>
+                    </RadzenColumn>
+                </RadzenRow>
                 @if (_running)
                 {
                     <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false"
@@ -135,17 +220,132 @@ else
                 {
                     <Aetheus.Front.Shared.AetheusDataGrid @ref="_runsGrid" TItem="PipelineRunDto"
                         Data="@_runs" Count="@_runsTotalCount" PageSize="@_runsPageSize"
-                        LoadData="@OnRunsLoadDataAsync" AutoLoad="false" AllowSorting="false" AllowFiltering="false"
+                        LoadData="@OnRunsLoadDataAsync"
                         RowClick="@(run => Nav.NavigateTo(PipelineRunPresentation.Href(run.Id, ProjectId, ServerId)))" class="rz-mt-2">
                         <Columns>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="Id" Title="#" Width="80px">
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="Id" Title="@L["ID"]" Width="80px">
                                 <Template Context="run">
-                                    <NavLink href="@PipelineRunPresentation.Href(run.Id, ProjectId, ServerId)" class="pipeline-name-link" @onclick:stopPropagation="true">#@run.Id</NavLink>
+                                    <NavLink href="@PipelineRunPresentation.Href(run.Id, ProjectId, ServerId)" class="pipeline-name-link" @onclick:stopPropagation="true">@run.Id</NavLink>
                                 </Template>
                             </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="Status" Title="@L["Status"]" Width="120px">
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["Actions"]" Width="110px" Sortable="false" Filterable="false" TextAlign="TextAlign.Center">
                                 <Template Context="run">
-                                    <RadzenBadge BadgeStyle="@PipelineRunPresentation.Badge(run.Status)" Text="@L.Localize(run.Status)" />
+                                    <span @onclick:stopPropagation="true">
+                                        <RadzenStack Orientation="Orientation.Horizontal" Gap="0.15rem" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center">
+                                            @if (PipelineRunPresentation.CanCancel(run))
+                                            {
+                                                <RadzenButton Icon="cancel" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled"
+                                                    Size="ButtonSize.ExtraSmall" title="@L["CancelRun"]" aria-label="@L["CancelRun"]"
+                                                    Click="@(() => OnCancelRunAsync(run))" />
+                                            }
+                                            @if (PipelineRunPresentation.IsFailed(run))
+                                            {
+                                                <RadzenButton Icon="replay" Size="ButtonSize.ExtraSmall"
+                                                    Click="@OnRun" IsBusy="@_running" title="@L["Rerun"]" aria-label="@L["Rerun"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
+                                            }
+                                        </RadzenStack>
+                                    </span>
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="Status" Title="@L["Status"]" Width="150px">
+                                <Template Context="run">
+                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                                        <RadzenBadge BadgeStyle="@PipelineRunPresentation.Badge(run.Status)" Text="@L.Localize(run.Status)" />
+                                        @* The gate letter rides with the status because it qualifies it: a
+                                           green run that scored D is not the same result as a green run. *@
+                                        @if (run.GateGrade.HasValue)
+                                        {
+                                            <RadzenBadge BadgeStyle="@PipelineHelper.GetGradeBadge(run.GateGrade.Value)"
+                                                         Text="@run.GateGrade.Value.ToString()"
+                                                         title="@L["GateGrade"]" class="pipeline-gate-grade-badge" />
+                                        }
+                                    </RadzenStack>
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="StartedAt" Title="@L["Started"]" FormatString="{0:g}" Width="150px" />
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="CompletedAt" Title="@L["Completed"]" FormatString="{0:g}" Width="150px" />
+                            @* Sortable on the stored end instant, not on the rendered text: the elapsed
+                               time is derived, so there is no column to sort and a text sort would order
+                               "9m" after "10m". SortProperty hands the server a real field, and a run
+                               still going has no CompletedAt, which is exactly "longest running". *@
+                            @* Duration is computed, never stored, so it has no DTO property to bind. The
+                               sort key is resolved server-side against (CompletedAt ?? now) - StartedAt:
+                               sorting on CompletedAt instead, as this column used to, ordered by end
+                               date while claiming to order by length - two different orders whenever
+                               runs do not last the same time. *@
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["Duration"]" Width="120px"
+                                SortProperty="Duration" Filterable="false">
+                                <Template Context="run">
+                                    @* FormatDuration returns an em dash while CompletedAt is null, so a running
+                                       run showed no duration at all - exactly when it is most useful. The shared
+                                       live component ticks for a running run and formats a finished one. *@
+                                    <PipelineRunLiveDuration StartedAt="@run.StartedAt" CompletedAt="@run.CompletedAt"
+                                                             IsRunning="@PipelineRunPresentation.CanCancel(run)" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="CommitHash" Title="@L["Commit"]" Width="130px">
+                                <Template Context="run">
+                                    @if (PipelineRunPresentation.ShortCommit(run.CommitHash) is { Length: > 0 } shortCommit)
+                                    {
+                                        @* Internal git graph first: it is the page that actually shows the
+                                           commit. RepositoryUrl points at the smart-HTTP endpoint, which
+                                           serves git protocol, not a page a reader can look at. *@
+                                        @if (run.Commits.FirstOrDefault() is { } commitLink)
+                                        {
+                                            <NavLink href="@($"git/commits/{commitLink.Id}")" class="pipeline-name-link"
+                                                     @onclick:stopPropagation="true" title="@run.CommitHash">
+                                                <span>@shortCommit</span>
+                                            </NavLink>
+                                        }
+                                        else
+                                        {
+                                            <span title="@run.CommitHash"><span>@shortCommit</span></span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="BranchName" Title="@L["SourceBranch"]" Width="150px">
+                                <Template Context="run">
+                                    @if (!string.IsNullOrWhiteSpace(run.BranchName))
+                                    {
+                                        @if (run.Branches.FirstOrDefault() is { } branchLink)
+                                        {
+                                            <NavLink href="@($"git/branches/{branchLink.Id}")" class="pipeline-name-link"
+                                                     @onclick:stopPropagation="true" title="@run.BranchName">
+                                                <span>@run.BranchName</span>
+                                            </NavLink>
+                                        }
+                                        else
+                                        {
+                                            <span><span>@run.BranchName</span></span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["Server"]" Width="160px" Sortable="false" Filterable="false">
+                                <Template Context="run">
+                                    @{ var runServer = run.Steps.FirstOrDefault(s => !s.IsSystem && s.ServerName is not null); }
+                                    @if (runServer is not null)
+                                    {
+                                        @if (runServer.ServerId is { } serverId)
+                                        {
+                                            <NavLink href="@($"servers/{serverId}")" class="pipeline-name-link" @onclick:stopPropagation="true">
+                                                <span>@runServer.ServerName</span>
+                                            </NavLink>
+                                        }
+                                        else
+                                        {
+                                            <span>@runServer.ServerName</span>
+                                        }
+                                    }
                                 </Template>
                             </RadzenDataGridColumn>
                             <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["CurrentStep"]" Width="200px" Sortable="false" Filterable="false">
@@ -161,60 +361,10 @@ else
                                     else if (run.Status == PipelineStatus.Running)
                                     {
                                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.4rem">
-                                            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" ShowValue="false" Size="ProgressBarCircularSize.Small" />
+                                            <AetheusLoader Size="AetheusLoaderSize.Small" />
                                             <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">@L["PreparingRun"]</RadzenText>
                                         </RadzenStack>
                                     }
-                                </Template>
-                            </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="BranchName" Title="@L["SourceBranch"]" Width="150px">
-                                <Template Context="run">
-                                    @if (!string.IsNullOrWhiteSpace(run.BranchName))
-                                    {
-                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
-                                            <RadzenIcon Icon="account_tree" class="rz-color-secondary" />
-                                            <span>@run.BranchName</span>
-                                        </RadzenStack>
-                                    }
-                                    else
-                                    {
-                                        <span>-</span>
-                                    }
-                                </Template>
-                            </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["Server"]" Width="160px" Sortable="false" Filterable="false">
-                                <Template Context="run">
-                                    @{ var runServer = run.Steps.FirstOrDefault(s => !s.IsSystem && s.ServerName is not null); }
-                                    @if (runServer is not null)
-                                    {
-                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
-                                            @if (runServer.ServerOs is not null) { <RadzenIcon Icon="@(PipelineRunPresentation.IsWindows(runServer.ServerOs) ? "desktop_windows" : "computer")" class="@(PipelineRunPresentation.IsWindows(runServer.ServerOs) ? "run-os-icon run-os-icon-windows" : "run-os-icon run-os-icon-linux")" /> }
-                                            <span>@runServer.ServerName</span>
-                                        </RadzenStack>
-                                    }
-                                </Template>
-                            </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="StartedAt" Title="@L["Started"]" FormatString="{0:g}" />
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Property="CompletedAt" Title="@L["Completed"]" FormatString="{0:g}" />
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["Duration"]" Width="120px">
-                                <Template Context="run">
-                                    @PipelineRunPresentation.FormatDuration(run.StartedAt, run.CompletedAt)
-                                </Template>
-                            </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="@L["Steps"]" Width="80px" TextAlign="TextAlign.Center">
-                                <Template Context="run">
-                                    @run.Steps.Count
-                                </Template>
-                            </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="PipelineRunDto" Title="" Width="110px" Sortable="false" Filterable="false" TextAlign="TextAlign.Center">
-                                <Template Context="run">
-                                    <span @onclick:stopPropagation="true">
-                                        @if (PipelineRunPresentation.IsFailed(run))
-                                        {
-                                            <RadzenButton Icon="replay" Text="@L["Rerun"]" Size="ButtonSize.ExtraSmall"
-                                                Click="@OnRun" IsBusy="@_running" aria-label="@L["Rerun"]" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
-                                        }
-                                    </span>
                                 </Template>
                             </RadzenDataGridColumn>
                         </Columns>
@@ -238,8 +388,8 @@ else
                     <div class="pipeline-edit-toolbar">
                         <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0 rz-mr-2">@L["YamlDefinition"]</RadzenText>
                         <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Save"]" Icon="save" IsBusy="@_saving" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                        <RadzenButton Text="@L["ValidateYaml"]" Icon="check_circle" Click="@OnValidateYaml" IsBusy="@_validating" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                        <RadzenButton Text="@L["FormatYaml"]" Icon="format_align_left" Click="@OnFormatYaml" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["ValidateYaml"]" Icon="check_circle" Click="@OnValidateYaml" IsBusy="@_validating" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["FormatYaml"]" Icon="format_align_left" Click="@OnFormatYaml" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                         <RadzenButton Text="@(_showDiff ? L["HideDiff"] : L["ShowDiff"])" Icon="difference"
                             ButtonStyle="ButtonStyle.Light" Variant="Variant.Text"
                             Click="@(() => _showDiff = !_showDiff)" Size="ButtonSize.Small" />

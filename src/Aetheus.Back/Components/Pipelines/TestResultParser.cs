@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Xml.Linq;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Back.Components.Pipelines;

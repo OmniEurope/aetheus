@@ -1,51 +1,63 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net;
 
 namespace Aetheus.Cli;
 
 // Composition over inheritance - F48: do not inherit from HttpClient.
-public sealed class AetheusApiClient : IDisposable
+internal sealed class AetheusApiClient : IDisposable
 {
     private readonly HttpClient _http;
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    public AetheusApiClient(string server, string? token)
+    internal AetheusApiClient(Uri server, string? token)
     {
-        ArgumentException.ThrowIfNullOrEmpty(server);
-
-        // Hardening (#44): refuse to send a bearer token over plaintext HTTP. CLI users that
-        // explicitly target a non-loopback HTTP endpoint with a token would leak it on the wire.
-        // Loopback addresses (localhost / 127.x / ::1) are exempt for development.
-        var uri = new Uri(server);
         var insecureOverride = Environment.GetEnvironmentVariable("AETHEUS_INSECURE") == "1";
-        if (!string.IsNullOrEmpty(token) && uri.Scheme == Uri.UriSchemeHttp && !IsLoopback(uri))
-            throw new InvalidOperationException(
-                "Refusing to send bearer token over plaintext HTTP. Use https:// or set AETHEUS_INSECURE=1.");
-        if (!string.IsNullOrEmpty(token) && uri.Scheme == Uri.UriSchemeHttp && !uri.IsLoopback && insecureOverride)
+        if (!string.IsNullOrEmpty(token) && server.Scheme == Uri.UriSchemeHttp && !server.IsLoopback)
         {
+            if (!insecureOverride || !IsPrivateIpLiteral(server.Host))
+            {
+                throw new ArgumentException(
+                    "Refusing to send a bearer token over plaintext HTTP. AETHEUS_INSECURE=1 "
+                    + "is restricted to private or link-local IP literals; use HTTPS otherwise.");
+            }
             Console.Error.WriteLine(
                 "WARNING: AETHEUS_INSECURE=1 is sending a bearer token over plaintext HTTP; "
                 + "traffic and credentials can be intercepted.");
         }
 
-        _http = new HttpClient { BaseAddress = uri };
+        _http = new HttpClient { BaseAddress = server, Timeout = RequestTimeout };
         if (!string.IsNullOrEmpty(token))
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 
-    private static bool IsLoopback(Uri uri)
+    private static bool IsPrivateIpLiteral(string host)
     {
-        if (Environment.GetEnvironmentVariable("AETHEUS_INSECURE") == "1") return true;
-        return uri.IsLoopback;
+        if (!IPAddress.TryParse(host, out var address))
+            return false;
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            var bytes = address.GetAddressBytes();
+            return bytes[0] == 10
+                || bytes[0] == 127
+                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168)
+                || (bytes[0] == 169 && bytes[1] == 254);
+        }
+
+        return IPAddress.IsLoopback(address)
+            || address.IsIPv6LinkLocal
+            || (address.GetAddressBytes()[0] & 0xFE) == 0xFC;
     }
 
-    public Task<T?> GetFromJsonAsync<T>(string requestUri, CancellationToken ct = default) =>
+    internal Task<T?> GetFromJsonAsync<T>(string requestUri, CancellationToken ct) =>
         _http.GetFromJsonAsync<T>(requestUri, ct);
 
-    public Task<HttpResponseMessage> PostAsync(string requestUri, HttpContent? content, CancellationToken ct = default) =>
+    internal Task<HttpResponseMessage> PostAsync(string requestUri, HttpContent? content, CancellationToken ct) =>
         _http.PostAsync(requestUri, content, ct);
 
-    public Task<HttpResponseMessage> GetAsync(string requestUri, CancellationToken ct = default) =>
+    internal Task<HttpResponseMessage> GetAsync(string requestUri, CancellationToken ct) =>
         _http.GetAsync(requestUri, ct);
 
     public void Dispose() => _http.Dispose();

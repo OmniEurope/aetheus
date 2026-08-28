@@ -6,6 +6,7 @@ using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Radzen;
+using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests.Pages.Dashboard;
 
@@ -79,6 +80,72 @@ public class HomeDeepTests : BunitContext
         // BadgeStyle.Warning is unique to the Degraded badge in the app-summary row (Up=Success, Down=Danger,
         // Unknown=Light), so its presence/absence tracks the conditional exactly.
         Assert.Equal(expectBadge, cut.Markup.Contains("rz-badge-warning", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MonitoredAppsGrid_RendersHealthyAppsAndAvailableCurrentVisitors()
+    {
+        _handler.SetJsonResponse("api/monitoring/dashboard", MakeDashboard());
+        _handler.SetJsonResponse(HttpMethod.Get, "api/appmonitoring/summary",
+            new AppMonitoringSummaryDto
+            {
+                TotalCount = 2,
+                UpCount = 2,
+                Applications =
+                [
+                    new MonitoredAppStatusDto
+                    {
+                        Id = 1, ProjectId = 4, Name = "healthy-with-analytics",
+                        CurrentStatus = AppHealthStatus.Up, OnlineVisitorCount = 3
+                    },
+                    new MonitoredAppStatusDto
+                    {
+                        Id = 2, ProjectId = 4, Name = "healthy-without-analytics",
+                        CurrentStatus = AppHealthStatus.Up, OnlineVisitorCount = null
+                    }
+                ]
+            });
+
+        var cut = Render<Home>();
+        cut.WaitForAssertion(() => Assert.Contains("healthy-with-analytics", cut.Markup));
+
+        var grid = Assert.Single(cut.FindComponents<RadzenDataGrid<MonitoredAppStatusDto>>());
+        Assert.Equal(2, grid.Instance.Data!.Count());
+        Assert.Contains("healthy-without-analytics", cut.Markup);
+        Assert.Contains("CurrentVisitors", cut.Markup);
+        // Scoped to the monitored-apps grid: this asserts that grid's column order, and the dashboard
+        // renders other grids whose headers also carry "Project". Searching the whole page made the
+        // assertion depend on which grid happened to render its Project column first.
+        var headers = grid.FindAll("th").Select(header => header.TextContent).ToList();
+        Assert.True(headers.FindIndex(header => header.Contains("Status", StringComparison.Ordinal))
+            < headers.FindIndex(header => header.Contains("CurrentVisitors", StringComparison.Ordinal)));
+        Assert.True(headers.FindIndex(header => header.Contains("CurrentVisitors", StringComparison.Ordinal))
+            < headers.FindIndex(header => header.Contains("Project", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void MonitoredAppsGrid_OmitsVisitorColumnWhenAnalyticsIsUnavailable()
+    {
+        _handler.SetJsonResponse("api/monitoring/dashboard", MakeDashboard());
+        _handler.SetJsonResponse(HttpMethod.Get, "api/appmonitoring/summary",
+            new AppMonitoringSummaryDto
+            {
+                TotalCount = 1,
+                UpCount = 1,
+                Applications =
+                [
+                    new MonitoredAppStatusDto
+                    {
+                        Id = 1, ProjectId = 4, Name = "healthy-without-analytics",
+                        CurrentStatus = AppHealthStatus.Up
+                    }
+                ]
+            });
+
+        var cut = Render<Home>();
+        cut.WaitForAssertion(() => Assert.Contains("healthy-without-analytics", cut.Markup));
+
+        Assert.DoesNotContain("CurrentVisitors", cut.Markup);
     }
 
     [Fact]

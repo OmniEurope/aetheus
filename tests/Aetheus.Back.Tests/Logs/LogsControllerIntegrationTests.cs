@@ -15,6 +15,8 @@ namespace Aetheus.Back.Tests;
 
 public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
+    private const string AgentSessionId = "11111111111111111111111111111111";
+    private const long AgentSessionFencingToken = 1;
     private readonly string _agentToken = $"test-agent-token-{Guid.NewGuid():N}";
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
@@ -73,6 +75,8 @@ public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplication
         var response = await agentClient.PostAsJsonAsync("/api/logs", new AppendLogRequest
         {
             TaskId = taskId,
+            AgentSessionId = AgentSessionId,
+            AgentSessionFencingToken = AgentSessionFencingToken,
             Level = TaskLogLevel.Info,
             Message = "Build started"
         }, cancellationToken: TestContext.Current.CancellationToken);
@@ -89,6 +93,8 @@ public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplication
         await agentClient.PostAsJsonAsync("/api/logs", new AppendLogRequest
         {
             TaskId = taskId,
+            AgentSessionId = AgentSessionId,
+            AgentSessionFencingToken = AgentSessionFencingToken,
             Level = TaskLogLevel.Info,
             Message = "Step 1 complete"
         }, cancellationToken: TestContext.Current.CancellationToken);
@@ -109,9 +115,9 @@ public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplication
 
         var requests = new List<AppendLogRequest>
         {
-            new() { TaskId = taskId, Level = TaskLogLevel.Info, Message = "Line 1" },
-            new() { TaskId = taskId, Level = TaskLogLevel.Warning, Message = "Line 2" },
-            new() { TaskId = taskId, Level = TaskLogLevel.Error, Message = "Line 3" }
+            new() { TaskId = taskId, AgentSessionId = AgentSessionId, AgentSessionFencingToken = AgentSessionFencingToken, Level = TaskLogLevel.Info, Message = "Line 1" },
+            new() { TaskId = taskId, AgentSessionId = AgentSessionId, AgentSessionFencingToken = AgentSessionFencingToken, Level = TaskLogLevel.Warning, Message = "Line 2" },
+            new() { TaskId = taskId, AgentSessionId = AgentSessionId, AgentSessionFencingToken = AgentSessionFencingToken, Level = TaskLogLevel.Error, Message = "Line 3" }
         };
 
         var response = await agentClient.PostAsJsonAsync("/api/logs/batch", requests, cancellationToken: TestContext.Current.CancellationToken);
@@ -127,8 +133,8 @@ public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplication
 
         var requests = new List<AppendLogRequest>
         {
-            new() { TaskId = taskId, Level = TaskLogLevel.Info, Message = "Batch A" },
-            new() { TaskId = taskId, Level = TaskLogLevel.Debug, Message = "Batch B" }
+            new() { TaskId = taskId, AgentSessionId = AgentSessionId, AgentSessionFencingToken = AgentSessionFencingToken, Level = TaskLogLevel.Info, Message = "Batch A" },
+            new() { TaskId = taskId, AgentSessionId = AgentSessionId, AgentSessionFencingToken = AgentSessionFencingToken, Level = TaskLogLevel.Debug, Message = "Batch B" }
         };
         await agentClient.PostAsJsonAsync("/api/logs/batch", requests, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -164,7 +170,10 @@ public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplication
             IpAddress = "10.0.0.80",
             AgentVersion = "1.0.0",
             OsDescription = "Linux",
-            LastHeartbeat = DateTime.UtcNow
+            LastHeartbeat = DateTime.UtcNow,
+            AgentSessionId = AgentSessionId,
+            AgentSessionFencingToken = AgentSessionFencingToken,
+            AgentSessionLeaseExpiresAt = DateTime.UtcNow.AddMinutes(5)
         };
         db.Servers.Add(server);
         await db.SaveChangesAsync();
@@ -185,7 +194,9 @@ public class LogsControllerIntegrationTests : IClassFixture<CustomWebApplication
             Name = "log-test-task",
             Command = "echo test",
             Status = TaskExecutionStatus.Running,
-            TimeoutSeconds = 60
+            TimeoutSeconds = 60,
+            AssignedAgentSessionId = AgentSessionId,
+            AssignedAgentSessionFencingToken = AgentSessionFencingToken
         };
         db.Tasks.Add(task);
         await db.SaveChangesAsync();

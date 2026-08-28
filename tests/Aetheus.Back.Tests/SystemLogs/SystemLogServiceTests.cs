@@ -123,6 +123,23 @@ public class SystemLogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetLogEntriesAsync_FiltersByCorrelationId()
+    {
+        const string json = "{\"Timestamp\":\"2025-01-15T10:30:00.123Z\",\"Level\":\"Error\",\"Message\":\"Failure\",\"SourceContext\":\"App\",\"CorrelationId\":\"agent-update-42\"}\n";
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDir, "structured.json"),
+            json,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _sut.GetLogEntriesAsync(
+            null, null, "agent-update-42", null, null, 1, 50,
+            ct: TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(result.Items);
+        Assert.Equal("agent-update-42", entry.CorrelationId);
+    }
+
+    [Fact]
     public async Task GetLogEntriesAsync_FiltersByFileName()
     {
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.log"), "2025-01-15 10:30:00.123 [INF] From A\n", cancellationToken: TestContext.Current.CancellationToken);

@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: EUPL-1.2
+package fixtures;
+
+public final class QualityPositive {
+    private String unusedField;
+
+    private void unusedMethod() {
+    }
+
+    public void printValue(String value) {
+        System.out.println(value);
+    }
+}

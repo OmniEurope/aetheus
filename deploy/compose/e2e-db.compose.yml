@@ -10,7 +10,7 @@
 # Distinct compose project name (aetheus-e2e) + own volume keep it fully
 # isolated from the dev stack (aetheus-local).
 #
-# Usage (driven by ylaunch.ps1 -te / Ensure-E2eDb):
+# Usage (driven by launch-windows.ps1 -te / Ensure-E2eDb):
 #   docker compose -f deploy/compose/e2e-db.compose.yml up -d
 # =============================================================================
 

@@ -89,6 +89,91 @@ public class EnvironmentServiceTests
     }
 
     [Fact]
+    public async Task CreateEnvironmentAsync_WithSource_UsesOverridesAndDeepCopiesConfiguration()
+    {
+        var source = new Environment
+        {
+            Id = 77,
+            Name = "source",
+            Description = "source description",
+            ProjectId = 8,
+            Servers = [new EnvironmentServer { ServerId = 4 }],
+            Checks =
+            [
+                new EnvironmentCheck
+                {
+                    Id = 1,
+                    Name = "readiness",
+                    Type = EnvironmentCheckType.StatusCheck,
+                    Configuration = "{}",
+                    TimeoutSeconds = 30
+                }
+            ],
+            LinkedProjectServers = [new EnvironmentProjectServer { ProjectServerId = 12 }],
+            Libraries =
+            [
+                new VariableLibrary
+                {
+                    Id = 2,
+                    Name = "runtime",
+                    Entries = [new VariableLibraryEntry { Id = 3, Key = "REGION", Value = "eu" }]
+                }
+            ],
+            Vaults =
+            [
+                new Vault
+                {
+                    Id = 4,
+                    Name = "deploy",
+                    Secrets = [new VaultSecret { Id = 5, Key = "TOKEN", EncryptedValue = "cipher" }]
+                }
+            ],
+            Pipelines =
+            [
+                new Pipeline
+                {
+                    Id = 6,
+                    Name = "release",
+                    YamlDefinition = "steps: []",
+                    TriggerType = PipelineTriggerType.Manual,
+                    CreatedByUsername = "owner"
+                }
+            ]
+        };
+        Environment? added = null;
+        _repo.GetEnvironmentForDuplicationAsync(77, Arg.Any<CancellationToken>()).Returns(source);
+        _repo.When(repository => repository.AddEnvironmentAsync(
+                Arg.Any<Environment>(), Arg.Any<CancellationToken>()))
+            .Do(call => added = call.Arg<Environment>());
+        _repo.GetEnvironmentWithServersAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ => added!);
+
+        var result = await _sut.CreateEnvironmentAsync(new CreateEnvironmentRequest
+        {
+            Name = "target",
+            Description = "edited before creation",
+            ProjectId = 3,
+            SourceEnvironmentId = 77,
+            ServerIds = [9]
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("target", result.Name);
+        Assert.NotNull(added);
+        Assert.Equal(3, added.ProjectId);
+        Assert.Equal("edited before creation", added.Description);
+        Assert.Equal(9, Assert.Single(added.Servers).ServerId);
+        Assert.NotSame(source.Checks[0], Assert.Single(added.Checks));
+        Assert.Equal("readiness", added.Checks[0].Name);
+        Assert.Equal(12, Assert.Single(added.LinkedProjectServers).ProjectServerId);
+        Assert.NotSame(source.Libraries[0], Assert.Single(added.Libraries));
+        Assert.Equal("eu", Assert.Single(added.Libraries[0].Entries).Value);
+        Assert.NotSame(source.Vaults[0], Assert.Single(added.Vaults));
+        Assert.Equal("cipher", Assert.Single(added.Vaults[0].Secrets).EncryptedValue);
+        Assert.NotSame(source.Pipelines[0], Assert.Single(added.Pipelines));
+        Assert.Equal("steps: []", added.Pipelines[0].YamlDefinition);
+    }
+
+    [Fact]
     public async Task UpdateEnvironmentAsync_NotFound_ReturnsNull()
     {
         _repo.FindEnvironmentAsync(99, Arg.Any<CancellationToken>())

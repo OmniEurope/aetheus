@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Logs;
 
 public partial class SystemLogs : ComponentBase, IAsyncDisposable
 {
+    [Parameter, SupplyParameterFromQuery(Name = "search")]
+    public string? Search { get; set; }
+
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private NotificationService Notification { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private ClipboardService Clipboard { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
 
@@ -35,6 +32,8 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
     private bool _isLoadingMore;
     private bool _isDownloading;
     private bool _isExporting;
+    private bool _initialized;
+    private string? _appliedSearch;
 
     private bool _autoRefresh;
     private readonly CancellationTokenSource _lifetimeCts = new();
@@ -55,6 +54,8 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        _searchText = Search;
+        _appliedSearch = Search;
         _levelOptions = LevelsArray.Select(value => new LogLevelOption(L[value], value)).ToList();
         try
         {
@@ -62,11 +63,25 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
             await LoadEntriesAsync();
         }
         catch (HttpRequestException) { } // 401 on expired JWT - redirect handled by AuthProvider
+        finally
+        {
+            _initialized = true;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_initialized || string.Equals(Search, _appliedSearch, StringComparison.Ordinal))
+            return;
+
+        _appliedSearch = Search;
+        _searchText = Search;
+        await LoadEntriesAsync();
     }
 
     private async Task LoadLogFilesAsync()
     {
-        _logFiles = await Api.GetSystemLogFilesAsync();
+        _logFiles = await Api.Security.GetSystemLogFilesAsync();
         _fileNames = _logFiles?.Select(f => f.FileName).ToList() ?? [];
     }
 
@@ -83,7 +98,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
         await _reloadLock.WaitAsync();
         try
         {
-            var entries = await Api.GetSystemLogEntriesAsync(
+            var entries = await Api.Security.GetSystemLogEntriesAsync(
                 selectedFile, selectedLevel, searchText, dateFrom, dateTo, 1);
             if (_disposed || generation != _loadGeneration) return;
 
@@ -122,7 +137,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
         try
         {
             if (generation != _loadGeneration) return;
-            var next = await Api.GetSystemLogEntriesAsync(
+            var next = await Api.Security.GetSystemLogEntriesAsync(
                 selectedFile, selectedLevel, searchText, dateFrom, dateTo, nextPage);
             if (!_disposed && generation == _loadGeneration && next is not null)
             {
@@ -134,7 +149,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
         catch (HttpRequestException)
         {
             if (!_disposed && generation == _loadGeneration)
-                Notification.Notify(NotificationSeverity.Error, L["Error"], L["LoadFailed"]);
+                Toast.Error("Error", "LoadFailed");
         }
         finally
         {
@@ -180,7 +195,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
             var fetched = 0;
             for (var p = 1; p <= pagesToLoad; p++)
             {
-                var pageResult = await Api.GetSystemLogEntriesAsync(
+                var pageResult = await Api.Security.GetSystemLogEntriesAsync(
                     selectedFile, selectedLevel, searchText, dateFrom, dateTo, p);
                 if (pageResult is null) break;
                 lastPage = pageResult;
@@ -252,11 +267,11 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
         StateHasChanged();
         try
         {
-            var bytes = await Api.DownloadSystemLogFileAsync(_selectedFile);
+            var bytes = await Api.Security.DownloadSystemLogFileAsync(_selectedFile);
             if (bytes is not null)
                 await JS.InvokeVoidAsync("downloadFileFromBytes", bytes, _selectedFile, "text/plain");
             else
-                Notification.Notify(NotificationSeverity.Error, L["Error"], L["DownloadFailed"]);
+                Toast.Error("Error", "DownloadFailed");
         }
         finally
         {
@@ -271,7 +286,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
         StateHasChanged();
         try
         {
-            var bytes = await Api.ExportSystemLogsCsvAsync(_selectedFile, _selectedLevel, _searchText, _dateFrom, _dateTo);
+            var bytes = await Api.Security.ExportSystemLogsCsvAsync(_selectedFile, _selectedLevel, _searchText, _dateFrom, _dateTo);
             if (bytes is not null)
             {
                 var fileName = $"system-logs-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
@@ -279,7 +294,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
             }
             else
             {
-                Notification.Notify(NotificationSeverity.Error, L["Error"], L["ExportFailed"]);
+                Toast.Error("Error", "ExportFailed");
             }
         }
         finally
@@ -297,7 +312,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
             new ConfirmOptions { OkButtonText = L["Confirm"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
 
-        var deleted = await Api.PurgeSystemLogsAsync();
+        var deleted = await Api.Security.PurgeSystemLogsAsync();
         if (deleted.HasValue)
         {
             Notification.Notify(NotificationSeverity.Success, L["PurgeLogs"],
@@ -323,7 +338,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
                 ["Message"] = entry.Message,
                 ["Exception"] = entry.Exception ?? string.Empty
             },
-            new DialogOptions { Width = "700px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "700px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
     }
 
     private static BadgeStyle GetBadgeStyle(string level) => level switch
@@ -332,7 +347,7 @@ public partial class SystemLogs : ComponentBase, IAsyncDisposable
         "Warning" => BadgeStyle.Warning,
         "Information" => BadgeStyle.Info,
         "Debug" => BadgeStyle.Light,
-        _ => BadgeStyle.Secondary
+        _ => BadgeStyle.Light
     };
 
     public async ValueTask DisposeAsync()

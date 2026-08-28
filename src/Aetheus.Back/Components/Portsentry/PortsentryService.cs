@@ -1,23 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Portsentry;
 
 public class PortsentryService(IPortsentryRepository repo, IAuditService audit, ITaskService taskService) : IPortsentryService
 {
-    // Persist a queued task AND push the "TaskQueued" SignalR event so the top-bar tracker shows it
-    // live (and can later flip it Running/Completed). Mirrors ServerServiceManager (see ITaskService).
-    private async Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
-    {
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await taskService.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
-    }
+    private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+        => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
 
     public async Task<PortsentryDataDto> GetStateAsync(int serverId, CancellationToken ct = default)
     {

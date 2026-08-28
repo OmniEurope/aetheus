@@ -3,6 +3,8 @@ using System.Net;
 using Aetheus.Front.Pages.Git;
 using Aetheus.Shared.DTOs;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages.Git;
 
@@ -12,57 +14,50 @@ public class BranchDetailTests : BunitContext
 
     public BranchDetailTests() => _handler = BunitTestHelper.RegisterServices(this);
 
-    private static GitBranchDto Sample(int id = 3, string? repoUrl = "https://github.com/acme/demo.git") => new()
+    private static GitBranchDto Sample(int id = 3) => new()
     {
         Id = id,
         ProjectId = 1,
         ProjectName = "Demo",
         Name = "feature/awesome",
-        RepositoryUrl = repoUrl
+        RepositoryUrl = "https://localhost:5302/git/1/demo.git"
     };
 
+    private void SetRepositories(params GitLightRepoDto[] repositories) =>
+        _handler.SetJsonResponse("api/git/repos", new PaginatedResult<GitLightRepoDto>
+        {
+            Items = repositories.ToList(),
+            TotalCount = repositories.Length,
+            Page = 1,
+            PageSize = 100
+        });
+
     [Fact]
-    public void Renders_LoadedBranch_ShowsName()
+    public void ExistingBranch_RedirectsToCanonicalRepositoryBranchesTab()
     {
         _handler.SetJsonResponse("api/gitgraph/branches/3", Sample());
+        SetRepositories(new GitLightRepoDto
+        {
+            Id = 7,
+            ProjectId = 1,
+            Name = "Demo",
+            CloneUrl = "https://localhost:5302/git/1/demo.git"
+        });
 
-        var cut = Render<BranchDetail>(p => p.Add(c => c.BranchId, 3));
+        Render<BranchDetail>(parameters => parameters.Add(component => component.BranchId, 3));
 
-        cut.WaitForState(() => cut.Markup.Contains("feature/awesome"));
-        Assert.Contains("feature/awesome", cut.Markup);
+        Assert.EndsWith("/git-repositories/7?tab=branches&branch=feature%2Fawesome",
+            Services.GetRequiredService<NavigationManager>().Uri);
     }
 
     [Fact]
-    public void Renders_LocalRepository_StillRendersBranch()
-    {
-        _handler.SetJsonResponse("api/gitgraph/branches/4", Sample(4, repoUrl: "/srv/git/demo"));
-
-        var cut = Render<BranchDetail>(p => p.Add(c => c.BranchId, 4));
-
-        cut.WaitForState(() => cut.Markup.Contains("feature/awesome"));
-        Assert.Contains("feature/awesome", cut.Markup);
-    }
-
-    [Fact]
-    public void Renders_NotFound_DoesNotShowBranchName()
+    public void MissingBranch_DoesNotRedirect()
     {
         _handler.SetResponse("api/gitgraph/branches/9", HttpStatusCode.NotFound);
 
-        var cut = Render<BranchDetail>(p => p.Add(c => c.BranchId, 9));
+        var cut = Render<BranchDetail>(parameters => parameters.Add(component => component.BranchId, 9));
 
-        Assert.DoesNotContain("feature/awesome", cut.Markup);
-    }
-
-    [Fact]
-    public void BranchIdChange_ReloadsSameComponentInstance()
-    {
-        _handler.SetJsonResponse("api/gitgraph/branches/1", Sample(1) with { Name = "first" });
-        _handler.SetJsonResponse("api/gitgraph/branches/2", Sample(2) with { Name = "second" });
-        var cut = Render<BranchDetail>(p => p.Add(c => c.BranchId, 1));
-
-        cut.Render(p => p.Add(c => c.BranchId, 2));
-
-        cut.WaitForAssertion(() => Assert.Contains("second", cut.Markup));
-        Assert.DoesNotContain(">first<", cut.Markup);
+        cut.WaitForAssertion(() => Assert.Contains("NotFound", cut.Markup));
+        Assert.Equal("http://localhost/", Services.GetRequiredService<NavigationManager>().Uri);
     }
 }

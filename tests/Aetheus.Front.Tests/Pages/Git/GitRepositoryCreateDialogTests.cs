@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Reflection;
 using Aetheus.Front.Pages;
 using Aetheus.Shared.DTOs;
 using Bunit;
@@ -48,22 +47,28 @@ public class GitRepositoryCreateDialogTests : BunitContext
     }
 
     [Fact]
-    public async Task Submit_PostsCreateRequestToReposEndpoint()
+    public void InputEvents_AreSentByTheCreateForm()
     {
         _handler.SetJsonResponse("api/git/repos", new GitLightRepoDto { Id = 9, Name = "new-repo", ProjectId = 42 });
 
         var cut = Render<GitRepositoryCreateDialog>(p => p.Add(x => x.ProjectId, 42));
 
-        var request = typeof(GitRepositoryCreateDialog)
-            .GetField("_request", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(cut.Instance)!;
-        request.GetType().GetProperty("Name")!.SetValue(request, "new-repo");
+        cut.Find("input[name='Name']").Input("new-repo");
+        cut.Find("textarea[name='Description']").Input("Local Portfolio test repository.");
+        cut.Find("input[name='DefaultBranch']").Input("develop");
+        cut.Find("form").Submit();
 
-        var submit = typeof(GitRepositoryCreateDialog).GetMethod("Submit", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(() => (Task)submit.Invoke(cut.Instance, [])!);
+        cut.WaitForAssertion(() => Assert.Contains(
+            _handler.Requests,
+            request => request.Method == "POST" && request.Url.EndsWith("api/git/repos", StringComparison.Ordinal)));
+        var body = _handler.RequestDetails.Last(request =>
+            request.Method == "POST" && request.Url.EndsWith("api/git/repos", StringComparison.Ordinal)).Body;
+        var request = System.Text.Json.JsonSerializer.Deserialize<CreateGitLightRepoRequest>(
+            body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
 
-        // Submit POSTs the create request to api/git/repos. (The dialog-close-with-true on a non-null
-        // created repo is a DialogService.Close a standalone bUnit render cannot observe.)
-        Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/git/repos"));
+        Assert.Equal(42, request!.ProjectId);
+        Assert.Equal("new-repo", request.Name);
+        Assert.Equal("Local Portfolio test repository.", request.Description);
+        Assert.Equal("develop", request.DefaultBranch);
     }
 }

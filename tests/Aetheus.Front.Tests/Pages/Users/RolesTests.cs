@@ -17,7 +17,7 @@ public class RolesTests : BunitContext
     }
 
     [Fact]
-    public async Task GridReload_LoadsAndRendersPaginatedRoles()
+    public void InitialRender_LoadsAndRendersPaginatedRoles()
     {
         _handler.SetJsonResponse("api/roles", new PaginatedResult<RoleDto>
         {
@@ -30,8 +30,6 @@ public class RolesTests : BunitContext
         });
 
         var cut = Render<Roles>();
-        var grid = cut.FindComponent<RadzenDataGrid<RoleDto>>();
-        await cut.InvokeAsync(grid.Instance.Reload);
 
         cut.WaitForAssertion(() => Assert.Multiple(() =>
         {

@@ -1,0 +1,308 @@
+# Toto adapter carrying the full aetheus-candidate contract, not the reduced toto-candidate one:
+# ordered baseline identity, authorized bootstrap, a sealed assurance contract graded from real
+# evidence, and an immutable undeployed release.
+name: toto-candidate-full
+# Keep the production-seeded V1 pin until a deployed backend publishes newer immutable template versions.
+extends: application-candidate@1
+trigger: manual
+supersede_running: true
+variable_libraries:
+  - toto-observability
+parameters:
+  - name: allowBootstrap
+    display_name: Explicitly authorize first-release QA bootstrap
+    type: boolean
+    default: "false"
+  - name: telemetry
+    display_name: Inject Aetheus.Telemetry
+    type: boolean
+    default: "false"
+  - name: telemetryVersion
+    display_name: Exact Aetheus.Telemetry version
+    type: string
+    default: "0.1.0"
+  - name: telemetrySha256
+    display_name: Exact Aetheus.Telemetry package digest
+    type: string
+    default: ""
+  - name: webAnalytics
+    display_name: Inject Aetheus.WebAnalytics
+    type: boolean
+    default: "false"
+  - name: webAnalyticsVersion
+    display_name: Exact Aetheus.WebAnalytics version
+    type: string
+    default: "0.1.0"
+  - name: webAnalyticsSha256
+    display_name: Exact Aetheus.WebAnalytics package digest
+    type: string
+    default: ""
+variables:
+  APPLICATION_CI_PIPELINE: toto-ci
+  APPLICATION_QUALITY_PIPELINE: toto-quality
+  APPLICATION_SECURITY_PIPELINE: toto-security
+  APPLICATION_QA_PIPELINE: toto-qa
+  APPLICATION_ARTIFACT_NAME: Package-artifacts
+  # Findings and failing tests must degrade the sealed grade instead of killing the qualification;
+  # a technical fault still stops it, because missing evidence fails --require-evidence below.
+  TOTO_TOLERATE_TEST_FAILURE: "true"
+  # The candidate seals three analyses, so the dynamic security producer has to actually run.
+  TOTO_DAST_ENABLED: "true"
+  TOTO_ENABLE_TELEMETRY: "${{ parameters.telemetry }}"
+  TOTO_TELEMETRY_VERSION: "${{ parameters.telemetryVersion }}"
+  TOTO_TELEMETRY_SHA256: "${{ parameters.telemetrySha256 }}"
+  TOTO_ENABLE_WEB_ANALYTICS: "${{ parameters.webAnalytics }}"
+  TOTO_WEB_ANALYTICS_VERSION: "${{ parameters.webAnalyticsVersion }}"
+  TOTO_WEB_ANALYTICS_SHA256: "${{ parameters.webAnalyticsSha256 }}"
+
+stages:
+  - name: Baseline
+    group: Source
+    execution_role: build
+    os: linux
+    steps:
+      - name: Restore factually deployed baseline contract
+        type: restore-artifacts
+        release: current-deployed
+        artifact: Package-artifacts
+        target_directory: .delivery-baseline
+        allow_missing: true
+        timeout_seconds: 1200
+      - name: Export immutable baseline identity
+        # The V1 template runs steps in parallel. Remove its unordered export; BaselineIdentity
+        # below performs the real operation only after artifact restoration reaches a terminal
+        # success, so the identity can never be read from a half-restored directory.
+        remove: true
+
+  - name: BaselineIdentity
+    group: Source
+    execution_role: build
+    os: linux
+    depends_on: [Baseline]
+    # Toto runners carry no host-level node; every node step in this project takes it from the
+    # pinned toolchain container, exactly as toto-ci does.
+    isolation:
+      mode: container
+      toolchain: node
+      network: none
+    steps:
+      - name: Export ordered immutable baseline identity
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          CONTRACT=".delivery-baseline/.pipeline-artifacts/delivery-contract.json"
+          if test -s "$CONTRACT"; then
+            node - "$CONTRACT" <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const path = process.argv[2];
+          const bytes = fs.readFileSync(path);
+          const contract = JSON.parse(bytes);
+          console.log("##aetheus[setvariable name=DELIVERY_BASELINE_BOOTSTRAP]false");
+          console.log(`##aetheus[setvariable name=DELIVERY_BASELINE_CANDIDATE_VERSION]${contract.candidateVersion}`);
+          console.log(`##aetheus[setvariable name=DELIVERY_BASELINE_SOURCE_SHA]${contract.sourceSha}`);
+          console.log(`##aetheus[setvariable name=DELIVERY_BASELINE_CONTRACT_SHA256]${crypto.createHash("sha256").update(bytes).digest("hex")}`);
+          NODE
+          else
+            echo "##aetheus[setvariable name=DELIVERY_BASELINE_BOOTSTRAP]true"
+          fi
+        timeout_seconds: 600
+
+  - name: BootstrapAuthorization
+    group: Source
+    execution_role: build
+    os: linux
+    depends_on: [BaselineIdentity]
+    steps:
+      - name: Refuse unauthorized bootstrap before CI
+        shell: |
+          set -eu
+          if [ "${DELIVERY_BASELINE_BOOTSTRAP:-true}" = true ] \
+            && [ "${{ parameters.allowBootstrap }}" != true ]; then
+            echo "No rollback-capable deployed baseline exists and allowBootstrap is false; refusing bootstrap before CI." >&2
+            exit 1
+          fi
+          echo "Baseline authorization accepted before CI."
+        timeout_seconds: 60
+
+  - name: CI
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [BootstrapAuthorization]
+    steps:
+      - name: Build, test and package exact source
+        type: trigger
+        pipeline: toto-ci
+        # Source is inherited, which already hands each producer this run's exact commit; the
+        # assurance contract refuses any summary belonging to another revision, so the binding is
+        # verified rather than assumed. An explicit source_commit would require inherit_source:
+        # false and a hardcoded branch, which buys nothing here.
+        variables:
+          DELIVERY_BASELINE_BOOTSTRAP: "$(DELIVERY_BASELINE_BOOTSTRAP)"
+          DELIVERY_BASELINE_CANDIDATE_VERSION: "$(DELIVERY_BASELINE_CANDIDATE_VERSION)"
+          DELIVERY_BASELINE_SOURCE_SHA: "$(DELIVERY_BASELINE_SOURCE_SHA)"
+          DELIVERY_BASELINE_CONTRACT_SHA256: "$(DELIVERY_BASELINE_CONTRACT_SHA256)"
+          TOTO_TOLERATE_TEST_FAILURE: "$(TOTO_TOLERATE_TEST_FAILURE)"
+          TOTO_ENABLE_TELEMETRY: "$(TOTO_ENABLE_TELEMETRY)"
+          TOTO_TELEMETRY_VERSION: "$(TOTO_TELEMETRY_VERSION)"
+          TOTO_TELEMETRY_SHA256: "$(TOTO_TELEMETRY_SHA256)"
+          TOTO_ENABLE_WEB_ANALYTICS: "$(TOTO_ENABLE_WEB_ANALYTICS)"
+          TOTO_WEB_ANALYTICS_VERSION: "$(TOTO_WEB_ANALYTICS_VERSION)"
+          TOTO_WEB_ANALYTICS_SHA256: "$(TOTO_WEB_ANALYTICS_SHA256)"
+        timeout_seconds: 7200
+
+  - name: Quality
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [CI]
+    steps:
+      - name: Produce quality evidence and evaluate its gate
+        type: trigger
+        pipeline: toto-quality
+        # Source is inherited, which already hands each producer this run's exact commit; the
+        # assurance contract refuses any summary belonging to another revision, so the binding is
+        # verified rather than assumed. An explicit source_commit would require inherit_source:
+        # false and a hardcoded branch, which buys nothing here.
+        # A findings-driven grade is evidence, not a fault: it is sealed and degrades the
+        # candidate. The gate reaching no verdict at all is what AssuranceSeal refuses.
+        continue_on_error: true
+        timeout_seconds: 7200
+
+  - name: Security
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [Quality]
+    steps:
+      - name: Produce security evidence and evaluate its gate
+        type: trigger
+        pipeline: toto-security
+        # Source is inherited, which already hands each producer this run's exact commit; the
+        # assurance contract refuses any summary belonging to another revision, so the binding is
+        # verified rather than assumed. An explicit source_commit would require inherit_source:
+        # false and a hardcoded branch, which buys nothing here.
+        continue_on_error: true
+        timeout_seconds: 7200
+
+  - name: QA
+    group: QA
+    execution_role: build
+    os: linux
+    depends_on: [Security]
+    steps:
+      - name: Validate V, dynamic security, rollback V-1 and teardown
+        type: trigger
+        pipeline: toto-qa
+        # Source is inherited, which already hands each producer this run's exact commit; the
+        # assurance contract refuses any summary belonging to another revision, so the binding is
+        # verified rather than assumed. An explicit source_commit would require inherit_source:
+        # false and a hardcoded branch, which buys nothing here.
+        continue_on_error: true
+        variables:
+          TOTO_TOLERATE_TEST_FAILURE: "$(TOTO_TOLERATE_TEST_FAILURE)"
+          TOTO_DAST_ENABLED: "$(TOTO_DAST_ENABLED)"
+        timeout_seconds: 18000
+
+  - name: AssuranceRestore
+    group: Release
+    execution_role: build
+    os: linux
+    depends_on: [QA]
+    steps:
+      - name: Restore the exact packaged payload and its provenance
+        type: restore-artifacts
+        artifact: Package-artifacts
+        artifact_source_pipeline: toto-ci
+        target_directory: .assurance-input/ci
+        timeout_seconds: 300
+      - name: Restore quality grade summary
+        type: restore-artifacts
+        artifact: analysis-quality-summary-json
+        artifact_source_pipeline: toto-quality
+        target_directory: .assurance-input/quality
+        timeout_seconds: 300
+      - name: Restore security grade summary
+        type: restore-artifacts
+        artifact: analysis-security-summary-json
+        artifact_source_pipeline: toto-security
+        target_directory: .assurance-input/security
+        timeout_seconds: 300
+      - name: Restore dynamic security grade summary
+        type: restore-artifacts
+        artifact: analysis-security-summary-json
+        artifact_source_pipeline: toto-qa
+        target_directory: .assurance-input/qa
+        timeout_seconds: 300
+
+  - name: AssuranceSeal
+    group: Release
+    execution_role: build
+    os: linux
+    depends_on: [AssuranceRestore]
+    isolation:
+      mode: container
+      toolchain: node
+      network: none
+    artifacts:
+      - ".pipeline-artifacts/source-commit"
+      - ".pipeline-artifacts/assurance-contract.json"
+      - ".pipeline-artifacts/assurance"
+    steps:
+      - name: Seal advisory outcomes and grades into the candidate
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          # The toolchain container carries no git, so identity is taken from the commit CI
+          # actually packaged and checked against this run's commit. That is the binding that
+          # matters here: it proves the sealed grades describe the payload being published,
+          # not merely that a workspace happens to sit on the right revision.
+          COMMIT="$(tr -d '\r\n' < .assurance-input/ci/.pipeline-artifacts/source-commit)"
+          test -n "$COMMIT" || { echo "The CI payload carries no source commit." >&2; exit 1; }
+          test "$COMMIT" = "${BUILD_SOURCEVERSION:-}" || {
+            echo "The packaged CI payload does not match the candidate commit." >&2
+            exit 1
+          }
+          mkdir -p .pipeline-artifacts
+          printf '%s\n' "$COMMIT" > .pipeline-artifacts/source-commit
+          # Toto ships neither Roslyn analyzers nor an agent, so those two gates cannot exist for
+          # it. They are declared inapplicable and recorded as NotRun; claiming them Passed would
+          # be a lie, and leaving them Unavailable would fail --require-evidence below.
+          AETHEUS_ASSURANCE_INAPPLICABLE_TESTS="analyzers,agentCompatibility" \
+          AETHEUS_ASSURANCE_PERFORMANCE_ENABLED="${{ parameters.performance }}" \
+          AETHEUS_ASSURANCE_ALLOW_BOOTSTRAP="${{ parameters.allowBootstrap }}" \
+            node deploy/scripts/generate-candidate-assurance-contract.mjs \
+              .pipeline-artifacts/assurance-contract.json \
+              .pipeline-artifacts/assurance \
+              "$COMMIT" \
+              .assurance-input/quality \
+              .assurance-input/security \
+              .assurance-input/qa \
+              .assurance-input/ci/.pipeline-artifacts/artifact-provenance.json
+          # The candidate qualifies, it does not deploy. --require-evidence keeps the honest half
+          # of the contract: every analysis and every required test must have produced real
+          # evidence, so a technical fault still fails here. A test that ran and failed is graded
+          # F and sealed instead of killing the qualification; the strict "everything Passed"
+          # boundary belongs to whatever pipeline actually deploys.
+          node deploy/scripts/verify-candidate-assurance-contract.mjs \
+            .pipeline-artifacts/assurance-contract.json \
+            .pipeline-artifacts/source-commit \
+            F \
+            --require-evidence
+        timeout_seconds: 300
+
+  - name: Candidate
+    group: Release
+    execution_role: build
+    os: linux
+    depends_on: [AssuranceSeal]
+    steps:
+      - name: Publish immutable undeployed candidate
+        type: release
+        version: "$(CANDIDATE_VERSION)"
+        changelog: true
+        deployed: false
+        artifact: Package-artifacts
+        artifact_source_pipeline: toto-ci
+        timeout_seconds: 300

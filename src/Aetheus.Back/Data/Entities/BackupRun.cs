@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// PLAN-006 4.3: one execution of a <see cref="BackupPolicy"/>. The no-fake recoverability contract lives
+/// ADR-024 4.3: one execution of a <see cref="BackupPolicy"/>. The no-fake recoverability contract lives
 /// in <see cref="RestoreCheckStatus"/>: a run is <c>Unverified</c> until a restore-check actually succeeds
 /// on a throwaway target; a failed check is <c>Failed</c> (red, visible), never silently "ok".
 /// </summary>

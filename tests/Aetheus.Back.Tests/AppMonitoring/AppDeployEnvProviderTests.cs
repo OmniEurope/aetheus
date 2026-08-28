@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Microsoft.Extensions.Caching.Memory;
 using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.AppMonitoring.Ingest;
+using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
+using Aetheus.Back.Components.Vaults;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
@@ -17,6 +20,9 @@ public class AppDeployEnvProviderTests : IDisposable
 {
     private readonly AppDbContext _db;
     private readonly ISecretMaskingService _masking = Substitute.For<ISecretMaskingService>();
+    private readonly IIngestService _ingest = Substitute.For<IIngestService>();
+    private readonly IAuditService _audit = Substitute.For<IAuditService>();
+    private readonly IVaultService _vaults = Substitute.For<IVaultService>();
     private readonly IngestKeyHasher _hasher =
         new(Options.Create(new JwtOptions { SigningKey = "unit-test-signing-key-least-32-bytes!!" }));
 
@@ -37,7 +43,15 @@ public class AppDeployEnvProviderTests : IDisposable
         {
             ["AppMonitoring:IngestBaseUrl"] = baseUrl
         }).Build();
-        return new AppDeployEnvProvider(new AppMonitoringRepository(_db), _hasher, _masking, config,
+        return new AppDeployEnvProvider(
+            new AppMonitoringRepository(_db),
+            _hasher,
+            _masking,
+            _ingest,
+            _audit,
+            _vaults,
+            config,
+            new MemoryCache(new MemoryCacheOptions()),
             new FakeTimeProvider(new DateTimeOffset(2026, 1, 10, 12, 0, 0, TimeSpan.Zero)));
     }
 
@@ -46,15 +60,54 @@ public class AppDeployEnvProviderTests : IDisposable
     {
         var env = await Build("https://obs.example.com").GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal("https://obs.example.com/api/ingest/otlp/v1", env["OTEL_EXPORTER_OTLP_ENDPOINT"]);
-        Assert.Equal("http/json", env["OTEL_EXPORTER_OTLP_PROTOCOL"]);
+        Assert.Equal("https://obs.example.com/api/ingest/otlp/v1/metrics", env["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"]);
+        Assert.Equal("https://obs.example.com/api/ingest/otlp/v1/logs", env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"]);
+        Assert.Equal("https://obs.example.com/api/ingest/otlp/v1/traces", env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]);
+        Assert.Equal("http/protobuf", env["OTEL_EXPORTER_OTLP_PROTOCOL"]);
         Assert.StartsWith("x-aetheus-ingest-key=", env["OTEL_EXPORTER_OTLP_HEADERS"]);
+        Assert.Equal("https://obs.example.com/api/ingest/visitors", env["AETHEUS_VISITOR_ENDPOINT"]);
 
         var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(a => a.Id == 1, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(app.IngestKeyHash); // a fresh key was issued and stored (hashed)
+        Assert.Equal(new DateTime(2026, 4, 10, 12, 0, 0, DateTimeKind.Utc), app.IngestKeyExpiresAt);
 
         // The plaintext key is registered for masking in the run's logs.
         _masking.Received(1).RegisterRuntimeSecret(7, Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task SameRun_AcrossStages_ReusesOneKey()
+    {
+        // A production deployment calls this once per stage carrying execution_role: deploy - about ten
+        // times. Rotating on each call left the container holding a key that rotation had already pushed
+        // past "previous", so every OTLP export came back 401 and no application ever recorded a point.
+        var provider = Build("https://obs.example.com");
+
+        var first = await provider.GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
+        var second = await provider.GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
+        var third = await provider.GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(first["AETHEUS_INGEST_KEY"], second["AETHEUS_INGEST_KEY"]);
+        Assert.Equal(first["AETHEUS_INGEST_KEY"], third["AETHEUS_INGEST_KEY"]);
+        Assert.Equal(first["OTEL_EXPORTER_OTLP_HEADERS"], third["OTEL_EXPORTER_OTLP_HEADERS"]);
+
+        // One rotation for the whole run, so the key handed to the container stays the current one.
+        var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(a => a.Id == 1, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(1, app.IngestKeyVersion);
+    }
+
+    [Fact]
+    public async Task DifferentRuns_StillRotate()
+    {
+        // Reuse is scoped to one run: a later deployment must not keep issuing the key of an earlier one.
+        var provider = Build("https://obs.example.com");
+
+        var runSeven = await provider.GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
+        var runEight = await provider.GetDeployEnvAsync(1, null, pipelineRunId: 8, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(runSeven["AETHEUS_INGEST_KEY"], runEight["AETHEUS_INGEST_KEY"]);
+        var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(a => a.Id == 1, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(2, app.IngestKeyVersion);
     }
 
     [Fact]
@@ -72,5 +125,74 @@ public class AppDeployEnvProviderTests : IDisposable
     {
         var env = await Build("https://obs.example.com").GetDeployEnvAsync(projectId: 999, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
         Assert.Empty(env);
+    }
+
+    [Fact]
+    public async Task DisabledLegacyApp_IsNotSelectedOverActiveEnvironmentApp()
+    {
+        _db.MonitoredApps.AddRange(
+            new MonitoredApp
+            {
+                Id = 2,
+                ProjectId = 1,
+                EnvironmentId = 7,
+                Name = "Portfolio",
+                Enabled = false
+            },
+            new MonitoredApp
+            {
+                Id = 3,
+                ProjectId = 1,
+                EnvironmentId = 7,
+                Name = "Aetheus",
+                Enabled = true
+            });
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var env = await Build("https://obs.example.com").GetDeployEnvAsync(
+            1,
+            environmentId: 7,
+            pipelineRunId: 7,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("3", env["AETHEUS_TELEMETRY_APPLICATION_ID"]);
+        Assert.Equal("Aetheus", env["OTEL_SERVICE_NAME"]);
+    }
+
+    [Fact]
+    public async Task AnalyticsEnabled_InjectsPackageConfigurationAndMasksBothSecrets()
+    {
+        var app = await _db.MonitoredApps.SingleAsync(
+            item => item.Id == 1,
+            TestContext.Current.CancellationToken);
+        app.AnalyticsEnabled = true;
+        app.AnalyticsSiteId = "portfolio-prod";
+        app.AnalyticsVaultName = "aetheus-web-analytics-1";
+        app.AnalyticsPseudonymKeyVersion = 3;
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _vaults.ResolveVaultSecretsAsync(
+                Arg.Any<List<string>>(),
+                1,
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, string>
+            {
+                [AppWebAnalyticsConfigurationService.SecretKey] =
+                    "0123456789abcdef0123456789abcdef"
+            });
+
+        var env = await Build("https://obs.example.com").GetDeployEnvAsync(
+            1,
+            null,
+            pipelineRunId: 7,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("true", env["AETHEUS_WEB_ANALYTICS_ENABLED"]);
+        Assert.False(string.IsNullOrWhiteSpace(env["AETHEUS_INGEST_KEY"]));
+        Assert.Equal("portfolio-prod", env["AETHEUS_WEB_ANALYTICS_SITE_ID"]);
+        Assert.Equal(
+            "https://obs.example.com/api/ingest/web-analytics/v1/events",
+            env["AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT"]);
+        Assert.Equal("3", env["AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION"]);
+        Assert.Equal(2, _masking.ReceivedCalls().Count());
     }
 }

@@ -33,6 +33,17 @@ else
     Count="@_totalCount" PageSize="25" IsLoading="@_loading" LoadData="@OnLoadData"
     RowClick="@(env => Nav.NavigateTo($"/environments/{env.Id}"))"
     EmptyText="@L["NoEnvironmentsFound"]" FullHeight="@IsGlobal">
+    <EmptyTemplate>
+        <EmptyState Icon="layers" Title="@L["NoEnvironmentsFound"]" Description="@L["EmptyEnvironmentsHint"]">
+            <ActionContent>
+                @if (_canWrite)
+                {
+                    <RadzenButton Text="@L["NewEnvironment"]" Icon="add" Click="@NewEnvironment"
+                        ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                }
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
     <Columns>
         <RadzenDataGridColumn TItem="EnvironmentDto" Property="Name" Title="@L["Name"]" MinWidth="10rem">
             <Template Context="env">

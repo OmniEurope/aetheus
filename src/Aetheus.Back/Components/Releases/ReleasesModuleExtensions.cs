@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines.Events;
-using Aetheus.Back.Services;
 using Aetheus.Back.Services.DomainEvents;
 
 namespace Aetheus.Back.Components.Releases;

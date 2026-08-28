@@ -14,6 +14,7 @@ namespace Aetheus.Back.Tests.Servers;
 public class ServerServicePolicyTests
 {
     private readonly IServerRepository _repo = Substitute.For<IServerRepository>();
+    private readonly IServerHeartbeatRepository _heartbeatRepoMock = Substitute.For<IServerHeartbeatRepository>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
     private readonly ServerService _sut;
 
@@ -29,7 +30,7 @@ public class ServerServicePolicyTests
         hub.Clients.Returns(clients);
         alertHub.Clients.Returns(clients);
 
-        _sut = new ServerService(_repo, hub, alertHub, _audit,
+        _sut = new ServerService(_repo, _heartbeatRepoMock, hub, alertHub, _audit,
             Substitute.For<Aetheus.Back.Components.Tasks.ITaskService>(),
             Options.Create(new BackgroundServicesOptions()), TimeProvider.System,
             Substitute.For<IDbTransactionScope>());
@@ -113,7 +114,7 @@ public class ServerServicePolicyTests
     }
 
     // S-TECH-HBS4: GetRecentHeartbeatsAsync was removed with the orphaned heartbeats endpoint
-    // (the HeartbeatSparkline consumer is gone). The repo method GetMetricTimestampsAsync keeps its
+    // (the HeartbeatSparkline consumer is gone). The repo method GetRecentMetricTimestampsAsync keeps its
     // own dedicated coverage in ServerRepositoryMetricsTests.
 
     // --- DiagnoseAsync ---

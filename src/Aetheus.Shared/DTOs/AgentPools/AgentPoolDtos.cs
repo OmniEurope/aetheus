@@ -22,7 +22,7 @@ public sealed record AgentPoolServerDto
     public ServerStatus ServerStatus { get; init; }
 }
 
-public sealed record CreateAgentPoolRequest
+public abstract record AgentPoolMutationRequest
 {
     [Required]
     [StringLength(100)]
@@ -38,18 +38,6 @@ public sealed record CreateAgentPoolRequest
     public List<int> ServerIds { get; init; } = [];
 }
 
-public sealed record UpdateAgentPoolRequest
-{
-    [Required]
-    [StringLength(100)]
-    public string Name { get; init; } = string.Empty;
+public sealed record CreateAgentPoolRequest : AgentPoolMutationRequest;
 
-    [StringLength(500)]
-    public string Description { get; init; } = string.Empty;
-
-    [Range(1, 100)]
-    public int MaxConcurrency { get; init; } = 1;
-
-    [MaxLength(200)]
-    public List<int> ServerIds { get; init; } = [];
-}
+public sealed record UpdateAgentPoolRequest : AgentPoolMutationRequest;

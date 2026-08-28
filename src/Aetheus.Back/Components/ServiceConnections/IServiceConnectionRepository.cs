@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.ServiceConnections;
 public interface IServiceConnectionRepository
 {
     Task<(List<ServiceConnection> Items, int TotalCount)> GetPagedAsync(
-        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
+        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false);
     Task<ServiceConnection?> GetDetailAsync(int id, CancellationToken ct = default);
     Task<ServiceConnection?> FindAsync(int id, CancellationToken ct = default);
     Task<List<ServiceConnection>> FindByNamesAsync(List<string> names, int? projectId, CancellationToken ct = default);

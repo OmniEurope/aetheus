@@ -1,0 +1,39 @@
+# Local Windows-agent qualification: checkout, build and test the real Toto fixture.
+name: toto-windows-smoke
+trigger: manual
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+stages:
+  - name: WindowsQualification
+    group: Build
+    execution_role: build
+    os: windows
+    steps:
+      - name: Verify Windows checkout
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+            throw "This qualification requires a Windows runner."
+          }
+          $commit = (git rev-parse HEAD).Trim()
+          if ($commit -ne "$(BUILD_SOURCEVERSION)") {
+            throw "The checked-out Toto revision does not match BUILD_SOURCEVERSION."
+          }
+          if (-not (Test-Path -LiteralPath "Toto.slnx" -PathType Leaf)) {
+            throw "Toto.slnx is missing from the pipeline workspace."
+          }
+          Write-Host "Windows runner checkout verified at $commit."
+        timeout_seconds: 120
+
+      - name: Build Toto
+        working_directory: "$(WORKSPACE)"
+        shell: dotnet build Toto.slnx --configuration Release --verbosity minimal
+        timeout_seconds: 600
+
+      - name: Test Toto
+        working_directory: "$(WORKSPACE)"
+        shell: dotnet test Toto.slnx --configuration Release --no-build --verbosity minimal
+        timeout_seconds: 600

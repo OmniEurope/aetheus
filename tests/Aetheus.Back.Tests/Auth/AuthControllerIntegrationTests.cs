@@ -27,6 +27,19 @@ public class AuthControllerIntegrationTests : IClassFixture<CustomWebApplication
     // ──── Login ────
 
     [Fact]
+    public async Task PublicDemoInfo_DefaultEnvironment_IsDisabled()
+    {
+        var response = await _anonClient.GetAsync(
+            "/api/auth/public-demo", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<PublicDemoInfoDto>(
+            TestJsonOptions.Default, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.False(result.Enabled);
+    }
+
+    [Fact]
     public async Task Login_ValidCredentials_ReturnsToken()
     {
         var response = await _anonClient.PostAsJsonAsync("/api/auth/login", new LoginRequest

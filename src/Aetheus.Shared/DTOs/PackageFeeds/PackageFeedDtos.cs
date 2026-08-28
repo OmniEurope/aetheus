@@ -6,7 +6,7 @@ namespace Aetheus.Shared.DTOs;
 
 // --- A-01: Package Feeds ---
 
-public sealed record PackageFeedDto
+public abstract record PackageFeedBaseDto
 {
     public int Id { get; init; }
     public string Name { get; init; } = string.Empty;
@@ -16,23 +16,18 @@ public sealed record PackageFeedDto
     public int? ProjectId { get; init; }
     public string? ProjectName { get; init; }
     public string? ServiceConnectionName { get; init; }
-    public int PackageCount { get; init; }
     public DateTime CreatedAt { get; init; }
 }
 
-public sealed record PackageFeedDetailDto
+public sealed record PackageFeedDto : PackageFeedBaseDto
 {
-    public int Id { get; init; }
-    public string Name { get; init; } = string.Empty;
-    public string? Description { get; init; }
-    public PackageFeedType FeedType { get; init; }
-    public string UpstreamUrl { get; init; } = string.Empty;
-    public int? ProjectId { get; init; }
-    public string? ProjectName { get; init; }
+    public int PackageCount { get; init; }
+}
+
+public sealed record PackageFeedDetailDto : PackageFeedBaseDto
+{
     public int? ServiceConnectionId { get; init; }
-    public string? ServiceConnectionName { get; init; }
     public List<PackageEntryDto> Packages { get; init; } = [];
-    public DateTime CreatedAt { get; init; }
 }
 
 public sealed record CreatePackageFeedRequest

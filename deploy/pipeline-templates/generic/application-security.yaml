@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: application-security-template
+trigger: manual
+variables:
+  APPLICATION_CI_PIPELINE: application-ci
+
+stages:
+  - name: Security
+    group: Security
+    execution_role: build
+    os: linux
+    steps:
+      - name: Restore immutable CI payload
+        type: restore-artifacts
+        artifact: ApplicationPayload-artifacts
+        artifact_source_pipeline: "$(APPLICATION_CI_PIPELINE)"
+        timeout_seconds: 1800
+      - name: Run project security adapter
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/security.sh
+          sh .pipeline/scripts/security.sh
+        timeout_seconds: 7200

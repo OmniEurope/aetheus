@@ -139,6 +139,33 @@ public sealed class PipelineRunFormattingBehaviorTests
         Assert.Equal(expectedIcon, PipelineRunFormatting.StatusPointIcon(status));
     }
 
+    [Theory]
+    [InlineData("1.1.57", "1.1.57")]
+    [InlineData("c-aad836e31883c38b4390a1f7d0a7b9c2d3e419fe4", "c-aad83…19fe4")]
+    public void TruncateMiddle_ShortensOnlyValuesThatWouldOverflowATile(string value, string expected)
+        => Assert.Equal(expected, PipelineRunFormatting.TruncateMiddle(value));
+
+    [Fact]
+    public void BuiltAppVersion_PrefersTheResolvedVariableAndFallsBackToAStepOutput()
+    {
+        var resolved = new PipelineRunDto
+        {
+            ResolvedVariables = new Dictionary<string, string> { ["APP_VERSION"] = " 1.1.57 " }
+        };
+        var emitted = new PipelineRunDto
+        {
+            Steps =
+            [
+                new PipelineStepRunDto { OutputVariables = new Dictionary<string, string> { ["APP_VERSION"] = "1.1.12" } },
+                new PipelineStepRunDto { OutputVariables = new Dictionary<string, string> { ["APP_VERSION"] = "1.1.13" } }
+            ]
+        };
+
+        Assert.Equal("1.1.57", PipelineRunFormatting.BuiltAppVersion(resolved));
+        Assert.Equal("1.1.13", PipelineRunFormatting.BuiltAppVersion(emitted));
+        Assert.Null(PipelineRunFormatting.BuiltAppVersion(new PipelineRunDto()));
+    }
+
     private static PipelineStepRunDto FailedStep(params (string Key, string Value)[] outputVariables) => new()
     {
         Status = TaskExecutionStatus.Failed,

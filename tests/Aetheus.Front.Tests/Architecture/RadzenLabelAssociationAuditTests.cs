@@ -34,7 +34,7 @@ public class RadzenLabelAssociationAuditTests
         var razorDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
         Assert.True(Directory.Exists(razorDir), $"Front dir not found: {razorDir}");
 
-        foreach (var file in Directory.EnumerateFiles(razorDir, "*.razor", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(razorDir, "*.razor"))
         {
             var raw = StripRazorComments(File.ReadAllText(file));
             var rel = Path.GetRelativePath(razorDir, file);
@@ -48,9 +48,15 @@ public class RadzenLabelAssociationAuditTests
                     if (end < 0) break;
                     var tag = raw.Substring(idx, end - idx + 1);
 
-                    // Decorative controls carry no interactive label - skip (this is how
-                    // LabeledToggle's own internal RadzenCheckBox/RadzenSwitch stays exempt).
-                    if (!tag.Contains("aria-hidden", StringComparison.Ordinal))
+                    if (tag.Contains("aria-hidden", StringComparison.Ordinal))
+                    {
+                        var isSharedDisplayControl = rel.EndsWith(
+                            Path.Combine("Shared", "LabeledToggle.razor"), StringComparison.OrdinalIgnoreCase);
+                        if (!isSharedDisplayControl && !WrappedByKeyboardClickableDiv(raw, idx))
+                            violations.Add($"{rel}: {open[1..]} uses aria-hidden without a proven "
+                                + "keyboard-clickable wrapper; use <LabeledToggle> or an @onclick/@onkeydown wrapper");
+                    }
+                    else
                     {
                         if (PrecededByRadzenText(raw, idx) || FollowedByRadzenText(raw, end))
                             violations.Add($"{rel}: {open[1..]} sits next to a bare <RadzenText> label - "
@@ -70,6 +76,32 @@ public class RadzenLabelAssociationAuditTests
         Assert.True(violations.Count == 0,
             "Toggle labels must be click-associated via the shared <LabeledToggle> component:\n  "
             + string.Join("\n  ", violations));
+    }
+
+    [Fact]
+    public void NativeRadios_HaveAnAccessibleClickableLabel()
+    {
+        var violations = new List<string>();
+        var razorDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
+        var radioPattern = new Regex(
+            """<input\b(?=[^>]*\btype\s*=\s*["']radio["'])[^>]*>""",
+            RegexOptions.IgnoreCase);
+
+        foreach (var file in RepositoryScan.Enumerate(razorDir, "*.razor"))
+        {
+            var raw = StripRazorComments(File.ReadAllText(file));
+            var rel = Path.GetRelativePath(razorDir, file);
+            foreach (Match match in radioPattern.Matches(raw))
+            {
+                var explicitlyNamed = match.Value.Contains("aria-label=", StringComparison.OrdinalIgnoreCase)
+                    || match.Value.Contains("aria-labelledby=", StringComparison.OrdinalIgnoreCase);
+                if (!explicitlyNamed && !WrappedByHtmlLabel(raw, match.Index))
+                    violations.Add($"{rel}: native radio has no wrapping <label>, aria-label, or aria-labelledby");
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "Radio controls must have an accessible clickable label:\n  " + string.Join("\n  ", violations));
     }
 
     [Theory]
@@ -146,6 +178,27 @@ public class RadzenLabelAssociationAuditTests
         return openingTag.Contains("Text=", StringComparison.Ordinal);
     }
 
+    private static bool WrappedByHtmlLabel(string raw, int controlStart)
+    {
+        var openIdx = raw.LastIndexOf("<label", controlStart, StringComparison.OrdinalIgnoreCase);
+        if (openIdx < 0) return false;
+        var closeIdx = raw.LastIndexOf("</label>", controlStart, StringComparison.OrdinalIgnoreCase);
+        return closeIdx < openIdx;
+    }
+
+    private static bool WrappedByKeyboardClickableDiv(string raw, int controlStart)
+    {
+        var openIdx = raw.LastIndexOf("<div", controlStart, StringComparison.OrdinalIgnoreCase);
+        if (openIdx < 0) return false;
+        var closeIdx = raw.LastIndexOf("</div>", controlStart, StringComparison.OrdinalIgnoreCase);
+        if (closeIdx > openIdx) return false;
+        var end = FindTagEnd(raw, openIdx);
+        if (end < 0) return false;
+        var tag = raw.Substring(openIdx, end - openIdx + 1);
+        return tag.Contains("@onclick=", StringComparison.Ordinal)
+            && tag.Contains("@onkeydown=", StringComparison.Ordinal);
+    }
+
     // Walks from the tag open to the '>' that closes the opening tag, skipping any '>'
     // that sits inside a quoted attribute value (e.g. the arrow in a => lambda).
     private static int FindTagEnd(string source, int start)
@@ -163,14 +216,5 @@ public class RadzenLabelAssociationAuditTests
     private static string StripRazorComments(string source) =>
         Regex.Replace(source, @"@\*.*?\*@", string.Empty, RegexOptions.Singleline);
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(RadzenLabelAssociationAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

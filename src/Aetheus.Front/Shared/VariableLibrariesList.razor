@@ -38,7 +38,15 @@ else
     RowClick="@(lib => Nav.NavigateTo($"/variable-libraries/{lib.Id}"))"
     EmptyText="@L["NoVariableLibrariesFound"]" FullHeight="@IsGlobal">
     <EmptyTemplate>
-        <EmptyState Icon="data_object" Title="@L["NoVariableLibrariesFound"]" Description="@L["EmptyLibrariesHint"]" />
+        <EmptyState Icon="data_object" Title="@L["NoVariableLibrariesFound"]" Description="@L["EmptyLibrariesHint"]">
+            <ActionContent>
+                @if (_canWrite && (IsGlobal || IsProjectScope))
+                {
+                    <RadzenButton Text="@L["NewVariableLibrary"]" Icon="add" Click="@NewLibrary"
+                        ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                }
+            </ActionContent>
+        </EmptyState>
     </EmptyTemplate>
     <Columns>
         <RadzenDataGridColumn TItem="VariableLibraryDto" Property="Name" Title="@L["Name"]" MinWidth="10rem">

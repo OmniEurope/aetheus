@@ -1,15 +1,41 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
+using System.Text.Json;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 // Pipeline lifecycle queries: retention, webhook/schedule triggers, active-run checks, stuck-run reconcile.
 internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider timeProvider)
 {
+    public async Task<bool> IsStepRetryEligibleAsync(
+        int pipelineRunId,
+        int stepRunId,
+        CancellationToken ct = default)
+    {
+        var scannerKey = await db.Set<ServerTask>().AsNoTracking()
+            .Where(task => task.PipelineRunId == pipelineRunId
+                && task.PipelineStepRunId == stepRunId
+                && task.Operation == OperationKind.PipelineRunScanner)
+            .OrderByDescending(task => task.Id)
+            .Select(task => task.Command)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (scannerKey is null) return true;
+
+        var report = await db.AnalysisReports.AsNoTracking()
+            .Where(item => item.PipelineRunId == pipelineRunId && item.ScannerKey == scannerKey)
+            .OrderByDescending(item => item.Id)
+            .Select(item => new { item.Status, item.ErrorMessage })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (report is null) return true;
+        if (report.Status == AnalysisReportStatus.Unavailable)
+            return ContainsTransientMarker(report.ErrorMessage);
+        return report.Status == AnalysisReportStatus.Error && ContainsTransientMarker(report.ErrorMessage);
+    }
+
+    private static bool ContainsTransientMarker(string? message) =>
+        message is not null && new[] { "network", "download", "registry", "temporar", "429", "502", "503", "504" }
+            .Any(marker => message.Contains(marker, StringComparison.OrdinalIgnoreCase));
+
     public async Task<bool> TryTransitionPipelineRunStatusAsync(
         int runId, PipelineStatus expectedStatus, PipelineStatus newStatus, CancellationToken ct = default)
     {
@@ -38,6 +64,48 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
         run.CompletedAt = completedAt;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return true;
+    }
+
+    public async Task<int> ResetFailedStepRunsAsync(int runId, CancellationToken ct = default)
+    {
+        await using var transaction = db.Database.IsRelational() && db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false)
+            : null;
+
+        // Failure finalization cancels the downstream tail. Reopen it with the failed step so a
+        // partial retry cannot finalize green while required stages remain Cancelled.
+        var failedSteps = await db.PipelineStepRuns
+            .Where(s => s.PipelineRunId == runId
+                && (s.Status == TaskExecutionStatus.Failed
+                    || s.Status == TaskExecutionStatus.Timeout
+                    || s.Status == TaskExecutionStatus.Cancelled))
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (failedSteps.Count == 0) return 0;
+
+        foreach (var step in failedSteps)
+        {
+            step.Status = TaskExecutionStatus.Pending;
+            step.ExitCode = null;
+            step.FailureCode = null;
+            step.FailureReason = null;
+            step.StartedAt = null;
+            step.CompletedAt = null;
+        }
+
+        var run = await db.PipelineRuns.FindAsync([runId], ct).ConfigureAwait(false);
+        if (run is not null)
+        {
+            run.Status = PipelineStatus.Running;
+            run.CompletedAt = null;
+            var variables = PipelineRunHelpers.DeserializeResolvedVariables(run.AdditionalVariablesJson);
+            variables.Remove(PipelineRunService.CancellationRequestedVariable);
+            run.AdditionalVariablesJson = JsonSerializer.Serialize(variables);
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        if (transaction is not null)
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return failedSteps.Count;
     }
 
     public async Task<PipelineApproval?> TryResolveApprovalAsync(
@@ -79,12 +147,13 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
             .ConfigureAwait(false);
     }
 
-    // Tracked (mutated + saved by the reconcile sweeper). A trigger step waits on a child run and has NO
+    // A trigger step waits on a child run and has NO
     // ServerTask, so TaskTimeoutService never sees it; if the child's completion event was lost (backend
     // restart, missed hook) the step hangs Running forever. The sweeper re-checks these; the age filter
     // keeps it from racing the normal event handler on freshly-dispatched triggers.
     public async Task<List<PipelineStepRun>> GetStuckRunningTriggerStepsAsync(DateTime startedBefore, CancellationToken ct = default)
         => await db.PipelineStepRuns
+            .AsNoTracking()
             .Where(s => s.Status == TaskExecutionStatus.Running
                         && s.TriggeredRunId != null
                         && s.StartedAt != null
@@ -108,7 +177,24 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
                         // Nothing can produce the next normal completion callback.
                         && !r.StepRuns.Any(s => s.Status == TaskExecutionStatus.Assigned
                                                 || s.Status == TaskExecutionStatus.Running)
-                        && !r.Tasks.Any(t => t.Status == TaskExecutionStatus.Pending
+                        // Every workspace run owns a deferred cleanup task from the start. While it is
+                        // merely Pending it cannot drive normal scheduling, so it must not hide a stalled
+                        // run from recovery. Once assigned/running, however, its callback is in flight.
+                        && !r.Tasks.Any(t => (t.Status == TaskExecutionStatus.Pending && !t.IsDeferredCleanup)
+                                             || t.Status == TaskExecutionStatus.Assigned
+                                             || t.Status == TaskExecutionStatus.Running))
+            .Select(r => r.Id)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+    public async Task<List<int>> GetStalledCancellationRunIdsAsync(DateTime startedBefore, CancellationToken ct = default)
+        => await db.PipelineRuns
+            .AsNoTracking()
+            .Where(r => r.Status == PipelineStatus.Running
+                        && r.StartedAt < startedBefore
+                        && r.AdditionalVariablesJson.Contains(PipelineRunService.CancellationRequestedVariable)
+                        // A pending deferred cleanup is deliberately ignored: reapplying cancellation
+                        // releases orphan Running steps, then the scheduler dispatches that cleanup.
+                        && !r.Tasks.Any(t => (t.Status == TaskExecutionStatus.Pending && !t.IsDeferredCleanup)
                                              || t.Status == TaskExecutionStatus.Assigned
                                              || t.Status == TaskExecutionStatus.Running))
             .Select(r => r.Id)
@@ -131,9 +217,21 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
     public async Task<int> DeleteRunsOlderThanAsync(DateTime cutoff, CancellationToken ct = default)
     {
         if (db.Database.IsRelational())
-            return await db.PipelineRuns.Where(r => r.StartedAt < cutoff).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            return await db.PipelineRuns
+                .Where(r => r.StartedAt < cutoff
+                            && !r.Tasks.Any(task => task.IsDeferredCleanup
+                                && (task.Status == TaskExecutionStatus.Pending
+                                    || task.Status == TaskExecutionStatus.Assigned
+                                    || task.Status == TaskExecutionStatus.Running)))
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
-        var old = await db.PipelineRuns.Where(r => r.StartedAt < cutoff).ToListAsync(ct).ConfigureAwait(false);
+        var old = await db.PipelineRuns
+            .Where(r => r.StartedAt < cutoff
+                        && !r.Tasks.Any(task => task.IsDeferredCleanup
+                            && (task.Status == TaskExecutionStatus.Pending
+                                || task.Status == TaskExecutionStatus.Assigned
+                                || task.Status == TaskExecutionStatus.Running)))
+            .ToListAsync(ct).ConfigureAwait(false);
         db.PipelineRuns.RemoveRange(old);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return old.Count;
@@ -174,6 +272,32 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
             .ConfigureAwait(false);
     }
 
+    public async Task<bool> LockPipelineForWebhookAsync(int pipelineId, CancellationToken ct = default)
+    {
+        if (!db.Database.IsRelational())
+            return await db.Pipelines.AnyAsync(pipeline => pipeline.Id == pipelineId, ct).ConfigureAwait(false);
+
+        var rows = await db.Pipelines
+            .Where(pipeline => pipeline.Id == pipelineId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(pipeline => pipeline.Name, pipeline => pipeline.Name),
+                ct)
+            .ConfigureAwait(false);
+        return rows == 1;
+    }
+
+    public async Task<List<int>> GetActiveRunIdsAsync(int pipelineId, CancellationToken ct = default)
+    {
+        return await db.PipelineRuns
+            .Where(run => run.PipelineId == pipelineId
+                          && (run.Status == PipelineStatus.Running
+                              || run.Status == PipelineStatus.Pending
+                              || run.Status == PipelineStatus.WaitingForApproval))
+            .OrderBy(run => run.Id)
+            .Select(run => run.Id)
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<HashSet<int>> GetPipelineIdsWithActiveRunsAsync(CancellationToken ct = default)
     {
         var ids = await db.PipelineRuns
@@ -196,28 +320,33 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
         if (projectId.HasValue)
             query = query.Where(run => run.Pipeline.ProjectId == projectId.Value);
 
-        return await query
+        var runs = await query
             .OrderByDescending(run => run.StartedAt)
             .Take(100)
             .Select(PipelineRunHelpers.RunListProjection)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        return runs.Select(PipelineRunHelpers.HydrateListWarnings).ToList();
     }
 
     public async Task<List<PipelineRunDto>> GetRecentRunsAsync(
-        List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default)
+        List<int>? accessiblePipelineIds = null, int? projectId = null, int? serverId = null,
+        CancellationToken ct = default)
     {
         var query = db.PipelineRuns.AsNoTracking().AsQueryable();
         if (accessiblePipelineIds is not null)
             query = query.Where(run => accessiblePipelineIds.Contains(run.PipelineId));
         if (projectId.HasValue)
             query = query.Where(run => run.Pipeline.ProjectId == projectId.Value);
+        if (serverId.HasValue)
+            query = query.Where(run => run.StepRuns.Any(step => step.ServerId == serverId.Value));
 
-        return await query
+        var runs = await query
             .OrderByDescending(run => run.StartedAt)
             .Take(20)
             .Select(PipelineRunHelpers.RunListProjection)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        return runs.Select(PipelineRunHelpers.HydrateListWarnings).ToList();
     }
 }

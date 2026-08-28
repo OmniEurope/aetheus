@@ -1,0 +1,8 @@
+{
+  "requestId": 42,
+  "taskId": 0,
+  "status": "WaitingForIdle",
+  "targetVersion": "1.0.401",
+  "blockingTaskCount": 2,
+  "created": true
+}

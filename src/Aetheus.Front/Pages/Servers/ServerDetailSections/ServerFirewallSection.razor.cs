@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -65,7 +58,7 @@ public partial class ServerFirewallSection
         _loading = true;
         try
         {
-            var firewall = await Api.GetFirewallAsync(serverId);
+            var firewall = await Api.Security.GetFirewallAsync(serverId);
             if (serverId == ServerId && generation == _loadGeneration)
                 _firewall = firewall;
         }
@@ -88,8 +81,8 @@ public partial class ServerFirewallSection
     }
 
     private Task SubmitRuleAsync(NewRuleModel _) => _ruleAction == FirewallRuleAction.Allow
-        ? RunAsync(() => Api.FirewallAllowAsync(ServerId, BuildRequest()), "FirewallRuleQueued")
-        : RunAsync(() => Api.FirewallDenyAsync(ServerId, BuildRequest()), "FirewallRuleQueued");
+        ? RunAsync(() => Api.Security.FirewallAllowAsync(ServerId, BuildRequest()), "FirewallRuleQueued")
+        : RunAsync(() => Api.Security.FirewallDenyAsync(ServerId, BuildRequest()), "FirewallRuleQueued");
 
     private string LocalizeAction(string action) => action.ToLowerInvariant() switch
     {
@@ -106,7 +99,7 @@ public partial class ServerFirewallSection
                 new ConfirmOptions { OkButtonText = L["FirewallDisable"].Value, CancelButtonText = L["Cancel"].Value });
             if (confirmed != true) return;
         }
-        await RunAsync(() => Api.FirewallToggleAsync(ServerId, enable), enable ? "FirewallEnableQueued" : "FirewallDisableQueued");
+        await RunAsync(() => Api.Security.FirewallToggleAsync(ServerId, enable), enable ? "FirewallEnableQueued" : "FirewallDisableQueued");
     }
 
     private async Task DeleteRuleAsync(FirewallRuleDto rule)
@@ -122,7 +115,7 @@ public partial class ServerFirewallSection
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        await RunAsync(() => Api.FirewallDeleteRuleAsync(ServerId, new FirewallRuleRequest
+        await RunAsync(() => Api.Security.FirewallDeleteRuleAsync(ServerId, new FirewallRuleRequest
         {
             Port = rule.Port ?? 0,
             Protocol = rule.Protocol,

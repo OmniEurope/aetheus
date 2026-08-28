@@ -38,8 +38,9 @@ public class ProjectServersSectionTemplateTests : BunitContext
         _handler.SetPaginatedJsonResponse("api/projects/1/servers", new List<ProjectServerDto>());
         var cut = Render<ProjectServersSection>(p => p.Add(x => x.ProjectId, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
-        // No servers → the shared EmptyState (NoRecords) is shown.
-        Assert.Contains("NoRecords", cut.Markup);
+        // No servers → a contextual empty state provides the direct add-server action.
+        Assert.Contains("NoProjectServers", cut.Markup);
+        Assert.Contains("AddServer", cut.Markup);
     }
 
     [Fact]

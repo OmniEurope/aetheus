@@ -44,7 +44,7 @@
             </ChildContent>
         </RadzenSplitButton>
         <RadzenButton Icon="description" Text="@L["ViewLogs"]" Size="ButtonSize.Small"
-            Click="@GetLogsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@GetLogsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
     }
 </RadzenStack>
 
@@ -103,7 +103,7 @@
                         <RadzenButton Icon="refresh" Text="@L["Refresh"]" Size="ButtonSize.Small"
                             Click="@LoadWarningsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                     </RadzenStack>
-                    <RadzenDataGrid Data="@_warnings" TItem="RkhunterWarningDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    <RadzenDataGrid Responsive="false" Data="@_warnings" TItem="RkhunterWarningDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                         <Columns>
                             <RadzenDataGridColumn TItem="RkhunterWarningDto" Property="Category" Title="@L["Category"]" Width="150px" />
                             <RadzenDataGridColumn TItem="RkhunterWarningDto" Property="Detail" Title="@L["Detail"]" />
@@ -134,7 +134,7 @@
                 }
                 else
                 {
-                    <RadzenDataGrid Data="@_scanHistory" TItem="RkhunterScanResultDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    <RadzenDataGrid Responsive="false" Data="@_scanHistory" TItem="RkhunterScanResultDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                         <Columns>
                             <RadzenDataGridColumn TItem="RkhunterScanResultDto" Title="@L["Status"]" Width="120px">
                                 <Template Context="r">

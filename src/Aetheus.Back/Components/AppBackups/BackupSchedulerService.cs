@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aetheus.Back.Components.AppBackups;
 
 /// <summary>
-/// PLAN-006 4.3: fires scheduled backups and periodic restore-checks. Every minute it evaluates each
+/// ADR-024 4.3: fires scheduled backups and periodic restore-checks. Every minute it evaluates each
 /// enabled policy's <c>ScheduleCron</c> (dispatch a backup) and <c>RestoreCheckCron</c> (dispatch a
 /// restore-check of the latest successful run). Structured like <c>PipelineSchedulerService</c>; due-calc
 /// via <see cref="BackupSchedule"/>.

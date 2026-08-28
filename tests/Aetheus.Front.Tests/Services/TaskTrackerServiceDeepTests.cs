@@ -86,29 +86,37 @@ public class TaskTrackerServiceDeepTests : BunitContext
         Assert.Equal(originalStarted, sut.Tasks[0].StartedAt);
     }
 
-    // === RemoveOnTerminal ===
+    // === HandleTerminal ===
 
     [Fact]
-    public void RemoveOnTerminal_NonExistentId_NoOnChanged()
+    public void HandleTerminal_NonExistentId_NoOnChanged()
     {
         var sut = CreateService();
         var changed = 0;
         sut.OnChanged += () => changed++;
 
-        Invoke(sut, "RemoveOnTerminal", 999);
+        Invoke(sut, "HandleTerminal", new TaskCompletedNotification
+        {
+            TaskId = 999,
+            Status = TaskExecutionStatus.Success
+        });
 
         Assert.Equal(0, changed);
     }
 
     [Fact]
-    public void RemoveOnTerminal_ExistingId_FiresOnChanged()
+    public void HandleTerminal_ExistingId_FiresOnChanged()
     {
         var sut = CreateService();
         Invoke(sut, "Upsert", MakeTask(20));
         var changed = 0;
         sut.OnChanged += () => changed++;
 
-        Invoke(sut, "RemoveOnTerminal", 20);
+        Invoke(sut, "HandleTerminal", new TaskCompletedNotification
+        {
+            TaskId = 20,
+            Status = TaskExecutionStatus.Success
+        });
 
         Assert.Equal(1, changed);
         Assert.Equal(0, sut.Count);
@@ -168,7 +176,11 @@ public class TaskTrackerServiceDeepTests : BunitContext
         Invoke(sut, "Upsert", MakeTask(1));
         Invoke(sut, "Upsert", MakeTask(2));
         Assert.Equal(2, sut.Count);
-        Invoke(sut, "RemoveOnTerminal", 1);
+        Invoke(sut, "HandleTerminal", new TaskCompletedNotification
+        {
+            TaskId = 1,
+            Status = TaskExecutionStatus.Success
+        });
         Assert.Equal(1, sut.Count);
     }
 }

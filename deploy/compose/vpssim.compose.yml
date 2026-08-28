@@ -24,10 +24,11 @@ services:
       args:
         # -net10: pre-bake the .NET SDK 10.0 into the image (1) or keep it absent (0, default).
         INSTALL_DOTNET: ${VPSSIM_DOTNET:-0}
-        # VPW3: throwaway root password - overridable via env, defaults to 'aetheus'.
-        VPSSIM_ROOT_PASSWORD: ${VPSSIM_ROOT_PASSWORD:-aetheus}
     # systemd needs to manage cgroups; DinD needs device access.
     privileged: true
+    # The image defaults to an unprivileged user. This local system-container
+    # harness opts into uid 0 explicitly because systemd and DinD require it.
+    user: "0:0"
     cgroup: host
     # Reach the host-side backend (started by ylaunch) for agent enrollment.
     extra_hosts:
@@ -35,6 +36,17 @@ services:
       - "aetheus.localhost:127.0.0.1"
       - "app.aetheus.localhost:127.0.0.1"
       - "api.aetheus.localhost:127.0.0.1"
+      # The cutover publishes two static properties, the vitrine and the documentation site, each on
+      # its own name. Without this one the mirror could publish the docs payload and still serve the
+      # stock Apache page, which is what happened on deploy-local run 1173.
+      - "docs.aetheus.localhost:127.0.0.1"
+      # The nightly demo deploys here and then probes BG_PUBLIC_ORIGIN. That name is a real public
+      # record pointing at the production VPS, so without this the simulated box deployed its own
+      # demo and graded the production one, whose credentials differ - a 401 in OneTimeSetUp that
+      # reads like a broken deployment. On the real host the name already resolves to itself; this
+      # gives the simulation the same property. Browser smoke containers run with --network host,
+      # so they inherit this file.
+      - "demo.aetheus.sonytumen.com:127.0.0.1"
     # Optional agent auto-install. VPSSIM_AGENT=1 → the box mints a token from the
     # backend API at boot and self-installs the agent (appears in the dashboard).
     # Default 0 → blank VPS, no agent. Auto-install requires either AGENT_TOKEN
@@ -44,6 +56,7 @@ services:
       - BACKEND_URL=${VPSSIM_BACKEND_URL:-https://host.docker.internal:5301}
       - ADMIN_USER=${VPSSIM_ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${VPSSIM_ADMIN_PASSWORD:-}
+      - AGENT_TOKEN=${VPSSIM_AGENT_TOKEN:-}
       - AGENT_NAME=${VPSSIM_AGENT_NAME:-vpssim}
     # systemd expects writable tmpfs for runtime state.
     tmpfs:
@@ -63,6 +76,15 @@ services:
       # PostgreSQL keeps its old password in the nested Docker volume while the agent creates
       # a new .env file, making the next migration fail with 28P01.
       - vpssim-agent-state:/var/lib/aetheus-agent
+      # Secret-zero and its installation-dated backups deliberately live outside the agent purge boundary.
+      - vpssim-production-state:/var/lib/aetheus-production
+      # The nightly demo keeps its own secrets and Compose environment here, and the demo database
+      # volume below remembers the password they contain. Without this volume a simulator rebuild
+      # erased the secrets while the database kept the old ones: nightly run 1218 could not even
+      # roll back ("State directory /var/lib/aetheus-demo does not exist"), and the next preparation
+      # would have regenerated a password the database refuses (28P01), exactly what the production
+      # line above exists to prevent.
+      - vpssim-demo-state:/var/lib/aetheus-demo
       # A real VPS keeps its host-level proxy, certificates and static site across reboots. Preserve
       # the same state when Docker Compose replaces the outer simulator after an image rebuild.
       - vpssim-apache:/etc/apache2
@@ -82,6 +104,8 @@ volumes:
   vpssim-docker:
   vpssim-containerd:
   vpssim-agent-state:
+  vpssim-production-state:
+  vpssim-demo-state:
   vpssim-apache:
   vpssim-letsencrypt:
   vpssim-www:

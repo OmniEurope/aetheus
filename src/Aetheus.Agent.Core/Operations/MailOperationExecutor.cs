@@ -2,12 +2,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -65,22 +59,17 @@ public sealed class MailOperationExecutor(
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken cancellationToken)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("Mail operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var platformFailure = await OperationPlatformGuard.RequireLinuxAsync(
+            onOutput, "Mail operations are only supported on Linux").ConfigureAwait(false);
+        if (platformFailure is not null) return platformFailure;
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
         if (kind == OperationKind.MailGetLogs)
             return await GetLogsAsync(target, timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
 
-        var psi = BuildPsi(kind);
-        if (psi is null)
-            return new ExecutorResult(-1, false);
-
-        return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
+        return await OperationProcessRunner.RunOptionalAsync(
+            BuildPsi(kind), timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ExecutorResult> ExecuteAsync(
@@ -155,14 +144,7 @@ public sealed class MailOperationExecutor(
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         foreach (var arg in BuildSetupArgv(hostname!, domain, selector!, email!, quota))
             psi.ArgumentList.Add(arg);
 
@@ -192,91 +174,7 @@ public sealed class MailOperationExecutor(
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<string>? argv;
-        string? stdin = null;
-
-        switch (kind)
-        {
-            case OperationKind.MailAddDomain:
-                if (!MailValidation.IsValidDomainName(target)) { argv = null; break; }
-                argv = ["-n", ManageHelperPath, "add-domain", target];
-                break;
-
-            case OperationKind.MailAddAccount:
-                {
-                    envVars.TryGetValue(MailSetupEnv.Domain, out var domain);
-                    envVars.TryGetValue(MailSetupEnv.QuotaMb, out var quotaRaw);
-                    envVars.TryGetValue(MailSetupEnv.AccountPassword, out var password);
-                    if (!MailValidation.IsValidEmail(target) ||
-                        !MailValidation.IsValidDomainName(domain) ||
-                        !int.TryParse(quotaRaw, NumberStyles.None, CultureInfo.InvariantCulture, out var quota) ||
-                        !MailValidation.IsValidQuotaMb(quota) ||
-                        !MailValidation.IsValidPassword(password))
-                    {
-                        argv = null;
-                        break;
-                    }
-                    argv = ["-n", ManageHelperPath, "add-account", target, domain!, quota.ToString(CultureInfo.InvariantCulture)];
-                    stdin = password + "\n"; // off the process list
-                    break;
-                }
-
-            case OperationKind.MailAddAlias:
-                {
-                    envVars.TryGetValue(MailSetupEnv.AliasDestination, out var destination);
-                    if (!MailValidation.IsValidEmail(target) || !MailValidation.IsValidEmail(destination)) { argv = null; break; }
-                    argv = ["-n", ManageHelperPath, "add-alias", target, destination!];
-                    break;
-                }
-
-            case OperationKind.MailDkimRotate:
-                {
-                    envVars.TryGetValue(MailSetupEnv.NewSelector, out var newSelector);
-                    if (!MailValidation.IsValidDomainName(target) || !MailValidation.IsValidDkimSelector(newSelector)) { argv = null; break; }
-                    argv = ["-n", ManageHelperPath, "dkim-rotate", target, newSelector!];
-                    break;
-                }
-
-            case OperationKind.MailChangePassword:
-                {
-                    // S-TECH-MCPW: email is the target; the new password is piped over stdin (never argv) so
-                    // it stays off ps / /proc/cmdline. The helper re-validates and hashes it via doveadm pw.
-                    envVars.TryGetValue(MailSetupEnv.AccountPassword, out var password);
-                    if (!MailValidation.IsValidEmail(target) || !MailValidation.IsValidPassword(password)) { argv = null; break; }
-                    argv = ["-n", ManageHelperPath, "change-password", target];
-                    stdin = password + "\n";
-                    break;
-                }
-
-            // Removal / read ops (audit "dead shell action" migration): the same helper handles the
-            // remove/read sub-commands with the same argv-exact re-validation boundary.
-            case OperationKind.MailRemoveDomain:
-                if (!MailValidation.IsValidDomainName(target)) { argv = null; break; }
-                argv = ["-n", ManageHelperPath, "remove-domain", target];
-                break;
-
-            case OperationKind.MailDeleteAccount:
-                {
-                    envVars.TryGetValue(MailSetupEnv.Domain, out var domain);
-                    if (!MailValidation.IsValidEmail(target) || !MailValidation.IsValidDomainName(domain)) { argv = null; break; }
-                    argv = ["-n", ManageHelperPath, "delete-account", target, domain!];
-                    break;
-                }
-
-            case OperationKind.MailRemoveAlias:
-                if (!MailValidation.IsValidEmail(target)) { argv = null; break; }
-                argv = ["-n", ManageHelperPath, "remove-alias", target];
-                break;
-
-            case OperationKind.MailDkimRead:
-                if (!MailValidation.IsValidDkimSelector(target)) { argv = null; break; }
-                argv = ["-n", ManageHelperPath, "dkim-read", target];
-                break;
-
-            default:
-                argv = null;
-                break;
-        }
+        var (argv, stdin) = BuildManageCommand(kind, target, envVars);
 
         if (argv is null)
         {
@@ -285,22 +183,13 @@ public sealed class MailOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("Mail operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var platformFailure = await OperationPlatformGuard.RequireLinuxAsync(
+            onOutput, "Mail operations are only supported on Linux").ConfigureAwait(false);
+        if (platformFailure is not null) return platformFailure;
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         foreach (var arg in argv)
             psi.ArgumentList.Add(arg);
 
@@ -308,20 +197,104 @@ public sealed class MailOperationExecutor(
             psi, timeoutSeconds, onOutput, logger, cancellationToken, standardInput: stdin).ConfigureAwait(false);
     }
 
+    private static (IReadOnlyList<string>? Argv, string? Stdin) BuildManageCommand(
+        OperationKind kind,
+        string target,
+        IReadOnlyDictionary<string, string> envVars) =>
+        kind switch
+        {
+            OperationKind.MailAddDomain => DomainCommand("add-domain", target),
+            OperationKind.MailAddAccount => AddAccountCommand(target, envVars),
+            OperationKind.MailAddAlias => AddAliasCommand(target, envVars),
+            OperationKind.MailDkimRotate => RotateDkimCommand(target, envVars),
+            OperationKind.MailChangePassword => ChangePasswordCommand(target, envVars),
+            OperationKind.MailRemoveDomain => DomainCommand("remove-domain", target),
+            OperationKind.MailDeleteAccount => DeleteAccountCommand(target, envVars),
+            OperationKind.MailRemoveAlias => EmailCommand("remove-alias", target),
+            OperationKind.MailDkimRead => DkimReadCommand(target),
+            _ => (null, null)
+        };
+
+    private static (IReadOnlyList<string>?, string?) DomainCommand(string command, string target) =>
+        MailValidation.IsValidDomainName(target)
+            ? (["-n", ManageHelperPath, command, target], null)
+            : (null, null);
+
+    private static (IReadOnlyList<string>?, string?) EmailCommand(string command, string target) =>
+        MailValidation.IsValidEmail(target)
+            ? (["-n", ManageHelperPath, command, target], null)
+            : (null, null);
+
+    private static (IReadOnlyList<string>?, string?) AddAccountCommand(
+        string target,
+        IReadOnlyDictionary<string, string> envVars)
+    {
+        envVars.TryGetValue(MailSetupEnv.Domain, out var domain);
+        envVars.TryGetValue(MailSetupEnv.QuotaMb, out var quotaRaw);
+        envVars.TryGetValue(MailSetupEnv.AccountPassword, out var password);
+        if (!MailValidation.IsValidEmail(target)
+            || !MailValidation.IsValidDomainName(domain)
+            || !int.TryParse(quotaRaw, NumberStyles.None, CultureInfo.InvariantCulture, out var quota)
+            || !MailValidation.IsValidQuotaMb(quota)
+            || !MailValidation.IsValidPassword(password))
+            return (null, null);
+        return (
+            ["-n", ManageHelperPath, "add-account", target, domain!, quota.ToString(CultureInfo.InvariantCulture)],
+            password + "\n");
+    }
+
+    private static (IReadOnlyList<string>?, string?) AddAliasCommand(
+        string target,
+        IReadOnlyDictionary<string, string> envVars)
+    {
+        envVars.TryGetValue(MailSetupEnv.AliasDestination, out var destination);
+        return MailValidation.IsValidEmail(target) && MailValidation.IsValidEmail(destination)
+            ? (["-n", ManageHelperPath, "add-alias", target, destination!], null)
+            : (null, null);
+    }
+
+    private static (IReadOnlyList<string>?, string?) RotateDkimCommand(
+        string target,
+        IReadOnlyDictionary<string, string> envVars)
+    {
+        envVars.TryGetValue(MailSetupEnv.NewSelector, out var selector);
+        return MailValidation.IsValidDomainName(target) && MailValidation.IsValidDkimSelector(selector)
+            ? (["-n", ManageHelperPath, "dkim-rotate", target, selector!], null)
+            : (null, null);
+    }
+
+    private static (IReadOnlyList<string>?, string?) ChangePasswordCommand(
+        string target,
+        IReadOnlyDictionary<string, string> envVars)
+    {
+        envVars.TryGetValue(MailSetupEnv.AccountPassword, out var password);
+        return MailValidation.IsValidEmail(target) && MailValidation.IsValidPassword(password)
+            ? (["-n", ManageHelperPath, "change-password", target], password + "\n")
+            : (null, null);
+    }
+
+    private static (IReadOnlyList<string>?, string?) DeleteAccountCommand(
+        string target,
+        IReadOnlyDictionary<string, string> envVars)
+    {
+        envVars.TryGetValue(MailSetupEnv.Domain, out var domain);
+        return MailValidation.IsValidEmail(target) && MailValidation.IsValidDomainName(domain)
+            ? (["-n", ManageHelperPath, "delete-account", target, domain!], null)
+            : (null, null);
+    }
+
+    private static (IReadOnlyList<string>?, string?) DkimReadCommand(string target) =>
+        MailValidation.IsValidDkimSelector(target)
+            ? (["-n", ManageHelperPath, "dkim-read", target], null)
+            : (null, null);
+
     /// <summary>
     /// Maps a Mail operation kind to a fully-resolved argv. Service control operations go
     /// through sudo; queue and config commands also need sudo for postfix/postqueue access.
     /// </summary>
     private static ProcessStartInfo? BuildPsi(OperationKind kind)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         psi.ArgumentList.Add("-n"); // never prompt - NOPASSWD required by sudoers rule
 
         switch (kind)

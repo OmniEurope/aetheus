@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Components.ExternalRepos;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
 using Aetheus.Back.Extensions;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -24,9 +20,11 @@ public class GitLightService(
     IHubContext<GitRealtimeHub> hub,
     IMemoryCache cache,
     GitBranchProtectionService branchProtection,
+    GitAiPatchService aiPatch,
     ILogger<GitLightService> logger,
     TimeProvider timeProvider) : IGitLightService
 {
+    internal const int MaximumCommitPatchFiles = 100;
     private readonly GitLightOptions _options = options.Value;
 
     private Task BroadcastAsync(int repoId, string @event, CancellationToken ct = default) =>
@@ -155,6 +153,14 @@ public class GitLightService(
         return GitLightMapper.MapRepoToDto(entity!, BuildCloneUrl(entity!.ProjectId, entity.Slug));
     }
 
+    public async Task EnsureRepositoryInitializedAsync(int id, CancellationToken ct = default)
+    {
+        var entity = await lightRepo.FindByIdAsync(id, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException($"Repository {id} not found.");
+        var diskPath = ResolveDiskPath(entity.ProjectId, entity.Slug);
+        await cli.InitBareRepoAsync(diskPath, entity.DefaultBranch, ct).ConfigureAwait(false);
+    }
+
     public async Task<GitLightRepoDto?> UpdateRepositoryAsync(int id, UpdateGitLightRepoRequest request, CancellationToken ct = default)
     {
         var entity = await lightRepo.FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -172,8 +178,11 @@ public class GitLightService(
             if (!entity.IsEmpty)
             {
                 var branches = await cli.GetBranchesAsync(diskPath, entity.DefaultBranch, ct).ConfigureAwait(false);
-                if (!branches.Any(branch => string.Equals(branch.Name, requestedDefaultBranch, StringComparison.Ordinal)))
+                var matchingBranch = branches.FirstOrDefault(
+                    branch => string.Equals(branch.Name, requestedDefaultBranch, StringComparison.OrdinalIgnoreCase));
+                if (matchingBranch is null)
                     throw new BadRequestException($"Branch '{requestedDefaultBranch}' does not exist.");
+                requestedDefaultBranch = matchingBranch.Name;
             }
 
             await cli.SetHeadAsync(diskPath, requestedDefaultBranch, ct).ConfigureAwait(false);
@@ -230,7 +239,9 @@ public class GitLightService(
         if (entity is null) return new PaginatedResult<GitLightCommitDto> { Items = [], TotalCount = 0, Page = page, PageSize = pageSize };
 
         var diskPath = ResolveDiskPath(entity.ProjectId, entity.Slug);
-        var effectiveRef = refName ?? entity.DefaultBranch;
+        var effectiveRef = string.Equals(refName, GitReference.AllBranches, StringComparison.Ordinal)
+            ? null
+            : refName ?? entity.DefaultBranch;
         page = Math.Max(page, 1);
         pageSize = PaginationDefaults.Clamp(pageSize);
 
@@ -259,18 +270,36 @@ public class GitLightService(
     public async Task<GitLightCommitDetailDto?> GetCommitDetailAsync(int repoId, string sha, CancellationToken ct = default)
     {
         if (!GitUnifiedDiffParser.IsSha(sha)) return null;
+        var normalizedSha = sha.ToLowerInvariant();
 
         var entity = await lightRepo.FindByIdAsync(repoId, ct).ConfigureAwait(false);
         if (entity is null) return null;
 
         var diskPath = ResolveDiskPath(entity.ProjectId, entity.Slug);
-        var commits = await cli.GetCommitsAsync(diskPath, sha, 0, 1, ct: ct).ConfigureAwait(false);
+        var commits = await cli.GetCommitsAsync(diskPath, normalizedSha, 0, 1, ct: ct).ConfigureAwait(false);
         var commit = commits.FirstOrDefault();
         if (commit is null) return null;
 
-        var fromRef = commit.ParentShas.Count > 0 ? commit.ParentShas[0] : GitUnifiedDiffParser.EmptyTreeSha;
-        var patch = await cli.GetCommitPatchAsync(diskPath, fromRef, commit.Sha, ct).ConfigureAwait(false);
-        return new GitLightCommitDetailDto { Commit = commit, Diff = GitUnifiedDiffParser.Parse(patch) };
+        var patch = commit.ParentShas.Count > 0
+            ? await cli.GetCommitPatchAsync(diskPath, commit.ParentShas[0], commit.Sha, ct).ConfigureAwait(false)
+            : await cli.GetRootCommitPatchAsync(diskPath, commit.Sha, ct).ConfigureAwait(false);
+        return new GitLightCommitDetailDto
+        {
+            Commit = commit,
+            Diff = GitUnifiedDiffParser.Parse(
+                patch.Patch,
+                MaximumCommitPatchFiles,
+                patch.IsTruncated)
+        };
+    }
+
+    public async Task<Dictionary<string, string>> GetCommitMessagesAsync(int repoId, IReadOnlyCollection<string> shas, CancellationToken ct = default)
+    {
+        if (shas.Count is < 1 or > 200 || shas.Any(sha => !GitUnifiedDiffParser.IsSha(sha)))
+            throw new ArgumentException("Between 1 and 200 hexadecimal commit SHAs are required.", nameof(shas));
+        var entity = await lightRepo.FindByIdAsync(repoId, ct).ConfigureAwait(false);
+        if (entity is null) return [];
+        return await cli.GetCommitMessagesAsync(ResolveDiskPath(entity.ProjectId, entity.Slug), shas, ct).ConfigureAwait(false);
     }
 
     // ── Branches ─────────────────────────────────────────────────────
@@ -294,6 +323,11 @@ public class GitLightService(
         await BroadcastAsync(repoId, GitRealtimeEvents.BranchesChanged, ct).ConfigureAwait(false);
     }
 
+    public Task<(bool Success, string? CommitSha, string? Error)> ApplyPatchAsync(
+        int repoId, string branch, string patch, CancellationToken ct = default) =>
+        aiPatch.ApplyAsync(repoId, branch, patch, BroadcastBranchesChangedAsync, ct);
+    private Task BroadcastBranchesChangedAsync(int repoId, CancellationToken ct) =>
+        BroadcastAsync(repoId, GitRealtimeEvents.BranchesChanged, ct);
     public async Task DeleteBranchAsync(int repoId, string name, CancellationToken ct = default)
     {
         var entity = await lightRepo.FindByIdAsync(repoId, ct).ConfigureAwait(false);
@@ -384,7 +418,8 @@ public class GitLightService(
             return new PaginatedResult<InternalPullRequestDto> { Items = [], TotalCount = 0, Page = page, PageSize = pageSize };
 
         var (items, totalCount) = await gitRepo.GetPullRequestsPagedAsync(
-            entity.GitConnectionId.Value, request.Search, page, pageSize, request.Status, ct).ConfigureAwait(false);
+            entity.GitConnectionId.Value, request.Search, page, pageSize, request.Status, ct,
+            GitLightMapper.MapPrSortKey(request.SortBy), request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<InternalPullRequestDto>
         {
@@ -444,11 +479,9 @@ public class GitLightService(
     public async Task<InternalPullRequestDto?> MergePullRequestAsync(
         int repoId, int prId, string authorLogin, CancellationToken ct = default)
     {
-        var entity = await lightRepo.FindByIdAsync(repoId, ct).ConfigureAwait(false);
-        if (entity is null || !entity.GitConnectionId.HasValue) return null;
-
-        var pr = await gitRepo.FindPullRequestByExternalIdAsync(entity.GitConnectionId.Value, prId, ct).ConfigureAwait(false);
-        if (pr is null || pr.Status != PullRequestStatus.Open) return null;
+        var (entity, pr) = await GitPullRequestResolver
+            .FindOpenAsync(lightRepo, gitRepo, repoId, prId, ct).ConfigureAwait(false);
+        if (entity is null || pr is null) return null;
 
         var diskPath = ResolveDiskPath(entity.ProjectId, entity.Slug);
         var (success, mergeCommitSha, error) = await cli.MergeBranchesAsync(
@@ -475,11 +508,9 @@ public class GitLightService(
 
     public async Task<InternalPullRequestDto?> ClosePullRequestAsync(int repoId, int prId, CancellationToken ct = default)
     {
-        var entity = await lightRepo.FindByIdAsync(repoId, ct).ConfigureAwait(false);
-        if (entity is null || !entity.GitConnectionId.HasValue) return null;
-
-        var pr = await gitRepo.FindPullRequestByExternalIdAsync(entity.GitConnectionId.Value, prId, ct).ConfigureAwait(false);
-        if (pr is null || pr.Status != PullRequestStatus.Open) return null;
+        var (_, pr) = await GitPullRequestResolver
+            .FindOpenAsync(lightRepo, gitRepo, repoId, prId, ct).ConfigureAwait(false);
+        if (pr is null) return null;
 
         pr.Status = PullRequestStatus.Closed;
         pr.LastSyncedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -509,18 +540,8 @@ public class GitLightService(
         => GitRepoPathResolver.TryResolve(_options.RepositoriesPath, projectId, slug)
            ?? throw new BadRequestException("Invalid repository path.");
 
-    public string BuildCloneUrl(int projectId, string slug)
-    {
-        var httpContext = httpContextAccessor.HttpContext;
-        if (httpContext is null) return string.Empty;
-
-        // Config-first (Aetheus:PublicApiBaseUrl wins), matching MirrorCloneUrl.Build: in prod the
-        // backend sits behind the Apache TLS proxy, so the raw request scheme is http on the loopback
-        // hop. The configured canonical HTTPS URL is the single source of truth; the request host is a
-        // dev-only fallback (dev already serves https).
-        var baseUrl = HostUrlExtensions.ResolvePublicApiUrl(configuration, httpContext);
-        return $"{baseUrl}/git/{projectId}/{slug}.git";
-    }
+    public string BuildCloneUrl(int projectId, string slug) =>
+        MirrorCloneUrl.Build(configuration, httpContextAccessor.HttpContext, projectId, slug);
 
     // ── Blame ────────────────────────────────────────────────────────
 

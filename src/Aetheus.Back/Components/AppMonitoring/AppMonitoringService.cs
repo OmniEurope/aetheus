@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -19,10 +14,16 @@ public sealed class AppMonitoringService(
     public async Task<List<MonitoredAppDto>> GetAppsForProjectAsync(int projectId, CancellationToken ct = default)
     {
         var apps = await repo.GetAppsByProjectAsync(projectId, ct).ConfigureAwait(false);
-        var result = new List<MonitoredAppDto>(apps.Count);
-        foreach (var app in apps)
-            result.Add(await MapWithUptimeAsync(app, ct).ConfigureAwait(false));
-        return result;
+        if (apps.Count == 0)
+            return [];
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var uptimes = await repo.GetUptimeWindowsAsync(
+            apps.Select(app => app.Id).ToList(), now, ct).ConfigureAwait(false);
+        return apps.Select(app => MapWithUptime(
+            app,
+            uptimes.GetValueOrDefault(app.Id),
+            now)).ToList();
     }
 
     public async Task<MonitoredAppDto?> GetAppAsync(int id, CancellationToken ct = default)
@@ -190,11 +191,21 @@ public sealed class AppMonitoringService(
 
         var apps = await repo.GetAppsForSummaryAsync(accessibleProjectIds, ct).ConfigureAwait(false);
         var telemetryStorageBytes = await repo.GetTelemetryStorageBytesAsync(ct).ConfigureAwait(false);
+        var analyticsAppIds = apps
+            .Where(app => app.AnalyticsEnabled)
+            .Select(app => app.Id)
+            .ToList();
+        Dictionary<int, int> activeVisitorCounts = analyticsAppIds.Count == 0
+            ? []
+            : await repo.GetActiveVisitorCountsAsync(
+                analyticsAppIds,
+                timeProvider.GetUtcNow().UtcDateTime.AddMinutes(-5),
+                ct).ConfigureAwait(false);
 
-        var troubled = apps
-            .Where(a => a.CurrentStatus is AppHealthStatus.Down or AppHealthStatus.Degraded)
-            .OrderByDescending(a => a.LastStatusChangeAt ?? DateTime.MinValue)
-            .Take(10)
+        var applications = apps
+            .OrderBy(app => app.CurrentStatus == AppHealthStatus.Up)
+            .ThenByDescending(app => app.LastStatusChangeAt ?? DateTime.MinValue)
+            .ThenBy(app => app.Name)
             .Select(a => new MonitoredAppStatusDto
             {
                 Id = a.Id,
@@ -202,8 +213,15 @@ public sealed class AppMonitoringService(
                 ProjectId = a.ProjectId,
                 ProjectName = a.Project?.Name,
                 CurrentStatus = a.CurrentStatus,
-                LastStatusChangeAt = a.LastStatusChangeAt
+                LastStatusChangeAt = a.LastStatusChangeAt,
+                OnlineVisitorCount = a.AnalyticsEnabled
+                    ? activeVisitorCounts.GetValueOrDefault(a.Id)
+                    : null
             })
+            .ToList();
+        var troubled = applications
+            .Where(app => app.CurrentStatus is AppHealthStatus.Down or AppHealthStatus.Degraded)
+            .Take(10)
             .ToList();
 
         return new AppMonitoringSummaryDto
@@ -214,6 +232,7 @@ public sealed class AppMonitoringService(
             DegradedCount = apps.Count(a => a.CurrentStatus == AppHealthStatus.Degraded),
             UnknownCount = apps.Count(a => a.CurrentStatus == AppHealthStatus.Unknown),
             TelemetryStorageBytes = telemetryStorageBytes,
+            Applications = applications,
             Troubled = troubled
         };
     }
@@ -235,7 +254,8 @@ public sealed class AppMonitoringService(
             var eventType = next switch
             {
                 AppHealthStatus.Down => "app.down",
-                AppHealthStatus.Up when previous == AppHealthStatus.Down => "app.recovered",
+                AppHealthStatus.Up when previous is AppHealthStatus.Down or AppHealthStatus.Degraded
+                    => "app.recovered",
                 _ => null
             };
 
@@ -267,11 +287,15 @@ public sealed class AppMonitoringService(
     private async Task<MonitoredAppDto> MapWithUptimeAsync(MonitoredApp app, CancellationToken ct)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var (up24, total24) = await repo.GetRawUptimeAsync(app.Id, now.AddHours(-24), ct).ConfigureAwait(false);
-        var (up7, total7) = await repo.GetRawUptimeAsync(app.Id, now.AddDays(-7), ct).ConfigureAwait(false);
-        var (up90, total90) = await repo.GetHourlyUptimeAsync(app.Id, now.AddDays(-90), ct).ConfigureAwait(false);
+        var windows = await repo.GetUptimeWindowsAsync([app.Id], now, ct).ConfigureAwait(false);
+        return MapWithUptime(app, windows.GetValueOrDefault(app.Id), now);
+    }
 
-        return new MonitoredAppDto
+    private static MonitoredAppDto MapWithUptime(
+        MonitoredApp app,
+        AppUptimeWindowCounts uptime,
+        DateTime now) =>
+        new()
         {
             Id = app.Id,
             ProjectId = app.ProjectId,
@@ -293,15 +317,15 @@ public sealed class AppMonitoringService(
             LastCheckedAt = app.LastCheckedAt,
             LastResponseTimeMs = app.LastResponseTimeMs,
             CreatedAt = app.CreatedAt,
-            Uptime24h = total24 > 0 ? (double)up24 / total24 : null,
-            Uptime7d = total7 > 0 ? (double)up7 / total7 : null,
-            Uptime90d = total90 > 0 ? (double)up90 / total90 : null,
-            HasIngestKey = app.IngestKeyHash is not null,
+            Uptime24h = uptime.Total24h > 0 ? (double)uptime.Up24h / uptime.Total24h : null,
+            Uptime7d = uptime.Total7d > 0 ? (double)uptime.Up7d / uptime.Total7d : null,
+            Uptime90d = uptime.Total90d > 0 ? (double)uptime.Up90d / uptime.Total90d : null,
+            HasIngestKey = app.IngestKeyHash is not null
+                           && app.IngestKeyExpiresAt >= now,
             IngestKeyCreatedAt = app.IngestKeyCreatedAt,
             IngestDroppedCount = app.IngestDroppedCount,
             LastIngestAt = app.LastIngestAt
         };
-    }
 
     private static void ValidateProbeUrl(string? url)
     {

@@ -28,8 +28,8 @@ public class ServerConfigSectionMethodTests : BunitContext
     [InlineData("enable", BadgeStyle.Success)]
     [InlineData("update", BadgeStyle.Info)]
     [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("unknown", BadgeStyle.Secondary)]
-    [InlineData("delete", BadgeStyle.Secondary)]
+    [InlineData("unknown", BadgeStyle.Light)]
+    [InlineData("delete", BadgeStyle.Light)]
     public void GetChangeBadgeStyle_ReturnsExpected(string action, BadgeStyle expected)
     {
         var method = typeof(ServerConfigSection).GetMethod("GetChangeBadgeStyle", PrivStatic)!;
@@ -60,7 +60,7 @@ public class ServerConfigSectionMethodTests : BunitContext
     }
 
     [Fact]
-    public async Task ValidateConfigAsync_EmptyYaml_DoesNothing()
+    public async Task ValidateConfigAsync_EmptyYaml_MakesNoRequest()
     {
         var cut = RenderSection();
         typeof(ServerConfigSection).GetField("_configImportYaml", Priv)!.SetValue(cut.Instance, "");
@@ -68,8 +68,10 @@ public class ServerConfigSectionMethodTests : BunitContext
         var method = typeof(ServerConfigSection).GetMethod("ValidateConfigAsync", Priv)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var validating = (bool)typeof(ServerConfigSection).GetField("_configValidating", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(validating);
+        // A360-09: _configValidating is false in BOTH branches (set true then false again), so
+        // asserting it proved nothing: deleting the guard left this test green. The guard's actual
+        // effect is that no call is made, so that is what is asserted now.
+        Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("configuration/validate"));
     }
 
     [Fact]
@@ -86,7 +88,7 @@ public class ServerConfigSectionMethodTests : BunitContext
     }
 
     [Fact]
-    public async Task PreviewConfigAsync_EmptyYaml_DoesNothing()
+    public async Task PreviewConfigAsync_EmptyYaml_MakesNoRequest()
     {
         var cut = RenderSection();
         typeof(ServerConfigSection).GetField("_configImportYaml", Priv)!.SetValue(cut.Instance, " ");
@@ -94,8 +96,7 @@ public class ServerConfigSectionMethodTests : BunitContext
         var method = typeof(ServerConfigSection).GetMethod("PreviewConfigAsync", Priv)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var previewing = (bool)typeof(ServerConfigSection).GetField("_configPreviewing", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(previewing);
+        Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("configuration/preview"));
     }
 
     [Fact]
@@ -112,7 +113,7 @@ public class ServerConfigSectionMethodTests : BunitContext
     }
 
     [Fact]
-    public async Task DeployConfigAsync_EmptyYaml_DoesNothing()
+    public async Task DeployConfigAsync_EmptyYaml_MakesNoRequest()
     {
         var cut = RenderSection();
         typeof(ServerConfigSection).GetField("_configImportYaml", Priv)!.SetValue(cut.Instance, "");
@@ -120,8 +121,7 @@ public class ServerConfigSectionMethodTests : BunitContext
         var method = typeof(ServerConfigSection).GetMethod("DeployConfigAsync", Priv)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var deploying = (bool)typeof(ServerConfigSection).GetField("_configDeploying", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(deploying);
+        Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("configuration/deploy"));
     }
 
     [Fact]

@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
+using System.Text.Json;
 
 namespace Aetheus.Front.Pages.Git;
 
@@ -21,17 +13,24 @@ public partial class GitRepositories : IAsyncDisposable
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
+    [Inject] private ILogger<GitRepositories> Logger { get; set; } = default!;
 
     private HubConnection? _hub;
+    private CancellationTokenSource? _loadCts;
+    private int _loadGeneration;
     private AetheusDataGrid<GitLightRepoDto>? _grid;
     private readonly HashSet<int> _joinedRepositoryIds = [];
 
     [SupplyParameterFromQuery(Name = "projectId")]
     public int? ProjectId { get; set; }
 
+    [SupplyParameterFromQuery(Name = "create")]
+    public bool CreateRequested { get; set; }
+
     private List<GitLightRepoDto> _repos = [];
     private int _totalCount;
     private List<ProjectDto> _projects = [];
+    private bool _projectsLoaded;
     private string? _search;
     private bool _loading;
     private bool _canWrite;
@@ -41,6 +40,14 @@ public partial class GitRepositories : IAsyncDisposable
     private int _pageSize = 25;
     private string _sortBy = "Name";
     private bool _sortDescending;
+    private bool _createDialogOpened;
+    internal bool IsLoading => _loading;
+    internal int? ActiveProjectFilter => _projectFilter;
+    internal IReadOnlyList<GitLightRepoDto> Repositories => _repos;
+    internal int RepositoryCount => _totalCount;
+    private string GitGridClass => !_loading && _totalCount == 0
+        ? "pipeline-list-grid git-repositories-grid-empty"
+        : "pipeline-list-grid";
 
     protected override async Task OnInitializedAsync()
     {
@@ -53,11 +60,18 @@ public partial class GitRepositories : IAsyncDisposable
         RefreshCanWrite();
         try
         {
-            _projects = await Api.GetAllProjectsAsync();
+            _projects = await Api.Projects.GetAllProjectsAsync();
+            _projectsLoaded = true;
         }
-        catch (HttpRequestException) { _projects = []; }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            GitLoadFailureLogger.Log(Logger, ex, "projects", detailPage: false);
+            _projects = [];
+            _projectsLoaded = false;
+        }
         ApplyProjectFilterFromQuery();
         await LoadData();
+        if (RedirectToOnlyRepositoryIfNeeded()) return;
         await ConnectHub();
     }
 
@@ -109,6 +123,14 @@ public partial class GitRepositories : IAsyncDisposable
         InvokeAsync(StateHasChanged);
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_createDialogOpened || !CreateRequested || !_projectFilter.HasValue || !_canWrite) return;
+        _createDialogOpened = true;
+        await ShowCreateDialog();
+        Nav.NavigateTo($"git-repositories?projectId={_projectFilter.Value}", replace: true);
+    }
+
     private void RefreshCanWrite() =>
         _canWrite = Permissions.CanWrite(Aetheus.Shared.Enums.ResourceType.Project);
 
@@ -124,32 +146,49 @@ public partial class GitRepositories : IAsyncDisposable
         await ResetAndReloadAsync();
     }
 
-    private async Task LoadData()
+    internal async Task LoadData()
     {
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        using var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _loadCts, cts);
+        previous?.Cancel();
         _loading = true;
         // No project filter => list every repo the user can access (backend cross-project view);
         // a filter narrows to that project. try/catch for the OnInitializedAsync path: an expired-JWT
         // 401 must fall through to an empty list, not trip the ErrorBoundary during the auth redirect.
         try
         {
-            var result = await Api.GetGitReposPageAsync(
-                _currentPage, _pageSize, _projectFilter, _search, _sortBy, _sortDescending);
+            var result = await Api.Git.GetGitReposPageAsync(
+                _currentPage, _pageSize, _projectFilter, _search, _sortBy, _sortDescending, cts.Token);
+            if (generation != _loadGeneration) return;
             _repos = result.Items;
             _totalCount = result.TotalCount;
             await JoinVisibleRepositoryGroupsAsync();
         }
-        catch (HttpRequestException)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            if (generation != _loadGeneration) return;
+            GitLoadFailureLogger.Log(Logger, ex, "repositories", detailPage: false);
             _repos = [];
             _totalCount = 0;
         }
-        finally { _loading = false; }
+        finally
+        {
+            if (generation == _loadGeneration)
+            {
+                _loading = false;
+                Interlocked.CompareExchange(ref _loadCts, null, cts);
+            }
+        }
     }
 
-    private async Task OnLoadDataAsync(LoadDataArgs args)
+    internal async Task OnLoadDataAsync(LoadDataArgs args)
     {
         (_currentPage, _pageSize) = args.ToPageRequest();
-        (_sortBy, _sortDescending) = GetSort(args);
+        (_sortBy, _sortDescending) = args.ToSortRequest("Name");
         await LoadData();
     }
 
@@ -173,7 +212,7 @@ public partial class GitRepositories : IAsyncDisposable
         var name = await Dialog.OpenAsync<GitRepositoryCreateDialog>(
             L["NewRepository"].Value,
             new Dictionary<string, object?> { { "ProjectId", _projectFilter.Value } },
-            new DialogOptions { Width = "500px" });
+            new DialogOptions { Width = "500px", AutoFocusFirstElement = false });
 
         if (name is true)
         {
@@ -189,7 +228,7 @@ public partial class GitRepositories : IAsyncDisposable
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var result = await Api.DeleteGitRepoAsync(repo.Id);
+        var result = await Api.Git.DeleteGitRepoAsync(repo.Id);
         if (result)
         {
             Toast.Success("Deleted", repo.Name);
@@ -222,7 +261,7 @@ public partial class GitRepositories : IAsyncDisposable
             return;
         }
 
-        _projectFilter = _projects.Any(p => p.Id == ProjectId.Value)
+        _projectFilter = !_projectsLoaded || _projects.Any(p => p.Id == ProjectId.Value)
             ? ProjectId.Value
             : null;
     }
@@ -240,16 +279,27 @@ public partial class GitRepositories : IAsyncDisposable
         }
     }
 
-    private static (string SortBy, bool Descending) GetSort(LoadDataArgs args)
+    private bool RedirectToOnlyRepositoryIfNeeded()
     {
-        if (string.IsNullOrWhiteSpace(args.OrderBy)) return ("Name", false);
-        var parts = args.OrderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return (parts[0], parts.Length > 1
-            && string.Equals(parts[1], "desc", StringComparison.OrdinalIgnoreCase));
+        if (CreateRequested || !_projectFilter.HasValue || !string.IsNullOrWhiteSpace(_search)
+            || HasExternalRepositoryFragment() || _currentPage != 1 || _totalCount != 1 || _repos.Count != 1)
+            return false;
+
+        var repository = _repos[0];
+        Nav.NavigateTo($"git-repositories/{repository.Id}?projectId={repository.ProjectId}", replace: true);
+        return true;
     }
+
+    private bool HasExternalRepositoryFragment() => string.Equals(
+        new Uri(Nav.Uri).Fragment,
+        "#external-repository",
+        StringComparison.OrdinalIgnoreCase);
 
     public async ValueTask DisposeAsync()
     {
+        Interlocked.Increment(ref _loadGeneration);
+        var cts = Interlocked.Exchange(ref _loadCts, null);
+        cts?.Cancel();
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_hub is not null)
         {

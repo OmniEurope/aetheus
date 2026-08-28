@@ -1,0 +1,121 @@
+# Toto adapter for the reusable application-candidate contract.
+name: toto-candidate
+# Keep the production-seeded V1 pin until a deployed backend publishes newer immutable template versions.
+extends: application-candidate@1
+trigger: manual
+variable_libraries:
+  - toto-observability
+parameters:
+  - name: telemetry
+    display_name: Inject Aetheus.Telemetry
+    type: boolean
+    default: "false"
+  - name: telemetryVersion
+    display_name: Exact Aetheus.Telemetry version
+    type: string
+    default: "0.1.0"
+  - name: telemetrySha256
+    display_name: Exact Aetheus.Telemetry package digest
+    type: string
+    default: ""
+  - name: webAnalytics
+    display_name: Inject Aetheus.WebAnalytics
+    type: boolean
+    default: "false"
+  - name: webAnalyticsVersion
+    display_name: Exact Aetheus.WebAnalytics version
+    type: string
+    default: "0.1.0"
+  - name: webAnalyticsSha256
+    display_name: Exact Aetheus.WebAnalytics package digest
+    type: string
+    default: ""
+variables:
+  APPLICATION_CI_PIPELINE: toto-ci
+  APPLICATION_QUALITY_PIPELINE: toto-quality
+  APPLICATION_SECURITY_PIPELINE: toto-security
+  APPLICATION_QA_PIPELINE: toto-qa
+  APPLICATION_ARTIFACT_NAME: Package-artifacts
+  TOTO_ENABLE_TELEMETRY: "${{ parameters.telemetry }}"
+  TOTO_TELEMETRY_VERSION: "${{ parameters.telemetryVersion }}"
+  TOTO_TELEMETRY_SHA256: "${{ parameters.telemetrySha256 }}"
+  TOTO_ENABLE_WEB_ANALYTICS: "${{ parameters.webAnalytics }}"
+  TOTO_WEB_ANALYTICS_VERSION: "${{ parameters.webAnalyticsVersion }}"
+  TOTO_WEB_ANALYTICS_SHA256: "${{ parameters.webAnalyticsSha256 }}"
+
+stages:
+  - name: Baseline
+    group: Source
+    execution_role: build
+    os: linux
+    steps:
+      - name: Restore factually deployed baseline contract
+        type: restore-artifacts
+        release: current-deployed
+        allow_missing: true
+        continue_on_error: true
+        timeout_seconds: 1200
+      - name: Export immutable baseline identity
+        # The V1 template runs Baseline steps in parallel. Remove its unordered export;
+        # BaselineFallback below evaluates the restore output after Baseline is terminal.
+        remove: true
+
+  - name: BaselineFallback
+    group: Source
+    execution_role: build
+    os: linux
+    depends_on: [Baseline]
+    condition: "ne(variables['DELIVERY_BASELINE_BOOTSTRAP'], 'false')"
+    steps:
+      - name: Export immutable baseline identity
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          echo "##aetheus[setvariable name=DELIVERY_BASELINE_BOOTSTRAP]true"
+        timeout_seconds: 120
+
+  - name: CI
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [BaselineFallback]
+    steps:
+      - name: Build, test and package exact source
+        type: trigger
+        pipeline: toto-ci
+        variables:
+          DELIVERY_BASELINE_BOOTSTRAP: "$(DELIVERY_BASELINE_BOOTSTRAP)"
+          DELIVERY_BASELINE_CANDIDATE_VERSION: "$(DELIVERY_BASELINE_CANDIDATE_VERSION)"
+          DELIVERY_BASELINE_SOURCE_SHA: "$(DELIVERY_BASELINE_SOURCE_SHA)"
+          DELIVERY_BASELINE_CONTRACT_SHA256: "$(DELIVERY_BASELINE_CONTRACT_SHA256)"
+          TOTO_ENABLE_TELEMETRY: "$(TOTO_ENABLE_TELEMETRY)"
+          TOTO_TELEMETRY_VERSION: "$(TOTO_TELEMETRY_VERSION)"
+          TOTO_TELEMETRY_SHA256: "$(TOTO_TELEMETRY_SHA256)"
+          TOTO_ENABLE_WEB_ANALYTICS: "$(TOTO_ENABLE_WEB_ANALYTICS)"
+          TOTO_WEB_ANALYTICS_VERSION: "$(TOTO_WEB_ANALYTICS_VERSION)"
+          TOTO_WEB_ANALYTICS_SHA256: "$(TOTO_WEB_ANALYTICS_SHA256)"
+        timeout_seconds: 7200
+
+  - name: Quality
+    group: Quality
+    execution_role: build
+    os: linux
+    depends_on: [CI]
+    steps:
+      - name: Produce quality evidence and evaluate its gate
+        type: trigger
+        pipeline: toto-quality
+        continue_on_error: true
+        timeout_seconds: 7200
+
+  - name: Security
+    group: Security
+    execution_role: build
+    os: linux
+    depends_on: [CI]
+    steps:
+      - name: Produce security evidence and evaluate its gate
+        type: trigger
+        pipeline: toto-security
+        continue_on_error: true
+        timeout_seconds: 7200

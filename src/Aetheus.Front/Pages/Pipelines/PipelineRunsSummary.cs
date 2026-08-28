@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
+
+namespace Aetheus.Front.Pages.Pipelines;
+
+/// <summary>
+/// Figures behind the summary tiles on a pipeline's Runs tab, computed from the page of runs the
+/// grid is showing so the tiles and the rows below them can never disagree.
+/// </summary>
+/// <remarks>
+/// Carries no display text: every "nothing to show" case surfaces as null and the view renders its
+/// own localized placeholder, which keeps this type free of the localizer and directly testable.
+/// </remarks>
+public sealed record PipelineRunsSummary(
+    AnalysisGrade? LatestGrade,
+    int SucceededCount,
+    int FinishedCount,
+    TimeSpan? AverageSuccessDuration,
+    DateTime? LastSuccessAt)
+{
+    public static PipelineRunsSummary Create(IReadOnlyList<PipelineRunDto> runs)
+    {
+        var finished = runs.Where(run => run.CompletedAt is not null).ToList();
+
+        // Successful runs only: a run that failed after two minutes would drag the average down and
+        // misrepresent what a normal execution of this pipeline costs.
+        var successDurations = finished
+            .Where(run => run.Status == PipelineStatus.Success)
+            .Select(run => run.CompletedAt!.Value - run.StartedAt)
+            .Where(duration => duration > TimeSpan.Zero)
+            .ToList();
+
+        return new PipelineRunsSummary(
+            LatestGrade: runs
+                .OrderByDescending(run => run.StartedAt)
+                .Select(run => run.GateGrade)
+                .FirstOrDefault(grade => grade is not null),
+            SucceededCount: finished.Count(run => run.Status == PipelineStatus.Success),
+            FinishedCount: finished.Count,
+            AverageSuccessDuration: successDurations.Count == 0
+                ? null
+                : TimeSpan.FromSeconds(successDurations.Average(duration => duration.TotalSeconds)),
+            LastSuccessAt: finished
+                .Where(run => run.Status == PipelineStatus.Success)
+                .OrderByDescending(run => run.CompletedAt)
+                .Select(run => run.CompletedAt)
+                .FirstOrDefault());
+    }
+
+    public int? SuccessPercent => FinishedCount == 0 ? null : SucceededCount * 100 / FinishedCount;
+
+    /// <summary>Success share of the finished runs, or <paramref name="notAvailable"/> when none finished.</summary>
+    public string SuccessRateLabel(string notAvailable) => SuccessPercent is { } percent
+        ? $"{percent}% ({SucceededCount}/{FinishedCount})"
+        : notAvailable;
+
+    /// <summary>Mean duration of the successful runs, or <paramref name="notAvailable"/> when none succeeded.</summary>
+    public string AverageDurationLabel(string notAvailable) => AverageSuccessDuration is { } average
+        ? FormatDuration(average)
+        : notAvailable;
+
+    /// <summary>Local time of the last success, or <paramref name="notAvailable"/> when there is none.</summary>
+    public string LastSuccessLabel(string notAvailable) => LastSuccessAt is { } lastSuccess
+        ? lastSuccess.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture)
+        : notAvailable;
+
+    public static string FormatDuration(TimeSpan duration) => duration.TotalMinutes >= 1
+        ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s"
+        : $"{duration.Seconds}s";
+}

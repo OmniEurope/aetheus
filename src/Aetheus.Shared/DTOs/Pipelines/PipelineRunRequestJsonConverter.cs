@@ -11,6 +11,7 @@ namespace Aetheus.Shared.DTOs;
 public sealed class PipelineRunRequestJsonConverter : JsonConverter<PipelineRunRequest>
 {
     private const string BranchVariable = "AETHEUS_RUN_BRANCH";
+    private const string IdempotencyVariable = "AETHEUS_RUN_IDEMPOTENCY_KEY";
 
     public override PipelineRunRequest? Read(
         ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -22,10 +23,12 @@ public sealed class PipelineRunRequestJsonConverter : JsonConverter<PipelineRunR
 
         var root = document.RootElement;
         var hasCurrentShape = TryGetProperty(root, "parameters", out var parametersElement)
-            || TryGetProperty(root, "sourceBranch", out _);
+            || TryGetProperty(root, "sourceBranch", out _)
+            || TryGetProperty(root, "idempotencyKey", out _);
         if (hasCurrentShape)
         {
             TryGetProperty(root, "sourceBranch", out var branchElement);
+            TryGetProperty(root, "idempotencyKey", out var idempotencyElement);
             return new PipelineRunRequest
             {
                 Parameters = parametersElement.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
@@ -33,19 +36,24 @@ public sealed class PipelineRunRequestJsonConverter : JsonConverter<PipelineRunR
                     : ReadStringDictionary(parametersElement, PipelineRunRequest.MaxParameterCount),
                 SourceBranch = branchElement.ValueKind == JsonValueKind.String
                     ? branchElement.GetString()
+                    : null,
+                IdempotencyKey = idempotencyElement.ValueKind == JsonValueKind.String
+                    ? idempotencyElement.GetString()
                     : null
             };
         }
 
-        var legacy = ReadStringDictionary(root, PipelineRunRequest.MaxParameterCount + 1);
+        var legacy = ReadStringDictionary(root, PipelineRunRequest.MaxParameterCount + 2);
         legacy.Remove(BranchVariable, out var sourceBranch);
+        legacy.Remove(IdempotencyVariable, out var idempotencyKey);
         if (legacy.Count > PipelineRunRequest.MaxParameterCount)
             throw new JsonException(
                 $"Pipeline run parameters cannot contain more than {PipelineRunRequest.MaxParameterCount} entries.");
         return new PipelineRunRequest
         {
             Parameters = legacy.Count == 0 ? null : legacy,
-            SourceBranch = sourceBranch
+            SourceBranch = sourceBranch,
+            IdempotencyKey = idempotencyKey
         };
     }
 
@@ -59,6 +67,8 @@ public sealed class PipelineRunRequestJsonConverter : JsonConverter<PipelineRunR
         }
         if (!string.IsNullOrWhiteSpace(value.SourceBranch))
             writer.WriteString("sourceBranch", value.SourceBranch);
+        if (!string.IsNullOrWhiteSpace(value.IdempotencyKey))
+            writer.WriteString("idempotencyKey", value.IdempotencyKey);
         writer.WriteEndObject();
     }
 

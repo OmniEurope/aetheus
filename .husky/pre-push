@@ -1,0 +1,8 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# The unit suites the CI gate blocks on, run before the code can reach a shared branch.
+# Without this, a red test only surfaced hours later in nightly: commit ad1b1f15 pushed a
+# broken architecture test to develop because pre-commit only builds, and nightly 1955 was
+# the first thing to notice.
+dotnet husky run --group pre-push

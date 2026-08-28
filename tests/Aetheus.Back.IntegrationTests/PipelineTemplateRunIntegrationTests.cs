@@ -3,6 +3,7 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -29,11 +30,14 @@ public sealed class PipelineTemplateRunIntegrationTests(PostgresFixture fixture)
             Status = ServerStatus.Online,
             PipelineRunnerEnabled = true,
             LastHeartbeat = DateTime.UtcNow,
-            OrganizationId = organizationId
+            OrganizationId = organizationId,
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilitiesJson = "[\"pipeline.build\",\"shell.execute\"]"
         };
         var project = new Project
         {
             Name = $"template-project-{suffix}",
+            RepositoryUrl = $"https://git.example/{suffix}.git",
             OrganizationId = organizationId
         };
         var template = new PipelineTemplate
@@ -46,7 +50,7 @@ public sealed class PipelineTemplateRunIntegrationTests(PostgresFixture fixture)
         template.Versions.Add(new PipelineTemplateVersion
         {
             Version = 1,
-            YamlContent = "name: template\nstages:\n  - name: Toolchain\n    steps:\n      - name: Inspect Git\n        shell: git --version",
+            YamlContent = "name: template\nstages:\n  - name: Toolchain\n    steps:\n      - name: Inspect Template\n        shell: echo template-ready",
             ChangelogEntry = "Initial version",
             CreatedByUsername = "integration"
         });
@@ -63,9 +67,15 @@ public sealed class PipelineTemplateRunIntegrationTests(PostgresFixture fixture)
         await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var runService = scope.ServiceProvider.GetRequiredService<IPipelineRunService>();
-        var run = await runService.TriggerRunAsync(pipeline.Id, ct: TestContext.Current.CancellationToken);
+        var run = await runService.TriggerRunAsync(
+            pipeline.Id,
+            new Dictionary<string, string>
+            {
+                ["AETHEUS_SOURCE_COMMIT"] = new('a', 40)
+            },
+            ct: TestContext.Current.CancellationToken);
         Assert.NotNull(run);
-        Assert.Contains("git --version", run.YamlSnapshot, StringComparison.Ordinal);
+        Assert.Contains("echo template-ready", run.YamlSnapshot, StringComparison.Ordinal);
 
         var prepareTask = await db.Tasks.SingleAsync(item => item.PipelineRunId == run.Id, cancellationToken: TestContext.Current.CancellationToken);
         var taskService = scope.ServiceProvider.GetRequiredService<ITaskService>();
@@ -75,6 +85,6 @@ public sealed class PipelineTemplateRunIntegrationTests(PostgresFixture fixture)
 
         var userTask = await db.Tasks.AsNoTracking()
             .SingleAsync(item => item.PipelineRunId == run.Id && item.Id != prepareTask.Id, cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("Inspect Git", userTask.Name);
+        Assert.Equal("Inspect Template", userTask.Name);
     }
 }

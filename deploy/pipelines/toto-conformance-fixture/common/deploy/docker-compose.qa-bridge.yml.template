@@ -1,0 +1,6 @@
+services:
+  api:
+    # QA-only private route for toolchain containers. The ordinary deployment definition
+    # remains loopback-only and never inherits this additional binding.
+    ports:
+      - "${TOTO_BIND_ADDRESS:?TOTO_BIND_ADDRESS must be the private Docker bridge gateway}:${TOTO_PORT}:8080"

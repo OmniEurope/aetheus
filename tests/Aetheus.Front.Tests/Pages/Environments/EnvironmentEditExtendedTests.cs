@@ -59,7 +59,8 @@ public class EnvironmentEditExtendedTests : BunitContext
         _handler.SetJsonResponse("api/servers", BuildServers());
         if (envId.HasValue)
             _handler.SetJsonResponse($"api/environments/{envId}", BuildEnvironment());
-        _handler.SetJsonResponse("api/environments", new EnvironmentDto { Id = 10, Name = "NewEnv" });
+        _handler.SetJsonResponse("api/environments", new PaginatedResult<EnvironmentDto>());
+        _handler.SetJsonResponse(HttpMethod.Post, "api/environments", new EnvironmentDto { Id = 10, Name = "NewEnv" });
     }
 
     // ── TypeStyle static method ────────────────────────────────────────────
@@ -178,7 +179,7 @@ public class EnvironmentEditExtendedTests : BunitContext
     public async Task OnSubmit_Create_CallsApiAndNavigates()
     {
         SetupStubs();
-        _handler.SetJsonResponse("api/environments", new EnvironmentDto { Id = 42, Name = "New" });
+        _handler.SetJsonResponse(HttpMethod.Post, "api/environments", new EnvironmentDto { Id = 42, Name = "New" });
 
         var cut = Render<EnvironmentEdit>(p => p.Add(x => x.Id, (int?)null));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
@@ -223,7 +224,7 @@ public class EnvironmentEditExtendedTests : BunitContext
     public async Task OnSubmit_Create_NullResponse_DoesNotNavigate()
     {
         SetupStubs();
-        _handler.SetJsonResponse("api/environments", (EnvironmentDto?)null);
+        _handler.SetJsonResponse(HttpMethod.Post, "api/environments", (EnvironmentDto?)null);
 
         var cut = Render<EnvironmentEdit>(p => p.Add(x => x.Id, (int?)null));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
@@ -265,11 +266,15 @@ public class EnvironmentEditExtendedTests : BunitContext
     {
         _handler.SetPaginatedJsonResponse<ProjectDto>(
             HttpMethod.Get,
-            "api/projects?page=1&pageSize=100",
+            "api/projects?page=1&pageSize=200",
             []);
         _handler.SetPaginatedJsonResponse<ServerDto>(
             HttpMethod.Get,
             "api/servers?page=1&pageSize=100",
+            []);
+        _handler.SetPaginatedJsonResponse<EnvironmentDto>(
+            HttpMethod.Get,
+            "api/environments?page=1&pageSize=100",
             []);
         var cut = Render<EnvironmentEdit>();
         var optionsField = typeof(EnvironmentEdit).GetField("_typeOptions", Priv)!;

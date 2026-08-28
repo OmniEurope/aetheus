@@ -1,0 +1,52 @@
+# =============================================================================
+# toto-legacy-orchestration-accept - Orchestration pipeline for Toto (was: toto-deploy)
+# =============================================================================
+# The single launchable "deploy to accept" pipeline. It runs CI, then the QA
+# pipeline, then the environment-deployment pipeline, in sequence, WITHOUT
+# modifying any of them:
+#   1. CI      - type: trigger -> launches `toto-ci` and WAITS for it to finish.
+#   2. QA      - type: trigger -> launches `toto-qa` and WAITS for it to finish.
+#   3. Deploy  - type: trigger -> launches `toto-accept-deploy` and WAITS for it.
+#
+# Each `type: trigger` step starts the named pipeline (same project) as a child run
+# and blocks until it reaches a terminal status; a child failure fails the trigger
+# step (and, by default, this run), so QA never runs on a red CI and the deploy
+# never runs on a red QA. Cycle/depth guards apply (UPSTREAM_CHAIN). This is the
+# in-run orchestration counterpart to the on_success: chaining demo (toto-ci-trigger).
+#
+# The three pipelines are independent and each runs exactly once: toto-ci owns the
+# build/test/lint/package, toto-qa owns the throwaway-stack integration + e2e, and
+# toto-accept-deploy (this Deploy stage, the single deploy) ships to accept.
+name: toto-legacy-orchestration-accept
+trigger: manual
+
+stages:
+  - name: CI
+    os: linux
+    steps:
+      - name: Build & test (toto-ci)
+        type: trigger
+        pipeline: toto-legacy-ci
+        timeout_seconds: 3600
+
+  - name: QA
+    os: linux
+    group: QA
+    depends_on:
+      - CI
+    steps:
+      - name: QA suite (toto-qa)
+        type: trigger
+        pipeline: toto-legacy-qa
+        timeout_seconds: 3600
+
+  - name: Deploy
+    os: linux
+    group: Deploy
+    depends_on:
+      - QA
+    steps:
+      - name: Deploy to accept (toto-accept-deploy)
+        type: trigger
+        pipeline: toto-legacy-accept-deploy
+        timeout_seconds: 3600

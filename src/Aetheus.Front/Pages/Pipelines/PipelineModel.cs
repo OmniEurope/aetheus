@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -17,4 +16,26 @@ internal sealed class PipelineModel
     public string? SourceBranch { get; set; }
     public int? EnvironmentId { get; set; }
     public int? ProjectServerId { get; set; }
+
+    public CreatePipelineRequest ToCreateRequest() => new()
+    {
+        Name = Name,
+        Description = Description,
+        YamlDefinition = YamlDefinition,
+        ProjectId = ProjectId,
+        SourceBranch = SourceBranch,
+        EnvironmentId = EnvironmentId,
+        ProjectServerId = ProjectServerId
+    };
+
+    public UpdatePipelineRequest ToUpdateRequest() => new()
+    {
+        Name = Name,
+        Description = Description,
+        YamlDefinition = YamlDefinition,
+        ProjectId = ProjectId,
+        SourceBranch = SourceBranch,
+        EnvironmentId = EnvironmentId,
+        ProjectServerId = ProjectServerId
+    };
 }

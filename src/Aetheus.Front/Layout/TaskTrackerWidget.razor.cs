@@ -1,27 +1,18 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Layout;
 
 public partial class TaskTrackerWidget : IDisposable
 {
     [Inject] private TaskTrackerService Tracker { get; set; } = default!;
-    [Inject] private AuthStateProvider Auth { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
 
     private bool _popoverOpen;
     private int _count;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         Tracker.OnChanged += OnTrackerChanged;
-        if (Auth.IsAuthenticated)
-            await Tracker.StartAsync();
         _count = Tracker.Count;
     }
 

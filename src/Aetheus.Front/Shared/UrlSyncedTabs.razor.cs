@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.AspNetCore.Components;
 
 namespace Aetheus.Front.Shared;
 
@@ -22,6 +21,12 @@ public partial class UrlSyncedTabs : ComponentBase
 
     /// <summary>Forwarded to the inner RadzenTabs <c>class</c>.</summary>
     [Parameter] public string? Class { get; set; }
+
+    /// <summary>Forwarded to the inner RadzenTabs rendering strategy.</summary>
+    [Parameter] public TabRenderMode RenderMode { get; set; } = TabRenderMode.Server;
+
+    /// <summary>Forwarded to the inner RadzenTabs title position.</summary>
+    [Parameter] public TabPosition TabPosition { get; set; } = TabPosition.Top;
 
     private string CssClass => string.IsNullOrWhiteSpace(Class)
         ? "url-synced-tabs"
@@ -58,7 +63,13 @@ public partial class UrlSyncedTabs : ComponentBase
         var urlChanged = !_tabInitialized || !string.Equals(Tab, _lastTab, StringComparison.Ordinal);
         if (urlChanged)
         {
-            target = IndexForSlug(Tab);
+            // A bound parent may compute a non-zero default from the loaded content before this
+            // wrapper's first parameter pass (for example, skip an empty first catalog tab). Honour
+            // that initial programmatic default when the URL carries no explicit tab. Subsequent
+            // navigation back to a clean URL still resets to the first tab.
+            target = !_tabInitialized && string.IsNullOrEmpty(Tab) && SelectedIndex != 0
+                ? SelectedIndex
+                : IndexForSlug(Tab);
             _lastTab = Tab;
             _tabInitialized = true;
         }

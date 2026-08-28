@@ -43,11 +43,11 @@ public sealed class TotpIntegrationTests(PostgresFixture fixture)
     /// Generates a valid TOTP code from the base32 shared key returned by the setup endpoint.
     /// Uses the same OtpNet library as the server.
     /// </summary>
-    private static string GenerateTotpCode(string base32SharedKey)
+    private static string GenerateTotpCode(string base32SharedKey, DateTime? timestamp = null)
     {
         var secretBytes = Base32Encoding.ToBytes(base32SharedKey);
         var totp = new Totp(secretBytes, step: 30, totpSize: 6);
-        return totp.ComputeTotp();
+        return timestamp is null ? totp.ComputeTotp() : totp.ComputeTotp(timestamp.Value);
     }
 
     [Fact]
@@ -114,6 +114,15 @@ public sealed class TotpIntegrationTests(PostgresFixture fixture)
             TotpCode = "0000000"
         }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, badCodeResp.StatusCode);
+
+        // A syntactically valid code well outside the ±1-step acceptance window must also fail.
+        var expiredCodeResp = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            Username = username,
+            Password = password,
+            TotpCode = GenerateTotpCode(setup.SharedKey, DateTime.UtcNow.AddMinutes(-2))
+        }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, expiredCodeResp.StatusCode);
 
         // Step 5: Login WITH valid TOTP code - should succeed.
         var validCode = GenerateTotpCode(setup.SharedKey);

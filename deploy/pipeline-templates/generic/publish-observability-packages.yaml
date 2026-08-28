@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: publish-observability-packages-template
+trigger: manual
+variables:
+  APPLICATION_PACKAGE_TELEMETRY_PIPELINE: package-telemetry
+  APPLICATION_PACKAGE_DOTNET_ANALYTICS_PIPELINE: package-web-analytics-dotnet
+  APPLICATION_PACKAGE_BROWSER_ANALYTICS_PIPELINE: package-web-analytics-browser
+
+stages:
+  - name: BuildPackages
+    group: Packages
+    execution_role: build
+    os: linux
+    steps:
+      - name: Build telemetry package
+        type: trigger
+        pipeline: "$(APPLICATION_PACKAGE_TELEMETRY_PIPELINE)"
+        timeout_seconds: 3600
+      - name: Build .NET analytics package
+        type: trigger
+        pipeline: "$(APPLICATION_PACKAGE_DOTNET_ANALYTICS_PIPELINE)"
+        timeout_seconds: 3600
+      - name: Build browser analytics package
+        type: trigger
+        pipeline: "$(APPLICATION_PACKAGE_BROWSER_ANALYTICS_PIPELINE)"
+        timeout_seconds: 3600
+
+  - name: PublishPackages
+    group: Release
+    execution_role: build
+    os: linux
+    depends_on: [BuildPackages]
+    steps:
+      - name: Restore telemetry package
+        type: restore-artifacts
+        artifact: Package-artifacts
+        artifact_source_pipeline: "$(APPLICATION_PACKAGE_TELEMETRY_PIPELINE)"
+      - name: Restore .NET analytics package
+        type: restore-artifacts
+        artifact: Package-artifacts
+        artifact_source_pipeline: "$(APPLICATION_PACKAGE_DOTNET_ANALYTICS_PIPELINE)"
+      - name: Restore browser analytics package
+        type: restore-artifacts
+        artifact: Package-artifacts
+        artifact_source_pipeline: "$(APPLICATION_PACKAGE_BROWSER_ANALYTICS_PIPELINE)"
+      - name: Publish qualified package set
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/publish-packages.sh
+          sh .pipeline/scripts/publish-packages.sh
+        timeout_seconds: 3600

@@ -23,6 +23,11 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS agent-build
 WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props NuGet.config ./
+COPY scanner-manifest.json ./
+COPY .aetheus/security-rules/opengrep/aetheus-security.yml .aetheus/security-rules/opengrep/aetheus-security.yml
+COPY deploy/scripts/zap-active-automation.sh deploy/scripts/zap-active-automation.sh
+COPY deploy/scripts/publish-observability-package.sh deploy/scripts/publish-observability-package.sh
+COPY deploy/scripts/promote-observability-packages.sh deploy/scripts/promote-observability-packages.sh
 COPY src/Aetheus.Shared/Aetheus.Shared.csproj src/Aetheus.Shared/
 COPY src/Aetheus.Agent.Core/Aetheus.Agent.Core.csproj src/Aetheus.Agent.Core/
 COPY src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj src/Aetheus.Agent.Linux/
@@ -30,6 +35,9 @@ RUN dotnet restore src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj -r linux-x
 COPY src/Aetheus.Shared/ src/Aetheus.Shared/
 COPY src/Aetheus.Agent.Core/ src/Aetheus.Agent.Core/
 COPY src/Aetheus.Agent.Linux/ src/Aetheus.Agent.Linux/
+COPY deploy/scripts/zap-active-automation.sh deploy/scripts/zap-active-automation.sh
+COPY deploy/scripts/publish-observability-package.sh deploy/scripts/publish-observability-package.sh
+COPY deploy/scripts/promote-observability-packages.sh deploy/scripts/promote-observability-packages.sh
 RUN dotnet publish src/Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj \
         -c Release -r linux-x64 --self-contained true -o /agentpkg
 COPY deploy/scripts/install-agent-linux.sh /agentpkg/install-agent-linux.sh
@@ -80,6 +88,26 @@ RUN mkdir -p /var/www/vpssim \
         > /etc/apache2/sites-available/vpssim.conf \
     && a2ensite vpssim >/dev/null
 
+# --- Documentation site: the second static property the cutover publishes -----
+#     The mirror already had a vhost for the vitrine (aetheus.localhost) but none for the docs, so
+#     deploy-local run 1173 published /var/www/aetheus-docs correctly and Apache still answered
+#     docs.aetheus.localhost with the stock Debian page. Same shape as the vitrine vhost, plain HTTP
+#     because no authority issues certificates for a *.localhost name.
+RUN mkdir -p /var/www/aetheus-docs \
+    && printf '%s\n' \
+        '<VirtualHost *:80>' \
+        '    ServerName docs.aetheus.localhost' \
+        '    DocumentRoot /var/www/aetheus-docs' \
+        '    <Directory /var/www/aetheus-docs>' \
+        '        Require all granted' \
+        '        Options -Indexes' \
+        '    </Directory>' \
+        '    ErrorLog ${APACHE_LOG_DIR}/docs.aetheus.localhost_error.log' \
+        '    CustomLog ${APACHE_LOG_DIR}/docs.aetheus.localhost_access.log combined' \
+        '</VirtualHost>' \
+        > /etc/apache2/sites-available/011-aetheus-docs-local.conf \
+    && a2ensite 011-aetheus-docs-local >/dev/null
+
 # --- CertbotCollector: a real (self-signed) cert in the Let's Encrypt layout.
 #     Not LE-signed (impossible on localhost) but a genuine X.509 the collector
 #     parses for expiry/SANs. /etc/letsencrypt/live/<domain>/{fullchain,privkey}.pem
@@ -91,6 +119,27 @@ RUN mkdir -p /etc/letsencrypt/live/vpssim.local \
         -addext "subjectAltName=DNS:vpssim.local,DNS:www.vpssim.local" >/dev/null 2>&1 \
     && chmod 644 /etc/letsencrypt/live/vpssim.local/fullchain.pem \
     && chmod 600 /etc/letsencrypt/live/vpssim.local/privkey.pem
+
+# --- Nightly demo: the same Let's Encrypt layout for the demo hostname, plus the trust that makes
+#     it usable. vpssim.compose.yml already resolves demo.aetheus.sonytumen.com to this box, and
+#     nightly-demo-prepare.sh only calls the certbot helper when the live directory is missing - so
+#     shipping the certificate here keeps ACME out of the simulation without forking the script.
+#     Registering it as a local CA is what the real host gets for free from Let's Encrypt: without
+#     it the deployment's own smoke probe reached a correctly deployed demo and refused it with
+#     "The SSL connection could not be established", two blocking findings on a healthy cutover.
+#     The gate is untouched - it still demands a valid chain; the simulated host now provides one.
+RUN mkdir -p /etc/letsencrypt/live/demo.aetheus.sonytumen.com \
+    && openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+        -keyout /etc/letsencrypt/live/demo.aetheus.sonytumen.com/privkey.pem \
+        -out /etc/letsencrypt/live/demo.aetheus.sonytumen.com/fullchain.pem \
+        -subj "/CN=demo.aetheus.sonytumen.com/O=Aetheus local simulation (self-signed, NOT a public CA)" \
+        -addext "subjectAltName=DNS:demo.aetheus.sonytumen.com" \
+        -addext "basicConstraints=critical,CA:TRUE" >/dev/null 2>&1 \
+    && chmod 644 /etc/letsencrypt/live/demo.aetheus.sonytumen.com/fullchain.pem \
+    && chmod 600 /etc/letsencrypt/live/demo.aetheus.sonytumen.com/privkey.pem \
+    && install -m 644 /etc/letsencrypt/live/demo.aetheus.sonytumen.com/fullchain.pem \
+        /usr/local/share/ca-certificates/aetheus-local-simulation-demo.crt \
+    && update-ca-certificates >/dev/null 2>&1
 
 # Certbot's Apache plugin creates this shared include on a real host. The local certificate path
 # deliberately avoids ACME, so provide the equivalent secure protocol baseline explicitly; the
@@ -126,6 +175,7 @@ ARG TS3_VERSION=3.13.7
 RUN useradd -r -m -d /opt/teamspeak -s /usr/sbin/nologin teamspeak \
     && wget -qO /tmp/ts3.tar.bz2 \
         "https://files.teamspeak-services.com/releases/server/${TS3_VERSION}/teamspeak3-server_linux_amd64-${TS3_VERSION}.tar.bz2" \
+    && echo "775a5731a9809801e4c8f9066cd9bc562a1b368553139c1249f2a0740d50041e  /tmp/ts3.tar.bz2" | sha256sum -c - \
     && tar -xjf /tmp/ts3.tar.bz2 -C /tmp \
     && cp -a /tmp/teamspeak3-server_linux_amd64/. /opt/teamspeak/ \
     && rm -rf /tmp/ts3.tar.bz2 /tmp/teamspeak3-server_linux_amd64 \
@@ -150,8 +200,26 @@ RUN chmod +x /usr/local/sbin/vpssim-provision.sh \
 COPY --from=agent-build /agentpkg /opt/agent-pkg
 COPY deploy/docker/vpssim-agent-bootstrap.sh /usr/local/sbin/vpssim-agent-bootstrap.sh
 RUN chmod +x /usr/local/sbin/vpssim-agent-bootstrap.sh /opt/agent-pkg/install-agent-linux.sh \
-    && printf '[Unit]\nDescription=VPS-sim agent auto-install\nAfter=docker.service network-online.target vpssim-provision.service\nWants=network-online.target\nConditionPathExists=!/var/lib/vpssim-agent-installed\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/local/sbin/vpssim-agent-bootstrap.sh\n\n[Install]\nWantedBy=multi-user.target\n' \
+    && printf '[Unit]\nDescription=VPS-sim agent auto-install\nAfter=docker.service network-online.target vpssim-provision.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/local/sbin/vpssim-agent-bootstrap.sh\n\n[Install]\nWantedBy=multi-user.target\n' \
         > /etc/systemd/system/vpssim-agent.service
+
+# Node ignores the system CA store and trusts only its own bundled roots, so `npm publish` to the
+# development control plane failed with DEPTH_ZERO_SELF_SIGNED_CERT while curl and dotnet - which do
+# read the system store, where aetheus-dev.crt already lives - succeeded against the same host.
+# Point Node at that same store. This is the opposite of `strict-ssl=false`: the chain is still
+# verified, the simulated host simply provides the root it is verified against, exactly as the demo
+# certificate above does for the deployment smoke probe. Written as a drop-in because the agent unit
+# does not exist yet at build time - install-agent-linux.sh creates it on first boot.
+RUN mkdir -p /etc/systemd/system/aetheus-agent.service.d \
+    && printf '[Service]\nEnvironment=NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt\n' \
+        > /etc/systemd/system/aetheus-agent.service.d/10-node-ca-store.conf
+
+# The simulated host is a 4 GB WSL2 VM, roughly a tenth of the production VPS. BuildKit happily runs
+# two dotnet publishes side by side, which is right on the real host and fatal here: nightly run 1174
+# died with the kernel OOM-killer taking out `csc`. Cap the builder to one step at a time, on this
+# host only - production keeps its full parallelism because the variable simply is not set there.
+RUN printf '[Service]\nEnvironment=AETHEUS_BUILDX_MAX_PARALLELISM=1\n' \
+        > /etc/systemd/system/aetheus-agent.service.d/20-buildx-parallelism.conf
 
 # --- Enable everything on boot ----------------------------------------------
 # Enable units one by one so a missing/odd unit never aborts the rest (a single
@@ -166,12 +234,9 @@ RUN for unit in \
         systemctl enable "$unit" 2>/dev/null || echo "WARN: could not enable $unit"; \
     done
 
-# Throwaway dev access: root login over SSH with a fixed password. Disposable,
-# local-only — never mirror near prod. VPW3: the password is a build arg (default
-# 'aetheus') so it can be overridden per-run instead of being hard-coded here.
-ARG VPSSIM_ROOT_PASSWORD=aetheus
-RUN echo "root:${VPSSIM_ROOT_PASSWORD}" | chpasswd \
-    && mkdir -p /run/sshd \
+# Throwaway dev access is configured at runtime by ylaunch after container start,
+# so no password or password-derived layer is persisted in the image.
+RUN mkdir -p /run/sshd \
     && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && printf '\n=== Aetheus VPS-sim — disposable local sandbox (NOT production) ===\n\n' > /etc/motd
 
@@ -201,6 +266,12 @@ RUN if [ "$INSTALL_DOTNET" = "1" ]; then \
         && /usr/local/bin/dotnet --version; \
     fi
 
+# Safe image default: the supported Compose harness explicitly opts back into
+# uid 0 because systemd-as-PID-1 and Docker-in-Docker require it. A plain
+# `docker run` therefore cannot start this privileged simulator as root by
+# accident.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin vpssim-runtime
+USER vpssim-runtime
+
 STOPSIGNAL SIGRTMIN+3
-EXPOSE 22
 CMD ["/sbin/init"]

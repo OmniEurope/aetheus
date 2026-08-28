@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Artifacts;
 
@@ -18,6 +10,7 @@ public partial class ArtifactDetail
     [Inject] private IJSRuntime Js { get; set; } = default!;
     [Inject] private ClipboardService Clipboard { get; set; } = default!;
     [Inject] private Layout.ProjectNavContextService ProjectNav { get; set; } = default!;
+    [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
 
     [Parameter] public int ArtifactId { get; set; }
 
@@ -39,13 +32,30 @@ public partial class ArtifactDetail
         var artifactId = ArtifactId;
         _loading = true;
         PipelineArtifactDto? artifact;
-        try { artifact = await Api.GetArtifactAsync(artifactId); }
+        try { artifact = await Api.ServerTools.GetArtifactAsync(artifactId); }
         catch (HttpRequestException) { artifact = null; }
         if (ArtifactId != artifactId) return;
         _artifact = artifact;
         if (_artifact?.ProjectId is not null)
             ProjectNav.Set(_artifact.ProjectId.Value);
+        ReassertBreadcrumb();
         _loading = false;
+    }
+
+    private void ReassertBreadcrumb()
+    {
+        if (_artifact is null) return;
+        var current = new BreadcrumbItem(_artifact.Name);
+        if (_artifact.ProjectId is { } projectId)
+        {
+            Breadcrumb.Set(
+                new BreadcrumbItem(L["Projects"], "/projects"),
+                new BreadcrumbItem(_artifact.ProjectName ?? $"{L["Project"]} #{projectId}", $"/projects/{projectId}/overview"),
+                new BreadcrumbItem(L["Artifacts"], $"/projects/{projectId}/artifacts"),
+                current);
+            return;
+        }
+        Breadcrumb.Set(new BreadcrumbItem(L["Artifacts"]), current);
     }
 
     private async Task DownloadAsync()
@@ -55,7 +65,7 @@ public partial class ArtifactDetail
         StateHasChanged();
         try
         {
-            var stream = await Api.DownloadArtifactAsync(_artifact.Id);
+            var stream = await Api.ServerTools.DownloadArtifactAsync(_artifact.Id);
             if (stream is not null)
             {
                 using var streamRef = new DotNetStreamReference(stream);
@@ -82,13 +92,17 @@ public partial class ArtifactDetail
         _ => BadgeStyle.Light
     };
 
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1024 => $"{bytes / 1024.0:F0} KB",
-        _ => $"{bytes} B"
-    };
+    private static string BranchHref(BranchLinkDto branch) => $"/git-repositories/branches/{branch.Id}";
 
-    private static string ShortSha(string commitHash) => commitHash[..Math.Min(8, commitHash.Length)];
+    private string BranchHref(string branchName) => _artifact?.SourceRepositoryId is { } repositoryId
+        ? $"/git-repositories/{repositoryId}?tab=branches&branch={Uri.EscapeDataString(branchName)}"
+        : $"/git-repositories?projectId={_artifact?.ProjectId}";
+
+    private string CommitHref(CommitLinkDto commit) => _artifact?.SourceRepositoryId is { } repositoryId
+        ? $"/git-repositories/{repositoryId}/commits/{Uri.EscapeDataString(commit.Sha)}"
+        : $"/git-repositories/commits/{commit.Id}";
+
+    private string CommitHref(string commitHash) => _artifact?.SourceRepositoryId is { } repositoryId
+        ? $"/git-repositories/{repositoryId}?tab=commits&search={Uri.EscapeDataString(commitHash)}"
+        : $"/git-repositories?projectId={_artifact?.ProjectId}";
 }

@@ -1,6 +1,6 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @* Reusable task list: search + status filter + server-side paginated grid (localized status badge,
-   offline badge, logs viewer) + live SignalR refresh. Hosted by the global /tasks page (no scope)
+   offline badge, detail navigation) + live SignalR refresh. Hosted by the global /tasks page (no scope)
    and by the per-server tasks section (ServerId set), so both share the exact same feature set. *@
 @using Aetheus.Front.Helpers
 
@@ -21,19 +21,54 @@
         Click="@ResetAndReload" aria-label="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
 </div>
 
+@if (_loadFailed)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" class="rz-mb-3">
+        @L["LoadFailed"]
+        <RadzenButton Text="@L["Retry"]" Icon="refresh" Size="ButtonSize.Small"
+            Click="@ReloadGridAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+    </RadzenAlert>
+}
+
 <AetheusDataGrid @ref="_grid" Data="@_tasks" TItem="ServerTaskDto"
-    Count="@_totalCount" PageSize="25" IsLoading="@_loading" LoadData="@OnLoadData" FullHeight="true">
+    Count="@_totalCount" PageSize="25" IsLoading="@_loading" LoadData="@OnLoadData" FullHeight="true"
+    RowClick="@OpenTask">
     <Columns>
-        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Id" Title="#" Width="80px" />
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Id" Title="#" Width="80px">
+            <Template Context="task">
+                <a href="@($"/tasks/{task.Id}")" class="pipeline-name-link"
+                    @onclick:stopPropagation="true">@task.Id</a>
+            </Template>
+        </RadzenDataGridColumn>
         <RadzenDataGridColumn TItem="ServerTaskDto" Property="Name" Title="@L["Name"]" MinWidth="10rem" />
         @if (ServerId is null)
         {
             <RadzenDataGridColumn TItem="ServerTaskDto" Property="ServerName" Title="@L["Server"]" Width="150px" />
         }
+        <RadzenDataGridColumn TItem="ServerTaskDto" Title="@L["Source"]" Width="210px" Sortable="false">
+            <Template Context="task">
+                @if (task.PipelineRunId is { } pipelineRunId)
+                {
+                    <RadzenLink Path="@($"/pipelines/runs/{pipelineRunId}")"
+                        Text="@($"{L["PipelineRun"]} #{pipelineRunId}")" @onclick:stopPropagation="true" />
+                }
+                else
+                {
+                    <RadzenLink Path="@($"/servers/{task.ServerId}/overview")"
+                        Text="@($"{L["Server"]}: {GetSourceServerName(task)}")" @onclick:stopPropagation="true" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
         <RadzenDataGridColumn TItem="ServerTaskDto" Property="Executor" Title="@L["Executor"]" Width="100px" />
-        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="140px">
+        <RadzenDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="270px">
             <Template Context="task">
                 <RadzenBadge BadgeStyle="@GetTaskBadge(task.Status)" Text="@L.Localize(task.Status)" />
+                @if (!string.IsNullOrWhiteSpace(task.FailureCode))
+                {
+                    <RadzenBadge BadgeStyle="@GetFailureBadge(task.FailureCode)"
+                        Icon="@GetFailureIcon(task.FailureCode)"
+                        Text="@L[task.FailureCode]" title="@task.FailureReason" class="rz-ml-1" />
+                }
                 @if (IsStalledOnOfflineAgent(task))
                 {
                     <RadzenBadge BadgeStyle="BadgeStyle.Warning" Icon="cloud_off" Text="@L["TaskAgentOffline"]"
@@ -43,10 +78,5 @@
         </RadzenDataGridColumn>
         <RadzenDataGridColumn TItem="ServerTaskDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" />
         <RadzenDataGridColumn TItem="ServerTaskDto" Property="ExitCode" Title="@L["Exit"]" Width="80px" />
-        <RadzenDataGridColumn TItem="ServerTaskDto" Title="@L["TaskLogsColumn"]" Width="80px" Sortable="false">
-            <Template Context="task">
-                <RadzenButton Icon="receipt_long" Title="@L["Logs"]" Size="ButtonSize.Small" Click="@(() => ViewLogs(task.Id))" aria-label="@L["ViewLogs"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-            </Template>
-        </RadzenDataGridColumn>
     </Columns>
 </AetheusDataGrid>

@@ -1,13 +1,22 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @page "/backups"
 
-<PageTitle>@L["Backups"] - Aetheus</PageTitle>
-
-<Aetheus.Front.Shared.PageHeader Title="@L["Backups"]" Icon="backup">
-    <Actions>
-        <RadzenButton Text="@L["BackupNewPolicy"]" Icon="add" Click="@NewPolicy" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-    </Actions>
-</Aetheus.Front.Shared.PageHeader>
+@if (!ProjectId.HasValue)
+{
+    <PageTitle>@L["Backups"] - Aetheus</PageTitle>
+    <Aetheus.Front.Shared.PageHeader Title="@L["Backups"]" Icon="backup">
+        <Actions>
+            <RadzenButton Text="@L["BackupNewPolicy"]" Icon="add" Click="@NewPolicy" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </Actions>
+    </Aetheus.Front.Shared.PageHeader>
+}
+else
+{
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-3">
+        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["Backups"]</RadzenText>
+        <RadzenButton Text="@L["BackupNewPolicy"]" Icon="add" Size="ButtonSize.Small" Click="@NewPolicy" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+    </RadzenStack>
+}
 
 <RadzenText TextStyle="TextStyle.Body2" class="rz-mb-4">@L["BackupPageDescription"]</RadzenText>
 
@@ -23,16 +32,19 @@
         <RadzenTemplateForm TItem="PolicyForm" Data="@_form" Submit="@(async (PolicyForm _) => await SaveAsync())">
             <LocalizedDataAnnotationsValidator />
             <RadzenStack Gap="1rem">
-                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@(_form.Id == 0 ? L["BackupNewPolicy"] : L["BackupEditPolicy"])</RadzenText>
+                <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@(_form.Id == 0 ? L["BackupNewPolicy"] : L["BackupEditPolicy"])</RadzenText>
                 <RadzenStack Orientation="Orientation.Horizontal" Wrap="FlexWrap.Wrap" Gap="1rem" AlignItems="AlignItems.Start">
                     <RadzenFormField Text="@L["BackupName"]" Variant="Variant.Outlined">
                         <RadzenTextBox @bind-Value="_form.Name" Name="Name" MaxLength="120" />
                         <ValidationMessage For="@(() => _form.Name)" />
                     </RadzenFormField>
-                    <RadzenFormField Text="@L["Project"]" Variant="Variant.Outlined">
-                        <RadzenDropDown TValue="int" @bind-Value="_form.ProjectId" Data="@_projects" ValueProperty="Id" TextProperty="Name" Disabled="@(_form.Id != 0)" />
-                        <ValidationMessage For="@(() => _form.ProjectId)" />
-                    </RadzenFormField>
+                    @if (!ProjectId.HasValue)
+                    {
+                        <RadzenFormField Text="@L["Project"]" Variant="Variant.Outlined">
+                            <RadzenDropDown TValue="int" @bind-Value="_form.ProjectId" Data="@_projects" ValueProperty="Id" TextProperty="Name" Disabled="@(_form.Id != 0)" />
+                            <ValidationMessage For="@(() => _form.ProjectId)" />
+                        </RadzenFormField>
+                    }
                     <RadzenFormField Text="@L["Server"]" Variant="Variant.Outlined">
                         <RadzenDropDown TValue="int" @bind-Value="_form.ServerId" Data="@_servers" ValueProperty="Id" TextProperty="Name" Disabled="@(_form.Id != 0)" />
                         <ValidationMessage For="@(() => _form.ServerId)" />
@@ -102,9 +114,12 @@
     </EmptyTemplate>
     <Columns>
         <RadzenDataGridColumn TItem="BackupPolicyDto" Property="Name" Title="@L["BackupName"]" MinWidth="10rem" />
-        <RadzenDataGridColumn TItem="BackupPolicyDto" Title="@L["Project"]" Width="160px">
-            <Template Context="p">@ProjectName(p.ProjectId)</Template>
-        </RadzenDataGridColumn>
+        @if (!ProjectId.HasValue)
+        {
+            <RadzenDataGridColumn TItem="BackupPolicyDto" Title="@L["Project"]" Width="160px">
+                <Template Context="p">@ProjectName(p.ProjectId)</Template>
+            </RadzenDataGridColumn>
+        }
         <RadzenDataGridColumn TItem="BackupPolicyDto" Title="@L["Server"]" Width="160px">
             <Template Context="p">@ServerName(p.ServerId)</Template>
         </RadzenDataGridColumn>
@@ -136,7 +151,7 @@
 
 @if (_runsFor is not null)
 {
-    <RadzenText TextStyle="TextStyle.H6" class="rz-mt-6 rz-mb-2">@string.Format(L["BackupRunsFor"], _runsFor.Name)</RadzenText>
+    <RadzenText TextStyle="TextStyle.H5" class="rz-mt-6 rz-mb-2">@string.Format(L["BackupRunsFor"], _runsFor.Name)</RadzenText>
     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
         <RadzenTextBox @bind-Value="_runsSearch" Change="@ResetRunsAsync"
             Placeholder="@L["Search"]" class="pipeline-list-search" />

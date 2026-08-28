@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Shared.DTOs.Organizations;
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Services;
 
@@ -21,7 +20,7 @@ public sealed class ActiveOrganizationService(ApiClient api, IJSRuntime js)
 
     public async Task RefreshAsync(CancellationToken ct = default)
     {
-        var orgs = await api.GetMyOrganizationsAsync(ct).ConfigureAwait(false) ?? [];
+        var orgs = await api.Servers.GetMyOrganizationsAsync(ct).ConfigureAwait(false) ?? [];
         Available = orgs;
 
         var stored = await TryGetStoredAsync().ConfigureAwait(false);

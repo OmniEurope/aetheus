@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
-using Radzen.Blazor;
 using static Aetheus.Front.Pages.Pipelines.PipelineRunFormatting;
 
 namespace Aetheus.Front.Pages.Pipelines;
@@ -25,21 +14,23 @@ public partial class PipelineRun : IAsyncDisposable
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private ProjectNavContextService ProjectNav { get; set; } = default!;
+    [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
-
     [Parameter] public int RunId { get; set; }
     [SupplyParameterFromQuery] public int? ProjectId { get; set; }
     [SupplyParameterFromQuery] public int? ServerId { get; set; }
+    private int? EffectiveProjectId => _run?.ProjectId ?? ProjectId;
 
-    private string PipelineHref => ProjectId is { } projectId
+    private string PipelineHref => EffectiveProjectId is { } projectId
         ? $"/pipelines/{_run!.PipelineId}?projectId={projectId}"
         : ServerId is { } serverId ? $"/pipelines/{_run!.PipelineId}?serverId={serverId}" : $"/pipelines/{_run!.PipelineId}";
-
     private PipelineRunDto? _run;
     private PipelineRunMetrics _metrics = new();
+    private readonly PipelineRunGateState _gateState = new();
+    private readonly PipelineRunPageCache _pageCache = new();
     private List<ReleaseDto> _releases = [];
-    // The project's internal mirror repo id, resolved at load so the "Repository" tile deep-links to the
-    // in-app browse page (/git-repositories/{id}) instead of the raw smart-HTTP URL the browser can't open.
+    private List<AiRunResultDto> _aiResults = [];
+    // Internal mirror id used by the Repository tile instead of the raw smart-HTTP URL.
     private int? _repoId;
     private List<StageViewModel> _stages = [];
     private bool _loading;
@@ -49,8 +40,8 @@ public partial class PipelineRun : IAsyncDisposable
     private PipelineRunLiveConnection? _live;
     private bool _rerunning;
     private PipelineRunRerunCoordinator? _rerunCoordinator;
+    private PipelineRunCommandCoordinator? _commandCoordinator;
     private bool _retrying;
-    private System.Threading.Timer? _durationTimer;
     // S-TECH-32: live log streaming for the selected running step (poll stays as fallback). Owned by
     // the log streamer collaborator; the component keeps the shared log cache it writes into.
     private PipelineRunLogStreamer? _logStreamer;
@@ -70,100 +61,137 @@ public partial class PipelineRun : IAsyncDisposable
 
     private async Task LoadRunPageAsync(int runId, int generation, CancellationToken ct)
     {
-        bool IsCurrent() => _loadSession.IsCurrent(generation) && RunId == runId;
+        if (!await ResetRunPageAsync(runId, generation).ConfigureAwait(false)) return;
+        _logStreamer = new PipelineRunLogStreamer(Api, HubFactory, Logger, _stepLogsCache, InvokeAsync, StateHasChanged);
+        _previousDurations = new PipelineRunPreviousDurations(Api);
+        _loading = true;
+        _run = await LoadRootRunAsync(runId, ct).ConfigureAwait(false);
+        if (!IsCurrentLoad(runId, generation)) return;
+        if (_run is not null)
+            if (!await EnrichRunAsync(runId, generation, ct).ConfigureAwait(false)) return;
+        _loading = false;
+        await _logStreamer.UpdateAsync(_selectedStep);
+        if (!IsCurrentLoad(runId, generation)) return;
+        _live = new PipelineRunLiveConnection(HubFactory, Logger, runId,
+            () => LiveChildRunIds(_childRunCache), ReloadRunAsync, RefreshQueueAsync, InvokeAsync,
+            () => AllStepsAcrossChildren().Any(step => step.Status == TaskExecutionStatus.Assigned));
+        await _live.StartAsync();
+    }
 
-        // Blazor keeps this component instance alive when navigating from one run route to another.
-        // Tear down every run-scoped collaborator and reset the view before loading the new route;
-        // otherwise the address changes while the previous run remains rendered.
+    private bool IsCurrentLoad(int runId, int generation) =>
+        _loadSession.IsCurrent(generation) && RunId == runId;
+
+    private void ReassertBreadcrumb()
+    {
+        if (_run is null) return;
+        var runItem = new BreadcrumbItem($"{L["PipelineRun"]} #{_run.Id}");
+        if (_run.ProjectId is { } projectId)
+        {
+            Breadcrumb.Set(
+                new BreadcrumbItem(L["Projects"], "/projects"),
+                new BreadcrumbItem(_run.ProjectName ?? $"{L["Project"]} #{projectId}", $"/projects/{projectId}/overview"),
+                new BreadcrumbItem(L["Pipelines"], $"/projects/{projectId}/pipelines"),
+                new BreadcrumbItem(_run.PipelineName, PipelineHref),
+                runItem);
+            return;
+        }
+
+        Breadcrumb.Set(
+            new BreadcrumbItem(L["Pipelines"], "/pipelines"),
+            new BreadcrumbItem(_run.PipelineName, PipelineHref),
+            runItem);
+    }
+
+    private async Task<bool> ResetRunPageAsync(int runId, int generation)
+    {
         if (_live is not null)
         {
             await _live.DisposeAsync();
             _live = null;
-            if (!IsCurrent()) return;
+            if (!IsCurrentLoad(runId, generation)) return false;
         }
-
         if (_logStreamer is not null)
         {
             await _logStreamer.DisposeAsync();
             _logStreamer = null;
-            if (!IsCurrent()) return;
+            if (!IsCurrentLoad(runId, generation)) return false;
         }
-
-        _durationTimer?.Dispose();
-        _durationTimer = null;
         ResetRunState();
+        return true;
+    }
 
-        _logStreamer = new PipelineRunLogStreamer(Api, HubFactory, Logger, _stepLogsCache, InvokeAsync, StateHasChanged);
-        _previousDurations = new PipelineRunPreviousDurations(Api);
-        _loading = true;
-        PipelineRunDto? run;
-        try { run = await Api.GetPipelineRunAsync(runId); }
-        catch (HttpRequestException) { run = null; }
-        if (!IsCurrent()) return;
-        _run = run;
-        if (_run is not null)
+    private async Task<PipelineRunDto?> LoadRootRunAsync(int runId, CancellationToken ct)
+    {
+        try
         {
-            _run = NormalizeRunCompletion(_run);
-            BuildStages();
-            ProjectNav.Set(_run.ProjectId);
-
-            if (_run.ProjectId is { } projectId)
-            {
-                int? repoId;
-                try { repoId = await ResolveRepositoryIdAsync(_run, projectId); }
-                catch (HttpRequestException) { repoId = null; }
-                if (!IsCurrent()) return;
-                _repoId = repoId;
-            }
-
-            List<ReleaseDto> releases;
-            try { releases = await Api.GetReleasesByRunAsync(runId); }
-            catch (HttpRequestException) { releases = []; }
-            if (!IsCurrent()) return;
-            _releases = releases;
-
-            await LoadChildRunsAndAggregateAsync(ct);
-            if (!IsCurrent()) return;
-            await _previousDurations.LoadAsync(_childRunCache.Values.Prepend(_run));
-            if (!IsCurrent()) return;
-
-            // Never auto-select a `type: trigger` step: it has no logs of its own (it waits on a child run),
-            // so selecting it would strand the log pane empty. In a trigger-only orchestration run this
-            // leaves nothing selected, and the run tree invites the user to expand a child pipeline instead.
-            // Ordinary and system steps (TriggeredRunId is null) are still auto-selected as before.
-            var autoSelect = _stages.SelectMany(s => s.Steps)
-                .FirstOrDefault(s => s.Status == TaskExecutionStatus.Running && s.TriggeredRunId is null)
-                ?? _stages.SelectMany(s => s.Steps).LastOrDefault(s => s.TriggeredRunId is null && s.Status is TaskExecutionStatus.Failed or TaskExecutionStatus.Success);
-            if (autoSelect is not null)
-            {
-                _selectedStep = autoSelect;
-                if (autoSelect.TaskId.HasValue)
-                {
-                    try { _stepLogsCache[autoSelect.TaskId.Value] = await Api.GetTaskLogsAsync(autoSelect.TaskId.Value) ?? []; }
-                    catch (HttpRequestException) { _stepLogsCache[autoSelect.TaskId.Value] = []; }
-                    if (!IsCurrent()) return;
-                }
-            }
-
-            await LoadFailedStepLogsAsync();
-            if (!IsCurrent()) return;
-            await _metrics.LoadAsync(Api, runId, _run);
-            if (!IsCurrent()) return;
+            return _pageCache.TryGetRun(runId, out var cached)
+                ? cached
+                : await Api.Pipelines.GetPipelineRunAsync(runId, ct);
         }
-        _loading = false;
-        UpdateDurationTimer();
-        await _logStreamer.UpdateAsync(_selectedStep);
-        if (!IsCurrent()) return;
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
 
-        _live = new PipelineRunLiveConnection(HubFactory, Logger, runId, () => _childRunCache.Keys, ReloadRunAsync, InvokeAsync);
-        await _live.StartAsync();
+    private async Task<bool> EnrichRunAsync(int runId, int generation, CancellationToken ct)
+    {
+        _run = NormalizeRunCompletion(_run!);
+        _pageCache.StoreRun(_run);
+        BuildStages();
+        ProjectNav.Set(_run.ProjectId);
+        ReassertBreadcrumb();
+        var rootRun = _run;
+        var repositoryTask = PipelineRunRepositoryResolver.ResolveAsync(Api, rootRun, ct);
+        var releasesTask = Api.Projects.GetReleasesByRunAsync(runId, ct);
+        var aiResultsTask = PipelineRunAiResults.LoadAsync(Api, runId, ct);
+        var failedLogsTask = LoadFailedStepLogsAsync();
+        var (children, mergedRun) = await PipelineRunChildAggregator.LoadAsync(rootRun, Api, _pageCache, ct);
+        if (!IsCurrentLoad(runId, generation)) return false;
+        _childRunCache.Clear();
+        foreach (var child in children) _childRunCache[child.Key] = child.Value;
+        _run = mergedRun;
+        await Task.WhenAll(
+            _previousDurations.LoadAsync(_childRunCache.Values.Prepend(_run)),
+            LoadGateAsync(ct),
+            _metrics.LoadAsync(Api, runId, _run),
+            failedLogsTask);
+        if (!IsCurrentLoad(runId, generation)) return false;
+        _repoId = await repositoryTask;
+        _releases = await LoadReleasesAsync(releasesTask).ConfigureAwait(false);
+        _aiResults = await aiResultsTask;
+        return await AutoSelectStepAsync(runId, generation).ConfigureAwait(false);
+    }
+
+    private static async Task<List<ReleaseDto>> LoadReleasesAsync(Task<List<ReleaseDto>> releasesTask)
+    {
+        try { return await releasesTask; }
+        catch (HttpRequestException) { return []; }
+    }
+
+    private async Task<bool> AutoSelectStepAsync(int runId, int generation)
+    {
+        var autoSelect = _stages.SelectMany(s => s.Steps)
+            .FirstOrDefault(s => s.Status == TaskExecutionStatus.Running && s.TriggeredRunId is null)
+            ?? _stages.SelectMany(s => s.Steps)
+                .LastOrDefault(s => s.TriggeredRunId is null
+                                    && s.Status is TaskExecutionStatus.Failed or TaskExecutionStatus.Success);
+        if (autoSelect is null) return true;
+        _selectedStep = autoSelect;
+        await _logStreamer!.UpdateAsync(_selectedStep);
+        if (!IsCurrentLoad(runId, generation)) return false;
+        if (!autoSelect.TaskId.HasValue) return true;
+        await LoadTaskLogSnapshotAsync(autoSelect.TaskId.Value);
+        return IsCurrentLoad(runId, generation);
     }
 
     private void ResetRunState()
     {
         _run = null;
         _metrics = new PipelineRunMetrics();
+        _gateState.Clear();
         _releases = [];
+        _aiResults = [];
         _repoId = null;
         _stages = [];
         _selectedTab = 0;
@@ -171,6 +199,7 @@ public partial class PipelineRun : IAsyncDisposable
         _childRunCache.Clear();
         _stepLogsCache.Clear();
         _selectedStep = null;
+        _userPinnedStep = false;
         _logVarRegex = null;
         _logSearch = string.Empty;
         _showCommand = false;
@@ -213,7 +242,7 @@ public partial class PipelineRun : IAsyncDisposable
         _childRunCache.Clear();
         if (_run is null || !IsOrchestration) return;
 
-        var (children, merged) = await PipelineRunChildAggregator.LoadAsync(_run, Api, ct);
+        var (children, merged) = await PipelineRunChildAggregator.LoadAsync(_run, Api, _pageCache, ct);
         foreach (var kv in children) _childRunCache[kv.Key] = kv.Value;
         _run = merged;
     }
@@ -225,77 +254,79 @@ public partial class PipelineRun : IAsyncDisposable
         _stages = RunStageBuilder.Build(_run);
     }
 
-    private async Task ReloadRunAsync()
+    internal async Task ReloadRunAsync()
     {
-        _run = await Api.GetPipelineRunAsync(RunId);
+        _run = await Api.Pipelines.GetPipelineRunAsync(RunId);
         if (_run is not null)
         {
             _run = NormalizeRunCompletion(_run);
-            UpdateDurationTimer();
             BuildStages();
-            try { _releases = await Api.GetReleasesByRunAsync(RunId); }
+            try { _releases = await Api.Projects.GetReleasesByRunAsync(RunId); }
             catch (HttpRequestException) { /* keep prior releases on a transient failure */ }
             await LoadChildRunsAndAggregateAsync(_loadSession.Token);
             await _previousDurations.LoadAsync(_childRunCache.Values.Prepend(_run));
+            await LoadGateAsync(_loadSession.Token);
             // A child run may have just appeared (its trigger step fired) - join its group so its own
             // step events keep this view live from here on.
             if (_live is not null) await _live.JoinGroupsAsync();
-            // Follow execution task-to-task, including into a triggered child run: prefer a running step
-            // that actually has logs (a real TaskId) over the logless trigger step, searching the parent
-            // and every child. Falls back to any running step so a single run behaves exactly as before.
-            var runningStep = AllStepsAcrossChildren().FirstOrDefault(s => s.Status == TaskExecutionStatus.Running && s.TaskId is not null)
-                ?? _stages.SelectMany(s => s.Steps).FirstOrDefault(s => s.Status == TaskExecutionStatus.Running);
-            if (runningStep is not null)
+            // A manual selection is sticky across live reloads. Refresh the selected DTO by its persisted
+            // step id, but never replace it with a different running parent/child step. If the selected
+            // step disappeared (for example after a run retry rebuilt its steps), release the pin and
+            // resume automatic execution following.
+            var pinnedStep = _userPinnedStep && _selectedStep is not null
+                ? AllStepsAcrossChildren().FirstOrDefault(step => step.Id == _selectedStep.Id)
+                : null;
+            if (pinnedStep is not null)
             {
-                _selectedStep = runningStep;
-                // First time we follow this task, seed its history (the log hub streams only NEW lines from
-                // the join point, it does not replay). Skip if already cached - the streamer keeps it fresh.
-                if (runningStep.TaskId is { } tid && !_stepLogsCache.ContainsKey(tid))
+                _selectedStep = pinnedStep;
+            }
+            else
+            {
+                _userPinnedStep = false;
+                // Follow execution task-to-task, including into a triggered child run: prefer a running
+                // step that actually has logs over the logless trigger step.
+                var runningStep = AllStepsAcrossChildren().FirstOrDefault(step =>
+                                      step.Status == TaskExecutionStatus.Running && step.TaskId is not null)
+                                  ?? _stages.SelectMany(stage => stage.Steps).FirstOrDefault(step =>
+                                      step.Status == TaskExecutionStatus.Running);
+                if (runningStep is not null)
                 {
-                    try { _stepLogsCache[tid] = await Api.GetTaskLogsAsync(tid) ?? []; }
-                    catch (HttpRequestException) { _stepLogsCache[tid] = []; }
+                    _selectedStep = runningStep;
+                    if (_logStreamer is not null) await _logStreamer.UpdateAsync(_selectedStep);
+                    // First time we follow this task, seed its history (the log hub streams only NEW lines
+                    // from the join point, it does not replay).
+                    if (runningStep.TaskId is { } tid && !_stepLogsCache.ContainsKey(tid))
+                    {
+                        await LoadTaskLogSnapshotAsync(tid);
+                    }
                 }
             }
             await LoadFailedStepLogsAsync();
         }
         else
         {
-            UpdateDurationTimer();
         }
         if (_logStreamer is not null) await _logStreamer.UpdateAsync(_selectedStep);
         StateHasChanged();
     }
 
-    private Task<int?> ResolveRepositoryIdAsync(PipelineRunDto run, int projectId) =>
-        PipelineRunRepositoryResolver.ResolveAsync(Api, run, projectId);
-
-    private void StartTickTimer()
+    internal async Task RefreshQueueAsync()
     {
-        _durationTimer ??= new System.Threading.Timer(
-            _ => _ = InvokeAsync(StateHasChanged),
-            null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        if (_run is null) return;
+        _run = await PipelineRunQueueRefresh.RefreshAsync(
+            Api, _run, _childRunCache, _loadSession.Token);
+        BuildStages();
+        if (_selectedStep is not null)
+            _selectedStep = AllStepsAcrossChildren().FirstOrDefault(step => step.Id == _selectedStep.Id)
+                ?? _selectedStep;
+        StateHasChanged();
     }
 
-    private void UpdateDurationTimer()
-    {
-        if (RunInProgress)
-        {
-            StartTickTimer();
-            return;
-        }
+    private IEnumerable<PipelineStepRunDto> AllStepsAcrossChildren() =>
+        PipelineRunPresentation.AllSteps(_stages, _childRunCache);
 
-        _durationTimer?.Dispose();
-        _durationTimer = null;
-    }
-
-    // Every step across the parent run and its loaded child runs, so the log pane can follow the running
-    // task INTO a triggered child (a trigger step itself has no TaskId, hence no logs of its own).
-    private IEnumerable<PipelineStepRunDto> AllStepsAcrossChildren()
-    {
-        foreach (var step in _stages.SelectMany(s => s.Steps)) yield return step;
-        foreach (var child in _childRunCache.Values)
-            foreach (var step in child.Steps) yield return step;
-    }
+    internal static IReadOnlyCollection<int> LiveChildRunIds(IReadOnlyDictionary<int, PipelineRunDto> children) =>
+        PipelineRunPresentation.LiveChildRunIds(children);
 
     public async ValueTask DisposeAsync()
     {
@@ -307,7 +338,6 @@ public partial class PipelineRun : IAsyncDisposable
         if (_logStreamer is not null)
             await _logStreamer.DisposeAsync();
 
-        _durationTimer?.Dispose();
     }
 
     private void ToggleMatrixGroup(string key)
@@ -316,9 +346,10 @@ public partial class PipelineRun : IAsyncDisposable
             _expandedMatrixGroups.Add(key);
     }
 
-    private string? GitBranch => _run?.ResolvedVariables
-        .GetValueOrDefault("BUILD_SOURCEBRANCH")
-        ?? _run?.ResolvedVariables.GetValueOrDefault("DEFAULT_BRANCH");
+    private string? GitBranch => PipelineRunPresentation.GitBranch(_run);
+
+    /// <summary>Application version this run built (APP_VERSION), shown under the Release tile.</summary>
+    private string? AppVersion => _run is null ? null : BuiltAppVersion(_run);
 
     private IReadOnlyList<string> BlockingWarnings =>
         _run is null ? [] : _run.Warnings.Where(IsBlockingWarning).ToList();
@@ -332,6 +363,9 @@ public partial class PipelineRun : IAsyncDisposable
     private bool HasFailedSteps => _run?.Steps.Any(s => s.Status == TaskExecutionStatus.Failed) == true;
 
     private bool CanRerun => PipelineRunRerunCoordinator.CanRerun(_run);
+
+    private PipelineRunCommandCoordinator Commands =>
+        _commandCoordinator ??= new(Api, Dialog, Toast, L, Js);
 
     private async Task OnRerunClick(RadzenSplitButtonItem? item)
     {
@@ -353,7 +387,9 @@ public partial class PipelineRun : IAsyncDisposable
 
     private bool HasYamlTab => !string.IsNullOrEmpty(_run?.YamlSnapshot);
 
-    private List<string> TabSlugs() => PipelineRunPresentation.TabSlugs(_run, HasYamlTab, HasLintTab);
+    private bool ShowGateTab => !RunInProgress && _gateState.HasResult;
+
+    private List<string> TabSlugs() => PipelineRunPresentation.TabSlugs(_run, ShowGateTab, HasYamlTab, HasLintTab);
 
     // Overview cross-link tiles that jump into a tab. They navigate (push history) so the URL stays the
     // source of truth for UrlSyncedTabs; the guard against the current tab avoids duplicate entries.
@@ -365,43 +401,35 @@ public partial class PipelineRun : IAsyncDisposable
     }
 
     private void GoToLogsTab() => NavigateToTab("logs");
+    private void GoToArtifactsTab() => NavigateToTab("artifacts");
     private void GoToCoverageTab() => NavigateToTab("coverage");
     private void GoToLintTab() => NavigateToTab("lint");
 
-    /// <summary>True when lint passed; false if it failed; null when there is no lint data.
-    /// Structured SARIF data (no errors) wins when present, falling back to the step-status heuristic.</summary>
-    private bool? LintPassed => _run?.LintSummary is { } summary
-        ? summary.Passed
-        : (LintSteps.Count > 0 ? LintSteps.All(s => s.Status != TaskExecutionStatus.Failed) : null);
+    private Task LoadGateAsync(CancellationToken ct)
+    {
+        if (_run is null || RunInProgress)
+        {
+            _gateState.Clear();
+            return Task.CompletedTask;
+        }
 
-    /// <summary>The repository URL only when it is a real http(s) link - guards against ssh-style
-    /// URLs (git@host:…) that the Blazor router would otherwise try to navigate internally and crash on.</summary>
-    private string? SafeRepoUrl => IsWebUrl(_run?.RepositoryUrl) ? _run!.RepositoryUrl : null;
+        return _gateState.LoadAsync(Api, _run, _childRunCache.Values, _pageCache, ct);
+    }
+    private bool? LintPassed => PipelineRunPresentation.LintPassed(_run, LintSteps);
 
-    /// <summary>External commit URL ({repo}/commit/{sha}) when the repository is a real http(s) link.</summary>
-    private string? CommitUrl => BuildCommitUrl(_run?.RepositoryUrl, _run?.CommitHash);
-
-    // Lint steps of this run PLUS those of any triggered child run (orchestration bubble-up): a
-    // parent orchestration run has no lint steps of its own, so surface the children's here so the
-    // Lint tab + overview tile appear on the parent too (structured LintSummary bubbles separately).
     private IReadOnlyList<PipelineStepRunDto> LintSteps =>
-        (_run?.Steps ?? Enumerable.Empty<PipelineStepRunDto>())
-            .Concat(_childRunCache.Values.SelectMany(c => c.Steps))
-            .Where(s => !s.IsSystem && (
-                s.StepName.Contains("lint", StringComparison.OrdinalIgnoreCase) ||
-                s.StageName.Contains("lint", StringComparison.OrdinalIgnoreCase)))
-            .ToList();
+        PipelineRunPresentation.LintSteps(_run, _childRunCache);
 
     private async Task LoadLintLogsAsync(int taskId)
     {
-        try { _stepLogsCache[taskId] = await Api.GetTaskLogsAsync(taskId) ?? []; }
+        try { _stepLogsCache[taskId] = await Api.Monitoring.GetTaskLogsAsync(taskId) ?? []; }
         catch (HttpRequestException) { _stepLogsCache[taskId] = []; }
         StateHasChanged();
     }
 
     private async Task LoadCoverageLogsAsync(int taskId)
     {
-        try { _stepLogsCache[taskId] = await Api.GetTaskLogsAsync(taskId) ?? []; }
+        try { _stepLogsCache[taskId] = await Api.Monitoring.GetTaskLogsAsync(taskId) ?? []; }
         catch (HttpRequestException) { _stepLogsCache[taskId] = []; }
         StateHasChanged();
     }
@@ -412,11 +440,8 @@ public partial class PipelineRun : IAsyncDisposable
         _retrying = true;
         try
         {
-            var run = await Api.RetryFailedStepsAsync(_run.Id);
-            if (run is not null)
+            if (await Commands.RetryFailedAsync(_run))
                 await ReloadRunAsync();
-            else
-                Toast.Error("PipelineRunFailed", "Error");
         }
         finally
         {
@@ -432,19 +457,11 @@ public partial class PipelineRun : IAsyncDisposable
     private async Task CancelRunAsync()
     {
         if (_run is null || _cancelling || !RunInProgress) return;
-        var confirmed = await Dialog.Confirm(
-            L["CancelRunConfirm"].Value, L["CancelRun"].Value,
-            new ConfirmOptions { OkButtonText = L["CancelRun"].Value, CancelButtonText = L["Back"].Value });
-        if (confirmed != true) return;
-
+        if (!await Commands.ConfirmCancellationAsync()) return;
         _cancelling = true;
         try
         {
-            var status = await Api.CancelPipelineRunAsync(_run.Id);
-            if (status.Success)
-                Toast.Info("RunCancelled", "RunCancelledDetail");
-            else if (status.Forbidden)
-                Toast.Error("PipelineRunFailed", "PipelineRunForbidden");
+            await Commands.CancelAsync(_run);
             await ReloadRunAsync();
         }
         finally
@@ -498,20 +515,24 @@ public partial class PipelineRun : IAsyncDisposable
         }
     }
 
-    private async Task ShowVariables()
-    {
-        if (_run is null || _run.ResolvedVariables.Count == 0) return;
-        await Dialog.OpenAsync<PipelineRunVariablesDialog>(
-            string.Format(L["VarsCount"], _run.ResolvedVariables.Count),
-            new Dictionary<string, object?> { { "Variables", _run.ResolvedVariables } },
-            new DialogOptions { Width = "600px" });
-    }
+    private Task ShowVariables() =>
+        _run is null || _run.ResolvedVariables.Count == 0
+            ? Task.CompletedTask
+            : Commands.ShowVariablesAsync(_run);
+
+    private Task ShowParameters() =>
+        _run is null || _run.Parameters.Count == 0
+            ? Task.CompletedTask
+            : Commands.ShowParametersAsync(_run);
 
     private string GetNextConnectorStatus(int stageIndex) =>
         PipelineRunPresentation.NextConnectorStatus(_stages, stageIndex);
 
     // --- Step log viewer (split view) ---
     private PipelineStepRunDto? _selectedStep;
+    private bool _userPinnedStep;
+    internal PipelineStepRunDto? SelectedStep => _selectedStep;
+    internal bool IsStepSelectionPinned => _userPinnedStep;
     private string _logSearch = string.Empty;
 
     // The executed command can echo secrets/long argv, so it is masked by default and revealed on
@@ -520,80 +541,51 @@ public partial class PipelineRun : IAsyncDisposable
     private bool _showResults = true;
 
     // S-UX-17: copy the selected step's full log to the clipboard.
-    private async Task CopyLogsAsync()
-    {
-        if (_selectedStep?.TaskId is not { } taskId) return;
-        var logs = _stepLogsCache.GetValueOrDefault(taskId);
-        if (logs is null or { Count: 0 }) return;
-        await Js.InvokeVoidAsync("Aetheus.copyToClipboard", string.Join("\n", logs.Select(l => l.Message)));
-        Toast.Success("LogsCopied");
-    }
+    private Task CopyLogsAsync() =>
+        _selectedStep?.TaskId is { } taskId
+        && _stepLogsCache.GetValueOrDefault(taskId) is { Count: > 0 } logs
+            ? Commands.CopyLogsAsync(logs)
+            : Task.CompletedTask;
 
-    // S-UX-RUNB: one-line "why did it fail" summary for the top-of-page banner (failed step names + exit codes).
-    private string FailedRunReason => string.Join(", ", FailedSteps.Select(s =>
-        s.ExitCode is { } code ? string.Format(L["FailedStepWithExit"], s.StepName, code) : s.StepName));
-
-    // S-UX-28: failed non-system steps whose error log should be surfaced inline on the Overview tab.
+    private string FailedRunReason => string.Join(", ", FailedSteps.Select(step =>
+        step.ExitCode is { } code ? string.Format(L["FailedStepWithExit"], step.StepName, code) : step.StepName));
     private IReadOnlyList<PipelineStepRunDto> FailedSteps =>
-        _run?.Steps.Where(s => s.Status == TaskExecutionStatus.Failed && !s.IsSystem).ToList() ?? [];
-
-    // Preload the logs for every failed step so the Overview error card can render them without a click.
-    private Task LoadFailedStepLogsAsync() =>
-        PipelineRunLogView.LoadFailedStepLogsAsync(FailedSteps, Api, _stepLogsCache);
-
-    // S-UX-29: stream-download an artifact directly from the run's Artifacts tab (no detail-page hop).
-    private async Task DownloadArtifactAsync(PipelineArtifactDto artifact)
-    {
-        var stream = await Api.DownloadArtifactAsync(artifact.Id);
-        if (stream is null) return;
-        using var streamRef = new DotNetStreamReference(stream);
-        await Js.InvokeVoidAsync("downloadFileFromStream", $"{artifact.Name}.zip", streamRef);
-    }
-
-    // S-UX-32: copy the executed YAML snapshot to the clipboard.
-    private async Task CopyYamlAsync()
-    {
-        if (string.IsNullOrEmpty(_run?.YamlSnapshot)) return;
-        await Js.InvokeVoidAsync("Aetheus.copyToClipboard", _run.YamlSnapshot);
-        Toast.Success("Copied");
-    }
-
-    // YAML definition peek: a `pipeline: <name>` line in the YAML tab is clickable; setting _peekName opens
-    // the referenced pipeline's live definition in the shared read-only <PipelineDefinitionPeek> right pane.
+        _run?.Steps.Where(step => step.Status == TaskExecutionStatus.Failed && !step.IsSystem).ToList() ?? [];
+    private Task LoadFailedStepLogsAsync() => PipelineRunLogView.LoadFailedStepLogsAsync(FailedSteps, Api, _stepLogsCache);
+    private Task DownloadArtifactAsync(PipelineArtifactDto artifact) => Commands.DownloadArtifactAsync(artifact);
+    private Task OpenAiResultAsync(AiRunResultDto result) => PipelineRunAiResults.OpenAsync(Dialog, L, result);
+    private Task CopyYamlAsync() => string.IsNullOrEmpty(_run?.YamlSnapshot) ? Task.CompletedTask : Commands.CopyYamlAsync(_run.YamlSnapshot);
     private string? _peekName;
-    // Toggle soft-wrapping of long YAML lines on the left (definition) pane (the peek pane has its own).
     private bool _yamlWrap;
-
     private void ClosePeek() => _peekName = null;
     private readonly Dictionary<int, List<TaskLogDto>> _stepLogsCache = [];
     private bool _logsLoading;
-
-    private async Task SelectStep(PipelineStepRunDto step)
+    internal async Task SelectStep(PipelineStepRunDto step)
     {
         _selectedStep = step;
-        _lastAutoScrollCount = -1; // re-pin auto-follow to the newly selected step's tail
+        _userPinnedStep = true;
+        _lastAutoScrollCount = -1;
         NavigateToTab("logs");
-        if (_logStreamer is not null) await _logStreamer.UpdateAsync(_selectedStep);
-
-        if (step.TaskId is null) return;
+        if (step.TaskId is null)
+        {
+            if (_logStreamer is not null) await _logStreamer.UpdateAsync(_selectedStep);
+            return;
+        }
         var taskId = step.TaskId.Value;
-
-        if (step.Status == TaskExecutionStatus.Running)
-            _stepLogsCache.Remove(taskId);
-
+        if (step.Status == TaskExecutionStatus.Running) _stepLogsCache.Remove(taskId);
+        if (_logStreamer is not null) await _logStreamer.UpdateAsync(_selectedStep);
         if (_stepLogsCache.ContainsKey(taskId)) return;
-
         _logsLoading = true;
         StateHasChanged();
-        try
-        {
-            _stepLogsCache[taskId] = await Api.GetTaskLogsAsync(taskId) ?? [];
-        }
-        catch (HttpRequestException)
-        {
-            _stepLogsCache[taskId] = [];
-        }
+        await LoadTaskLogSnapshotAsync(taskId);
         _logsLoading = false;
     }
-
+    private async Task LoadTaskLogSnapshotAsync(int taskId)
+    {
+        List<TaskLogDto> snapshot;
+        try { snapshot = await Api.Monitoring.GetTaskLogsAsync(taskId) ?? []; }
+        catch (HttpRequestException) { snapshot = []; }
+        _stepLogsCache.TryGetValue(taskId, out var streamedDuringSnapshot);
+        _stepLogsCache[taskId] = PipelineRunLogSnapshot.Merge(snapshot, streamedDuringSnapshot ?? []);
+    }
 }

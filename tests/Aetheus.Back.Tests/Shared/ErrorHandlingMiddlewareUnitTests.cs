@@ -44,6 +44,7 @@ public class ErrorHandlingMiddlewareUnitTests
         Assert.Equal("application/json", context.Response.ContentType);
         var error = await ReadBody(context);
         Assert.Equal("not found", error!.Message);
+        Assert.Equal(context.TraceIdentifier, error.CorrelationId);
     }
 
     [Fact]
@@ -106,6 +107,23 @@ public class ErrorHandlingMiddlewareUnitTests
         Assert.Equal(500, context.Response.StatusCode);
         var error = await ReadBody(context);
         Assert.Contains("unexpected", error!.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_OversizedRequest_ReturnsExplicit413()
+    {
+        var middleware = new ErrorHandlingMiddleware(
+            _ => throw new BadHttpRequestException(
+                "Request body too large.", StatusCodes.Status413PayloadTooLarge),
+            _logger);
+
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status413PayloadTooLarge, context.Response.StatusCode);
+        var error = await ReadBody(context);
+        Assert.Contains("too large", error!.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<ApiError?> ReadBody(HttpContext context)

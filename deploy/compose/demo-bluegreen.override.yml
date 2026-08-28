@@ -1,0 +1,16 @@
+# Demo-only additions layered over remote-bluegreen.compose.yml.
+# Project, ports, volumes and state paths remain validated by nightly-demo-prepare.sh.
+services:
+  back-blue:
+    environment:
+      - Aetheus__EnvironmentTier=qa
+      - Aetheus__PublicDemo=true
+      - Seed__Demo=true
+      - Seed__DemoDate=${SEED_DEMO_DATE:-2026-07-14}
+
+  back-green:
+    environment:
+      - Aetheus__EnvironmentTier=qa
+      - Aetheus__PublicDemo=true
+      - Seed__Demo=true
+      - Seed__DemoDate=${SEED_DEMO_DATE:-2026-07-14}

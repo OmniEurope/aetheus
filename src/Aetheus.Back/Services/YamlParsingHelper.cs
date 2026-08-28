@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -13,6 +12,9 @@ public static class YamlParsingHelper
 
     public static readonly ISerializer Serializer = new SerializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        .WithAttributeOverride<PipelineIsolationDefinition>(
+            isolation => isolation.IsContainer,
+            new YamlIgnoreAttribute())
         .Build();
 
     /// <summary>
@@ -65,55 +67,59 @@ public static class YamlParsingHelper
 
         var result = new List<PipelineStageDefinition>();
         foreach (var stage in definition.Stages)
-        {
-            if (stage.Jobs.Count > 0)
-            {
-                var externalDeps = stage.DependsOn
-                    .SelectMany(dep => allJobsPerStage.GetValueOrDefault(dep, [dep]))
-                    .ToList();
-
-                foreach (var job in stage.Jobs)
-                {
-                    var mergedVars = new Dictionary<string, string>(stage.Variables, StringComparer.OrdinalIgnoreCase);
-                    foreach (var kv in job.Variables)
-                        mergedVars[kv.Key] = kv.Value;
-
-                    // S-TECH-55: a job's own depends_on lists sibling job names within this stage.
-                    // Sibling job names already equal their pseudo-stage names, so they merge straight
-                    // in alongside the stage-level (cross-stage) dependencies.
-                    var jobDeps = job.DependsOn.Count > 0
-                        ? externalDeps.Concat(job.DependsOn).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
-                        : externalDeps;
-
-                    result.Add(new PipelineStageDefinition
-                    {
-                        Name = job.Name,
-                        Agent = !string.IsNullOrEmpty(job.Agent) ? job.Agent : stage.Agent,
-                        Os = !string.IsNullOrEmpty(job.Os) ? job.Os : stage.Os,
-                        Group = stage.Name,
-                        ExecutionRole = job.ExecutionRole ?? stage.ExecutionRole,
-                        Environment = job.Environment ?? stage.Environment,
-                        Pool = job.Pool ?? stage.Pool,
-                        Condition = job.Condition ?? stage.Condition,
-                        DependsOn = jobDeps,
-                        Variables = mergedVars,
-                        Steps = job.Steps,
-                        Matrix = job.Matrix ?? stage.Matrix,
-                        Strategy = job.Strategy ?? stage.Strategy,
-                        Artifacts = job.Artifacts.Count > 0 ? job.Artifacts : stage.Artifacts,
-                        Isolation = job.Isolation ?? stage.Isolation ?? definition.Isolation
-                    });
-                }
-            }
-            else
-            {
-                // Direct-step stage inherits the run-level isolation when it sets none of its own.
-                result.Add(stage.Isolation is null && definition.Isolation is not null
-                    ? stage with { Isolation = definition.Isolation }
-                    : stage);
-            }
-        }
+            AddFlattenedStage(definition.Isolation, stage, allJobsPerStage, result);
         return result;
+    }
+
+    private static void AddFlattenedStage(
+        PipelineIsolationDefinition? defaultIsolation,
+        PipelineStageDefinition stage,
+        IReadOnlyDictionary<string, List<string>> allJobsPerStage,
+        ICollection<PipelineStageDefinition> result)
+    {
+        if (stage.Jobs.Count == 0)
+        {
+            result.Add(stage.Isolation is null && defaultIsolation is not null
+                ? stage with { Isolation = defaultIsolation }
+                : stage);
+            return;
+        }
+        var externalDependencies = stage.DependsOn
+            .SelectMany(dependency => allJobsPerStage.GetValueOrDefault(dependency, [dependency]))
+            .ToList();
+        foreach (var job in stage.Jobs)
+            result.Add(CreateJobStage(defaultIsolation, stage, job, externalDependencies));
+    }
+
+    private static PipelineStageDefinition CreateJobStage(
+        PipelineIsolationDefinition? defaultIsolation,
+        PipelineStageDefinition stage,
+        PipelineJobDefinition job,
+        IReadOnlyCollection<string> externalDependencies)
+    {
+        var variables = new Dictionary<string, string>(stage.Variables, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in job.Variables) variables[key] = value;
+        var dependencies = job.DependsOn.Count > 0
+            ? externalDependencies.Concat(job.DependsOn).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : externalDependencies.ToList();
+        return new PipelineStageDefinition
+        {
+            Name = job.Name,
+            Agent = !string.IsNullOrEmpty(job.Agent) ? job.Agent : stage.Agent,
+            Os = !string.IsNullOrEmpty(job.Os) ? job.Os : stage.Os,
+            Group = stage.Name,
+            ExecutionRole = job.ExecutionRole ?? stage.ExecutionRole,
+            Environment = job.Environment ?? stage.Environment,
+            Pool = job.Pool ?? stage.Pool,
+            Condition = job.Condition ?? stage.Condition,
+            DependsOn = dependencies,
+            Variables = variables,
+            Steps = job.Steps,
+            Matrix = job.Matrix ?? stage.Matrix,
+            Strategy = job.Strategy ?? stage.Strategy,
+            Artifacts = job.Artifacts.Count > 0 ? job.Artifacts : stage.Artifacts,
+            Isolation = job.Isolation ?? stage.Isolation ?? defaultIsolation
+        };
     }
 
     public static List<string> ParseVaultNames(string yamlDefinition)

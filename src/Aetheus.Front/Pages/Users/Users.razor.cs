@@ -1,14 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Users;
 
@@ -28,8 +18,9 @@ public partial class Users : IAsyncDisposable
     private List<UserDto> _users = [];
     private int _totalCount;
     private bool _loading;
+    private bool _loadFailed;
+    private int _silentRefreshDepth;
     private string? _search;
-    private List<string> _availableRoles = [];
     // RT4M: the shared admin-hub subscription wrapper, owned and disposed by this page.
     private AdminEntitySubscription? _adminRt;
 
@@ -41,21 +32,25 @@ public partial class Users : IAsyncDisposable
             return;
         }
         Breadcrumb.Set(new BreadcrumbItem(L["Administration"], "/admin"), new BreadcrumbItem(L["Users"]));
-        try { _availableRoles = await Api.GetRolesAsync(); }
-        catch (HttpRequestException) { _availableRoles = []; }
         // Realtime: reload the grid whenever any session creates/updates/deletes a user (the creator
         // also receives this broadcast, so the list refreshes even within the acting session). RT4M.
         _adminRt = new AdminEntitySubscription(HubFactory);
         await _adminRt.StartAsync(AdminEntities.User,
-            () => InvokeAsync(async () => { if (_grid is not null) await _grid.Reload(); }));
+            () => InvokeAsync(async () =>
+            {
+                Cache.InvalidatePrefix("users:");
+                await RefreshSilentlyAsync(() => _grid?.Reload() ?? Task.CompletedTask);
+            }));
         // Stale-while-revalidate: pre-seed the grid from the cached default view (grid PageSize = 50)
         // so revisiting /admin/users paints instantly; OnLoadData then revalidates in the background.
         Cache.Seed<PaginatedResult<UserDto>>(CacheKey(1, 50, null), ApplyUsers);
         // LoadData auto-fired by RadzenDataGrid.
     }
 
-    private string CacheKey(int page, int pageSize, string? search) =>
-        $"users:{page}:{pageSize}:{search}";
+    // The sort is part of the key: without it two different orders share one cache entry and the
+    // second one is served the first one's rows, which looks exactly like a sort that does nothing.
+    private string CacheKey(int page, int pageSize, string? search, string? sortBy = null, bool sortDescending = false) =>
+        $"users:{page}:{pageSize}:{search}:{sortBy}:{sortDescending}";
 
     private void ApplyUsers(PaginatedResult<UserDto> result)
     {
@@ -65,18 +60,43 @@ public partial class Users : IAsyncDisposable
 
     private async Task OnLoadData(LoadDataArgs args)
     {
+        _loadFailed = false;
         var (page, pageSize) = args.ToPageRequest();
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(UserDto.Username));
+        var showLoading = _silentRefreshDepth == 0;
         await Cache.RevalidateAsync(
-            CacheKey(page, pageSize, _search),
-            () => Api.GetUsersAsync(page, pageSize, _search),
+            CacheKey(page, pageSize, _search, sortBy, sortDescending),
+            () => Api.Auth.GetUsersAsync(page, pageSize, _search, sortBy, sortDescending),
             ApplyUsers,
-            loading => _loading = loading,
-            () => InvokeAsync(StateHasChanged));
+            loading =>
+            {
+                if (showLoading || !loading) _loading = loading;
+            },
+            () => InvokeAsync(StateHasChanged),
+            _ => _loadFailed = true);
+    }
+
+    private async Task RetryLoadAsync()
+    {
+        if (_grid is not null) await _grid.Reload();
     }
 
     private async Task ResetAndReload()
     {
         if (_grid is not null) await _grid.GoToPage(0);
+    }
+
+    private async Task RefreshSilentlyAsync(Func<Task> refresh)
+    {
+        _silentRefreshDepth++;
+        try
+        {
+            await refresh();
+        }
+        finally
+        {
+            _silentRefreshDepth--;
+        }
     }
 
     private async Task ClearFilters()
@@ -88,11 +108,11 @@ public partial class Users : IAsyncDisposable
     private async Task OnCreate()
     {
         var created = await Dialog.OpenAsync<UserCreateDialog>(L["NewUser"],
-            new Dictionary<string, object?> { ["AvailableRoles"] = _availableRoles },
-            new DialogOptions { Width = "560px", CloseDialogOnOverlayClick = false });
+            new Dictionary<string, object?>(),
+            new DialogOptions { Width = "560px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
 
         if (created is UserDto)
-            await ResetAndReload();
+            await RefreshSilentlyAsync(ResetAndReload);
     }
 
     private async Task OnRolesChanged(UserDto user, object value)
@@ -108,8 +128,16 @@ public partial class Users : IAsyncDisposable
             MustChangePassword = user.MustChangePassword,
             Roles = roles
         };
-        await Api.UpdateUserAsync(user.Id, request);
-        Toast.Success(L["Saved"], L["RolesUpdated"]);
+        var updated = await Api.Auth.UpdateUserAsync(user.Id, request);
+        if (updated is not null)
+        {
+            Toast.Success(L["Saved"], L["RolesUpdated"]);
+        }
+        else
+        {
+            Toast.Error(L["Error"], L["SaveFailed"]);
+            await RefreshSilentlyAsync(() => _grid?.Reload() ?? Task.CompletedTask);
+        }
     }
 
     private static BadgeStyle GetRoleBadgeStyle(string roleName) =>

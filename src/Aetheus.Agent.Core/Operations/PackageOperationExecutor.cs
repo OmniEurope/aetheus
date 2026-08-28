@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -28,18 +23,13 @@ public sealed class PackageOperationExecutor(
         OperationKind.ServiceUninstall;
 
     public async Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken)
+        OperationKind kind, string target, int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {
-        if (!OperationTargetValidator.IsValid(kind, target))
-        {
-            logger.LogWarning("Rejected package operation with non-allow-listed package name");
-            await onOutput("Package is not in the managed-package allow-list", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var targetFailure = await OperationExecutorFailure.ValidateTargetAsync(
+            kind, target, onOutput, () => logger.LogWarning("Rejected package operation with non-allow-listed package name"),
+            "Package is not in the managed-package allow-list").ConfigureAwait(false);
+        if (targetFailure is not null) return targetFailure;
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
@@ -62,38 +52,19 @@ public sealed class PackageOperationExecutor(
             // is its own argv-exact entry in the AETHEUS_PACKAGE allow-list.
             if (kind == OperationKind.ServiceInstall)
             {
-                var update = await RunSudoAsync(BuildAptUpdateArgv(), timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
+                var update = await AptProcessRunner.RunSudoAsync(
+                    BuildAptUpdateArgv(), timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
                 if (update.ExitCode != 0)
                     await onOutput("apt-get update failed; continuing with the cached package index", TaskLogLevel.Warning).ConfigureAwait(false);
             }
 
-            return await RunSudoAsync(BuildAptArgv(verb, target), timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
+            return await AptProcessRunner.RunSudoAsync(
+                BuildAptArgv(verb, target), timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             AptLock.Gate.Release();
         }
-    }
-
-    private async Task<ExecutorResult> RunSudoAsync(
-        IReadOnlyList<string> argv, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        // Non-interactive debconf: postfix/dovecot (and packages that pull them) otherwise block on a
-        // config prompt with no controlling tty and exit 100. Kept across sudo via AETHEUS_PACKAGE env_keep.
-        psi.Environment["DEBIAN_FRONTEND"] = "noninteractive";
-        foreach (var arg in argv)
-            psi.ArgumentList.Add(arg);
-
-        return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
     }
 
     // The full argv passed to `sudo` (unit-testable without spawning a process): `-n` (never prompt -

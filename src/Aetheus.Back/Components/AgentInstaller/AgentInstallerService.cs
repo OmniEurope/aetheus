@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text;
-using Aetheus.Back.Exceptions;
 
 namespace Aetheus.Back.Components.AgentInstaller;
 
@@ -61,7 +60,7 @@ public sealed class AgentInstallerService : IAgentInstallerService
         sb.Append("WORKDIR=\"$(mktemp -d)\"\n");
         sb.Append("trap 'rm -rf \"$WORKDIR\"' EXIT\n");
         sb.Append("echo \"==> Downloading agent ${AGENT_VERSION}\"\n");
-        sb.Append("curl -fSL \"${SERVER_URL}/downloads/aetheus-agent-linux-${AGENT_VERSION}.tar.gz\" -o \"$WORKDIR/aetheus-agent.tar.gz\"\n");
+        sb.Append("curl -fSL \"${SERVER_URL}/downloads/aetheus-agent-linux-x64.tar.gz\" -o \"$WORKDIR/aetheus-agent.tar.gz\"\n");
         sb.Append("tar -xzf \"$WORKDIR/aetheus-agent.tar.gz\" -C \"$WORKDIR\"\n");
         sb.Append('\n');
         // Module flags: pipeline-runner is ON by default in the installer (opt OUT with --no-pipeline-runner);
@@ -91,15 +90,14 @@ public sealed class AgentInstallerService : IAgentInstallerService
         sb.AppendLine("Write-Host \"==> Downloading agent $AgentVersion\"");
         sb.AppendLine("New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null");
         sb.AppendLine("$pkg = Join-Path $env:TEMP 'aetheus-agent.zip'");
-        sb.AppendLine("Invoke-WebRequest -Uri \"$ServerUrl/downloads/aetheus-agent-windows-$AgentVersion.zip\" -OutFile $pkg");
+        sb.AppendLine("Invoke-WebRequest -Uri \"$ServerUrl/downloads/aetheus-agent-win-x64.zip\" -OutFile $pkg");
         sb.AppendLine("Expand-Archive -Force -Path $pkg -DestinationPath $InstallDir");
         sb.AppendLine();
         if (pipelineRunner)
         {
-            sb.AppendLine("Write-Host \"==> Pipeline-runner module: installing toolchain (git, .NET SDK)\"");
+            sb.AppendLine("Write-Host \"==> Pipeline-runner module: installing Git; SDKs use locked OCI images\"");
             sb.AppendLine("if (Get-Command winget -ErrorAction SilentlyContinue) {");
             sb.AppendLine("  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git --silent --accept-package-agreements --accept-source-agreements 2>$null }");
-            sb.AppendLine("  if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { winget install --id Microsoft.DotNet.SDK.10 --silent --accept-package-agreements --accept-source-agreements 2>$null }");
             sb.AppendLine("}");
             sb.AppendLine();
         }

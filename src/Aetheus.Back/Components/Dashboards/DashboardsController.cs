@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Dashboards;
 

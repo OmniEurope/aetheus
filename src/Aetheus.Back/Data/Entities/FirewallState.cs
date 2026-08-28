@@ -2,7 +2,7 @@
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// PLAN-006 4.2: a server's last reported firewall (ufw) state (upserted from the heartbeat). Only
+/// ADR-024 4.2: a server's last reported firewall (ufw) state (upserted from the heartbeat). Only
 /// written when ufw is present; <see cref="Installed"/> vs a populated <see cref="RulesJson"/> keeps the
 /// UI honest (present-but-unreadable vs active-with-rules).
 /// </summary>

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: package-telemetry-template
+trigger: manual
+
+stages:
+  - name: Package
+    group: Packages
+    execution_role: build
+    os: linux
+    artifacts:
+      - ".pipeline-artifacts/packages/**"
+    steps:
+      - name: Build and qualify telemetry package
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/package-telemetry.sh
+          sh .pipeline/scripts/package-telemetry.sh
+          test -d .pipeline-artifacts/packages
+          find .pipeline-artifacts/packages -type f -print -quit | grep -q .
+        timeout_seconds: 3600

@@ -70,6 +70,322 @@ namespace Aetheus.Back.Data.Migrations
                     b.ToTable("AgentPoolServers");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AgentUpdateRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("ConfirmationDeadline")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ConfirmedSessionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ExpectedCapabilitiesJson")
+                        .IsRequired()
+                        .HasMaxLength(8192)
+                        .HasColumnType("character varying(8192)");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FailureDiagnostic")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("HandoffAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("ObservedProtocolVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ObservedSessionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ObservedVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("ServerId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("IsActive", "Status");
+
+                    b.HasIndex("ServerId", "TargetVersion")
+                        .IsUnique()
+                        .HasFilter("\"IsActive\" = TRUE");
+
+                    b.ToTable("AgentUpdateRequests");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiRunResult", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AiTaskDefinitionId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BaseCommitSha")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DiffPatch")
+                        .HasMaxLength(1000000)
+                        .HasColumnType("character varying(1000000)");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("PipelineRunId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProfileName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ProposedBranchName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("ProposedCommitSha")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ProposedRepositoryId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReportMarkdown")
+                        .IsRequired()
+                        .HasMaxLength(1000000)
+                        .HasColumnType("character varying(1000000)");
+
+                    b.Property<bool>("SendsDataExternally")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("ServerTaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SourceRepositoryId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Succeeded")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Truncated")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Verdict")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServerTaskId")
+                        .IsUnique();
+
+                    b.HasIndex("AiTaskDefinitionId", "CreatedAt");
+
+                    b.HasIndex("PipelineRunId", "CreatedAt");
+
+                    b.ToTable("AiRunResults");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiRunnerProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ArgsTemplateJson")
+                        .IsRequired()
+                        .HasMaxLength(32000)
+                        .HasColumnType("character varying(32000)");
+
+                    b.Property<string>("Binary")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("EnvironmentJsonEncrypted")
+                        .IsRequired()
+                        .HasMaxLength(64000)
+                        .HasColumnType("character varying(64000)");
+
+                    b.Property<int>("MaxOutputBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SendsDataExternally")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("TimeoutSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("AiRunnerProfiles");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiTaskDefinition", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastScheduledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("ProfileId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PromptTemplate")
+                        .IsRequired()
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.Property<string>("Schedule")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int?>("ServerId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProfileId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("ServerId");
+
+                    b.HasIndex("Enabled", "Schedule");
+
+                    b.ToTable("AiTaskDefinitions", t =>
+                        {
+                            t.HasCheckConstraint("CK_AiTaskDefinitions_ExactlyOneOwner", "(\"ProjectId\" IS NOT NULL AND \"ServerId\" IS NULL) OR (\"ProjectId\" IS NULL AND \"ServerId\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiTaskTrigger", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AiTaskDefinitionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime?>("LastTriggeredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventType");
+
+                    b.HasIndex("AiTaskDefinitionId", "EventType")
+                        .IsUnique();
+
+                    b.ToTable("AiTaskTriggers");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AlertRule", b =>
                 {
                     b.Property<int>("Id")
@@ -131,6 +447,903 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasIndex("ServerId");
 
                     b.ToTable("AlertRules");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisComponent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ComponentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Hash")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsDirect")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LicensesJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PackageUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisReportId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId", "PackageUrl", "Version");
+
+                    b.ToTable("AnalysisComponents");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisEvaluation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("BaselineRunId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BlockerCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EvaluatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Grade")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("GradeCompleteness")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("GradeSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("GradeSnapshotJson")
+                        .IsRequired()
+                        .HasMaxLength(100000)
+                        .HasColumnType("character varying(100000)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PipelineRunId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PolicySnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PolicySnapshotJson")
+                        .IsRequired()
+                        .HasMaxLength(100000)
+                        .HasColumnType("character varying(100000)");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WarningCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisReportId")
+                        .IsUnique();
+
+                    b.HasIndex("BaselineRunId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("PipelineRunId");
+
+                    b.HasIndex("ProjectId", "EvaluatedAt");
+
+                    b.ToTable("AnalysisEvaluations");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFinding", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Category")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Confidence")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Cwe")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("FingerprintVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("HelpUri")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RuleId")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId", "LastSeenAt");
+
+                    b.HasIndex("ProjectId", "Fingerprint", "FingerprintVersion")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectId", "Status", "Severity");
+
+                    b.ToTable("AnalysisFindings");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFindingDecision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisFindingId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUsername")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("ExpirationNotificationSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("AnalysisFindingId", "CreatedAt");
+
+                    b.HasIndex("ProjectId", "ExpiresAt");
+
+                    b.ToTable("AnalysisFindingDecisions");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFindingOccurrence", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisFindingId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AnalysisReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BranchName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CommitHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("EndLine")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsNew")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LocationHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("RuleId")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ScannerKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("StartLine")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Symbol")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisFindingId", "CreatedAt");
+
+                    b.HasIndex("AnalysisReportId", "AnalysisFindingId", "LocationHash")
+                        .IsUnique();
+
+                    b.ToTable("AnalysisFindingOccurrences");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisMetric", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("BaselineValue")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Symbol")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<double>("Value")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("AnalysisReportId", "Key");
+
+                    b.HasIndex("ProjectId", "Key", "CreatedAt");
+
+                    b.ToTable("AnalysisMetrics");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Behavior")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BranchPattern")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int?>("Category")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("EnvironmentPattern")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("MetricKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("NewFindingsOnly")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("Operator")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PolicyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RuleId")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ScannerKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("SeverityThreshold")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("Threshold")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("OrganizationId", "ProjectId", "Name")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("OrganizationId", "ProjectId", "Name"), false);
+
+                    b.HasIndex("OrganizationId", "ProjectId", "PolicyKey")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("OrganizationId", "ProjectId", "PolicyKey"), false);
+
+                    b.ToTable("AnalysisPolicies");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicyException", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AnalysisFindingId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AnalysisPolicyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BranchPattern")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int?>("Category")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUsername")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("EnvironmentPattern")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime?>("ExpirationNotificationSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Fingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RuleId")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ScannerKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisFindingId");
+
+                    b.HasIndex("AnalysisPolicyId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId", "ExpiresAt");
+
+                    b.ToTable("AnalysisPolicyExceptions");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicyRevision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisPolicyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasMaxLength(100000)
+                        .HasColumnType("character varying(100000)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisPolicyId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AnalysisPolicyRevisions");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisReport", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BranchName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CommitHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("ContentSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EnvironmentName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("Format")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsTruncated")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("PipelineArtifactId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PipelineRunId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReportPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("RuleSetHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ScannerKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ScannerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ScannerVersion")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("StageName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StepName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("PipelineArtifactId");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.HasIndex("PipelineRunId", "ScannerKey", "ContentHash")
+                        .IsUnique();
+
+                    b.HasIndex("PipelineRunId", "ScannerKey", "StageName", "StepName", "PayloadHash")
+                        .IsUnique();
+
+                    b.ToTable("AnalysisReports");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisTrackingProject", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalProjectId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ExternalProjectName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("LastKnownVulnerabilityCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LastSbomReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LastSnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("LastSyncAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SyncStatus")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastSbomReportId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.HasIndex("Active", "LastSyncAt");
+
+                    b.ToTable("AnalysisTrackingProjects");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisVulnerabilityObservation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AnalysisReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AnalysisTrackingProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ComponentName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ComponentVersion")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsContinuous")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("ObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PackageUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("VulnerabilityId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisReportId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId", "ObservedAt");
+
+                    b.HasIndex("AnalysisTrackingProjectId", "VulnerabilityId", "PackageUrl", "ObservedAt");
+
+                    b.ToTable("AnalysisVulnerabilityObservations");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.ApacheModule", b =>
@@ -239,6 +1452,253 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasIndex("ServerId");
 
                     b.ToTable("ApacheVirtualHosts");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsAggregate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AuthenticatedUniqueVisitors")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("PageViews")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("PeriodKind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("PeriodStartUtc")
+                        .HasColumnType("date");
+
+                    b.Property<int>("ReturningVisitors")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sessions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UniqueVisitors")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeriodStartUtc");
+
+                    b.HasIndex("MonitoredAppId", "PeriodKind", "PeriodStartUtc")
+                        .IsUnique();
+
+                    b.ToTable("AppAnalyticsAggregates");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("Authenticated")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ErrorType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("KeyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Route")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("SessionPseudonym")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MonitoredAppId", "EventId")
+                        .IsUnique();
+
+                    b.HasIndex("MonitoredAppId", "OccurredAtUtc");
+
+                    b.ToTable("AppAnalyticsEvents");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsPageAggregate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateOnly>("DayUtc")
+                        .HasColumnType("date");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("PageViews")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Route")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DayUtc");
+
+                    b.HasIndex("MonitoredAppId", "DayUtc", "Route")
+                        .IsUnique();
+
+                    b.ToTable("AppAnalyticsPageAggregates");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsPeriodIdentity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("FirstSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("KeyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PeriodKind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("PeriodStartUtc")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Pseudonym")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastSeenAtUtc");
+
+                    b.HasIndex("MonitoredAppId", "PeriodKind", "PeriodStartUtc", "Pseudonym")
+                        .IsUnique();
+
+                    b.ToTable("AppAnalyticsPeriodIdentities");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsRejection", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MonitoredAppId");
+
+                    b.HasIndex("OccurredAtUtc");
+
+                    b.ToTable("AppAnalyticsRejections");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("Authenticated")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("KeyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PageViewCount")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ReturningVisitor")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SessionPseudonym")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastSeenAtUtc");
+
+                    b.HasIndex("MonitoredAppId", "SessionPseudonym", "LastSeenAtUtc");
+
+                    b.ToTable("AppAnalyticsSessions");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AppErrorEvent", b =>
@@ -539,6 +1999,38 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("AppSettings");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppVisitorIdentity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateOnly>("DayUtc")
+                        .HasColumnType("date");
+
+                    b.Property<string>("FingerprintHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DayUtc");
+
+                    b.HasIndex("MonitoredAppId", "DayUtc", "FingerprintHash")
+                        .IsUnique();
+
+                    b.ToTable("AppVisitorIdentities");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AuditLog", b =>
@@ -970,6 +2462,134 @@ namespace Aetheus.Back.Data.Migrations
                     b.ToTable("DashboardWidgets");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.DastExecutionLease", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EnvironmentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PipelineRunId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PipelineStepRunId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetHost")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
+                    b.Property<int>("TargetPort")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PipelineStepRunId");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("PipelineRunId", "ExpiresAt");
+
+                    b.HasIndex("EnvironmentId", "TargetHost", "TargetPort");
+
+                    b.ToTable("DastExecutionLeases");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.DependencyTrackOutboxItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AnalysisReportId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalProjectName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PipelineArtifactId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProjectVersion")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ReportEntryPath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnalysisReportId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("PipelineArtifactId");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.ToTable("DependencyTrackOutboxItems");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.DockerComposeStack", b =>
                 {
                     b.Property<int>("Id")
@@ -1197,6 +2817,19 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DastAllowedHosts")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("DastContainsRealData")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("DastEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("DastIsEphemeral")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -1797,6 +3430,50 @@ namespace Aetheus.Back.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AnalyticsAllowedOriginsJson")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("AnalyticsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("AnalyticsKeyRotationPendingAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("AnalyticsLastIngestAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("AnalyticsPendingPseudonymKeyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("AnalyticsPseudonymKeyCreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("AnalyticsPseudonymKeyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("AnalyticsPublicIngestEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("AnalyticsQuotaAlertLevel")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("AnalyticsRejectedCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AnalyticsSiteId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("AnalyticsStorageBudgetBytes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(104857600L);
+
+                    b.Property<string>("AnalyticsVaultName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<int>("ConsecutiveFailures")
                         .HasColumnType("integer");
 
@@ -1827,9 +3504,17 @@ namespace Aetheus.Back.Data.Migrations
                     b.Property<DateTime?>("IngestKeyCreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("IngestKeyExpiresAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP + INTERVAL '90 days'");
+
                     b.Property<string>("IngestKeyHash")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<int>("IngestKeyVersion")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("LastCheckedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1847,6 +3532,13 @@ namespace Aetheus.Back.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
+
+                    b.Property<string>("PreviousIngestKeyHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("PreviousIngestKeyValidUntil")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("ProbeIntervalSeconds")
                         .HasColumnType("integer");
@@ -1872,6 +3564,10 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AnalyticsSiteId")
+                        .IsUnique()
+                        .HasFilter("\"AnalyticsSiteId\" IS NOT NULL");
+
                     b.HasIndex("CurrentStatus");
 
                     b.HasIndex("EnvironmentId");
@@ -1879,6 +3575,10 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasIndex("IngestKeyHash")
                         .IsUnique()
                         .HasFilter("\"IngestKeyHash\" IS NOT NULL");
+
+                    b.HasIndex("PreviousIngestKeyHash")
+                        .IsUnique()
+                        .HasFilter("\"PreviousIngestKeyHash\" IS NOT NULL");
 
                     b.HasIndex("ProjectId");
 
@@ -2175,6 +3875,9 @@ namespace Aetheus.Back.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("BuildCounter")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2207,6 +3910,16 @@ namespace Aetheus.Back.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<int?>("SourceRepositoryId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TemplateReferenceName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("TemplateReferenceVersion")
+                        .HasColumnType("integer");
+
                     b.Property<int>("TriggerType")
                         .HasColumnType("integer");
 
@@ -2225,6 +3938,8 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.HasIndex("ProjectServerId");
 
+                    b.HasIndex("SourceRepositoryId");
+
                     b.HasIndex("Name", "EnvironmentId")
                         .IsUnique()
                         .HasFilter("\"EnvironmentId\" IS NOT NULL");
@@ -2236,6 +3951,8 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasIndex("Name", "ProjectServerId")
                         .IsUnique()
                         .HasFilter("\"ProjectServerId\" IS NOT NULL");
+
+                    b.HasIndex("TemplateReferenceName", "TemplateReferenceVersion");
 
                     b.ToTable("Pipelines");
                 });
@@ -2319,6 +4036,9 @@ namespace Aetheus.Back.Data.Migrations
                     b.Property<DateTime>("RetentionExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("RetentionLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("RetentionPolicy")
                         .HasColumnType("integer");
 
@@ -2348,6 +4068,24 @@ namespace Aetheus.Back.Data.Migrations
                     b.ToTable("PipelineArtifacts");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineFavorite", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PipelineId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId", "PipelineId");
+
+                    b.HasIndex("PipelineId");
+
+                    b.ToTable("PipelineFavorites");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineRun", b =>
                 {
                     b.Property<int>("Id")
@@ -2364,6 +4102,9 @@ namespace Aetheus.Back.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<int>("BuildNumber")
+                        .HasColumnType("integer");
+
                     b.Property<string>("CommitHash")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -2371,12 +4112,20 @@ namespace Aetheus.Back.Data.Migrations
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("ParametersJson")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<int>("PipelineId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("RepositoryUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<string>("ResolvedVariablesJson")
                         .HasColumnType("text");
@@ -2401,6 +4150,10 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.HasIndex("Status");
 
+                    b.HasIndex("PipelineId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
                     b.HasIndex("PipelineId", "Status");
 
                     b.ToTable("PipelineRuns");
@@ -2422,6 +4175,14 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.Property<int?>("ExitCode")
                         .HasColumnType("integer");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<string>("GroupName")
                         .HasColumnType("text");
@@ -2446,6 +4207,14 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.Property<int?>("ServerId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("SkippedCondition")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("SkippedConditionVariablesJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
 
                     b.Property<string>("StageName")
                         .IsRequired()
@@ -2474,6 +4243,8 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasIndex("ServerId");
 
                     b.HasIndex("TaskId");
+
+                    b.HasIndex("TriggeredRunId");
 
                     b.HasIndex("PipelineRunId", "StageName");
 
@@ -3004,6 +4775,123 @@ namespace Aetheus.Back.Data.Migrations
                     b.ToTable("RegistrationTokens");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.RegistryPackage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("DistTagsJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("RegistryPackages");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.RegistryPackageVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Integrity")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("IsListed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPrerelease")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Metadata")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("NormalizedVersion")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("PublishedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("RegistryPackageId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Sha1")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RegistryPackageId", "NormalizedVersion")
+                        .IsUnique();
+
+                    b.ToTable("RegistryPackageVersions");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.Release", b =>
                 {
                     b.Property<int>("Id")
@@ -3412,7 +5300,32 @@ namespace Aetheus.Back.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AgentCapabilitiesJson")
+                        .HasMaxLength(8192)
+                        .HasColumnType("character varying(8192)");
+
                     b.Property<DateTime?>("AgentInstalledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("AgentProtocolVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("AgentSessionFencingToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("AgentSessionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("AgentSessionLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("AgentUpdateReserved")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("AgentUpdateReservedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("AgentVersion")
@@ -3477,6 +5390,9 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.Property<bool>("RequireContainerIsolation")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("ScannerCapabilitiesJson")
+                        .HasColumnType("text");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -3694,8 +5610,23 @@ namespace Aetheus.Back.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<long?>("AssignedAgentSessionFencingToken")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AssignedAgentSessionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("AssignedAgentVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime?>("AssignedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AssignedScannerManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Command")
                         .IsRequired()
@@ -3719,6 +5650,14 @@ namespace Aetheus.Back.Data.Migrations
                     b.Property<string>("ContainerRuntime")
                         .HasColumnType("text");
 
+                    b.Property<string>("ContainerShell")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("ContainerToolchain")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3731,6 +5670,17 @@ namespace Aetheus.Back.Data.Migrations
 
                     b.Property<int?>("ExitCode")
                         .HasColumnType("integer");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("IsDeferredCleanup")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3762,6 +5712,12 @@ namespace Aetheus.Back.Data.Migrations
                     b.HasIndex("PipelineRunId");
 
                     b.HasIndex("PipelineStepRunId");
+
+                    b.HasIndex("IsDeferredCleanup", "Status");
+
+                    b.HasIndex("PipelineRunId", "IsDeferredCleanup")
+                        .IsUnique()
+                        .HasFilter("\"IsDeferredCleanup\" = TRUE AND \"PipelineRunId\" IS NOT NULL");
 
                     b.HasIndex("ServerId", "Status");
 
@@ -4834,6 +6790,96 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("Server");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AgentUpdateRequest", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Server", "Server")
+                        .WithMany("AgentUpdateRequests")
+                        .HasForeignKey("ServerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.ServerTask", "Task")
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Server");
+
+                    b.Navigation("Task");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiRunResult", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AiTaskDefinition", "AiTaskDefinition")
+                        .WithMany("Results")
+                        .HasForeignKey("AiTaskDefinitionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineRun", "PipelineRun")
+                        .WithMany()
+                        .HasForeignKey("PipelineRunId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.ServerTask", "ServerTask")
+                        .WithOne()
+                        .HasForeignKey("Aetheus.Back.Data.Entities.AiRunResult", "ServerTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AiTaskDefinition");
+
+                    b.Navigation("PipelineRun");
+
+                    b.Navigation("ServerTask");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiRunnerProfile", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiTaskDefinition", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AiRunnerProfile", "Profile")
+                        .WithMany("TaskDefinitions")
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Server", "Server")
+                        .WithMany()
+                        .HasForeignKey("ServerId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Profile");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Server");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiTaskTrigger", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AiTaskDefinition", "AiTaskDefinition")
+                        .WithMany("Triggers")
+                        .HasForeignKey("AiTaskDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AiTaskDefinition");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AlertRule", b =>
                 {
                     b.HasOne("Aetheus.Back.Data.Entities.NotificationChannel", "NotificationChannel")
@@ -4849,6 +6895,320 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("NotificationChannel");
 
                     b.Navigation("Server");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisComponent", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "AnalysisReport")
+                        .WithMany("Components")
+                        .HasForeignKey("AnalysisReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisReport");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisEvaluation", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "AnalysisReport")
+                        .WithOne("Evaluation")
+                        .HasForeignKey("Aetheus.Back.Data.Entities.AnalysisEvaluation", "AnalysisReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineRun", "BaselineRun")
+                        .WithMany()
+                        .HasForeignKey("BaselineRunId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineRun", "PipelineRun")
+                        .WithMany()
+                        .HasForeignKey("PipelineRunId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisReport");
+
+                    b.Navigation("BaselineRun");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("PipelineRun");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFinding", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFindingDecision", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisFinding", "AnalysisFinding")
+                        .WithMany("Decisions")
+                        .HasForeignKey("AnalysisFindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisFinding");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFindingOccurrence", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisFinding", "AnalysisFinding")
+                        .WithMany("Occurrences")
+                        .HasForeignKey("AnalysisFindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "AnalysisReport")
+                        .WithMany("Occurrences")
+                        .HasForeignKey("AnalysisReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisFinding");
+
+                    b.Navigation("AnalysisReport");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisMetric", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "AnalysisReport")
+                        .WithMany("Metrics")
+                        .HasForeignKey("AnalysisReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisReport");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicy", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicyException", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisFinding", "AnalysisFinding")
+                        .WithMany()
+                        .HasForeignKey("AnalysisFindingId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisPolicy", "AnalysisPolicy")
+                        .WithMany("Exceptions")
+                        .HasForeignKey("AnalysisPolicyId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisFinding");
+
+                    b.Navigation("AnalysisPolicy");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicyRevision", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisPolicy", "AnalysisPolicy")
+                        .WithMany("Revisions")
+                        .HasForeignKey("AnalysisPolicyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisPolicy");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisReport", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineArtifact", "PipelineArtifact")
+                        .WithMany()
+                        .HasForeignKey("PipelineArtifactId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineRun", "PipelineRun")
+                        .WithMany()
+                        .HasForeignKey("PipelineRunId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("PipelineArtifact");
+
+                    b.Navigation("PipelineRun");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisTrackingProject", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "LastSbomReport")
+                        .WithMany()
+                        .HasForeignKey("LastSbomReportId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LastSbomReport");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisVulnerabilityObservation", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "AnalysisReport")
+                        .WithMany()
+                        .HasForeignKey("AnalysisReportId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisTrackingProject", "AnalysisTrackingProject")
+                        .WithMany("VulnerabilityObservations")
+                        .HasForeignKey("AnalysisTrackingProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisReport");
+
+                    b.Navigation("AnalysisTrackingProject");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.ApacheModule", b =>
@@ -4882,6 +7242,72 @@ namespace Aetheus.Back.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Server");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsAggregate", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsEvent", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsPageAggregate", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsPeriodIdentity", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsRejection", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsSession", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AppErrorEvent", b =>
@@ -4951,6 +7377,17 @@ namespace Aetheus.Back.Data.Migrations
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AppMetricThreshold", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppVisitorIdentity", b =>
                 {
                     b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
                         .WithMany()
@@ -5055,6 +7492,67 @@ namespace Aetheus.Back.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Dashboard");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.DastExecutionLease", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Environment", "Environment")
+                        .WithMany()
+                        .HasForeignKey("EnvironmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineRun", "PipelineRun")
+                        .WithMany()
+                        .HasForeignKey("PipelineRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineStepRun", "PipelineStepRun")
+                        .WithMany()
+                        .HasForeignKey("PipelineStepRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Environment");
+
+                    b.Navigation("PipelineRun");
+
+                    b.Navigation("PipelineStepRun");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.DependencyTrackOutboxItem", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.AnalysisReport", "AnalysisReport")
+                        .WithMany()
+                        .HasForeignKey("AnalysisReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineArtifact", "PipelineArtifact")
+                        .WithMany()
+                        .HasForeignKey("PipelineArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Aetheus.Back.Data.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AnalysisReport");
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("PipelineArtifact");
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.DockerComposeStack", b =>
@@ -5428,11 +7926,18 @@ namespace Aetheus.Back.Data.Migrations
                         .HasForeignKey("ProjectServerId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Aetheus.Back.Data.Entities.GitInternalRepo", "SourceRepository")
+                        .WithMany()
+                        .HasForeignKey("SourceRepositoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Environment");
 
                     b.Navigation("Project");
 
                     b.Navigation("ProjectServer");
+
+                    b.Navigation("SourceRepository");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineApproval", b =>
@@ -5485,6 +7990,25 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("PipelineRun");
 
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineFavorite", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.Pipeline", "Pipeline")
+                        .WithMany()
+                        .HasForeignKey("PipelineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aetheus.Back.Data.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Pipeline");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineRun", b =>
@@ -5677,6 +8201,17 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("Organization");
 
                     b.Navigation("UsedByServer");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.RegistryPackageVersion", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.RegistryPackage", "RegistryPackage")
+                        .WithMany("Versions")
+                        .HasForeignKey("RegistryPackageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("RegistryPackage");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.Release", b =>
@@ -6239,6 +8774,48 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("Servers");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiRunnerProfile", b =>
+                {
+                    b.Navigation("TaskDefinitions");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AiTaskDefinition", b =>
+                {
+                    b.Navigation("Results");
+
+                    b.Navigation("Triggers");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisFinding", b =>
+                {
+                    b.Navigation("Decisions");
+
+                    b.Navigation("Occurrences");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisPolicy", b =>
+                {
+                    b.Navigation("Exceptions");
+
+                    b.Navigation("Revisions");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisReport", b =>
+                {
+                    b.Navigation("Components");
+
+                    b.Navigation("Evaluation");
+
+                    b.Navigation("Metrics");
+
+                    b.Navigation("Occurrences");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AnalysisTrackingProject", b =>
+                {
+                    b.Navigation("VulnerabilityObservations");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.BackupPolicy", b =>
                 {
                     b.Navigation("Runs");
@@ -6342,6 +8919,11 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("Vaults");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.RegistryPackage", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.Release", b =>
                 {
                     b.Navigation("RollbacksFrom");
@@ -6358,6 +8940,8 @@ namespace Aetheus.Back.Data.Migrations
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.Server", b =>
                 {
+                    b.Navigation("AgentUpdateRequests");
+
                     b.Navigation("ApacheModules");
 
                     b.Navigation("ApacheState");

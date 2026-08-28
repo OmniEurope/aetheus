@@ -12,8 +12,9 @@ public class ReleaseHelperTests
     [InlineData(ReleaseStatus.Building, BadgeStyle.Warning)]
     [InlineData(ReleaseStatus.Published, BadgeStyle.Success)]
     [InlineData(ReleaseStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(ReleaseStatus.RolledBack, BadgeStyle.Secondary)]
+    [InlineData(ReleaseStatus.RolledBack, BadgeStyle.Light)]
     [InlineData(ReleaseStatus.Promoted, BadgeStyle.Primary)]
+    [InlineData(ReleaseStatus.Superseded, BadgeStyle.Light)]
     public void GetReleaseBadge_ReturnsCorrectStyle(ReleaseStatus status, BadgeStyle expected)
     {
         Assert.Equal(expected, ReleaseHelper.GetReleaseBadge(status));

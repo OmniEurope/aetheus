@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages;
+using Aetheus.Front.Shared;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
@@ -20,9 +21,18 @@ public class UserEditTests : BunitContext
         _handler = BunitTestHelper.RegisterServices(this, isAdmin: true);
     }
 
+    private void SetupRoles(params string[] roles) =>
+        _handler.SetPaginatedJsonResponse("api/roles",
+            roles.Select((role, index) => new RoleDto
+            {
+                Id = index + 1,
+                Name = role,
+                Description = $"{role} description"
+            }));
+
     private void SetupMocks(int id = 1)
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "Viewer", "Editor" });
+        SetupRoles("Admin", "Viewer", "Editor");
         _handler.SetJsonResponse($"api/users/{id}", new UserDto
         {
             Id = id,
@@ -44,12 +54,12 @@ public class UserEditTests : BunitContext
     [Fact]
     public void NewUser_RendersEmptyForm()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "Viewer" });
+        SetupRoles("Admin", "Viewer");
         var cut = Render<UserEdit>(p => p.Add(x => x.Id, null));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
 
-        // New-user mode fetches the available roles but never a user detail.
-        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/users/roles"));
+        // New-user mode pages through available roles but never fetches a user detail.
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/roles"));
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("/effective-permissions"));
     }
 
@@ -70,17 +80,16 @@ public class UserEditTests : BunitContext
     public void NonAdmin_RedirectsToHome()
     {
         var handler = BunitTestHelper.RegisterServices(this, isAdmin: false);
-        handler.SetJsonResponse("api/users/roles", new List<string>());
         Render<UserEdit>(p => p.Add(x => x.Id, 1));
 
         // The non-admin guard returns before any roles/user data is fetched.
-        Assert.DoesNotContain(handler.Requests, r => r.Url.Contains("api/users/roles"));
+        Assert.DoesNotContain(handler.Requests, r => r.Url.Contains("api/roles"));
     }
 
     [Fact]
     public void EditUser_WithMultipleRoles_LoadsCorrectly()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "Viewer", "Editor" });
+        SetupRoles("Admin", "Viewer", "Editor");
         _handler.SetJsonResponse("api/users/2", new UserDto
         {
             Id = 2,
@@ -107,7 +116,7 @@ public class UserEditTests : BunitContext
     [Fact]
     public void EditUser_InactiveUser_LoadsCorrectly()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Viewer" });
+        SetupRoles("Viewer");
         _handler.SetJsonResponse("api/users/3", new UserDto
         {
             Id = 3,
@@ -129,49 +138,113 @@ public class UserEditTests : BunitContext
         Assert.False((bool)model.GetType().GetProperty("IsActive")!.GetValue(model)!);
     }
 
-    // --- OnRoleToggled ---
-
     [Fact]
-    public void OnRoleToggled_AddRole()
+    public async Task ExistingUser_RoleClick_SavesImmediatelyWithoutSaveButton()
     {
         SetupMocks();
-        var cut = Render<UserEdit>(p => p.Add(x => x.Id, 1));
+        _handler.SetJsonResponse(HttpMethod.Put, "api/users/1", new UserDto
+        {
+            Id = 1,
+            Username = "testuser",
+            Email = "test@example.com",
+            IsActive = true,
+            Roles = ["Viewer", "Admin"]
+        });
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/users/1?tab=roles");
+        var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
+        cut.WaitForState(() => cut.FindAll(".role-assignment-picker").Count == 1);
 
-        var method = typeof(UserEdit).GetMethod("OnRoleToggled", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, ["Admin", true]);
+        var roleCard = cut.Find(".iam-role-assignment-card");
+        Assert.DoesNotContain(roleCard.QuerySelectorAll("button"), button =>
+            string.Equals(button.TextContent.Trim(), "Save", StringComparison.OrdinalIgnoreCase));
 
-        var model = typeof(UserEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        var roles = (List<string>)model.GetType().GetProperty("Roles")!.GetValue(model)!;
-        Assert.Contains("Admin", roles);
+        var picker = cut.FindComponent<RoleAssignmentPicker>();
+        await cut.InvokeAsync(() =>
+            picker.Instance.SelectedRolesChanged.InvokeAsync(["Viewer", "Admin"]));
+
+        var request = Assert.Single(_handler.RequestDetails, request =>
+            request.Method == "PUT" && request.Url.Contains("api/users/1"));
+        Assert.Contains("\"Admin\"", request.Body);
+        cut.WaitForAssertion(() => Assert.Contains("Saved", roleCard.TextContent));
     }
 
     [Fact]
-    public void OnRoleToggled_RemoveRole()
+    public async Task ExistingUser_RoleSave_PreservesSavedRolesWhenPermissionRefreshIsUnauthorized()
     {
         SetupMocks();
-        var cut = Render<UserEdit>(p => p.Add(x => x.Id, 1));
+        _handler.SetJsonResponse("api/users/1", new UserDto
+        {
+            Id = 1,
+            Username = "admin",
+            Email = "admin@example.com",
+            IsActive = true,
+            Roles = ["Viewer"]
+        });
+        _handler.SetJsonResponse(HttpMethod.Put, "api/users/1", new UserDto
+        {
+            Id = 1,
+            Username = "admin",
+            Email = "admin@example.com",
+            IsActive = true,
+            Roles = ["Viewer", "Admin"]
+        });
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/users/1?tab=roles");
+        var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
+        cut.WaitForState(() => cut.FindAll(".role-assignment-picker").Count == 1);
+        _handler.SetResponse(
+            HttpMethod.Get,
+            "api/users/1/effective-permissions",
+            System.Net.HttpStatusCode.Unauthorized);
 
-        var method = typeof(UserEdit).GetMethod("OnRoleToggled", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, ["Viewer", false]);
+        var picker = cut.FindComponent<RoleAssignmentPicker>();
+        await cut.InvokeAsync(() =>
+            picker.Instance.SelectedRolesChanged.InvokeAsync(["Viewer", "Admin"]));
 
-        var model = typeof(UserEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var model = typeof(UserEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!;
         var roles = (List<string>)model.GetType().GetProperty("Roles")!.GetValue(model)!;
-        Assert.DoesNotContain("Viewer", roles);
+        Assert.Equal(["Viewer", "Admin"], roles);
+        Assert.True((bool)typeof(UserEdit).GetField("_rolesSaved", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!);
+        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
+            message => message.Severity == NotificationSeverity.Warning
+                       && message.Detail == "UserRolesSavedPermissionRefreshUnauthorized");
     }
 
     [Fact]
-    public void OnRoleToggled_AddDuplicateRole_NoDuplicate()
+    public async Task ExistingUser_RoleSave_ReportsUnexpectedPermissionRefreshFailureWithoutRollback()
     {
         SetupMocks();
-        var cut = Render<UserEdit>(p => p.Add(x => x.Id, 1));
+        _handler.SetJsonResponse(HttpMethod.Put, "api/users/1", new UserDto
+        {
+            Id = 1,
+            Username = "testuser",
+            Email = "test@example.com",
+            IsActive = true,
+            Roles = ["Viewer", "Admin"]
+        });
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/users/1?tab=roles");
+        var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
+        cut.WaitForState(() => cut.FindAll(".role-assignment-picker").Count == 1);
+        _handler.SetResponse(
+            HttpMethod.Get,
+            "api/users/1/effective-permissions",
+            System.Net.HttpStatusCode.InternalServerError);
 
-        var method = typeof(UserEdit).GetMethod("OnRoleToggled", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, ["Viewer", true]); // already in roles
-        method.Invoke(cut.Instance, ["Viewer", true]); // again
+        var picker = cut.FindComponent<RoleAssignmentPicker>();
+        await cut.InvokeAsync(() =>
+            picker.Instance.SelectedRolesChanged.InvokeAsync(["Viewer", "Admin"]));
 
-        var model = typeof(UserEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var model = typeof(UserEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!;
         var roles = (List<string>)model.GetType().GetProperty("Roles")!.GetValue(model)!;
-        Assert.Single(roles, r => r == "Viewer");
+        Assert.Equal(["Viewer", "Admin"], roles);
+        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
+            message => message.Severity == NotificationSeverity.Warning
+                       && message.Detail == "UserRolesSavedPermissionRefreshFailed");
     }
 
     // --- OnSubmit ---
@@ -179,7 +252,7 @@ public class UserEditTests : BunitContext
     [Fact]
     public async Task OnSubmit_NewUser_ShortPassword_ShowsError()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Viewer" });
+        SetupRoles("Viewer");
         var cut = Render<UserEdit>(p => p.Add(x => x.Id, null));
 
         var model = typeof(UserEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
@@ -204,6 +277,38 @@ public class UserEditTests : BunitContext
 
         // The edit path issues a PUT to api/users/1 (the update the test name promises).
         Assert.Contains(_handler.Requests, r => r.Method == "PUT" && r.Url.Contains("api/users/1"));
+    }
+
+    [Fact]
+    public async Task ActiveToggle_DeactivationCancelled_DoesNotUpdateAndRestoresToggle()
+    {
+        SetupMocks();
+        var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
+        cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
+        var activeToggle = cut.FindAll("input.labeled-toggle-native-input")[0];
+        var dialog = Services.GetRequiredService<DialogService>();
+        var change = activeToggle.TriggerEventAsync("onchange", new ChangeEventArgs { Value = false });
+        await cut.InvokeAsync(() => dialog.Close(false));
+        await change;
+
+        Assert.DoesNotContain(_handler.Requests, request => request.Method == "PUT");
+        Assert.True(cut.FindAll("input.labeled-toggle-native-input")[0].HasAttribute("checked"));
+    }
+
+    [Fact]
+    public async Task ActiveToggle_DeactivationConfirmed_UpdatesImmediately()
+    {
+        SetupMocks();
+        var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
+        cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
+        var dialog = Services.GetRequiredService<DialogService>();
+        var change = cut.FindAll("input.labeled-toggle-native-input")[0]
+            .TriggerEventAsync("onchange", new ChangeEventArgs { Value = false });
+        await cut.InvokeAsync(() => dialog.Close(true));
+        await change;
+
+        Assert.Contains(_handler.Requests, request =>
+            request.Method == "PUT" && request.Url.Contains("api/users/1", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -261,7 +366,7 @@ public class UserEditTests : BunitContext
     // --- OnChangePassword ---
 
     [Fact]
-    public async Task OnChangePassword_ShortPassword_DoesNothing()
+    public async Task OnChangePassword_ShortPassword_MakesNoRequest()
     {
         SetupMocks();
         var cut = Render<UserEdit>(p => p.Add(x => x.Id, 1));
@@ -271,6 +376,22 @@ public class UserEditTests : BunitContext
 
         // A < 6 char password fails the length guard - no change-password call is sent.
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("change-password"));
+    }
+
+    [Fact]
+    public void SecurityPassword_InvalidSubmit_ShowsWarningNotification()
+    {
+        SetupMocks();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/users/1?tab=security");
+        var cut = Render<UserEdit>(p => p.Add(x => x.Id, 1));
+        cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
+        cut.Find("input[type='password']").Input("short");
+
+        cut.Find("form").Submit();
+
+        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
+            message => message.Severity == NotificationSeverity.Warning);
+        Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("change-password"));
     }
 
     [Fact]
@@ -309,7 +430,7 @@ public class UserEditTests : BunitContext
     [Fact]
     public void EditUser_WithEffectivePermissions_ShowsPermissionTable()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "Viewer" });
+        SetupRoles("Admin", "Viewer");
         _handler.SetJsonResponse("api/users/4", new UserDto
         {
             Id = 4,

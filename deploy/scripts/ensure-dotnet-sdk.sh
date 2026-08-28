@@ -1,10 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: EUPL-1.2
 
-# Resolve the exact SDK pinned by global.json. Existing agents may have been
-# binary-upgraded without re-running the root installer, so their system SDK can
-# lag behind the repository. Install the pinned SDK in the agent user's home as
-# a self-healing, non-root fallback and print only the executable path on stdout.
+# Resolve the exact baseline SDK declared by global.json for pipeline evidence.
+# Developer workstations may use global.json's stable .NET 10 feature-band
+# fallback, but agents must not silently change SDK when their host is upgraded.
+# Install the baseline in a version-isolated, non-root cache when the host does
+# not resolve that exact SDK, and print only the executable path on stdout.
 
 set -eu
 
@@ -16,6 +17,7 @@ if [ ! -s "$GLOBAL_JSON" ]; then
     echo "Pinned SDK manifest not found: $GLOBAL_JSON" >&2
     exit 1
 fi
+GLOBAL_JSON_DIR="$(CDPATH= cd -- "$(dirname -- "$GLOBAL_JSON")" && pwd)"
 
 SDK_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$GLOBAL_JSON" | head -n 1)"
 if ! printf '%s\n' "$SDK_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -23,22 +25,23 @@ if ! printf '%s\n' "$SDK_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     exit 1
 fi
 
-has_sdk() {
-    "$1" --list-sdks 2>/dev/null | grep -q "^${SDK_VERSION} "
+resolves_exact_sdk() {
+    [ "$(cd "$GLOBAL_JSON_DIR" && "$1" --version 2>/dev/null)" = "$SDK_VERSION" ]
 }
 
 if command -v dotnet >/dev/null 2>&1; then
     SYSTEM_DOTNET="$(command -v dotnet)"
-    if has_sdk "$SYSTEM_DOTNET"; then
+    if resolves_exact_sdk "$SYSTEM_DOTNET"; then
         printf '%s\n' "$SYSTEM_DOTNET"
         exit 0
     fi
 fi
 
 : "${HOME:?HOME is required to install the pinned .NET SDK without root}"
-INSTALL_DIR="${AETHEUS_DOTNET_ROOT:-$HOME/.aetheus/dotnet}"
+INSTALL_ROOT="${AETHEUS_DOTNET_ROOT:-$HOME/.aetheus/dotnet}"
+INSTALL_DIR="$INSTALL_ROOT/$SDK_VERSION"
 LOCAL_DOTNET="$INSTALL_DIR/dotnet"
-if [ -x "$LOCAL_DOTNET" ] && has_sdk "$LOCAL_DOTNET"; then
+if [ -x "$LOCAL_DOTNET" ] && resolves_exact_sdk "$LOCAL_DOTNET"; then
     printf '%s\n' "$LOCAL_DOTNET"
     exit 0
 fi
@@ -67,7 +70,7 @@ curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
 printf '%s  %s\n' "$DOTNET_INSTALLER_SHA256" "$INSTALLER" | sha256sum -c - >/dev/null
 bash "$INSTALLER" --version "$SDK_VERSION" --install-dir "$INSTALL_DIR" --no-path >/dev/null
 
-if [ ! -x "$LOCAL_DOTNET" ] || ! has_sdk "$LOCAL_DOTNET"; then
+if [ ! -x "$LOCAL_DOTNET" ] || ! resolves_exact_sdk "$LOCAL_DOTNET"; then
     echo "Pinned .NET SDK $SDK_VERSION installation could not be verified" >&2
     exit 1
 fi

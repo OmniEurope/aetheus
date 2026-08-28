@@ -1,66 +1,68 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Aetheus.Agent.Core.Collectors;
+using NSubstitute;
 
 namespace Aetheus.Agent.Core.Tests;
 
-/// <summary>
-/// S-FEAT-11: the ServerQuery client talks TCP directly (no <c>nc</c>). Exercised against a loopback
-/// <see cref="TcpListener"/> standing in for a ServerQuery telnet endpoint.
-/// </summary>
-public class TcpTeamspeakQueryClientTests
+public sealed class TcpTeamspeakQueryClientTests
 {
     [Fact]
-    public async Task ExecuteAsync_WritesCommandsAndReturnsServerResponse()
+    public async Task ExecuteAsync_WritesExactAsciiCommandAndReturnsCompleteReply()
     {
-        using var listener = new TcpListener(IPAddress.IPv6Any, 0) { Server = { DualMode = true } };
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var receivedLines = new List<string>();
-
-        var serverTask = Task.Run(async () =>
-        {
-            using var conn = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
-            await using var stream = conn.GetStream();
-            using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
-            while (await reader.ReadLineAsync(TestContext.Current.CancellationToken) is { } line)
+        var transport = Substitute.For<ITeamspeakQueryTransport>();
+        ReadOnlyMemory<byte> observedPayload = default;
+        transport.ExchangeAsync(10011, Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
             {
-                receivedLines.Add(line);
-                if (line == "quit") break;
-            }
+                observedPayload = call.ArgAt<ReadOnlyMemory<byte>>(1);
+                return "TS3\nerror id=0 msg=ok\n";
+            });
+        var client = new TcpTeamspeakQueryClient(transport);
+        const string commands = "login user pass\nserverinfo\nquit\n";
 
-            foreach (var fragment in new[] { "TS3\nvirtualserver_", "name=Test\\sServer ", "error id=0 msg=ok\n" })
-            {
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(fragment), TestContext.Current.CancellationToken);
-                await stream.FlushAsync(TestContext.Current.CancellationToken);
-                await Task.Yield();
-            }
-            conn.Client.Shutdown(SocketShutdown.Both);
-        }, TestContext.Current.CancellationToken);
-
-        var client = new TcpTeamspeakQueryClient();
         var result = await client.ExecuteAsync(
-            port, "serverinfo\nquit\n", TestContext.Current.CancellationToken);
+            10011,
+            commands,
+            TestContext.Current.CancellationToken);
 
-        await serverTask;
-
-        Assert.NotNull(result);
-        Assert.Contains("virtualserver_name=Test", result);
-        Assert.Equal(new[] { "serverinfo", "quit" }, receivedLines);
+        Assert.Equal("TS3\nerror id=0 msg=ok\n", result);
+        Assert.Equal(commands, Encoding.ASCII.GetString(observedPayload.Span));
+        await transport.Received(1).ExchangeAsync(
+            10011,
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ExecuteAsync_ConnectionRefused_ReturnsNull()
+    public async Task ExecuteAsync_EmptyProtocolReply_ReturnsNull()
     {
-        using var reserved = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        var closedPort = ((IPEndPoint)reserved.LocalEndPoint!).Port;
+        var transport = Substitute.For<ITeamspeakQueryTransport>();
+        transport.ExchangeAsync(Arg.Any<int>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
+            .Returns(" \r\n");
+        var client = new TcpTeamspeakQueryClient(transport);
 
-        var client = new TcpTeamspeakQueryClient();
         var result = await client.ExecuteAsync(
-            closedPort, "quit\n", TestContext.Current.CancellationToken);
+            10011,
+            "quit\n",
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TransportFailure_ReturnsNull()
+    {
+        var transport = Substitute.For<ITeamspeakQueryTransport>();
+        transport.ExchangeAsync(Arg.Any<int>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<string>(new SocketException()));
+        var client = new TcpTeamspeakQueryClient(transport);
+
+        var result = await client.ExecuteAsync(
+            10011,
+            "quit\n",
+            TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }

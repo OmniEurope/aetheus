@@ -6,7 +6,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else if (_artifact is null)
 {
@@ -25,7 +25,7 @@ else
         </ChildContent>
         <Actions>
             <RadzenButton Text="@L["Download"]" Icon="download" Size="ButtonSize.Small"
-                Click="DownloadAsync" IsBusy="_downloading" BusyText="@L["Download"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                Click="DownloadAsync" IsBusy="_downloading" BusyText="@L["Download"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         </Actions>
     </Aetheus.Front.Shared.PageHeader>
 
@@ -33,7 +33,7 @@ else
     <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" Wrap="FlexWrap.Wrap" class="rz-mt-4">
         <RadzenCard class="run-overview-card">
             <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="sd_storage" class="run-tile-icon" /> @L["Size"]</RadzenText>
-            <RadzenText TextStyle="TextStyle.Body1">@FormatSize(_artifact.SizeBytes)</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body1">@DisplayFormatting.Size(_artifact.SizeBytes)</RadzenText>
         </RadzenCard>
         <RadzenCard class="run-overview-card">
             <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary"><RadzenIcon Icon="schedule" class="run-tile-icon" /> @L["CreatedAt"]</RadzenText>
@@ -70,7 +70,7 @@ else
                     {
                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                             <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="call_split" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                            <a href="/git/branches/@branch.Id" class="detail-value-link">@branch.Name</a>
+                            <a href="@BranchHref(branch)" class="detail-value-link">@branch.Name</a>
                         </RadzenStack>
                     }
                 }
@@ -78,7 +78,7 @@ else
                 {
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                         <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="call_split" class="run-tile-icon" /> @L["Branch"]</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2">@_artifact.BranchName</RadzenText>
+                        <a href="@BranchHref(_artifact.BranchName)" class="detail-value-link">@_artifact.BranchName</a>
                     </RadzenStack>
                 }
                 @if (_artifact.Commits.Count > 0)
@@ -87,7 +87,7 @@ else
                     {
                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                             <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
-                            <a href="/git/commits/@commit.Id" class="detail-value-link text-mono" title="@commit.Sha">@ShortSha(commit.Sha)</a>
+                            <a href="@CommitHref(commit)" class="detail-value-link text-mono" title="@commit.Sha">@DisplayFormatting.ShortSha(commit.Sha)</a>
                         </RadzenStack>
                     }
                 }
@@ -95,7 +95,7 @@ else
                 {
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
                         <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary"><RadzenIcon Icon="commit" class="run-tile-icon" /> @L["Commit"]</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2" class="text-mono" title="@_artifact.CommitHash">@ShortSha(_artifact.CommitHash)</RadzenText>
+                        <a href="@CommitHref(_artifact.CommitHash)" class="detail-value-link text-mono" title="@_artifact.CommitHash">@DisplayFormatting.ShortSha(_artifact.CommitHash)</a>
                     </RadzenStack>
                 }
             </RadzenCard>

@@ -15,11 +15,11 @@ public class PipelineControllerIntegrationTests(CustomWebApplicationFactory fact
         name: test-pipeline
         trigger: manual
         stages:
-          - name: build
-            agent: test-server
+          - name: orchestration
             steps:
-              - name: compile
-                shell: dotnet build
+              - name: delegate
+                type: trigger
+                pipeline: child-pipeline
         """;
 
     [Fact]

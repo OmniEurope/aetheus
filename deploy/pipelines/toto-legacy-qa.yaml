@@ -1,0 +1,80 @@
+# =============================================================================
+# toto-legacy-qa - runtime QA for the local Toto pipeline harness
+# =============================================================================
+# Toto intentionally contains its unit suite under tests/ but no separate
+# qa-tests or Playwright project. CI owns the unit suite; this pipeline proves
+# the actual container image starts and serves its API on an isolated QA port.
+# It always tears the stack down and fails honestly if the runtime probe failed.
+name: toto-legacy-qa
+trigger: manual
+variables:
+  QA_PORT: "8091"
+
+stages:
+  - name: DeployQA
+    os: linux
+    group: QA
+    environment: QA
+    steps:
+      - name: Build image and start QA stack
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        timeout_seconds: 1800
+        shell: |
+          set -eu
+          QA_PROJ="toto-qa-${AETHEUS_RUN_ID:-manual}"
+          rm -f "$WORKSPACE/.qa-failed"
+          cleanup() { docker compose -p "$QA_PROJ" -f deploy/docker-compose.qa.yml down -v --remove-orphans || true; }
+          trap 'rc=$?; if [ $rc -ne 0 ]; then cleanup; fi' EXIT
+          docker build -f deploy/Dockerfile -t "toto-qa:${AETHEUS_RUN_ID:-current}" .
+          docker compose -p "$QA_PROJ" -f deploy/docker-compose.qa.yml up -d --wait
+
+  - name: Integration
+    os: linux
+    group: QA
+    environment: QA
+    depends_on:
+      - DeployQA
+    steps:
+      - name: Probe live Todo API
+        working_directory: "$(WORKSPACE)"
+        timeout_seconds: 120
+        continue_on_error: true
+        shell: |
+          set +e
+          if ! curl -fsS "http://127.0.0.1:$(QA_PORT)/api/todos" >/dev/null; then
+            echo "QA runtime probe failed."
+            touch "$WORKSPACE/.qa-failed"
+            exit 1
+          fi
+          echo "QA runtime probe passed."
+
+  - name: TeardownQA
+    os: linux
+    group: QA
+    environment: QA
+    condition: always()
+    depends_on:
+      - Integration
+    steps:
+      - name: Destroy QA stack
+        working_directory: "$(WORKSPACE)"
+        timeout_seconds: 300
+        shell: |
+          set -eu
+          QA_PROJ="toto-qa-${AETHEUS_RUN_ID:-manual}"
+          docker compose -p "$QA_PROJ" -f deploy/docker-compose.qa.yml down -v --remove-orphans
+
+  - name: QAGate
+    os: linux
+    group: QA
+    environment: QA
+    depends_on:
+      - TeardownQA
+    steps:
+      - name: Verify QA runtime probe
+        working_directory: "$(WORKSPACE)"
+        timeout_seconds: 60
+        shell: |
+          test ! -f "$WORKSPACE/.qa-failed"
+          echo "QA validation passed."

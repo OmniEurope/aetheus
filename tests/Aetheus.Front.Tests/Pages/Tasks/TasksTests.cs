@@ -3,6 +3,8 @@ using Aetheus.Front.Pages.Tasks;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 using TasksPage = Aetheus.Front.Pages.Tasks.Tasks;
 
@@ -132,22 +134,17 @@ public class TasksTests : BunitContext
     }
 
     [Fact]
-    public async Task ViewLogs_SetsSelectedTaskLogs()
+    public void OpenTask_NavigatesToDetailPage()
     {
         _handler.SetJsonResponse("api/tasks", new PaginatedResult<ServerTaskDto>
         {
             Items = [new ServerTaskDto { Id = 7, Name = "deploy", Status = TaskExecutionStatus.Success }],
             TotalCount = 1
         });
-        _handler.SetJsonResponse("api/logs/task/7", new List<TaskLogDto>
-        {
-            new() { Id = 1, TaskId = 7, Message = "done", Level = TaskLogLevel.Info, Timestamp = DateTime.UtcNow }
-        });
-
         var cut = Render<TaskListView>();
 
-        await cut.InvokeAsync(async () => await cut.Instance.ViewLogs(7));
+        cut.InvokeAsync(() => cut.Instance.OpenTask(new ServerTaskDto { Id = 7 }));
 
-        Assert.Equal(7, cut.Instance._selectedTaskId);
+        Assert.EndsWith("/tasks/7", Services.GetRequiredService<NavigationManager>().Uri);
     }
 }

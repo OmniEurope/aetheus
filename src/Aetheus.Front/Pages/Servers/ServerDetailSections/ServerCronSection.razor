@@ -21,10 +21,10 @@
                 <RadzenBadge Text="@FilteredJobs.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
                 <RadzenTextBox @bind-Value="_jobSearch" Placeholder="@L["FilterCronJobs"]" />
             </RadzenStack>
-            <RadzenDataGrid Data="@FilteredJobs" TItem="CronJobDto" Density="Density.Compact"
+            <RadzenDataGrid Responsive="false" Data="@FilteredJobs" TItem="CronJobDto" Density="Density.Compact"
                 AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                AllowGrouping="true" ShowGroupPanel="true" AllowPaging="true" PageSize="25"
-                PagerHorizontalAlign="HorizontalAlign.Center">
+                AllowGrouping="true" ShowGroupPanel="true" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
+                PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                 <Columns>
                     <RadzenDataGridColumn TItem="CronJobDto" Property="User" Title="@L["User"]" Width="140px" />
                     <RadzenDataGridColumn TItem="CronJobDto" Property="Schedule" Title="@L["Schedule"]" Width="160px">

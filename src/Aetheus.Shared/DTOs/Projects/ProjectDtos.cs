@@ -11,6 +11,7 @@ public sealed record ProjectDto
     public string Name { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public string? RepositoryUrl { get; init; }
+    public int? InternalRepositoryId { get; init; }
     public string? DefaultBranch { get; init; }
     public ProjectStatus Status { get; init; }
     public List<string> Tags { get; init; } = [];
@@ -24,11 +25,34 @@ public sealed record ProjectDto
     /// (S-UX-30).</summary>
     public PipelineStatus? LastRunStatus { get; init; }
     public DateTime? LastRunAt { get; init; }
+    public int? LastRunId { get; init; }
+    public string? LastRunName { get; init; }
+    public int? ParentRunId { get; init; }
+    public string? ParentRunName { get; init; }
+
+    /// <summary>Current project-wide A-F grade, combining the latest required analysis domains.
+    /// Null when no complete grade has been produced yet.</summary>
+    public AnalysisGrade? LatestGateGrade { get; init; }
 
     /// <summary>Most recent git activity for the project: the latest of the internal repository's
     /// last push and any external connection's last sync. Null when the project has no git.
     /// Drives the "last git update" chip on the projects list.</summary>
     public DateTime? LastGitUpdateAt { get; init; }
+
+    /// <summary>Most recent first-class commit observed for the project. The id deep-links to the
+    /// commit detail while the SHA/message/date keep the project tile useful without another call.</summary>
+    public int? LastCommitId { get; init; }
+    public string? LastCommitSha { get; init; }
+    public string? LastCommitMessage { get; init; }
+    public DateTime? LastCommitAt { get; init; }
+
+    /// <summary>Availability aggregated from enabled production monitored apps. Unavailable means
+    /// no production monitor exists or its current state is unknown.</summary>
+    public ProjectProductionStatus ProductionStatus { get; init; } = ProjectProductionStatus.Unavailable;
+
+    /// <summary>Active analytics sessions seen in the last five minutes across production apps.
+    /// Null means web analytics is not available; zero is a measured absence of active sessions.</summary>
+    public int? OnlineUserCount { get; init; }
 }
 
 public sealed record ProjectDetailDto
@@ -42,6 +66,10 @@ public sealed record ProjectDetailDto
     public List<string> Tags { get; init; } = [];
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
+
+    /// <summary>Current project-wide A-F grade, combining the latest required analysis domains.
+    /// Null when no complete grade has been produced yet.</summary>
+    public AnalysisGrade? LatestGateGrade { get; init; }
 
     /// <summary>Most recent git activity (internal last push / external last sync); null when the
     /// project has no git. Shown in the overview "Repository" card.</summary>
@@ -63,7 +91,7 @@ public sealed record ProjectDetailDto
     public int EnvironmentCount { get; init; }
 }
 
-public sealed record CreateProjectRequest
+public abstract record ProjectRequest
 {
     [Required]
     [StringLength(100)]
@@ -92,41 +120,19 @@ public sealed record CreateProjectRequest
     [StringLength(100)]
     public string? ReleaseNumberingPattern { get; init; }
 
+}
+
+public sealed record CreateProjectRequest : ProjectRequest
+{
     /// <summary>Organization that owns the new project. Optional -
     /// when omitted, the API uses the caller's default organization.</summary>
     [Range(1, int.MaxValue)]
     public int? OrganizationId { get; init; }
 }
 
-public sealed record UpdateProjectRequest
+public sealed record UpdateProjectRequest : ProjectRequest
 {
-    [Required]
-    [StringLength(100)]
-    public string Name { get; init; } = string.Empty;
-
-    [StringLength(500)]
-    public string Description { get; init; } = string.Empty;
-
-    [StringLength(500)]
-    [HttpsUrl]
-    public string? RepositoryUrl { get; init; }
-
-    [StringLength(100)]
-    public string? DefaultBranch { get; init; }
-
     public ProjectStatus Status { get; init; }
-    [MaxLength(20)]
-    [MaxItemStringLength(50)]
-    public List<string> Tags { get; init; } = [];
-
-    [Range(1, 3650)]
-    public int? ArtifactRetentionDays { get; init; }
-
-    [Range(1, 3650)]
-    public int? ArtifactLatestRetentionDays { get; init; }
-
-    [StringLength(100)]
-    public string? ReleaseNumberingPattern { get; init; }
 }
 
 public sealed record ProjectActivityDto

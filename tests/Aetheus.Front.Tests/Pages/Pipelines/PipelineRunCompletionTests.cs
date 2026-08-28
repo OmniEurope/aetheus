@@ -21,6 +21,11 @@ public class PipelineRunCompletionTests : BunitContext
             HttpMethod.Get,
             "/runs?pageSize=50",
             []);
+        _handler.SetPaginatedJsonResponse<AiRunResultDto>(
+            HttpMethod.Get,
+            "api/ai/results",
+            []);
+        _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/", System.Net.HttpStatusCode.NoContent);
     }
 
     private readonly BunitTestHelper.TestHandler _handler;

@@ -2,7 +2,7 @@
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// Hourly aggregate of an application metric (PLAN-001 phase 2, 90-day retention). Produced by
+/// Hourly aggregate of an application metric (ADR-021 phase 2, 90-day retention). Produced by
 /// <c>AppTelemetryRetentionService</c> from raw <see cref="AppMetricSample"/> rows of completed hours.
 /// </summary>
 public class AppMetricHourly

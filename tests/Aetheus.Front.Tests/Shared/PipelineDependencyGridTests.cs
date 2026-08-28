@@ -76,6 +76,7 @@ public class PipelineDependencyGridTests : BunitContext
             .Add(component => component.Items, new List<PipelineDependencyDto> { item })
             .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
             .Add(component => component.RunPipeline, run)
+            .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
             .Add(component => component.CanWrite, true));
 
         cut.FindAll("button").Single(button => button.TextContent.Contains("Run", StringComparison.Ordinal)).Click();
@@ -86,6 +87,53 @@ public class PipelineDependencyGridTests : BunitContext
             Assert.Equal(17, invocation.Value.Id);
             Assert.Null(invocation.Value.Item);
         });
+    }
+
+    [Fact]
+    public void FavoriteButton_UsesFilledStarAndRequestsRemoval()
+    {
+        (int Id, bool IsFavorite)? invocation = null;
+        var item = new PipelineDependencyDto { Id = 17, Name = "release" };
+        var cut = Render<PipelineDependencyGrid>(parameters => parameters
+            .Add(component => component.Items, new List<PipelineDependencyDto> { item })
+            .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
+            .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (id, favorite) =>
+            {
+                invocation = (id, favorite);
+                return Task.CompletedTask;
+            })
+            .Add(component => component.FavoritePipelineIds, new HashSet<int> { 17 }));
+
+        var button = cut.Find("button[aria-label='RemovePipelineFromFavorites']");
+        Assert.Contains("star", button.TextContent);
+
+        button.Click();
+
+        Assert.Equal((17, false), invocation);
+    }
+
+    [Fact]
+    public void NonFavoriteButton_UsesOutlinedStarAndRequestsAddition()
+    {
+        (int Id, bool IsFavorite)? invocation = null;
+        var item = new PipelineDependencyDto { Id = 18, Name = "deploy" };
+        var cut = Render<PipelineDependencyGrid>(parameters => parameters
+            .Add(component => component.Items, new List<PipelineDependencyDto> { item })
+            .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
+            .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (id, favorite) =>
+            {
+                invocation = (id, favorite);
+                return Task.CompletedTask;
+            }));
+
+        var button = cut.Find("button[aria-label='AddPipelineToFavorites']");
+        Assert.Contains("star_border", button.TextContent);
+
+        button.Click();
+
+        Assert.Equal((18, true), invocation);
     }
 
     [Fact]
@@ -100,6 +148,7 @@ public class PipelineDependencyGridTests : BunitContext
             .Add(component => component.Items, items)
             .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
             .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
             .Add(component => component.GroupByProject, true)
             .Add(component => component.Virtualize, true));
 
@@ -142,11 +191,66 @@ public class PipelineDependencyGridTests : BunitContext
         Assert.Contains("pipeline-run-dot-running", dots[^1].ClassList);
     }
 
+    [Fact]
+    public void ModelStatus_LinksModelAndOffersDirectUpdate()
+    {
+        var item = new PipelineDependencyDto { Id = 17, Name = "release" };
+        var cut = Render<PipelineDependencyGrid>(parameters => parameters
+            .Add(component => component.Items, new List<PipelineDependencyDto> { item })
+            .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
+            .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
+            .Add(component => component.CanWrite, true)
+            .Add(component => component.FleetAvailable, true)
+            .Add(component => component.FleetItems, new Dictionary<int, PipelineFleetItemDto>
+            {
+                [17] = new()
+                {
+                    PipelineId = 17,
+                    TemplateId = 8,
+                    TemplateName = "release-model",
+                    PinnedVersion = 2,
+                    LatestVersion = 3,
+                    Freshness = PipelineFleetFreshness.Outdated
+                }
+            }));
+
+        Assert.Contains("href=\"/templates/8\"", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("release-model", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("Outdated", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("v2", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("v@pinnedVersion", cut.Markup, StringComparison.Ordinal);
+
+        cut.FindAll("button").Single(button => button.TextContent.Contains("Update", StringComparison.Ordinal)).Click();
+        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+        Assert.EndsWith("/pipelines/17/template/update/3", nav.Uri, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PipelineWithoutModel_IsExplicitlyAutonomous()
+    {
+        var item = new PipelineDependencyDto { Id = 18, Name = "standalone" };
+        var cut = Render<PipelineDependencyGrid>(parameters => parameters
+            .Add(component => component.Items, new List<PipelineDependencyDto> { item })
+            .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
+            .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
+            .Add(component => component.FleetAvailable, true)
+            .Add(component => component.FleetItems, new Dictionary<int, PipelineFleetItemDto>
+            {
+                [18] = new() { PipelineId = 18, Freshness = PipelineFleetFreshness.OffCatalog }
+            }));
+
+        Assert.Contains("AutonomousPipeline", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/templates/", cut.Markup, StringComparison.Ordinal);
+    }
+
     private IRenderedComponent<PipelineDependencyGrid> RenderGrid(PipelineDependencyDto item, bool showsChildren) =>
         Render<PipelineDependencyGrid>(parameters => parameters
             .Add(component => component.Items, new List<PipelineDependencyDto> { item })
             .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
             .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
             .Add(component => component.ShowsChildren, showsChildren)
             .Add(component => component.CanWrite, true));
 }

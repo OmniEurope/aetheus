@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
 public partial class PipelineFleet : IAsyncDisposable
 {
     [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
 
     private RadzenDataGrid<PipelineFleetItemDto>? _grid;
     private List<PipelineFleetItemDto> _items = [];
@@ -51,8 +42,8 @@ public partial class PipelineFleet : IAsyncDisposable
         ];
         try
         {
-            var templatesTask = Api.GetPipelineTemplatesAsync();
-            var projectsTask = Api.GetAllProjectsAsync();
+            var templatesTask = Api.PipelineTemplates.GetPipelineTemplatesAsync();
+            var projectsTask = Api.Projects.GetAllProjectsAsync();
             await Task.WhenAll(templatesTask, projectsTask);
             _templates = await templatesTask;
             _projects = await projectsTask;
@@ -77,7 +68,7 @@ public partial class PipelineFleet : IAsyncDisposable
         _gridLoadError = false;
         try
         {
-            var result = await Api.GetPipelineFleetAsync(
+            var result = await Api.Pipelines.GetPipelineFleetAsync(
                 _page, _pageSize, _search, _templateId, _projectId, _freshness,
                 _sortBy, _sortDescending);
             _items = result.Items;
@@ -139,18 +130,8 @@ public partial class PipelineFleet : IAsyncDisposable
             await LoadAsync();
     }
 
-    private async Task OpenUpdateAsync(PipelineFleetItemDto item)
-    {
-        var updated = await Dialog.OpenAsync<PipelineFleetUpdateDialog>(
-            L["UpdatePipelineTemplate"],
-            new Dictionary<string, object?>
-            {
-                ["PipelineId"] = item.PipelineId,
-                ["TargetVersion"] = item.LatestVersion!.Value
-            },
-            new DialogOptions { Width = "80rem" });
-        if (updated is true) await ReloadAsync();
-    }
+    private void OpenUpdateAsync(PipelineFleetItemDto item) =>
+        Nav.NavigateTo($"/pipelines/{item.PipelineId}/template/update/{item.LatestVersion!.Value}");
 
     private bool CanUpdate(PipelineFleetItemDto item) =>
         Permissions.CanWrite(ResourceType.Pipeline, item.PipelineId);

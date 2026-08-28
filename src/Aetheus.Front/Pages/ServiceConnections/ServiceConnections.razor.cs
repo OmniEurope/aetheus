@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.ServiceConnections;
 
-public partial class ServiceConnections : IDisposable
+public partial class ServiceConnections : IAsyncDisposable
 {
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
@@ -19,6 +10,8 @@ public partial class ServiceConnections : IDisposable
     [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private UiActions Ui { get; set; } = default!;
+    [Inject] private NotifyHelper Notify { get; set; } = default!;
+    [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
 
     private List<ServiceConnectionDto> _items = [];
     private int _count;
@@ -27,6 +20,7 @@ public partial class ServiceConnections : IDisposable
     private bool _canWrite;
     private readonly HashSet<int> _testing = [];
     private readonly Dictionary<int, ServiceConnectionTestResultDto> _testResults = [];
+    private HubConnection? _hubConnection;
 
     protected override async Task OnInitializedAsync()
     {
@@ -37,6 +31,7 @@ public partial class ServiceConnections : IDisposable
         RefreshCanWrite();
         try { await LoadData(new LoadDataArgs()); }
         catch (HttpRequestException) { } // 401 on expired JWT - redirect handled by AuthProvider
+        await StartRealtimeAsync();
     }
 
     private void OnPermissionsChanged()
@@ -51,7 +46,9 @@ public partial class ServiceConnections : IDisposable
     {
         _loading = true;
         var (page, pageSize) = args.ToPageRequest(20);
-        var result = await Api.GetServiceConnectionsAsync(page, pageSize, _search);
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(ServiceConnectionDto.Name));
+        var result = await Api.Settings.GetServiceConnectionsAsync(page, pageSize, _search,
+            sortBy: sortBy, sortDescending: sortDescending);
         _items = result.Items;
         _count = result.TotalCount;
         _loading = false;
@@ -64,6 +61,26 @@ public partial class ServiceConnections : IDisposable
         catch (HttpRequestException) { }
     }
 
+    private async Task StartRealtimeAsync()
+    {
+        try
+        {
+            _hubConnection = HubFactory.Create("entities");
+            _hubConnection.On<ResourceType, int, string>("EntityChanged", (type, _, _) =>
+                type == ResourceType.ServiceConnection
+                    ? InvokeAsync(ReloadData)
+                    : Task.CompletedTask);
+            _hubConnection.RejoinOnReconnect(() => InvokeAsync(async () =>
+            {
+                await _hubConnection.InvokeAsync("JoinEntityUpdates", ResourceType.ServiceConnection);
+                await ReloadData();
+            }));
+            await _hubConnection.StartAsync();
+            await _hubConnection.InvokeAsync("JoinEntityUpdates", ResourceType.ServiceConnection);
+        }
+        catch { /* SignalR is best-effort; local mutations still reload explicitly. */ }
+    }
+
     private async Task TestAsync(int id)
     {
         _testing.Add(id);
@@ -71,13 +88,20 @@ public partial class ServiceConnections : IDisposable
         StateHasChanged();
         try
         {
-            var result = await Api.TestServiceConnectionAsync(id);
+            var result = await Api.Settings.TestServiceConnectionAsync(id);
             // A missing connection (deleted meanwhile) is an honest "error", never a green.
             _testResults[id] = result ?? new ServiceConnectionTestResultDto
             {
                 Status = ServiceConnectionTestStatus.Error,
                 Message = L["ServiceConnectionNotFound"]
             };
+            var testResult = _testResults[id];
+            Notify.Notify(
+                testResult.Status == ServiceConnectionTestStatus.Valid
+                    ? NotificationSeverity.Success
+                    : NotificationSeverity.Error,
+                "TestConnection",
+                testResult.Message ?? L["ServiceConnectionTestFailed"]);
         }
         catch (HttpRequestException)
         {
@@ -86,6 +110,7 @@ public partial class ServiceConnections : IDisposable
                 Status = ServiceConnectionTestStatus.Error,
                 Message = L["ServiceConnectionTestFailed"]
             };
+            Notify.Error("Error", "ServiceConnectionTestFailed");
         }
         finally
         {
@@ -101,7 +126,7 @@ public partial class ServiceConnections : IDisposable
         var result = await Dialog.OpenAsync<ServiceConnectionEditDialog>(
             connection is null ? L["Create"] : L["Edit"],
             new Dictionary<string, object?> { ["ConnectionId"] = connection?.Id },
-            new DialogOptions { Width = "640px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "640px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
 
         if (result is true)
         {
@@ -118,7 +143,7 @@ public partial class ServiceConnections : IDisposable
         if (confirmed != true) return;
 
         await Ui.RunAsync(
-            () => Api.DeleteServiceConnectionAsync(connection.Id),
+            () => Api.Settings.DeleteServiceConnectionAsync(connection.Id),
             "Deleted",
             async () => { _testResults.Remove(connection.Id); await LoadData(new LoadDataArgs()); },
             errorKey: "DeleteFailed",
@@ -133,5 +158,13 @@ public partial class ServiceConnections : IDisposable
         _ => BadgeStyle.Warning
     };
 
-    public void Dispose() => Permissions.OnPermissionsChanged -= OnPermissionsChanged;
+    public async ValueTask DisposeAsync()
+    {
+        Permissions.OnPermissionsChanged -= OnPermissionsChanged;
+        if (_hubConnection is null) return;
+        try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.ServiceConnection); }
+        catch { /* best-effort */ }
+        await _hubConnection.DisposeAsync();
+        _hubConnection = null;
+    }
 }

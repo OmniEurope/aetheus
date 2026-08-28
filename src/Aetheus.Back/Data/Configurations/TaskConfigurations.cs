@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Aetheus.Back.Data.Configurations;
@@ -16,6 +15,18 @@ internal sealed class ServerTaskConfiguration : IEntityTypeConfiguration<ServerT
         builder.HasIndex(e => new { e.Status, e.CreatedAt });
         builder.HasIndex(e => new { e.Status, e.AssignedAt });
         builder.HasIndex(e => new { e.Status, e.StartedAt });
+        builder.HasIndex(e => new { e.IsDeferredCleanup, e.Status });
+        builder.HasIndex(e => e.PipelineRunId);
+        builder.HasIndex(e => new { e.PipelineRunId, e.IsDeferredCleanup })
+            .IsUnique()
+            .HasFilter("\"IsDeferredCleanup\" = TRUE AND \"PipelineRunId\" IS NOT NULL");
+        builder.Property(e => e.AssignedAgentSessionId).HasMaxLength(64);
+        builder.Property(e => e.AssignedAgentVersion).HasMaxLength(64);
+        builder.Property(e => e.AssignedScannerManifestSha256).HasMaxLength(64);
+        builder.Property(e => e.ContainerToolchain).HasMaxLength(64);
+        builder.Property(e => e.ContainerShell).HasMaxLength(16);
+        builder.Property(e => e.FailureCode).HasMaxLength(64);
+        builder.Property(e => e.FailureReason).HasMaxLength(2048);
         builder.HasOne(e => e.Server)
                .WithMany(s => s.Tasks)
                .HasForeignKey(e => e.ServerId)

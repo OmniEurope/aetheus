@@ -131,10 +131,15 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
     private async Task<List<ServiceInfoDto>> CollectSystemdServicesAsync(CancellationToken ct)
     {
         var byName = new Dictionary<string, ServiceInfoDto>(StringComparer.OrdinalIgnoreCase);
+        await CollectInstalledSystemdServicesAsync(byName, ct).ConfigureAwait(false);
+        await OverlaySystemdRuntimeStatusAsync(byName, ct).ConfigureAwait(false);
+        await ReclassifyIdleSystemdServicesAsync(byName, ct).ConfigureAwait(false);
+        return byName.Values.ToList();
+    }
 
-        // 1) Full catalog of *installed* unit files (enabled/disabled/static/masked/oneshot/timer-driven).
-        // `list-unit-files` returns every installed unit, even if it has never been loaded - so we see
-        // certbot/teamspeak even when they're idle or run only via a timer.
+    private async Task CollectInstalledSystemdServicesAsync(
+        IDictionary<string, ServiceInfoDto> byName, CancellationToken ct)
+    {
         try
         {
             var output = await RunCommandAsync("systemctl list-unit-files --type=service --no-legend --no-pager --plain", ct).ConfigureAwait(false);
@@ -161,8 +166,11 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
         {
             logger.LogDebug(ex, "Failed to list systemd unit files");
         }
+    }
 
-        // 2) Overlay runtime status from currently loaded units (active/inactive/failed).
+    private async Task OverlaySystemdRuntimeStatusAsync(
+        IDictionary<string, ServiceInfoDto> byName, CancellationToken ct)
+    {
         try
         {
             var output = await RunCommandAsync("systemctl list-units --type=service --all --no-pager --no-legend --plain", ct).ConfigureAwait(false);
@@ -199,13 +207,11 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
         {
             logger.LogDebug(ex, "Failed to collect running systemd services");
         }
+    }
 
-        // 3) Reclassify oneshot/timer-driven services so their `dead` SubState (the normal state when
-        //    a oneshot has finished) is not surfaced as an alarming red badge:
-        //      - service paired with an active .timer  → status = "scheduled"
-        //      - well-known cron-driven oneshot        → status = "idle"
-        //    Both keep IsRunning = false (no process is up), but the friendlier label tells the user
-        //    the unit is healthy and waiting for its next trigger.
+    private async Task ReclassifyIdleSystemdServicesAsync(
+        IDictionary<string, ServiceInfoDto> byName, CancellationToken ct)
+    {
         try
         {
             var servicesWithActiveTimer = await CollectActiveTimerServiceNamesAsync(ct).ConfigureAwait(false);
@@ -231,8 +237,6 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
             // SubState and the user still sees the service, just with the original `dead` label.
             logger.LogDebug(ex, "Failed to reclassify oneshot/timer-driven services");
         }
-
-        return byName.Values.ToList();
     }
 
     private static bool IsAtRestSub(string status) =>

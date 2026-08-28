@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Back.Components.Git;
 
-public class GitService(IGitRepository repo, IPipelineRepository pipelineRepo, IAuditService audit, ILogger<GitService> logger, TimeProvider timeProvider) : IGitService
+public class GitService(IGitRepository repo, IAuditService audit, ILogger<GitService> logger, TimeProvider timeProvider) : IGitService
 {
     public async Task<List<GitConnectionDto>> GetConnectionsByProjectAsync(int projectId, CancellationToken ct = default)
     {
@@ -190,11 +186,8 @@ public class GitService(IGitRepository repo, IPipelineRepository pipelineRepo, I
         return c?.ProjectId;
     }
 
-    public async Task<int?> GetProjectIdForRunAsync(int pipelineRunId, CancellationToken ct = default)
-    {
-        var run = await pipelineRepo.GetPipelineRunWithPipelineAsync(pipelineRunId, ct).ConfigureAwait(false);
-        return run?.Pipeline?.ProjectId;
-    }
+    public Task<int?> GetProjectIdForRunAsync(int pipelineRunId, CancellationToken ct = default)
+        => repo.GetRunProjectIdAsync(pipelineRunId, ct);
 
     private static GitConnectionDto MapConnectionToDto(GitConnection g) => new()
     {

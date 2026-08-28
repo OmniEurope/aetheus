@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
+using System.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Auth;
 
@@ -24,20 +23,14 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
 
     public async Task<User?> FindUserWithRolesAsync(string username, CancellationToken ct = default)
     {
-        return await db.Users
-            .AsNoTracking()
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Username == username && u.IsActive, ct)
-            .ConfigureAwait(false);
+        return await db.Users.FindByUsernameWithRolesAsync(username, ct).ConfigureAwait(false);
     }
 
     public async Task<User?> FindUserByIdWithRolesAsync(int userId, CancellationToken ct = default)
     {
         return await db.Users
             .AsNoTracking()
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
+            .IncludeRoles()
             .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive, ct)
             .ConfigureAwait(false);
     }
@@ -61,6 +54,107 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
     public void AddServerToken(ServerToken serverToken)
     {
         db.ServerTokens.Add(serverToken);
+    }
+
+    public async Task<bool> TryPersistServerEnrollmentAsync(
+        int registrationTokenId,
+        Server server,
+        ServerToken serverToken,
+        CancellationToken ct = default)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        if (!db.Database.IsRelational())
+        {
+            var registrationToken = await db.RegistrationTokens
+                .FirstOrDefaultAsync(
+                    token => token.Id == registrationTokenId
+                        && !token.IsUsed
+                        && token.ExpiresAt > now,
+                    ct)
+                .ConfigureAwait(false);
+            if (registrationToken is null)
+                return false;
+
+            registrationToken.IsUsed = true;
+            registrationToken.UsedByServer = server;
+            if (server.Id == 0 && db.Entry(server).State == EntityState.Detached)
+                db.Servers.Add(server);
+
+            if (server.Id != 0)
+            {
+                var activeTokens = await db.ServerTokens
+                    .Where(token => token.ServerId == server.Id
+                        && !token.IsRevoked
+                        && token.ExpiresAt > now)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                foreach (var activeToken in activeTokens)
+                    activeToken.IsRevoked = true;
+            }
+
+            db.ServerTokens.Add(serverToken);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // The non-relational branch above is the tracked-entity fallback for every bulk update below.
+        // Keep this invariant explicit beside the relational transaction so future additions remain guarded.
+        if (!db.Database.IsRelational())
+            throw new InvalidOperationException("The relational enrollment path requires a relational database.");
+
+        await using var transaction = await db.Database
+            .BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)
+            .ConfigureAwait(false);
+        try
+        {
+            // Claim the registration token before inserting any server state. The compare-and-set
+            // row update serializes concurrent enrollments without relying on an earlier read.
+            var consumed = await db.RegistrationTokens
+                .Where(token => token.Id == registrationTokenId
+                    && !token.IsUsed
+                    && token.ExpiresAt > now)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(token => token.IsUsed, true)
+                        .SetProperty(token => token.UsedByServerId, (int?)null),
+                    ct)
+                .ConfigureAwait(false);
+            if (consumed == 0)
+            {
+                await transaction.RollbackAsync(ct).ConfigureAwait(false);
+                return false;
+            }
+
+            if (server.Id == 0 && db.Entry(server).State == EntityState.Detached)
+                db.Servers.Add(server);
+            if (server.Id != 0)
+            {
+                await db.ServerTokens
+                    .Where(token => token.ServerId == server.Id
+                        && !token.IsRevoked
+                        && token.ExpiresAt > now)
+                    .ExecuteUpdateAsync(
+                        setters => setters.SetProperty(token => token.IsRevoked, true),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+
+            db.ServerTokens.Add(serverToken);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await db.RegistrationTokens
+                .Where(token => token.Id == registrationTokenId && token.IsUsed)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(token => token.UsedByServerId, server.Id),
+                    ct)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
     }
 
     public void AddRegistrationToken(RegistrationToken token)
@@ -158,24 +252,6 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
         return true;
     }
 
-    public async Task LinkServerToEnvironmentsByNameAsync(
-        int serverId, IReadOnlyCollection<string> environmentNames, CancellationToken ct = default)
-    {
-        var environmentIds = await db.Environments
-            .Where(environment => environmentNames.Contains(environment.Name))
-            .Select(environment => environment.Id)
-            .ToListAsync(ct).ConfigureAwait(false);
-        var existingIds = await db.EnvironmentServers
-            .Where(link => link.ServerId == serverId && environmentIds.Contains(link.EnvironmentId))
-            .Select(link => link.EnvironmentId)
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        foreach (var environmentId in environmentIds.Except(existingIds))
-            db.EnvironmentServers.Add(new EnvironmentServer { EnvironmentId = environmentId, ServerId = serverId });
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
-
     public async Task<ExternalLogin?> FindExternalLoginAsync(string provider, string providerSubjectId, CancellationToken ct = default)
     {
         return await db.ExternalLogins
@@ -201,52 +277,36 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
     }
 
     public async Task BumpSecurityStampAsync(int userId, CancellationToken ct = default)
-    {
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false);
-        if (user is null) return;
-        user.SecurityStamp = Guid.NewGuid().ToString("N");
-        user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+        => await UpdateUserAsync(
+            userId, user => user.SecurityStamp = Guid.NewGuid().ToString("N"), ct).ConfigureAwait(false);
 
     // --- Lockout (F-011) ---
 
     public async Task IncrementFailedLoginAsync(int userId, CancellationToken ct = default)
-    {
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false);
-        if (user is null) return;
-        user.FailedLoginCount++;
-        user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+        => await UpdateUserAsync(userId, user => user.FailedLoginCount++, ct).ConfigureAwait(false);
 
     public async Task ResetFailedLoginAsync(int userId, CancellationToken ct = default)
-    {
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false);
-        if (user is null) return;
-        user.FailedLoginCount = 0;
-        user.LockoutEndUtc = null;
-        user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+        => await UpdateUserAsync(userId, ClearLockout, ct).ConfigureAwait(false);
 
     public async Task LockoutUserAsync(int userId, DateTime lockoutEndUtc, CancellationToken ct = default)
+        => await UpdateUserAsync(userId, user => user.LockoutEndUtc = lockoutEndUtc, ct).ConfigureAwait(false);
+
+    public async Task ClearLockoutAsync(int userId, CancellationToken ct = default)
+        => await UpdateUserAsync(userId, ClearLockout, ct).ConfigureAwait(false);
+
+    private async Task UpdateUserAsync(int userId, Action<User> update, CancellationToken ct)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false);
         if (user is null) return;
-        user.LockoutEndUtc = lockoutEndUtc;
+        update(user);
         user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task ClearLockoutAsync(int userId, CancellationToken ct = default)
+    private static void ClearLockout(User user)
     {
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false);
-        if (user is null) return;
         user.FailedLoginCount = 0;
         user.LockoutEndUtc = null;
-        user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     // --- Refresh Tokens (F-012) ---

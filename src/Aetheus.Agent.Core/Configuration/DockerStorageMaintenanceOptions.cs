@@ -7,7 +7,9 @@ namespace Aetheus.Agent.Core.Configuration;
 /// </summary>
 public sealed class DockerStorageMaintenanceOptions
 {
-    public int PolicyVersion { get; set; }
+    public const int CurrentPolicyVersion = 3;
+
+    public int PolicyVersion { get; set; } = CurrentPolicyVersion;
     public bool Enabled { get; set; } = true;
     public bool DryRun { get; set; }
     public bool DeploymentOnly { get; set; }
@@ -16,8 +18,8 @@ public sealed class DockerStorageMaintenanceOptions
     public int MaintenanceIntervalMinutes { get; set; } = 60;
     public int MaxCacheAgeHours { get; set; } = 168;
     public int PressureCacheAgeHours { get; set; } = 24;
-    public int ReservedSpaceGiB { get; set; } = 20;
-    public int MaxCacheGiB { get; set; } = 80;
+    public int ReservedSpaceGiB { get; set; } = 5;
+    public int MaxCacheGiB { get; set; } = 15;
     public int MinFreeSpaceGiB { get; set; } = 20;
     public int PressureUsedPercent { get; set; } = 80;
     public string? NuGetPackagesPath { get; set; }

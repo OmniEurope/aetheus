@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Validation;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Auth;
 
@@ -16,7 +10,7 @@ public partial class ChangePasswordRequired
     [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-    [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
+    [Inject] private RealtimeSessionLifecycle RealtimeSession { get; set; } = default!;
 
     private readonly PasswordChangeModel _model = new();
     private bool _busy;
@@ -37,7 +31,7 @@ public partial class ChangePasswordRequired
         _busy = true;
         _error = null;
 
-        var ok = await Api.ChangeOwnPasswordAsync(new ChangeUserPasswordRequest
+        var ok = await Api.Auth.ChangeOwnPasswordAsync(new ChangeUserPasswordRequest
         {
             CurrentPassword = _model.CurrentPassword,
             NewPassword = _model.NewPassword
@@ -60,21 +54,8 @@ public partial class ChangePasswordRequired
 
     private async Task StopRealtimeAndLogoutAsync()
     {
-        await HubFactory.StopAllAsync();
+        await RealtimeSession.StopAsync();
         await Auth.LogoutAsync();
     }
 
-    private sealed class PasswordChangeModel
-    {
-        [Required]
-        public string CurrentPassword { get; set; } = string.Empty;
-
-        [Required]
-        [StringLength(PasswordPolicy.MaximumLength, MinimumLength = PasswordPolicy.MinimumLength)]
-        public string NewPassword { get; set; } = string.Empty;
-
-        [Required]
-        [Compare(nameof(NewPassword))]
-        public string ConfirmPassword { get; set; } = string.Empty;
-    }
 }

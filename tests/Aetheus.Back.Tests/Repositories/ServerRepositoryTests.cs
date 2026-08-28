@@ -12,6 +12,7 @@ public class ServerRepositoryTests : IDisposable
 {
     private readonly AppDbContext _db;
     private readonly ServerRepository _repo;
+    private readonly ServerHeartbeatRepository _heartbeatRepo;
 
     public ServerRepositoryTests()
     {
@@ -20,6 +21,9 @@ public class ServerRepositoryTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
         _repo = new ServerRepository(_db, TimeProvider.System);
+        // Same AppDbContext instance, deliberately: that shared context is what keeps one heartbeat
+        // one transaction after the split, so the tests must exercise the pair the same way.
+        _heartbeatRepo = new ServerHeartbeatRepository(_db);
     }
 
     private Server CreateServer(string name = "srv", ServerType type = ServerType.Normal, ServerStatus status = ServerStatus.Online)
@@ -191,7 +195,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var metric = new ServerMetric { ServerId = s.Id, CpuPercent = 50, Timestamp = DateTime.UtcNow };
-        await _repo.AddMetricAsync(metric, ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.AddMetricAsync(metric, ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.ServerMetrics.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -207,7 +211,7 @@ public class ServerRepositoryTests : IDisposable
         s = (await _db.Servers.Include(x => x.Services).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
         var newSvcs = new List<ServiceInfo> { new() { ServerId = s.Id, Name = "new", Status = "active" } };
-        await _repo.ReplaceServicesAsync(s.Id, newSvcs, ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceServicesAsync(s.Id, newSvcs, ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var svcs = await _db.ServiceInfos.Where(x => x.ServerId == s.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -224,7 +228,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.DockerContainers).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceDockerContainersAsync(s.Id, [new() { ServerId = s.Id, ContainerId = "new", Name = "new", Image = "img", Status = "up" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerContainersAsync(s.Id, [new() { ServerId = s.Id, ContainerId = "new", Name = "new", Image = "img", Status = "up" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerContainers.CountAsync(c => c.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -239,7 +243,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.DockerImages).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceDockerImagesAsync(s.Id, [new() { ServerId = s.Id, ImageId = "new", Repository = "r", Tag = "2", Size = "2" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerImagesAsync(s.Id, [new() { ServerId = s.Id, ImageId = "new", Repository = "r", Tag = "2", Size = "2" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerImages.CountAsync(i => i.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -254,7 +258,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.DockerComposeStacks).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceDockerComposeStacksAsync(s.Id, [new() { ServerId = s.Id, Name = "new", Status = "up", ConfigFile = "/" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerComposeStacksAsync(s.Id, [new() { ServerId = s.Id, Name = "new", Status = "up", ConfigFile = "/" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerComposeStacks.CountAsync(c => c.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -269,7 +273,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.DockerNetworks).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceDockerNetworksAsync(s.Id, [new() { ServerId = s.Id, NetworkId = "new", Name = "new", Driver = "bridge" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerNetworksAsync(s.Id, [new() { ServerId = s.Id, NetworkId = "new", Name = "new", Driver = "bridge" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerNetworks.CountAsync(n => n.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -284,7 +288,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.DockerVolumes).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceDockerVolumesAsync(s.Id, [new() { ServerId = s.Id, Name = "new", Driver = "local" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceDockerVolumesAsync(s.Id, [new() { ServerId = s.Id, Name = "new", Driver = "local" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.DockerVolumes.CountAsync(v => v.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -302,7 +306,7 @@ public class ServerRepositoryTests : IDisposable
         s = (await _db.Servers.Include(x => x.ApacheState).Include(x => x.ApacheModules).Include(x => x.ApacheVirtualHosts).FirstAsync(x => x.Id == s.Id, TestContext.Current.CancellationToken))!;
 
         var newState = new ApacheState { ServerId = s.Id, IsRunning = false, Version = "2.5" };
-        await _repo.ReplaceApacheDataAsync(s.Id, newState, [new() { ServerId = s.Id, Name = "new" }], [new() { ServerId = s.Id, ServerName = "new", DocumentRoot = "/" }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceApacheDataAsync(s.Id, newState, [new() { ServerId = s.Id, Name = "new" }], [new() { ServerId = s.Id, ServerName = "new", DocumentRoot = "/" }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await _db.ApacheModules.CountAsync(m => m.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -317,7 +321,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.ApacheState).Include(x => x.ApacheModules).Include(x => x.ApacheVirtualHosts).FirstAsync(x => x.Id == s.Id, TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceApacheDataAsync(s.Id, null, [], [], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceApacheDataAsync(s.Id, null, [], [], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(0, await _db.ApacheStates.CountAsync(a => a.ServerId == s.Id, cancellationToken: TestContext.Current.CancellationToken));
@@ -334,7 +338,7 @@ public class ServerRepositoryTests : IDisposable
         _db.TeamspeakBans.Add(new TeamspeakBan { ServerId = server.Id, BanId = 1, Nickname = "Old" });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        await _repo.ReplaceTeamspeakDataAsync(
+        await _heartbeatRepo.ReplaceTeamspeakDataAsync(
             server.Id,
             new TeamspeakState { ServerId = server.Id, ServerName = "New", Platform = "Linux" },
             [new TeamspeakChannel { ServerId = server.Id, ChannelId = 2, Name = "New" }],
@@ -357,7 +361,7 @@ public class ServerRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         s = (await _db.Servers.Include(x => x.CertbotCertificates).FirstAsync(x => x.Id == s.Id, cancellationToken: TestContext.Current.CancellationToken))!;
 
-        await _repo.ReplaceCertbotCertificatesAsync(s.Id, [new() { ServerId = s.Id, Name = "new", Domains = "new", ExpiryDate = DateTime.UtcNow }], ct: TestContext.Current.CancellationToken);
+        await _heartbeatRepo.ReplaceCertbotCertificatesAsync(s.Id, [new() { ServerId = s.Id, Name = "new", Domains = "new", ExpiryDate = DateTime.UtcNow }], ct: TestContext.Current.CancellationToken);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var certs = await _db.CertbotCertificates.Where(c => c.ServerId == s.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -529,28 +533,32 @@ public class ServerRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetReleasesForServerAsync_ReturnsReleases()
+    public async Task ServerOwnedResources_AppearWithoutPipelineHistory()
     {
-        var s = CreateServer("releases");
-        var project = new Project { Name = "P1" };
+        var server = CreateServer("owned-resources");
+        var project = new Project { Name = "Direct" };
         _db.Projects.Add(project);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
-
-        var pipeline = new Pipeline { Name = "pipe", ProjectId = project.Id, YamlDefinition = "" };
-        _db.Pipelines.Add(pipeline);
+        var projectServer = new ProjectServer
+        {
+            ProjectId = project.Id,
+            ServerId = server.Id,
+            DisplayName = "Production",
+            Host = server.Hostname
+        };
+        _db.ProjectServers.Add(projectServer);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.VariableLibraries.Add(new VariableLibrary { Name = "Direct library", ProjectServerId = projectServer.Id });
+        _db.Vaults.Add(new Vault { Name = "Direct vault", ProjectServerId = projectServer.Id });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var run = new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Running };
-        _db.PipelineRuns.Add(run);
-        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var projects = await _repo.GetProjectsForServerAsync(server.Id, ct: TestContext.Current.CancellationToken);
+        var libraries = await _repo.GetVariableLibrariesForServerAsync(server.Id, ct: TestContext.Current.CancellationToken);
+        var vaults = await _repo.GetVaultsForServerAsync(server.Id, ct: TestContext.Current.CancellationToken);
 
-        _db.PipelineStepRuns.Add(new PipelineStepRun { PipelineRunId = run.Id, ServerId = s.Id, StepName = "s1", Status = TaskExecutionStatus.Pending });
-        _db.Releases.Add(new Release { ProjectId = project.Id, Version = "1.0", DetectedAt = DateTime.UtcNow });
-        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
-
-        var result = await _repo.GetReleasesForServerAsync(s.Id, ct: TestContext.Current.CancellationToken);
-        Assert.Single(result);
-        Assert.Equal("1.0", result[0].Version);
+        Assert.Equal("Direct", Assert.Single(projects).Name);
+        Assert.Equal("Production", Assert.Single(libraries).ProjectServer!.DisplayName);
+        Assert.Equal("Production", Assert.Single(vaults).ProjectServer!.DisplayName);
     }
 
     [Fact]
@@ -612,3 +620,4 @@ public class ServerRepositoryTests : IDisposable
 
     public void Dispose() => _db.Dispose();
 }
+

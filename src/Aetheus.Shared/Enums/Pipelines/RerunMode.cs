@@ -11,5 +11,8 @@ public enum RerunMode
     SnapshotSameCommit = 1,
 
     /// <summary>Re-run the captured YAML snapshot but against the current branch head commit.</summary>
-    SnapshotBranchHead = 2
+    SnapshotBranchHead = 2,
+
+    /// <summary>Re-run the captured definition at the same commit and reuse only fully verified child checkpoints.</summary>
+    ResumeCheckpoints = 3
 }

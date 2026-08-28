@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Audit;
 
@@ -23,11 +21,12 @@ public class AuditRepository(AppDbContext db) : IAuditRepository
         }
     }
 
-    public async Task<List<AuditLog>> GetPagedAsync(int skip, int take, string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default)
+    public async Task<List<AuditLog>> GetPagedAsync(int skip, int take, string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true)
     {
         return await BuildFilteredQuery(search, action, entityType, entityId, dateFrom, dateTo)
             .AsNoTracking()
-            .OrderByDescending(a => a.Timestamp)
+            .OrderByProperty(sortBy, sortDescending, a => a.Timestamp)
             .Skip(skip)
             .Take(take)
             .ToListAsync(ct)

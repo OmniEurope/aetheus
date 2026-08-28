@@ -45,6 +45,14 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
+    public void Renders_One_Global_Breadcrumb_Slot()
+    {
+        var cut = Render<MainLayout>();
+
+        Assert.Single(cut.FindAll("nav[data-testid='app-breadcrumb']"));
+    }
+
+    [Fact]
     public void RendersAppShell_HomeLink_WithoutErrorCard()
     {
         var cut = Render<MainLayout>();
@@ -54,11 +62,10 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
-    public void Dispose_DoesNotThrow()
+    public async Task DisposeAsync_DoesNotThrow()
     {
         var cut = Render<MainLayout>();
-        var instance = (IDisposable)cut.Instance;
-        instance.Dispose();
+        await cut.Instance.DisposeAsync();
     }
 
     [Fact]
@@ -72,7 +79,7 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
-    public void RecoverError_DoesNotThrow()
+    public void RecoverError_RemovesItFromTheMarkup()
     {
         var cut = Render<MainLayout>();
 
@@ -83,7 +90,7 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
-    public async Task OnLogout_DoesNotThrow()
+    public async Task OnLogout_NavigatesAway()
     {
         var cut = Render<MainLayout>();
 
@@ -157,3 +164,4 @@ public class MainLayoutTests : BunitContext
         Assert.Contains("#main-content", cut.Markup);
     }
 }
+

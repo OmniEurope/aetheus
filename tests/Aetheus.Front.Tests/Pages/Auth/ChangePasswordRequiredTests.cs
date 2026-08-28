@@ -2,8 +2,10 @@
 using System.Reflection;
 using Aetheus.Front.Pages.Auth;
 using Aetheus.Front.Services;
+using Aetheus.Front.Tests.Services;
 using Bunit;
 using Bunit.TestDoubles;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages.Auth;
@@ -31,6 +33,11 @@ public class ChangePasswordRequiredTests : BunitContext
         cut.InvokeAsync(async () =>
             await (Task)typeof(ChangePasswordRequired).GetMethod("OnSubmit", Priv)!.Invoke(cut.Instance, [])!);
 
+    private void UseCountingHubFactory() =>
+        Services.AddSingleton<HubConnectionFactory>(services => new CountingHubConnectionFactory(
+            services.GetRequiredService<IConfiguration>(),
+            services.GetRequiredService<AuthStateProvider>()));
+
     [Fact]
     public void Renders_PasswordChangeForm()
     {
@@ -45,8 +52,10 @@ public class ChangePasswordRequiredTests : BunitContext
     {
         // 200 on the change endpoint ⇒ ApiStatus.Success ⇒ logout + redirect.
         _handler.SetResponse(HttpMethod.Post, "api/users/me/change-password", System.Net.HttpStatusCode.OK);
+        UseCountingHubFactory();
         var auth = Services.GetRequiredService<AuthStateProvider>();
         var nav = Services.GetRequiredService<BunitNavigationManager>();
+        var factory = (CountingHubConnectionFactory)Services.GetRequiredService<HubConnectionFactory>();
 
         var cut = Render<ChangePasswordRequired>();
         SetModel(cut, "OldPass1!", "NewPass2!");
@@ -56,6 +65,7 @@ public class ChangePasswordRequiredTests : BunitContext
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/users/me/change-password"));
         // …logout cleared the in-memory token…
         Assert.Null(auth.Token);
+        Assert.Equal(1, factory.StopAllCount);
         // …and the user was redirected to the login screen.
         Assert.EndsWith("/login", nav.Uri);
     }
@@ -81,16 +91,18 @@ public class ChangePasswordRequiredTests : BunitContext
     }
 
     [Fact]
-    public async Task LogoutButton_LogsOutAndRedirectsToLogin()
+    public void LogoutButton_LogsOutAndRedirectsToLogin()
     {
+        UseCountingHubFactory();
         var auth = Services.GetRequiredService<AuthStateProvider>();
         var nav = Services.GetRequiredService<BunitNavigationManager>();
+        var factory = (CountingHubConnectionFactory)Services.GetRequiredService<HubConnectionFactory>();
 
         var cut = Render<ChangePasswordRequired>();
-        await cut.InvokeAsync(async () =>
-            await (Task)typeof(ChangePasswordRequired).GetMethod("LogoutAsync", Priv)!.Invoke(cut.Instance, [])!);
+        cut.FindAll("button").Single(button => button.GetAttribute("aria-label") == "Logout").Click();
 
         Assert.Null(auth.Token);
+        Assert.Equal(1, factory.StopAllCount);
         Assert.EndsWith("/login", nav.Uri);
     }
 }

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Shared;
+using Aetheus.Back.Components.AgentUpdate;
+using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Hubs;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -20,6 +17,7 @@ namespace Aetheus.Back.Components.Servers;
 // dependencies and delegates to. One instance is registered in DI and exposed under every interface.
 public class ServerService(
     IServerRepository repo,
+    IServerHeartbeatRepository heartbeatRepo,
     IHubContext<ServerHub> serverHub,
     IHubContext<AlertHub> alertHub,
     IAuditService audit,
@@ -27,32 +25,67 @@ public class ServerService(
     IOptions<BackgroundServicesOptions> backgroundOptions,
     TimeProvider timeProvider,
     IDbTransactionScope transaction,
-    ILoggerFactory? loggerFactory = null)
+    ILoggerFactory? loggerFactory = null,
+    IAgentCompatibilityPolicy? compatibilityPolicy = null,
+    // No IPipelineRepository: its single use was enriching server releases with their source
+    // pipeline, and that whole endpoint now lives in Releases, which already sits above Pipelines.
+    IAgentUpdateConfirmationService? updateConfirmation = null)
     : IServerLifecycleService, IServerHeartbeatService, IServerServiceManagementService,
       IServerAgentContactService, IServerDiagnosticService
 {
     // ServerHeartbeatProcessor is internal, so a typed ILogger<> for it cannot appear on this public
     // ctor - build the category logger from the (public) factory instead. Optional/null-defaulted so unit
     // tests that new-up the service directly need not thread a factory (DI still injects the real one).
-    private readonly ServerHeartbeatProcessor _heartbeat = new(repo, serverHub, alertHub, timeProvider, transaction,
+    private readonly ServerHeartbeatProcessor _heartbeat = new(repo, heartbeatRepo, serverHub, alertHub, timeProvider, transaction, updateConfirmation,
         (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<ServerHeartbeatProcessor>());
-    private readonly ServerServiceManager _serviceManager = new(repo, audit, taskService);
+    private readonly ServerServiceManager _serviceManager = new(repo, heartbeatRepo, audit, taskService);
     private readonly ServerAgentContactProbe _contact = new(repo, backgroundOptions, timeProvider);
-    private readonly ServerDiagnosticAnalyzer _diagnostic = new(repo, timeProvider);
+    private readonly ServerDiagnosticAnalyzer _diagnostic = new(repo, timeProvider, compatibilityPolicy);
 
-    public async Task<PaginatedResult<ServerDto>> GetServersAsync(PaginationRequest request, ServerType? type = null, ServerStatus? status = null, List<int>? accessibleIds = null, CancellationToken ct = default)
+    public async Task<PaginatedResult<ServerDto>> GetServersAsync(
+        PaginationRequest request,
+        ServerType? type = null,
+        ServerStatus? status = null,
+        AgentCompatibilityStatus? compatibility = null,
+        List<int>? accessibleIds = null,
+        CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
+        var effectiveAccessibleIds = accessibleIds;
+        if (compatibility is not null && compatibilityPolicy is not null)
+        {
+            var facts = await repo.GetServersForCompatibilityAsync(accessibleIds, ct).ConfigureAwait(false);
+            effectiveAccessibleIds = facts
+                .Where(server => compatibilityPolicy.Evaluate(server).Status == compatibility)
+                .Select(server => server.Id)
+                .ToList();
+        }
         var (items, totalCount) = await repo.GetServersPagedProjectedAsync(
             request.Search, request.SortBy, request.SortDescending,
-            type, status, page, pageSize, accessibleIds, ct).ConfigureAwait(false);
+            type, status, page, pageSize, effectiveAccessibleIds, ct).ConfigureAwait(false);
 
         return new PaginatedResult<ServerDto>
         {
-            Items = items,
+            Items = items.Select(WithCompatibility).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
+        };
+    }
+
+    public async Task<AgentCompatibilitySummaryDto> GetAgentCompatibilitySummaryAsync(
+        List<int>? accessibleIds = null,
+        CancellationToken ct = default)
+    {
+        if (compatibilityPolicy is null) return new AgentCompatibilitySummaryDto();
+        var facts = await repo.GetServersForCompatibilityAsync(accessibleIds, ct).ConfigureAwait(false);
+        var states = facts.Select(server => compatibilityPolicy.Evaluate(server).Status).ToList();
+        return new AgentCompatibilitySummaryDto
+        {
+            UpToDate = states.Count(state => state == AgentCompatibilityStatus.UpToDate),
+            UpdateRecommended = states.Count(state => state == AgentCompatibilityStatus.UpdateRecommended),
+            UpdateRequired = states.Count(state => state == AgentCompatibilityStatus.UpdateRequired),
+            Unknown = states.Count(state => state == AgentCompatibilityStatus.Unknown)
         };
     }
 
@@ -65,8 +98,12 @@ public class ServerService(
         var latestMetric = server.Metrics.FirstOrDefault();
         // S-TECH-N8R3: heartbeat history over the last 30 min so the detail can show a real uptime%/sparkline.
         var heartbeatSince = timeProvider.GetUtcNow().UtcDateTime.AddMinutes(-30);
-        var heartbeatHistory = await repo.GetRecentMetricTimestampsAsync(id, heartbeatSince, ct).ConfigureAwait(false) ?? [];
-        return new ServerDetailDto
+        var heartbeatHistory = await heartbeatRepo.GetRecentMetricTimestampsAsync(id, heartbeatSince, ct).ConfigureAwait(false) ?? [];
+        var blockingTaskCount = server.AgentUpdateReserved
+            ? await repo.CountActiveNonUpdateTasksAsync(id, ct).ConfigureAwait(false)
+            : 0;
+        var latestUpdate = server.AgentUpdateRequests.FirstOrDefault();
+        var detail = new ServerDetailDto
         {
             HeartbeatHistory = heartbeatHistory,
             Id = server.Id,
@@ -75,6 +112,24 @@ public class ServerService(
             OsDescription = server.OsDescription,
             IpAddress = server.IpAddress,
             AgentVersion = server.AgentVersion,
+            AgentProtocolVersion = server.AgentProtocolVersion,
+            AgentCapabilities = ServerDataMapper.DeserializeDiagnostics(server.AgentCapabilitiesJson),
+            AgentUpdateReserved = server.AgentUpdateReserved,
+            AgentUpdateRequest = latestUpdate is null
+                ? null
+                : new AgentUpdateRequestSummaryDto
+                {
+                    RequestId = latestUpdate.Id,
+                    ObservedVersion = latestUpdate.ObservedVersion,
+                    TargetVersion = latestUpdate.TargetVersion,
+                    Status = latestUpdate.Status,
+                    BlockingTaskCount = blockingTaskCount,
+                    RequestedAt = latestUpdate.RequestedAt,
+                    HandoffAt = latestUpdate.HandoffAt,
+                    ConfirmedAt = latestUpdate.ConfirmedAt,
+                    FailureCode = latestUpdate.FailureCode,
+                    FailureDiagnostic = latestUpdate.FailureDiagnostic
+                },
             Status = server.Status,
             Type = server.Type,
             LastHeartbeat = server.LastHeartbeat,
@@ -127,6 +182,7 @@ public class ServerService(
             Portsentry = ServerDataMapper.MapPortsentryDataDto(server),
             Rkhunter = ServerDataMapper.MapRkhunterDataDto(server)
         };
+        return detail with { AgentCompatibility = compatibilityPolicy?.Evaluate(detail) };
     }
 
     public async Task<ServerDto?> UpdateServerAsync(int id, UpdateServerRequest request, CancellationToken ct = default)
@@ -142,8 +198,9 @@ public class ServerService(
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         await audit.LogAsync("Updated", "Server", server.Id, server.Name, ct).ConfigureAwait(false);
-        await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(server.Id), HubGroups.ServerOrg(server.OrganizationId)]).SendAsync("ServerUpdated", ServerDataMapper.MapToDto(server), ct).ConfigureAwait(false);
-        return ServerDataMapper.MapToDto(server);
+        var dto = WithCompatibility(ServerDataMapper.MapToDto(server));
+        await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(server.Id), HubGroups.ServerOrg(server.OrganizationId)]).SendAsync("ServerUpdated", dto, ct).ConfigureAwait(false);
+        return dto;
     }
 
     public Task<bool> ServerExistsAsync(int serverId, CancellationToken ct = default)
@@ -177,19 +234,7 @@ public class ServerService(
             serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
         return new PaginatedResult<ProjectDto>
         {
-            Items = projects.Select(p => new ProjectDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                RepositoryUrl = p.RepositoryUrl,
-                DefaultBranch = p.DefaultBranch,
-                Status = p.Status,
-                Tags = TagsHelper.DeserializeTags(p.Tags),
-                OrganizationId = p.OrganizationId,
-                CreatedAt = p.CreatedAt,
-                UpdatedAt = p.UpdatedAt
-            }).ToList(),
+            Items = projects.Select(project => ProjectDtoMapper.ToDto(project)).ToList(),
             TotalCount = total,
             Page = page,
             PageSize = pageSize
@@ -230,6 +275,10 @@ public class ServerService(
             Description = v.Description,
             ProjectId = v.ProjectId,
             ProjectName = v.Project?.Name,
+            EnvironmentId = v.EnvironmentId,
+            EnvironmentName = v.Environment?.Name,
+            ProjectServerId = v.ProjectServerId,
+            ProjectServerName = v.ProjectServer?.DisplayName,
             EntryCount = v.Entries.Count,
             CreatedAt = v.CreatedAt,
             UpdatedAt = v.UpdatedAt,
@@ -247,6 +296,10 @@ public class ServerService(
             Description = v.Description,
             ProjectId = v.ProjectId,
             ProjectName = v.Project?.Name,
+            EnvironmentId = v.EnvironmentId,
+            EnvironmentName = v.Environment?.Name,
+            ProjectServerId = v.ProjectServerId,
+            ProjectServerName = v.ProjectServer?.DisplayName,
             SecretCount = v.Secrets.Count,
             CreatedAt = v.CreatedAt,
             UpdatedAt = v.UpdatedAt,
@@ -254,24 +307,6 @@ public class ServerService(
         }).ToList();
     }
 
-    public async Task<List<ReleaseDto>> GetServerReleasesAsync(int serverId, CancellationToken ct = default)
-    {
-        var releases = await repo.GetReleasesForServerAsync(serverId, ct).ConfigureAwait(false);
-        return releases.Select(r => new ReleaseDto
-        {
-            Id = r.Id,
-            ProjectId = r.ProjectId,
-            ProjectName = r.Project?.Name ?? string.Empty,
-            Version = r.Version,
-            BranchName = r.BranchName,
-            Status = r.Status,
-            DetectedAt = r.DetectedAt,
-            PublishedAt = r.PublishedAt,
-            PromotedAt = r.PromotedAt,
-            RolledBackAt = r.RolledBackAt,
-            PipelineRunId = r.PipelineRunId
-        }).ToList();
-    }
 
     public async Task<PaginatedResult<ServerTaskDto>> GetServerTasksAsync(int serverId, PaginationRequest request, CancellationToken ct = default)
     {
@@ -290,20 +325,7 @@ public class ServerService(
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetLogsPagedAsync(serverId, page, pageSize, ct).ConfigureAwait(false);
-        return new PaginatedResult<TaskLogDto>
-        {
-            Items = items.Select(l => new TaskLogDto
-            {
-                Id = l.Id,
-                TaskId = l.TaskId,
-                Level = l.Level,
-                Message = l.Message,
-                Timestamp = l.Timestamp
-            }).ToList(),
-            TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize
-        };
+        return TaskLogMapper.ToPaginatedResult(items, totalCount, page, pageSize);
     }
 
     // --- Posture toggles (Server.Admin-gated by the caller; idempotent; Sec-Audit on change) ---
@@ -316,7 +338,7 @@ public class ServerService(
         // Idempotent - no audit, no broadcast when the value already matches. Keeps the
         // audit log focused on actual posture changes (a clicker burst doesn't pollute it).
         if (server.PipelineRunnerEnabled == enabled)
-            return ServerDataMapper.MapToDto(server);
+            return WithCompatibility(ServerDataMapper.MapToDto(server));
 
         server.PipelineRunnerEnabled = enabled;
         server.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -327,8 +349,8 @@ public class ServerService(
         var detail = $"{server.Name} pipeline runner {(enabled ? "enabled" : "disabled")} by {actorUsername}";
         await audit.LogAsync(action, "Server", server.Id, detail, ct).ConfigureAwait(false);
         await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(server.Id), HubGroups.ServerOrg(server.OrganizationId)])
-            .SendAsync("ServerUpdated", ServerDataMapper.MapToDto(server), ct).ConfigureAwait(false);
-        return ServerDataMapper.MapToDto(server);
+            .SendAsync("ServerUpdated", WithCompatibility(ServerDataMapper.MapToDto(server)), ct).ConfigureAwait(false);
+        return WithCompatibility(ServerDataMapper.MapToDto(server));
     }
 
     public async Task<ServerDto?> SetContainerIsolationRequiredAsync(int id, bool required, string actorUsername, CancellationToken ct = default)
@@ -337,7 +359,7 @@ public class ServerService(
         if (server is null) return null;
 
         if (server.RequireContainerIsolation == required)
-            return ServerDataMapper.MapToDto(server);
+            return WithCompatibility(ServerDataMapper.MapToDto(server));
 
         server.RequireContainerIsolation = required;
         server.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -347,8 +369,8 @@ public class ServerService(
         var detail = $"{server.Name} container-isolation policy {(required ? "enforced" : "relaxed")} by {actorUsername}";
         await audit.LogAsync(action, "Server", server.Id, detail, ct).ConfigureAwait(false);
         await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(server.Id), HubGroups.ServerOrg(server.OrganizationId)])
-            .SendAsync("ServerUpdated", ServerDataMapper.MapToDto(server), ct).ConfigureAwait(false);
-        return ServerDataMapper.MapToDto(server);
+            .SendAsync("ServerUpdated", WithCompatibility(ServerDataMapper.MapToDto(server)), ct).ConfigureAwait(false);
+        return WithCompatibility(ServerDataMapper.MapToDto(server));
     }
 
     // --- Delegations to the focused collaborators (one registered instance fronts every interface) ---
@@ -394,4 +416,7 @@ public class ServerService(
 
     public Task<ServerDiagnosticDto?> DiagnoseAsync(int serverId, CancellationToken ct = default)
         => _diagnostic.DiagnoseAsync(serverId, ct);
+
+    private ServerDto WithCompatibility(ServerDto server) =>
+        server with { AgentCompatibility = compatibilityPolicy?.Evaluate(server) };
 }

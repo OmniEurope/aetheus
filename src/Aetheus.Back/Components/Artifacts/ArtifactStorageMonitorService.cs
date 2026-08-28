@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Artifacts;

@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Aetheus.Shared.DTOs.Organizations;
 
 namespace Aetheus.Back.Components.Organizations;
 
-public class OrganizationService(IOrganizationRepository repo, IResourceAuthorizationService authz, TimeProvider timeProvider, IAdminChangeNotifier notifier, IUserChangeNotifier userNotifier) : IOrganizationService
+public class OrganizationService(IOrganizationRepository repo, IResourceAuthorizationService authz, TimeProvider timeProvider, IAdminChangeNotifier notifier, IUserChangeNotifier userNotifier, IAuditService audit) : IOrganizationService
 {
     public async Task<PaginatedResult<OrganizationDto>> GetOrganizationsAsync(string? search, PaginationRequest request, CancellationToken ct)
     {
@@ -56,6 +53,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
         };
         await repo.AddAsync(org, ct).ConfigureAwait(false);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await audit.LogAsync("Organization.Created", "Organization", org.Id,
+            $"Organization '{org.Name}' created", ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(AdminEntities.Organization, org.Id, EntityChangeOps.Created, ct).ConfigureAwait(false);
         return MapToListDto(org);
     }
@@ -75,6 +74,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
         org.Description = request.Description?.Trim() ?? string.Empty;
         org.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await audit.LogAsync("Organization.Updated", "Organization", org.Id,
+            $"Organization '{org.Name}' updated", ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(AdminEntities.Organization, org.Id, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         return MapToListDto(org);
     }
@@ -87,6 +88,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
         var deleted = await repo.DeleteAsync(id, ct).ConfigureAwait(false);
         if (deleted)
         {
+            await audit.LogAsync("Organization.Deleted", "Organization", id,
+                $"Organization {id} deleted", ct).ConfigureAwait(false);
             foreach (var m in members)
                 authz.InvalidateRoleCache(m.Username);
             await notifier.BroadcastAsync(AdminEntities.Organization, id, EntityChangeOps.Deleted, ct).ConfigureAwait(false);
@@ -116,6 +119,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
         };
         await repo.AddMemberAsync(member, ct).ConfigureAwait(false);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await audit.LogAsync("Organization.MemberAdded", "Organization", organizationId,
+            $"User '{user.Username}' added as {member.Role}", ct).ConfigureAwait(false);
         authz.InvalidateRoleCache(user.Username);
         await notifier.BroadcastAsync(AdminEntities.Organization, organizationId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         await userNotifier.NotifyPermissionsChangedAsync(user.Id, PermissionChangeReasons.OrganizationMembership, ct).ConfigureAwait(false);
@@ -128,6 +133,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
         if (member is null) return null;
         member.Role = request.Role;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await audit.LogAsync("Organization.MemberRoleUpdated", "Organization", organizationId,
+            $"User '{member.User.Username}' role changed to {member.Role}", ct).ConfigureAwait(false);
         authz.InvalidateRoleCache(member.User.Username);
         await notifier.BroadcastAsync(AdminEntities.Organization, organizationId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         await userNotifier.NotifyPermissionsChangedAsync(member.UserId, PermissionChangeReasons.OrganizationMembership, ct).ConfigureAwait(false);
@@ -142,6 +149,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
             authz.InvalidateRoleCache(member.User.Username);
         if (removed)
         {
+            await audit.LogAsync("Organization.MemberRemoved", "Organization", organizationId,
+                $"User '{member?.User.Username ?? memberId.ToString()}' removed", ct).ConfigureAwait(false);
             await notifier.BroadcastAsync(AdminEntities.Organization, organizationId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
             if (member is not null)
                 await userNotifier.NotifyPermissionsChangedAsync(member.UserId, PermissionChangeReasons.OrganizationMembership, ct).ConfigureAwait(false);
@@ -160,6 +169,8 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
             throw new BadRequestException("One or more project IDs do not exist.");
 
         await repo.AssignProjectsAsync(organizationId, distinct, ct).ConfigureAwait(false);
+        await audit.LogAsync("Organization.ProjectsAssigned", "Organization", organizationId,
+            $"Assigned project IDs: {string.Join(", ", distinct)}", ct).ConfigureAwait(false);
 
         // Reassigning the org's projects changes what its members can reach through org-scoped
         // access, so invalidate their authz cache and push a refresh.

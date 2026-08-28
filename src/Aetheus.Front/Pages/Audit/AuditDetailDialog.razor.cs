@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Audit;
 
@@ -53,7 +47,7 @@ public partial class AuditDetailDialog : ComponentBase
     {
         try
         {
-            _verification = await Api.VerifyAuditEntryAsync(Log.Id);
+            _verification = await Api.Monitoring.VerifyAuditEntryAsync(Log.Id);
         }
         catch (HttpRequestException)
         {

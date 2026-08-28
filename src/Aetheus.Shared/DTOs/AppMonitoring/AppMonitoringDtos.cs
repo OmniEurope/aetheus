@@ -2,10 +2,11 @@
 using System.ComponentModel.DataAnnotations;
 using Aetheus.Shared.Constants;
 using Aetheus.Shared.Enums;
+using Aetheus.Shared.Validation;
 
 namespace Aetheus.Shared.DTOs;
 
-/// <summary>Read model for a monitored application (PLAN-001 phase 1: availability).</summary>
+/// <summary>Read model for a monitored application (ADR-021 phase 1: availability).</summary>
 public sealed record MonitoredAppDto
 {
     public int Id { get; init; }
@@ -64,6 +65,168 @@ public sealed record MetricSeriesDto
     public IReadOnlyList<MetricPointDto> Points { get; init; } = [];
 }
 
+/// <summary>
+/// Opaque daily visitor identifier produced server-side by the monitored application. It must be a
+/// keyed digest; raw IP addresses and user-agent strings are never accepted by this contract.
+/// </summary>
+public sealed record AppVisitorIngestRequest
+{
+    [Required]
+    [StringLength(64, MinimumLength = 64)]
+    [RegularExpression("^[a-fA-F0-9]{64}$")]
+    public string VisitorId { get; init; } = string.Empty;
+}
+
+public sealed record AppVisitorPointDto
+{
+    public DateOnly DayUtc { get; init; }
+    public int UniqueVisitors { get; init; }
+}
+
+public sealed record AppVisitorSeriesDto
+{
+    public int Today { get; init; }
+    public IReadOnlyList<AppVisitorPointDto> Points { get; init; } = [];
+}
+
+public abstract record WebAnalyticsEventRequest
+{
+    [Range(1, 1)]
+    public int SchemaVersion { get; init; }
+
+    [Required]
+    public Guid EventId { get; init; }
+
+    [Required]
+    public DateTime OccurredAtUtc { get; init; }
+
+    [Required]
+    [StringLength(32, MinimumLength = 1)]
+    public string Kind { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(256, MinimumLength = 1)]
+    public string Route { get; init; } = string.Empty;
+
+    [Range(0, 300_000)]
+    public int? DurationMs { get; init; }
+
+    [StringLength(32, MinimumLength = 1)]
+    [RegularExpression("^[a-z0-9_]+$")]
+    public string? ErrorType { get; init; }
+}
+
+public sealed record AppWebAnalyticsIngestEvent : WebAnalyticsEventRequest
+{
+    [Range(1, int.MaxValue)]
+    public int ApplicationId { get; init; }
+
+    [Required]
+    [StringLength(64, MinimumLength = 1)]
+    [RegularExpression("^[a-z0-9.-]+$")]
+    public string SiteId { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(64, MinimumLength = 64)]
+    [RegularExpression("^[a-f0-9]{64}$")]
+    public string DailyPseudonym { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(64, MinimumLength = 64)]
+    [RegularExpression("^[a-f0-9]{64}$")]
+    public string WeeklyPseudonym { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(64, MinimumLength = 64)]
+    [RegularExpression("^[a-f0-9]{64}$")]
+    public string MonthlyPseudonym { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(64, MinimumLength = 64)]
+    [RegularExpression("^[a-f0-9]{64}$")]
+    public string SessionPseudonym { get; init; } = string.Empty;
+
+    [StringLength(64, MinimumLength = 64)]
+    [RegularExpression("^[a-f0-9]{64}$")]
+    public string? AuthenticatedPseudonym { get; init; }
+
+    [Range(1, int.MaxValue)]
+    public int KeyVersion { get; init; }
+}
+
+public sealed record AppWebAnalyticsPointDto
+{
+    public DateOnly DayUtc { get; init; }
+    public int UniqueVisitors { get; init; }
+    public int Sessions { get; init; }
+    public int ReturningVisitors { get; init; }
+    public long PageViews { get; init; }
+}
+
+public sealed record AppWebAnalyticsPageDto
+{
+    public string Route { get; init; } = string.Empty;
+    public long PageViews { get; init; }
+}
+
+public sealed record AppWebAnalyticsSummaryDto
+{
+    public int UniqueVisitorsToday { get; init; }
+    public int UniqueVisitorsThisWeek { get; init; }
+    public int UniqueVisitorsThisMonth { get; init; }
+    public int AuthenticatedUniqueThisMonth { get; init; }
+    public int SessionsThisMonth { get; init; }
+    public int ReturningVisitorsThisMonth { get; init; }
+    public long PageViewsThisMonth { get; init; }
+    public int BrowserPerformanceSamplesLast30Days { get; init; }
+    public double? AverageBrowserNavigationDurationMs { get; init; }
+    public int? P95BrowserNavigationDurationMs { get; init; }
+    public int BrowserErrorsLast30Days { get; init; }
+    public DateTime? LastIngestAtUtc { get; init; }
+    public long RejectedEvents { get; init; }
+    public long EstimatedStorageBytes { get; init; }
+    public long StorageBudgetBytes { get; init; }
+    public int StorageUsagePercent { get; init; }
+    public IReadOnlyList<AppWebAnalyticsPointDto> Daily { get; init; } = [];
+    public IReadOnlyList<AppWebAnalyticsPageDto> TopPages { get; init; } = [];
+}
+
+public sealed record ConfigureAppWebAnalyticsRequest
+{
+    public bool Enabled { get; init; }
+    public bool PublicIngestEnabled { get; init; }
+
+    [Required]
+    [StringLength(64, MinimumLength = 1)]
+    [RegularExpression("^[a-z0-9.-]+$")]
+    public string SiteId { get; init; } = string.Empty;
+
+    [Required]
+    [MinLength(1)]
+    [MaxLength(10)]
+    [MaxItemStringLength(2048)]
+    public List<string> AllowedOrigins { get; init; } = [];
+
+    [Range(1_048_576, 10_737_418_240)]
+    public long StorageBudgetBytes { get; init; } = AppMonitoringDefaults.DefaultAnalyticsStorageBudgetBytes;
+}
+
+public sealed record AppWebAnalyticsConfigurationDto
+{
+    public bool Enabled { get; init; }
+    public bool PublicIngestEnabled { get; init; }
+    public string SiteId { get; init; } = string.Empty;
+    public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
+    public long StorageBudgetBytes { get; init; }
+    public int PseudonymKeyVersion { get; init; }
+    public DateTime? PseudonymKeyCreatedAt { get; init; }
+}
+
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(
+    System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
+public sealed record PublicWebAnalyticsEventRequest
+    : WebAnalyticsEventRequest;
+
 public sealed record AppMetricThresholdDto
 {
     public int Id { get; init; }
@@ -111,14 +274,11 @@ public sealed record AppErrorEventDto
     public DateTime LastSeenAt { get; init; }
 }
 
-public sealed record CreateMonitoredAppRequest
+public abstract record MonitoredAppRequest
 {
     [Required]
     [StringLength(150, MinimumLength = 1)]
     public string Name { get; set; } = string.Empty;
-
-    [Required]
-    public int ProjectId { get; set; }
 
     public int? EnvironmentId { get; set; }
 
@@ -147,37 +307,13 @@ public sealed record CreateMonitoredAppRequest
     public bool Enabled { get; set; } = true;
 }
 
-public sealed record UpdateMonitoredAppRequest
+public sealed record CreateMonitoredAppRequest : MonitoredAppRequest
 {
     [Required]
-    [StringLength(150, MinimumLength = 1)]
-    public string Name { get; set; } = string.Empty;
-
-    public int? EnvironmentId { get; set; }
-
-    public int? ServerId { get; set; }
-
-    [StringLength(2048)]
-    [Url]
-    public string? ProbeUrl { get; set; }
-
-    [Range(AppMonitoringDefaults.MinimumProbeIntervalSeconds, AppMonitoringDefaults.MaximumProbeIntervalSeconds)]
-    public int ProbeIntervalSeconds { get; set; } = AppMonitoringDefaults.DefaultProbeIntervalSeconds;
-
-    [Range(AppMonitoringDefaults.MinimumProbeTimeoutSeconds, AppMonitoringDefaults.MaximumProbeTimeoutSeconds)]
-    public int ProbeTimeoutSeconds { get; set; } = AppMonitoringDefaults.DefaultProbeTimeoutSeconds;
-
-    [Range(AppMonitoringDefaults.MinimumExpectedStatusCode, AppMonitoringDefaults.MaximumExpectedStatusCode)]
-    public int ExpectedStatusCode { get; set; } = AppMonitoringDefaults.DefaultExpectedStatusCode;
-
-    [Range(AppMonitoringDefaults.MinimumTransitionThreshold, AppMonitoringDefaults.MaximumTransitionThreshold)]
-    public int FailureThreshold { get; set; } = AppMonitoringDefaults.DefaultFailureThreshold;
-
-    [Range(AppMonitoringDefaults.MinimumTransitionThreshold, AppMonitoringDefaults.MaximumTransitionThreshold)]
-    public int RecoveryThreshold { get; set; } = AppMonitoringDefaults.DefaultRecoveryThreshold;
-
-    public bool Enabled { get; set; } = true;
+    public int ProjectId { get; set; }
 }
+
+public sealed record UpdateMonitoredAppRequest : MonitoredAppRequest;
 
 /// <summary>A single availability data point (raw sample).</summary>
 public sealed record AppHealthSampleDto
@@ -217,6 +353,22 @@ public sealed record AppProbeResultDto
 
     [StringLength(500)]
     public string? Error { get; init; }
+
+    public static AppProbeResultDto Failure(
+        int monitoredAppId,
+        DateTime timestamp,
+        int responseTimeMs,
+        string reason) => new()
+        {
+            MonitoredAppId = monitoredAppId,
+            Timestamp = timestamp,
+            IsUp = false,
+            ResponseTimeMs = responseTimeMs,
+            StatusCode = null,
+            Error = reason.Length > AppMonitoringDefaults.MaximumErrorLength
+                ? reason[..AppMonitoringDefaults.MaximumErrorLength]
+                : reason
+        };
 }
 
 /// <summary>Global monitoring summary for the dashboard tile.</summary>
@@ -229,10 +381,13 @@ public sealed record AppMonitoringSummaryDto
     public int UnknownCount { get; init; }
     /// <summary>Physical PostgreSQL bytes used by app telemetry tables; observable growth signal.</summary>
     public long TelemetryStorageBytes { get; init; }
+    /// <summary>Every enabled monitored application visible to the caller.</summary>
+    public IReadOnlyList<MonitoredAppStatusDto> Applications { get; init; } = [];
+    /// <summary>Backward-compatible subset retained for clients that only surface unhealthy applications.</summary>
     public IReadOnlyList<MonitoredAppStatusDto> Troubled { get; init; } = [];
 }
 
-/// <summary>Compact status line for an app in trouble (dashboard tile).</summary>
+/// <summary>Compact status line for a monitored application on the dashboard.</summary>
 public sealed record MonitoredAppStatusDto
 {
     public int Id { get; init; }
@@ -241,4 +396,6 @@ public sealed record MonitoredAppStatusDto
     public string? ProjectName { get; init; }
     public AppHealthStatus CurrentStatus { get; init; }
     public DateTime? LastStatusChangeAt { get; init; }
+    /// <summary>Distinct sessions seen in the active window; null when web analytics is unavailable.</summary>
+    public int? OnlineVisitorCount { get; init; }
 }

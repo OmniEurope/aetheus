@@ -257,6 +257,59 @@ public class GitRepositoriesDeepTests : BunitContext
         Assert.Empty(projects);
     }
 
+    [Fact]
+    public void MalformedProjectsResponse_PreservesExplicitProjectFilter()
+    {
+        _handler.SetRawResponse("api/projects", "<html>proxy error</html>");
+        _handler.SetPaginatedJsonResponse("api/git/repos", new List<GitLightRepoDto>());
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        navigation.NavigateTo("git-repositories?projectId=77");
+
+        var cut = Render<GitRepositories>();
+        cut.WaitForState(
+            () => !cut.Instance.IsLoading,
+            TimeSpan.FromSeconds(2));
+
+        Assert.Equal(77, cut.Instance.ActiveProjectFilter);
+        Assert.Contains(_handler.Requests, request => request.Url.Contains("projectId=77", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LoadData_NewerRequestCancelsOlderResponseAndKeepsNewestRows()
+    {
+        SetupProjects();
+        SetupRepos(1);
+        var cut = Render<GitRepositories>();
+        cut.WaitForState(
+            () => !cut.Instance.IsLoading,
+            TimeSpan.FromSeconds(2));
+
+        var oldStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var oldResponse = new TaskCompletionSource<PaginatedResult<GitLightRepoDto>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(
+            HttpMethod.Get,
+            "api/git/repos",
+            async ct =>
+            {
+                oldStarted.TrySetResult();
+                return await oldResponse.Task.WaitAsync(ct);
+            });
+
+        var oldLoad = cut.Instance.LoadData();
+        await oldStarted.Task.WaitAsync(Xunit.TestContext.Current.CancellationToken);
+
+        _handler.SetJsonResponse(HttpMethod.Get, "api/git/repos", new PaginatedResult<GitLightRepoDto>
+        {
+            Items = [new GitLightRepoDto { Id = 99, Name = "newest" }],
+            TotalCount = 1
+        });
+        await cut.Instance.LoadData();
+        await oldLoad;
+
+        Assert.Equal(99, Assert.Single(cut.Instance.Repositories).Id);
+    }
+
     // ── Test 11: SyncUrlWithCurrentFilter does not crash ─────────────────────
 
     [Fact]

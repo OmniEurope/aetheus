@@ -22,21 +22,52 @@
 
 @if (!_isNew && _detail is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else
 {
     <RadzenTemplateForm TItem="EnvironmentModel" Data="@_model" Submit="@OnSubmit">
         <LocalizedDataAnnotationsValidator />
+        @if (_isNew)
+        {
+            <RadzenCard class="environment-copy-source rz-mb-4">
+                <RadzenRow Gap="1rem" AlignItems="AlignItems.Center">
+                    <RadzenColumn Size="12" SizeMD="5">
+                        <RadzenStack Gap="0.35rem">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                <RadzenIcon Icon="content_copy" class="environment-copy-source__icon" />
+                                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H2">@L["StartFromExistingEnvironment"]</RadzenText>
+                            </RadzenStack>
+                            <RadzenText TextStyle="TextStyle.Body2" class="environment-copy-source__hint">
+                                @L["StartFromExistingEnvironmentHint"]
+                            </RadzenText>
+                        </RadzenStack>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="7">
+                        <RadzenFormField Text="@L["SourceEnvironment"]" class="rz-w-100">
+                            <RadzenDropDown TValue="int?" Data="@_copySources" TextProperty="Label" ValueProperty="Id"
+                                Value="@_sourceEnvironmentId" Change="@OnSourceEnvironmentChanged"
+                                AllowClear="true" AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                Placeholder="@L["CreateEnvironmentFromScratch"]" class="rz-w-100" />
+                        </RadzenFormField>
+                    </RadzenColumn>
+                </RadzenRow>
+            </RadzenCard>
+        }
         <RadzenRow Gap="1rem">
             <RadzenColumn Size="12" SizeMD="6">
                 <RadzenStack Gap="1rem">
                     <RadzenFormField Text="@L["Name"]">
-                        <RadzenTextBox @bind-Value="_model.Name" Name="Name" />
+                        <RadzenTextBox @bind-Value="_model.Name"
+                            @oninput="@(e => _model.Name = e.Value?.ToString() ?? string.Empty)"
+                            Name="Name" />
                         <ValidationMessage For="@(() => _model.Name)" />
                     </RadzenFormField>
                     <RadzenFormField Text="@L["Description"]">
-                        <RadzenTextArea @bind-Value="_model.Description" Name="Description" Rows="3" />
+                        <RadzenTextArea @bind-Value="_model.Description"
+                            @oninput="@(e => _model.Description = e.Value?.ToString() ?? string.Empty)"
+                            Name="Description" Rows="3" />
                     </RadzenFormField>
                     <RadzenFormField Text="@L["Type"]">
                         <RadzenDropDown TValue="EnvironmentType" Data="@_typeOptions"
@@ -58,14 +89,28 @@ else
                             <RadzenNumeric TValue="int" @bind-Value="_model.ApprovalTimeoutMinutes" Min="1" Max="10080" />
                         </RadzenFormField>
                         <RadzenFormField Text="@L["ApprovalInstructions"]">
-                            <RadzenTextArea @bind-Value="_model.ApprovalInstructions" Rows="2" />
+                            <RadzenTextArea @bind-Value="_model.ApprovalInstructions"
+                                @oninput="@(e => _model.ApprovalInstructions = e.Value?.ToString())"
+                                Name="ApprovalInstructions" Rows="2" />
+                        </RadzenFormField>
+                    }
+                    <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.DastEnabled" Text="@L["DastEnabled"]" />
+                    @if (_model.DastEnabled)
+                    {
+                        <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.DastIsEphemeral" Text="@L["DastEphemeral"]" />
+                        <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.DastContainsRealData" Text="@L["DastContainsRealData"]" />
+                        <RadzenFormField Text="@L["DastAllowedHosts"]">
+                            <RadzenTextArea @bind-Value="_model.DastAllowedHosts"
+                                @oninput="@(e => _model.DastAllowedHosts = e.Value?.ToString() ?? string.Empty)"
+                                Name="DastAllowedHosts" Rows="3" Placeholder="qa.example.test" />
+                            <RadzenText TextStyle="TextStyle.Caption">@L["DastAllowedHostsHelp"]</RadzenText>
                         </RadzenFormField>
                     }
                 </RadzenStack>
             </RadzenColumn>
         </RadzenRow>
 
-        <RadzenText TextStyle="TextStyle.H6" class="rz-mt-4 rz-mb-2">@L["Servers"]</RadzenText>
+        <RadzenText TextStyle="TextStyle.H5" class="rz-mt-4 rz-mb-2">@L["Servers"]</RadzenText>
         <RadzenDropDown TValue="IEnumerable<int>" Data="@_servers" TextProperty="Name" ValueProperty="Id"
             @bind-Value="_model.ServerIds" Multiple="true" Chips="true" AllowClear="true"
             AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"

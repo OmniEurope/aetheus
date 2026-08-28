@@ -1,29 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Projects.ProjectDetailSections;
 
-public partial class ProjectExternalRepoSection : ComponentBase, IDisposable
+public partial class ProjectExternalRepoSection : ProjectWritableSectionBase
 {
-    [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
-    [Inject] private PermissionService Permissions { get; set; } = default!;
-    [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private UiActions Ui { get; set; } = default!;
 
-    [Parameter] public int ProjectId { get; set; }
-
-    private bool _loading = true;
     private bool _enabled;
-    private bool _canWrite;
     private bool _busy;
     private bool _syncing;
     private ExternalRepoDto? _repo;
@@ -34,31 +17,13 @@ public partial class ProjectExternalRepoSection : ComponentBase, IDisposable
     private static readonly List<object> _authTypes = Enum.GetValues<GitAuthType>()
         .Select(t => (object)new { Text = t.ToString(), Value = t }).ToList();
 
-    protected override void OnInitialized()
-    {
-        // Permissions may land after the section mounts (MainLayout loads them in parallel);
-        // subscribe so the attach/detach/sync affordances reactivate the moment they arrive.
-        Permissions.OnPermissionsChanged += OnPermissionsChanged;
-        RefreshCanWrite();
-    }
-
-    private void OnPermissionsChanged()
-    {
-        RefreshCanWrite();
-        InvokeAsync(StateHasChanged);
-    }
-
-    private void RefreshCanWrite() => _canWrite = Permissions.CanWrite(ResourceType.Project);
-
-    protected override async Task OnParametersSetAsync() => await LoadAsync();
-
-    private async Task LoadAsync()
+    protected override async Task LoadAsync()
     {
         _loading = true;
         try
         {
-            _enabled = await Api.IsExternalReposEnabledAsync();
-            _repo = _enabled ? await Api.GetExternalRepoAsync(ProjectId) : null;
+            _enabled = await Api.Git.IsExternalReposEnabledAsync();
+            _repo = _enabled ? await Api.Git.GetExternalRepoAsync(ProjectId) : null;
         }
         catch (HttpRequestException) { _repo = null; }
         finally { _loading = false; }
@@ -70,7 +35,7 @@ public partial class ProjectExternalRepoSection : ComponentBase, IDisposable
         try
         {
             await Ui.RunAsync(
-                () => Api.AttachExternalRepoAsync(new AttachExternalRepoRequest
+                () => Api.Git.AttachExternalRepoAsync(new AttachExternalRepoRequest
                 {
                     ProjectId = ProjectId,
                     ProviderType = _model.ProviderType,
@@ -101,7 +66,7 @@ public partial class ProjectExternalRepoSection : ComponentBase, IDisposable
         StateHasChanged();
         try
         {
-            var result = await Api.SyncExternalRepoNowAsync(ProjectId);
+            var result = await Api.Git.SyncExternalRepoNowAsync(ProjectId);
             if (result is not null) { _repo = result; Toast.Success("Saved", "ExternalRepoSyncQueued"); }
             else Toast.Error("Error", "SaveFailed");
         }
@@ -115,7 +80,7 @@ public partial class ProjectExternalRepoSection : ComponentBase, IDisposable
             new ConfirmOptions { OkButtonText = L["Detach"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var status = await Api.DetachExternalRepoAsync(ProjectId);
+        var status = await Api.Git.DetachExternalRepoAsync(ProjectId);
         if (status.Success) { _repo = null; StateHasChanged(); }
         else Toast.Error("Error", "DeleteFailed");
     }
@@ -127,8 +92,6 @@ public partial class ProjectExternalRepoSection : ComponentBase, IDisposable
         GitMirrorStatus.Error => BadgeStyle.Danger,
         _ => BadgeStyle.Light
     };
-
-    public void Dispose() => Permissions.OnPermissionsChanged -= OnPermissionsChanged;
 
     private sealed class AttachModel
     {

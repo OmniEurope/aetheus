@@ -23,11 +23,15 @@ public class PipelinesTests : E2ETestBase
         await Expect(newButton).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         await WaitForNoSpinnerAsync();
-        await Expect(Page.GetByRole(AriaRole.Heading, new() { NameRegex = new("Pipelines with children") })).ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(Page.GetByRole(AriaRole.Heading, new() { NameRegex = new("Pipelines without children") })).ToBeVisibleAsync(new() { Timeout = 10000 });
+        var parentsTab = Page.GetByRole(AriaRole.Tab, new() { NameRegex = new("Pipelines with children") });
+        var leavesTab = Page.GetByRole(AriaRole.Tab, new() { NameRegex = new("Pipelines without children") });
+        await Expect(parentsTab).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(leavesTab).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         var grids = Page.Locator(".pipeline-dependency-grid");
-        await Expect(grids).ToHaveCountAsync(2, new() { Timeout = 10000 });
+        // Radzen renders only the selected catalog tab's panel. The two catalog groups are
+        // represented by the tabs above, while exactly one dependency grid is active at a time.
+        await Expect(grids).ToHaveCountAsync(1, new() { Timeout = 10000 });
         var grid = grids.First;
         await Expect(grid).ToBeVisibleAsync(new() { Timeout = 10000 });
 
@@ -63,6 +67,7 @@ public class PipelinesTests : E2ETestBase
 
         var clearFilters = Page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" });
         await clearFilters.ClickAsync();
+        await leavesTab.ClickAsync();
         await Expect(grids.GetByText("API CI", new() { Exact = true }).First)
             .ToBeVisibleAsync(new() { Timeout = 5000 });
 
@@ -96,17 +101,18 @@ public class PipelinesTests : E2ETestBase
     }
 
     [Test]
-    public async Task Pipelines_NewPipeline_NavigatesToEditor()
+    public async Task Pipelines_NewPipeline_NavigatesToSetupWizard()
     {
         await NavigateToAsync("pipelines");
         await Page.Locator(".pipeline-list-toolbar").GetByText("New Pipeline").ClickAsync();
 
-        await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex("/pipelines/new"), new() { Timeout = 5000 });
-        await Expect(Page.Locator("input[name='Name']")).ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(Page.GetByRole(AriaRole.Button, new()
-        {
-            NameRegex = new System.Text.RegularExpressions.Regex("Create$")
-        }))
+        await Expect(Page).ToHaveURLAsync(
+            new System.Text.RegularExpressions.Regex("/pipelines/setup"), new() { Timeout = 5000 });
+        await Expect(Page.GetByRole(AriaRole.Heading, new() { Name = "Pipeline setup wizard" }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(Page.GetByRole(AriaRole.Tab, new() { Name = "1 Project" }))
+            .ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Expect(Page.GetByText("Select the project that will own the generated pipelines."))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
     }
 
@@ -119,6 +125,33 @@ public class PipelinesTests : E2ETestBase
         await ClickSidebarNavItemAsync("Pipelines");
 
         await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex("/pipelines"), new() { Timeout = 5000 });
+    }
+
+    [Test]
+    public async Task PipelineRun_WhenGateEvidenceReturns500_ShowsIncompleteWarningWithoutGrade()
+    {
+        AllowBrowserDiagnostic(new System.Text.RegularExpressions.Regex(
+            "Failed to load resource.*500", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        AllowBrowserDiagnostic(new System.Text.RegularExpressions.Regex(
+            "Polly.*Result: '500'",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Singleline));
+        await Page.RouteAsync("**/api/analysis/runs/*/result", route => route.FulfillAsync(new()
+        {
+            Status = 500,
+            ContentType = "application/json",
+            Body = "{}"
+        }));
+
+        await NavigateToAsync("pipelines/runs/1");
+
+        await Expect(Page.GetByText("Analysis gate incomplete", new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(Page.GetByText(
+                new System.Text.RegularExpressions.Regex(
+                    "The displayed gate is incomplete and must not be treated as passed")))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(Page.Locator(".analysis-run-gate-grade")).ToHaveCountAsync(0);
     }
 
 }

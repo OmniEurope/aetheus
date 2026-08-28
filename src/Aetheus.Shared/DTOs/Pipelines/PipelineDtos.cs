@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
 
@@ -14,6 +15,7 @@ public sealed record PipelineDto
     public PipelineTriggerType TriggerType { get; init; }
     public int? ProjectId { get; init; }
     public string? ProjectName { get; init; }
+    public int? SourceRepositoryId { get; init; }
     public string? SourceBranch { get; init; }
     public int? EnvironmentId { get; init; }
     public string? EnvironmentName { get; init; }
@@ -32,6 +34,7 @@ public sealed record PipelineDto
 public sealed record PipelineSourceDto
 {
     public int RepositoryId { get; init; }
+    public string CloneUrl { get; init; } = string.Empty;
     public string Path { get; init; } = string.Empty;
     public string Branch { get; init; } = string.Empty;
     public string? CommitHash { get; init; }
@@ -74,7 +77,7 @@ public sealed record PipelineRunSummaryDto
     public string? CurrentStep { get; init; }
 }
 
-[ExactlyOneOwner]
+[AtMostOneOwner]
 public sealed record CreatePipelineRequest
 {
     [Required]
@@ -89,13 +92,14 @@ public sealed record CreatePipelineRequest
     public string YamlDefinition { get; init; } = string.Empty;
 
     public int? ProjectId { get; init; }
+    public int? SourceRepositoryId { get; init; }
     [StringLength(255)]
     public string? SourceBranch { get; init; }
     public int? EnvironmentId { get; init; }
     public int? ProjectServerId { get; init; }
 }
 
-[ExactlyOneOwner]
+[AtMostOneOwner]
 public sealed record UpdatePipelineRequest
 {
     [Required]
@@ -110,10 +114,28 @@ public sealed record UpdatePipelineRequest
     public string YamlDefinition { get; init; } = string.Empty;
 
     public int? ProjectId { get; init; }
+    public int? SourceRepositoryId { get; init; }
     [StringLength(255)]
     public string? SourceBranch { get; init; }
     public int? EnvironmentId { get; init; }
     public int? ProjectServerId { get; init; }
+}
+
+/// <summary>Query for a page of pipeline runs: paging (inherited), sorting (inherited
+/// <see cref="PaginationRequest.SortBy"/> / <see cref="PaginationRequest.SortDescending"/>) and the
+/// column filters the runs grid exposes.
+/// <para>Sorting and filtering are applied server-side because the grid is server-paged: applying
+/// them to the loaded page only would sort 25 rows and call it an order, which reads as a working
+/// affordance while telling the reader something false about the rest of the history.</para></summary>
+public sealed record PipelineRunPaginationRequest : PaginationRequest
+{
+    public PipelineStatus? Status { get; init; }
+
+    [StringLength(255)]
+    public string? BranchName { get; init; }
+
+    [StringLength(64)]
+    public string? CommitHash { get; init; }
 }
 
 public sealed record PipelineRunDto
@@ -127,6 +149,12 @@ public sealed record PipelineRunDto
     public DateTime? CompletedAt { get; init; }
     public Dictionary<string, string> ResolvedVariables { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
+    /// <summary>True after the cancellation request has been durably accepted, while mandatory
+    /// teardown may still keep the run active.</summary>
+    public bool CancellationRequested { get; init; }
+    /// <summary>Internal projection bridge used to hydrate <see cref="Warnings"/> after EF materialization.</summary>
+    [JsonIgnore]
+    public string? ProjectedWarningsJson { get; init; }
     public List<PipelineStepRunDto> Steps { get; init; } = [];
     public List<PipelineApprovalDto> Approvals { get; init; } = [];
     public List<PipelineArtifactDto> Artifacts { get; init; } = [];
@@ -144,6 +172,11 @@ public sealed record PipelineRunDto
     public string? CommitHash { get; init; }
     public string? RepositoryUrl { get; init; }
     public string? ProjectName { get; init; }
+
+    /// <summary>Worst analysis grade recorded for this run (A..F), or null when no gate evaluated it.
+    /// Projected from the stored <c>AnalysisEvaluation</c> rows, never recomputed, so run listings can
+    /// show the gate letter without loading the full gate for every row.</summary>
+    public AnalysisGrade? GateGrade { get; init; }
 
     // Resolved internal git-graph links (when a graph node exists for the run's commit/branch).
     // Empty lists fall back to plain text / the external repo URL in the run view.
@@ -185,14 +218,28 @@ public sealed record PipelineStepRunDto
     public DateTime? StartedAt { get; init; }
     public DateTime? CompletedAt { get; init; }
     public int? ExitCode { get; init; }
+    /// <summary>Structured terminal failure category reported by the agent for the linked task.</summary>
+    public string? FailureCode { get; init; }
+    /// <summary>Masked terminal diagnostic reported by the agent when execution could not emit logs.</summary>
+    public string? FailureReason { get; init; }
     public Dictionary<string, string> OutputVariables { get; init; } = [];
     public int RetryCount { get; init; }
     public bool ContinueOnError { get; init; }
     public string? MatrixLeg { get; init; }
     public bool IsSystem { get; init; }
     public string? GroupName { get; init; }
+    /// <summary>The condition that evaluated to false when this step did not run.</summary>
+    public string? SkippedCondition { get; init; }
+    /// <summary>Non-secret variable values used to evaluate <see cref="SkippedCondition"/>.</summary>
+    public Dictionary<string, string> SkippedConditionVariables { get; init; } = [];
     /// <summary>Linked task ID for fetching execution logs via <c>GET /api/logs/task/{taskId}</c>.</summary>
     public int? TaskId { get; init; }
+
+    /// <summary>One-based position of this assigned task in its runner's live queue.</summary>
+    public int? QueuePosition { get; init; }
+
+    /// <summary>Total tasks currently waiting in the same runner queue.</summary>
+    public int? QueueDepth { get; init; }
 
     /// <summary>The resolved shell command dispatched to the agent for this step, with secret
     /// values masked. Null for steps that never produced a task (e.g. skipped/pending). Surfaced
@@ -225,6 +272,10 @@ public sealed record PipelineYamlDefinition
     public string? ProjectType { get; init; }
 
     public string? Schedule { get; init; }
+
+    /// <summary>Webhook-only latest-wins policy. A newer matching push requests cancellation of
+    /// active runs (while preserving their <c>always()</c> teardown) before launching the new SHA.</summary>
+    public bool? SupersedeRunning { get; init; }
 
     /// <summary>Branch filter for the <c>webhook</c> trigger. When non-empty, an automated webhook run
     /// is created only if the pushed ref matches one of these patterns; an empty list fires on any
@@ -336,241 +387,9 @@ public sealed record PipelineJobDefinition
     public PipelineIsolationDefinition? Isolation { get; init; }
 }
 
-/// <summary>
-/// Per-stage/job execution isolation. <c>Mode</c> = <c>process</c> (default) or <c>container</c>.
-/// In container mode each step runs in an ephemeral, hardened container (cap-drop ALL, read-only
-/// root, pids/memory limits). <c>Runtime</c> selects the container runtime (<c>runc</c> default,
-/// <c>runsc</c> for gVisor, <c>kata</c> for micro-VMs) so kernel-level isolation can be enabled
-/// without a code change.
-/// </summary>
-public sealed record PipelineIsolationDefinition
-{
-    public const string ModeProcess = "process";
-    public const string ModeContainer = "container";
-
-    /// <summary><c>process</c> (default) or <c>container</c>.</summary>
-    public string Mode { get; init; } = ModeProcess;
-
-    /// <summary>Container image when <see cref="Mode"/> is <c>container</c> (e.g.
-    /// <c>mcr.microsoft.com/dotnet/sdk:9.0</c>). Required for container mode.</summary>
-    public string? Image { get; init; }
-
-    /// <summary>Container runtime: <c>runc</c> (default), <c>runsc</c> (gVisor), <c>kata</c>.</summary>
-    public string? Runtime { get; init; }
-
-    /// <summary>Container network: <c>bridge</c> (default - outbound access, needed for clone /
-    /// package restore) or <c>none</c> to fully cut the container off from the network.</summary>
-    public string? Network { get; init; }
-
-    /// <summary>Optional memory ceiling for the container (S-UX-35), maps to <c>docker run --memory</c>
-    /// (e.g. <c>512m</c>, <c>2g</c>). Null = unbounded.</summary>
-    public string? Memory { get; init; }
-
-    /// <summary>Optional CPU quota for the container (S-UX-35), maps to <c>docker run --cpus</c>
-    /// (e.g. <c>1.5</c>). Null = unbounded.</summary>
-    public string? Cpus { get; init; }
-
-    public bool IsContainer => string.Equals(Mode, ModeContainer, StringComparison.OrdinalIgnoreCase);
-}
-
 public sealed record PipelineDeploymentStrategy
 {
     public string Type { get; init; } = "runOnce";
     public int MaxParallel { get; init; } = 1;
 }
 
-public sealed record PipelineStepDefinition
-{
-    public string Name { get; init; } = string.Empty;
-    public bool Remove { get; init; }
-    public string Shell { get; init; } = string.Empty;
-    public string? Type { get; init; }
-    public string? Condition { get; init; }
-    public bool Checkout { get; init; }
-    public string? WorkingDirectory { get; init; }
-    public int TimeoutSeconds { get; init; } = 300;
-    public int RetryCount { get; init; }
-    public bool ContinueOnError { get; init; }
-    public string? Version { get; init; }
-    public bool Changelog { get; init; }
-    /// <summary>Marks a release created after a verified production go-live as the project's active
-    /// deployment. The backend demotes the previously active release atomically.</summary>
-    public bool Deployed { get; init; }
-    public List<string> TargetFiles { get; init; } = [];
-
-    /// <summary>S-FEAT-K3P8: minimum line-coverage percent (0–100) for a <c>type: coverage</c> step.
-    /// When set, the step fails if the published line rate is below it (respecting continue_on_error).</summary>
-    public double? MinCoverage { get; init; }
-
-    /// <summary>S-FEAT-D7M5: maximum allowed cyclomatic complexity for a <c>type: complexity</c> step.
-    /// When set, the step fails if the highest method CC exceeds it (respecting continue_on_error).</summary>
-    public int? MaxComplexity { get; init; }
-
-    // ── Cross-agent deploy (type: deploy) ──────────────────────────────────────────────────────────
-    // The four fields below configure a deployment step. The backend resolves which artifact to ship
-    // from Artifact (same-run) OR Release (an existing release), infers DeployKind from Compose, and
-    // dispatches an OperationKind.PipelineDeploy to a deployment-capable agent. App is the application
-    // instance name (validated against OperationTargetValidator.DeployAppRegex at dispatch).
-
-    /// <summary>Same-run artifact name to deploy (produced by an earlier <c>type: artifacts</c> step in
-    /// this run). Mutually informative with <see cref="Release"/>: when both are null the backend fails
-    /// the step with a clear "nothing to deploy" error.</summary>
-    public string? Artifact { get; init; }
-
-    /// <summary>Relative destination used by <c>type: restore-artifacts</c>. The control plane and
-    /// agent both reject rooted paths and traversal segments. Null restores into the workspace root.</summary>
-    public string? TargetDirectory { get; init; }
-
-    /// <summary>Bootstrap-only escape hatch for <c>type: restore-artifacts</c> with the literal
-    /// <c>release: latest-published</c>, <c>release: previous-published</c>, or
-    /// <c>release: previous-deployed</c>. When true and no retained
-    /// rollback-capable artifact exists for that selector, the
-    /// step succeeds explicitly without dispatching an agent task so later steps can prove a first
-    /// contract-release bootstrap. Imported/tag-only release metadata does not disable this bootstrap.
-    /// It never suppresses an invalid selector or a failed artifact download.</summary>
-    public bool AllowMissing { get; init; }
-
-    /// <summary>Existing release to deploy (scenario 3): a release id, a version string, or the literal
-    /// <c>"latest"</c> to resolve the newest release of the run's project, or
-    /// <c>"latest-published"</c> to resolve the newest retained publishable/deployed release, or
-    /// <c>"previous-published"</c> to resolve the newest published one whose artifact commit differs from
-    /// the current run, or <c>"previous-deployed"</c> to resolve the active deployed predecessor at a
-    /// different commit. Takes the
-    /// artifact from that release instead of the current run. Also supported by
-    /// <c>type: restore-artifacts</c> for an exact retained N-1 payload.</summary>
-    public string? Release { get; init; }
-
-    /// <summary>Application instance name on the target agent. Doubles as the systemd template instance
-    /// (<c>aetheus-app@&lt;app&gt;</c>) and the on-disk deploy directory, so it is validated against the
-    /// strict <c>^[a-zA-Z0-9_-]{1,64}$</c> shape (<see cref="OperationTargetValidator.DeployAppRegex"/>)
-    /// before dispatch and re-validated by the root-owned restart helper agent-side.</summary>
-    public string? App { get; init; }
-
-    /// <summary>Path (within the artifact) to a docker compose file. When set, the deploy runs in
-    /// container mode (<c>docker load</c> + <c>docker compose up -d --wait</c>); when null, binary mode
-    /// (atomic symlink flip + systemd restart helper). This is how <c>DeployKind</c> is inferred.</summary>
-    public string? Compose { get; init; }
-
-    /// <summary>Dedicated post-deploy health-gate stabilization window (seconds) for a binary
-    /// <c>type: deploy</c> step. When &gt; 0 the agent uses it verbatim (clamped to a 20s floor and the
-    /// overall step timeout) instead of deriving the window from <see cref="TimeoutSeconds"/>/3 - so a
-    /// legitimately slow .NET cold start (JIT + EF migrations) is not mistaken for a crash loop and
-    /// rolled back. 0 (default) keeps the timeout-derived window. Maps to YAML <c>health_timeout_seconds</c>.</summary>
-    public int HealthTimeoutSeconds { get; init; }
-
-    /// <summary>Optional functional readiness URL for a binary <c>type: deploy</c> step. It must be
-    /// an absolute loopback HTTP(S) URL. After systemd is stable the target agent requires a 2xx
-    /// response before declaring success; failure follows the same automatic rollback path. Maps to
-    /// YAML <c>health_url</c>.</summary>
-    public string? HealthUrl { get; init; }
-
-    /// <summary>Backup-run selector for <c>type: restore-backup</c>. Manual rollbacks pass the
-    /// verified run through <c>$(AETHEUS_ROLLBACK_BACKUP_RUN_ID)</c>; the backend resolves it rather
-    /// than trusting a file path supplied by YAML.</summary>
-    public string? BackupRun { get; init; }
-
-    // ── Host Apache reverse proxy (type: apache-proxy) ───────────────────────────────────────────────
-    // The backend renders a reverse-proxy vhost (ServerName → Upstream), then dispatches an
-    // OperationKind.ApacheConfigureProxy to an Apache-manage-capable agent that writes the vhost,
-    // enables the site and gracefully reloads Apache on the host.
-
-    /// <summary>type: apache-proxy - the <c>ServerName</c> for the rendered reverse-proxy vhost
-    /// (the public host/domain). Maps to YAML <c>server_name</c>.</summary>
-    public string? ServerName { get; init; }
-
-    /// <summary>type: apache-proxy - the upstream the vhost proxies to, e.g.
-    /// <c>http://127.0.0.1:8090</c> (the published port of the deployed container). Maps to <c>upstream</c>.</summary>
-    public string? Upstream { get; init; }
-
-    // ── Host HTTPS via Certbot (type: certbot) ───────────────────────────────────────────────────────
-
-    /// <summary>type: certbot - comma-separated domain(s) to obtain a certificate for. Maps to
-    /// <c>domains</c>. On a host that cannot complete ACME validation (no public DNS / unreachable
-    /// port 80) the agent falls back to a self-signed certificate in the Let's Encrypt layout so the
-    /// site still serves HTTPS ("do the closest thing").</summary>
-    public string? Domains { get; init; }
-
-    /// <summary>type: certbot - contact email for the ACME account / expiry notices. Maps to <c>email</c>.</summary>
-    public string? Email { get; init; }
-
-    // ── Pipeline orchestration (type: trigger) ──────────────────────────────────────────────────────
-
-    /// <summary>type: trigger - the name of another pipeline (same project) to trigger and wait for.
-    /// The step stays Running until the triggered child run reaches a terminal status, then mirrors it
-    /// (child Success ⇒ step Success; child Failed/Cancelled ⇒ step Failed, respecting
-    /// <see cref="ContinueOnError"/>). Maps to YAML <c>pipeline</c>.</summary>
-    public string? Pipeline { get; init; }
-
-    /// <summary>type: trigger - extra non-secret variables passed to the child run. System lineage
-    /// variables are applied afterwards and cannot be overridden. Maps to YAML <c>variables</c>.</summary>
-    public Dictionary<string, string> Variables { get; init; } = [];
-
-    /// <summary>type: restore-artifacts - name of the upstream pipeline, triggered by the direct
-    /// parent orchestration run, that produced <see cref="Artifact"/>. Maps to
-    /// YAML <c>artifact_source_pipeline</c>.</summary>
-    public string? ArtifactSourcePipeline { get; init; }
-}
-
-public sealed record DryRunResultDto
-{
-    public List<DryRunStageDto> Stages { get; init; } = [];
-    public Dictionary<string, string> ResolvedVariables { get; init; } = [];
-    public List<string> Warnings { get; init; } = [];
-}
-
-public sealed record DryRunStageDto
-{
-    public string StageName { get; init; } = string.Empty;
-    public string Agent { get; init; } = string.Empty;
-    public string? Os { get; init; }
-    public List<DryRunStepDto> Steps { get; init; } = [];
-}
-
-public sealed record DryRunStepDto
-{
-    public string StepName { get; init; } = string.Empty;
-    public string OriginalCommand { get; init; } = string.Empty;
-    public string ResolvedCommand { get; init; } = string.Empty;
-}
-
-/// <summary>Result of resolving each stage's target server <em>before</em> launching a run,
-/// so the UI can warn when no online agent matches a stage.</summary>
-public sealed record PipelinePreflightDto
-{
-    public List<PreflightStageDto> Stages { get; init; } = [];
-    public List<string> Warnings { get; init; } = [];
-}
-
-public sealed record PreflightStageDto
-{
-    public string StageName { get; init; } = string.Empty;
-    public PreflightTargetKind TargetKind { get; init; }
-
-    /// <summary>The agent name / pool name / environment name the stage targets.</summary>
-    public string Target { get; init; } = string.Empty;
-    public bool Resolved { get; init; }
-    public string? ServerName { get; init; }
-
-    /// <summary>Human-readable reason when <see cref="Resolved"/> is false.</summary>
-    public string? Reason { get; init; }
-}
-
-// Per-run results & metrics DTOs (test / coverage / lint / complexity, trends, RunMetric) live in
-// PipelineResultDtos.cs to keep this file within the 600-line budget.
-
-public sealed record YamlValidationResultDto
-{
-    public bool IsValid { get; init; }
-    public PipelineYamlDefinition? Definition { get; init; }
-    public List<string> Errors { get; init; } = [];
-    public List<string> Warnings { get; init; } = [];
-}
-
-public sealed record ValidateYamlRequest
-{
-    [Required]
-    [StringLength(50_000)]
-    public string Yaml { get; init; } = string.Empty;
-
-    public int? OrganizationId { get; init; }
-}

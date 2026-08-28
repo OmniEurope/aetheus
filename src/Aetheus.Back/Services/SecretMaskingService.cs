@@ -3,6 +3,21 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Services;
 
+/// <summary>
+/// Redacts a run's secrets out of anything shown to a human.
+///
+/// KNOWN LIMIT, stated rather than implied: runtime-registered secrets (those minted during the run,
+/// like the deployment bootstrap password or the ephemeral clone token) live ONLY in this process's
+/// <see cref="IMemoryCache"/>, with a 30-minute sliding expiration. They are therefore lost when the
+/// backend restarts, and unknown to any other instance. Two consequences, both fail-OPEN:
+/// a log line masked by the instance that minted the secret can come back unmasked from another
+/// instance or after a restart. Vault secrets do not have this problem: they are re-read from the
+/// database on a cache miss.
+///
+/// This is a deliberate single-instance assumption, not an oversight. Removing it means persisting
+/// run secrets encrypted (an architecture decision with its own key-lifetime questions), which is why
+/// it is recorded here instead of being silently half-fixed.
+/// </summary>
 public sealed class SecretMaskingService(ISecretMaskingRepository secretRepo, IEncryptionService encryption, IMemoryCache cache) : ISecretMaskingService
 {
     private static readonly TimeSpan SlidingExpiration = TimeSpan.FromMinutes(30);
@@ -57,6 +72,9 @@ public sealed class SecretMaskingService(ISecretMaskingRepository secretRepo, IE
         }
     }
 
+    public IReadOnlyCollection<string> GetRuntimeSecretValues(int pipelineRunId) =>
+        GetRuntimeSecrets(pipelineRunId);
+
     private List<string> GetRuntimeSecrets(int pipelineRunId) =>
         cache.TryGetValue<List<string>>(RuntimeCacheKey(pipelineRunId), out var list) && list is not null
             ? list
@@ -73,17 +91,21 @@ public sealed class SecretMaskingService(ISecretMaskingRepository secretRepo, IE
         if (cache.TryGetValue<List<string>>(key, out var cached) && cached is not null)
             return cached;
 
+        // "This run has no secrets" is an answer worth caching, and it is the MAJORITY answer. Only the
+        // nominal path used to populate the cache, so a run with no vault replayed both lookups below on
+        // every call - and MaskAsync is called per step command, per failure reason and per output
+        // variable, so reading one 40-step run cost ~80 queries every time its page was opened.
         var pipelineId = await secretRepo.GetPipelineIdForRunAsync(pipelineRunId, ct).ConfigureAwait(false);
         if (pipelineId is null)
-            return [];
+            return CacheSecrets(key, []);
 
         var (yamlDefinition, projectId) = await secretRepo.GetPipelineYamlAndProjectAsync(pipelineId.Value, ct).ConfigureAwait(false);
         if (yamlDefinition is null)
-            return [];
+            return CacheSecrets(key, []);
 
         var vaultNames = YamlParsingHelper.ParseVaultNames(yamlDefinition);
         if (vaultNames.Count == 0)
-            return [];
+            return CacheSecrets(key, []);
 
         var encryptedValues = await secretRepo.GetEncryptedSecretsAsync(vaultNames, projectId, ct).ConfigureAwait(false);
 
@@ -100,7 +122,12 @@ public sealed class SecretMaskingService(ISecretMaskingRepository secretRepo, IE
         // Sort longest-first for correct masking
         decrypted.Sort((a, b) => b.Length.CompareTo(a.Length));
 
-        cache.Set(key, decrypted, new MemoryCacheEntryOptions { SlidingExpiration = SlidingExpiration });
-        return decrypted;
+        return CacheSecrets(key, decrypted);
+    }
+
+    private List<string> CacheSecrets(string key, List<string> secrets)
+    {
+        cache.Set(key, secrets, new MemoryCacheEntryOptions { SlidingExpiration = SlidingExpiration });
+        return secrets;
     }
 }

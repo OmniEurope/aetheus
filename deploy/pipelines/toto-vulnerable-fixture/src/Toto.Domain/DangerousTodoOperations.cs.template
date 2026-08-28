@@ -1,0 +1,17 @@
+using System.Diagnostics;
+
+namespace Toto.Domain;
+
+public static class DangerousTodoOperations
+{
+    public const string SyntheticCredential = "__TOTO_VULNERABLE_GITHUB_TOKEN__";
+
+    public static Process? RunCommand(string userInput) =>
+        Process.Start("/bin/sh", $"-c {userInput}");
+
+    public static string BuildUnsafeQuery(string title) =>
+        $"SELECT id, title FROM todos WHERE title = '{title}'";
+
+    public static string ReadArbitraryFile(string userSuppliedPath) =>
+        File.ReadAllText(userSuppliedPath);
+}

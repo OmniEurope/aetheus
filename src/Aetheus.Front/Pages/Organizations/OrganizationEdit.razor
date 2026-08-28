@@ -8,12 +8,12 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
-    <RadzenTemplateForm TItem="CreateOrganizationRequest" Data="_model"
-        Submit="@((CreateOrganizationRequest _) => OnSubmit())" class="rz-mt-4 form-narrow">
+    <RadzenTemplateForm TItem="OrganizationFormModel" Data="_model"
+        Submit="@((OrganizationFormModel _) => OnSubmit())" class="rz-mt-4 form-narrow">
         <LocalizedDataAnnotationsValidator />
         <RadzenStack Gap="1rem">
             <RadzenFormField Text="@L["Name"]" Variant="Variant.Filled">

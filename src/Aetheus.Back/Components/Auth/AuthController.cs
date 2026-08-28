@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using Aetheus.Back.Configuration;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Aetheus.Back.Components.Auth;
@@ -17,8 +15,14 @@ public class AuthController(
     IConfiguration configuration) : ControllerBase
 {
     private const string ExternalGatewayHeader = "X-Aetheus-External-Auth";
+
     [AllowAnonymous]
-    [EnableRateLimiting("login")]
+    [HttpGet("public-demo")]
+    public ActionResult<PublicDemoInfoDto> GetPublicDemoInfo()
+        => Ok(new PublicDemoInfoDto { Enabled = PublicDemoConfiguration.IsEnabled(configuration) });
+
+    [AllowAnonymous]
+    [EnableRateLimiting("enrollment")]
     [HttpPost("register")]
     public async Task<ActionResult<ServerRegistrationResponse>> RegisterServer(
         [FromBody] ServerRegistrationRequest request, CancellationToken ct)
@@ -30,6 +34,7 @@ public class AuthController(
     }
 
     [AllowAnonymous]
+    [ServiceFilter(typeof(LoginValidationAuditFilter))]
     [EnableRateLimiting("login")]
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken ct)
@@ -129,7 +134,7 @@ public class AuthController(
     /// Requires a still-valid bearer token - the SecurityStamp claim is re-checked, so revoked
     /// users (password change, role change) cannot renew.
     /// </summary>
-    [EnableRateLimiting("login")]
+    [EnableRateLimiting("auth-token")]
     [HttpPost("renew")]
     public async Task<ActionResult<LoginResponse>> Renew(CancellationToken ct)
     {
@@ -146,7 +151,7 @@ public class AuthController(
     // --- Refresh Token Rotation (F-012) ---
 
     [AllowAnonymous]
-    [EnableRateLimiting("login")]
+    [EnableRateLimiting("auth-token")]
     [HttpPost("token/refresh")]
     public async Task<ActionResult<LoginResponse>> RefreshToken(
         [FromBody] RefreshTokenRequest request, CancellationToken ct)

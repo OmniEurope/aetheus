@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Components.Auth;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Servers;
 
@@ -26,11 +21,26 @@ public class ServersController(
     ILogger<ServersController> logger) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<PaginatedResult<ServerDto>>> GetServers([FromQuery] PaginationRequest request, [FromQuery] ServerType? type = null, [FromQuery] ServerStatus? status = null, CancellationToken ct = default)
+    public async Task<ActionResult<PaginatedResult<ServerDto>>> GetServers(
+        [FromQuery] PaginationRequest request,
+        [FromQuery] ServerType? type = null,
+        [FromQuery] ServerStatus? status = null,
+        [FromQuery] AgentCompatibilityStatus? compatibility = null,
+        CancellationToken ct = default)
     {
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Server, Permission.Read, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<ServerDto>());
-        return Ok(await lifecycle.GetServersAsync(request, type, status, accessibleIds, ct));
+        return Ok(await lifecycle.GetServersAsync(
+            request, type, status, compatibility, accessibleIds, ct));
+    }
+
+    [HttpGet("agent-compatibility-summary")]
+    public async Task<ActionResult<AgentCompatibilitySummaryDto>> GetAgentCompatibilitySummary(
+        CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(
+            User, ResourceType.Server, Permission.Read, ct);
+        return Ok(await lifecycle.GetAgentCompatibilitySummaryAsync(accessibleIds, ct));
     }
 
     [HttpGet("names")]
@@ -194,7 +204,7 @@ public class ServersController(
         if (!await authz.HasPermissionAsync(User, ResourceType.Server, id, Permission.Admin, ct))
             return Forbid();
 
-        return Ok(await agentUpdate.QueueUpdateAsync(id, ct));
+        return Ok(await agentUpdate.QueueUpdateAsync(id, User.Identity?.Name ?? "unknown", ct));
     }
 
     /// <summary>
@@ -206,7 +216,18 @@ public class ServersController(
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Server, Permission.Admin, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new AgentUpdateAllResponse());
 
-        return Ok(await agentUpdate.QueueUpdateAllAsync(accessibleIds, ct));
+        return Ok(await agentUpdate.QueueUpdateAllAsync(
+            accessibleIds,
+            User.Identity?.Name ?? "unknown",
+            ct));
+    }
+
+    [HttpGet("agent/update-all-preview")]
+    public async Task<ActionResult<AgentUpdateAllPreviewDto>> PreviewUpdateAllAgents(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(
+            User, ResourceType.Server, Permission.Admin, ct);
+        return Ok(await agentUpdate.PreviewUpdateAllAsync(accessibleIds, ct));
     }
 
     [HttpGet("{id:int}/projects")]
@@ -246,15 +267,6 @@ public class ServersController(
         return Ok(await lifecycle.GetServerVaultsAsync(id, ct));
     }
 
-    [HttpGet("{id:int}/releases")]
-    public async Task<ActionResult<List<ReleaseDto>>> GetServerReleases(int id, CancellationToken ct)
-    {
-        if (!await authz.HasPermissionAsync(User, ResourceType.Server, id, Permission.Read, ct))
-            return Forbid();
-
-        return Ok(await lifecycle.GetServerReleasesAsync(id, ct));
-    }
-
     [HttpPost("{id:int}/services/action")]
     public async Task<IActionResult> ExecuteServiceAction(int id, [FromBody] ServiceActionRequest request, CancellationToken ct)
     {
@@ -285,7 +297,7 @@ public class ServersController(
         return Ok(new ServiceTaskResponse { TaskId = taskId });
     }
 
-    // PLAN-006 4.1: read the server's last reported OS-patch status (pending counts + packages).
+    // ADR-024 4.1: read the server's last reported OS-patch status (pending counts + packages).
     [HttpGet("{id:int}/security-updates")]
     public async Task<ActionResult<ServerSecurityUpdatesDto>> GetSecurityUpdates(int id, CancellationToken ct)
     {
@@ -295,7 +307,7 @@ public class ServersController(
         return Ok(await services.GetSecurityUpdatesAsync(id, ct));
     }
 
-    // PLAN-006 4.1: enqueue a system package upgrade - dry-run preview or consented apply.
+    // ADR-024 4.1: enqueue a system package upgrade - dry-run preview or consented apply.
     [HttpPost("{id:int}/system/upgrade")]
     public async Task<IActionResult> UpgradeSystem(int id, [FromBody] SystemUpgradeRequest request, CancellationToken ct)
     {
@@ -306,7 +318,7 @@ public class ServersController(
         return Ok(new ServiceTaskResponse { TaskId = taskId });
     }
 
-    // PLAN-006 4.2: read the server's last reported firewall (ufw) state + rules.
+    // ADR-024 4.2: read the server's last reported firewall (ufw) state + rules.
     [HttpGet("{id:int}/firewall")]
     public async Task<ActionResult<ServerFirewallDto>> GetFirewall(int id, CancellationToken ct)
     {

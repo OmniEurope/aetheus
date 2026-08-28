@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.AspNetCore.Components;
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Pages.Shared;
 

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: package-web-analytics-browser-template
+trigger: manual
+
+stages:
+  - name: Package
+    group: Packages
+    execution_role: build
+    os: linux
+    artifacts:
+      - ".pipeline-artifacts/packages/**"
+    steps:
+      - name: Build and qualify browser analytics package
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/package-web-analytics-browser.sh
+          sh .pipeline/scripts/package-web-analytics-browser.sh
+          test -d .pipeline-artifacts/packages
+          find .pipeline-artifacts/packages -type f -print -quit | grep -q .
+        timeout_seconds: 3600

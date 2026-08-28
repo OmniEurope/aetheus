@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: EUPL-1.2 -->
 # GitGraph
 
-Git provenance cross-linking: first-class `GitCommit` / `GitBranch` entities that releases, artifacts and commits/branches link to many-to-many. Surfaces the internal `/git/commits/{id}` and `/git/branches/{id}` detail pages and records provenance continuously as runs are triggered and releases created (no longer only via the one-shot migration backfill).
+Git provenance cross-linking: first-class `GitCommit` / `GitBranch` entities that releases and artifacts link to many-to-many. The legacy identifier routes resolve into the canonical `/git-repositories/...` repository browser, so commit and branch navigation has one UI. Provenance is recorded continuously as runs are triggered and releases created (no longer only via the one-shot migration backfill).
 
 ## API Surface
 

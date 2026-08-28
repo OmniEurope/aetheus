@@ -1,12 +1,12 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @if (_result is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
     <RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Logs"]</RadzenText>
-    <RadzenDataGrid Data="@_result.Items" TItem="TaskLogDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+    <RadzenDataGrid Responsive="false" Data="@_result.Items" TItem="TaskLogDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
         <EmptyTemplate>
             <EmptyState Icon="article" Title="@L["NoLogs"]" />
         </EmptyTemplate>

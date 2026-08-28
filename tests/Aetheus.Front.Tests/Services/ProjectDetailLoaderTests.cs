@@ -60,7 +60,28 @@ public class ProjectDetailLoaderTests : BunitContext
     }
 
     [Fact]
-    public async Task EnsureLoadedAsync_SameId_NoOps()
+    public async Task EnsureLoadedAsync_DoesNotWaitForRealtimeNegotiation()
+    {
+        StubProject(3);
+        var blockingHubFactory = new BunitTestHelper.BlockingHubConnectionFactory(
+            Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+            Services.GetRequiredService<AuthStateProvider>());
+        var sut = new ProjectDetailLoader(
+            Services.GetRequiredService<ApiClient>(),
+            Services.GetRequiredService<NavigationManager>(),
+            NullLogger<ProjectDetailLoader>.Instance,
+            blockingHubFactory);
+
+        await sut.EnsureLoadedAsync(3, Xunit.TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(1), Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, sut.Project?.Id);
+        Assert.True(sut.InitialLoadCompleted);
+        await sut.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_SameId_LeavesTheValueUnchanged()
     {
         StubProject(1);
         var sut = CreateLoader();

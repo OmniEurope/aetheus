@@ -23,7 +23,7 @@ public class ApiClientMailGitTests
         const string url = "api/servers/1/mail";
         _handler.SetJsonResponse(HttpMethod.Get, url, new MailDataDto { IsInstalled = true, PostfixVersion = "3.8" });
 
-        var result = await _api.GetMailStateAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Mail.GetMailStateAsync(1, Xunit.TestContext.Current.CancellationToken);
 
         Assert.True(result.IsInstalled);
         Assert.Equal("3.8", result.PostfixVersion);
@@ -40,17 +40,17 @@ public class ApiClientMailGitTests
         if (resource == "domains")
         {
             _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<MailDomainDto>());
-            Assert.Empty(await _api.GetMailDomainsAsync(1));
+            Assert.Empty(await _api.Mail.GetMailDomainsAsync(1));
         }
         else if (resource == "accounts")
         {
             _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<MailAccountDto>());
-            Assert.Empty(await _api.GetMailAccountsAsync(1));
+            Assert.Empty(await _api.Mail.GetMailAccountsAsync(1));
         }
         else
         {
             _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<MailAliasDto>());
-            Assert.Empty(await _api.GetMailAliasesAsync(1));
+            Assert.Empty(await _api.Mail.GetMailAliasesAsync(1));
         }
 
         AssertRequest(HttpMethod.Get, url);
@@ -62,7 +62,7 @@ public class ApiClientMailGitTests
         const string url = "api/servers/1/mail/domains/1";
         _handler.SetJsonResponse(HttpMethod.Get, url, new MailDomainDto { Id = 1, Name = "example.com" });
 
-        var result = await _api.GetMailDomainAsync(1, 1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Mail.GetMailDomainAsync(1, 1, Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal("example.com", result!.Name);
         AssertRequest(HttpMethod.Get, url);
@@ -74,7 +74,7 @@ public class ApiClientMailGitTests
         const string url = "api/servers/1/mail/domains";
         _handler.SetJsonResponse(HttpMethod.Post, url, new MailDomainDto { Id = 2, Name = "new.example.com" });
 
-        var result = await _api.CreateMailDomainAsync(1, new CreateMailDomainRequest(), Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Mail.CreateMailDomainAsync(1, new CreateMailDomainRequest(), Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal("new.example.com", result!.Name);
         AssertRequest(HttpMethod.Post, url);
@@ -86,7 +86,7 @@ public class ApiClientMailGitTests
         const string url = "api/servers/1/mail/accounts";
         _handler.SetJsonResponse(HttpMethod.Post, url, new MailAccountDto { Id = 5, Email = "user@example.com" });
 
-        var result = await _api.CreateMailAccountAsync(1, new CreateMailAccountRequest(), Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Mail.CreateMailAccountAsync(1, new CreateMailAccountRequest(), Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal("user@example.com", result!.Email);
         AssertRequest(HttpMethod.Post, url);
@@ -103,9 +103,9 @@ public class ApiClientMailGitTests
 
         var result = resource.Split('/')[0] switch
         {
-            "domains" => await _api.DeleteMailDomainAsync(1, 1, Xunit.TestContext.Current.CancellationToken),
-            "accounts" => await _api.DeleteMailAccountAsync(1, 1, Xunit.TestContext.Current.CancellationToken),
-            _ => await _api.DeleteMailAliasAsync(1, 1, Xunit.TestContext.Current.CancellationToken)
+            "domains" => await _api.Mail.DeleteMailDomainAsync(1, 1, Xunit.TestContext.Current.CancellationToken),
+            "accounts" => await _api.Mail.DeleteMailAccountAsync(1, 1, Xunit.TestContext.Current.CancellationToken),
+            _ => await _api.Mail.DeleteMailAliasAsync(1, 1, Xunit.TestContext.Current.CancellationToken)
         };
 
         Assert.True(result.Success);
@@ -123,9 +123,9 @@ public class ApiClientMailGitTests
 
         var result = command switch
         {
-            "action" => await _api.ExecuteMailActionAsync(1, new MailActionRequest(), Xunit.TestContext.Current.CancellationToken),
-            "logs" => await _api.GetMailLogsAsync(1, new MailLogRequest(), Xunit.TestContext.Current.CancellationToken),
-            _ => await _api.SetupMailAsync(1, new MailSetupRequest(), Xunit.TestContext.Current.CancellationToken)
+            "action" => await _api.Mail.ExecuteMailActionAsync(1, new MailActionRequest(), Xunit.TestContext.Current.CancellationToken),
+            "logs" => await _api.Mail.GetMailLogsAsync(1, new MailLogRequest(), Xunit.TestContext.Current.CancellationToken),
+            _ => await _api.Mail.SetupMailAsync(1, new MailSetupRequest(), Xunit.TestContext.Current.CancellationToken)
         };
 
         Assert.True(result.Success);
@@ -138,7 +138,7 @@ public class ApiClientMailGitTests
         const string url = "api/servers/1/mail/domains/1/dns";
         _handler.SetJsonResponse(HttpMethod.Get, url, new MailDnsRecordsDto { Domain = "example.com", DkimSelector = "default" });
 
-        var result = await _api.GetMailDnsRecordsAsync(1, 1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Mail.GetMailDnsRecordsAsync(1, 1, Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal("example.com", result!.Domain);
         Assert.Equal("default", result.DkimSelector);
@@ -151,7 +151,7 @@ public class ApiClientMailGitTests
         const string url = "api/git/repos?page=1&pageSize=100&projectId=42&sortDescending=False";
         _handler.SetJsonResponse(HttpMethod.Get, url, Page(new GitLightRepoDto { Id = 3, Name = "svc", Slug = "svc" }));
 
-        var result = await _api.GetGitReposAsync(42, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Git.GetGitReposAsync(42, Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal("svc", Assert.Single(result).Slug);
         AssertRequest(HttpMethod.Get, url);
@@ -163,7 +163,7 @@ public class ApiClientMailGitTests
         const string url = "api/git/repos/1";
         _handler.SetJsonResponse(HttpMethod.Get, url, new GitLightRepoDto { Id = 1, Name = "repo", Slug = "repo" });
 
-        var result = await _api.GetGitRepoAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Git.GetGitRepoAsync(1, Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal(1, result!.Id);
         Assert.Equal("repo", result.Name);
@@ -176,7 +176,7 @@ public class ApiClientMailGitTests
         const string url = "api/git/repos";
         _handler.SetJsonResponse(HttpMethod.Post, url, new GitLightRepoDto { Id = 2, Slug = "new-repo" });
 
-        var result = await _api.CreateGitRepoAsync(new CreateGitLightRepoRequest(), Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Git.CreateGitRepoAsync(new CreateGitLightRepoRequest(), Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal("new-repo", result!.Slug);
         AssertRequest(HttpMethod.Post, url);
@@ -188,7 +188,7 @@ public class ApiClientMailGitTests
         const string url = "api/git/repos/1";
         _handler.SetResponse(HttpMethod.Delete, url, HttpStatusCode.NoContent);
 
-        var result = await _api.DeleteGitRepoAsync(1, Xunit.TestContext.Current.CancellationToken);
+        var result = await _api.Git.DeleteGitRepoAsync(1, Xunit.TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         AssertRequest(HttpMethod.Delete, url);
@@ -206,19 +206,19 @@ public class ApiClientMailGitTests
         {
             case "branches":
                 _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<GitLightBranchDto>());
-                Assert.Empty(await _api.GetGitBranchesAsync(1, Xunit.TestContext.Current.CancellationToken));
+                Assert.Empty(await _api.Git.GetGitBranchesAsync(1, Xunit.TestContext.Current.CancellationToken));
                 break;
             case "tags":
                 _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<GitLightTagDto>());
-                Assert.Empty(await _api.GetGitTagsAsync(1, Xunit.TestContext.Current.CancellationToken));
+                Assert.Empty(await _api.Git.GetGitTagsAsync(1, Xunit.TestContext.Current.CancellationToken));
                 break;
             case "tree":
                 _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<GitLightTreeEntryDto>());
-                Assert.Empty(await _api.GetGitTreeAsync(1, ct: Xunit.TestContext.Current.CancellationToken));
+                Assert.Empty(await _api.Git.GetGitTreeAsync(1, ct: Xunit.TestContext.Current.CancellationToken));
                 break;
             default:
                 _handler.SetJsonResponse(HttpMethod.Get, url, new PaginatedResult<BranchProtectionRuleDto>());
-                Assert.Empty(await _api.GetGitBranchProtectionRulesAsync(1, Xunit.TestContext.Current.CancellationToken));
+                Assert.Empty(await _api.Git.GetGitBranchProtectionRulesAsync(1, Xunit.TestContext.Current.CancellationToken));
                 break;
         }
 
@@ -234,13 +234,13 @@ public class ApiClientMailGitTests
         if (resource == "blob")
         {
             _handler.SetJsonResponse(HttpMethod.Get, url, new GitLightBlobDto { Path = "file.txt", Content = "hello" });
-            var result = await _api.GetGitBlobAsync(1, "main", "file.txt", Xunit.TestContext.Current.CancellationToken);
+            var result = await _api.Git.GetGitBlobAsync(1, "main", "file.txt", Xunit.TestContext.Current.CancellationToken);
             Assert.Equal("hello", result!.Content);
         }
         else
         {
             _handler.SetJsonResponse(HttpMethod.Get, url, Array.Empty<GitLightBlameLine>());
-            Assert.Empty(await _api.GetGitBlameAsync(1, "main", "file.txt"));
+            Assert.Empty(await _api.Git.GetGitBlameAsync(1, "main", "file.txt"));
         }
 
         AssertRequest(HttpMethod.Get, url);

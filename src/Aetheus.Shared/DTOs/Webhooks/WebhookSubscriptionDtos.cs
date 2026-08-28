@@ -16,7 +16,7 @@ public sealed record WebhookSubscriptionDto
     public int FailureCount { get; init; }
 }
 
-public sealed record CreateWebhookSubscriptionRequest
+public abstract record WebhookSubscriptionMutationRequest
 {
     [Required]
     [StringLength(100)]
@@ -31,19 +31,9 @@ public sealed record CreateWebhookSubscriptionRequest
     public string? Secret { get; init; }
 }
 
-public sealed record UpdateWebhookSubscriptionRequest
+public sealed record CreateWebhookSubscriptionRequest : WebhookSubscriptionMutationRequest;
+
+public sealed record UpdateWebhookSubscriptionRequest : WebhookSubscriptionMutationRequest
 {
-    [Required]
-    [StringLength(100)]
-    public string EventType { get; init; } = string.Empty;
-
-    [Required]
-    [StringLength(500)]
-    [Url]
-    public string TargetUrl { get; init; } = string.Empty;
-
-    [StringLength(200)]
-    public string? Secret { get; init; }
-
     public bool IsEnabled { get; init; } = true;
 }

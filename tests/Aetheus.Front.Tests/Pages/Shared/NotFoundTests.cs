@@ -16,3 +16,4 @@ public class NotFoundTests : BunitContext
         Assert.Contains("NotFoundMessage", cut.Markup);
     }
 }
+

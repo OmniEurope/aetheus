@@ -276,7 +276,7 @@ public class ServerRkhunterSectionRenderTests : BunitContext
     [Theory]
     [InlineData("clean", "check_circle")]
     [InlineData("warning", "warning")]
-    [InlineData("unknown", "help_outline")]
+    [InlineData("unknown", "help")]
     public void GetScanStatusIcon_ReturnsCorrectIcon(string status, string expected)
     {
         var method = typeof(ServerRkhunterSection).GetMethod("GetScanStatusIcon", StaticPriv)!;
@@ -296,7 +296,7 @@ public class ServerRkhunterSectionRenderTests : BunitContext
     [Theory]
     [InlineData("clean", BadgeStyle.Success)]
     [InlineData("warning", BadgeStyle.Warning)]
-    [InlineData("other", BadgeStyle.Secondary)]
+    [InlineData("other", BadgeStyle.Light)]
     public void GetScanBadgeStyle_ReturnsCorrectStyle(string status, BadgeStyle expected)
     {
         var method = typeof(ServerRkhunterSection).GetMethod("GetScanBadgeStyle", StaticPriv)!;

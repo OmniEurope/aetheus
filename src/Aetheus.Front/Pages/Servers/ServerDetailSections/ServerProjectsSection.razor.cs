@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -42,7 +36,7 @@ public partial class ServerProjectsSection
         _loading = true;
         try
         {
-            var result = await Api.GetServerProjectsPageAsync(serverId, page, pageSize, sortBy: sortBy, sortDescending: sortDescending);
+            var result = await Api.Servers.GetServerProjectsPageAsync(serverId, page, pageSize, sortBy: sortBy, sortDescending: sortDescending);
             if (ServerId == serverId && generation == _loadGeneration)
             {
                 _projects = result.Items;

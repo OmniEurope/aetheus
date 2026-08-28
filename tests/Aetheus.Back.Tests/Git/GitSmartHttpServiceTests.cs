@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Git;
-using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Components.Git.Events;
+using Aetheus.Back.Services.DomainEvents;
 using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
@@ -23,8 +24,8 @@ public class GitSmartHttpServiceTests : IDisposable
     private readonly IGitLightRepository _lightRepoMock = Substitute.For<IGitLightRepository>();
     private readonly IAuthService _authServiceMock = Substitute.For<IAuthService>();
     private readonly IWebhookService _webhookMock = Substitute.For<IWebhookService>();
-    private readonly IPipelineService _pipelineServiceMock = Substitute.For<IPipelineService>();
-    private readonly IPipelineRunService _pipelineRunServiceMock = Substitute.For<IPipelineRunService>();
+    // Git only announces the push now; the dispatcher is what this module owes.
+    private readonly IDomainEventDispatcher _domainEventsMock = Substitute.For<IDomainEventDispatcher>();
     private readonly IGitLightCliService _cliMock = Substitute.For<IGitLightCliService>();
     private readonly TimeProvider _timeProvider = Substitute.For<TimeProvider>();
     private readonly IHostApplicationLifetime _applicationLifetime = Substitute.For<IHostApplicationLifetime>();
@@ -47,9 +48,7 @@ public class GitSmartHttpServiceTests : IDisposable
             _lightRepoMock,
             _authServiceMock,
             _webhookMock,
-            _pipelineServiceMock,
-            _pipelineRunServiceMock,
-            Substitute.For<Aetheus.Back.Components.Pipelines.IPipelineRepository>(),
+            _domainEventsMock,
             _cliMock,
             hub,
             options,
@@ -184,8 +183,6 @@ public class GitSmartHttpServiceTests : IDisposable
             DefaultBranch = "main"
         };
         _lightRepoMock.FindBySlugAsync(1, "my-repo", Arg.Any<CancellationToken>()).Returns(repo);
-        _pipelineServiceMock.GetWebhookTriggeredPipelinesForProjectAsync(1, Arg.Any<CancellationToken>())
-            .Returns(new List<Shared.DTOs.PipelineDto>());
         _cliMock.GetTreeAsync(Arg.Any<string>(), "HEAD", ".pipeline", Arg.Any<CancellationToken>())
             .Returns(new List<Shared.DTOs.GitLightTreeEntryDto>());
 
@@ -196,11 +193,16 @@ public class GitSmartHttpServiceTests : IDisposable
         await _lightRepoMock.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// What this side still owes: announce the push with the ACCEPTED commit and the resolved
+    /// repository path, on the application-lifetime token rather than the disconnected client's.
+    /// What the announcement then triggers is asserted in GitPushPipelineTriggerHandlerTests - the
+    /// point of the split is that this module no longer decides it.
+    /// </summary>
     [Fact]
-    public async Task MarkPushedAsync_UsesAcceptedCommitForSyncAndTriggeredRun()
+    public async Task MarkPushedAsync_AnnouncesTheAcceptedPushOnTheLifetimeToken()
     {
         const string commit = "0123456789abcdef0123456789abcdef01234567";
-        const string yaml = "name: release\ntrigger: webhook\nbranches:\n  - main\nstages: []";
         var repo = new GitInternalRepo
         {
             Id = 1,
@@ -210,13 +212,6 @@ public class GitSmartHttpServiceTests : IDisposable
             DefaultBranch = "main"
         };
         _lightRepoMock.FindBySlugAsync(7, "repo", Arg.Any<CancellationToken>()).Returns(repo);
-        _cliMock.GetTreeAsync(Arg.Any<string>(), commit, ".pipeline", Arg.Any<CancellationToken>())
-            .Returns([new GitLightTreeEntryDto { Name = "release.yml", Type = GitTreeEntryType.Blob }]);
-        _cliMock.GetBlobAsync(Arg.Any<string>(), commit, ".pipeline/release.yml", Arg.Any<CancellationToken>())
-            .Returns(new GitLightBlobDto { Path = ".pipeline/release.yml", Content = yaml });
-        _pipelineServiceMock.GetWebhookTriggeredPipelinesForProjectAsync(7, Arg.Any<CancellationToken>())
-            .Returns([new PipelineDto { Id = 12, Name = "release", ProjectId = 7, TriggerType = PipelineTriggerType.Webhook, YamlDefinition = yaml }]);
-        _pipelineServiceMock.HasActiveRunAsync(12, Arg.Any<CancellationToken>()).Returns(false);
 
         using var disconnectedClient = new CancellationTokenSource();
         disconnectedClient.Cancel();
@@ -224,21 +219,23 @@ public class GitSmartHttpServiceTests : IDisposable
         await _sut.MarkPushedAsync(
             7, "repo", [new GitRefUpdate("refs/heads/main", commit)], disconnectedClient.Token);
 
-        await _lightRepoMock.Received(1).FindBySlugAsync(
-            7, "repo", Arg.Is<CancellationToken>(token => token == _applicationLifetime.ApplicationStopping));
         await _lightRepoMock.Received(1).SaveChangesAsync(
             Arg.Is<CancellationToken>(token => token == _applicationLifetime.ApplicationStopping));
         await _webhookMock.Received(1).FireEventAsync(
             "git.push", Arg.Any<object>(),
             Arg.Is<CancellationToken>(token => token == _applicationLifetime.ApplicationStopping));
-        await _pipelineServiceMock.Received(1).UpsertPipelineFromYamlAsync(
-            "release", yaml, 7, "webhook",
-            Arg.Is<CancellationToken>(token => token == _applicationLifetime.ApplicationStopping), "main", "main");
-        await _pipelineRunServiceMock.Received(1).TriggerAutomatedRunAsync(
-            12, "GitPush",
-            Arg.Is<Dictionary<string, string>>(variables =>
-                variables["WEBHOOK_REF"] == "refs/heads/main"
-                && variables["AETHEUS_SOURCE_COMMIT"] == commit),
-            Arg.Is<CancellationToken>(token => token == _applicationLifetime.ApplicationStopping));
+        // A360-21: PUBLISHED, not dispatched. The announcement is observer semantics and the subscriber
+        // now runs a full pipeline launch, preflight included; awaiting it here made `git push` wait for
+        // the orchestrator. Publish takes no token by design - it hands the work to the background
+        // queue, which already runs on the application lifetime rather than the client's connection.
+        _domainEventsMock.Received(1).Publish(
+            Arg.Is<GitPushProcessedEvent>(push =>
+                push.ProjectId == 7
+                && push.GitRepoId == repo.Id
+                && push.DefaultBranch == "main"
+                && push.RefUpdates.Count == 1
+                && push.RefUpdates[0].NewObjectId == commit));
+        await _domainEventsMock.DidNotReceive().DispatchAsync(
+            Arg.Any<GitPushProcessedEvent>(), Arg.Any<CancellationToken>());
     }
 }

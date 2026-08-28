@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Notifications;
 
@@ -20,6 +11,7 @@ public partial class NotificationsAdmin : ComponentBase
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private UiActions Ui { get; set; } = default!;
+    [Inject] private NotifyHelper Notify { get; set; } = default!;
 
     private List<NotificationChannelDto> _channels = [];
     private List<NotificationRuleDto> _rules = [];
@@ -53,7 +45,7 @@ public partial class NotificationsAdmin : ComponentBase
         _channelsLoading = true;
         try
         {
-            var result = await Api.GetNotificationChannelsPagedAsync(
+            var result = await Api.Monitoring.GetNotificationChannelsPagedAsync(
                 page, pageSize, _channelSearch, sortBy, sortDescending);
             _channels = result.Items;
             _channelTotalCount = result.TotalCount;
@@ -69,7 +61,7 @@ public partial class NotificationsAdmin : ComponentBase
         _rulesLoading = true;
         try
         {
-            var result = await Api.GetNotificationRulesPagedAsync(
+            var result = await Api.Monitoring.GetNotificationRulesPagedAsync(
                 page, pageSize, _ruleSearch, sortBy, sortDescending);
             _rules = result.Items;
             _ruleTotalCount = result.TotalCount;
@@ -101,7 +93,7 @@ public partial class NotificationsAdmin : ComponentBase
         var result = await Dialog.OpenAsync<NotificationChannelEditDialog>(
             channel is null ? L["Create"] : L["Edit"],
             new Dictionary<string, object?> { ["ChannelId"] = channel?.Id },
-            new DialogOptions { Width = "640px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "640px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
         if (result is true)
         {
             _dialogChannels = [];
@@ -112,11 +104,11 @@ public partial class NotificationsAdmin : ComponentBase
     private async Task OpenRuleDialogAsync(NotificationRuleDto? rule)
     {
         if (_dialogChannels.Count == 0)
-            _dialogChannels = await Api.GetNotificationChannelsAsync();
+            _dialogChannels = await Api.Monitoring.GetNotificationChannelsAsync();
         var result = await Dialog.OpenAsync<NotificationRuleEditDialog>(
             rule is null ? L["Create"] : L["Edit"],
             new Dictionary<string, object?> { ["Rule"] = rule, ["Channels"] = _dialogChannels },
-            new DialogOptions { Width = "640px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "640px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
         if (result is true && _rulesGrid is not null) await _rulesGrid.Reload();
     }
 
@@ -127,16 +119,24 @@ public partial class NotificationsAdmin : ComponentBase
         StateHasChanged();
         try
         {
-            var result = await Api.TestNotificationChannelAsync(id);
+            var result = await Api.Monitoring.TestNotificationChannelAsync(id);
             _channelTest[id] = result ?? new NotificationTestResultDto
             {
                 Status = NotificationTestStatus.Failed,
                 Message = L["NotificationChannelNotFound"]
             };
+            var testResult = _channelTest[id];
+            Notify.Notify(
+                testResult.Status == NotificationTestStatus.Sent
+                    ? NotificationSeverity.Success
+                    : NotificationSeverity.Error,
+                testResult.Status == NotificationTestStatus.Sent ? "Saved" : "Error",
+                testResult.Message ?? L["NotificationChannelTestFailed"]);
         }
         catch (HttpRequestException)
         {
             _channelTest[id] = new NotificationTestResultDto { Status = NotificationTestStatus.Failed, Message = L["NotificationChannelTestFailed"] };
+            Notify.Error("Error", "NotificationChannelTestFailed");
         }
         finally
         {
@@ -153,7 +153,7 @@ public partial class NotificationsAdmin : ComponentBase
         if (confirmed != true) return;
 
         await Ui.RunAsync(
-            () => Api.DeleteNotificationChannelAsync(channel.Id),
+            () => Api.Monitoring.DeleteNotificationChannelAsync(channel.Id),
             "Deleted",
             async () =>
             {
@@ -173,7 +173,7 @@ public partial class NotificationsAdmin : ComponentBase
         if (confirmed != true) return;
 
         await Ui.RunAsync(
-            () => Api.DeleteNotificationRuleAsync(rule.Id),
+            () => Api.Monitoring.DeleteNotificationRuleAsync(rule.Id),
             "Deleted",
             () => _rulesGrid?.Reload() ?? Task.CompletedTask,
             errorKey: "DeleteFailed",

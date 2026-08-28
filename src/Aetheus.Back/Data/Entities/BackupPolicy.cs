@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// PLAN-006 4.3: an orchestrated backup policy for a managed app. Project-owned (RBAC scope) with a
+/// ADR-024 4.3: an orchestrated backup policy for a managed app. Project-owned (RBAC scope) with a
 /// target server (the app's host). Backs up a DB (pg_dump/mysqldump) plus optional file paths on a cron
 /// schedule; a separate restore-check cadence verifies recoverability. No secrets in logs (the DB
 /// password is AES-encrypted at rest and passed to the agent only via a protected env var).

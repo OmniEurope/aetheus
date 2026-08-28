@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Shared;
 
@@ -18,6 +15,14 @@ public sealed record PipelineRunTableItem
     public string? ServerName { get; init; }
     public string? ServerOs { get; init; }
     public string? CurrentStep { get; init; }
+    public string? BranchName { get; init; }
+    public string? CommitHash { get; init; }
+    public string? RepositoryUrl { get; init; }
+    public AnalysisGrade? GateGrade { get; init; }
+    public bool CancellationRequested { get; init; }
+    public DateTime LatestStartedAt { get; init; }
+    public IReadOnlyList<int> TriggeredRunIds { get; init; } = [];
+    public IReadOnlyList<PipelineRunTableItem> LinkedRuns { get; init; } = [];
 
     public static PipelineRunTableItem FromRun(PipelineRunDto run) => new()
     {
@@ -31,6 +36,88 @@ public sealed record PipelineRunTableItem
         CompletedAt = run.CompletedAt,
         ServerName = run.Steps.FirstOrDefault(step => !step.IsSystem && step.ServerId.HasValue)?.ServerName,
         ServerOs = run.Steps.FirstOrDefault(step => !step.IsSystem && step.ServerId.HasValue)?.ServerOs,
-        CurrentStep = PipelineHelper.GetCurrentStepLabel(run)
+        CurrentStep = PipelineHelper.GetCurrentStepLabel(run),
+        BranchName = run.BranchName,
+        CommitHash = run.CommitHash,
+        RepositoryUrl = run.RepositoryUrl,
+        GateGrade = run.GateGrade,
+        CancellationRequested = run.CancellationRequested,
+        LatestStartedAt = run.StartedAt,
+        TriggeredRunIds = run.Steps
+            .Where(step => step.TriggeredRunId.HasValue)
+            .Select(step => step.TriggeredRunId!.Value)
+            .Distinct()
+            .ToList()
     };
+
+    public static IReadOnlyList<PipelineRunTableItem> GroupRuns(IEnumerable<PipelineRunDto> runs)
+    {
+        var items = runs
+            .Select(FromRun)
+            .DistinctBy(run => run.RunId)
+            .ToList();
+        var byId = items.ToDictionary(run => run.RunId);
+        var parentByChild = items
+            .SelectMany(parent => parent.TriggeredRunIds
+                .Where(byId.ContainsKey)
+                .Select(childRunId => new { ChildRunId = childRunId, ParentRunId = parent.RunId }))
+            .GroupBy(link => link.ChildRunId)
+            .ToDictionary(group => group.Key, group => group.First().ParentRunId);
+
+        return items
+            .GroupBy(run => ResolveRootRunId(run.RunId, parentByChild))
+            .Select(group =>
+            {
+                var groupRunIds = group.Select(run => run.RunId).ToHashSet();
+                return BuildTree(group.Key, byId, parentByChild, groupRunIds, []);
+            })
+            .OrderByDescending(run => run.LatestStartedAt)
+            .ThenByDescending(run => run.RunId)
+            .ToList();
+    }
+
+    private static PipelineRunTableItem BuildTree(
+        int runId,
+        IReadOnlyDictionary<int, PipelineRunTableItem> byId,
+        IReadOnlyDictionary<int, int> parentByChild,
+        IReadOnlySet<int> groupRunIds,
+        HashSet<int> path)
+    {
+        var run = byId[runId];
+        if (!path.Add(runId))
+            return run;
+
+        var linkedRuns = run.TriggeredRunIds
+            .Where(childRunId =>
+                groupRunIds.Contains(childRunId)
+                && parentByChild.GetValueOrDefault(childRunId) == runId
+                && !path.Contains(childRunId))
+            .Select(childRunId => BuildTree(childRunId, byId, parentByChild, groupRunIds, path))
+            .ToList();
+        path.Remove(runId);
+
+        return run with
+        {
+            LinkedRuns = linkedRuns,
+            LatestStartedAt = linkedRuns
+                .Select(child => child.LatestStartedAt)
+                .Append(run.StartedAt)
+                .Max()
+        };
+    }
+
+    private static int ResolveRootRunId(int runId, IReadOnlyDictionary<int, int> parentByChild)
+    {
+        var currentRunId = runId;
+        var visited = new HashSet<int> { runId };
+
+        while (parentByChild.TryGetValue(currentRunId, out var parentRunId))
+        {
+            if (!visited.Add(parentRunId))
+                return visited.Min();
+            currentRunId = parentRunId;
+        }
+
+        return currentRunId;
+    }
 }

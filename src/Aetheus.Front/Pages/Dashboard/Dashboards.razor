@@ -15,7 +15,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else if (_dashboards.Count == 0)
 {
@@ -34,7 +34,7 @@ else
             <RadzenColumn Size="4" SizeSM="6" SizeXS="12">
                 <RadzenCard class="rz-p-4">
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
-                        <RadzenText TextStyle="TextStyle.H6">@dashboard.Name</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H5">@dashboard.Name</RadzenText>
                         @if (dashboard.IsDefault)
                         {
                             <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L["IsDefault"]" />

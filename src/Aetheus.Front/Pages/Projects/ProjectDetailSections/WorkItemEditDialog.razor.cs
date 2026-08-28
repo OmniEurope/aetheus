@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Projects.ProjectDetailSections;
 
@@ -58,7 +50,7 @@ public partial class WorkItemEditDialog : ComponentBase
             if (IsEdit)
             {
                 await Ui.RunAsync(
-                    () => Api.UpdateWorkItemAsync(Item!.Id, new UpdateWorkItemRequest
+                    () => Api.Pipelines.UpdateWorkItemAsync(Item!.Id, new UpdateWorkItemRequest
                     {
                         Type = _model.Type,
                         Title = _model.Title,
@@ -78,7 +70,7 @@ public partial class WorkItemEditDialog : ComponentBase
             else
             {
                 await Ui.RunAsync(
-                    () => Api.CreateWorkItemAsync(new CreateWorkItemRequest
+                    () => Api.Pipelines.CreateWorkItemAsync(new CreateWorkItemRequest
                     {
                         ProjectId = ProjectId,
                         Type = _model.Type,

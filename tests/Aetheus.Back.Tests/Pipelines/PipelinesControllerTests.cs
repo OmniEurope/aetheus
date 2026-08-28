@@ -209,7 +209,7 @@ public class PipelinesControllerTests
     {
         _authz.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, Permission.Read, TestContext.Current.CancellationToken)
             .Returns([1, 3]);
-        _runService.GetRecentRunsAsync(Arg.Any<List<int>?>(), 7, TestContext.Current.CancellationToken)
+        _runService.GetRecentRunsAsync(Arg.Any<List<int>?>(), 7, null, TestContext.Current.CancellationToken)
             .Returns([new PipelineRunDto { Id = 9, PipelineId = 3, Status = PipelineStatus.Success }]);
 
         var response = await _sut.GetRecentRuns(7, TestContext.Current.CancellationToken);
@@ -217,7 +217,7 @@ public class PipelinesControllerTests
         var ok = Assert.IsType<OkObjectResult>(response.Result);
         Assert.Single(Assert.IsType<List<PipelineRunDto>>(ok.Value));
         await _runService.Received(1).GetRecentRunsAsync(
-            Arg.Is<List<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 1, 3 })), 7, TestContext.Current.CancellationToken);
+            Arg.Is<List<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 1, 3 })), 7, null, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -372,13 +372,19 @@ public class PipelinesControllerTests
             .Returns(new YamlValidationResultDto { IsValid = true });
         _runService.TriggerPreparedRunAsync(Arg.Any<PipelineRunPreparation>(),
             Arg.Any<Dictionary<string, string>?>(), Arg.Any<Dictionary<string, string>?>(),
-            Arg.Any<CancellationToken>()).Returns(run);
+            Arg.Any<CancellationToken>(), "request-42").Returns(run);
 
-        var response = await _sut.TriggerRun(1, null, TestContext.Current.CancellationToken);
+        var response = await _sut.TriggerRun(1, new PipelineRunRequest
+        {
+            IdempotencyKey = "request-42"
+        }, TestContext.Current.CancellationToken);
 
         var created = Assert.IsType<CreatedAtActionResult>(response.Result);
         Assert.Equal(10, ((PipelineRunDto)created.Value!).Id);
         Assert.Equal(nameof(_sut.GetRun), created.ActionName);
+        await _runService.Received(1).TriggerPreparedRunAsync(
+            Arg.Any<PipelineRunPreparation>(), null, null,
+            TestContext.Current.CancellationToken, "request-42");
     }
 
     [Fact]
@@ -456,10 +462,10 @@ public class PipelinesControllerTests
     [Fact]
     public async Task GetRuns_ReturnsOk()
     {
-        _runService.GetRunsAsync(1, Arg.Any<PaginationRequest>(), TestContext.Current.CancellationToken)
+        _runService.GetRunsAsync(1, Arg.Any<PipelineRunPaginationRequest>(), TestContext.Current.CancellationToken)
             .Returns(new PaginatedResult<PipelineRunDto>());
 
-        var response = await _sut.GetRuns(1, new PaginationRequest(), TestContext.Current.CancellationToken);
+        var response = await _sut.GetRuns(1, new PipelineRunPaginationRequest(), TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(response.Result);
         Assert.Empty(((PaginatedResult<PipelineRunDto>)ok.Value!).Items);
@@ -857,3 +863,4 @@ public class PipelinesControllerTests
         Assert.IsType<UnauthorizedObjectResult>(response);
     }
 }
+

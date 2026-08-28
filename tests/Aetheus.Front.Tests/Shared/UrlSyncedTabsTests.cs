@@ -95,6 +95,17 @@ public class UrlSyncedTabsTests : BunitContext
     }
 
     [Fact]
+    public void InitialProgrammaticSelectedIndex_IsHonoured_WhenUrlHasNoExplicitTab()
+    {
+        var c = NewComponent();
+        SetParam(c, nameof(UrlSyncedTabs.SelectedIndex), 1);
+
+        OnParametersSet(c);
+
+        Assert.Equal(1, Index(c));
+    }
+
+    [Fact]
     public void UrlTabChange_WinsOverStaleIndex()
     {
         var c = NewComponent();

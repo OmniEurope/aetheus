@@ -24,8 +24,11 @@ public sealed class AppMonitoringServiceCrudTests
     {
         _repo.GetProjectOrgIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.Arg<IReadOnlyCollection<int>>().ToDictionary(id => id, _ => 9));
-        _repo.GetRawUptimeAsync(Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>()).Returns((0, 0));
-        _repo.GetHourlyUptimeAsync(Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>()).Returns((0, 0));
+        _repo.GetUptimeWindowsAsync(
+                Arg.Any<IReadOnlyCollection<int>>(),
+                Arg.Any<DateTime>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, AppUptimeWindowCounts>());
         _service = new AppMonitoringService(
             _repo, _notifications, _notifier, _time, NullLogger<AppMonitoringService>.Instance);
     }
@@ -45,14 +48,18 @@ public sealed class AppMonitoringServiceCrudTests
             Server = new Server { Id = 7, Name = "web-01" },
             ServerId = 7,
             IngestKeyHash = "hash",
+            IngestKeyExpiresAt = _time.GetUtcNow().UtcDateTime.AddDays(30),
             IngestDroppedCount = 3
         };
         _repo.GetAppsByProjectAsync(4, Arg.Any<CancellationToken>()).Returns([app]);
-        _repo.GetRawUptimeAsync(2, Arg.Is<DateTime>(d => d == _time.GetUtcNow().UtcDateTime.AddHours(-24)), Arg.Any<CancellationToken>())
-            .Returns((18, 20));
-        _repo.GetRawUptimeAsync(2, Arg.Is<DateTime>(d => d == _time.GetUtcNow().UtcDateTime.AddDays(-7)), Arg.Any<CancellationToken>())
-            .Returns((60, 80));
-        _repo.GetHourlyUptimeAsync(2, Arg.Any<DateTime>(), Arg.Any<CancellationToken>()).Returns((900, 1000));
+        _repo.GetUptimeWindowsAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 2 })),
+                _time.GetUtcNow().UtcDateTime,
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, AppUptimeWindowCounts>
+            {
+                [2] = new(18, 20, 60, 80, 900, 1000)
+            });
 
         var dto = Assert.Single(await _service.GetAppsForProjectAsync(4, ct: TestContext.Current.CancellationToken));
 
@@ -64,6 +71,10 @@ public sealed class AppMonitoringServiceCrudTests
         Assert.Equal(0.9, dto.Uptime90d);
         Assert.True(dto.HasIngestKey);
         Assert.Equal(3, dto.IngestDroppedCount);
+        await _repo.Received(1).GetUptimeWindowsAsync(
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 2 })),
+            _time.GetUtcNow().UtcDateTime,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -217,7 +228,7 @@ public sealed class AppMonitoringServiceCrudTests
     }
 
     [Fact]
-    public async Task GetSummary_EmptyScopeShortCircuits_OtherwiseBuildsHistogramAndTroubledOrder()
+    public async Task GetSummary_EmptyScopeShortCircuits_OtherwiseReturnsEveryAppAndAvailableVisitors()
     {
         var empty = await _service.GetSummaryAsync([], ct: TestContext.Current.CancellationToken);
         Assert.Equal(0, empty.TotalCount);
@@ -225,12 +236,17 @@ public sealed class AppMonitoringServiceCrudTests
 
         var apps = new List<MonitoredApp>
         {
-            new() { Id = 1, ProjectId = 4, Name = "up", CurrentStatus = AppHealthStatus.Up },
+            new() { Id = 1, ProjectId = 4, Name = "up", CurrentStatus = AppHealthStatus.Up, AnalyticsEnabled = true },
             new() { Id = 2, ProjectId = 4, Name = "down-old", CurrentStatus = AppHealthStatus.Down, LastStatusChangeAt = _time.GetUtcNow().UtcDateTime.AddHours(-2) },
             new() { Id = 3, ProjectId = 5, Name = "degraded-new", CurrentStatus = AppHealthStatus.Degraded, LastStatusChangeAt = _time.GetUtcNow().UtcDateTime.AddMinutes(-5), Project = new Project { Name = "Web" } },
             new() { Id = 4, ProjectId = 5, Name = "unknown", CurrentStatus = AppHealthStatus.Unknown }
         };
         _repo.GetAppsForSummaryAsync(null, Arg.Any<CancellationToken>()).Returns(apps);
+        _repo.GetActiveVisitorCountsAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 1 })),
+                _time.GetUtcNow().UtcDateTime.AddMinutes(-5),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, int> { [1] = 3 });
 
         var summary = await _service.GetSummaryAsync(null, ct: TestContext.Current.CancellationToken);
 
@@ -239,6 +255,9 @@ public sealed class AppMonitoringServiceCrudTests
         Assert.Equal(1, summary.DownCount);
         Assert.Equal(1, summary.DegradedCount);
         Assert.Equal(1, summary.UnknownCount);
+        Assert.Equal(4, summary.Applications.Count);
+        Assert.Equal(3, summary.Applications.Single(app => app.Name == "up").OnlineVisitorCount);
+        Assert.Null(summary.Applications.Single(app => app.Name == "unknown").OnlineVisitorCount);
         Assert.Equal(["degraded-new", "down-old"], summary.Troubled.Select(x => x.Name));
         Assert.Equal("Web", summary.Troubled[0].ProjectName);
     }

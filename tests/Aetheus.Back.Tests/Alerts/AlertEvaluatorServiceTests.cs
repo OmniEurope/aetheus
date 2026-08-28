@@ -1,13 +1,55 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Alerts;
+using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Hubs;
 using Aetheus.Shared.Enums;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 
 namespace Aetheus.Back.Tests;
 
 public class AlertEvaluatorServiceTests
 {
     private static readonly DateTime Now = new(2026, 7, 17, 12, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public async Task EvaluateAlertRulesAsync_LoadsAllServerWindowsInOneRepositoryCall()
+    {
+        var repository = Substitute.For<IAlertRepository>();
+        repository.GetEnabledAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new AlertRule { ServerId = 11, SustainedSeconds = 60 },
+            new AlertRule { ServerId = 12, SustainedSeconds = 180 }
+        ]);
+        repository.GetRecentMetricsForServersAsync(
+                Arg.Any<IReadOnlyCollection<int>>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, List<ServerMetric>>());
+        var services = new ServiceCollection()
+            .AddSingleton(repository)
+            .AddSingleton(Substitute.For<INotificationService>())
+            .BuildServiceProvider();
+        var service = new AlertEvaluatorService(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            Substitute.For<IHubContext<AlertHub>>(),
+            NullLogger<AlertEvaluatorService>.Instance,
+            TimeProvider.System);
+
+        await service.EvaluateAlertRulesAsync(TestContext.Current.CancellationToken);
+
+        await repository.Received(1).GetRecentMetricsForServersAsync(
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.Count == 2
+                && ids.Contains(11)
+                && ids.Contains(12)),
+            270,
+            TestContext.Current.CancellationToken);
+        await repository.DidNotReceive().GetRecentMetricsAsync(
+            Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public void HasContinuousCoverage_RequiresBoundaryAndRecentMetric()

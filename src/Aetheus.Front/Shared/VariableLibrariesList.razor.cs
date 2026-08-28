@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -49,8 +40,10 @@ public partial class VariableLibrariesList : IAsyncDisposable
     private string CacheKey => $"variable-libraries:server:{ServerId}";
 
     // Server-paginated (global/project) scope cache key, distinct from the server-detail CacheKey above.
-    private string PagedCacheKey(int page, int pageSize, string? search) =>
-        $"variable-libraries:{ProjectId}:{page}:{pageSize}:{search}";
+    // The sort is part of the key: two orders sharing one entry means the second is served the first
+    // one's rows, which is indistinguishable from a sort that does nothing.
+    private string PagedCacheKey(int page, int pageSize, string? search, string? sortBy = null, bool sortDescending = false) =>
+        $"variable-libraries:{ProjectId}:{page}:{pageSize}:{search}:{sortBy}:{sortDescending}";
 
     private void ApplyLibrariesPage(PaginatedResult<VariableLibraryDto> result)
     {
@@ -85,7 +78,7 @@ public partial class VariableLibrariesList : IAsyncDisposable
 
     private async Task LoadServerLibrariesAsync()
     {
-        _serverAll = await Api.GetServerVariableLibrariesAsync(ServerId!.Value);
+        _serverAll = await Api.Servers.GetServerVariableLibrariesAsync(ServerId!.Value);
         _totalCount = _serverAll.Count;
         Cache.Set(CacheKey, _serverAll);
     }
@@ -100,23 +93,25 @@ public partial class VariableLibrariesList : IAsyncDisposable
 
     private async Task OnLoadData(LoadDataArgs args)
     {
-        if (IsServerScope)
-        {
-            // Server-detail scope: page the in-memory list (already cached via LoadServerLibrariesAsync).
-            var skip = args.Skip ?? 0;
-            var top = args.Top ?? 25;
-            _libraries = _serverAll.Skip(skip).Take(top).ToList();
-            _totalCount = _serverAll.Count;
-            return;
-        }
+        if (TryApplyServerPage(args)) return;
 
         var (page, pageSize) = args.ToPageRequest();
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(VariableLibraryDto.Name));
         await Cache.RevalidateAsync(
-            PagedCacheKey(page, pageSize, _search),
-            () => Api.GetVariableLibrariesAsync(page: page, pageSize: pageSize, search: _search, projectId: ProjectId),
+            PagedCacheKey(page, pageSize, _search, sortBy, sortDescending),
+            () => Api.Variables.GetVariableLibrariesAsync(page: page, pageSize: pageSize, search: _search, projectId: ProjectId,
+                sortBy: sortBy, sortDescending: sortDescending),
             ApplyLibrariesPage,
             loading => _loading = loading,
             () => InvokeAsync(StateHasChanged));
+    }
+
+    private bool TryApplyServerPage(LoadDataArgs args)
+    {
+        if (!IsServerScope) return false;
+        _libraries = args.ToClientPage(_serverAll);
+        _totalCount = args.ClientFilteredCount(_serverAll);
+        return true;
     }
 
     private AetheusDataGrid<VariableLibraryDto>? _grid;
@@ -170,8 +165,7 @@ public partial class VariableLibrariesList : IAsyncDisposable
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_hubConnection is not null)
         {
-            try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.VariableLibrary); } catch { /* best-effort */ }
-            await _hubConnection.DisposeAsync();
+            await _hubConnection.LeaveEntityUpdatesAndDisposeAsync(ResourceType.VariableLibrary);
             _hubConnection = null;
         }
     }

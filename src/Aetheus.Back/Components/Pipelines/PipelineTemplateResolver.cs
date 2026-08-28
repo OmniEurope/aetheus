@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -87,6 +86,7 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
             Trigger = child.Trigger != "manual" ? child.Trigger : parent.Trigger,
             ProjectType = child.ProjectType ?? parent.ProjectType,
             Schedule = child.Schedule ?? parent.Schedule,
+            SupersedeRunning = child.SupersedeRunning ?? parent.SupersedeRunning,
             Branches = child.Branches.Count > 0 ? child.Branches : parent.Branches,
             Extends = null,
             Variables = variables,
@@ -106,7 +106,7 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
         var result = parent.ToList();
         foreach (var item in child)
         {
-            var index = FindByName(result, item.Name, stage => stage.Name);
+            var index = CaseInsensitiveNameLookup.FindIndex(result, item.Name, stage => stage.Name);
             if (item.Remove)
             {
                 if (index >= 0) result.RemoveAt(index);
@@ -130,7 +130,7 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
         var result = parent.ToList();
         foreach (var item in child)
         {
-            var index = FindByName(result, item.Name, job => job.Name);
+            var index = CaseInsensitiveNameLookup.FindIndex(result, item.Name, job => job.Name);
             if (item.Remove)
             {
                 if (index >= 0) result.RemoveAt(index);
@@ -149,7 +149,7 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
         var result = parent.ToList();
         foreach (var item in child)
         {
-            var index = FindByName(result, item.Name, step => step.Name);
+            var index = CaseInsensitiveNameLookup.FindIndex(result, item.Name, step => step.Name);
             if (item.Remove)
             {
                 if (index >= 0) result.RemoveAt(index);
@@ -175,10 +175,16 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
                 declarations, supplied, out var values, out var parameterErrors))
             throw new BadRequestException(string.Join(" ", parameterErrors));
 
+        var declaredNames = declarations
+            .Select(parameter => parameter.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var resolved = ParameterPattern.Replace(yaml, match =>
         {
             var name = match.Groups[1].Value;
-            return values.TryGetValue(name, out var value) ? value : match.Value;
+            if (values.TryGetValue(name, out var value))
+                return value;
+            return declaredNames.Contains(name) ? string.Empty : match.Value;
         });
         var unresolved = ParameterPattern.Match(resolved);
         if (unresolved.Success)
@@ -212,16 +218,9 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
         return new TemplateReference(name, version);
     }
 
-    private static int FindByName<T>(IReadOnlyList<T> items, string name, Func<T, string> selector)
-    {
-        for (var index = 0; index < items.Count; index++)
-            if (string.Equals(selector(items[index]), name, StringComparison.OrdinalIgnoreCase)) return index;
-        return -1;
-    }
-
     private static void ReplaceOrAppend<T>(List<T> items, T item, Func<T, string> selector)
     {
-        var index = FindByName(items, selector(item), selector);
+        var index = CaseInsensitiveNameLookup.FindIndex(items, selector(item), selector);
         if (index >= 0) items[index] = item; else items.Add(item);
     }
 

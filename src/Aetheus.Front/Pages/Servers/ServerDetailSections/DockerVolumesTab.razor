@@ -1,0 +1,18 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Volumes tab of the Docker section. Same shape as DockerNetworksTab: read-only over the parent's
+   inventory, with only its own filter state. *@
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" class="rz-mb-3" Gap="0.5rem">
+    <RadzenBadge Text="@FilteredVolumes.Count.ToString()" BadgeStyle="BadgeStyle.Info" />
+    <RadzenTextBox @bind-Value="_volumeSearch" Placeholder="@L["FilterVolumes"]" class="docker-search" />
+</RadzenStack>
+<RadzenDataGrid Responsive="false" Data="@FilteredVolumes" TItem="DockerVolumeDto" Density="Density.Compact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+    AllowGrouping="true" ShowGroupPanel="true" Groups="@_volumeGroups"
+    @bind-AllGroupsExpanded="_allVolumeGroupsExpanded" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+    <Columns>
+        <RadzenDataGridColumn TItem="DockerVolumeDto" Property="Project" Title="@L["Project"]" Width="140px" />
+        <RadzenDataGridColumn TItem="DockerVolumeDto" Property="Name" Title="@L["Name"]" />
+        <RadzenDataGridColumn TItem="DockerVolumeDto" Property="Driver" Title="@L["Driver"]" Width="120px" />
+        <RadzenDataGridColumn TItem="DockerVolumeDto" Property="Mountpoint" Title="@L["Mountpoint"]" />
+    </Columns>
+</RadzenDataGrid>

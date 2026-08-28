@@ -27,11 +27,11 @@ public class AppHealthStateMachineTests
         int fails = 0, succ = 5;
 
         var a = AppHealthStateMachine.Apply(s, fails, succ, isUp: false, 3, 2);
-        Assert.Equal(AppHealthStatus.Up, a.Status); // 1 failure, still Up (anti-flap)
-        Assert.False(a.Changed);
+        Assert.Equal(AppHealthStatus.Degraded, a.Status); // early warning without declaring Down
+        Assert.True(a.Changed);
 
         var b = AppHealthStateMachine.Apply(a.Status, a.ConsecutiveFailures, a.ConsecutiveSuccesses, isUp: false, 3, 2);
-        Assert.Equal(AppHealthStatus.Up, b.Status); // 2 failures, still Up
+        Assert.Equal(AppHealthStatus.Degraded, b.Status); // 2 failures, still not Down
 
         var c = AppHealthStateMachine.Apply(b.Status, b.ConsecutiveFailures, b.ConsecutiveSuccesses, isUp: false, 3, 2);
         Assert.Equal(AppHealthStatus.Down, c.Status); // 3 failures -> Down
@@ -41,11 +41,11 @@ public class AppHealthStateMachineTests
     [Fact]
     public void Flapping_SingleFailureBetweenSuccesses_DoesNotTripDown()
     {
-        // Up, one failure, then success: never reaches the failure threshold, stays Up throughout.
+        // Up, one failure, then success: surfaces Degraded but never reaches Down.
         var a = AppHealthStateMachine.Apply(AppHealthStatus.Up, 0, 4, isUp: false, 3, 2);
-        Assert.Equal(AppHealthStatus.Up, a.Status);
+        Assert.Equal(AppHealthStatus.Degraded, a.Status);
         var b = AppHealthStateMachine.Apply(a.Status, a.ConsecutiveFailures, a.ConsecutiveSuccesses, isUp: true, 3, 2);
-        Assert.Equal(AppHealthStatus.Up, b.Status);
+        Assert.Equal(AppHealthStatus.Degraded, b.Status);
         Assert.Equal(0, b.ConsecutiveFailures); // failure streak reset by the success
     }
 
@@ -54,8 +54,8 @@ public class AppHealthStateMachineTests
     {
         var s = AppHealthStatus.Down;
         var a = AppHealthStateMachine.Apply(s, 5, 0, isUp: true, 3, 2);
-        Assert.Equal(AppHealthStatus.Down, a.Status); // 1 success, still Down
-        Assert.False(a.Changed);
+        Assert.Equal(AppHealthStatus.Degraded, a.Status); // recovery started, not green yet
+        Assert.True(a.Changed);
 
         var b = AppHealthStateMachine.Apply(a.Status, a.ConsecutiveFailures, a.ConsecutiveSuccesses, isUp: true, 3, 2);
         Assert.Equal(AppHealthStatus.Up, b.Status); // 2 successes -> Up

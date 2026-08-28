@@ -1,5 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@* PLAN-001 phase 2: OTLP metric time-series chart for a monitored app. *@
+@* ADR-021 phase 2: OTLP metric time-series chart for a monitored app. *@
 @if (_names.Count == 0)
 {
     <EmptyState Icon="show_chart" Title="@L["NoMetricsYet"]" />
@@ -21,22 +21,52 @@ else
 
     @if (_loading)
     {
-        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+        <AetheusLoader Size="AetheusLoaderSize.Small" />
     }
-    else if (_points.Count >= 2)
+    else if (_points.Count > 0)
     {
+        @* Headline figures: a chart alone makes the reader estimate the numbers that matter most. *@
+        <RadzenStack Orientation="Orientation.Horizontal" Gap="2rem" class="rz-mb-3" Wrap="FlexWrap.Wrap">
+            <RadzenStack Gap="0">
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Latest"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H6">@FormatValue(_points[^1].Value)</RadzenText>
+            </RadzenStack>
+            <RadzenStack Gap="0">
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Average"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H6">@FormatValue(_average)</RadzenText>
+            </RadzenStack>
+            <RadzenStack Gap="0">
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Peak"]</RadzenText>
+                <RadzenText TextStyle="TextStyle.H6">@FormatValue(_peak)</RadzenText>
+            </RadzenStack>
+        </RadzenStack>
+
         <RadzenChart>
-            <RadzenLineSeries Data="@_points" CategoryProperty="Label" ValueProperty="Value" Title="@_selectedMetric" Smooth="true">
-                <RadzenMarkers MarkerType="MarkerType.Circle" />
+            @* Measurements are plotted as read: no smoothing, which would invent values between samples. *@
+            @if (_hasBand)
+            {
+                <RadzenAreaSeries Data="@_points" CategoryProperty="Label" ValueProperty="Max"
+                                  Title="@L["Max"]" Fill="rgba(99,102,241,0.12)" Stroke="rgba(99,102,241,0.35)" />
+                <RadzenAreaSeries Data="@_points" CategoryProperty="Label" ValueProperty="Min"
+                                  Title="@L["Min"]" Fill="rgba(255,255,255,0)" Stroke="rgba(99,102,241,0.35)" />
+            }
+            <RadzenLineSeries Data="@_points" CategoryProperty="Label" ValueProperty="Value"
+                              Title="@_selectedMetric" Smooth="false">
+                @if (_showMarkers)
+                {
+                    <RadzenMarkers MarkerType="MarkerType.Circle" />
+                }
             </RadzenLineSeries>
             @if (_hasP95)
             {
-                <RadzenLineSeries Data="@_points" CategoryProperty="Label" ValueProperty="P95" Title="@L["P95"]" Smooth="true" />
+                <RadzenLineSeries Data="@_points" CategoryProperty="Label" ValueProperty="P95"
+                                  Title="@L["P95"]" Smooth="false" LineType="LineType.Dashed" />
             }
             <RadzenValueAxis Min="0">
                 <RadzenAxisTitle Text="@AxisTitle" />
             </RadzenValueAxis>
-            <RadzenCategoryAxis />
+            @* Thin out the time labels: one tick per point is unreadable past a few hours of data. *@
+            <RadzenCategoryAxis Step="@_labelStep" />
             <RadzenLegend Position="LegendPosition.Bottom" />
         </RadzenChart>
     }

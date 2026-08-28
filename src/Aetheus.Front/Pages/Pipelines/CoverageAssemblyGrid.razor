@@ -11,10 +11,10 @@
         </RadzenStack>
     </RadzenAlert>
 }
-<RadzenDataGrid @ref="_grid" TItem="CoverageAssemblyDto" Data="@_assemblies" Count="@_totalCount"
-    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="true" PageSize="12"
+<RadzenDataGrid Responsive="false" @ref="_grid" TItem="CoverageAssemblyDto" Data="@_assemblies" Count="@_totalCount"
+    IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="12"
     AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-    Density="Density.Compact" class="coverage-file-grid rz-mb-4">
+    Density="Density.Compact" class="coverage-file-grid rz-mb-4" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
     <Columns>
         <RadzenDataGridColumn TItem="CoverageAssemblyDto" Property="Name" Title="@L["Assembly"]" />
         <RadzenDataGridColumn TItem="CoverageAssemblyDto" Property="LineRate" Title="@L["LineCoverage"]" Width="16rem">

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -26,18 +21,13 @@ public sealed class DockerOperationExecutor(
         OperationKind.DockerPullImage;
 
     public async Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken)
+        OperationKind kind, string target, int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {
-        if (!OperationTargetValidator.IsValid(kind, target))
-        {
-            logger.LogWarning("Rejected docker target with invalid format");
-            await onOutput("Invalid docker target format", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var targetFailure = await OperationExecutorFailure.ValidateTargetAsync(
+            kind, target, onOutput, () => logger.LogWarning("Rejected docker target with invalid format"),
+            "Invalid docker target format").ConfigureAwait(false);
+        if (targetFailure is not null) return targetFailure;
 
         var args = BuildArgs(kind, target);
         if (args is null) return new ExecutorResult(-1, false);

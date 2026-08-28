@@ -83,23 +83,6 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
             .Add(x => x.DockerInitialLoaded, initialLoaded));
     }
 
-    // ── reflection helpers (drive real private methods + read state) ──────────
-
-    private static T GetField<T>(IRenderedComponent<ServerDockerSection> cut, string name)
-        => (T)typeof(ServerDockerSection).GetField(name, Priv)!.GetValue(cut.Instance)!;
-
-    private static void InvokeMethod(IRenderedComponent<ServerDockerSection> cut, string name, params object?[] args)
-    {
-        var method = typeof(ServerDockerSection).GetMethod(name, Priv)!;
-        cut.InvokeAsync(() => { method.Invoke(cut.Instance, args); }).GetAwaiter().GetResult();
-    }
-
-    private static void InvokeAsyncMethod(IRenderedComponent<ServerDockerSection> cut, string name, params object?[] args)
-    {
-        var method = typeof(ServerDockerSection).GetMethod(name, Priv)!;
-        cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, args)!).GetAwaiter().GetResult();
-    }
-
     // ── TEST 1: Skeleton shown when not initial-loaded and no containers ─────
     // Exercises the @if (!_dockerInitialLoaded && FilteredContainers.Count == 0) branch (line 22-29)
 
@@ -238,10 +221,11 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
             }
         ]);
         var cut = RenderSection(BuildServer(docker));
+        var tab = cut.FindComponent<DockerContainersTab>();
 
         // Set _logsContainerId, leave _logsContent null → spinner branch
-        typeof(ServerDockerSection).GetField("_logsContainerId", Priv)!.SetValue(cut.Instance, "logctr000000logs");
-        typeof(ServerDockerSection).GetField("_logsContent", Priv)!.SetValue(cut.Instance, null);
+        typeof(DockerContainersTab).GetField("_logsContainerId", Priv)!.SetValue(tab.Instance, "logctr000000logs");
+        typeof(DockerContainersTab).GetField("_logsContent", Priv)!.SetValue(tab.Instance, null);
         cut.Render();
 
         Assert.Contains("logctr000000logs"[..12], cut.Markup);
@@ -254,8 +238,9 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_LogsPanel_WithContent_ShowsPreBlock()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_logsContainerId", Priv)!.SetValue(cut.Instance, "logctr000000logs");
-        typeof(ServerDockerSection).GetField("_logsContent", Priv)!.SetValue(cut.Instance, "line1\nline2");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_logsContainerId", Priv)!.SetValue(tab.Instance, "logctr000000logs");
+        typeof(DockerContainersTab).GetField("_logsContent", Priv)!.SetValue(tab.Instance, "line1\nline2");
         cut.Render();
 
         Assert.Contains("docker-logs", cut.Markup);
@@ -269,8 +254,9 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_InspectPanel_NullContent_ShowsWaiting()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_inspectContainerId", Priv)!.SetValue(cut.Instance, "inspectid000001a");
-        typeof(ServerDockerSection).GetField("_inspectContent", Priv)!.SetValue(cut.Instance, null);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_inspectContainerId", Priv)!.SetValue(tab.Instance, "inspectid000001a");
+        typeof(DockerContainersTab).GetField("_inspectContent", Priv)!.SetValue(tab.Instance, null);
         cut.Render();
 
         Assert.Contains("inspectid000001a"[..12], cut.Markup);
@@ -283,8 +269,9 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_InspectPanel_WithContent_ShowsCopyButton()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_inspectContainerId", Priv)!.SetValue(cut.Instance, "inspectid000001a");
-        typeof(ServerDockerSection).GetField("_inspectContent", Priv)!.SetValue(cut.Instance, "{\"Id\":\"abc\"}");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_inspectContainerId", Priv)!.SetValue(tab.Instance, "inspectid000001a");
+        typeof(DockerContainersTab).GetField("_inspectContent", Priv)!.SetValue(tab.Instance, "{\"Id\":\"abc\"}");
         cut.Render();
 
         // Inspect pre block and copy button icon both appear
@@ -299,9 +286,10 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_ShellPanel_Visible_RendersTerminal()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_shellContainerId", Priv)!.SetValue(cut.Instance, "shellid0000shell");
-        typeof(ServerDockerSection).GetField("_shellContainerName", Priv)!.SetValue(cut.Instance, "my-shell-ctr");
-        typeof(ServerDockerSection).GetField("_shellOutput", Priv)!.SetValue(cut.Instance, "$ ls\nDockerfile");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_shellContainerId", Priv)!.SetValue(tab.Instance, "shellid0000shell");
+        typeof(DockerContainersTab).GetField("_shellContainerName", Priv)!.SetValue(tab.Instance, "my-shell-ctr");
+        typeof(DockerContainersTab).GetField("_shellOutput", Priv)!.SetValue(tab.Instance, "$ ls\nDockerfile");
         cut.Render();
 
         Assert.Contains("my-shell-ctr", cut.Markup);
@@ -315,9 +303,10 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_EnvPanel_NullContent_ShowsWaiting()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_envContainerId", Priv)!.SetValue(cut.Instance, "envctr000000env0");
-        typeof(ServerDockerSection).GetField("_envContainerName", Priv)!.SetValue(cut.Instance, "env-target");
-        typeof(ServerDockerSection).GetField("_envContent", Priv)!.SetValue(cut.Instance, null);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_envContainerId", Priv)!.SetValue(tab.Instance, "envctr000000env0");
+        typeof(DockerContainersTab).GetField("_envContainerName", Priv)!.SetValue(tab.Instance, "env-target");
+        typeof(DockerContainersTab).GetField("_envContent", Priv)!.SetValue(tab.Instance, null);
         cut.Render();
 
         Assert.Contains("env-target", cut.Markup);
@@ -330,10 +319,11 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_EnvPanel_WithContent_ShowsEnvTable()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_envContainerId", Priv)!.SetValue(cut.Instance, "envctr000000env0");
-        typeof(ServerDockerSection).GetField("_envContainerName", Priv)!.SetValue(cut.Instance, "env-target");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_envContainerId", Priv)!.SetValue(tab.Instance, "envctr000000env0");
+        typeof(DockerContainersTab).GetField("_envContainerName", Priv)!.SetValue(tab.Instance, "env-target");
         // ParseEnvVars expects a JSON-array-like string
-        typeof(ServerDockerSection).GetField("_envContent", Priv)!.SetValue(cut.Instance, "[\"PATH=/usr/local/sbin:/usr/bin\",\"HOME=/root\",\"USER=app\"]");
+        typeof(DockerContainersTab).GetField("_envContent", Priv)!.SetValue(tab.Instance, "[\"PATH=/usr/local/sbin:/usr/bin\",\"HOME=/root\",\"USER=app\"]");
         cut.Render();
 
         Assert.Contains("role=\"grid\"", cut.Markup);
@@ -348,10 +338,11 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_BrowsePanel_AtRoot_NoUpButton()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_browseContainerId", Priv)!.SetValue(cut.Instance, "bwsctr000000bws0");
-        typeof(ServerDockerSection).GetField("_browseContainerName", Priv)!.SetValue(cut.Instance, "browse-target");
-        typeof(ServerDockerSection).GetField("_browsePath", Priv)!.SetValue(cut.Instance, "/");
-        typeof(ServerDockerSection).GetField("_browseContent", Priv)!.SetValue(cut.Instance, null);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_browseContainerId", Priv)!.SetValue(tab.Instance, "bwsctr000000bws0");
+        typeof(DockerContainersTab).GetField("_browseContainerName", Priv)!.SetValue(tab.Instance, "browse-target");
+        typeof(DockerContainersTab).GetField("_browsePath", Priv)!.SetValue(tab.Instance, "/");
+        typeof(DockerContainersTab).GetField("_browseContent", Priv)!.SetValue(tab.Instance, null);
         cut.Render();
 
         Assert.Contains("browse-target", cut.Markup);
@@ -365,10 +356,11 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public void Render_BrowsePanel_NonRootPath_ShowsUpButtonAndContent()
     {
         var cut = RenderSection();
-        typeof(ServerDockerSection).GetField("_browseContainerId", Priv)!.SetValue(cut.Instance, "bwsctr000000bws0");
-        typeof(ServerDockerSection).GetField("_browseContainerName", Priv)!.SetValue(cut.Instance, "browse-target");
-        typeof(ServerDockerSection).GetField("_browsePath", Priv)!.SetValue(cut.Instance, "/etc");
-        typeof(ServerDockerSection).GetField("_browseContent", Priv)!.SetValue(cut.Instance, "hosts  resolv.conf  passwd");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_browseContainerId", Priv)!.SetValue(tab.Instance, "bwsctr000000bws0");
+        typeof(DockerContainersTab).GetField("_browseContainerName", Priv)!.SetValue(tab.Instance, "browse-target");
+        typeof(DockerContainersTab).GetField("_browsePath", Priv)!.SetValue(tab.Instance, "/etc");
+        typeof(DockerContainersTab).GetField("_browseContent", Priv)!.SetValue(tab.Instance, "hosts  resolv.conf  passwd");
         cut.Render();
 
         Assert.Contains("arrow_upward", cut.Markup);
@@ -377,17 +369,18 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     }
 
     // ── TEST 15: Compose editor - _composeEditorVisible, loading branch ───────
-    // Exercises lines 378-404, and the inner _composeFileLoading branch (lines 387-391)
+    // The editor moved into DockerComposeTab, so the branch is driven on that component.
 
     [Fact]
-    public void OpenComposeEditorAsync_SetsVisibleAndStack_CloseResets()
+    public async Task OpenComposeEditorAsync_SetsVisibleAndStack_CloseResets()
     {
         _handler.SetResponse(
             HttpMethod.Get,
             "api/servers/30/docker/compose/webapp/file",
             System.Net.HttpStatusCode.OK);
-        var docker = BuildDockerData(composeStacks: [
-            new DockerComposeStackDto
+        var stacks = new List<DockerComposeStackDto>
+        {
+            new()
             {
                 Name = "webapp",
                 Status = "running",
@@ -395,20 +388,24 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
                 TotalCount = 2,
                 ConfigFile = "/opt/webapp/docker-compose.yml"
             }
-        ]);
-        var cut = RenderSection(BuildServer(docker));
+        };
+        var cut = Render<DockerComposeTab>(p => p
+            .Add(x => x.ServerId, 30)
+            .Add(x => x.Stacks, stacks));
 
-        // Drive the REAL open method (not a set-then-get) and assert its effect on state.
-        InvokeAsyncMethod(cut, "OpenComposeEditorAsync", "webapp");
-        Assert.True(GetField<bool>(cut, "_composeEditorVisible"));
-        Assert.Equal("webapp", GetField<string>(cut, "_composeEditorStack"));
-        // compose/file mock returns true ⇒ the success branch keeps the loading flag set.
-        Assert.True(GetField<bool>(cut, "_composeFileLoading"));
+        // Drive the tab through its own buttons: the editor is a rendered panel, not a private flag.
+        Assert.DoesNotContain("yaml-editor", cut.Markup);
+        Assert.DoesNotContain("RequestingCompose", cut.Markup);
 
-        // CloseComposeEditor resets the editor state.
-        InvokeMethod(cut, "CloseComposeEditor");
-        Assert.False(GetField<bool>(cut, "_composeEditorVisible"));
-        Assert.Equal(string.Empty, GetField<string>(cut, "_composeEditorStack"));
+        await cut.Find("button[title='EditCompose']").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+
+        // compose/file mock returns true ⇒ the success branch leaves the panel in its loading state.
+        Assert.Contains("RequestingCompose", cut.Markup);
+        Assert.Contains("webapp", cut.Markup);
+
+        // Closing tears the panel back down.
+        await cut.Find("button[title='Close']").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+        Assert.DoesNotContain("RequestingCompose", cut.Markup);
     }
 
     // ── TEST 17: Zoom dialog - OpenProjectZoom sets the zoomed project, Close clears it ─
@@ -434,10 +431,11 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
             composeStacks: [new DockerComposeStackDto { Name = "zoomapp", Status = "running", RunningCount = 1, TotalCount = 1, ConfigFile = "/opt/zoomapp/docker-compose.yml" }]
         );
         var cut = RenderSection(BuildServer(docker));
+        var tab = cut.FindComponent<DockerContainersTab>();
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
-        var method = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["zoomapp"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["zoomapp"])!);
 
         Assert.Equal(typeof(DockerProjectDialog), dialog.LastComponent);
         Assert.Equal("zoomapp", dialog.LastParameters!["Project"]);
@@ -462,10 +460,11 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
             }
         ]);
         var cut = RenderSection(BuildServer(docker));
+        var tab = cut.FindComponent<DockerContainersTab>();
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
-        var method = typeof(ServerDockerSection).GetMethod("OpenResourceLimitsDialog", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["limitctr000limit"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", Priv)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["limitctr000limit"])!);
 
         Assert.Equal(typeof(DockerResourceLimitsDialog), dialog.LastComponent);
         Assert.Equal("limitctr000limit", dialog.LastParameters!["ContainerId"]);
@@ -478,26 +477,27 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
     public async Task ConfirmRemoveContainer_ShowsDialog_WithTitleAndMessage()
     {
         var cut = RenderSection();
+        var tab = cut.FindComponent<DockerContainersTab>();
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
-        var method = typeof(ServerDockerSection).GetMethod("ConfirmRemoveContainerAsync", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["ctrid000000remov", "doomed-ctr"])!);
+        var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", Priv)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["ctrid000000remov", "doomed-ctr"])!);
 
         Assert.Equal("RemoveContainer", dialog.LastTitle);
         Assert.Equal("RemoveContainerConfirm", dialog.LastConfirmMessage);
     }
 
     // ── TEST 21: Images with repos+tags renders in images tab ────────────────
-    // Exercises the image-grid template including Created and ImageId sub-expressions.
-    // The Images tab is not the active tab in bUnit, so its markup is not rendered.
-    // We verify the FilteredImages computed property returns the expected data (which
-    // the template would render if the tab were active).
+    // Exercises the image-grid template including the Created and ImageId sub-expressions.
+    // The tab is its own component now, so it is rendered directly; its groups start collapsed,
+    // which is why they are expanded before the markup is read.
 
     [Fact]
     public void Render_ImagesWithReposAndTags_RendersGrid()
     {
-        var docker = BuildDockerData(images: [
-            new DockerImageDto
+        var images = new List<DockerImageDto>
+        {
+            new()
             {
                 ImageId = "sha256:aabb11223344aabb",
                 Repository = "myrepo/myimage",
@@ -506,7 +506,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
                 Created = DateTime.UtcNow.AddDays(-7),
                 Project = "webapp"
             },
-            new DockerImageDto
+            new()
             {
                 ImageId = "sha256:ccdd55667788ccdd",
                 Repository = "<none>",
@@ -515,14 +515,22 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
                 Created = DateTime.UtcNow.AddDays(-30),
                 Project = ""
             }
-        ]);
-        var cut = RenderSection(BuildServer(docker));
-        // Verify via the computed property (covers FilteredImages expression in the template)
-        var filteredProp = typeof(ServerDockerSection).GetProperty("FilteredImages", Priv)!;
-        var filtered = (List<DockerImageDto>)filteredProp.GetValue(cut.Instance)!;
+        };
+        var cut = Render<DockerImagesTab>(p => p
+            .Add(x => x.ServerId, 30)
+            .Add(x => x.Images, images));
+
+        typeof(DockerImagesTab).GetField("_allImageGroupsExpanded", Priv)!.SetValue(cut.Instance, true);
+        cut.Render();
+
+        Assert.Contains("myrepo/myimage", cut.Markup);
+        Assert.Contains("v1.0.0", cut.Markup);
+        // The ID column truncates to the first 12 characters.
+        Assert.Contains("sha256:aabb1", cut.Markup);
+
+        var filtered = (List<DockerImageDto>)typeof(DockerImagesTab)
+            .GetProperty("FilteredImages", Priv)!.GetValue(cut.Instance)!;
         Assert.Equal(2, filtered.Count);
-        Assert.Equal("myrepo/myimage", filtered[0].Repository);
-        Assert.Equal("v1.0.0", filtered[0].Tag);
     }
 
     // ── TEST 22: Networks and volumes tabs render ─────────────────────────────
@@ -585,11 +593,12 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
             }
         ]);
         var cut = RenderSection(BuildServer(docker));
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        typeof(ServerDockerSection).GetField("_containerSearch", Priv)!.SetValue(cut.Instance, "web");
+        typeof(DockerContainersTab).GetField("_containerSearch", Priv)!.SetValue(tab.Instance, "web");
 
-        var filteredProp = typeof(ServerDockerSection).GetProperty("FilteredContainers", Priv)!;
-        var filtered = (List<DockerContainerDto>)filteredProp.GetValue(cut.Instance)!;
+        var filteredProp = typeof(DockerContainersTab).GetProperty("FilteredContainers", Priv)!;
+        var filtered = (List<DockerContainerDto>)filteredProp.GetValue(tab.Instance)!;
         Assert.Single(filtered);
         Assert.Equal("filter-web", filtered[0].Name);
     }

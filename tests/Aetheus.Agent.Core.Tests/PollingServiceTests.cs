@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
+using Aetheus.Shared.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
@@ -17,6 +21,8 @@ public class PollingServiceTests
     private readonly IServerApiClient _apiClientMock = Substitute.For<IServerApiClient>();
     private readonly IExecutor _executorMock = Substitute.For<IExecutor>();
     private readonly IAgentProcessRestarter _processRestarter = Substitute.For<IAgentProcessRestarter>();
+    private readonly IDeploymentBuildRefusalOutbox _refusalOutbox =
+        Substitute.For<IDeploymentBuildRefusalOutbox>();
     private readonly AgentState _agentState;
     private readonly EnrollmentService _enrollment;
     private readonly IOptions<AetheusAgentOptions> _options;
@@ -37,9 +43,24 @@ public class PollingServiceTests
         });
 
         _enrollment = CreateEnrolledEnrollmentService();
+        _refusalOutbox.ReadAllAsync(Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<DeploymentBuildRefusalReport>());
 
         _executorMock.Type.Returns(ExecutorType.Shell);
     }
+
+    /// <summary>
+    /// Makes the build lease immediately available on a maintenance double. Without it the substitute
+    /// returns false and the poller correctly hands the task back to the queue, which is the subject of
+    /// its own test rather than of the ones that assert on execution.
+    /// </summary>
+    private static void GrantBuildLease(IDockerStorageMaintenance maintenance) =>
+        maintenance.PrepareBuildAsync(
+                Arg.Any<IDictionary<string, string>>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<bool>(),
+                Arg.Any<TimeSpan?>())
+            .Returns(true);
 
     // E-3: drive one poll iteration and await the dispatched in-flight tasks so the
     // assertion on a task's terminal effect is deterministic (no PeriodicTimer / sleep).
@@ -51,19 +72,28 @@ public class PollingServiceTests
 
     private PollingService CreateService(
         IEnumerable<IOperationExecutor>? operationExecutors = null,
-        IDockerStorageMaintenance? dockerStorageMaintenance = null) => new(
+        IDockerStorageMaintenance? dockerStorageMaintenance = null,
+        AgentRuntimeHealth? runtimeHealth = null,
+        TimeProvider? timeProvider = null,
+        IContainerExecutor? containerExecutor = null,
+        IOptions<AetheusAgentOptions>? options = null)
+    {
+        var time = timeProvider ?? TimeProvider.System;
+        return new(
         _apiClientMock,
         _enrollment,
         [_executorMock],
         operationExecutors ?? Array.Empty<IOperationExecutor>(),
-        Substitute.For<IContainerExecutor>(),
+        containerExecutor ?? Substitute.For<IContainerExecutor>(),
         dockerStorageMaintenance ?? Substitute.For<IDockerStorageMaintenance>(),
+        _refusalOutbox,
         _agentState,
-        new AgentRuntimeHealth(TimeProvider.System),
+        runtimeHealth ?? new AgentRuntimeHealth(time),
         _processRestarter,
-        TimeProvider.System,
-        _options,
+        time,
+        options ?? _options,
         NullLogger<PollingService>.Instance);
+    }
 
     [Fact]
     public async Task PollOnceAsync_PollsForTasksWhenEnrolled()
@@ -75,6 +105,54 @@ public class PollingServiceTests
         await PollAndDrainAsync(service);
 
         await _apiClientMock.Received(1).GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_ApiFailure_DoesNotRefreshWatchdogSuccess()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero));
+        var health = new AgentRuntimeHealth(time);
+        health.MarkPollingSuccess();
+        var previousSuccess = health.LastPollingSuccessAt;
+        time.Advance(TimeSpan.FromMinutes(1));
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Connection refused"));
+        var service = CreateService(runtimeHealth: health, timeProvider: time);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            service.PollOnceAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(previousSuccess, health.LastPollingSuccessAt);
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_ApiSuccess_RefreshesWatchdogSuccess()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero));
+        var health = new AgentRuntimeHealth(time);
+        health.MarkPollingSuccess();
+        time.Advance(TimeSpan.FromMinutes(1));
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new List<PendingTaskDto>());
+        var service = CreateService(runtimeHealth: health, timeProvider: time);
+
+        await service.PollOnceAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(time.GetUtcNow(), health.LastPollingSuccessAt);
+    }
+
+    [Fact]
+    public async Task SendLogBatchAsync_CancelsAnUnresponsiveBackendWithinItsOwnBudget()
+    {
+        _apiClientMock.AppendLogBatchAsync(Arg.Any<List<AppendLogRequest>>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.Delay(Timeout.InfiniteTimeSpan, call.ArgAt<CancellationToken>(1)));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            PollingService.SendLogBatchAsync(
+                _apiClientMock,
+                [new AppendLogRequest { TaskId = 42, Message = "bounded" }],
+                TestContext.Current.CancellationToken,
+                TimeSpan.FromMilliseconds(20)));
     }
 
     [Fact]
@@ -114,10 +192,47 @@ public class PollingServiceTests
     }
 
     [Fact]
+    public async Task PollOnceAsync_ResolvesPersistedSecretPlaceholderOnlyAtExecution()
+    {
+        var placeholder = PipelineSecretPlaceholder.Create("DEPLOY_TOKEN");
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 142,
+            Name = "secret-task",
+            Command = $"deploy --token '{placeholder}'",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                ["DEPLOY_TOKEN"] = "runtime-secret"
+            },
+            TimeoutSeconds = 30
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+        _executorMock.ExecuteAsync(
+                "deploy --token 'runtime-secret'",
+                pendingTask.EnvironmentVariables,
+                30,
+                Arg.Any<Func<string, TaskLogLevel, Task>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ExecutorResult(0, false));
+
+        await PollAndDrainAsync(CreateService());
+
+        await _executorMock.Received(1).ExecuteAsync(
+            "deploy --token 'runtime-secret'",
+            pendingTask.EnvironmentVariables,
+            30,
+            Arg.Any<Func<string, TaskLogLevel, Task>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PollOnceAsync_DockerBuild_HoldsMaintenanceLeaseAndFinalizesAfterFailure()
     {
         var maintenance = Substitute.For<IDockerStorageMaintenance>();
         maintenance.IsBuildCommand(Arg.Any<string>()).Returns(true);
+        GrantBuildLease(maintenance);
         var pendingTask = new PendingTaskDto
         {
             Id = 43,
@@ -137,9 +252,11 @@ public class PollingServiceTests
         await PollAndDrainAsync(CreateService(dockerStorageMaintenance: maintenance));
 
         await maintenance.Received(1).PrepareBuildAsync(
-            pendingTask.EnvironmentVariables, Arg.Any<CancellationToken>(), true);
-        await maintenance.Received(1).CompleteBuildAsync(
-            Arg.Is<CancellationToken>(token => !token.CanBeCanceled), true);
+            pendingTask.EnvironmentVariables, Arg.Any<CancellationToken>(), true, Arg.Any<TimeSpan?>());
+        await maintenance.Received(1).ScheduleBuildCompletionAsync(
+            true, Arg.Is<CancellationToken>(token => !token.CanBeCanceled));
+        await maintenance.DidNotReceive().CompleteBuildAsync(
+            Arg.Any<CancellationToken>(), Arg.Any<bool>());
     }
 
     [Fact]
@@ -147,6 +264,7 @@ public class PollingServiceTests
     {
         var maintenance = Substitute.For<IDockerStorageMaintenance>();
         maintenance.IsBuildCommand(Arg.Any<string>()).Returns(false);
+        GrantBuildLease(maintenance);
         var pendingTask = new PendingTaskDto
         {
             Id = 44,
@@ -170,9 +288,160 @@ public class PollingServiceTests
         await PollAndDrainAsync(CreateService(dockerStorageMaintenance: maintenance));
 
         await maintenance.Received(1).PrepareBuildAsync(
-            pendingTask.EnvironmentVariables, Arg.Any<CancellationToken>(), false);
-        await maintenance.Received(1).CompleteBuildAsync(
-            Arg.Is<CancellationToken>(token => !token.CanBeCanceled), false);
+            pendingTask.EnvironmentVariables, Arg.Any<CancellationToken>(), false, Arg.Any<TimeSpan?>());
+        await maintenance.Received(1).ScheduleBuildCompletionAsync(
+            false, Arg.Is<CancellationToken>(token => !token.CanBeCanceled));
+        await maintenance.DidNotReceive().CompleteBuildAsync(
+            Arg.Any<CancellationToken>(), Arg.Any<bool>());
+    }
+
+    // The poll asks for as many tasks as it has free slots, but the local gate can already be
+    // exhausted by the time the claim comes back: a finishing task releases the gate before it leaves
+    // the tracking table. The old code just stopped dispatching, which stranded a task the control
+    // plane had already moved to Assigned. Nothing started it, nothing handed it back, and the start
+    // ceiling failed the run minutes later on a task the agent never logged as starting.
+    [Fact]
+    public async Task PollOnceAsync_NoFreeExecutionSlot_ReturnsTheClaimInsteadOfStrandingIt()
+    {
+        var options = Options.Create(new AetheusAgentOptions
+        {
+            ServerUrl = "http://localhost:5301",
+            PollingIntervalSeconds = 1,
+            MaxConcurrentTasks = 1
+        });
+        var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var occupying = new PendingTaskDto
+        {
+            Id = 71, Name = "occupies-the-only-slot", Command = "sleep", Executor = ExecutorType.Shell,
+            EnvironmentVariables = [], TimeoutSeconds = 30
+        };
+        var stranded = new PendingTaskDto
+        {
+            Id = 72, Name = "claimed-with-no-slot", Command = "echo", Executor = ExecutorType.Shell,
+            EnvironmentVariables = [], TimeoutSeconds = 30
+        };
+        _executorMock.ExecuteAsync(
+                occupying.Command, Arg.Any<Dictionary<string, string>>(), Arg.Any<int>(),
+                Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => { await blocked.Task; return new ExecutorResult(0, false); });
+        // One poll hands back both: the first takes the only slot, the second finds the gate closed.
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([occupying, stranded]);
+        var service = CreateService(options: options);
+
+        await service.PollOnceAsync(TestContext.Current.CancellationToken);
+
+        await _apiClientMock.Received(1).ReleaseTaskAsync(72, Arg.Any<CancellationToken>());
+        await _apiClientMock.DidNotReceive().ReleaseTaskAsync(71, Arg.Any<CancellationToken>());
+        blocked.TrySetResult();
+        await service.DrainRunningTasksAsync();
+    }
+
+    // Two build pipelines on one runner used to be mutually exclusive: the second task held its claim
+    // while waiting for the local build lease, and the control plane failed it for never leaving
+    // Assigned. The task must go back to the queue instead, without executing anything.
+    [Fact]
+    public async Task PollOnceAsync_BuildLeaseStaysHeld_ReturnsTheTaskToTheQueueWithoutExecuting()
+    {
+        var maintenance = Substitute.For<IDockerStorageMaintenance>();
+        maintenance.IsBuildCommand(Arg.Any<string>()).Returns(true);
+        maintenance.PrepareBuildAsync(
+                Arg.Any<IDictionary<string, string>>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<bool>(),
+                Arg.Any<TimeSpan?>())
+            .Returns(false);
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 45,
+            PipelineRunId = 13,
+            Name = "second-build",
+            Command = "docker buildx build --load .",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = [],
+            TimeoutSeconds = 30
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+
+        await PollAndDrainAsync(CreateService(dockerStorageMaintenance: maintenance));
+
+        await _apiClientMock.Received(1).ReleaseTaskAsync(45, Arg.Any<CancellationToken>());
+        await _apiClientMock.DidNotReceive().StartTaskAsync(45, Arg.Any<CancellationToken>());
+        await _apiClientMock.DidNotReceive().CompleteTaskAsync(
+            45, Arg.Any<TaskResultDto>(), Arg.Any<CancellationToken>());
+        await _executorMock.DidNotReceive().ExecuteAsync(
+            Arg.Any<string>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<int>(),
+            Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>());
+        await maintenance.DidNotReceive().ScheduleBuildCompletionAsync(
+            Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    // The release must beat the control plane's Assigned ceiling, otherwise the watchdog fails the task
+    // before the agent ever hands it back and the fix buys nothing.
+    [Fact]
+    public void BuildLeaseWaitBudget_StaysUnderTheControlPlaneAssignedCeiling()
+    {
+        Assert.True(PollingService.BuildLeaseWaitBudget < TimeSpan.FromMinutes(2));
+        Assert.True(PollingService.BuildLeaseWaitBudget > TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_BuildLeaseWait_DoesNotStartServerExecutionTimeout()
+    {
+        var maintenance = Substitute.For<IDockerStorageMaintenance>();
+        maintenance.IsBuildCommand(Arg.Any<string>()).Returns(false);
+        var prepareEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePrepare = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        maintenance.PrepareBuildAsync(
+                Arg.Any<IDictionary<string, string>>(),
+                Arg.Any<CancellationToken>(),
+                false,
+                Arg.Any<TimeSpan?>())
+            .Returns(async _ =>
+            {
+                prepareEntered.TrySetResult();
+                await releasePrepare.Task;
+                return true;
+            });
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 441,
+            PipelineRunId = 12,
+            Name = "queued-build",
+            Command = "dotnet test tests/Aetheus.Back.Tests",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                ["AETHEUS_EXECUTION_ROLE"] = "build"
+            },
+            TimeoutSeconds = 120
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+        _executorMock.ExecuteAsync(
+                pendingTask.Command, pendingTask.EnvironmentVariables, pendingTask.TimeoutSeconds,
+                Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(new ExecutorResult(0, false));
+        var service = CreateService(dockerStorageMaintenance: maintenance);
+
+        await service.PollOnceAsync(TestContext.Current.CancellationToken);
+        await prepareEntered.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+
+        await _apiClientMock.DidNotReceive().StartTaskAsync(441, Arg.Any<CancellationToken>());
+
+        releasePrepare.TrySetResult();
+        await service.DrainRunningTasksAsync();
+
+        Received.InOrder(() =>
+        {
+            _ = maintenance.PrepareBuildAsync(
+                pendingTask.EnvironmentVariables, Arg.Any<CancellationToken>(), false, Arg.Any<TimeSpan?>());
+            _ = _apiClientMock.StartTaskAsync(441, Arg.Any<CancellationToken>());
+            _ = _executorMock.ExecuteAsync(
+                pendingTask.Command, pendingTask.EnvironmentVariables, pendingTask.TimeoutSeconds,
+                Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>());
+        });
     }
 
     [Fact]
@@ -196,12 +465,78 @@ public class PollingServiceTests
         await PollAndDrainAsync(CreateService(dockerStorageMaintenance: maintenance));
 
         await _apiClientMock.Received(1).StartTaskAsync(45, Arg.Any<CancellationToken>());
-        await _apiClientMock.Received(1).CompleteTaskAsync(45,
-            Arg.Is<TaskResultDto>(result => result.Status == TaskExecutionStatus.Failed),
+        await _refusalOutbox.Received(1).StoreAsync(
+            Arg.Is<DeploymentBuildRefusalReport>(report =>
+                report.TaskId == 45
+                && report.Reason.Contains("deployment-only", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
+        await _apiClientMock.Received(1).ReportDeploymentBuildRefusalAsync(
+            Arg.Is<DeploymentBuildRefusalReport>(report => report.TaskId == 45),
+            Arg.Any<CancellationToken>());
+        Received.InOrder(() =>
+        {
+            _ = _refusalOutbox.StoreAsync(
+                Arg.Is<DeploymentBuildRefusalReport>(report => report.TaskId == 45),
+                Arg.Any<CancellationToken>());
+            _ = _apiClientMock.StartTaskAsync(45, Arg.Any<CancellationToken>());
+            _ = _apiClientMock.ReportDeploymentBuildRefusalAsync(
+                Arg.Is<DeploymentBuildRefusalReport>(report => report.TaskId == 45),
+                Arg.Any<CancellationToken>());
+        });
         await _executorMock.DidNotReceive().ExecuteAsync(
             Arg.Any<string>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<int>(),
             Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_DeploymentRefusalNetworkFailure_RemainsInDurableOutbox()
+    {
+        var maintenance = Substitute.For<IDockerStorageMaintenance>();
+        maintenance.DeploymentOnly.Returns(true);
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new PendingTaskDto
+                {
+                    Id = 47,
+                    PipelineRunId = 12,
+                    Name = "build-on-deploy",
+                    Command = "docker build .",
+                    EnvironmentVariables = []
+                }
+            ]);
+        _apiClientMock.ReportDeploymentBuildRefusalAsync(
+                Arg.Any<DeploymentBuildRefusalReport>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("offline"));
+
+        await PollAndDrainAsync(CreateService(dockerStorageMaintenance: maintenance));
+
+        await _refusalOutbox.Received(1).StoreAsync(
+            Arg.Is<DeploymentBuildRefusalReport>(report => report.TaskId == 47),
+            Arg.Any<CancellationToken>());
+        _refusalOutbox.DidNotReceive().Remove(Arg.Any<Guid>());
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_ReplaysPersistedDeploymentRefusalAndAcknowledgesIt()
+    {
+        var report = new DeploymentBuildRefusalReport
+        {
+            IncidentId = Guid.NewGuid(),
+            TaskId = 48,
+            OccurredAtUtc = DateTime.UtcNow,
+            Reason = "deployment-only refusal"
+        };
+        _refusalOutbox.ReadAllAsync(Arg.Any<CancellationToken>()).Returns([report]);
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        await CreateService().PollOnceAsync(TestContext.Current.CancellationToken);
+
+        await _apiClientMock.Received(1).ReportDeploymentBuildRefusalAsync(
+            report,
+            Arg.Any<CancellationToken>());
+        _refusalOutbox.Received(1).Remove(report.IncidentId);
     }
 
     [Fact]
@@ -346,6 +681,40 @@ public class PollingServiceTests
     }
 
     [Fact]
+    public async Task PollOnceAsync_SelfUpdateWithTrackedProcess_RemainsPendingUntilAgentIsIdle()
+    {
+        var operation = Substitute.For<IOperationExecutor>();
+        operation.CanHandle(OperationKind.AgentSelfUpdate).Returns(true);
+        var health = new AgentRuntimeHealth(TimeProvider.System);
+        using var process = Process.GetCurrentProcess();
+        using var activity = health.TrackProcess(process);
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new PendingTaskDto
+                {
+                    Id = 123,
+                    Name = "self-update",
+                    Operation = OperationKind.AgentSelfUpdate,
+                    EnvironmentVariables = [],
+                    TimeoutSeconds = 60
+                }
+            ]);
+        var service = CreateService([operation], runtimeHealth: health);
+
+        await service.PollOnceAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(service._runningTasks);
+        await operation.DidNotReceive().ExecuteAsync(
+            Arg.Any<OperationKind>(),
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<int>(),
+            Arg.Any<Func<string, TaskLogLevel, Task>>(),
+            Arg.Any<CancellationToken>());
+        _processRestarter.DidNotReceive().Restart(Arg.Any<string>());
+    }
+
+    [Fact]
     public async Task PollOnceAsync_SuccessfulSelfUpdate_RestartsEvenWhenFinalAcknowledgementFails()
     {
         var operation = Substitute.For<IOperationExecutor>();
@@ -436,7 +805,7 @@ public class PollingServiceTests
     [Fact]
     public async Task ExecuteAsync_NotEnrolled_DoesNotPoll()
     {
-        var notEnrolledState = new AgentState();
+        var notEnrolledState = new AgentState(TimeProvider.System);
         var notEnrolled = new EnrollmentService(
             _apiClientMock,
             _options,
@@ -454,6 +823,7 @@ public class PollingServiceTests
             Array.Empty<IOperationExecutor>(),
             Substitute.For<IContainerExecutor>(),
             Substitute.For<IDockerStorageMaintenance>(),
+            _refusalOutbox,
             notEnrolledState,
             new AgentRuntimeHealth(TimeProvider.System),
             _processRestarter,
@@ -583,6 +953,201 @@ public class PollingServiceTests
     }
 
     [Fact]
+    public async Task PollOnceAsync_ContainerizedTypedOperation_CannotBypassContainerIsolation()
+    {
+        var operationExecutor = Substitute.For<IOperationExecutor>();
+        operationExecutor.CanHandle(OperationKind.AiRun).Returns(true);
+        var containerExecutor = Substitute.For<IContainerExecutor>();
+        containerExecutor.ExecuteAsync(
+                Arg.Any<ContainerSpec>(),
+                Arg.Any<string>(),
+                Arg.Any<Dictionary<string, string>>(),
+                Arg.Any<int>(),
+                Arg.Any<Func<string, TaskLogLevel, Task>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ExecutorResult(0, false));
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 102,
+            Name = "isolated-ai",
+            Command = "ai-run",
+            Operation = OperationKind.AiRun,
+            Container = new ContainerSpec { Image = "runner@sha256:abc" },
+            EnvironmentVariables = new Dictionary<string, string>(),
+            TimeoutSeconds = 30
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+        var service = CreateService([operationExecutor], containerExecutor: containerExecutor);
+
+        await PollAndDrainAsync(service);
+
+        await containerExecutor.Received(1).ExecuteAsync(
+            pendingTask.Container,
+            "ai-run",
+            Arg.Any<Dictionary<string, string>>(),
+            30,
+            Arg.Any<Func<string, TaskLogLevel, Task>>(),
+            Arg.Any<CancellationToken>());
+        await operationExecutor.DidNotReceive().ExecuteAsync(
+            OperationKind.AiRun,
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<int>(),
+            Arg.Any<Func<string, TaskLogLevel, Task>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(1, false, "InfrastructureMismatch", "Toolchain manifest is invalid.", TaskExecutionStatus.Failed)]
+    [InlineData(-1, true, "ToolError", "Container timed out.", TaskExecutionStatus.Timeout)]
+    [InlineData(1, false, "BuildFailed", "Compilation failed.", TaskExecutionStatus.Failed)]
+    [InlineData(1, false, "TestsFailed", "Two tests failed.", TaskExecutionStatus.Failed)]
+    public async Task PollOnceAsync_TransportsStructuredFailureExactly(
+        int exitCode,
+        bool timedOut,
+        string failureCode,
+        string failureReason,
+        TaskExecutionStatus expectedStatus)
+    {
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 991,
+            Name = "structured-failure",
+            Command = "execute",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = [],
+            TimeoutSeconds = 30
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+        _executorMock.ExecuteAsync(
+                pendingTask.Command,
+                Arg.Any<Dictionary<string, string>>(),
+                pendingTask.TimeoutSeconds,
+                Arg.Any<Func<string, TaskLogLevel, Task>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ExecutorResult(exitCode, timedOut, failureCode, failureReason));
+
+        await PollAndDrainAsync(CreateService());
+
+        await _apiClientMock.Received(1).CompleteTaskAsync(
+            pendingTask.Id,
+            Arg.Is<TaskResultDto>(result =>
+                result.Status == expectedStatus
+                && result.ExitCode == exitCode
+                && result.FailureCode == failureCode
+                && result.FailureReason == failureReason),
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_PurgeWorkspace_RemovesBothTreesEvenAfterExecutionFailure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aetheus-purge-{Guid.NewGuid():N}");
+        var pipelineRunId = 741;
+        var workspace = Path.Combine(root, "cw", pipelineRunId.ToString());
+        var state = Path.Combine(root, "container-state", pipelineRunId.ToString());
+        Directory.CreateDirectory(workspace);
+        Directory.CreateDirectory(state);
+        await File.WriteAllTextAsync(
+            Path.Combine(workspace, "source.txt"),
+            "source",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(state, "state.json"),
+            "{}",
+            TestContext.Current.CancellationToken);
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 992,
+            PipelineRunId = pipelineRunId,
+            PurgeWorkspace = true,
+            Name = "cleanup-after-failure",
+            Command = "fail",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = [],
+            TimeoutSeconds = 30
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+        _executorMock.ExecuteAsync(
+                pendingTask.Command,
+                Arg.Any<Dictionary<string, string>>(),
+                pendingTask.TimeoutSeconds,
+                Arg.Any<Func<string, TaskLogLevel, Task>>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("simulated execution failure"));
+        var options = Options.Create(new AetheusAgentOptions
+        {
+            ServerUrl = "http://localhost:5301",
+            WorkDirectory = root,
+            PollingIntervalSeconds = 1,
+            MaxConcurrentTasks = 2
+        });
+
+        try
+        {
+            await PollAndDrainAsync(CreateService(options: options));
+
+            Assert.False(Directory.Exists(workspace));
+            Assert.False(Directory.Exists(state));
+            await _apiClientMock.Received(1).CompleteTaskAsync(
+                pendingTask.Id,
+                Arg.Is<TaskResultDto>(result => result.Status == TaskExecutionStatus.Failed),
+                CancellationToken.None);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_ContainerArtifactOperation_UsesDaemonVisibleWorkspace()
+    {
+        var operation = Substitute.For<IOperationExecutor>();
+        operation.CanHandle(OperationKind.PipelineCollectArtifacts).Returns(true);
+        operation.ExecuteAsync(
+                OperationKind.PipelineCollectArtifacts,
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyDictionary<string, string>>(),
+                30,
+                Arg.Any<Func<string, TaskLogLevel, Task>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ExecutorResult(0, false));
+        var pendingTask = new PendingTaskDto
+        {
+            Id = 103,
+            PipelineRunId = 42,
+            Name = "Collect Artifacts",
+            Command = "[\"out/**\"]",
+            Operation = OperationKind.PipelineCollectArtifacts,
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                ["AETHEUS_WORKSPACE_MODE"] = "container",
+                ["AETHEUS_WORKING_DIR"] = "/w"
+            },
+            TimeoutSeconds = 30
+        };
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([pendingTask]);
+
+        await PollAndDrainAsync(CreateService([operation]));
+
+        await operation.Received(1).ExecuteAsync(
+            OperationKind.PipelineCollectArtifacts,
+            pendingTask.Command,
+            Arg.Is<IReadOnlyDictionary<string, string>>(env =>
+                env["AETHEUS_WORKING_DIR"]
+                    == Path.Combine(_options.Value.WorkDirectory, "cw", "42")),
+            30,
+            Arg.Any<Func<string, TaskLogLevel, Task>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PollOnceAsync_OperationTask_NoHandler_ReportsFailure()
     {
         var pendingTask = new PendingTaskDto
@@ -658,16 +1223,39 @@ public class PollingServiceTests
         _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<PendingTaskDto> { pendingTask });
 
+        static async Task<ExecutorResult> CrashAfterOutputAsync(
+            Func<string, TaskLogLevel, Task> onOutput)
+        {
+            await onOutput("executor started", TaskLogLevel.Info);
+            throw new InvalidOperationException("Executor crashed");
+        }
+
         _executorMock.ExecuteAsync(
                 "crash", Arg.Any<Dictionary<string, string>>(), 30,
                 Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("Executor crashed"));
+            .Returns(call => CrashAfterOutputAsync(
+                call.ArgAt<Func<string, TaskLogLevel, Task>>(3)));
 
         var service = CreateService();
         await PollAndDrainAsync(service);
 
         await _apiClientMock.Received(1).CompleteTaskAsync(66,
-            Arg.Is<TaskResultDto>(r => r.Status == TaskExecutionStatus.Failed && r.ExitCode == -1),
+            Arg.Is<TaskResultDto>(r =>
+                r.Status == TaskExecutionStatus.Failed
+                && r.ExitCode == -1
+                && r.FailureCode == TaskFailureCodes.ToolError
+                && r.FailureReason != null
+                && r.FailureReason.Contains("InvalidOperationException", StringComparison.Ordinal)
+                && r.FailureReason.Contains("Executor crashed", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+        await _apiClientMock.Received().AppendLogBatchAsync(
+            Arg.Is<List<AppendLogRequest>>(batch =>
+                batch.Any(log => log.Message == "executor started")),
+            Arg.Any<CancellationToken>());
+        await _apiClientMock.Received().AppendLogBatchAsync(
+            Arg.Is<List<AppendLogRequest>>(batch =>
+                batch.Any(log => log.Level == TaskLogLevel.Error
+                                 && log.Message.Contains("Executor crashed", StringComparison.Ordinal))),
             Arg.Any<CancellationToken>());
     }
 
@@ -707,8 +1295,10 @@ public class PollingServiceTests
         Assert.Equal(2, Volatile.Read(ref maximum));
         Assert.Equal(2, service._runningTasks.Count);
 
+        var failedExecution = service._runningTasks[1].Execution;
         releases[1].TrySetResult();
-        await WaitUntilAsync(() => !service._runningTasks.ContainsKey(1));
+        await failedExecution.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.False(service._runningTasks.ContainsKey(1));
         await service.PollOnceAsync(TestContext.Current.CancellationToken);
         await started[3].Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
@@ -746,15 +1336,6 @@ public class PollingServiceTests
             observed = Volatile.Read(ref maximum);
             if (candidate <= observed) return;
         } while (Interlocked.CompareExchange(ref maximum, candidate, observed) != observed);
-    }
-
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        var timeout = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition() && timeout.Elapsed < TimeSpan.FromSeconds(5))
-            await Task.Delay(TimeSpan.FromMilliseconds(10), TestContext.Current.CancellationToken);
-
-        Assert.True(condition(), "The asynchronous polling state did not reach the expected condition.");
     }
 
     // Reconciliation: a task reported terminal server-side is cancelled locally - this is the trigger

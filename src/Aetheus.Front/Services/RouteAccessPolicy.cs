@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Services;
 
@@ -18,8 +17,13 @@ public static class RouteAccessPolicy
     {
         var path = relativeUri.Split('?', '#')[0].Trim('/');
 
+        // Login is a public transition route. Keep it renderable after LoginAsync has published the
+        // authenticated state and while the login component is still preloading permissions before
+        // navigating home. Denying it during that short window flashes the global "Access denied"
+        // state even though authentication succeeded. An already-authenticated direct visit is still
+        // redirected home by Login.OnInitializedAsync.
         if (path.Equals("login", StringComparison.OrdinalIgnoreCase))
-            return !isAuthenticated;
+            return true;
 
         if (!isAuthenticated)
             return false;
@@ -44,14 +48,22 @@ public static class RouteAccessPolicy
             return CanAccessProjectPath(projectTail, permissions);
 
         if (Matches(path, "pipelines", out var pipelineTail))
-        {
-            if (pipelineTail.Equals("fleet", StringComparison.OrdinalIgnoreCase))
-                return permissions.CanReadAny(ResourceType.PipelineTemplate);
-            if (pipelineTail.StartsWith("runs/", StringComparison.OrdinalIgnoreCase))
-                return permissions.CanReadAny(ResourceType.Pipeline);
-            return CanAccessResourcePath(pipelineTail, ResourceType.Pipeline, permissions, "new");
-        }
+            return CanAccessPipelinePath(pipelineTail, permissions);
 
+        return CanAccessOtherPath(path, permissions);
+    }
+
+    private static bool CanAccessPipelinePath(string tail, PermissionService permissions)
+    {
+        if (tail.Equals("fleet", StringComparison.OrdinalIgnoreCase))
+            return permissions.CanReadAny(ResourceType.PipelineTemplate);
+        if (tail.StartsWith("runs/", StringComparison.OrdinalIgnoreCase))
+            return permissions.CanReadAny(ResourceType.Pipeline);
+        return CanAccessResourcePath(tail, ResourceType.Pipeline, permissions, "new");
+    }
+
+    private static bool CanAccessOtherPath(string path, PermissionService permissions)
+    {
         if (path.Equals("templates", StringComparison.OrdinalIgnoreCase))
             return permissions.CanReadAny(ResourceType.PipelineTemplate);
 
@@ -75,7 +87,9 @@ public static class RouteAccessPolicy
             || path.Equals("alerts", StringComparison.OrdinalIgnoreCase))
             return permissions.CanReadAny(ResourceType.Server);
 
-        if (path.Equals("backups", StringComparison.OrdinalIgnoreCase)
+        if (path.Equals("analysis", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("analysis/", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("backups", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("git", StringComparison.OrdinalIgnoreCase))
             return permissions.CanReadAny(ResourceType.Project);
@@ -136,9 +150,15 @@ public static class RouteAccessPolicy
 
         if (segments.Length == 1)
             return permissions.CanRead(ResourceType.Project, projectId);
-
         var canReadProject = permissions.CanRead(ResourceType.Project, projectId);
-        return segments[1].ToLowerInvariant() switch
+        return CanAccessProjectSection(segments[1], projectId, canReadProject, permissions);
+    }
+
+    private static bool CanAccessProjectSection(
+        string section,
+        int projectId,
+        bool canReadProject,
+        PermissionService permissions) => section.ToLowerInvariant() switch
         {
             "pipelines" => canReadProject && permissions.CanReadAny(ResourceType.Pipeline),
             "servers" => canReadProject && permissions.CanReadAny(ResourceType.Server),
@@ -149,7 +169,6 @@ public static class RouteAccessPolicy
             "edit" => permissions.CanWrite(ResourceType.Project, projectId),
             _ => permissions.CanRead(ResourceType.Project, projectId)
         };
-    }
 
     private static bool Matches(string path, string prefix, out string tail)
     {

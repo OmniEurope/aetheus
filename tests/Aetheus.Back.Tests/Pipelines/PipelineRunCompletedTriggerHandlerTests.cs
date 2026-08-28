@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Pipelines.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests.Pipelines;
@@ -19,11 +18,11 @@ public sealed class PipelineRunCompletedTriggerHandlerTests
 {
     private readonly IPipelineRepository _repo = Substitute.For<IPipelineRepository>();
     private readonly IPipelineRunService _runService = Substitute.For<IPipelineRunService>();
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 7, 6, 12, 0, 0, TimeSpan.Zero));
     private readonly PipelineRunCompletedTriggerHandler _sut;
 
     public PipelineRunCompletedTriggerHandlerTests()
-        => _sut = new PipelineRunCompletedTriggerHandler(_repo, _runService, _clock, NullLogger<PipelineRunCompletedTriggerHandler>.Instance);
+        => _sut = new PipelineRunCompletedTriggerHandler(
+            _repo, _runService, NullLogger<PipelineRunCompletedTriggerHandler>.Instance);
 
     private PipelineStepRun ArrangeWaitingStep(TaskExecutionStatus status = TaskExecutionStatus.Running)
     {
@@ -47,11 +46,36 @@ public sealed class PipelineRunCompletedTriggerHandlerTests
 
         await _sut.HandleAsync(new PipelineRunCompletedEvent(99, PipelineStatus.Success), ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal(TaskExecutionStatus.Success, step.Status);
-        Assert.Equal(0, step.ExitCode);
-        Assert.Equal(_clock.GetUtcNow().UtcDateTime, step.CompletedAt);
-        await _repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
-        await _runService.Received(1).AdvanceStageAsync(5, "deploy", Arg.Any<CancellationToken>());
+        await _runService.Received(1).ResolveCompletedTriggerStepAsync(
+            step,
+            PipelineStatus.Success,
+            Arg.Is<IReadOnlyDictionary<string, string>>(outputs => outputs.Count == 0),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_ChildSuccess_PropagatesChildOutputVariablesToParentTriggerStep()
+    {
+        var step = ArrangeWaitingStep();
+        _repo.GetSuccessfulStepOutputsAsync(99, Arg.Any<CancellationToken>()).Returns(
+        [
+            new StepOutputProjection(
+                "Package",
+                "Create contract",
+                """{"CANDIDATE_ID":"abc123","CANDIDATE_VERSION":"c-source-abc123"}""")
+        ]);
+
+        await _sut.HandleAsync(
+            new PipelineRunCompletedEvent(99, PipelineStatus.Success),
+            ct: TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).ResolveCompletedTriggerStepAsync(
+            step,
+            PipelineStatus.Success,
+            Arg.Is<IReadOnlyDictionary<string, string>>(outputs =>
+                outputs["CANDIDATE_ID"] == "abc123"
+                && outputs["CANDIDATE_VERSION"] == "c-source-abc123"),
+            Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -63,9 +87,11 @@ public sealed class PipelineRunCompletedTriggerHandlerTests
 
         await _sut.HandleAsync(new PipelineRunCompletedEvent(99, childStatus), ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal(TaskExecutionStatus.Failed, step.Status);
-        Assert.Equal(1, step.ExitCode);
-        await _runService.Received(1).AdvanceStageAsync(5, "deploy", Arg.Any<CancellationToken>());
+        await _runService.Received(1).ResolveCompletedTriggerStepAsync(
+            step,
+            childStatus,
+            Arg.Is<IReadOnlyDictionary<string, string>>(outputs => outputs.Count == 0),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -75,8 +101,11 @@ public sealed class PipelineRunCompletedTriggerHandlerTests
 
         await _sut.HandleAsync(new PipelineRunCompletedEvent(99, PipelineStatus.Failed), ct: TestContext.Current.CancellationToken);
 
-        await _repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
-        await _runService.DidNotReceive().AdvanceStageAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().ResolveCompletedTriggerStepAsync(
+            Arg.Any<PipelineStepRun>(),
+            Arg.Any<PipelineStatus>(),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -86,6 +115,10 @@ public sealed class PipelineRunCompletedTriggerHandlerTests
 
         await _sut.HandleAsync(new PipelineRunCompletedEvent(99, PipelineStatus.Success), ct: TestContext.Current.CancellationToken);
 
-        await _runService.DidNotReceive().AdvanceStageAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().ResolveCompletedTriggerStepAsync(
+            Arg.Any<PipelineStepRun>(),
+            Arg.Any<PipelineStatus>(),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
     }
 }

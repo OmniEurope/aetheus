@@ -5,7 +5,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else if (_repo is null)
 {
@@ -56,8 +56,8 @@ else
                        also prevents double-fetching the initial page (we already load it
                        in OnInitializedAsync via LoadCommits). *@
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
-                        <RadzenDropDown TValue="string" Data="@_branches.Select(b => b.Name)" @bind-Value="_selectedRef"
-                            Change="@(_ => LoadCommits())" Placeholder="@_repo.DefaultBranch" AllowClear="false" />
+                        <RadzenDropDown TValue="string" Data="@CommitRefOptions" TextProperty="Text" ValueProperty="Value"
+                            @bind-Value="_selectedRef" Change="@(_ => LoadCommits())" AllowClear="false" />
                         <RadzenTextBox @bind-Value="_commitSearch" Placeholder="@L["SearchCommits"]" class="rz-flex-grow-1" />
                         <RadzenButton Icon="search" Size="ButtonSize.Small" Click="@LoadCommits" title="@L["Search"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                         <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@string.Format(L["Total"], _commitsTotalCount)" />
@@ -66,15 +66,20 @@ else
                         Count="@_commitsTotalCount" IsLoading="@_commitsLoading" LoadData="@OnLoadCommits"
                         AutoLoad="false" EmptyText="@L["NoCommitsFound"]"
                         RowClick="@(c => Nav.NavigateTo($"/git-repositories/{Id}/commits/{c.Sha}"))">
+                        @* Commits are the one grid on this page that cannot honour a column sort: the page
+                           comes from a git revision walk paged by offset, so its order is the walk's
+                           (topological, newest first), and re-ordering it would mean reading the whole
+                           history per page. The columns say so rather than offering an order that never
+                           arrives; the other five grids here do sort server-side. *@
                         <Columns>
-                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="ShortSha" Title="@L["Commit"]" Width="100px">
+                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="ShortSha" Title="@L["Commit"]" Width="100px" Sortable="false">
                                 <Template Context="c">
                                     <a href="@($"/git-repositories/{Id}/commits/{c.Sha}")" class="rz-link" @onclick:stopPropagation="true"><code>@c.ShortSha</code></a>
                                 </Template>
                             </RadzenDataGridColumn>
-                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="Message" Title="@L["Message"]" Width="auto" />
-                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="AuthorName" Title="@L["Author"]" Width="150px" />
-                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="AuthorDate" Title="@L["Date"]" FormatString="{0:g}" Width="160px" />
+                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="Message" Title="@L["Message"]" Width="auto" Sortable="false" />
+                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="AuthorName" Title="@L["Author"]" Width="150px" Sortable="false" />
+                            <RadzenDataGridColumn TItem="GitLightCommitDto" Property="AuthorDate" Title="@L["Date"]" FormatString="{0:g}" Width="160px" Sortable="false" />
                         </Columns>
                     </AetheusDataGrid>
                 }
@@ -192,12 +197,12 @@ else
                             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
                                 <RadzenIcon Icon="description" />
                                 <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@_blobContent.Path</RadzenText>
-                                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@FormatSize(_blobContent.Size)" />
+                                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@GitRepositoryViewHelpers.FormatSize(_blobContent.Size)" />
                                 <div class="pipeline-list-spacer"></div>
                                 @if (!_blobContent.IsBinary)
                                 {
                                     <RadzenButton Icon="person_search" Text="@(_blameLines is not null ? L["Code"] : L["Blame"])"
-                                        Size="ButtonSize.Small" Click="@ToggleBlame" title="@L["Blame"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                        Size="ButtonSize.Small" Click="@ToggleBlame" title="@L["Blame"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                                 }
                                 <RadzenButton Icon="arrow_back" Size="ButtonSize.Small" Click="@CloseBlobAsync" title="@L["Back"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                             </RadzenStack>
@@ -234,7 +239,7 @@ else
                                     <Template Context="e">
                                         @if (e.Size.HasValue)
                                         {
-                                            @FormatSize(e.Size.Value)
+                                            @GitRepositoryViewHelpers.FormatSize(e.Size.Value)
                                         }
                                     </Template>
                                 </RadzenDataGridColumn>
@@ -279,7 +284,7 @@ else
                             <Template Context="pr">
                                 @if (pr.Status == PullRequestStatus.Open)
                                 {
-                                    <RadzenButton Text="@L["Merge"]" Icon="merge_type" Click="@(() => MergePr(pr))" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                    <RadzenButton Text="@L["Merge"]" Icon="merge_type" Click="@(() => MergePr(pr))" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                                     <RadzenButton Text="@L["Close"]" Icon="close" Click="@(() => ClosePr(pr))" Disabled="@(!_canWrite)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                                 }
                             </Template>
@@ -297,7 +302,7 @@ else
                 }
                 else if (_graphLoading)
                 {
-                    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+                    <AetheusLoader />
                 }
                 else
                 {

@@ -2,11 +2,14 @@
 using Aetheus.Agent.Core.Collectors;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Services;
+using Aetheus.Shared.Analysis;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Aetheus.Agent.Core.Tests;
 
@@ -26,6 +29,7 @@ public class HeartbeatServiceTests
     private readonly IFirewallCollector _firewallCollectorMock = Substitute.For<IFirewallCollector>();
     private readonly ISudoersHashCollector _sudoersHashCollectorMock = Substitute.For<ISudoersHashCollector>();
     private readonly IDockerStorageMaintenance _dockerStorageMaintenanceMock = Substitute.For<IDockerStorageMaintenance>();
+    private readonly IShellRunner _shellRunnerMock = Substitute.For<IShellRunner>();
     private readonly AgentState _agentState;
     private readonly EnrollmentService _enrollment;
     private readonly IOptions<AetheusAgentOptions> _options;
@@ -119,7 +123,11 @@ public class HeartbeatServiceTests
                 && h.MemoryTotalMb == 8192
                 && h.StorageDiagnostics.BuildCacheBytes == 1234
                 && h.SudoersInventoryAvailable == true
-                && !string.IsNullOrEmpty(h.AgentVersion)),
+                && !string.IsNullOrEmpty(h.AgentVersion)
+                && h.AgentProtocolVersion == AgentProtocol.CurrentVersion
+                && h.AgentCapabilities != null
+                && h.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate)
+                && h.AgentCapabilities.SequenceEqual(h.AgentCapabilities.Order(StringComparer.Ordinal))),
             Arg.Any<CancellationToken>());
     }
 
@@ -140,6 +148,65 @@ public class HeartbeatServiceTests
         await service.CollectAndSendHeartbeatAsync(TestContext.Current.CancellationToken);
 
         await _apiClientMock.Received(2).SendHeartbeatAsync(1, Arg.Any<ServerHeartbeatDto>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CollectAndSendHeartbeatAsync_ApiFailure_DoesNotRefreshWatchdogSuccess()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero));
+        var health = new AgentRuntimeHealth(time);
+        health.MarkHeartbeatSuccess();
+        var previousSuccess = health.LastHeartbeatSuccessAt;
+        time.Advance(TimeSpan.FromMinutes(1));
+        _apiClientMock.SendHeartbeatAsync(1, Arg.Any<ServerHeartbeatDto>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Connection refused"));
+        var service = CreateService(time, health);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            service.CollectAndSendHeartbeatAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(previousSuccess, health.LastHeartbeatSuccessAt);
+    }
+
+    [Fact]
+    public async Task CollectAndSendHeartbeatAsync_ApiSuccess_RefreshesWatchdogSuccess()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero));
+        var health = new AgentRuntimeHealth(time);
+        health.MarkHeartbeatSuccess();
+        time.Advance(TimeSpan.FromMinutes(1));
+        var service = CreateService(time, health);
+
+        await service.CollectAndSendHeartbeatAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(time.GetUtcNow(), health.LastHeartbeatSuccessAt);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Enrolled_SendsInitialHeartbeatBeforeFirstTimerTick()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 5, 8, 0, 0, TimeSpan.Zero));
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _apiClientMock.SendHeartbeatAsync(1, Arg.Any<ServerHeartbeatDto>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                sent.TrySetResult();
+                return (ServerHeartbeatResponseDto?)null;
+            });
+        var service = CreateService(time);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await service.LoopStarted.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        await sent.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        await service.StopAsync(TestContext.Current.CancellationToken);
+
+        await _apiClientMock.Received(1).SendHeartbeatAsync(
+            1,
+            Arg.Is<ServerHeartbeatDto>(heartbeat =>
+                heartbeat.AgentProtocolVersion == AgentProtocol.CurrentVersion
+                && heartbeat.AgentCapabilities != null
+                && heartbeat.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -166,7 +233,6 @@ public class HeartbeatServiceTests
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         await service.LoopStarted.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
-        time.Advance(TimeSpan.FromSeconds(1));
         await firstAttempt.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromSeconds(1));
         await secondAttempt.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
@@ -178,7 +244,7 @@ public class HeartbeatServiceTests
     [Fact]
     public async Task ExecuteAsync_NotEnrolled_DoesNotSendHeartbeat()
     {
-        var notEnrolledState = new AgentState();
+        var notEnrolledState = new AgentState(TimeProvider.System);
         var notEnrolled = CreateNotEnrolledEnrollmentService(notEnrolledState);
 
         var service = new HeartbeatService(
@@ -264,7 +330,31 @@ public class HeartbeatServiceTests
         hungCollector.TrySetCanceled(TestContext.Current.CancellationToken);
     }
 
-    private HeartbeatService CreateService(TimeProvider? timeProvider = null)
+    [Fact]
+    public async Task CollectAndSendHeartbeatAsync_HungScannerProbe_StillReportsEmbeddedManifestIdentity()
+    {
+        var hungProbe = new TaskCompletionSource<ShellExecResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _shellRunnerMock.RunExecAsync(
+                Arg.Is<string>(file => file.Contains("docker", StringComparison.OrdinalIgnoreCase)),
+                Arg.Is<IReadOnlyList<string>>(arguments => arguments.Contains("info")),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<TimeSpan?>())
+            .Returns(hungProbe.Task);
+        var service = CreateService();
+
+        await service.CollectAndSendHeartbeatAsync(TestContext.Current.CancellationToken);
+
+        var identity = $"scanner-manifest:sha256:{ScannerManifestCatalog.Sha256}";
+        await _apiClientMock.Received(1).SendHeartbeatAsync(
+            1,
+            Arg.Is<ServerHeartbeatDto>(heartbeat => heartbeat.ScannerCapabilities.Contains(identity, StringComparer.Ordinal)),
+            Arg.Any<CancellationToken>());
+        hungProbe.TrySetCanceled(TestContext.Current.CancellationToken);
+    }
+
+    private HeartbeatService CreateService(
+        TimeProvider? timeProvider = null,
+        AgentRuntimeHealth? runtimeHealth = null)
     {
         var time = timeProvider ?? TimeProvider.System;
         return new(
@@ -283,9 +373,9 @@ public class HeartbeatServiceTests
         _firewallCollectorMock,
         _sudoersHashCollectorMock,
         _dockerStorageMaintenanceMock,
-        Substitute.For<IShellRunner>(),
+        _shellRunnerMock,
         _agentState,
-        new AgentRuntimeHealth(time),
+        runtimeHealth ?? new AgentRuntimeHealth(time),
         time,
         _options,
         NullLogger<HeartbeatService>.Instance);

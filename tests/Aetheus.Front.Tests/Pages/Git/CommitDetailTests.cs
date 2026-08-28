@@ -3,6 +3,8 @@ using System.Net;
 using Aetheus.Front.Pages.Git;
 using Aetheus.Shared.DTOs;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages.Git;
 
@@ -12,60 +14,65 @@ public class CommitDetailTests : BunitContext
 
     public CommitDetailTests() => _handler = BunitTestHelper.RegisterServices(this);
 
-    private static GitCommitDto Sample(int id = 3, string? repoUrl = "https://github.com/acme/demo.git") => new()
+    private static GitCommitDto Sample(int id = 3, string? repoUrl = "https://localhost:5302/git/1/demo.git") => new()
     {
         Id = id,
         ProjectId = 1,
         ProjectName = "Demo",
         Sha = "abcdef1234567890",
-        Message = "feat: initial commit",
-        Author = "alice",
-        CommittedAt = new DateTime(2026, 6, 1, 9, 0, 0, DateTimeKind.Utc),
         RepositoryUrl = repoUrl
     };
 
+    private void SetRepositories(params GitLightRepoDto[] repositories) =>
+        _handler.SetJsonResponse("api/git/repos", new PaginatedResult<GitLightRepoDto>
+        {
+            Items = repositories.ToList(),
+            TotalCount = repositories.Length,
+            Page = 1,
+            PageSize = 100
+        });
+
     [Fact]
-    public void Renders_LoadedCommit_ShowsShortSha()
+    public void ExistingCommit_RedirectsToCanonicalRepositoryCommit()
     {
         _handler.SetJsonResponse("api/gitgraph/commits/3", Sample());
+        SetRepositories(new GitLightRepoDto
+        {
+            Id = 7,
+            ProjectId = 1,
+            Name = "Demo",
+            CloneUrl = "https://localhost:5302/git/1/demo.git"
+        });
 
-        var cut = Render<CommitDetail>(p => p.Add(c => c.CommitId, 3));
+        Render<CommitDetail>(parameters => parameters.Add(component => component.CommitId, 3));
 
-        cut.WaitForState(() => cut.Markup.Contains("abcdef12"));
-        Assert.Contains("abcdef12", cut.Markup);
+        Assert.EndsWith("/git-repositories/7/commits/abcdef1234567890",
+            Services.GetRequiredService<NavigationManager>().Uri);
     }
 
     [Fact]
-    public void Renders_LocalRepository_StillRendersCommit()
+    public void DifferentLauncherHost_StillMatchesRepositoryByPath()
     {
-        _handler.SetJsonResponse("api/gitgraph/commits/4", Sample(4, repoUrl: "/srv/git/demo"));
+        _handler.SetJsonResponse("api/gitgraph/commits/4", Sample(4,
+            "https://host.docker.internal:5303/git/1/demo.git"));
+        SetRepositories(
+            new GitLightRepoDto { Id = 7, ProjectId = 1, Name = "Demo", CloneUrl = "https://localhost:5302/git/1/demo.git" },
+            new GitLightRepoDto { Id = 8, ProjectId = 1, Name = "Other", CloneUrl = "https://localhost:5302/git/1/other.git" });
 
-        var cut = Render<CommitDetail>(p => p.Add(c => c.CommitId, 4));
+        Render<CommitDetail>(parameters => parameters.Add(component => component.CommitId, 4));
 
-        cut.WaitForState(() => cut.Markup.Contains("abcdef12"));
-        Assert.Contains("abcdef12", cut.Markup);
+        Assert.EndsWith("/git-repositories/7/commits/abcdef1234567890",
+            Services.GetRequiredService<NavigationManager>().Uri);
     }
 
     [Fact]
-    public void Renders_NotFound_DoesNotShowSha()
+    public void MissingCommit_DoesNotRedirect()
     {
         _handler.SetResponse("api/gitgraph/commits/9", HttpStatusCode.NotFound);
 
-        var cut = Render<CommitDetail>(p => p.Add(c => c.CommitId, 9));
+        var cut = Render<CommitDetail>(parameters => parameters.Add(component => component.CommitId, 9));
 
-        Assert.DoesNotContain("abcdef12", cut.Markup);
-    }
-
-    [Fact]
-    public void CommitIdChange_ReloadsSameComponentInstance()
-    {
-        _handler.SetJsonResponse("api/gitgraph/commits/1", Sample(1) with { Message = "first message" });
-        _handler.SetJsonResponse("api/gitgraph/commits/2", Sample(2) with { Message = "second message" });
-        var cut = Render<CommitDetail>(p => p.Add(c => c.CommitId, 1));
-
-        cut.Render(p => p.Add(c => c.CommitId, 2));
-
-        cut.WaitForAssertion(() => Assert.Contains("second message", cut.Markup));
-        Assert.DoesNotContain("first message", cut.Markup);
+        cut.WaitForAssertion(() => Assert.Contains("NotFound", cut.Markup));
+        Assert.Equal("http://localhost/", Services.GetRequiredService<NavigationManager>().Uri);
     }
 }

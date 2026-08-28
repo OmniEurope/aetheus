@@ -35,6 +35,7 @@ public record ServerDiagnosticDto
     /// the agent has never reported). Reserved for future hard breaks.
     /// </summary>
     public bool? VersionsCompatible { get; init; }
+    public AgentCompatibilityDto? AgentCompatibility { get; init; }
 
     /// <summary>
     /// Single short human-readable line the UI can render front-and-center -

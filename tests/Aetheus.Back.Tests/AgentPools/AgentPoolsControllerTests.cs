@@ -106,6 +106,44 @@ public class AgentPoolsControllerTests
     }
 
     [Fact]
+    public async Task CreatePool_ServerOutsideWritableScope_ReturnsForbid()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.AgentPool, null, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(new List<int> { 10 });
+
+        var result = await _sut.CreatePool(new CreateAgentPoolRequest
+        {
+            Name = "New",
+            ServerIds = [10, 99]
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        await _serviceMock.DidNotReceive().CreatePoolAsync(
+            Arg.Any<CreateAgentPoolRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreatePool_UnrestrictedServerScope_ReturnsCreated()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.AgentPool, null, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns((List<int>?)null);
+        _serviceMock.CreatePoolAsync(Arg.Any<CreateAgentPoolRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new AgentPoolDto { Id = 1, Name = "New" });
+
+        var result = await _sut.CreatePool(new CreateAgentPoolRequest
+        {
+            Name = "New",
+            ServerIds = [99]
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<CreatedAtActionResult>(result.Result);
+    }
+
+    [Fact]
     public async Task UpdatePool_Authorized_ReturnsOk()
     {
         _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.AgentPool, 1, Permission.Write, Arg.Any<CancellationToken>())
@@ -127,6 +165,25 @@ public class AgentPoolsControllerTests
         var result = await _sut.UpdatePool(1, new UpdateAgentPoolRequest { Name = "X" }, TestContext.Current.CancellationToken);
 
         Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdatePool_ServerOutsideWritableScope_ReturnsForbid()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.AgentPool, 1, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Write, Arg.Any<CancellationToken>())
+            .Returns(new List<int> { 10 });
+
+        var result = await _sut.UpdatePool(1, new UpdateAgentPoolRequest
+        {
+            Name = "Updated",
+            ServerIds = [10, 99]
+        }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        await _serviceMock.DidNotReceive().UpdatePoolAsync(
+            Arg.Any<int>(), Arg.Any<UpdateAgentPoolRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

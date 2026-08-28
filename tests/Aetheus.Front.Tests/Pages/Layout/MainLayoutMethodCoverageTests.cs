@@ -3,10 +3,12 @@ using System.Net;
 using System.Reflection;
 using Aetheus.Front.Layout;
 using Aetheus.Front.Services;
+using Aetheus.Front.Tests.Services;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.DTOs.Organizations;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -61,7 +63,7 @@ public class MainLayoutMethodCoverageTests : BunitContext
     }
 
     [Fact]
-    public async Task LoadPermissionsAsync_HttpError_DoesNotThrow()
+    public async Task LoadPermissionsAsync_HttpError_StillCallsTheApi()
     {
         _handler.SetResponse("api/users/me/permissions", HttpStatusCode.InternalServerError);
 
@@ -113,7 +115,7 @@ public class MainLayoutMethodCoverageTests : BunitContext
     }
 
     [Fact]
-    public async Task LoadOrganizationsAsync_HttpError_DoesNotThrow()
+    public async Task LoadOrganizationsAsync_HttpError_StillCallsTheApi()
     {
         _handler.SetResponse("api/organizations/me", HttpStatusCode.InternalServerError);
 
@@ -233,7 +235,7 @@ public class MainLayoutMethodCoverageTests : BunitContext
     }
 
     [Fact]
-    public async Task ToggleLanguage_DoesNotThrow()
+    public async Task ToggleLanguage_StillInvokesJs()
     {
         var cut = Render<MainLayout>();
         var method = LayoutType.GetMethod("ToggleLanguage", Priv)!;
@@ -248,7 +250,9 @@ public class MainLayoutMethodCoverageTests : BunitContext
     [Fact]
     public async Task OnNeedsLogin_WhenNotOnLoginPage_Triggers()
     {
+        UseCountingHubFactory();
         var cut = Render<MainLayout>();
+        var factory = (CountingHubConnectionFactory)Services.GetRequiredService<HubConnectionFactory>();
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         var permissions = Services.GetRequiredService<PermissionService>();
         var cache = Services.GetRequiredService<ListCacheService>();
@@ -267,6 +271,7 @@ public class MainLayoutMethodCoverageTests : BunitContext
 
         // Not on the login page, so the 401 funnel redirects to /login.
         Assert.Contains("login", nav.Uri);
+        cut.WaitForAssertion(() => Assert.Equal(1, factory.StopAllCount));
         Assert.False(permissions.IsLoaded);
         Assert.False(cache.TryGet<DashboardOverviewDto>("dashboard:overview", out _));
     }
@@ -300,7 +305,9 @@ public class MainLayoutMethodCoverageTests : BunitContext
     [Fact]
     public async Task OnLogoutMenuClick_ClosesMenuAndCallsLogout()
     {
+        UseCountingHubFactory();
         var cut = Render<MainLayout>();
+        var factory = (CountingHubConnectionFactory)Services.GetRequiredService<HubConnectionFactory>();
         LayoutType.GetField("_userMenuOpen", Priv)!.SetValue(cut.Instance, true);
 
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
@@ -310,7 +317,13 @@ public class MainLayoutMethodCoverageTests : BunitContext
 
         // After logout the navigation should go to /login
         Assert.Contains("login", nav.Uri);
+        Assert.Equal(1, factory.StopAllCount);
     }
+
+    private void UseCountingHubFactory() =>
+        Services.AddSingleton<HubConnectionFactory>(services => new CountingHubConnectionFactory(
+            services.GetRequiredService<IConfiguration>(),
+            services.GetRequiredService<AuthStateProvider>()));
 
     // ── OnActiveOrgChanged ────────────────────────────────────────────────────
 

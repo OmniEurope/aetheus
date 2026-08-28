@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Rkhunter;
 
@@ -51,21 +49,12 @@ public class RkhunterRepository(AppDbContext db, TimeProvider timeProvider) : IR
 
     public async Task AddTaskAsync(ServerTask task, CancellationToken ct = default)
     {
-        db.Tasks.Add(task);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await ServerTaskRepositoryOperations.AddTaskAsync(db, task, ct).ConfigureAwait(false);
     }
 
     public async Task UpdateScanScheduleAsync(int serverId, string? cronExpression, CancellationToken ct = default)
     {
-        var state = await db.RkhunterStates
-            .Where(r => r.ServerId == serverId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-
-        if (state is null) return;
-
-        state.ScanScheduleCron = cronExpression;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await UpdateStateAsync(serverId, state => state.ScanScheduleCron = cronExpression, ct).ConfigureAwait(false);
     }
 
     public async Task<List<RkhunterState>> GetScheduledStatesAsync(CancellationToken ct = default)
@@ -79,14 +68,18 @@ public class RkhunterRepository(AppDbContext db, TimeProvider timeProvider) : IR
 
     public async Task UpdateLastScheduledScanAsync(int serverId, CancellationToken ct = default)
     {
-        var state = await db.RkhunterStates
-            .Where(r => r.ServerId == serverId)
-            .FirstOrDefaultAsync(ct)
+        await UpdateStateAsync(
+            serverId,
+            state => state.LastScheduledScanAt = timeProvider.GetUtcNow().UtcDateTime,
+            ct).ConfigureAwait(false);
+    }
+
+    private async Task UpdateStateAsync(int serverId, Action<RkhunterState> update, CancellationToken ct)
+    {
+        var state = await db.RkhunterStates.FirstOrDefaultAsync(item => item.ServerId == serverId, ct)
             .ConfigureAwait(false);
-
         if (state is null) return;
-
-        state.LastScheduledScanAt = timeProvider.GetUtcNow().UtcDateTime;
+        update(state);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

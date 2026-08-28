@@ -1,14 +1,25 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
 using System.IO.Compression;
-using System.Text.Json;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
+using System.Security.Cryptography;
 
 namespace Aetheus.Agent.Core.Operations;
 
 internal static class PipelineArtifactCollector
 {
+    private static readonly HashSet<string> AlreadyCompressedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".7z", ".avif", ".br", ".bz2", ".gif", ".gz", ".jpeg", ".jpg", ".mp3", ".mp4",
+        ".nupkg", ".pdf", ".png", ".snupkg", ".tgz", ".webp", ".woff", ".woff2",
+        ".xz", ".zip"
+    };
+
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs", ".css", ".csv", ".html", ".js", ".json", ".md", ".mjs", ".props", ".razor",
+        ".sarif", ".targets", ".tsv", ".txt", ".xml", ".yaml", ".yml"
+    };
+
     public static async Task<ExecutorResult> CollectAsync(
         IServerApiClient apiClient, ILogger logger, string target,
         IReadOnlyDictionary<string, string> envVars,
@@ -18,6 +29,7 @@ internal static class PipelineArtifactCollector
         envVars.TryGetValue("AETHEUS_RUN_ID", out var runIdText);
         envVars.TryGetValue("AETHEUS_STAGE_NAME", out var stageName);
         envVars.TryGetValue("AETHEUS_WORKING_DIR", out var workingDirectory);
+        envVars.TryGetValue("AETHEUS_ARTIFACT_COMPRESSION", out var compressionText);
         if (!int.TryParse(runIdText, out var runId))
         {
             await onOutput("Missing AETHEUS_RUN_ID", TaskLogLevel.Error).ConfigureAwait(false);
@@ -26,24 +38,34 @@ internal static class PipelineArtifactCollector
 
         artifactName ??= "build-artifact";
         var baseDirectory = !string.IsNullOrEmpty(workingDirectory) ? workingDirectory : Directory.GetCurrentDirectory();
-        List<string>? patterns = null;
-        if (!string.IsNullOrWhiteSpace(target))
-        {
-            try { patterns = JsonSerializer.Deserialize<List<string>>(target); }
-            catch (JsonException) { patterns = [target]; }
-        }
+        var patterns = PipelineTargetPatterns.ParseOptional(target);
 
         await onOutput($"Collecting artifacts from {baseDirectory}...", TaskLogLevel.Info).ConfigureAwait(false);
         var temporaryZip = Path.Combine(Path.GetTempPath(), $"aetheus-artifact-{Guid.NewGuid():N}.zip");
         try
         {
+            var discovery = Stopwatch.StartNew();
+            List<string> matchingFiles;
+            var patternSizes = new List<(int Index, string Pattern, long Bytes, int Files)>();
             if (patterns is null or { Count: 0 })
             {
-                ZipFile.CreateFromDirectory(baseDirectory, temporaryZip, CompressionLevel.Optimal, includeBaseDirectory: false);
+                matchingFiles = Directory.EnumerateFiles(baseDirectory, "*", SearchOption.AllDirectories)
+                    .Where(File.Exists)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                patternSizes.Add((0, "<workspace>", SumFileLengths(matchingFiles), matchingFiles.Count));
             }
             else
             {
-                var matchingFiles = patterns
+                for (var index = 0; index < patterns.Count; index++)
+                {
+                    var patternFiles = WorkspaceFileMatcher.GetMatchingFiles(baseDirectory, patterns[index])
+                        .Where(File.Exists)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                    patternSizes.Add((index, patterns[index], SumFileLengths(patternFiles), patternFiles.Count));
+                }
+                matchingFiles = patterns
                     .SelectMany(pattern => WorkspaceFileMatcher.GetMatchingFiles(baseDirectory, pattern))
                     .Where(File.Exists)
                     .Distinct(StringComparer.Ordinal)
@@ -54,18 +76,60 @@ internal static class PipelineArtifactCollector
                     return new ExecutorResult(-1, false);
                 }
 
-                using var archive = ZipFile.Open(temporaryZip, ZipArchiveMode.Create);
+            }
+            discovery.Stop();
+
+            var sourceBytes = SumFileLengths(matchingFiles);
+            await using var transferLease = await ArtifactTransferBudget.Shared.AcquireAsync(sourceBytes, ct)
+                .ConfigureAwait(false);
+            _ = ResolveCompressionLevel(compressionText);
+            var compressionLevels = new Dictionary<CompressionLevel, int>();
+            var compression = Stopwatch.StartNew();
+            using (var archive = ZipFile.Open(temporaryZip, ZipArchiveMode.Create))
+            {
                 foreach (var file in matchingFiles)
                 {
                     var entryName = Path.GetRelativePath(baseDirectory, file);
-                    archive.CreateEntryFromFile(file, entryName, CompressionLevel.Optimal);
+                    var compressionLevel = ResolveCompressionLevel(compressionText, file);
+                    archive.CreateEntryFromFile(file, entryName, compressionLevel);
+                    compressionLevels[compressionLevel] = compressionLevels.GetValueOrDefault(compressionLevel) + 1;
                 }
             }
+            compression.Stop();
 
             var fileInfo = new FileInfo(temporaryZip);
-            await onOutput($"Artifact zip created: {fileInfo.Length / 1024}KB", TaskLogLevel.Info).ConfigureAwait(false);
+            var hash = Stopwatch.StartNew();
+            await using (var hashStream = new FileStream(
+                             temporaryZip, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
+                _ = await SHA256.HashDataAsync(hashStream, ct).ConfigureAwait(false);
+            hash.Stop();
+            var compressionSummary = string.Equals(compressionText?.Trim(), "adaptive", StringComparison.OrdinalIgnoreCase)
+                ? "Adaptive [" + string.Join(", ", compressionLevels
+                    .OrderBy(item => item.Key)
+                    .Select(item => $"{item.Key}={item.Value}")) + "]"
+                : ResolveCompressionLevel(compressionText).ToString();
+            await onOutput(
+                $"Artifact zip created: {fileInfo.Length / 1024}KB from {sourceBytes} bytes " +
+                $"({matchingFiles.Count} files, compression={compressionSummary}).",
+                TaskLogLevel.Info).ConfigureAwait(false);
+            await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.collect.discovery", "Duration", "s", discovery.Elapsed.TotalSeconds).ConfigureAwait(false);
+            await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.collect.compression", "Duration", "s", compression.Elapsed.TotalSeconds).ConfigureAwait(false);
+            await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.collect.hash", "Duration", "s", hash.Elapsed.TotalSeconds).ConfigureAwait(false);
+            await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.bytes.source", "Size", "bytes", sourceBytes).ConfigureAwait(false);
+            await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.bytes.compressed", "Size", "bytes", fileInfo.Length).ConfigureAwait(false);
+            foreach (var item in patternSizes)
+            {
+                await onOutput(
+                    $"Artifact pattern #{item.Index}: files={item.Files}, bytes={item.Bytes}, pattern={item.Pattern}",
+                    TaskLogLevel.Info).ConfigureAwait(false);
+                await PipelineMetricEmitter.EmitAsync(
+                    onOutput, $"artifact.pattern.{item.Index}.bytes", "Size", "bytes", item.Bytes).ConfigureAwait(false);
+            }
             await using var stream = new FileStream(temporaryZip, FileMode.Open, FileAccess.Read);
+            var upload = Stopwatch.StartNew();
             await apiClient.UploadArtifactAsync(runId, artifactName, stageName, stream, ct).ConfigureAwait(false);
+            upload.Stop();
+            await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.collect.upload", "Duration", "s", upload.Elapsed.TotalSeconds).ConfigureAwait(false);
             await onOutput("Artifact uploaded successfully", TaskLogLevel.Info).ConfigureAwait(false);
             await TryAutoPublishCoverageAsync(apiClient, logger, runId, stageName, baseDirectory, onOutput, ct).ConfigureAwait(false);
             return new ExecutorResult(0, false);
@@ -81,6 +145,28 @@ internal static class PipelineArtifactCollector
             if (File.Exists(temporaryZip)) File.Delete(temporaryZip);
         }
     }
+
+    internal static CompressionLevel ResolveCompressionLevel(string? value, string? filePath = null) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "fastest" => CompressionLevel.Fastest,
+            "optimal" => CompressionLevel.Optimal,
+            "none" or "nocompression" => CompressionLevel.NoCompression,
+            "adaptive" => ResolveAdaptiveCompressionLevel(filePath),
+            _ => throw new InvalidDataException(
+                "AETHEUS_ARTIFACT_COMPRESSION must be Adaptive, Fastest, Optimal or NoCompression.")
+        };
+
+    private static CompressionLevel ResolveAdaptiveCompressionLevel(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return CompressionLevel.Fastest;
+        var extension = Path.GetExtension(filePath);
+        if (AlreadyCompressedExtensions.Contains(extension)) return CompressionLevel.NoCompression;
+        return TextExtensions.Contains(extension) ? CompressionLevel.Optimal : CompressionLevel.Fastest;
+    }
+
+    private static long SumFileLengths(IEnumerable<string> files) =>
+        files.Aggregate(0L, (total, file) => checked(total + new FileInfo(file).Length));
 
     private static async Task TryAutoPublishCoverageAsync(
         IServerApiClient apiClient, ILogger logger, int runId, string? stageName, string baseDirectory,

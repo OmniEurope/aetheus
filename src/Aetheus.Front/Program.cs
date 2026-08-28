@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using Aetheus.Front;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.JSInterop;
-using Radzen;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -28,12 +24,15 @@ builder.Services.AddSingleton<PermissionService>();
 builder.Services.AddSingleton<YamlSerializationService>();
 builder.Services.AddScoped<AlertNotificationService>();
 builder.Services.AddScoped<UserNotificationService>();
+builder.Services.AddScoped<RealtimeSessionLifecycle>();
 builder.Services.AddTransient<AuthDelegatingHandler>();
 builder.Services.AddTransient<ErrorNotificationHandler>();
+builder.Services.AddTransient<BrowserNoStoreHandler>();
 builder.Services.AddHttpClient<ApiClient>(client =>
 {
     client.BaseAddress = new Uri(apiBaseUrl);
-}).AddHttpMessageHandler<AuthDelegatingHandler>()
+}).AddHttpMessageHandler<BrowserNoStoreHandler>()
+  .AddHttpMessageHandler<AuthDelegatingHandler>()
   .AddHttpMessageHandler<ErrorNotificationHandler>()
   .AddStandardResilienceHandler(options =>
   {
@@ -56,6 +55,11 @@ builder.Services.AddHttpClient<ApiClient>(client =>
           || (args.Outcome.Result is { IsSuccessStatusCode: false } r
               && (int)r.StatusCode >= 500));
   });
+builder.Services.AddHttpClient<ClientErrorReporter>(client =>
+{
+    client.BaseAddress = new Uri(apiBaseUrl);
+}).AddHttpMessageHandler<BrowserNoStoreHandler>()
+  .AddHttpMessageHandler<AuthDelegatingHandler>();
 
 // Breadcrumb
 builder.Services.AddScoped<Aetheus.Front.Layout.BreadcrumbService>();

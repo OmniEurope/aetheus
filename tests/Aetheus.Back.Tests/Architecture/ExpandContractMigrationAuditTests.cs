@@ -11,8 +11,7 @@ public sealed partial class ExpandContractMigrationAuditTests
     [Fact]
     public void FutureMigrationUpMethods_RespectExpandContract()
     {
-        var migrations = Directory.GetFiles(
-                Path.Combine(FindRepoRoot(), "src", "Aetheus.Back", "Data", "Migrations"), "*.cs")
+        var migrations = RepositoryScan.Enumerate(Path.Combine(FindRepoRoot(), "src", "Aetheus.Back", "Data", "Migrations"), "*.cs", SearchOption.TopDirectoryOnly)
             .Where(path => !path.EndsWith(".Designer.cs", StringComparison.Ordinal)
                            && !path.EndsWith("ModelSnapshot.cs", StringComparison.Ordinal)
                            && string.CompareOrdinal(Path.GetFileName(path), GuardBaseline) > 0)
@@ -46,13 +45,7 @@ public sealed partial class ExpandContractMigrationAuditTests
         return source[start..end];
     }
 
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx")))
-            directory = directory.Parent;
-        return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root not found.");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 
     [GeneratedRegex(@"migrationBuilder\.(?:Drop(?:Column|Table|ForeignKey|PrimaryKey|UniqueConstraint|CheckConstraint|Index|Sequence)|Rename(?:Column|Table|Index|Sequence)|AlterColumn)(?:<[^>]+>)?\s*\(")]
     private static partial Regex DestructiveOperationRegex();

@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -29,7 +22,7 @@ public partial class RollbackReleaseDialog
 
     protected override async Task OnInitializedAsync()
     {
-        var policies = await Api.GetAllBackupPoliciesAsync();
+        var policies = await Api.Security.GetAllBackupPoliciesAsync();
         var projectPolicies = policies.Where(policy => policy.ProjectId == ProjectId).ToList();
         var options = await Task.WhenAll(projectPolicies.Select(LoadVerifiedBackupsAsync));
         _verifiedBackups = options.SelectMany(item => item).ToList();
@@ -40,7 +33,7 @@ public partial class RollbackReleaseDialog
     {
         try
         {
-            var runs = await Api.GetAllBackupRunsAsync(policy.Id);
+            var runs = await Api.Security.GetAllBackupRunsAsync(policy.Id);
             return runs
                 .Where(r => r.Status == BackupRunStatus.Succeeded && r.RestoreCheckStatus == RestoreCheckStatus.Verified)
                 .Select(r => new BackupOption(r.Id, $"{policy.Name} · {r.StartedAt:g}"))

@@ -15,6 +15,10 @@ public sealed record EnvironmentDto
     public bool RequireApproval { get; init; }
     public int ApprovalTimeoutMinutes { get; init; }
     public string? ApprovalInstructions { get; init; }
+    public bool DastEnabled { get; init; }
+    public bool DastIsEphemeral { get; init; }
+    public bool DastContainsRealData { get; init; }
+    public string DastAllowedHosts { get; init; } = string.Empty;
     public List<EnvironmentServerDto> Servers { get; init; } = [];
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
@@ -27,7 +31,7 @@ public sealed record EnvironmentServerDto
     public ServerStatus ServerStatus { get; init; }
 }
 
-public sealed record CreateEnvironmentRequest
+public abstract record EnvironmentRequest
 {
     [Required]
     [StringLength(100)]
@@ -48,8 +52,19 @@ public sealed record CreateEnvironmentRequest
     [StringLength(1000)]
     public string? ApprovalInstructions { get; init; }
 
+    public bool DastEnabled { get; init; }
+    public bool DastIsEphemeral { get; init; }
+    public bool DastContainsRealData { get; init; }
+    [StringLength(2000)] public string DastAllowedHosts { get; init; } = string.Empty;
+
     [MaxLength(500)]
     public List<int> ServerIds { get; init; } = [];
+}
+
+public sealed record CreateEnvironmentRequest : EnvironmentRequest
+{
+    [Range(1, int.MaxValue)]
+    public int? SourceEnvironmentId { get; init; }
 }
 
 public sealed record DuplicateEnvironmentRequest
@@ -57,27 +72,4 @@ public sealed record DuplicateEnvironmentRequest
     public int? TargetProjectId { get; init; }
 }
 
-public sealed record UpdateEnvironmentRequest
-{
-    [Required]
-    [StringLength(100)]
-    public string Name { get; init; } = string.Empty;
-
-    [StringLength(500)]
-    public string Description { get; init; } = string.Empty;
-
-    public EnvironmentType Type { get; init; }
-
-    public int? ProjectId { get; init; }
-
-    public bool RequireApproval { get; init; }
-
-    [Range(1, 10080)]
-    public int ApprovalTimeoutMinutes { get; init; } = 1440;
-
-    [StringLength(1000)]
-    public string? ApprovalInstructions { get; init; }
-
-    [MaxLength(500)]
-    public List<int> ServerIds { get; init; } = [];
-}
+public sealed record UpdateEnvironmentRequest : EnvironmentRequest;

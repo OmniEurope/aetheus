@@ -153,8 +153,8 @@ public class ServerConfigSectionTemplateBranchTests : BunitContext
     [InlineData("enable", BadgeStyle.Success)]
     [InlineData("update", BadgeStyle.Info)]
     [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("delete", BadgeStyle.Secondary)]
-    [InlineData("remove", BadgeStyle.Secondary)]
+    [InlineData("delete", BadgeStyle.Light)]
+    [InlineData("remove", BadgeStyle.Light)]
     public void Template_GetChangeBadgeStyle_ReturnsExpected(string action, BadgeStyle expected)
     {
         var method = typeof(ServerConfigSection).GetMethod(

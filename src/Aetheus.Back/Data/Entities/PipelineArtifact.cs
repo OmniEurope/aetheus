@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -22,6 +21,8 @@ public class PipelineArtifact
     // Retention
     public ArtifactRetentionPolicy RetentionPolicy { get; set; } = ArtifactRetentionPolicy.Build;
     public DateTime RetentionExpiresAt { get; set; }
+    /// <summary>Temporary pin acquired by a checkpoint resume while the new parent run consumes this artifact.</summary>
+    public DateTime? RetentionLeaseExpiresAt { get; set; }
 
     // Deployment context
     public string? EnvironmentName { get; set; }

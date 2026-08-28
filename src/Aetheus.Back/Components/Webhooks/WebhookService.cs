@@ -4,12 +4,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Webhooks;
 

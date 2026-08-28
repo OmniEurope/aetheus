@@ -2,8 +2,8 @@
 <RadzenText TextStyle="TextStyle.H5" class="rz-mb-4">@L["Configuration"]</RadzenText>
 <RadzenStack Gap="1rem">
     <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center">
-        <RadzenButton Text="@L["ExportYaml"]" Icon="download" Click="@ExportConfigAsync" IsBusy="@_configExporting" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-        <RadzenButton Text="@L["ImportYaml"]" Icon="upload" Click="@(() => _configImportVisible = true)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+        <RadzenButton Text="@L["ExportYaml"]" Icon="download" Click="@ExportConfigAsync" IsBusy="@_configExporting" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+        <RadzenButton Text="@L["ImportYaml"]" Icon="upload" Click="@(() => _configImportVisible = true)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         @if (!string.IsNullOrEmpty(_configYaml))
         {
             <RadzenButton Text="@L["Copy"]" Icon="content_copy" Click="@CopyConfigToClipboardAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
@@ -24,8 +24,8 @@
             <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">@L["ImportYamlConfiguration"]</RadzenText>
             <RadzenTextArea @bind-Value="_configImportYaml" Rows="15" class="config-yaml-editor" />
             <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-3">
-                <RadzenButton Text="@L["ValidateYaml"]" Icon="check_circle" Click="@ValidateConfigAsync" IsBusy="@_configValidating" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-                <RadzenButton Text="@L["Preview"]" Icon="preview" Click="@PreviewConfigAsync" IsBusy="@_configPreviewing" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["ValidateYaml"]" Icon="check_circle" Click="@ValidateConfigAsync" IsBusy="@_configValidating" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                <RadzenButton Text="@L["Preview"]" Icon="preview" Click="@PreviewConfigAsync" IsBusy="@_configPreviewing" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 <RadzenButton Text="@L["Deploy"]" Icon="rocket_launch" Click="@DeployConfigAsync" IsBusy="@_configDeploying"
                     Disabled="@string.IsNullOrWhiteSpace(_configImportYaml)" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
                 <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@(() => { _configImportVisible = false; _configPreview = null; })" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
@@ -57,9 +57,9 @@
                     <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-2">
                         @string.Format(L["TasksPlanned"], _configPreview.TaskCount)
                     </RadzenText>
-                    <RadzenDataGrid Data="@_configPreview.Changes" TItem="ServerConfigChange" Density="Density.Compact"
+                    <RadzenDataGrid Responsive="false" Data="@_configPreview.Changes" TItem="ServerConfigChange" Density="Density.Compact"
                         AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                        AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                        AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                         <Columns>
                             <RadzenDataGridColumn TItem="ServerConfigChange" Property="Category" Title="@L["Category"]" Width="160px" />
                             <RadzenDataGridColumn TItem="ServerConfigChange" Property="Action" Title="@L["Action"]" Width="120px">

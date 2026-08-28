@@ -2,7 +2,7 @@ name: test-gittoto
 trigger: manual
 stages:
   - name: Create App
-    agent: production-host
+    agent: vps2577917
     os: linux
     steps:
       - name: Create Projects
@@ -10,7 +10,7 @@ stages:
         timeout_seconds: 120
 
   - name: Build
-    agent: production-host
+    agent: vps2577917
     os: linux
     depends_on:
       - Create App
@@ -20,7 +20,7 @@ stages:
         timeout_seconds: 120
 
   - name: Unit Tests
-    agent: production-host
+    agent: vps2577917
     os: linux
     depends_on:
       - Build
@@ -30,7 +30,7 @@ stages:
         timeout_seconds: 60
 
   - name: Integration Tests
-    agent: production-host
+    agent: vps2577917
     os: linux
     depends_on:
       - Unit Tests
@@ -40,7 +40,7 @@ stages:
         timeout_seconds: 60
 
   - name: Coverage
-    agent: production-host
+    agent: vps2577917
     os: linux
     depends_on:
       - Integration Tests
@@ -50,7 +50,7 @@ stages:
         timeout_seconds: 120
 
   - name: Cleanup
-    agent: production-host
+    agent: vps2577917
     os: linux
     depends_on:
       - Coverage

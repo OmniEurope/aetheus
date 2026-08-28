@@ -1,5 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@* PLAN-001 phase 3: OTLP log viewer for a monitored app (severity filter + search + virtualized list). *@
+@* ADR-021 phase 3: OTLP log viewer for a monitored app (severity filter + search + virtualized list). *@
 <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem" AlignItems="AlignItems.End" class="rz-mb-3">
     <RadzenStack Gap="0.25rem">
         <RadzenLabel Text="@L["LogLevel"]" />
@@ -21,7 +21,7 @@
 }
 else
 {
-    <div class="run-logs-lines" style="max-height: 30rem; overflow-y: auto;">
+    <div class="run-logs-lines app-log-scroll-region">
         <Virtualize Items="_logs" ItemSize="24" OverscanCount="20" Context="entry">
             <div class="run-log-line">
                 <RadzenBadge BadgeStyle="@SeverityBadge(entry.SeverityNumber)" Text="@SeverityLabel(entry)" class="rz-mr-2" />

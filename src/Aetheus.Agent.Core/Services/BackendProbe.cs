@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using System.Net.Security;
+using Aetheus.Agent.Core.Extensions;
 
 namespace Aetheus.Agent.Core.Services;
 
@@ -29,6 +31,14 @@ public static class BackendProbe
     /// every agent host (Linux / Windows) wires it identically.
     /// </summary>
     public static async Task<int> RunAsync(string serverUrl, string[] args, bool allowInsecure = false, CancellationToken ct = default)
+        => await RunWithTlsOptionsAsync(serverUrl, args, allowInsecure, pinnedThumbprint: null, ct).ConfigureAwait(false);
+
+    internal static async Task<int> RunWithTlsOptionsAsync(
+        string serverUrl,
+        string[] args,
+        bool allowInsecure,
+        string? pinnedThumbprint,
+        CancellationToken ct = default)
     {
         var timeout = TimeSpan.FromSeconds(DefaultTimeoutSeconds);
         for (var i = 0; i < args.Length - 1; i++)
@@ -40,12 +50,25 @@ public static class BackendProbe
             }
         }
 
-        // Honour AllowInsecureCerts so the probe matches the running agent: against a
-        // self-signed backend (dev / localhost) the default validator would reject the
-        // cert and report "unreachable" even though the service itself would connect.
-        using var handler = allowInsecure
-            ? new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator }
-            : null;
+        // Use the exact runtime TLS callback precedence (pin, then local-development
+        // AllowInsecureCerts, then platform validation) so installer success predicts whether the
+        // subsequently started agent can connect.
+        var options = new AetheusAgentOptions
+        {
+            ServerUrl = serverUrl,
+            AllowInsecureCerts = allowInsecure,
+            PinnedServerCertThumbprint = pinnedThumbprint
+        };
+        var certValidation = AgentCoreServiceCollectionExtensions.BuildCertValidationCallback(options);
+        using var handler = certValidation is null
+            ? null
+            : new SocketsHttpHandler
+            {
+                SslOptions = new SslClientAuthenticationOptions
+                {
+                    RemoteCertificateValidationCallback = certValidation
+                }
+            };
 
         var result = await ProbeAsync(serverUrl, timeout, handler, ct).ConfigureAwait(false);
         Console.WriteLine(result.Message);

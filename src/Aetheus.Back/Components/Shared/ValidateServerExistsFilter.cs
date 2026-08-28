@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Servers;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Aetheus.Back.Components.Shared;

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Pages;
+using Aetheus.Front.Services;
+using Aetheus.Front.Shared;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
@@ -42,6 +44,24 @@ public class HomeTests : BunitContext
     }
 
     [Fact]
+    public void DoesNotRenderOrLoadAiRunsTile()
+    {
+        _handler.SetJsonResponse("monitoring/dashboard", new DashboardOverviewDto
+        {
+            Servers = [],
+            RecentRuns = []
+        });
+
+        var cut = Render<Home>();
+        cut.WaitForState(() => cut.Markup.Contains("Dashboard", StringComparison.Ordinal));
+
+        Assert.DoesNotContain("AiRunsThisWeek", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/ai-tasks\"", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain(_handler.Requests, request =>
+            request.Url.Contains("api/ai", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void RedirectsToLogin_WhenNotAuthenticated()
     {
         var handler = BunitTestHelper.RegisterServices(this, authenticated: false);
@@ -50,6 +70,19 @@ public class HomeTests : BunitContext
         var cut = Render<Home>();
 
         Assert.EndsWith("/login", nav.Uri);
+    }
+
+    [Fact]
+    public void NoReadableResource_RendersWithoutDataRequests()
+    {
+        Services.GetRequiredService<PermissionService>().SetPermissions([], false);
+
+        var cut = Render<Home>();
+
+        Assert.DoesNotContain(_handler.Requests, request =>
+            request.Url.Contains("monitoring/dashboard", StringComparison.Ordinal)
+            || request.Url.Contains("api/appmonitoring/summary", StringComparison.Ordinal));
+        Assert.Contains("AccessDenied", cut.Markup);
     }
 
     [Fact]
@@ -64,7 +97,23 @@ public class HomeTests : BunitContext
             Servers = [new ServerDto { Id = 1, Name = "srv", Status = ServerStatus.Online }],
             RecentRuns =
             [
-                new PipelineRunDto { Id = 1, PipelineName = "deploy", Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow }
+                new PipelineRunDto
+                {
+                    Id = 1,
+                    PipelineId = 10,
+                    PipelineName = "deploy",
+                    Status = PipelineStatus.Success,
+                    StartedAt = DateTime.UtcNow.AddMinutes(-1),
+                    Steps = [new PipelineStepRunDto { Id = 1, TriggeredRunId = 2 }]
+                },
+                new PipelineRunDto
+                {
+                    Id = 2,
+                    PipelineId = 11,
+                    PipelineName = "verify",
+                    Status = PipelineStatus.Success,
+                    StartedAt = DateTime.UtcNow
+                }
             ]
         });
 
@@ -72,6 +121,16 @@ public class HomeTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("deploy"));
 
         Assert.Contains("deploy", cut.Markup);
+        Assert.DoesNotContain("verify", cut.Markup);
+
+        cut.Find("button[aria-label='ExpandLinkedPipelineRuns']").Click();
+        cut.WaitForState(() => cut.Markup.Contains("verify"));
+
+        Assert.Contains("verify", cut.Markup);
+        var runsGrid = cut.FindComponent<PipelineRunsGrid>().Instance;
+        Assert.True(runsGrid.Compact);
+        Assert.True(runsGrid.ShowDurationInCompact);
+        Assert.Equal(10, runsGrid.MaxGroups);
     }
 
     [Fact]
@@ -138,6 +197,31 @@ public class HomeTests : BunitContext
         Assert.Contains("settings", cut.Markup);
     }
 
+    [Theory]
+    [InlineData("CapBuild", "pipelines")]
+    [InlineData("CapDeploy", "apps")]
+    [InlineData("CapManage", "modules")]
+    public void CapabilityIcon_ClickNavigatesToMatchingServerSection(
+        string ariaLabel,
+        string section)
+    {
+        RenderWithServer(new ServerDto
+        {
+            Id = 42,
+            Name = "srv",
+            Status = ServerStatus.Online,
+            PipelineRunnerEnabled = true,
+            DeploymentTargetAvailable = true,
+            PackageManagementAvailable = true
+        });
+        var cut = Render<Home>();
+        var navigation = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+
+        cut.WaitForElement($".clickable-cell[aria-label='{ariaLabel}']").Click();
+
+        Assert.EndsWith($"/servers/42/{section}", navigation.Uri, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void StatusColumn_OmitsCapabilityIcons_WhenFlagsUnset()
     {
@@ -170,3 +254,4 @@ public class HomeTests : BunitContext
             RecentRuns = []
         });
 }
+

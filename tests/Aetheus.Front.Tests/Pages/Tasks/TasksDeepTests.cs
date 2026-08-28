@@ -4,6 +4,8 @@ using Aetheus.Front.Pages.Tasks;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Tasks;
@@ -74,38 +76,16 @@ public class TasksDeepTests : BunitContext
         Assert.Equal(6, options.Count);
     }
 
-    // === ViewLogs ===
+    // === Detail navigation ===
 
     [Fact]
-    public async Task ViewLogs_SetsSelectedTaskId()
+    public void OpenTask_NavigatesToTaskDetail()
     {
-        _handler.SetJsonResponse("api/logs/task/1", new List<TaskLogDto>
-        {
-            new() { Id = 10, Message = "Step 1", Level = TaskLogLevel.Info }
-        });
         var cut = RenderView();
 
-        await cut.InvokeAsync(async () => await cut.Instance.ViewLogs(1));
+        cut.InvokeAsync(() => cut.Instance.OpenTask(new ServerTaskDto { Id = 2 }));
 
-        Assert.Equal(1, cut.Instance._selectedTaskId);
-    }
-
-    [Fact]
-    public async Task ViewLogs_SetsSelectedTaskLogs()
-    {
-        _handler.SetJsonResponse("api/logs/task/2", new List<TaskLogDto>
-        {
-            new() { Id = 20, Message = "Error occurred", Level = TaskLogLevel.Error }
-        });
-        var cut = RenderView();
-
-        await cut.InvokeAsync(async () => await cut.Instance.ViewLogs(2));
-
-        var logs = (List<TaskLogDto>?)typeof(TaskListView)
-            .GetField("_selectedTaskLogs", Priv)!.GetValue(cut.Instance);
-        Assert.NotNull(logs);
-        Assert.Single(logs!);
-        Assert.Equal(20, logs![0].Id);
+        Assert.EndsWith("/tasks/2", Services.GetRequiredService<NavigationManager>().Uri);
     }
 
     // === ClearFilters ===
@@ -139,5 +119,7 @@ public class TasksDeepTests : BunitContext
         // The stubbed task rows render their names in the grid.
         Assert.Contains("Build", cut.Markup);
         Assert.Contains("Deploy", cut.Markup);
+        Assert.Contains("href=\"/tasks/1\"", cut.Markup);
+        Assert.DoesNotContain("receipt_long", cut.Markup);
     }
 }

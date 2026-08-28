@@ -64,7 +64,7 @@ public class ServerSectionRoutingTests : BunitContext
         typeof(Rkhunter).GetProperty("Id")!.SetValue(component, 1);
         await RunParametersAsync(component);
         // With no loader, the subscribe block is skipped and _subscribed stays null.
-        Assert.Null(typeof(Rkhunter).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class ServerSectionRoutingTests : BunitContext
         var component = new Mail();
         typeof(Mail).GetProperty("Id")!.SetValue(component, 2);
         await RunParametersAsync(component);
-        Assert.Null(typeof(Mail).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class ServerSectionRoutingTests : BunitContext
         var component = new Aetheus.Front.Pages.Servers.Sections.Services();
         typeof(Aetheus.Front.Pages.Servers.Sections.Services).GetProperty("Id")!.SetValue(component, 3);
         await RunParametersAsync(component);
-        Assert.Null(typeof(Aetheus.Front.Pages.Servers.Sections.Services).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class ServerSectionRoutingTests : BunitContext
         var component = new Teamspeak();
         typeof(Teamspeak).GetProperty("Id")!.SetValue(component, 4);
         await RunParametersAsync(component);
-        Assert.Null(typeof(Teamspeak).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class ServerSectionRoutingTests : BunitContext
         var component = new Docker();
         typeof(Docker).GetProperty("Id")!.SetValue(component, 5);
         await RunParametersAsync(component);
-        Assert.Null(typeof(Docker).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class ServerSectionRoutingTests : BunitContext
         var component = new Apache();
         typeof(Apache).GetProperty("Id")!.SetValue(component, 6);
         await RunParametersAsync(component);
-        Assert.Null(typeof(Apache).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
 
     // ── Real subscribe-on-parameters → unsubscribe-on-dispose lifecycle ────────
@@ -125,7 +125,7 @@ public class ServerSectionRoutingTests : BunitContext
 
         await RunParametersAsync(component);
         Assert.Equal(1, SubscriberCount(loader));
-        Assert.Same(loader, typeof(Rkhunter).GetField("_subscribed", Priv)!.GetValue(component));
+        Assert.Same(loader, typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
 
         component.Dispose();
         Assert.Equal(0, SubscriberCount(loader));
@@ -171,7 +171,7 @@ public class ServerSectionRoutingTests : BunitContext
     {
         var component = new Rkhunter();
         Assert.Null(typeof(Rkhunter).GetField("_section", Priv)!.GetValue(component));
-        var method = typeof(Rkhunter).GetMethod("OnTaskCompleted", Priv)!;
+        var method = typeof(ServerTaskAwareSectionBase).GetMethod("OnTaskCompletedAsync", Priv)!;
         var notification = new TaskCompletedNotification { ServerId = 1, TaskName = "rkhunter scan" };
         // _section is null - the handler must short-circuit without throwing.
         method.Invoke(component, [notification]);
@@ -182,7 +182,7 @@ public class ServerSectionRoutingTests : BunitContext
     {
         var component = new Mail();
         Assert.Null(typeof(Mail).GetField("_section", Priv)!.GetValue(component));
-        var method = typeof(Mail).GetMethod("OnTaskCompleted", Priv)!;
+        var method = typeof(ServerTaskAwareSectionBase).GetMethod("OnTaskCompletedAsync", Priv)!;
         var notification = new TaskCompletedNotification { ServerId = 1, TaskName = "mail check" };
         method.Invoke(component, [notification]);
     }
@@ -191,7 +191,7 @@ public class ServerSectionRoutingTests : BunitContext
     public void Services_OnTaskCompleted_WithNullSection_IsNoOp()
     {
         var component = new Aetheus.Front.Pages.Servers.Sections.Services();
-        var method = typeof(Aetheus.Front.Pages.Servers.Sections.Services).GetMethod("OnTaskCompleted", Priv)!;
+        var method = typeof(ServerTaskAwareSectionBase).GetMethod("OnTaskCompletedAsync", Priv)!;
         var notification = new TaskCompletedNotification { ServerId = 1, TaskName = "services check" };
         method.Invoke(component, [notification]);
     }
@@ -200,7 +200,7 @@ public class ServerSectionRoutingTests : BunitContext
     public void Docker_OnTaskCompleted_WithNullSection_IsNoOp()
     {
         var component = new Docker();
-        var method = typeof(Docker).GetMethod("OnTaskCompleted", Priv)!;
+        var method = typeof(ServerTaskAwareSectionBase).GetMethod("OnTaskCompletedAsync", Priv)!;
         var notification = new TaskCompletedNotification { ServerId = 1, TaskName = "docker ps" };
         method.Invoke(component, [notification]);
     }
@@ -209,7 +209,7 @@ public class ServerSectionRoutingTests : BunitContext
     public void Apache_OnTaskCompleted_WithNullSection_IsNoOp()
     {
         var component = new Apache();
-        var method = typeof(Apache).GetMethod("OnTaskCompleted", Priv)!;
+        var method = typeof(ServerTaskAwareSectionBase).GetMethod("OnTaskCompletedAsync", Priv)!;
         var notification = new TaskCompletedNotification { ServerId = 1, TaskName = "apache reload" };
         method.Invoke(component, [notification]);
     }

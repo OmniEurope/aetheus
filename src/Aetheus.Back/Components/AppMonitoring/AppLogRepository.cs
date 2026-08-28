@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -25,23 +23,36 @@ public sealed class AppLogRepository(AppDbContext db) : IAppLogRepository
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(l => l.Body.Contains(search));
 
+        return await LoadPageAsync(query, page, pageSize, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<(List<AppLogEntry> Items, int TotalCount)> LoadPageAsync(
+        IQueryable<AppLogEntry> query,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
-            .OrderByDescending(l => l.Timestamp)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+        var items = await query.OrderByDescending(log => log.Timestamp)
+            .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, totalCount);
     }
 
     public async Task<int> PurgeOlderThanAsync(DateTime cutoff, CancellationToken ct = default)
     {
-        if (db.Database.IsRelational())
-            return await db.AppLogEntries.Where(l => l.Timestamp < cutoff).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        return db.Database.IsRelational()
+            ? await db.AppLogEntries.Where(log => log.Timestamp < cutoff)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false)
+            : await PurgeTrackedAsync(cutoff, ct).ConfigureAwait(false);
+    }
 
-        var expired = await db.AppLogEntries.Where(l => l.Timestamp < cutoff).ToListAsync(ct).ConfigureAwait(false);
-        db.AppLogEntries.RemoveRange(expired);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    private async Task<int> PurgeTrackedAsync(DateTime cutoff, CancellationToken ct)
+    {
+        var expired = await db.AppLogEntries.Where(log => log.Timestamp < cutoff)
+            .ToListAsync(ct).ConfigureAwait(false);
+        db.RemoveRange(expired);
+        _ = await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return expired.Count;
     }
 }

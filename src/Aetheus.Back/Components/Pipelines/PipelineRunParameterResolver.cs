@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Shared.Helpers;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+/// <summary>
+/// Turns a prepared run plus the caller's parameter values into the run's effective definition:
+/// resolves the template at the pipeline's organization, flattens its jobs into stages, and works out
+/// which servers could host them.
+/// </summary>
+public interface IPipelineRunParameterResolver
+{
+    /// <summary>Applies <paramref name="parameters"/> to <paramref name="preparation"/> and returns the
+    /// preparation carrying the resolved snapshot, definition, stages and candidate targets.</summary>
+    /// <exception cref="BadRequestException">A required parameter is missing or invalid.</exception>
+    Task<PipelineRunPreparation> ResolveRunParametersAsync(
+        PipelineRunPreparation preparation,
+        IReadOnlyDictionary<string, string>? parameters,
+        CancellationToken ct = default);
+
+    /// <summary>The distinct servers that could host any stage of <paramref name="definition"/>.</summary>
+    Task<IReadOnlyCollection<int>> ResolveCandidateTargetServerIdsAsync(
+        PipelineYamlDefinition definition, int? organizationId, CancellationToken ct);
+}
+
+/// <summary>
+/// The parameter/target resolution step, extracted from <see cref="PipelineRunService"/>. It is a leaf:
+/// it reads the pipeline's organization and its candidate servers and returns a value, touching no run
+/// state and dispatching nothing. Extracting it is what lets
+/// <see cref="PipelineCheckpointReuseService"/> compare a checkpoint against the definition the current
+/// run would resolve to, without depending on the engine.
+/// </summary>
+public sealed class PipelineRunParameterResolver(
+    IPipelineRepository repo,
+    IPipelineTemplateResolver templateResolver,
+    IPipelineDispatchServerResolver dispatchServers) : IPipelineRunParameterResolver
+{
+    public async Task<PipelineRunPreparation> ResolveRunParametersAsync(
+        PipelineRunPreparation preparation,
+        IReadOnlyDictionary<string, string>? parameters,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(preparation);
+        if (!PipelineParameterResolver.TryResolve(
+                preparation.Definition.Parameters, parameters, out var effectiveParameters, out var errors))
+            throw new BadRequestException(string.Join(" ", errors));
+
+        var organizationId = await repo.GetPipelineOrganizationIdAsync(preparation.PipelineId, ct)
+            .ConfigureAwait(false) ?? 0;
+        var resolution = await templateResolver.ResolveAsync(
+            preparation.YamlSnapshot, organizationId, effectiveParameters, ct).ConfigureAwait(false);
+        var effectiveStages = YamlParsingHelper.FlattenJobs(resolution.Definition);
+        var targetIds = await ResolveCandidateTargetServerIdsAsync(
+            resolution.Definition, organizationId, ct).ConfigureAwait(false);
+        return preparation with
+        {
+            YamlSnapshot = resolution.Yaml,
+            Definition = resolution.Definition,
+            EffectiveStages = effectiveStages,
+            TargetServerIds = targetIds
+        };
+    }
+
+    public async Task<IReadOnlyCollection<int>> ResolveCandidateTargetServerIdsAsync(
+        PipelineYamlDefinition definition, int? organizationId, CancellationToken ct)
+    {
+        var ids = new HashSet<int>();
+        foreach (var stage in YamlParsingHelper.FlattenJobs(definition))
+        {
+            var candidates = await repo.FindCandidateTargetServerIdsAsync(
+                stage.Pool, stage.Environment, stage.Agent, OsTypeHelper.Parse(stage.Os),
+                organizationId, dispatchServers.StageHasDeployStep(stage), ct).ConfigureAwait(false);
+            ids.UnionWith(candidates);
+        }
+        return ids;
+    }
+}

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Pages.Servers;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Radzen;
 
 namespace Aetheus.Front.Layout;
 
@@ -16,6 +11,7 @@ public partial class ServerDetailLayout : IDisposable
     [Inject] private PermissionService Permissions { get; set; } = default!;
 
     private bool _canWrite;
+    private bool _deleteBusy;
     private bool _editVisible;
     private bool _editSaving;
     private string _editName = string.Empty;
@@ -28,6 +24,7 @@ public partial class ServerDetailLayout : IDisposable
     protected override void OnInitialized()
     {
         Loader.OnChanged += OnLoaderChanged;
+        Nav.LocationChanged += OnLocationChanged;
         // MainLayout loads permissions in parallel with route activation, so a section page can
         // mount BEFORE Permissions.IsLoaded - capturing _canWrite=false would strand the
         // Contact/Update/Edit/Delete buttons as permanently disabled. Subscribe so they
@@ -38,14 +35,23 @@ public partial class ServerDetailLayout : IDisposable
 
     private void OnLoaderChanged()
     {
+        ReassertBreadcrumb();
         // The server id is only known once the loader resolves the detail; recompute the
         // resource-scoped permission then.
         RefreshCanWrite();
-        // Mirror the legacy page: when a heartbeat bumps the agent version, let the progress
-        // card detect the post-update version (it transitions to Done).
-        if (!string.IsNullOrEmpty(Loader.Server?.AgentVersion))
-            _agentUpdateProgress?.HandleHeartbeat(Loader.Server.AgentVersion);
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        ReassertBreadcrumb();
+
+    private void ReassertBreadcrumb()
+    {
+        if (Loader.Server is null) return;
+        var items = BreadcrumbRouteResolver.Resolve(Nav.ToBaseRelativePath(Nav.Uri), key => L[key]).ToArray();
+        if (items.Length > 1)
+            items[1] = items[1] with { Text = Loader.Server.Name, IsLoading = false };
+        Breadcrumb.Set(items);
     }
 
     private void OnPermissionsChanged()
@@ -63,20 +69,26 @@ public partial class ServerDetailLayout : IDisposable
         return Dialog.OpenAsync<ContactAgentDialog>(
             L["ContactAgent"],
             new Dictionary<string, object?> { { "ServerId", Loader.Server.Id }, { "ServerName", Loader.Server.Name } },
-            new DialogOptions { Width = "480px", CloseDialogOnOverlayClick = false });
+            new DialogOptions { Width = "480px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
     }
 
     private async Task UpdateAgentAsync()
     {
         if (Loader.Server is null) return;
+        var sourceVersion = Loader.Server.AgentVersion;
+        var targetVersion = Loader.Server.AgentCompatibility?.TargetVersion
+            ?? Loader.Server.AgentUpdateRequest?.TargetVersion
+            ?? L["Unknown"].Value;
         var confirmed = await Dialog.Confirm(
-            string.Format(L["UpdateAgentConfirm"], Loader.Server.Name),
+            string.Format(L["UpdateAgentConfirm"], Loader.Server.Name, sourceVersion, targetVersion),
             L["UpdateAgent"],
             new ConfirmOptions { OkButtonText = L["UpdateAgent"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
 
-        var result = await Api.UpdateAgentAsync(Loader.Server.Id);
-        if (result is not null)
+        var result = await Api.Servers.UpdateAgentAsync(Loader.Server.Id);
+        if (result?.Outcome == AgentUpdateQueueOutcome.AlreadyUpToDate)
+            Toast.Info("UpdateAgent", "AgentAlreadyUpToDate", result.SourceVersion);
+        else if (result is not null)
             Toast.Success("UpdateAgent", "UpdateAgentQueued", Loader.Server.Name);
         else
             Toast.Error("Error", "UpdateAgentFailed");
@@ -84,18 +96,47 @@ public partial class ServerDetailLayout : IDisposable
 
     private async Task OnDeleteServer()
     {
-        if (Loader.Server is null) return;
+        if (Loader.Server is null || _deleteBusy) return;
         var confirmed = await Dialog.Confirm(
             string.Format(L["DeleteServerConfirm"], Loader.Server.Name),
             L["DeleteServer"],
             new ConfirmOptions { OkButtonText = L["Delete"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
 
-        var deleted = await Api.DeleteServerAsync(Loader.Server.Id);
-        if (deleted)
+        await DeleteServerConfirmedAsync();
+    }
+
+    internal async Task DeleteServerConfirmedAsync()
+    {
+        if (Loader.Server is null || _deleteBusy) return;
+
+        _deleteBusy = true;
+        StateHasChanged();
+        try
         {
-            Toast.Success(L["ServerDeleted"]);
-            Nav.NavigateTo("/servers");
+            var deleted = await Api.Servers.DeleteServerAsync(Loader.Server.Id);
+            if (deleted)
+            {
+                Toast.Success(L["ServerDeleted"]);
+                Nav.NavigateTo("/servers");
+            }
+            else
+            {
+                Toast.Error("Error", "DeleteFailed");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
+        catch (TaskCanceledException)
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
+        finally
+        {
+            _deleteBusy = false;
+            StateHasChanged();
         }
     }
 
@@ -119,7 +160,7 @@ public partial class ServerDetailLayout : IDisposable
             Type = _editType,
             Tags = tags
         };
-        var updated = await Api.UpdateServerAsync(Loader.Server.Id, request);
+        var updated = await Api.Servers.UpdateServerAsync(Loader.Server.Id, request);
         if (updated is not null)
         {
             Loader.UpdateServerFields(updated.Name, updated.Type, updated.Tags);
@@ -136,6 +177,7 @@ public partial class ServerDetailLayout : IDisposable
     public void Dispose()
     {
         Loader.OnChanged -= OnLoaderChanged;
+        Nav.LocationChanged -= OnLocationChanged;
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
     }
 }

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Notifications;
 
@@ -11,14 +9,7 @@ public class NotificationRepository(AppDbContext db) : INotificationRepository
         string? search, int page, int pageSize, string? sortBy, bool sortDescending,
         CancellationToken ct = default)
     {
-        var query = db.NotificationChannels
-            .AsNoTracking()
-            .AsQueryable();
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var pattern = $"%{search.Trim()}%";
-            query = query.Where(channel => EF.Functions.ILike(channel.Name, pattern));
-        }
+        var query = BuildChannelQuery(search);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -41,6 +32,15 @@ public class NotificationRepository(AppDbContext db) : INotificationRepository
             .Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, total);
+    }
+
+    private IQueryable<NotificationChannel> BuildChannelQuery(string? search)
+    {
+        var query = db.NotificationChannels.AsNoTracking().AsQueryable();
+        if (string.IsNullOrWhiteSpace(search)) return query;
+
+        var pattern = $"%{search.Trim()}%";
+        return query.Where(channel => EF.Functions.ILike(channel.Name, pattern));
     }
 
     public async Task<NotificationChannel?> GetChannelWithRulesAsync(int id, CancellationToken ct = default)

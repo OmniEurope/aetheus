@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Alerts;
 
@@ -49,34 +48,32 @@ public sealed class StorageAlertProvisioningService(
         var alertRepository = scope.ServiceProvider.GetRequiredService<IAlertRepository>();
         var serverRepository = scope.ServiceProvider.GetRequiredService<IServerRepository>();
         var servers = await serverRepository.GetServerIdNamePairsAsync(ct: ct).ConfigureAwait(false);
-        var existingRules = await alertRepository.GetAllAsync(ct).ConfigureAwait(false);
-        var existingProvisioningKeys = existingRules
-            .Select(rule => rule.ProvisioningKey)
-            .OfType<string>()
-            .ToHashSet(StringComparer.Ordinal);
-        var addedRules = new List<AlertRule>();
+        var provisioningKeys = new HashSet<string>(StringComparer.Ordinal);
+        var candidateRules = new List<AlertRule>();
 
         foreach (var server in servers)
         {
-            AddIfMissing(existingProvisioningKeys, addedRules, $"storage-disk-warning:{server.Id}", server.Id,
+            AddCandidate(provisioningKeys, candidateRules, $"storage-disk-warning:{server.Id}", server.Id,
                 $"Stockage ≥ {warningPercent:0.#} % - {server.Name}",
                 MetricType.Disk, ComparisonOperator.GreaterThanOrEqual, warningPercent, 300, AlertSeverity.Warning);
-            AddIfMissing(existingProvisioningKeys, addedRules, $"storage-disk-critical:{server.Id}", server.Id,
+            AddCandidate(provisioningKeys, candidateRules, $"storage-disk-critical:{server.Id}", server.Id,
                 $"Stockage ≥ {criticalPercent:0.#} % - {server.Name}",
                 MetricType.Disk, ComparisonOperator.GreaterThanOrEqual, criticalPercent, 60, AlertSeverity.Critical);
-            AddIfMissing(existingProvisioningKeys, addedRules, $"storage-disk-free:{server.Id}", server.Id,
+            AddCandidate(provisioningKeys, candidateRules, $"storage-disk-free:{server.Id}", server.Id,
                 $"Stockage libre < {minimumFreeGiB:0.#} Gio - {server.Name}",
                 MetricType.DiskFree, ComparisonOperator.LessThan, minimumFreeGiB, 60, AlertSeverity.Critical);
         }
 
-        if (addedRules.Count == 0) return;
-        await alertRepository.AddRangeAsync(addedRules, ct).ConfigureAwait(false);
-        logger.LogInformation("Provisioned {Count} baseline storage alert rule(s)", addedRules.Count);
+        var inserted = await alertRepository
+            .AddProvisionedRulesIfMissingAsync(candidateRules, ct)
+            .ConfigureAwait(false);
+        if (inserted > 0)
+            logger.LogInformation("Provisioned {Count} baseline storage alert rule(s)", inserted);
     }
 
-    private static void AddIfMissing(
-        ISet<string> existingProvisioningKeys,
-        ICollection<AlertRule> addedRules,
+    private static void AddCandidate(
+        ISet<string> provisioningKeys,
+        ICollection<AlertRule> candidateRules,
         string provisioningKey,
         int serverId,
         string name,
@@ -86,9 +83,9 @@ public sealed class StorageAlertProvisioningService(
         int sustainedSeconds,
         AlertSeverity severity)
     {
-        if (!existingProvisioningKeys.Add(provisioningKey)) return;
+        if (!provisioningKeys.Add(provisioningKey)) return;
 
-        addedRules.Add(new AlertRule
+        candidateRules.Add(new AlertRule
         {
             Name = name,
             ProvisioningKey = provisioningKey,

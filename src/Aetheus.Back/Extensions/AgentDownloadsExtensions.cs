@@ -4,6 +4,7 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using Aetheus.Back.Components.AgentUpdate;
 using Microsoft.Net.Http.Headers;
 
 namespace Aetheus.Back.Extensions;
@@ -27,7 +28,40 @@ internal static class AgentDownloadsExtensions
         var rawAppVersion = app.Configuration["App:Version"] ?? "dev";
         var safeAppVersion = Regex.Replace(rawAppVersion, "[^a-zA-Z0-9._-]", "-");
 
-        EnsureAgentDownloadPackages(app.Environment.ContentRootPath, downloadsPath);
+        EnsureAgentDownloadPackages(
+            app.Environment.ContentRootPath,
+            downloadsPath,
+            app.Environment.IsDevelopment());
+
+        app.MapGet("/downloads/agent-release-manifest.json", (IAgentReleaseCatalog releases) =>
+            Results.Json(releases.Current)).AllowAnonymous();
+
+        app.MapGet(
+            "/downloads/releases/{version}/{fileName}",
+            (string version, string fileName, HttpContext context, IAgentReleaseCatalog releases) =>
+            {
+                var manifest = releases.Current;
+                if (!string.Equals(version, manifest.SoftwareVersion, StringComparison.Ordinal)
+                    || Path.GetFileName(fileName) != fileName)
+                {
+                    return Results.NotFound();
+                }
+
+                var archive = manifest.Archives.SingleOrDefault(item =>
+                    string.Equals(item.FileName, fileName, StringComparison.Ordinal));
+                if (archive is null)
+                    return Results.NotFound();
+
+                var path = Path.Combine(downloadsPath, "releases", version, fileName);
+                if (!File.Exists(path))
+                    return Results.NotFound();
+
+                context.Response.Headers["X-Content-SHA256"] = archive.Sha256;
+                var contentType = archive.Platform == "windows"
+                    ? "application/zip"
+                    : "application/gzip";
+                return Results.File(path, contentType, fileName, enableRangeProcessing: false);
+            }).AllowAnonymous();
 
         app.MapGet("/downloads/aetheus-agent-linux-x64.tar.gz", async (HttpContext httpContext) =>
         {
@@ -188,7 +222,10 @@ internal static class AgentDownloadsExtensions
         }
     }
 
-    private static void EnsureAgentDownloadPackages(string backContentRootPath, string downloadsPath)
+    private static void EnsureAgentDownloadPackages(
+        string backContentRootPath,
+        string downloadsPath,
+        bool refreshDevelopmentPackages)
     {
         var solutionRootPath = Path.GetFullPath(Path.Combine(backContentRootPath, "..", ".."));
         var scriptsPath = Path.Combine(solutionRootPath, "deploy", "scripts");
@@ -199,7 +236,7 @@ internal static class AgentDownloadsExtensions
         lock (_packageLock)
         {
             var existingWinZip = Directory.GetFiles(downloadsPath, "aetheus-agent-win-x64*.zip").FirstOrDefault();
-            if (existingWinZip == null)
+            if (existingWinZip == null || refreshDevelopmentPackages)
             {
                 var windowsBuildPath = Path.Combine(solutionRootPath, "src", "Aetheus.Agent.Windows", "bin", "Debug", "net10.0-windows");
                 var windowsInstallScriptPath = Path.Combine(scriptsPath, "install-agent-windows.ps1");
@@ -211,7 +248,15 @@ internal static class AgentDownloadsExtensions
                     CopyDirectoryContent(windowsBuildPath, windowsPackageTempPath);
                     File.Copy(windowsInstallScriptPath, Path.Combine(windowsPackageTempPath, "install-agent-windows.ps1"), true);
                     var windowsArchivePath = Path.Combine(downloadsPath, "aetheus-agent-win-x64.zip");
-                    ZipFile.CreateFromDirectory(windowsPackageTempPath, windowsArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
+                    var replacementArchivePath = Path.Combine(
+                        downloadsPath,
+                        $"_aetheus-agent-win-x64-{Guid.NewGuid():N}.zip");
+                    ZipFile.CreateFromDirectory(
+                        windowsPackageTempPath,
+                        replacementArchivePath,
+                        CompressionLevel.Optimal,
+                        includeBaseDirectory: false);
+                    File.Move(replacementArchivePath, windowsArchivePath, overwrite: true);
                     Directory.Delete(windowsPackageTempPath, true);
                 }
             }

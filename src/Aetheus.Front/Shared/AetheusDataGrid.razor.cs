@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Shared;
 
@@ -24,7 +19,21 @@ public partial class AetheusDataGrid<TItem> where TItem : notnull
     /// <summary>Advanced header filters are the common table affordance across the product. A caller
     /// can still opt into the simpler inline filter when that is genuinely clearer.</summary>
     [Parameter] public FilterMode FilterMode { get; set; } = FilterMode.Advanced;
+    /// <summary>Rows per page. Kept at 25, the value the paged API calls already carry, so a page of UI
+    /// maps to exactly one request.</summary>
     [Parameter] public int PageSize { get; set; } = 25;
+
+    /// <summary>Infinite scroll instead of a pager. OFF by default since 2026-08-23.
+    /// <para>Radzen can only virtualise inside a bounded height, so the grid grew its own scroll body
+    /// while the page kept its own: two scrollbars on the same table, which is what a reader actually
+    /// hits. Paging and virtualization are mutually exclusive in Radzen, so the pager is the fix, not a
+    /// workaround. A caller that genuinely wants infinite scroll sets <c>Virtualize="true"</c> and
+    /// takes the bounded height with it.</para></summary>
+    [Parameter] public bool Virtualize { get; set; } = AetheusGrid.Virtualization;
+
+    /// <summary>Rows rendered above and below the viewport. Three is enough to hide the fetch during a
+    /// normal scroll without inflating the DOM.</summary>
+    [Parameter] public int VirtualizationOverscanCount { get; set; } = 3;
     [Parameter] public Density Density { get; set; } = Density.Compact;
     [Parameter] public string? EmptyText { get; set; }
     [Parameter] public RenderFragment? EmptyTemplate { get; set; }
@@ -50,8 +59,17 @@ public partial class AetheusDataGrid<TItem> where TItem : notnull
                 && AdditionalAttributes.TryGetValue("class", out var c) ? c?.ToString() : null;
             var classes = new List<string>();
             if (!string.IsNullOrWhiteSpace(passed)) classes.Add(passed);
+            // Every grid built on this wrapper, not just the virtualised ones. The ten-row floor used
+            // to hang off aetheus-grid-virtualized, so a plain grid (the runs table on a pipeline
+            // page, for one) got no floor at all and collapsed onto its own scrollbar.
+            classes.Add("aetheus-grid");
             if (RowClick.HasDelegate) classes.Add("aetheus-clickable-rows");
             if (FullHeight) classes.Add("aetheus-grid-fullheight");
+            // Always applied when virtualising, FullHeight included. Virtualization is circular without
+            // it: Radzen renders rows to fill the scroll body, but the body only has a height once rows
+            // exist, so a body left at min-height 0 stays 0 and the grid renders empty. FullHeight caps
+            // the height; this floor is what stops it collapsing.
+            if (Virtualize) classes.Add("aetheus-grid-virtualized");
             return string.Join(" ", classes);
         }
     }

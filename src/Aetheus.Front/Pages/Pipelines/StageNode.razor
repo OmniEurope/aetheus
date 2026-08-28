@@ -9,7 +9,7 @@
     with InvariantCulture so a comma-decimal UI locale (e.g. fr-FR) can't corrupt the CSS. This is
     the only sanctioned inline-style usage in the front-end; all other inline styles have been removed.
 *@
-<div id="@ElementId" class="vp-node stage-node-positioned @(IsSelected ? "vp-node-selected" : "")"
+<div id="@ElementId" class="vp-node stage-node-positioned @(IsSelected ? "vp-node-selected" : "") @(ReadOnly ? "vp-provenance-inherited" : "")"
      style="--node-x: @(X.ToString(CultureInfo.InvariantCulture))px; --node-y: @(Y.ToString(CultureInfo.InvariantCulture))px;"
      role="button" tabindex="0" aria-label="@Stage.Name"
      @onclick="OnSelectClicked" @onclick:stopPropagation="true" @onkeydown="OnNodeKeyDownAsync">

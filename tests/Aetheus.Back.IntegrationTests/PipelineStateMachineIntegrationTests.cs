@@ -3,6 +3,7 @@ using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,7 @@ namespace Aetheus.Back.IntegrationTests;
 public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture)
 {
     private const string SystemPrepare = "System:Prepare";
+    private const string RunnerCapabilities = "[\"pipeline.build\",\"shell.execute\"]";
     private const string TwoStageYaml = """
         name: two-stage
         trigger: manual
@@ -159,7 +161,17 @@ public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var orgId = await db.Set<Organization>().Select(o => o.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
-            var server = new Server { Name = $"runner-{Guid.NewGuid():N}", Hostname = "test", Status = ServerStatus.Online, PipelineRunnerEnabled = true, LastHeartbeat = DateTime.UtcNow, OrganizationId = orgId };
+            var server = new Server
+            {
+                Name = $"runner-{Guid.NewGuid():N}",
+                Hostname = "test",
+                Status = ServerStatus.Online,
+                PipelineRunnerEnabled = true,
+                LastHeartbeat = DateTime.UtcNow,
+                OrganizationId = orgId,
+                AgentProtocolVersion = AgentProtocol.CurrentVersion,
+                AgentCapabilitiesJson = RunnerCapabilities
+            };
             db.Servers.Add(server);
             await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -300,7 +312,17 @@ public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
             var orgId = await db.Set<Organization>().Select(o => o.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
-            var server = new Server { Name = $"runner-{Guid.NewGuid():N}", Hostname = "test", Status = ServerStatus.Online, PipelineRunnerEnabled = true, LastHeartbeat = DateTime.UtcNow, OrganizationId = orgId };
+            var server = new Server
+            {
+                Name = $"runner-{Guid.NewGuid():N}",
+                Hostname = "test",
+                Status = ServerStatus.Online,
+                PipelineRunnerEnabled = true,
+                LastHeartbeat = DateTime.UtcNow,
+                OrganizationId = orgId,
+                AgentProtocolVersion = AgentProtocol.CurrentVersion,
+                AgentCapabilitiesJson = RunnerCapabilities
+            };
             db.Servers.Add(server);
 
             var pipeline = new Pipeline { Name = $"sm-retry-{Guid.NewGuid():N}", YamlDefinition = RetryYaml };
@@ -370,7 +392,17 @@ public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var orgId = await db.Set<Organization>().Select(o => o.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
-            var server = new Server { Name = $"runner-{Guid.NewGuid():N}", Hostname = "test", Status = ServerStatus.Online, PipelineRunnerEnabled = true, LastHeartbeat = DateTime.UtcNow, OrganizationId = orgId };
+            var server = new Server
+            {
+                Name = $"runner-{Guid.NewGuid():N}",
+                Hostname = "test",
+                Status = ServerStatus.Online,
+                PipelineRunnerEnabled = true,
+                LastHeartbeat = DateTime.UtcNow,
+                OrganizationId = orgId,
+                AgentProtocolVersion = AgentProtocol.CurrentVersion,
+                AgentCapabilitiesJson = RunnerCapabilities
+            };
             db.Servers.Add(server);
             await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -430,7 +462,7 @@ public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture
     }
 
     [Fact]
-    public async Task CancelRun_RunningPipeline_CancelsAllPendingSteps()
+    public async Task CancelRun_RunningPipeline_WaitsForRunningWorkBeforeBecomingCancelled()
     {
         await using var factory = new AetheusWebApplicationFactory(fixture.ConnectionString);
 
@@ -485,12 +517,34 @@ public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
             var run = await db.PipelineRuns.AsNoTracking().FirstAsync(r => r.Id == runId, cancellationToken: TestContext.Current.CancellationToken);
-            Assert.Equal(PipelineStatus.Cancelled, run.Status);
+            Assert.Equal(PipelineStatus.Running, run.Status);
+            var variables = PipelineRunHelpers.DeserializeResolvedVariables(run.AdditionalVariablesJson);
+            Assert.Equal("true", variables[PipelineRunService.CancellationRequestedVariable]);
 
             var pendingSteps = await db.PipelineStepRuns.AsNoTracking()
                 .Where(s => s.PipelineRunId == runId && s.Status == TaskExecutionStatus.Pending)
                 .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
             Assert.Empty(pendingSteps);
+
+            var runningStep = await db.PipelineStepRuns
+                .SingleAsync(
+                    step => step.PipelineRunId == runId && step.Status == TaskExecutionStatus.Running,
+                    cancellationToken: TestContext.Current.CancellationToken);
+            runningStep.Status = TaskExecutionStatus.Success;
+            runningStep.CompletedAt = TimeProvider.System.GetUtcNow().UtcDateTime;
+            await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            var service = scope.ServiceProvider.GetRequiredService<IPipelineRunService>();
+            await service.AdvanceStageAsync(runId, "build", ct: TestContext.Current.CancellationToken);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var run = await db.PipelineRuns.AsNoTracking().FirstAsync(
+                candidate => candidate.Id == runId,
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(PipelineStatus.Cancelled, run.Status);
         }
     }
 
@@ -595,7 +649,17 @@ public sealed class PipelineStateMachineIntegrationTests(PostgresFixture fixture
                 """;
 
             var orgId = await db.Set<Organization>().Select(o => o.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
-            var server = new Server { Name = $"runner-ov-{Guid.NewGuid():N}", Hostname = "test", Status = ServerStatus.Online, PipelineRunnerEnabled = true, LastHeartbeat = DateTime.UtcNow, OrganizationId = orgId };
+            var server = new Server
+            {
+                Name = $"runner-ov-{Guid.NewGuid():N}",
+                Hostname = "test",
+                Status = ServerStatus.Online,
+                PipelineRunnerEnabled = true,
+                LastHeartbeat = DateTime.UtcNow,
+                OrganizationId = orgId,
+                AgentProtocolVersion = AgentProtocol.CurrentVersion,
+                AgentCapabilitiesJson = RunnerCapabilities
+            };
             db.Servers.Add(server);
             await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 

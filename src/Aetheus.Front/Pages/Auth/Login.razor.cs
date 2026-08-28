@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Auth;
 
@@ -12,7 +6,6 @@ public partial class Login
 {
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private AuthStateProvider Auth { get; set; } = default!;
-    [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
 
@@ -21,17 +14,39 @@ public partial class Login
     private bool _loading;
     private bool _showPassword;
     private bool _totpRequired;
+    private bool _useRecoveryCode;
     private bool _showForgotHint;
+    private bool _isPublicDemo;
 
     private void ToggleShowPassword() => _showPassword = !_showPassword;
 
     private void ToggleForgotHint() => _showForgotHint = !_showForgotHint;
 
-    protected override Task OnInitializedAsync()
+    private void ToggleRecoveryCode()
+    {
+        _useRecoveryCode = !_useRecoveryCode;
+        if (_useRecoveryCode)
+            _model.TotpCode = null;
+        else
+            _model.RecoveryCode = null;
+    }
+
+    protected override async Task OnInitializedAsync()
     {
         if (Auth.IsAuthenticated)
+        {
             Nav.NavigateTo("/");
-        return Task.CompletedTask;
+            return;
+        }
+
+        try
+        {
+            _isPublicDemo = (await Api.Auth.GetPublicDemoInfoAsync())?.Enabled == true;
+        }
+        catch (HttpRequestException)
+        {
+            _isPublicDemo = false;
+        }
     }
 
     private async Task OnSubmit()
@@ -41,16 +56,16 @@ public partial class Login
 
         try
         {
-            var result = await Api.LoginAsync(new LoginRequest
+            var outcome = await Api.Auth.LoginAsync(new LoginRequest
             {
                 Username = _model.Username,
                 Password = _model.Password,
                 RememberMe = _model.RememberMe,
-                TotpCode = _totpRequired ? _model.TotpCode : null,
-                RecoveryCode = _totpRequired ? _model.RecoveryCode : null
+                TotpCode = _totpRequired && !_useRecoveryCode ? _model.TotpCode : null,
+                RecoveryCode = _totpRequired && _useRecoveryCode ? _model.RecoveryCode : null
             });
 
-            if (result is not null)
+            if (outcome.Value is { } result)
             {
                 // F-010: server signals TOTP is required - show the code input
                 if (result.TotpRequired && string.IsNullOrEmpty(result.Token))
@@ -69,22 +84,16 @@ public partial class Login
                     return;
                 }
 
-                try
-                {
-                    var summary = await Api.GetMyPermissionsAsync();
-                    if (summary is not null)
-                        Permissions.SetPermissions(summary.EffectivePermissions, Auth.IsAdmin);
-                }
-                catch (Exception ex)
-                {
-                    // Permissions fetch failure should not block login
-                    System.Diagnostics.Debug.WriteLine($"[Login] Permissions load failed: {ex.Message}");
-                }
                 Nav.NavigateTo("/");
             }
             else
             {
-                _error = L["InvalidCredentials"].Value;
+                _error = outcome.StatusCode switch
+                {
+                    System.Net.HttpStatusCode.TooManyRequests => L["LoginRateLimited"].Value,
+                    >= System.Net.HttpStatusCode.InternalServerError => L["LoginUnavailable"].Value,
+                    _ => L["InvalidCredentials"].Value
+                };
             }
         }
         catch (HttpRequestException)

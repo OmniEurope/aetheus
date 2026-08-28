@@ -17,7 +17,7 @@
 
 <AetheusDataGrid @ref="_channelsGrid" Data="@_channels" Count="@_channelTotalCount"
     TItem="NotificationChannelDto" IsLoading="@_channelsLoading" LoadData="@LoadChannelsAsync"
-    PageSize="25" AllowFiltering="false" class="rz-mb-6">
+    PageSize="25" class="rz-mb-6">
     <EmptyTemplate>
         <EmptyState Icon="hub" Title="@L["NoNotificationChannels"]" Description="@L["NoNotificationChannelsDescription"]" />
     </EmptyTemplate>
@@ -61,7 +61,7 @@
 
 <AetheusDataGrid @ref="_rulesGrid" Data="@_rules" Count="@_ruleTotalCount"
     TItem="NotificationRuleDto" IsLoading="@_rulesLoading" LoadData="@LoadRulesAsync"
-    PageSize="25" AllowFiltering="false">
+    PageSize="25">
     <EmptyTemplate>
         <EmptyState Icon="rule" Title="@L["NoNotificationRules"]" Description="@L["NoNotificationRulesDescription"]" />
     </EmptyTemplate>

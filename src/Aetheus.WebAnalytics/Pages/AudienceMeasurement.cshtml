@@ -1,0 +1,46 @@
+@page "/privacy/audience-measurement"
+@model Aetheus.WebAnalytics.Pages.AudienceMeasurementModel
+@{
+    Layout = null;
+    var text = Aetheus.WebAnalytics.PrivacyTranslations.Current;
+    var labels = Aetheus.WebAnalytics.PrivacyTranslations.CurrentLabels;
+}
+<!doctype html>
+<html lang="@Aetheus.WebAnalytics.PrivacyTranslations.CurrentLanguage">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@text.Title</title>
+    <link rel="stylesheet" href="/_content/Aetheus.WebAnalytics/privacy.css" />
+</head>
+<body>
+<main>
+    <h1>@text.Title</h1>
+    <p>@text.Intro</p>
+    <p>@text.NoStorage</p>
+    <p>@text.Details</p>
+    <dl>
+        <dt>@labels.Controller</dt><dd>@Model.Options.ControllerName</dd>
+        <dt>@labels.Contact</dt><dd>@Model.Options.Contact</dd>
+        <dt>@labels.Purpose</dt><dd>@Model.Options.Purpose</dd>
+        <dt>@labels.LegalBasis</dt><dd>@Model.Options.LegalBasis</dd>
+        <dt>@labels.Hosting</dt><dd>@Model.Options.HostingDescription</dd>
+        <dt>@labels.DetailedRetention</dt><dd>@Model.Options.DetailedRetentionDays</dd>
+        <dt>@labels.SessionRetention</dt><dd>@Model.Options.SessionRetentionDays</dd>
+        <dt>@labels.AnonymousAggregates</dt><dd>@Model.Options.AggregateRetentionMonths</dd>
+    </dl>
+    <p><small>@labels.NoticeVersion: @Model.Options.PrivacyNoticeVersion</small></p>
+    @if (Model.OptedOut)
+    {
+        <p role="status">@text.Confirmed</p>
+    }
+    else
+    {
+        <form method="post">
+            @Html.AntiForgeryToken()
+            <button type="submit">@text.OptOut</button>
+        </form>
+    }
+</main>
+</body>
+</html>

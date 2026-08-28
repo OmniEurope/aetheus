@@ -50,7 +50,7 @@
                             </div>
                             @if (task.Status == TaskExecutionStatus.Running)
                             {
-                                <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.ExtraSmall" />
+                                <AetheusLoader Size="AetheusLoaderSize.ExtraSmall" Centered="false" />
                             }
                             else if (IsStalledOnOfflineAgent(task))
                             {
@@ -79,7 +79,7 @@
                                 </div>
                                 @if (task.Status == TaskExecutionStatus.Running)
                                 {
-                                    <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.ExtraSmall" />
+                                    <AetheusLoader Size="AetheusLoaderSize.ExtraSmall" Centered="false" />
                                 }
                                 else if (IsStalledOnOfflineAgent(task))
                                 {

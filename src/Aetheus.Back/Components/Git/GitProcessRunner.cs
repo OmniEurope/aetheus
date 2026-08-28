@@ -18,18 +18,35 @@ public class GitProcessRunner(ILogger<GitProcessRunner> logger)
         string workDir, IReadOnlyList<string> args, CancellationToken ct,
         TimeSpan? timeout = null, bool ignoreExitCode = false)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        var result = await RunGitCoreAsync(
+            workDir, args, ct, timeout, ignoreExitCode, maxOutputChars: null).ConfigureAwait(false);
+        return (result.ExitCode, result.Output, result.Error);
+    }
+
+    public Task<(int ExitCode, string Output, string Error, bool OutputTruncated)> RunGitBoundedAsync(
+        string workDir,
+        IReadOnlyList<string> args,
+        int maxOutputChars,
+        CancellationToken ct,
+        TimeSpan? timeout = null,
+        bool ignoreExitCode = false) =>
+        RunGitCoreAsync(
+            workDir,
+            args,
+            ct,
+            timeout,
+            ignoreExitCode,
+            Math.Clamp(maxOutputChars, 1, 4 * 1024 * 1024));
+
+    private async Task<(int ExitCode, string Output, string Error, bool OutputTruncated)> RunGitCoreAsync(
+        string workDir,
+        IReadOnlyList<string> args,
+        CancellationToken ct,
+        TimeSpan? timeout,
+        bool ignoreExitCode,
+        int? maxOutputChars)
+    {
+        var psi = GitProcessStartInfoFactory.Create(workDir, args);
 
         // Guard a missing working directory before Process.Start: it otherwise throws a raw
         // Win32Exception (267, "the directory name is invalid") that bubbles out as an unhandled 500.
@@ -40,7 +57,7 @@ public class GitProcessRunner(ILogger<GitProcessRunner> logger)
         {
             logger.LogWarning("git {Args} skipped - working directory does not exist: {Dir}",
                 string.Join(' ', args), workDir);
-            return (-1, string.Empty, $"Repository directory not found: {workDir}");
+            return (-1, string.Empty, $"Repository directory not found: {workDir}", false);
         }
 
         using var process = new Process { StartInfo = psi };
@@ -50,21 +67,22 @@ public class GitProcessRunner(ILogger<GitProcessRunner> logger)
         cts.CancelAfter(timeout ?? DefaultTimeout);
 
         string output, error;
+        var outputTruncated = false;
         try
         {
-            var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var outputTask = ReadOutputAsync(process.StandardOutput, maxOutputChars, cts.Token);
             var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
             var waitTask = process.WaitForExitAsync(cts.Token);
 
             await Task.WhenAll(outputTask, errorTask, waitTask).ConfigureAwait(false);
-            output = await outputTask.ConfigureAwait(false);
+            (output, outputTruncated) = await outputTask.ConfigureAwait(false);
             error = await errorTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             SafeKill(process);
             logger.LogWarning("git {Args} timed out in {Dir}", string.Join(' ', args), workDir);
-            return (-1, string.Empty, "Timeout");
+            return (-1, string.Empty, "Timeout", false);
         }
 
         if (process.ExitCode != 0 && !ignoreExitCode)
@@ -73,7 +91,30 @@ public class GitProcessRunner(ILogger<GitProcessRunner> logger)
                 string.Join(' ', args), process.ExitCode, workDir, error);
         }
 
-        return (process.ExitCode, output, error);
+        return (process.ExitCode, output, error, outputTruncated);
+    }
+
+    private static async Task<(string Output, bool Truncated)> ReadOutputAsync(
+        StreamReader reader,
+        int? maxChars,
+        CancellationToken ct)
+    {
+        if (maxChars is null)
+            return (await reader.ReadToEndAsync(ct).ConfigureAwait(false), false);
+
+        var retained = new StringBuilder(Math.Min(maxChars.Value, 64 * 1024));
+        var buffer = new char[8192];
+        var truncated = false;
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+        {
+            var remaining = maxChars.Value - retained.Length;
+            if (remaining > 0)
+                retained.Append(buffer, 0, Math.Min(remaining, read));
+            if (read > remaining)
+                truncated = true;
+        }
+        return (retained.ToString(), truncated);
     }
 
     public static void ClearReadOnlyAttributes(string directory)

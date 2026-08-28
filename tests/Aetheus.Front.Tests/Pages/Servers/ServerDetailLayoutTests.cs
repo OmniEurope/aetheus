@@ -87,6 +87,10 @@ public class ServerDetailLayoutTests : BunitContext
         Assert.Contains("UpdateAgent", cut.Markup);
         Assert.Contains("Edit", cut.Markup);
         Assert.Contains("Delete", cut.Markup);
+        Assert.Contains("aria-label=\"ContactAgent\"", cut.Markup);
+        Assert.Contains("aria-label=\"UpdateAgent\"", cut.Markup);
+        Assert.Contains("aria-label=\"Edit\"", cut.Markup);
+        Assert.Contains("aria-label=\"Delete\"", cut.Markup);
     }
 
     [Fact]
@@ -188,6 +192,30 @@ public class ServerDetailLayoutTests : BunitContext
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "DELETE");
     }
 
+    [Fact]
+    public async Task OnDeleteServer_ShowsBusyStateWhileDeleteCompletes()
+    {
+        var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(HttpMethod.Delete, "api/servers/12", async ct =>
+        {
+            await releaseDelete.Task.WaitAsync(ct);
+            return new { };
+        });
+        var cut = RenderLayout(MakeServer(12, "delete-me"));
+
+        var deletion = cut.InvokeAsync(cut.Instance.DeleteServerConfirmedAsync);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("Deleting", cut.Markup);
+        });
+        Assert.False(deletion.IsCompleted);
+
+        releaseDelete.SetResult();
+        await deletion;
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Deleting", cut.Markup));
+    }
+
     // ── contact agent dialog ────────────────────────────────────────────────
 
     [Fact]
@@ -231,6 +259,7 @@ public class ServerDetailLayoutTests : BunitContext
     public void OnLoaderChanged_RecomputesCanWrite_NoThrow()
     {
         var loader = SeedLoader(MakeServer(11, "load-me"));
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/servers/11/overview");
         var cut = Render<ServerDetailLayout>(p => p.Add(x => x.Body, b => b.AddMarkupContent(0, "<div/>")));
 
         // Fire the loader event (as a heartbeat would) - recomputes _canWrite + pokes the card.
@@ -238,6 +267,9 @@ public class ServerDetailLayoutTests : BunitContext
         cut.InvokeAsync(() => onChanged.Invoke(cut.Instance, []));
 
         Assert.True((bool)typeof(ServerDetailLayout).GetField("_canWrite", Priv)!.GetValue(cut.Instance)!);
+        var owner = Services.GetRequiredService<BreadcrumbService>().Items[1];
+        Assert.Equal("load-me", owner.Text);
+        Assert.False(owner.IsLoading);
         GC.KeepAlive(loader);
     }
 
@@ -260,6 +292,48 @@ public class ServerDetailLayoutTests : BunitContext
         });
         Assert.Contains("down-srv", cut.Markup);
         Assert.Contains("Offline", cut.Markup);
+    }
+
+    [Fact]
+    public void CompatibilityDetails_AreNotRendered_WhenAgentIsUpToDate()
+    {
+        var cut = RenderLayout(MakeServer() with
+        {
+            AgentCompatibility = new AgentCompatibilityDto
+            {
+                Status = AgentCompatibilityStatus.UpToDate,
+                Reason = AgentCompatibilityReason.Current,
+                InstalledVersion = "1.0.1294",
+                TargetVersion = "1.0.1294",
+                AgentProtocolVersion = 2,
+                MinimumSupportedProtocol = 1,
+                MaximumSupportedProtocol = 2
+            }
+        });
+
+        Assert.DoesNotContain("AgentCompatibilityDetails", cut.Markup);
+    }
+
+    [Fact]
+    public void CompatibilityDetails_AreNotRendered_WhenAgentRequiresUpdate()
+    {
+        var cut = RenderLayout(MakeServer() with
+        {
+            AgentCompatibility = new AgentCompatibilityDto
+            {
+                Status = AgentCompatibilityStatus.UpdateRequired,
+                Reason = AgentCompatibilityReason.UnsupportedProtocol,
+                InstalledVersion = "1.0.1200",
+                TargetVersion = "1.0.1294",
+                AgentProtocolVersion = 0,
+                MinimumSupportedProtocol = 1,
+                MaximumSupportedProtocol = 2
+            }
+        });
+
+        Assert.DoesNotContain("AgentCompatibilityDetails", cut.Markup);
+        Assert.DoesNotContain("AgentCompatibilityReason_UnsupportedProtocol", cut.Markup);
+        Assert.DoesNotContain("1.0.1200", cut.Markup);
     }
 
     [Fact]

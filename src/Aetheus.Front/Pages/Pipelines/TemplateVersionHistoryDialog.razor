@@ -1,4 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplateVersionHistoryBase
 
 <RadzenStack Gap="1rem">
     @if (_versionsLoadFailed)
@@ -12,11 +13,11 @@
         </RadzenAlert>
     }
 
-    <RadzenDataGrid @ref="_versionsGrid" Data="@_versions" Count="@_versionCount"
+    <RadzenDataGrid Responsive="false" @ref="_versionsGrid" Data="@_versions" Count="@_versionCount"
         TItem="PipelineTemplateVersionSummaryDto" IsLoading="@_versionsLoading"
         LoadData="@LoadVersionsAsync" AllowPaging="true" PageSize="10" AllowSorting="true"
         AllowFiltering="true" FilterMode="FilterMode.Advanced"
-        Density="Density.Compact">
+        Density="Density.Compact" AllowColumnResize="true">
         <Columns>
             <RadzenDataGridColumn TItem="PipelineTemplateVersionSummaryDto" Property="Version" Title="@L["Version"]" Width="6rem">
                 <Template Context="version">v@version.Version</Template>

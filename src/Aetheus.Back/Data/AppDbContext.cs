@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 
 namespace Aetheus.Back.Data;
@@ -14,8 +13,10 @@ public class AppDbContext(
     public DbSet<RegistrationToken> RegistrationTokens => Set<RegistrationToken>();
     public DbSet<ServerToken> ServerTokens => Set<ServerToken>();
     public DbSet<ServerTask> Tasks => Set<ServerTask>();
+    public DbSet<AgentUpdateRequest> AgentUpdateRequests => Set<AgentUpdateRequest>();
     public DbSet<TaskLog> TaskLogs => Set<TaskLog>();
     public DbSet<Pipeline> Pipelines => Set<Pipeline>();
+    public DbSet<PipelineFavorite> PipelineFavorites => Set<PipelineFavorite>();
     public DbSet<PipelineRun> PipelineRuns => Set<PipelineRun>();
     public DbSet<PipelineStepRun> PipelineStepRuns => Set<PipelineStepRun>();
     public DbSet<PipelineTemplate> PipelineTemplates => Set<PipelineTemplate>();
@@ -114,6 +115,33 @@ public class AppDbContext(
     public DbSet<AppMetricThreshold> AppMetricThresholds => Set<AppMetricThreshold>();
     public DbSet<AppLogEntry> AppLogEntries => Set<AppLogEntry>();
     public DbSet<AppErrorEvent> AppErrorEvents => Set<AppErrorEvent>();
+    public DbSet<AnalysisReport> AnalysisReports => Set<AnalysisReport>();
+    public DbSet<AnalysisFinding> AnalysisFindings => Set<AnalysisFinding>();
+    public DbSet<AnalysisFindingOccurrence> AnalysisFindingOccurrences => Set<AnalysisFindingOccurrence>();
+    public DbSet<AnalysisFindingDecision> AnalysisFindingDecisions => Set<AnalysisFindingDecision>();
+    public DbSet<AnalysisMetric> AnalysisMetrics => Set<AnalysisMetric>();
+    public DbSet<AnalysisComponent> AnalysisComponents => Set<AnalysisComponent>();
+    public DbSet<AnalysisPolicy> AnalysisPolicies => Set<AnalysisPolicy>();
+    public DbSet<AnalysisPolicyRevision> AnalysisPolicyRevisions => Set<AnalysisPolicyRevision>();
+    public DbSet<AnalysisPolicyException> AnalysisPolicyExceptions => Set<AnalysisPolicyException>();
+    public DbSet<AnalysisEvaluation> AnalysisEvaluations => Set<AnalysisEvaluation>();
+    public DbSet<AnalysisTrackingProject> AnalysisTrackingProjects => Set<AnalysisTrackingProject>();
+    public DbSet<AnalysisVulnerabilityObservation> AnalysisVulnerabilityObservations => Set<AnalysisVulnerabilityObservation>();
+    public DbSet<DastExecutionLease> DastExecutionLeases => Set<DastExecutionLease>();
+    public DbSet<DependencyTrackOutboxItem> DependencyTrackOutboxItems => Set<DependencyTrackOutboxItem>();
+    public DbSet<AppVisitorIdentity> AppVisitorIdentities => Set<AppVisitorIdentity>();
+    public DbSet<AppAnalyticsEvent> AppAnalyticsEvents => Set<AppAnalyticsEvent>();
+    public DbSet<AppAnalyticsSession> AppAnalyticsSessions => Set<AppAnalyticsSession>();
+    public DbSet<AppAnalyticsPeriodIdentity> AppAnalyticsPeriodIdentities => Set<AppAnalyticsPeriodIdentity>();
+    public DbSet<AppAnalyticsAggregate> AppAnalyticsAggregates => Set<AppAnalyticsAggregate>();
+    public DbSet<AppAnalyticsPageAggregate> AppAnalyticsPageAggregates => Set<AppAnalyticsPageAggregate>();
+    public DbSet<AppAnalyticsRejection> AppAnalyticsRejections => Set<AppAnalyticsRejection>();
+    public DbSet<RegistryPackage> RegistryPackages => Set<RegistryPackage>();
+    public DbSet<RegistryPackageVersion> RegistryPackageVersions => Set<RegistryPackageVersion>();
+    public DbSet<AiRunnerProfile> AiRunnerProfiles => Set<AiRunnerProfile>();
+    public DbSet<AiTaskDefinition> AiTaskDefinitions => Set<AiTaskDefinition>();
+    public DbSet<AiTaskTrigger> AiTaskTriggers => Set<AiTaskTrigger>();
+    public DbSet<AiRunResult> AiRunResults => Set<AiRunResult>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

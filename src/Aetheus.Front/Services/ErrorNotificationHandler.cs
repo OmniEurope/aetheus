@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Net.Http.Json;
-using Aetheus.Front.Resources;
-using Aetheus.Shared.DTOs;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Services;
 
-public sealed class ErrorNotificationHandler(NotificationService notificationService, IStringLocalizer<AppStrings> localizer) : DelegatingHandler
+public sealed class ErrorNotificationHandler(NotifyHelper toast, IStringLocalizer<AppStrings> localizer) : DelegatingHandler
 {
     private static readonly HashSet<HttpStatusCode> SilentCodes =
     [
@@ -20,7 +16,8 @@ public sealed class ErrorNotificationHandler(NotificationService notificationSer
     {
         var response = await base.SendAsync(request, cancellationToken);
 
-        if (!response.IsSuccessStatusCode && !SilentCodes.Contains(response.StatusCode))
+        var loginRequest = request.RequestUri?.AbsolutePath.EndsWith("/api/auth/login", StringComparison.OrdinalIgnoreCase) == true;
+        if (!response.IsSuccessStatusCode && !SilentCodes.Contains(response.StatusCode) && !loginRequest)
         {
             // On Blazor WASM the response body is a one-shot BrowserHttpReadStream. Reading it here to
             // surface the API error consumes and disposes it, so HttpClient's own post-pipeline buffering
@@ -38,17 +35,14 @@ public sealed class ErrorNotificationHandler(NotificationService notificationSer
             }
 
             var message = await ExtractErrorMessageAsync(response, cancellationToken);
-            var severity = response.StatusCode >= HttpStatusCode.InternalServerError
-                ? NotificationSeverity.Error
-                : NotificationSeverity.Warning;
-
-            notificationService.Notify(new NotificationMessage
-            {
-                Severity = severity,
-                Summary = $"{localizer["Error"]} {(int)response.StatusCode}",
-                Detail = message,
-                Duration = 5000
-            });
+            var correlationId = response.Headers.TryGetValues("X-Aetheus-Correlation-Id", out var values)
+                ? values.FirstOrDefault()
+                : null;
+            toast.ErrorRaw(
+                $"{localizer["Error"]} {(int)response.StatusCode}",
+                message,
+                correlationId,
+                reportClientError: string.IsNullOrWhiteSpace(correlationId));
         }
 
         return response;
@@ -57,13 +51,28 @@ public sealed class ErrorNotificationHandler(NotificationService notificationSer
     private async Task<string> ExtractErrorMessageAsync(
         HttpResponseMessage response, CancellationToken ct)
     {
-        if (response.Content.Headers.ContentType?.MediaType == "application/json")
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType == "application/json"
+            || mediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true)
         {
             try
             {
-                var error = await response.Content.ReadFromJsonAsync<ApiError>(JsonOptions.Web, ct);
-                if (!string.IsNullOrEmpty(error?.Message))
-                    return error.Message;
+                var payload = await response.Content.ReadAsStringAsync(ct);
+                if (!string.IsNullOrWhiteSpace(payload))
+                {
+                    if (payload[0] == '"')
+                        return System.Text.Json.JsonSerializer.Deserialize<string>(payload, JsonOptions.Web)
+                            ?? DefaultMessage(response.StatusCode);
+                    var error = System.Text.Json.JsonSerializer.Deserialize<ApiError>(payload, JsonOptions.Web);
+                    if (!string.IsNullOrEmpty(error?.Message)) return error.Message;
+                    using var document = System.Text.Json.JsonDocument.Parse(payload);
+                    if (document.RootElement.TryGetProperty("detail", out var detail)
+                        && !string.IsNullOrWhiteSpace(detail.GetString()))
+                        return detail.GetString()!;
+                    if (document.RootElement.TryGetProperty("title", out var title)
+                        && !string.IsNullOrWhiteSpace(title.GetString()))
+                        return title.GetString()!;
+                }
             }
             catch (Exception ex)
             {
@@ -72,14 +81,16 @@ public sealed class ErrorNotificationHandler(NotificationService notificationSer
             }
         }
 
-        return response.StatusCode switch
+        return DefaultMessage(response.StatusCode);
+    }
+
+    private string DefaultMessage(HttpStatusCode statusCode) => statusCode switch
         {
             HttpStatusCode.BadRequest => localizer["InvalidRequest"],
             HttpStatusCode.Forbidden => localizer["AccessDenied"],
             HttpStatusCode.NotFound => localizer["ResourceNotFound"],
             HttpStatusCode.Conflict => localizer["ConflictingOperation"],
             HttpStatusCode.InternalServerError => localizer["UnexpectedServerError"],
-            _ => string.Format(localizer["RequestFailed"], (int)response.StatusCode)
+            _ => string.Format(localizer["RequestFailed"], (int)statusCode)
         };
-    }
 }

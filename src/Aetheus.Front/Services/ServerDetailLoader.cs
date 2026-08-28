@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Services;
 
@@ -96,8 +92,8 @@ public sealed class ServerDetailLoader : IAsyncDisposable
             _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var token = _loadCts.Token;
 
-            Server = await _api.GetServerDetailAsync(id, token).ConfigureAwait(false);
-            Metrics = await LoadMetricsAsync(id, token).ConfigureAwait(false);
+            Server = await _api.Servers.GetServerDetailAsync(id, token).ConfigureAwait(false);
+            Metrics = await LoadMetricsAsync(id, afterUtc: null, ct: token).ConfigureAwait(false);
             InitialLoadCompleted = true;
             if (Server is { MemoryTotalMb: > 0 })
             {
@@ -107,7 +103,11 @@ public sealed class ServerDetailLoader : IAsyncDisposable
             OnChanged?.Invoke();
 
             if (Server is not null)
-                await StartHubAsync(id, token).ConfigureAwait(false);
+            {
+                // Heartbeats enrich the page after its initial HTTP state is visible. SignalR
+                // negotiation is best effort and must never hold every server section loader.
+                _ = StartHubAsync(id, token);
+            }
         }
         finally
         {
@@ -124,20 +124,24 @@ public sealed class ServerDetailLoader : IAsyncDisposable
     {
         if (_currentId != id || Server is null) return;
 
-        var fresh = await _api.GetServerDetailAsync(id, ct).ConfigureAwait(false);
+        var fresh = await _api.Servers.GetServerDetailAsync(id, ct).ConfigureAwait(false);
         if (fresh is null || _currentId != id) return;
 
         Server = fresh;
-        Metrics = await LoadMetricsAsync(id, ct).ConfigureAwait(false);
+        DateTime? afterUtc = Metrics.Count == 0 ? null : Metrics[^1].Timestamp;
+        var newMetrics = await LoadMetricsAsync(id, afterUtc, ct).ConfigureAwait(false);
+        if (newMetrics.Count > 0)
+            Metrics.AddRange(newMetrics);
+        TrimMetricWindow(DateTime.Now);
         LastUpdated = DateTime.Now;
         OnChanged?.Invoke();
     }
 
     private async Task StartHubAsync(int id, CancellationToken ct)
     {
-        _hub = _hubFactory.Create("servers");
+        var hub = _hubFactory.Create("servers");
 
-        _hub.On<ServerHeartbeatDto>("Heartbeat", h =>
+        hub.On<ServerHeartbeatDto>("Heartbeat", h =>
         {
             if (Server is null) return;
             var capabilities = ResolveSudoersCapabilities(Server, h);
@@ -182,14 +186,14 @@ public sealed class ServerDetailLoader : IAsyncDisposable
             OnChanged?.Invoke();
         });
 
-        _hub.On<int>("ServerOffline", serverId =>
+        hub.On<int>("ServerOffline", serverId =>
         {
             if (Server is null || serverId != id) return;
             Server = Server with { Status = ServerStatus.Offline };
             OnChanged?.Invoke();
         });
 
-        _hub.On<TaskCompletedNotification>("TaskCompleted", async notification =>
+        hub.On<TaskCompletedNotification>("TaskCompleted", async notification =>
         {
             if (notification.ServerId != id) return;
             var handlers = OnTaskCompleted?.GetInvocationList()
@@ -201,20 +205,45 @@ public sealed class ServerDetailLoader : IAsyncDisposable
 
         // Group membership is per-connection and lost on auto-reconnect - re-join so server
         // updates/heartbeats keep flowing (the next heartbeat re-syncs the metrics).
-        _hub.RejoinOnReconnect(() => _hub.InvokeAsync("JoinServerGroup", id));
+        hub.RejoinOnReconnect(() => hub.InvokeAsync("JoinServerGroup", id));
         try
         {
-            await _hub.StartAsync(ct).ConfigureAwait(false);
-            await _hub.InvokeAsync("JoinServerGroup", id, ct).ConfigureAwait(false);
+            await hub.StartAsync(ct).ConfigureAwait(false);
+            await hub.InvokeAsync("JoinServerGroup", id, ct).ConfigureAwait(false);
+
+            if (ct.IsCancellationRequested || _currentId != id) return;
+            var previous = Interlocked.Exchange(ref _hub, hub);
+            if (previous is not null && !ReferenceEquals(previous, hub))
+                await previous.DisposeAsync().ConfigureAwait(false);
+
+            // Teardown may have raced the exchange. Keep no connection for a server that is no
+            // longer current, otherwise transfer ownership to the loader and expose it to the UI.
+            if (ct.IsCancellationRequested || _currentId != id)
+                Interlocked.CompareExchange(ref _hub, null, hub);
+            else
+            {
+                hub = null!;
+                OnChanged?.Invoke();
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Navigation cancelled a best-effort connection attempt.
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
                 "[ServerDetailLoader] Real-time connection unavailable for server {ServerId}",
                 id);
-            await _hub.DisposeAsync().ConfigureAwait(false);
-            _hub = null;
+        }
+        finally
+        {
+            if (hub is not null)
+            {
+                try { await hub.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogDebug(ex, "[ServerDetailLoader] hub dispose failed"); }
+            }
         }
     }
 
@@ -247,11 +276,19 @@ public sealed class ServerDetailLoader : IAsyncDisposable
     private bool HasService(string name) =>
         Server?.Services.Any(s => s.IsInstalled && s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) == true;
 
-    private async Task<List<ServerMetricDto>> LoadMetricsAsync(int id, CancellationToken ct)
+    private async Task<List<ServerMetricDto>> LoadMetricsAsync(
+        int id,
+        DateTime? afterUtc,
+        CancellationToken ct)
     {
         try
         {
-            return await _api.GetServerMetricsAsync(id, 24, ct).ConfigureAwait(false);
+            return await _api.Monitoring.GetServerMetricsAsync(
+                id,
+                24,
+                ct,
+                afterUtc,
+                take: 1_000).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException)
         {
@@ -263,7 +300,9 @@ public sealed class ServerDetailLoader : IAsyncDisposable
     private void AppendMetric(ServerHeartbeatDto heartbeat)
     {
         var storage = heartbeat.StorageDiagnostics;
-        var now = storage.CollectedAtUtc.Year < 2000 ? DateTime.Now : storage.CollectedAtUtc;
+        var now = storage.CollectedAtUtc.Year < 2000
+            ? DateTime.Now
+            : ToLocalClock(storage.CollectedAtUtc);
         Metrics.Add(new ServerMetricDto
         {
             ServerId = Server?.Id ?? 0,
@@ -290,8 +329,26 @@ public sealed class ServerDetailLoader : IAsyncDisposable
             Timestamp = now
         });
 
-        var cutoff = now.AddHours(-24);
+        TrimMetricWindow(now);
+    }
+
+    internal static DateTime ToLocalClock(DateTime timestamp, TimeZoneInfo? timeZone = null)
+    {
+        if (timestamp.Kind == DateTimeKind.Local && timeZone is null)
+            return timestamp;
+
+        var utc = timestamp.Kind == DateTimeKind.Utc
+            ? timestamp
+            : DateTime.SpecifyKind(timestamp, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone ?? TimeZoneInfo.Local);
+    }
+
+    private void TrimMetricWindow(DateTime localNow)
+    {
+        var cutoff = localNow.AddHours(-24);
         Metrics.RemoveAll(metric => metric.Timestamp < cutoff);
+        if (Metrics.Count > 1_000)
+            Metrics.RemoveRange(0, Metrics.Count - 1_000);
     }
 
     /// <summary>
@@ -322,18 +379,17 @@ public sealed class ServerDetailLoader : IAsyncDisposable
         catch (ObjectDisposedException) { /* already disposed */ }
         _loadCts?.Dispose();
         _loadCts = null;
-
-        if (_hub is not null)
+        var hub = Interlocked.Exchange(ref _hub, null);
+        if (hub is not null)
         {
             try
             {
                 if (_currentId.HasValue)
-                    await _hub.InvokeAsync("LeaveServerGroup", _currentId.Value).ConfigureAwait(false);
+                    await hub.InvokeAsync("LeaveServerGroup", _currentId.Value).ConfigureAwait(false);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[ServerDetailLoader] LeaveServerGroup failed"); }
-            try { await _hub.DisposeAsync().ConfigureAwait(false); }
+            try { await hub.DisposeAsync().ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogDebug(ex, "[ServerDetailLoader] hub dispose failed"); }
-            _hub = null;
         }
 
         _currentId = null;

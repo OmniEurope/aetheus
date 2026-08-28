@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Vaults;
 
@@ -16,6 +15,12 @@ public interface IVaultService
     Task<VaultSecretDto?> RotateSecretAsync(int vaultId, int secretId, RotateVaultSecretRequest request, CancellationToken ct = default);
     Task<bool> DeleteSecretAsync(int vaultId, int secretId, CancellationToken ct = default);
     Task<List<VaultSecretVersionDto>> GetSecretVersionsAsync(int vaultId, int secretId, CancellationToken ct = default);
+    Task<int> PurgeHistoricalSecretVersionsAsync(
+        int vaultId,
+        int secretId,
+        DateTime cutoffUtc,
+        int maxCount,
+        CancellationToken ct = default);
     Task<Dictionary<string, string>> ResolveVaultSecretsAsync(List<string> names, int? projectId, CancellationToken ct = default);
     Task<Dictionary<string, string>> ResolveVaultSecretsWithCrossAccessAsync(List<string> names, int projectId, CancellationToken ct = default);
     Task<(Dictionary<string, string> Vars, HashSet<string> FoundNames)> ResolveVaultSecretsWithNamesAsync(List<string> names, int? projectId, CancellationToken ct = default);

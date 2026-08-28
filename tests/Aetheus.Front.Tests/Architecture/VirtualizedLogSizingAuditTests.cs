@@ -23,14 +23,26 @@ public class VirtualizedLogSizingAuditTests
         Assert.DoesNotContain("pre-wrap", rowRule);
     }
 
-    private static string FindRepoRoot()
+    [Fact]
+    public void RunTimeline_WithManySteps_ScrollsInItsPanelInsteadOfClippingTheTree()
     {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(VirtualizedLogSizingAuditTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
+        var root = FindRepoRoot();
+        var css = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Front", "wwwroot", "css", "app.css"));
+        var timelineRule = Regex.Match(
+            css,
+            @"\.run-split-timeline\s*\{(?<body>.*?)\}",
+            RegexOptions.Singleline).Groups["body"].Value;
+        var treeRule = Regex.Match(
+            css,
+            @"\.run-tree:not\(\.run-tree-nested\)\s*\{(?<body>.*?)\}",
+            RegexOptions.Singleline).Groups["body"].Value;
+
+        Assert.Contains("min-height: 0", timelineRule);
+        Assert.Contains("overflow-y: auto", timelineRule);
+        Assert.Contains("overscroll-behavior: contain", timelineRule);
+        Assert.Contains("scrollbar-gutter: stable", timelineRule);
+        Assert.Contains("flex: 0 0 auto", treeRule);
     }
+
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

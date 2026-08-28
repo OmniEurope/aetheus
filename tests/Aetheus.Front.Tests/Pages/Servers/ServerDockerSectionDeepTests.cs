@@ -216,8 +216,9 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenProjectZoom_OpensDialogForProject()
     {
         var cut = RenderSection(5);
-        var method = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", BF)!;
-        await cut.InvokeAsync(() => method.Invoke(cut.Instance, ["webapp"]));
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", BF)!;
+        await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["webapp"]));
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
         Assert.Equal(typeof(DockerProjectDialog), dialog.LastComponent);
@@ -230,8 +231,9 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenProjectZoom_ResolvesTheZoomedProjectsContainers()
     {
         var cut = RenderSection(6);
-        var method = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", BF)!;
-        await cut.InvokeAsync(() => method.Invoke(cut.Instance, ["webapp"]));
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", BF)!;
+        await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["webapp"]));
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
         var server = Assert.IsType<ServerDetailDto>(dialog.LastParameters!["Server"]);
@@ -248,10 +250,11 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenProjectZoom_ActionResult_ExecutesBulkAction()
     {
         var cut = RenderSection(7);
+        var tab = cut.FindComponent<DockerContainersTab>();
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
         dialog.OpenResult = DockerContainerAction.Restart;
-        var method = typeof(ServerDockerSection).GetMethod("OpenProjectZoom", BF)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["webapp"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", BF)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["webapp"])!);
 
         Assert.Contains(_handler.Requests, request => request.Method == "POST" && request.Url.Contains("docker/action"));
     }
@@ -262,10 +265,11 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task ToggleLogsAsync_Open_SetsContainerAndPostsLogsRequest()
     {
         var cut = RenderSection(8);
-        var method = typeof(ServerDockerSection).GetMethod("ToggleLogsAsync", BF)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("ToggleLogsAsync", BF)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
-        var logsId = (string?)typeof(ServerDockerSection).GetField("_logsContainerId", BF)!.GetValue(cut.Instance);
+        var logsId = (string?)typeof(DockerContainersTab).GetField("_logsContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", logsId);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/8/docker/containers/logs"));
     }
@@ -276,17 +280,18 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenShell_Toggle_SetsThenClearsContainer()
     {
         var cut = RenderSection(9);
-        var method = typeof(ServerDockerSection).GetMethod("OpenShell", BF)!;
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("OpenShell", BF)!;
 
-        await cut.InvokeAsync(() => method.Invoke(cut.Instance, ["abc123def456ghi", "web-running"]));
+        await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["abc123def456ghi", "web-running"]));
         Assert.Equal("abc123def456ghi",
-            (string?)typeof(ServerDockerSection).GetField("_shellContainerId", BF)!.GetValue(cut.Instance));
+            (string?)typeof(DockerContainersTab).GetField("_shellContainerId", BF)!.GetValue(tab.Instance));
         Assert.Equal("web-running",
-            (string?)typeof(ServerDockerSection).GetField("_shellContainerName", BF)!.GetValue(cut.Instance));
+            (string?)typeof(DockerContainersTab).GetField("_shellContainerName", BF)!.GetValue(tab.Instance));
 
         // Re-invoking with the same id closes the panel (real toggle behaviour).
-        await cut.InvokeAsync(() => method.Invoke(cut.Instance, ["abc123def456ghi", "web-running"]));
-        Assert.Null((string?)typeof(ServerDockerSection).GetField("_shellContainerId", BF)!.GetValue(cut.Instance));
+        await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["abc123def456ghi", "web-running"]));
+        Assert.Null((string?)typeof(DockerContainersTab).GetField("_shellContainerId", BF)!.GetValue(tab.Instance));
     }
 
     // ── Test 10: RequestEnvVarsAsync opens the env panel and posts a request ─
@@ -295,10 +300,11 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task RequestEnvVarsAsync_Open_SetsContainerAndPostsEnvRequest()
     {
         var cut = RenderSection(10);
-        var method = typeof(ServerDockerSection).GetMethod("RequestEnvVarsAsync", BF)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "web-running"])!);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("RequestEnvVarsAsync", BF)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "web-running"])!);
 
-        var envId = (string?)typeof(ServerDockerSection).GetField("_envContainerId", BF)!.GetValue(cut.Instance);
+        var envId = (string?)typeof(DockerContainersTab).GetField("_envContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", envId);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("docker/containers/abc123def456ghi/env"));
     }
@@ -309,7 +315,7 @@ public class ServerDockerSectionDeepTests : BunitContext
     public void ParseEnvVars_ValidJson_ReturnsKeyValuePairs()
     {
         var cut = RenderSection(11);
-        var method = typeof(ServerDockerSection).GetMethod("ParseEnvVars",
+        var method = typeof(DockerContainersTab).GetMethod("ParseEnvVars",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var result = (List<DockerEnvVarDto>)method.Invoke(null, ["[\"PATH=/usr/bin\",\"HOME=/root\"]"])!;
         Assert.Equal(2, result.Count);
@@ -323,11 +329,12 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenFileBrowserAsync_Open_SetsRootPathAndPostsBrowse()
     {
         var cut = RenderSection(12);
-        var method = typeof(ServerDockerSection).GetMethod("OpenFileBrowserAsync", BF)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "web-running"])!);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("OpenFileBrowserAsync", BF)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "web-running"])!);
 
-        var browseId = (string?)typeof(ServerDockerSection).GetField("_browseContainerId", BF)!.GetValue(cut.Instance);
-        var path = (string)typeof(ServerDockerSection).GetField("_browsePath", BF)!.GetValue(cut.Instance)!;
+        var browseId = (string?)typeof(DockerContainersTab).GetField("_browseContainerId", BF)!.GetValue(tab.Instance);
+        var path = (string)typeof(DockerContainersTab).GetField("_browsePath", BF)!.GetValue(tab.Instance)!;
         Assert.Equal("abc123def456ghi", browseId);
         Assert.Equal("/", path);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("docker/containers/browse"));
@@ -339,13 +346,14 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task BrowseParentAsync_FromSubdir_GoesUpAndReBrowses()
     {
         var cut = RenderSection(13);
-        typeof(ServerDockerSection).GetField("_browseContainerId", BF)!.SetValue(cut.Instance, "abc123def456ghi");
-        typeof(ServerDockerSection).GetField("_browsePath", BF)!.SetValue(cut.Instance, "/etc/nginx");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_browseContainerId", BF)!.SetValue(tab.Instance, "abc123def456ghi");
+        typeof(DockerContainersTab).GetField("_browsePath", BF)!.SetValue(tab.Instance, "/etc/nginx");
 
-        var method = typeof(ServerDockerSection).GetMethod("BrowseParentAsync", BF)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
+        var method = typeof(DockerContainersTab).GetMethod("BrowseParentAsync", BF)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, [])!);
 
-        var path = (string)typeof(ServerDockerSection).GetField("_browsePath", BF)!.GetValue(cut.Instance)!;
+        var path = (string)typeof(DockerContainersTab).GetField("_browsePath", BF)!.GetValue(tab.Instance)!;
         Assert.Equal("/etc", path);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("docker/containers/browse"));
     }
@@ -359,12 +367,12 @@ public class ServerDockerSectionDeepTests : BunitContext
             HttpMethod.Get,
             "api/servers/14/docker/compose/webapp/file",
             System.Net.HttpStatusCode.OK);
-        var cut = RenderSection(14);
-        var method = typeof(ServerDockerSection).GetMethod("OpenComposeEditorAsync", BF)!;
+        var cut = RenderSection(14).FindComponent<DockerComposeTab>();
+        var method = typeof(DockerComposeTab).GetMethod("OpenComposeEditorAsync", BF)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["webapp"])!);
 
-        var visible = (bool)typeof(ServerDockerSection).GetField("_composeEditorVisible", BF)!.GetValue(cut.Instance)!;
-        var stack = (string)typeof(ServerDockerSection).GetField("_composeEditorStack", BF)!.GetValue(cut.Instance)!;
+        var visible = (bool)typeof(DockerComposeTab).GetField("_composeEditorVisible", BF)!.GetValue(cut.Instance)!;
+        var stack = (string)typeof(DockerComposeTab).GetField("_composeEditorStack", BF)!.GetValue(cut.Instance)!;
         Assert.True(visible);
         Assert.Equal("webapp", stack);
         Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("docker/compose/webapp/file"));
@@ -376,8 +384,9 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenResourceLimitsDialog_SeedsMemoryFromContainer()
     {
         var cut = RenderSection(15);
-        var method = typeof(ServerDockerSection).GetMethod("OpenResourceLimitsDialog", BF)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BF)!;
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
         Assert.Equal(typeof(DockerResourceLimitsDialog), dialog.LastComponent);
@@ -391,7 +400,7 @@ public class ServerDockerSectionDeepTests : BunitContext
     public void GetMemoryBarClass_HighUsage_ReturnsDangerClass()
     {
         var cut = RenderSection(16);
-        var method = typeof(ServerDockerSection).GetMethod("GetMemoryBarClass",
+        var method = typeof(DockerContainersTab).GetMethod("GetMemoryBarClass",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var container = new DockerContainerDto
         {
@@ -408,8 +417,9 @@ public class ServerDockerSectionDeepTests : BunitContext
     public void ContainersForProject_Webapp_ReturnsOnlyWebappContainers()
     {
         var cut = RenderSection(17);
-        var method = typeof(ServerDockerSection).GetMethod("ContainersForProject", BF)!;
-        var result = (List<DockerContainerDto>)method.Invoke(cut.Instance, ["webapp"])!;
+        var tab = cut.FindComponent<DockerContainersTab>();
+        var method = typeof(DockerContainersTab).GetMethod("ContainersForProject", BF)!;
+        var result = (List<DockerContainerDto>)method.Invoke(tab.Instance, ["webapp"])!;
         Assert.All(result, c => Assert.Equal("webapp", c.Project));
     }
 }

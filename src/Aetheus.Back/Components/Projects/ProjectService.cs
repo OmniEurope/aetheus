@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Components.Servers;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.Projects;
@@ -24,15 +19,44 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
             request.Search, request.SortBy, request.SortDescending,
             page, pageSize, request.ProjectStatus, accessibleIds, ct).ConfigureAwait(false);
 
-        var dtos = items.Select(MapToDto).ToList();
+        var dtos = items.Select(project =>
+            ProjectDtoMapper.ToDto(project, includePipelineSummary: true)).ToList();
+        var projectIds = dtos.Select(dto => dto.Id).ToList();
 
         // Enrich each tile with its latest git activity (one batched query, not N+1).
         var gitDates = await GetLastGitUpdatesCachedAsync(
-            dtos.Select(d => d.Id).ToList(), ct).ConfigureAwait(false);
+            projectIds, ct).ConfigureAwait(false);
+        var internalRepositoryIds = await repo.GetInternalRepositoryIdsAsync(
+            projectIds, ct).ConfigureAwait(false) ?? [];
+        var insights = await repo.GetProjectListInsightsAsync(
+            projectIds,
+            timeProvider.GetUtcNow().UtcDateTime.AddMinutes(-5),
+            ct).ConfigureAwait(false) ?? [];
         for (var i = 0; i < dtos.Count; i++)
         {
             if (gitDates.TryGetValue(dtos[i].Id, out var date) && date.HasValue)
                 dtos[i] = dtos[i] with { LastGitUpdateAt = date.Value };
+            if (internalRepositoryIds.TryGetValue(dtos[i].Id, out var repositoryId))
+                dtos[i] = dtos[i] with { InternalRepositoryId = repositoryId };
+            if (insights.TryGetValue(dtos[i].Id, out var insight))
+            {
+                dtos[i] = dtos[i] with
+                {
+                    LastCommitId = insight.LastCommitId,
+                    LastCommitSha = insight.LastCommitSha,
+                    LastCommitMessage = insight.LastCommitMessage,
+                    LastCommitAt = insight.LastCommitAt,
+                    LastRunId = insight.LastRunId,
+                    LastRunName = insight.LastRunName,
+                    LastRunStatus = insight.LastRunStatus,
+                    LastRunAt = insight.LastRunAt,
+                    ParentRunId = insight.ParentRunId,
+                    ParentRunName = insight.ParentRunName,
+                    LatestGateGrade = insight.LatestGateGrade,
+                    ProductionStatus = insight.ProductionStatus,
+                    OnlineUserCount = insight.OnlineUserCount
+                };
+            }
         }
 
         return new PaginatedResult<ProjectDto>
@@ -55,10 +79,15 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
             ?? new ProjectSectionCounts(0, 0, 0, 0, 0);
 
         var gitDates = await GetLastGitUpdatesCachedAsync([id], ct).ConfigureAwait(false);
+        var insight = (await repo.GetProjectListInsightsAsync(
+            [id],
+            timeProvider.GetUtcNow().UtcDateTime.AddMinutes(-5),
+            ct).ConfigureAwait(false)).GetValueOrDefault(id);
 
         return new ProjectDetailDto
         {
             LastGitUpdateAt = gitDates.GetValueOrDefault(id),
+            LatestGateGrade = insight?.LatestGateGrade,
             ServerCount = counts.Servers,
             ReleaseCount = counts.Releases,
             VaultCount = counts.Vaults,
@@ -130,7 +159,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         cache.Remove(RepoUrlsCacheKey);
         await audit.LogAsync("Created", "Project", project.Id, project.Name, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, project.Id, EntityChangeOps.Created, ct, organizationId: orgId).ConfigureAwait(false);
-        return MapToDto(project);
+        return ProjectDtoMapper.ToDto(project, includePipelineSummary: true);
     }
 
     public async Task<ProjectDto?> UpdateProjectAsync(int id, UpdateProjectRequest request, CancellationToken ct = default)
@@ -153,7 +182,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         cache.Remove(RepoUrlsCacheKey);
         await audit.LogAsync("Updated", "Project", project.Id, project.Name, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, project.Id, EntityChangeOps.Updated, ct, organizationId: project.OrganizationId).ConfigureAwait(false);
-        return MapToDto(project);
+        return ProjectDtoMapper.ToDto(project, includePipelineSummary: true);
     }
 
     public async Task<bool> DeleteProjectAsync(int id, CancellationToken ct = default)
@@ -224,7 +253,8 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         {
             entry.AbsoluteExpirationRelativeToNow = CacheDuration;
             var projects = await repo.GetAllProjectsWithRepoUrlAsync(ct).ConfigureAwait(false);
-            return projects.Select(MapToDto).ToList();
+            return projects.Select(project =>
+                ProjectDtoMapper.ToDto(project, includePipelineSummary: true)).ToList();
         }).ConfigureAwait(false) ?? [];
     }
 
@@ -341,6 +371,8 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
                 StartedAt = t.StartedAt,
                 CompletedAt = t.CompletedAt,
                 ExitCode = t.ExitCode,
+                FailureCode = t.FailureCode,
+                FailureReason = t.FailureReason,
                 TimeoutSeconds = t.TimeoutSeconds
             }).ToList(),
             TotalCount = totalCount,
@@ -355,20 +387,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         var (items, totalCount) = await repo.GetLogsPagedAsync(
             projectId, request.Search, request.SortBy, request.SortDescending,
             page, pageSize, ct).ConfigureAwait(false);
-        return new PaginatedResult<TaskLogDto>
-        {
-            Items = items.Select(l => new TaskLogDto
-            {
-                Id = l.Id,
-                TaskId = l.TaskId,
-                Level = l.Level,
-                Message = l.Message,
-                Timestamp = l.Timestamp
-            }).ToList(),
-            TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize
-        };
+        return TaskLogMapper.ToPaginatedResult(items, totalCount, page, pageSize);
     }
 
     public async Task<List<ProjectActivityDto>> GetProjectActivityAsync(int projectId, int count = 20, CancellationToken ct = default)
@@ -422,29 +441,4 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         ServerStatus = ps.Server?.Status
     };
 
-    private static ProjectDto MapToDto(Project p)
-    {
-        // Latest run across all of the project's pipelines (only present when the caller included
-        // Runs in the query; empty otherwise - yields a null last-run, which the UI renders as "-").
-        var lastRun = p.Pipelines
-            .SelectMany(pl => pl.Runs)
-            .OrderByDescending(r => r.StartedAt)
-            .FirstOrDefault();
-        return new()
-        {
-            Id = p.Id,
-            Name = p.Name,
-            Description = p.Description,
-            RepositoryUrl = p.RepositoryUrl,
-            DefaultBranch = p.DefaultBranch,
-            Status = p.Status,
-            Tags = TagsHelper.DeserializeTags(p.Tags),
-            PipelineCount = p.Pipelines.Count,
-            OrganizationId = p.OrganizationId,
-            CreatedAt = p.CreatedAt,
-            UpdatedAt = p.UpdatedAt,
-            LastRunStatus = lastRun?.Status,
-            LastRunAt = lastRun?.StartedAt
-        };
-    }
 }

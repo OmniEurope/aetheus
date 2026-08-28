@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Aetheus.Back.Data.Configurations;
@@ -13,6 +12,9 @@ internal sealed class ServerConfiguration : IEntityTypeConfiguration<Server>
         builder.HasIndex(e => e.Name).IsUnique();
         builder.HasIndex(e => e.Status);
         builder.HasIndex(e => new { e.Status, e.LastHeartbeat });
+        builder.Property(e => e.AgentSessionId).HasMaxLength(64);
+        builder.Property(e => e.AgentCapabilitiesJson).HasMaxLength(8192);
+        builder.Property(e => e.AgentSessionFencingToken).HasDefaultValue(0L);
         builder.HasIndex(e => e.OrganizationId);
         builder.HasOne(e => e.Organization)
                .WithMany()

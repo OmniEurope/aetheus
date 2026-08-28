@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -10,11 +11,17 @@ namespace Aetheus.Back.Tests.Artifacts;
 
 public class ArtifactCleanupServiceTests
 {
-    private static (ArtifactCleanupService Sut, IArtifactRepository Repo, IArtifactStorageService Storage, DateTime Now)
+    private static (ArtifactCleanupService Sut, IArtifactRepository Repo, IArtifactStorageService Storage, IPostgresLeaderLease OperationLock, DateTime Now)
         BuildSut()
     {
         var repo = Substitute.For<IArtifactRepository>();
         var storage = Substitute.For<IArtifactStorageService>();
+        var operationLock = Substitute.For<IPostgresLeaderLease>();
+        operationLock.RunSerializedAsync(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, Task>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.ArgAt<CancellationToken>(2)));
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 6, 16, 12, 0, 0, TimeSpan.Zero));
 
         var services = new ServiceCollection();
@@ -23,14 +30,15 @@ public class ArtifactCleanupServiceTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var sut = new ArtifactCleanupService(scopeFactory, NullLogger<ArtifactCleanupService>.Instance, clock);
-        return (sut, repo, storage, clock.GetUtcNow().UtcDateTime);
+        var sut = new ArtifactCleanupService(
+            scopeFactory, NullLogger<ArtifactCleanupService>.Instance, clock, operationLock);
+        return (sut, repo, storage, operationLock, clock.GetUtcNow().UtcDateTime);
     }
 
     [Fact]
     public async Task CleanupExpiredArtifacts_FileDeleteFails_SkipsDbRemoval()
     {
-        var (sut, repo, storage, now) = BuildSut();
+        var (sut, repo, storage, _, now) = BuildSut();
         var artifact = new PipelineArtifact { Id = 1, FilePath = "test/broken.zip" };
         repo.GetExpiredAsync(now, 100, Arg.Any<CancellationToken>())
             .Returns(new List<PipelineArtifact> { artifact });
@@ -45,7 +53,7 @@ public class ArtifactCleanupServiceTests
     [Fact]
     public async Task CleanupExpiredArtifacts_DeletesFileThenRemovesFromDb()
     {
-        var (sut, repo, storage, now) = BuildSut();
+        var (sut, repo, storage, operationLock, now) = BuildSut();
         var artifact = new PipelineArtifact { Id = 2, FilePath = "test/good.zip" };
         repo.GetExpiredAsync(now, 100, Arg.Any<CancellationToken>())
             .Returns(new List<PipelineArtifact> { artifact });
@@ -56,14 +64,32 @@ public class ArtifactCleanupServiceTests
 
         await storage.Received(1).DeleteArtifactAsync("test/good.zip", Arg.Any<CancellationToken>());
         await repo.Received(1).RemoveAsync(artifact, Arg.Any<CancellationToken>());
+        await operationLock.Received(1).RunSerializedAsync(
+            ArtifactRetentionLock.For(artifact.Id),
+            Arg.Any<Func<CancellationToken, Task>>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task CleanupExpiredArtifacts_NoExpired_DoesNothing()
     {
-        var (sut, repo, storage, now) = BuildSut();
+        var (sut, repo, storage, _, now) = BuildSut();
         repo.GetExpiredAsync(now, 100, Arg.Any<CancellationToken>())
             .Returns(new List<PipelineArtifact>());
+
+        await sut.CleanupExpiredArtifactsAsync(TestContext.Current.CancellationToken);
+
+        await storage.DidNotReceive().DeleteArtifactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await repo.DidNotReceive().RemoveAsync(Arg.Any<PipelineArtifact>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CleanupExpiredArtifacts_LeaseAcquiredAfterSelection_SkipsPhysicalDelete()
+    {
+        var (sut, repo, storage, _, now) = BuildSut();
+        var artifact = new PipelineArtifact { Id = 3, FilePath = "test/raced.zip" };
+        repo.GetExpiredAsync(now, 100, Arg.Any<CancellationToken>()).Returns([artifact]);
+        repo.HasActiveRetentionLeaseAsync(artifact.Id, now, Arg.Any<CancellationToken>()).Returns(true);
 
         await sut.CleanupExpiredArtifactsAsync(TestContext.Current.CancellationToken);
 

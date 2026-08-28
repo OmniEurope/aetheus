@@ -66,7 +66,7 @@ public sealed class InteractiveControlsTests : E2ETestBase
     }
 
     [Test]
-    public async Task ConnectionLossDialog_AppearsAfterRealBrowserNetworkDrop_AndClosesAfterReconnect()
+    public async Task SignalRDrop_WithHealthyBackend_StaysUsableAndReconnectsAutomatically()
     {
         await NavigateToAsync("servers");
         var webServer = Page.Locator("a.server-name-link").Filter(new() { HasText = "web-01" }).First;
@@ -74,6 +74,7 @@ public sealed class InteractiveControlsTests : E2ETestBase
         var serverMatch = Regex.Match(serverHref ?? string.Empty, @"/servers/(\d+)/");
         Assert.That(serverMatch.Success, Is.True, "The seeded web-01 server must expose its id.");
         var serverId = int.Parse(serverMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        await ReenrollServerForTaskProbeAsync(serverId);
 
         AllowBrowserDiagnostic(new Regex(
             @"ERR_FAILED|Failed to (?:start|complete)|WebSocket.*failed|Failed to fetch",
@@ -82,24 +83,40 @@ public sealed class InteractiveControlsTests : E2ETestBase
         await Expect(dialog).ToHaveCountAsync(0);
 
         const string taskHubPattern = "**/hubs/servers**";
-        await Page.RouteAsync(taskHubPattern, route => route.AbortAsync());
+        var blockedHubRequests = 0;
+        await Page.RouteAsync(taskHubPattern, route =>
+        {
+            Interlocked.Increment(ref blockedHubRequests);
+            return route.AbortAsync();
+        });
         try
         {
             // Reloading keeps the independently served WASM frontend available while
             // the real task-tracker SignalR negotiate/connect calls fail at the network
-            // layer. MainLayout must surface the blocking overlay after its grace period.
+            // layer. A healthy HTTP backend must keep the application usable instead of
+            // surfacing the blocking backend-offline overlay.
             await Page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-            await Expect(dialog).ToBeVisibleAsync(new() { Timeout = 15000 });
-            await Expect(dialog.GetByRole(AriaRole.Button)).ToBeVisibleAsync(new() { Timeout = 5000 });
+
+            // Wait for the condition, not for a guessed duration. A flat 2.5s budget assumed the WASM
+            // frontend had booted and opened its first hub call by then; on a loaded agent it had not,
+            // the counter was still 0, and the run failed with "Expected: greater than 0" even though
+            // nothing was broken. The assertion below is unchanged and still blocking - only the wait
+            // became deterministic.
+            var hubCallDeadline = DateTime.UtcNow.AddSeconds(20);
+            while (Volatile.Read(ref blockedHubRequests) == 0 && DateTime.UtcNow < hubCallDeadline)
+                await Page.WaitForTimeoutAsync(250);
+
+            Assert.That(Volatile.Read(ref blockedHubRequests), Is.GreaterThan(0),
+                "The browser must have exercised a blocked SignalR request.");
+            await Expect(dialog).ToHaveCountAsync(0);
         }
         finally
         {
             await Page.UnrouteAsync(taskHubPattern);
         }
 
-        // Restoring the real SignalR route can reconnect immediately. The overlay is then
-        // removed by the product, so clicking its transient button after UnrouteAsync races
-        // a correct reconnect and can target a detached Radzen element.
+        // Restoring the real SignalR route lets the initial-connect retry loop recover without
+        // a reload or manual action.
         await Expect(dialog).ToHaveCountAsync(0, new() { Timeout = 15000 });
         await WaitForNoSpinnerAsync();
 
@@ -134,7 +151,22 @@ public sealed class InteractiveControlsTests : E2ETestBase
                 """,
                 new { backendUrl = BackendUrl, serverId, taskName });
 
-            await Expect(Page.Locator(".task-tracker-badge")).ToBeVisibleAsync(new() { Timeout = 10000 });
+            // The budget must cover the reconnect backoff, not a guessed delay. Blocking the hub
+            // walks FrontendRuntimeDefaults.SignalRRetryDelays up to its 30s step, so the tracker
+            // can legitimately stay disconnected for 30s after the route is restored - TaskQueued
+            // is then missed and only the SeedActiveAsync of the next successful connect brings the
+            // task back. A 10s budget was shorter than that worst case and failed the run with
+            // "element(s) not found" while nothing was broken. The probe task never terminates on
+            // its own (no real agent answers it), so waiting longer cannot mask a lost event: the
+            // badge is owed to us for as long as the task stays in flight.
+            await Expect(Page.Locator(".task-tracker-badge")).ToBeVisibleAsync(new() { Timeout = 45000 });
+
+            // The overlay can come back once more here: SignalR backs off between reconnect
+            // attempts, so the longer the hub stayed blocked the later the successful retry lands.
+            // Clicking through it failed with "connection-lost-mask intercepts pointer events".
+            // Re-asserting its absence is stricter than ignoring it - the click below still has to
+            // happen on a genuinely reconnected page.
+            await Expect(dialog).ToHaveCountAsync(0, new() { Timeout = 30000 });
             await Page.Locator(".task-tracker-btn").ClickAsync();
             await Expect(Page.Locator(".task-tracker-row-name").Filter(new() { HasText = taskName }))
                 .ToBeVisibleAsync(new() { Timeout = 10000 });
@@ -143,19 +175,9 @@ public sealed class InteractiveControlsTests : E2ETestBase
         {
             if (taskId > 0)
             {
-                var cancelStatus = await Page.EvaluateAsync<int>(
-                    """
-                    async ({ backendUrl, taskId }) => {
-                        const token = localStorage.getItem('aetheus_auth_token');
-                        const response = await fetch(`${backendUrl}/api/tasks/${taskId}/cancel`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                        return response.status;
-                    }
-                    """,
-                    new { backendUrl = BackendUrl, taskId });
-                Assert.That(cancelStatus, Is.EqualTo(200), "The reconnect probe task must be cancelled.");
+                await AssertTaskCancelledOrTerminalAsync(
+                    taskId,
+                    "The reconnect probe task must be cancelled or already terminal.");
             }
         }
     }

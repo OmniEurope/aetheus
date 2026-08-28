@@ -39,7 +39,6 @@ else
         }
     </RadzenStack>
 }
-
 <AetheusDataGrid @ref="_grid" TItem="ReleaseDto" Data="@_releases"
     Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadData"
     RowClick="@(r => Nav.NavigateTo($"/releases/{r.Id}"))"
@@ -78,25 +77,17 @@ else
                 }
             </Template>
         </RadzenDataGridColumn>
-        <RadzenDataGridColumn TItem="ReleaseDto" Title="@L["Changelog"]" Sortable="false" Filterable="false">
+        <RadzenDataGridColumn TItem="ReleaseDto" Property="SourcePipelineName" Title="@L["Pipeline"]">
             <Template Context="r">
-                @if (string.IsNullOrWhiteSpace(r.Changelog))
+                @if (r.SourcePipelineId.HasValue && !string.IsNullOrWhiteSpace(r.SourcePipelineName))
                 {
-                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">-</RadzenText>
+                    <a href="@PipelineHref(r)" class="pipeline-name-link" @onclick:stopPropagation="true">
+                        <RadzenIcon Icon="account_tree" /> @r.SourcePipelineName
+                    </a>
                 }
                 else
                 {
-                    <div class="release-changelog-cell">
-                        @(IsChangelogExpanded(r.Id) ? r.Changelog : ChangelogPreview(r.Changelog))
-                    </div>
-                    @if (IsChangelogTruncatable(r.Changelog))
-                    {
-                        <span @onclick:stopPropagation="true">
-                            <RadzenButton ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Size="ButtonSize.ExtraSmall"
-                                Text="@(IsChangelogExpanded(r.Id) ? L["ShowLess"] : L["ShowMore"])"
-                                Click="@(() => ToggleChangelog(r.Id))" />
-                        </span>
-                    }
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">-</RadzenText>
                 }
             </Template>
         </RadzenDataGridColumn>
@@ -128,7 +119,7 @@ else
                     }
                     @if (r.PipelineRunId.HasValue)
                     {
-                        <RadzenButton Icon="visibility" Size="ButtonSize.Small" Click="@(() => Nav.NavigateTo($"/pipelines/runs/{r.PipelineRunId}"))" title="@L["ViewRun"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        <RadzenButton Icon="visibility" Size="ButtonSize.Small" Click="@(() => Nav.NavigateTo($"/pipelines/runs/{r.PipelineRunId}"))" title="@L["ViewRun"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     }
                     </span>
                 </Template>

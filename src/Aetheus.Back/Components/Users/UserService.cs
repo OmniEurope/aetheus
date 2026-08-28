@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -17,7 +12,8 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetUsersPagedProjectedAsync(
-            request.Search, page, pageSize, ct).ConfigureAwait(false);
+            request.Search, page, pageSize, ct, request.SortBy, request.SortDescending)
+            .ConfigureAwait(false);
 
         return new PaginatedResult<UserDto>
         {
@@ -92,85 +88,92 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
     {
         var user = await repo.GetUserDetailAsync(id, ct).ConfigureAwait(false);
         if (user is null) return null;
-
-        // F-24: normalize incoming username before comparison/persistence.
         var normalized = (request.Username ?? string.Empty).Trim().ToLowerInvariant();
-        if (!string.Equals(user.Username, normalized, StringComparison.Ordinal))
-        {
-            var existing = await repo.FindByUsernameAsync(normalized, ct).ConfigureAwait(false);
-            if (existing is not null && existing.Id != id)
-                throw new ConflictException($"Username '{normalized}' is already taken.");
-        }
-
+        await EnsureUsernameAvailableAsync(id, user.Username, normalized, ct).ConfigureAwait(false);
         user.Username = normalized;
         user.Email = request.Email;
         var deactivating = user.IsActive && !request.IsActive;
         user.IsActive = request.IsActive;
         user.MustChangePassword = request.MustChangePassword;
         user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-
-        // Detect role-set changes so we can rotate the security stamp (immediate revocation).
-        var previousRoles = user.UserRoles.Select(ur => ur.Role.Name).OrderBy(n => n).ToList();
         var requestedRolesList = request.Roles ?? [];
-        var requestedRoles = requestedRolesList.OrderBy(n => n).ToList();
-        var rolesChanged = !previousRoles.SequenceEqual(requestedRoles, StringComparer.Ordinal);
-
-        // F-13 (mirror of DeleteUserAsync / UnassignRoleAsync): the bulk edit path must not strip the
-        // platform of its last active admin, nor let an admin lock themselves out via their own page.
-        var wasAdmin = previousRoles.Contains("Admin");
-        var willBeAdmin = requestedRoles.Contains("Admin");
-        var losingAdmin = wasAdmin && !willBeAdmin;
-        if (losingAdmin || deactivating)
-        {
-            var callerName = httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.Name);
-            if (callerName is not null && string.Equals(callerName, user.Username, StringComparison.Ordinal))
-                throw new BadRequestException("You cannot deactivate or remove the Admin role from your own account.");
-
-            if (wasAdmin)
-            {
-                var admins = await repo.CountActiveAdminsAsync(ct).ConfigureAwait(false);
-                if (admins <= 1)
-                    throw new BadRequestException("Cannot remove the last active administrator.");
-            }
-        }
-
-        user.UserRoles.Clear();
-        if (requestedRolesList.Count > 0)
-        {
-            var roles = await repo.GetRolesByNamesAsync(requestedRolesList, ct).ConfigureAwait(false);
-            foreach (var role in roles)
-                user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = role.Id, Role = role });
-        }
-
-        if (rolesChanged || deactivating)
-        {
-            RotateSecurityStamp(user);
-        }
-
+        var roleChange = DescribeRoleChange(user, requestedRolesList);
+        await EnsureSecurityChangeAllowedAsync(user, roleChange, deactivating, ct).ConfigureAwait(false);
+        if (roleChange.HasChanged)
+            await ApplyRolesAsync(user, requestedRolesList, ct).ConfigureAwait(false);
+        if (roleChange.HasChanged || deactivating) RotateSecurityStamp(user);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await PublishUserUpdateAsync(user, roleChange.HasChanged, deactivating, ct).ConfigureAwait(false);
+        return MapToDto(user);
+    }
 
-        // Invalidate AFTER the commit: evicting first leaves a window where a concurrent read
-        // between the eviction and the commit re-caches the OLD role set for the cache TTL.
-        if (rolesChanged || deactivating)
-        {
-            InvalidateAuthzCaches(user);
-        }
+    private async Task EnsureUsernameAvailableAsync(
+        int userId,
+        string currentUsername,
+        string normalizedUsername,
+        CancellationToken ct)
+    {
+        if (string.Equals(currentUsername, normalizedUsername, StringComparison.Ordinal)) return;
+        var existing = await repo.FindByUsernameAsync(normalizedUsername, ct).ConfigureAwait(false);
+        if (existing is not null && existing.Id != userId)
+            throw new ConflictException($"Username '{normalizedUsername}' is already taken.");
+    }
 
+    private static RoleChange DescribeRoleChange(User user, IReadOnlyCollection<string> requestedRoles)
+    {
+        var previous = user.UserRoles.Select(item => item.Role.Name).OrderBy(name => name).ToList();
+        var requested = requestedRoles.OrderBy(name => name).ToList();
+        return new RoleChange(
+            !previous.SequenceEqual(requested, StringComparer.Ordinal),
+            previous.Contains("Admin"),
+            requested.Contains("Admin"));
+    }
+
+    private async Task EnsureSecurityChangeAllowedAsync(
+        User user,
+        RoleChange roleChange,
+        bool deactivating,
+        CancellationToken ct)
+    {
+        if (!roleChange.LosingAdmin && !deactivating) return;
+        var callerName = httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.Name);
+        var changingOwnAccount = callerName is not null
+            && string.Equals(callerName, user.Username, StringComparison.Ordinal);
+        if (changingOwnAccount && roleChange.LosingAdmin)
+            throw new BadRequestException("You cannot remove the Admin role from your own account.");
+        if (!roleChange.WasAdmin) return;
+        var admins = await repo.CountActiveAdminsAsync(ct).ConfigureAwait(false);
+        if (admins <= 1)
+            throw new BadRequestException("Cannot remove the last active administrator.");
+    }
+
+    private async Task ApplyRolesAsync(
+        User user,
+        List<string> requestedRoles,
+        CancellationToken ct)
+    {
+        var roles = await repo.GetRolesByNamesAsync(requestedRoles, ct).ConfigureAwait(false);
+        var requestedRoleIds = roles.Select(role => role.Id).ToHashSet();
+        user.UserRoles.RemoveAll(userRole => !requestedRoleIds.Contains(userRole.RoleId));
+        var assignedRoleIds = user.UserRoles.Select(userRole => userRole.RoleId).ToHashSet();
+        foreach (var role in roles.Where(role => !assignedRoleIds.Contains(role.Id)))
+            user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = role.Id, Role = role });
+    }
+
+    private async Task PublishUserUpdateAsync(
+        User user,
+        bool rolesChanged,
+        bool deactivating,
+        CancellationToken ct)
+    {
+        if (rolesChanged || deactivating) InvalidateAuthzCaches(user);
         await audit.LogAsync("Updated", "User", user.Id, user.Username, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(AdminEntities.User, user.Id, EntityChangeOps.Updated, ct).ConfigureAwait(false);
-        // S-FEAT-RU5C: a role-set change shifts the affected roles' UserCount, so nudge the Roles list
-        // to refresh too - not just the Users list.
         if (rolesChanged)
-        {
             await notifier.BroadcastAsync(AdminEntities.Role, 0, EntityChangeOps.Updated, ct).ConfigureAwait(false);
-        }
-        // Push the blocking refresh to the affected user for any change that revoked their token
-        // (role set changed, or they were just deactivated).
         if (rolesChanged || deactivating)
-        {
-            await userNotifier.NotifyPermissionsChangedAsync(user.Id, PermissionChangeReasons.Roles, ct).ConfigureAwait(false);
-        }
-        return MapToDto(user);
+            await userNotifier.NotifyPermissionsChangedAsync(
+                user.Id, PermissionChangeReasons.Roles, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteUserAsync(int id, CancellationToken ct = default)
@@ -282,15 +285,7 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
             throw new ConflictException($"User '{user.Username}' already holds role '{role.Name}'.");
 
         user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = role.Id });
-        user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        RotateSecurityStamp(user);
-        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-        // Invalidate AFTER the commit - see UpdateUserAsync for why.
-        InvalidateAuthzCaches(user);
-
-        await audit.LogAsync("Updated", "User", user.Id, user.Username, ct).ConfigureAwait(false);
-        await notifier.BroadcastAsync(AdminEntities.User, user.Id, EntityChangeOps.Updated, ct).ConfigureAwait(false);
-        await userNotifier.NotifyPermissionsChangedAsync(user.Id, PermissionChangeReasons.Roles, ct).ConfigureAwait(false);
+        await PersistRoleChangeAsync(user, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> UnassignRoleAsync(int userId, int roleId, CancellationToken ct = default)
@@ -310,6 +305,12 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
         }
 
         user.UserRoles.Remove(target);
+        await PersistRoleChangeAsync(user, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task PersistRoleChangeAsync(User user, CancellationToken ct)
+    {
         user.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         RotateSecurityStamp(user);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -319,7 +320,6 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
         await audit.LogAsync("Updated", "User", user.Id, user.Username, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(AdminEntities.User, user.Id, EntityChangeOps.Updated, ct).ConfigureAwait(false);
         await userNotifier.NotifyPermissionsChangedAsync(user.Id, PermissionChangeReasons.Roles, ct).ConfigureAwait(false);
-        return true;
     }
 
     // Rotates the security stamp (immediate JWT revocation). Part of the entity being persisted, so
@@ -335,6 +335,11 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
     {
         cache.Remove($"sec-stamp:{user.Id}");
         authz.InvalidateRoleCache(user.Username);
+    }
+
+    private sealed record RoleChange(bool HasChanged, bool WasAdmin, bool WillBeAdmin)
+    {
+        public bool LosingAdmin => WasAdmin && !WillBeAdmin;
     }
 
     private static UserDto MapToDto(User u) => new()

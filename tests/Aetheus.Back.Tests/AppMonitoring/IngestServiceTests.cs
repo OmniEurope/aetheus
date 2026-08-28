@@ -35,7 +35,15 @@ public class IngestServiceTests : IDisposable
             new FakeTimeProvider(new DateTimeOffset(2026, 1, 10, 12, 0, 0, TimeSpan.Zero)),
             Substitute.For<ILogger<IngestService>>());
 
-        _db.MonitoredApps.Add(new MonitoredApp { Id = 1, ProjectId = 1, Name = "app", IngestKeyHash = _hasher.Hash("secret-key") });
+        _db.MonitoredApps.Add(new MonitoredApp
+        {
+            Id = 1,
+            ProjectId = 1,
+            Name = "app",
+            IngestKeyHash = _hasher.Hash("secret-key"),
+            IngestKeyCreatedAt = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc),
+            IngestKeyExpiresAt = new DateTime(2026, 4, 10, 12, 0, 0, DateTimeKind.Utc)
+        });
         _db.SaveChanges();
     }
 
@@ -47,6 +55,29 @@ public class IngestServiceTests : IDisposable
         Assert.Equal(1, await _service.ResolveAppIdAsync("secret-key", ct: TestContext.Current.CancellationToken));
         Assert.Null(await _service.ResolveAppIdAsync("wrong-key", ct: TestContext.Current.CancellationToken));
         Assert.Null(await _service.ResolveAppIdAsync("", ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ResolveAppId_RandomInvalidKeys_BoundsNegativeCache()
+    {
+        for (var i = 0; i < IngestService.MaxNegativeKeyCacheEntries + 25; i++)
+            Assert.Null(await _service.ResolveAppIdAsync(
+                $"invalid-{i}",
+                ct: TestContext.Current.CancellationToken));
+
+        Assert.InRange(_service.TrackedNegativeKeyCount, 1, IngestService.MaxNegativeKeyCacheEntries);
+    }
+
+    [Fact]
+    public async Task ResolveAppId_RejectsCurrentKeyAfterNinetyDays()
+    {
+        var app = _db.MonitoredApps.Single(item => item.Id == 1);
+        app.IngestKeyExpiresAt = new DateTime(2026, 1, 10, 11, 59, 59, DateTimeKind.Utc);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(await _service.ResolveAppIdAsync(
+            "secret-key",
+            ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]

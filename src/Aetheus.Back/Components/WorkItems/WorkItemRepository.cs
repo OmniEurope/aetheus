@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.WorkItems;
 
@@ -14,8 +11,22 @@ public class WorkItemRepository(AppDbContext db) : IWorkItemRepository
         WorkItemStatus? status = null, int? assigneeUserId = null,
         CancellationToken ct = default)
     {
-        var query = db.WorkItems.AsNoTracking().AsQueryable();
+        var query = FilterWorkItems(projectId, search, type, status, assigneeUserId);
+        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
+        var items = await OrderWorkItems(query, sortBy, sortDescending)
+            .Include(w => w.Assignee)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return (items, totalCount);
+    }
 
+    private IQueryable<WorkItem> FilterWorkItems(
+        int? projectId, string? search, WorkItemType? type,
+        WorkItemStatus? status, int? assigneeUserId)
+    {
+        var query = db.WorkItems.AsNoTracking().AsQueryable();
         if (projectId.HasValue)
             query = query.Where(w => w.ProjectId == projectId.Value);
         if (type.HasValue)
@@ -26,10 +37,12 @@ public class WorkItemRepository(AppDbContext db) : IWorkItemRepository
             query = query.Where(w => w.AssigneeUserId == assigneeUserId.Value);
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(w => w.Title.Contains(search));
+        return query;
+    }
 
-        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-
-        query = sortBy?.ToLowerInvariant() switch
+    private static IOrderedQueryable<WorkItem> OrderWorkItems(
+        IQueryable<WorkItem> query, string? sortBy, bool sortDescending) =>
+        sortBy?.ToLowerInvariant() switch
         {
             "priority" => sortDescending ? query.OrderByDescending(w => w.Priority) : query.OrderBy(w => w.Priority),
             "status" => sortDescending ? query.OrderByDescending(w => w.Status) : query.OrderBy(w => w.Status),
@@ -37,16 +50,6 @@ public class WorkItemRepository(AppDbContext db) : IWorkItemRepository
             "createdat" => sortDescending ? query.OrderByDescending(w => w.CreatedAt) : query.OrderBy(w => w.CreatedAt),
             _ => sortDescending ? query.OrderByDescending(w => w.Order) : query.OrderBy(w => w.Order)
         };
-
-        var items = await query
-            .Include(w => w.Assignee)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        return (items, totalCount);
-    }
 
     public async Task<WorkItem?> GetWorkItemDetailAsync(int id, CancellationToken ct = default)
     {

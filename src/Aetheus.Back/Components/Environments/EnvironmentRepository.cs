@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 
 namespace Aetheus.Back.Components.Environments;
@@ -9,7 +7,8 @@ namespace Aetheus.Back.Components.Environments;
 public class EnvironmentRepository(AppDbContext db) : IEnvironmentRepository
 {
     public async Task<(List<Environment> Items, int TotalCount)> GetEnvironmentsPagedAsync(
-        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
+        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = false)
     {
         var query = db.Environments.AsNoTracking().AsQueryable();
 
@@ -27,7 +26,7 @@ public class EnvironmentRepository(AppDbContext db) : IEnvironmentRepository
         var items = await query
             .Include(e => e.Project)
             .Include(e => e.Servers).ThenInclude(es => es.Server)
-            .OrderBy(e => e.Name)
+            .OrderByProperty(sortBy, sortDescending, e => e.Name, fallbackDescending: false)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsSplitQuery()

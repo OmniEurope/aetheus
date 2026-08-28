@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
 using Aetheus.Back.Components.Settings;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.SystemLogs;
 

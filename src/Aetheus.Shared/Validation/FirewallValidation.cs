@@ -5,7 +5,7 @@ using Aetheus.Shared.Constants;
 namespace Aetheus.Shared.Validation;
 
 /// <summary>
-/// Validates the bounded firewall-rule args (PLAN-006 4.2): protocol against the allow-list and the
+/// Validates the bounded firewall-rule args (ADR-024 4.2): protocol against the allow-list and the
 /// source as <c>any</c>, a single IP, or a CIDR. Shared so the backend, the agent executor, and (in
 /// spirit) the root-owned helper enforce the same bounds - no free-form firewall rule ever reaches ufw.
 /// </summary>

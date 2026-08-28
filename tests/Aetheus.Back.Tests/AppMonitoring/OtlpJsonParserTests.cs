@@ -54,8 +54,29 @@ public class OtlpJsonParserTests
         Assert.Contains("k", log.AttributesJson);
     }
 
+    [Theory]
+    [InlineData("SEVERITY_NUMBER_TRACE", 1)]
+    [InlineData("SEVERITY_NUMBER_DEBUG3", 7)]
+    [InlineData("SEVERITY_NUMBER_INFO4", 12)]
+    [InlineData("SEVERITY_NUMBER_WARN", 13)]
+    [InlineData("SEVERITY_NUMBER_ERROR", 17)]
+    [InlineData("SEVERITY_NUMBER_FATAL4", 24)]
+    public void ParseLogs_MapsCanonicalProtobufSeverityNames(string severity, int expected)
+    {
+        var json = """
+        {"resourceLogs":[{"scopeLogs":[{"logRecords":[
+          {"severityNumber":"__SEVERITY__","body":{"stringValue":"event"}}
+        ]}]}]}
+        """.Replace("__SEVERITY__", severity, StringComparison.Ordinal);
+        using var doc = JsonDocument.Parse(json);
+
+        var log = Assert.Single(OtlpJsonParser.ParseLogs(doc));
+
+        Assert.Equal(expected, log.SeverityNumber);
+    }
+
     [Fact]
-    public void ParseErrors_ExtractsExceptionEvent_WithTopFrame()
+    public void ParseErrors_DropsSensitiveExceptionDetailsAndKeepsType()
     {
         const string json = """
         {"resourceSpans":[{"scopeSpans":[{"spans":[
@@ -71,8 +92,8 @@ public class OtlpJsonParserTests
 
         var err = Assert.Single(errors);
         Assert.Equal("System.InvalidOperationException", err.ExceptionType);
-        Assert.Equal("bad state", err.Message);
-        Assert.Equal("at Foo.Bar()", err.TopFrame);
+        Assert.True(string.IsNullOrEmpty(err.Message));
+        Assert.True(string.IsNullOrEmpty(err.TopFrame));
     }
 
     [Fact]

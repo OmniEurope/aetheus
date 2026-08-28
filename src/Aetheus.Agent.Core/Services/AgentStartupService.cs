@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Agent.Core.Configuration;
+using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Plugins;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Services;
 
@@ -16,7 +15,10 @@ public sealed class AgentStartupService(
     {
         var workDir = options.Value.WorkDirectory;
         if (!string.IsNullOrEmpty(workDir))
+        {
             Directory.CreateDirectory(workDir);
+            AgentUpdateRecoveryState.RegisterStartedProcess(workDir);
+        }
 
         await pluginLoader.LoadPluginsAsync(options.Value.PluginDirectory, stoppingToken).ConfigureAwait(false);
 

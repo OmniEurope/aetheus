@@ -35,9 +35,13 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/monitoring/dashboard")]
     [InlineData("/api/plugins")]
     [InlineData("/api/package-feeds")]
+    [InlineData("/api/package-registry")]
+    [InlineData("/api/packages/nuget/v3/flatcontainer/sample/index.json")]
+    [InlineData("/api/packages/npm/-/ping")]
     [InlineData("/api/system-logs/files")]
     [InlineData("/api/releases")]
     [InlineData("/api/pipelines")]
+    [InlineData("/api/pipelines/runs/1/checkpoint-resume-preview")]
     [InlineData("/api/pipelines/templates")]
     [InlineData("/api/work-items")]
     [InlineData("/api/service-connections")]
@@ -55,6 +59,8 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/agent/installer/linux")]
     [InlineData("/api/personal-access-tokens")]
     [InlineData("/api/backups")]
+    [InlineData("/api/analysis/policies/global")]
+    [InlineData("/api/ai/profiles")]
     // AppMonitoringController (api/[controller]) and AppTelemetryController (api/appmonitoring) share the
     // normalized prefix api/appmonitoring, so ONE literal satisfies the prefix-based coverage guard for
     // both - but the anonymous-401 assertion only fires on the route it actually hits. Exercise a route
@@ -104,6 +110,9 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     // coverage guard AND absent from any anonymous-rejection sweep.
     [InlineData("POST", "/api/servers/1/cron")]
     [InlineData("DELETE", "/api/servers/1/cron")]
+    // ClientErrorsController is mutation-only too, and its single POST writes attacker-controlled text
+    // straight into the server log - an anonymous caller must never reach it.
+    [InlineData("POST", "/api/client-errors")]
     [InlineData("PUT", "/api/users/1")]
     [InlineData("PUT", "/api/agent-pools/1")]
     [InlineData("DELETE", "/api/projects/1")]

@@ -37,6 +37,9 @@ public class ReleaseServiceTests
 
     public ReleaseServiceTests()
     {
+        _pipelineRepoMock.GetRootRunReferencesAsync(
+                Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, PipelineRunRootReference>());
         _sut = new ReleaseService(_repoMock, _projectServiceMock, _gitServiceMock, _pipelineLauncherMock, _pipelineServiceMock, _releaseHubMock, _gitGraphMock, TimeProvider.System, _artifactStorageMock, _backupRepoMock, _auditMock, _artifactRepoMock, _artifactRetentionMock, _pipelineRepoMock, _transactionMock);
     }
 
@@ -47,8 +50,9 @@ public class ReleaseServiceTests
         {
             new() { Id = 1, ProjectId = 1, Version = "1.0.0", BranchName = "release/v1.0.0", Status = ReleaseStatus.Detected, Project = new Project { Name = "App" } }
         };
-        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>())
+        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>(), null, false)
             .Returns((releases, 1));
+
 
         var result = await _sut.GetReleasesAsync(null, new PaginationRequest { Page = 1, PageSize = 10 }, ct: TestContext.Current.CancellationToken);
 
@@ -58,9 +62,41 @@ public class ReleaseServiceTests
     }
 
     [Fact]
+    public async Task GetReleasesAsync_MapsRootPipelineForChildRun()
+    {
+        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>(), null, false)
+            .Returns(([
+                new Release
+                {
+                    Id = 1,
+                    ProjectId = 1,
+                    Version = "1.0.0",
+                    PipelineRunId = 42,
+                    Project = new Project { Name = "App" }
+                }
+            ], 1));
+        _pipelineRepoMock.GetRootRunReferencesAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 42 })),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, PipelineRunRootReference>
+            {
+                [42] = new(7, 3, "release-orchestrator")
+            });
+
+        var result = await _sut.GetReleasesAsync(
+            null,
+            new PaginationRequest { Page = 1, PageSize = 10 },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, result.Items[0].SourcePipelineId);
+        Assert.Equal("release-orchestrator", result.Items[0].SourcePipelineName);
+        Assert.Equal(42, result.Items[0].PipelineRunId);
+    }
+
+    [Fact]
     public async Task GetReleasesAsync_EmptyList_ReturnsEmpty()
     {
-        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>())
+        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>(), null, false)
             .Returns((new List<Release>(), 0));
 
         var result = await _sut.GetReleasesAsync(null, new PaginationRequest { Page = 1, PageSize = 10 }, ct: TestContext.Current.CancellationToken);
@@ -413,7 +449,7 @@ public class ReleaseServiceTests
         await _sut.CreateReleaseFromPipelineAsync(
             1, 43, "1.1.0", null, deployed: true, ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal(ReleaseStatus.Published, previous.Status);
+        Assert.Equal(ReleaseStatus.Superseded, previous.Status);
         Assert.Equal(ReleaseStatus.Deployed, created!.Status);
         await _transactionMock.Received(1).BeginTransactionAsync(Arg.Any<CancellationToken>());
         await _transactionMock.Received(1).CommitAsync(Arg.Any<CancellationToken>());
@@ -426,6 +462,7 @@ public class ReleaseServiceTests
         const string commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         var sourcePipeline = new Pipeline { Id = 2, ProjectId = 1, Name = "aetheus-ci" };
         var artifact = new PipelineArtifact { Id = 12, PipelineRunId = 42, ProjectId = 1 };
+        var assurance = new PipelineArtifact { Id = 13, PipelineRunId = 99, ProjectId = 1 };
         _pipelineRepoMock.GetPipelineRunWithPipelineAsync(42, Arg.Any<CancellationToken>()).Returns(new PipelineRun
         {
             Id = 42,
@@ -436,6 +473,7 @@ public class ReleaseServiceTests
         });
         _pipelineRepoMock.GetPipelineProjectIdAsync(sourcePipeline, Arg.Any<CancellationToken>()).Returns(1);
         _artifactRepoMock.GetByRunAsync(42, Arg.Any<CancellationToken>()).Returns([artifact]);
+        _artifactRepoMock.GetByRunAsync(99, Arg.Any<CancellationToken>()).Returns([assurance]);
         _repoMock.FindByVersionAsync(1, "1.0.0", Arg.Any<CancellationToken>()).Returns((Release?)null);
         _repoMock.GetMaxBuildNumberAsync(1, Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.AddReleaseAsync(Arg.Any<Release>(), Arg.Any<CancellationToken>()).Returns(call =>
@@ -451,6 +489,8 @@ public class ReleaseServiceTests
         Assert.Equal(99, release.PipelineRunId);
         await _artifactRetentionMock.Received(1).ApplyReleaseRetentionAsync(
             artifact, 7, Arg.Any<CancellationToken>());
+        await _artifactRetentionMock.Received(1).ApplyReleaseRetentionAsync(
+            assurance, 7, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -623,5 +663,53 @@ public class ReleaseServiceTests
         mockClients.Group(Arg.Any<string>()).Returns(mockClientProxy);
         mockClients.Groups(Arg.Any<IReadOnlyList<string>>()).Returns(mockClientProxy);
         _releaseHubMock.Clients.Returns(mockClients);
+    }
+
+    // --- GetServerReleasesAsync (relocated from ServerService with the endpoint) ---
+
+    [Fact]
+    public async Task GetServerReleasesAsync_ReturnsMappedList()
+    {
+        _repoMock.GetReleasesForServerAsync(1, Arg.Any<CancellationToken>())
+            .Returns([new Release { Id = 2, ProjectId = 1, Project = new Project { Name = "P1" }, Version = "1.0.0", BranchName = "main", Status = ReleaseStatus.Published }]);
+
+        var result = await _sut.GetServerReleasesAsync(1, ct: TestContext.Current.CancellationToken);
+
+        Assert.Single(result);
+        Assert.Equal("1.0.0", result[0].Version);
+        Assert.Equal(ReleaseStatus.Published, result[0].Status);
+    }
+
+    /// <summary>
+    /// The reason the endpoint moved: enriching a server's releases with the pipeline they came from
+    /// is what forced Servers to depend on Pipelines. Here it is the same enrichment every other
+    /// release view already gets, so it must keep working through this path too.
+    /// </summary>
+    [Fact]
+    public async Task GetServerReleasesAsync_MapsRootPipelineForChildRun()
+    {
+        _repoMock.GetReleasesForServerAsync(1, Arg.Any<CancellationToken>())
+            .Returns([
+                new Release
+                {
+                    Id = 2,
+                    ProjectId = 1,
+                    PipelineRunId = 42,
+                    Project = new Project { Name = "P1" },
+                    Version = "1.0.0"
+                }
+            ]);
+        _pipelineRepoMock.GetRootRunReferencesAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 42 })),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, PipelineRunRootReference>
+            {
+                [42] = new(7, 3, "release-orchestrator")
+            });
+
+        var result = await _sut.GetServerReleasesAsync(1, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, result[0].SourcePipelineId);
+        Assert.Equal("release-orchestrator", result[0].SourcePipelineName);
     }
 }

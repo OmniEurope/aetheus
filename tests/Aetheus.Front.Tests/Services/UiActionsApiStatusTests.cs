@@ -54,7 +54,7 @@ public class UiActionsApiStatusTests
     }
 
     [Fact]
-    public async Task RunAsync_ApiStatus_Success_WithNullOnSuccess_DoesNotThrow()
+    public async Task RunAsync_ApiStatus_Success_WithNullOnSuccess_LeavesTheFlagOn()
     {
         var result = await _sut.RunAsync(
             () => Task.FromResult(new ApiStatus(true, false, false)),

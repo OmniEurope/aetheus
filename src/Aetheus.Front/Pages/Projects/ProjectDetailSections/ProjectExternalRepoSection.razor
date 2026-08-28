@@ -1,11 +1,12 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectWritableSectionBase
 @using Aetheus.Shared.Enums
 
 <RadzenText TextStyle="TextStyle.H5" class="rz-mb-3">@L["ExternalRepo"]</RadzenText>
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+    <AetheusLoader />
 }
 else if (!_enabled)
 {
@@ -136,7 +137,7 @@ else if (_canWrite)
                 </RadzenColumn>
             </RadzenRow>
             <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mt-2">@L["ExternalRepoCloneHint"]</RadzenText>
-            <RadzenButton Text="@L["Attach"]" Icon="link" ButtonType="ButtonType.Submit" IsBusy="_busy" class="rz-mt-3" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["Attach"]" Icon="link" ButtonType="ButtonType.Submit" IsBusy="_busy" class="rz-mt-3" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         </RadzenTemplateForm>
     </RadzenCard>
 }

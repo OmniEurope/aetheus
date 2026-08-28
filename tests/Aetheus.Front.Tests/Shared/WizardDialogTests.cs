@@ -358,7 +358,7 @@ public class WizardDialogTests : BunitContext
     }
 
     [Fact]
-    public async Task OnKeyDown_NonEscape_DoesNothing()
+    public async Task OnKeyDown_NonEscape_LeavesTheFlagOff()
     {
         var cancelled = false;
         var steps = CreateSteps(2);

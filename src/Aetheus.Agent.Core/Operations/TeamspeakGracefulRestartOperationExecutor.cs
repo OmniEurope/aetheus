@@ -3,11 +3,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Aetheus.Agent.Core.Collectors;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -54,19 +49,12 @@ public sealed class TeamspeakGracefulRestartOperationExecutor(
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken ct)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("TeamSpeak operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
+        if (await RejectNonLinuxAsync(onOutput).ConfigureAwait(false))
             return new ExecutorResult(-1, false);
-        }
 
-        if (!envVars.TryGetValue(TeamspeakSetupEnv.RuntimeQueryPort, out var portRaw) ||
-            !int.TryParse(portRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) ||
-            port is < 1 or > 65535)
-        {
-            await onOutput("Missing or invalid TEAMSPEAK_QUERY_PORT", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var queryPort = await ServerQueryHelper.GetQueryPortAsync(envVars, onOutput).ConfigureAwait(false);
+        if (queryPort is null) return new ExecutorResult(-1, false);
+        var port = queryPort.Value;
 
         var seconds = 0;
         if (envVars.TryGetValue(TeamspeakSetupEnv.WarnSeconds, out var secRaw))
@@ -74,22 +62,8 @@ public sealed class TeamspeakGracefulRestartOperationExecutor(
         seconds = Math.Clamp(seconds, 0, 600);
         var message = envVars.GetValueOrDefault(TeamspeakSetupEnv.WarnMessage, "Server restarting");
 
-        var credentialPath = ServerQueryHelper.ReadCredentialPath();
-        string credential;
-        try
-        {
-            credential = (await File.ReadAllTextAsync(credentialPath, ct).ConfigureAwait(false)).Trim();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            await onOutput($"Cannot read TeamSpeak query credential at {credentialPath}: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
-        if (string.IsNullOrEmpty(credential))
-        {
-            await onOutput("TeamSpeak query credential file is empty", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var credential = await ServerQueryHelper.ReadCredentialAsync(onOutput, ct).ConfigureAwait(false);
+        if (credential is null) return new ExecutorResult(-1, false);
 
         // 1) Broadcast the warning, 2) wait the grace period, 3) kick everyone. Each ServerQuery runs
         //    over the native TCP client (no shell, no nc). A failed gm/kick is logged but does not abort
@@ -109,14 +83,7 @@ public sealed class TeamspeakGracefulRestartOperationExecutor(
         // 4) Restart the systemd unit. `ts3server` is allow-listed in the AETHEUS_SYSTEMCTL sudoers set
         //    (service-control capability); without it sudo fails and the step fails honestly.
         var restartTimeout = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         psi.ArgumentList.Add("-n");
         psi.ArgumentList.Add("/bin/systemctl");
         psi.ArgumentList.Add("restart");
@@ -124,6 +91,17 @@ public sealed class TeamspeakGracefulRestartOperationExecutor(
 
         await onOutput("Restarting ts3server…", TaskLogLevel.Info).ConfigureAwait(false);
         return await ProcessRunner.RunAsync(psi, restartTimeout, onOutput, logger, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> RejectNonLinuxAsync(
+        Func<string, TaskLogLevel, Task> onOutput)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return false;
+
+        await onOutput(
+            "TeamSpeak operations are only supported on Linux",
+            TaskLogLevel.Error).ConfigureAwait(false);
+        return true;
     }
 
     private async Task<ExecutorResult> GetLogsAsync(

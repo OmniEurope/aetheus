@@ -8,6 +8,8 @@ TeamSpeak server management per server: state collection, channel CRUD, client a
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/api/servers/{serverId}/teamspeak` | GET | User | TS state (channels, clients) |
+| `/api/servers/{serverId}/teamspeak/clients` | GET | User | Paginated connected clients |
+| `/api/servers/{serverId}/teamspeak/channels` | GET | User | List channels |
 | `/api/servers/{serverId}/teamspeak/action` | POST | User | Service action (start/stop) |
 | `/api/servers/{serverId}/teamspeak/setup` | POST | Admin | Initial TS setup |
 | `/api/servers/{serverId}/teamspeak/logs` | POST | User | Tail TS logs |

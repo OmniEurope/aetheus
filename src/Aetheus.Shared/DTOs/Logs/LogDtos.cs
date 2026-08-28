@@ -16,6 +16,9 @@ public sealed record TaskLogDto
 public sealed record AppendLogRequest
 {
     public int TaskId { get; init; }
+    [StringLength(64)]
+    public string? AgentSessionId { get; init; }
+    public long? AgentSessionFencingToken { get; init; }
 
     public TaskLogLevel Level { get; init; }
 

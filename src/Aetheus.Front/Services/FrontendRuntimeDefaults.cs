@@ -13,7 +13,9 @@ internal static class FrontendRuntimeDefaults
     public static IReadOnlyList<TimeSpan> SignalRRetryDelays { get; } =
     [
         TimeSpan.Zero,
+        TimeSpan.FromSeconds(1),
         TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5),
         TimeSpan.FromSeconds(10),
         TimeSpan.FromSeconds(30)
     ];

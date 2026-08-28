@@ -1,0 +1,19 @@
+using Toto.Domain;
+using Xunit;
+
+namespace Toto.Domain.Tests;
+
+public sealed class TodoTitleTests
+{
+    [Fact]
+    public void Normalize_TrimsAValidTitle()
+    {
+        Assert.Equal("rollback sentinel", TodoTitle.Normalize("  rollback sentinel  "));
+    }
+
+    [Fact]
+    public void Normalize_RejectsWhitespace()
+    {
+        Assert.Throws<ArgumentException>(() => TodoTitle.Normalize("   "));
+    }
+}

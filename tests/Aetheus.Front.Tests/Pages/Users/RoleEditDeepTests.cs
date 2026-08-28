@@ -36,11 +36,6 @@ public class RoleEditDeepTests : BunitContext
             Description = "Can edit",
             Permissions = []
         });
-        _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto>
-        {
-            Items = [],
-            TotalCount = 0
-        });
     }
 
     // ── New role ──────────────────────────────────────────────────────────────
@@ -95,7 +90,6 @@ public class RoleEditDeepTests : BunitContext
     public void OnInit_RoleNotFound_Redirects()
     {
         _handler.SetResponse("api/roles/999", System.Net.HttpStatusCode.NotFound);
-        _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto> { Items = [], TotalCount = 0 });
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         Render<RoleEdit>(p => p.Add(x => x.Id, 999));
 
@@ -218,7 +212,7 @@ public class RoleEditDeepTests : BunitContext
     // ── OnApplyBulk ───────────────────────────────────────────────────────────
 
     [Fact]
-    public void OnApplyBulk_NullPermission_DoesNothing()
+    public void OnApplyBulk_NullPermission_LeavesEveryRowUnchanged()
     {
         SetupRole(1);
         var cut = Render<RoleEdit>(p => p.Add(x => x.Id, 1));

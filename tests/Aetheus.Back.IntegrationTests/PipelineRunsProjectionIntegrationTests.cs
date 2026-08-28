@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -56,7 +57,12 @@ public sealed class PipelineRunsProjectionIntegrationTests(PostgresFixture fixtu
 
         await using (var db = NewContext())
         {
-            var repo = new PipelineRepository(db, TimeProvider.System, NullLogger<PipelineRepository>.Instance);
+            var repo = new PipelineRepository(
+                db,
+                TimeProvider.System,
+                NullLogger<PipelineRepository>.Instance,
+                new PipelineTaskLifecycleRepository(db, TimeProvider.System),
+                new PipelineRunLineageRepository(db));
 
             // If RunListProjection is not SQL-translatable, this throws (InvalidOperationException) here.
             var (items, total) = await repo.GetRunsPagedAsync(pipelineId, page: 1, pageSize: 10, ct: TestContext.Current.CancellationToken);
@@ -73,5 +79,63 @@ public sealed class PipelineRunsProjectionIntegrationTests(PostgresFixture fixtu
             Assert.Equal("first", items[0].Steps[0].StepName);
             Assert.Equal("second", items[0].Steps[1].StepName);
         }
+    }
+
+    [Fact]
+    public async Task ConditionEvidence_CompactedPayload_PersistsWithinPostgresColumnLimits()
+    {
+        await ResetAndMigrateAsync();
+        await using var db = NewContext();
+        var organization = new Organization
+        {
+            Name = $"org-{Guid.NewGuid():N}",
+            Slug = $"s{Guid.NewGuid():N}"[..12]
+        };
+        db.Organizations.Add(organization);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var project = new Project
+        {
+            Name = $"project-{Guid.NewGuid():N}",
+            OrganizationId = organization.Id
+        };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var pipeline = new Pipeline
+        {
+            Name = $"pipeline-{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            YamlDefinition = "name: evidence"
+        };
+        db.Pipelines.Add(pipeline);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var run = new PipelineRun
+        {
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Running
+        };
+        db.PipelineRuns.Add(run);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var variables = Enumerable.Range(0, 40).ToDictionary(
+            index => $"VAR_{index:D2}",
+            index => new string((char)('a' + index % 26), 600));
+        var step = new PipelineStepRun
+        {
+            PipelineRunId = run.Id,
+            StageName = "quality",
+            StepName = "condition",
+            Status = TaskExecutionStatus.Cancelled,
+            SkippedCondition = PipelineConditionEvidence.CompactCondition(new string('x', 1_100)),
+            SkippedConditionVariablesJson = PipelineConditionEvidence.SerializeVariables(variables)
+        };
+        db.PipelineStepRuns.Add(step);
+
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var persisted = await db.PipelineStepRuns.FindAsync(
+            [step.Id], TestContext.Current.CancellationToken);
+        Assert.NotNull(persisted);
+        Assert.Equal(1_000, persisted.SkippedCondition!.Length);
+        Assert.True(persisted.SkippedConditionVariablesJson!.Length <= 4_000);
     }
 }

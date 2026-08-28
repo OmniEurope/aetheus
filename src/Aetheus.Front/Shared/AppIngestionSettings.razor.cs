@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -28,6 +20,14 @@ public partial class AppIngestionSettings
     private List<AppMetricThresholdDto> _thresholds = [];
     private string? _generatedKey;
     private bool _busy;
+    private bool _analyticsBusy;
+    private bool _analyticsLoading = true;
+    private bool _analyticsEnabled;
+    private bool _analyticsPublicIngestEnabled;
+    private string _analyticsSiteId = string.Empty;
+    private string _analyticsOrigins = string.Empty;
+    private long _analyticsStorageBudgetBytes = AppMonitoringDefaults.DefaultAnalyticsStorageBudgetBytes;
+    private AppWebAnalyticsConfigurationDto? _analyticsConfiguration;
     private int _lastAppId = -1;
     private int _loadGeneration;
 
@@ -36,6 +36,11 @@ public partial class AppIngestionSettings
 
     private string IngestEndpoint =>
         $"{(Config["ApiBaseUrl"] ?? LocalDevelopmentEndpoints.ApiHttpsBaseUrl).TrimEnd('/')}/api/ingest/otlp/v1";
+    private string MetricsEndpoint => IngestEndpoint + "/metrics";
+    private string LogsEndpoint => IngestEndpoint + "/logs";
+    private string TracesEndpoint => IngestEndpoint + "/traces";
+    private string PublicAnalyticsEndpoint =>
+        $"{IngestEndpoint[..^"/otlp/v1".Length]}/web-analytics/v1/public/{Uri.EscapeDataString(_analyticsSiteId)}";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -43,7 +48,9 @@ public partial class AppIngestionSettings
         _lastAppId = AppId;
         var generation = ++_loadGeneration;
         _generatedKey = null;
-        await LoadThresholdsAsync(AppId, generation);
+        await Task.WhenAll(
+            LoadThresholdsAsync(AppId, generation),
+            LoadAnalyticsConfigurationAsync(AppId, generation));
     }
 
     private Task LoadThresholdsAsync() => LoadThresholdsAsync(AppId, _loadGeneration);
@@ -52,7 +59,7 @@ public partial class AppIngestionSettings
     {
         try
         {
-            var thresholds = await Api.GetAppThresholdsAsync(appId);
+            var thresholds = await Api.Monitoring.GetAppThresholdsAsync(appId);
             if (generation == _loadGeneration && appId == AppId) _thresholds = thresholds;
         }
         catch (HttpRequestException)
@@ -61,12 +68,41 @@ public partial class AppIngestionSettings
         }
     }
 
+    private async Task LoadAnalyticsConfigurationAsync(int appId, int generation)
+    {
+        if (generation == _loadGeneration && appId == AppId)
+            _analyticsLoading = true;
+        try
+        {
+            var configuration = await Api.Monitoring.GetAppWebAnalyticsConfigurationAsync(appId);
+            if (generation != _loadGeneration || appId != AppId)
+                return;
+            _analyticsConfiguration = configuration;
+            _analyticsEnabled = configuration?.Enabled ?? false;
+            _analyticsPublicIngestEnabled = configuration?.PublicIngestEnabled ?? false;
+            _analyticsSiteId = configuration?.SiteId ?? string.Empty;
+            _analyticsOrigins = string.Join(Environment.NewLine, configuration?.AllowedOrigins ?? []);
+            _analyticsStorageBudgetBytes = configuration?.StorageBudgetBytes
+                ?? AppMonitoringDefaults.DefaultAnalyticsStorageBudgetBytes;
+        }
+        catch (HttpRequestException)
+        {
+            if (generation == _loadGeneration && appId == AppId)
+                _analyticsConfiguration = null;
+        }
+        finally
+        {
+            if (generation == _loadGeneration && appId == AppId)
+                _analyticsLoading = false;
+        }
+    }
+
     private async Task GenerateKeyAsync()
     {
         _busy = true;
         try
         {
-            var resp = await Api.GenerateIngestKeyAsync(AppId);
+            var resp = await Api.Monitoring.GenerateIngestKeyAsync(AppId);
             if (resp is not null)
             {
                 _generatedKey = resp.Key;
@@ -87,7 +123,7 @@ public partial class AppIngestionSettings
             new ConfirmOptions { OkButtonText = L["Revoke"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var status = await Api.RevokeIngestKeyAsync(AppId);
+        var status = await Api.Monitoring.RevokeIngestKeyAsync(AppId);
         if (status.Success)
         {
             _generatedKey = null;
@@ -102,6 +138,70 @@ public partial class AppIngestionSettings
             await Clipboard.CopyAsync(_generatedKey);
     }
 
+    private async Task SaveAnalyticsConfigurationAsync()
+    {
+        var origins = _analyticsOrigins
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (string.IsNullOrWhiteSpace(_analyticsSiteId) || origins.Count == 0)
+        {
+            Toast.Warning("ValidationError", "RequiredFields");
+            return;
+        }
+
+        _analyticsBusy = true;
+        try
+        {
+            var configured = await Api.Monitoring.ConfigureAppWebAnalyticsAsync(AppId, new ConfigureAppWebAnalyticsRequest
+            {
+                Enabled = _analyticsEnabled,
+                PublicIngestEnabled = _analyticsPublicIngestEnabled,
+                SiteId = _analyticsSiteId.Trim(),
+                AllowedOrigins = origins,
+                StorageBudgetBytes = _analyticsStorageBudgetBytes
+            });
+            if (configured is null)
+            {
+                Toast.Error("Error", "OperationFailed");
+                return;
+            }
+            _analyticsConfiguration = configured;
+            Toast.Success("Saved", "WebAnalyticsConfigurationSaved");
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _analyticsBusy = false;
+        }
+    }
+
+    private async Task RotateAnalyticsKeyAsync()
+    {
+        var confirmed = await Dialog.Confirm(
+            L["RotateAnalyticsKeyConfirm"].Value,
+            L["RotateAnalyticsKey"].Value,
+            new ConfirmOptions { OkButtonText = L["Rotate"].Value, CancelButtonText = L["Cancel"].Value });
+        if (confirmed != true)
+            return;
+
+        _analyticsBusy = true;
+        try
+        {
+            _analyticsConfiguration = await Api.Monitoring.RotateAppWebAnalyticsKeyAsync(AppId);
+            if (_analyticsConfiguration is null)
+            {
+                Toast.Error("Error", "OperationFailed");
+                return;
+            }
+            Toast.Success("Saved", "AnalyticsKeyRotated");
+        }
+        finally
+        {
+            _analyticsBusy = false;
+        }
+    }
+
     private async Task AddThresholdAsync()
     {
         if (string.IsNullOrWhiteSpace(_newThreshold.MetricName))
@@ -109,7 +209,7 @@ public partial class AppIngestionSettings
             Toast.Warning("ValidationError", "RequiredFields");
             return;
         }
-        var created = await Api.CreateAppThresholdAsync(AppId, _newThreshold);
+        var created = await Api.Monitoring.CreateAppThresholdAsync(AppId, _newThreshold);
         if (created is not null)
         {
             _newThreshold.MetricName = string.Empty;
@@ -121,7 +221,7 @@ public partial class AppIngestionSettings
 
     private async Task DeleteThresholdAsync(int thresholdId)
     {
-        var status = await Api.DeleteAppThresholdAsync(thresholdId);
+        var status = await Api.Monitoring.DeleteAppThresholdAsync(thresholdId);
         if (status.Success)
         {
             Toast.Success("Deleted", "ThresholdDeleted");

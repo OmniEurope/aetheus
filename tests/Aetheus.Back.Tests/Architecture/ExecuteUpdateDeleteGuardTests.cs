@@ -24,7 +24,7 @@ public class ExecuteUpdateDeleteGuardTests
 
         var violations = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(componentsDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(componentsDir, "*.cs"))
         {
             var raw = File.ReadAllText(file);
             var stripped = StripCommentsAndStrings(raw);
@@ -94,14 +94,5 @@ public class ExecuteUpdateDeleteGuardTests
         return sb.ToString();
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(ExecuteUpdateDeleteGuardTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

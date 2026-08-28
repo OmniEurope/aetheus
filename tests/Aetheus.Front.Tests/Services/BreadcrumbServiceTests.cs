@@ -60,6 +60,28 @@ public class BreadcrumbServiceTests : BunitContext
     }
 
     [Fact]
+    public void ParentHref_ReturnsNearestClickableAncestor()
+    {
+        var sut = new BreadcrumbService(Nav);
+        sut.Set(
+            new BreadcrumbItem("Projects", "/projects"),
+            new BreadcrumbItem("Project without a link"),
+            new BreadcrumbItem("Pipelines", "/pipelines?projectId=42"),
+            new BreadcrumbItem("Current pipeline"));
+
+        Assert.Equal("/pipelines?projectId=42", sut.ParentHref);
+    }
+
+    [Fact]
+    public void ParentHref_DoesNotUseCurrentItemHref()
+    {
+        var sut = new BreadcrumbService(Nav);
+        sut.Set(new BreadcrumbItem("Current page", "/current-page"));
+
+        Assert.Null(sut.ParentHref);
+    }
+
+    [Fact]
     public void LocationChanged_ClearsItemsAndFiresOnChanged()
     {
         var sut = new BreadcrumbService(Nav);
@@ -72,6 +94,19 @@ public class BreadcrumbServiceTests : BunitContext
 
         Assert.Empty(sut.Items);
         Assert.True(changed);
+    }
+
+    [Fact]
+    public void LocationChanged_WithFallback_ReplacesItemsWithoutAnEmptyState()
+    {
+        var sut = new BreadcrumbService(Nav);
+        sut.ConfigureFallback(path => [new BreadcrumbItem($"fallback:{path}")]);
+        sut.Set(new BreadcrumbItem("Loaded page"));
+
+        Nav.NavigateTo("/other-page");
+
+        var item = Assert.Single(sut.Items);
+        Assert.Contains("other-page", item.Text, StringComparison.Ordinal);
     }
 
     [Fact]

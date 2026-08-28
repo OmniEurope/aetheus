@@ -41,7 +41,8 @@ public class ArtifactStorageServiceTests : IDisposable
         var (relativePath, sha256) = await _sut.SaveArtifactAsync(
             projectId: 1, pipelineId: 2, runId: 3, fileName: "build.zip", content, ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal(Path.Combine("1", "2", "3", "build.zip"), relativePath);
+        Assert.StartsWith(Path.Combine("1", "2", "3", "build."), relativePath, StringComparison.Ordinal);
+        Assert.EndsWith(".zip", relativePath, StringComparison.Ordinal);
 
         var fullPath = Path.Combine(_tempDir, relativePath);
         Assert.True(File.Exists(fullPath));
@@ -59,6 +60,24 @@ public class ArtifactStorageServiceTests : IDisposable
         // reflects the actual stored bytes rather than a placeholder.
         var (_, sha256) = await _sut.SaveArtifactAsync(1, 2, 3, "empty.zip", new MemoryStream([]), ct: TestContext.Current.CancellationToken);
         Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", sha256);
+    }
+
+    [Fact]
+    public async Task SaveArtifactAsync_SameLogicalNameTwice_NeverOverwritesPublishedBytes()
+    {
+        var (firstPath, firstSha) = await _sut.SaveArtifactAsync(
+            1, 2, 3, "build.zip", new MemoryStream("first"u8.ToArray()),
+            ct: TestContext.Current.CancellationToken);
+        var (secondPath, secondSha) = await _sut.SaveArtifactAsync(
+            1, 2, 3, "build.zip", new MemoryStream("second"u8.ToArray()),
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(firstPath, secondPath);
+        Assert.NotEqual(firstSha, secondSha);
+        Assert.Equal("first", await File.ReadAllTextAsync(
+            Path.Combine(_tempDir, firstPath), TestContext.Current.CancellationToken));
+        Assert.Equal("second", await File.ReadAllTextAsync(
+            Path.Combine(_tempDir, secondPath), TestContext.Current.CancellationToken));
     }
 
     [Theory]

@@ -1,0 +1,8 @@
+{
+  "name": "toto-quality-toolchain",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "jscpd": "5.0.12"
+  }
+}

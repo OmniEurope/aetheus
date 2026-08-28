@@ -2,12 +2,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -51,18 +45,13 @@ public sealed class ServiceOperationExecutor(
             : ExecuteAsync(kind, target, timeoutSeconds, onOutput, cancellationToken);
 
     public async Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken)
+        OperationKind kind, string target, int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {
-        if (!OperationTargetValidator.IsValid(kind, target))
-        {
-            logger.LogWarning("Rejected service name with invalid format");
-            await onOutput("Invalid service name format", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var targetFailure = await OperationExecutorFailure.ValidateTargetAsync(
+            kind, target, onOutput, () => logger.LogWarning("Rejected service name with invalid format"),
+            "Invalid service name format").ConfigureAwait(false);
+        if (targetFailure is not null) return targetFailure;
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
@@ -190,14 +179,7 @@ public sealed class ServiceOperationExecutor(
         // bare `systemctl`. System units need root, so a bare call was a no-op (or polkit-dependent) for a
         // non-root agent; this matches the argv-exact AETHEUS_SYSTEMCTL sudoers allow-list one-to-one (a unit
         // outside that fixed set is refused by sudo at the OS level). Mirrors the ServiceEnable path.
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         foreach (var arg in argv)
             psi.ArgumentList.Add(arg);
         return psi;
@@ -234,17 +216,7 @@ public sealed class ServiceOperationExecutor(
 
         if (verb is null) return null;
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sc",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add(verb);
-        psi.ArgumentList.Add(target);
-        return psi;
+        return BuildScCommand(verb, target);
     }
 
     // The service-enable sudoers allow-list uses bare unit names (apache2, nginx, …) to match the

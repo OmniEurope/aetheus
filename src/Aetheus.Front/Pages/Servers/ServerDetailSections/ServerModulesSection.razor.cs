@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -34,7 +25,7 @@ public partial class ServerModulesSection
         var serverId = ServerId;
         try
         {
-            var modules = await Api.GetServerModulesAsync(serverId);
+            var modules = await Api.Servers.GetServerModulesAsync(serverId);
             if (ServerId == serverId) _modules = modules;
         }
         catch (HttpRequestException)
@@ -48,7 +39,7 @@ public partial class ServerModulesSection
         _addSaving = true;
         try
         {
-            var result = await Api.CreateServerModuleAsync(ServerId, new CreateServerModuleRequest
+            var result = await Api.Servers.CreateServerModuleAsync(ServerId, new CreateServerModuleRequest
             {
                 Name = model.Name,
                 Type = model.Type,
@@ -92,10 +83,15 @@ public partial class ServerModulesSection
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.DeleteServerModuleAsync(ServerId, module.Id);
+        var success = await Api.Servers.DeleteServerModuleAsync(ServerId, module.Id);
         if (success)
         {
             _modules!.RemoveAll(m => m.Id == module.Id);
+            Toast.Success("Deleted", "Deleted");
+        }
+        else
+        {
+            Toast.Error("Error", "DeleteFailed");
         }
     }
 

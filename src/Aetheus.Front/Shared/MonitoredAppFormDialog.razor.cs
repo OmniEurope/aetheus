@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
-// PLAN-001: dialog form for creating/editing a monitored app. Closes with `true` on success so the
+// ADR-021: dialog form for creating/editing a monitored app. Closes with `true` on success so the
 // caller reloads the list; `false`/dismiss leaves it untouched.
-public partial class MonitoredAppFormDialog
+public partial class MonitoredAppFormDialog : EntityEditDialogBase
 {
-    [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private UiActions Ui { get; set; } = default!;
-    [Inject] private NotifyHelper Toast { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-
     [Parameter] public int ProjectId { get; set; }
 
     /// <summary>The app being edited; <c>null</c> opens the dialog in create mode.</summary>
@@ -25,8 +13,6 @@ public partial class MonitoredAppFormDialog
 
     private bool IsEdit => App is not null;
     private UpdateMonitoredAppRequest _model = new();
-    private bool _busy;
-
     private List<ServerDto> _servers = [];
     private List<EnvironmentDto> _environments = [];
 
@@ -51,8 +37,8 @@ public partial class MonitoredAppFormDialog
 
         try
         {
-            var serversTask = Api.GetAllServersAsync();
-            var environmentsTask = Api.GetAllEnvironmentsAsync(projectId: ProjectId);
+            var serversTask = Api.Servers.GetAllServersAsync();
+            var environmentsTask = Api.Servers.GetAllEnvironmentsAsync(projectId: ProjectId);
             await Task.WhenAll(serversTask, environmentsTask);
             _servers = await serversTask;
             _environments = await environmentsTask;
@@ -65,21 +51,17 @@ public partial class MonitoredAppFormDialog
 
     private async Task SubmitAsync()
     {
-        if (string.IsNullOrWhiteSpace(_model.Name))
-        {
-            Toast.Warning("ValidationError", "RequiredFields");
+        if (!ValidateRequiredName(_model.Name))
             return;
-        }
 
-        _busy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             if (IsEdit)
             {
                 await Ui.RunAsync(
-                    () => Api.UpdateMonitoredAppAsync(App!.Id, _model),
+                    () => Api.Monitoring.UpdateMonitoredAppAsync(App!.Id, _model),
                     "MonitoredAppUpdated",
-                    _ => { Dialog.Close(true); return Task.CompletedTask; },
+                    _ => CloseAfterSuccessAsync(),
                     successTitleKey: "Updated");
             }
             else
@@ -99,17 +81,11 @@ public partial class MonitoredAppFormDialog
                     Enabled = _model.Enabled
                 };
                 await Ui.RunAsync(
-                    () => Api.CreateMonitoredAppAsync(ProjectId, create),
+                    () => Api.Monitoring.CreateMonitoredAppAsync(ProjectId, create),
                     "MonitoredAppCreated",
-                    _ => { Dialog.Close(true); return Task.CompletedTask; },
+                    _ => CloseAfterSuccessAsync(),
                     successTitleKey: "Created");
             }
-        }
-        finally
-        {
-            _busy = false;
-        }
+        });
     }
-
-    private void Cancel() => Dialog.Close(false);
 }

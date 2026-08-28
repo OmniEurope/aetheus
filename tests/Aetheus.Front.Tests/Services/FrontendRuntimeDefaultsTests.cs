@@ -21,5 +21,8 @@ public sealed class FrontendRuntimeDefaultsTests
         Assert.True(FrontendRuntimeDefaults.SignalRRetryDelays
             .Zip(FrontendRuntimeDefaults.SignalRRetryDelays.Skip(1))
             .All(pair => pair.First <= pair.Second));
+        Assert.True(
+            FrontendRuntimeDefaults.SignalRRetryDelays.TakeWhile(delay => delay <= TimeSpan.FromSeconds(5)).Count() >= 4,
+            "Initial SignalR recovery needs several bounded attempts before the long backoff begins.");
     }
 }

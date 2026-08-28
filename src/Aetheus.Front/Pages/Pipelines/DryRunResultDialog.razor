@@ -20,8 +20,8 @@
 
         @if (Result.ResolvedVariables.Count > 0)
         {
-            <RadzenDataGrid Data="@Result.ResolvedVariables.Select(kv => new { kv.Key, kv.Value })" TItem="object"
-                Density="Density.Compact" class="rz-mb-4 dlg-summary-pre" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+            <RadzenDataGrid Responsive="false" Data="@Result.ResolvedVariables.Select(kv => new { kv.Key, kv.Value })" TItem="object"
+                Density="Density.Compact" class="rz-mb-4 dlg-summary-pre" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true">
                 <Columns>
                     <RadzenDataGridColumn Property="Key" Title="@L["Key"]" Width="200px" />
                     <RadzenDataGridColumn Property="Value" Title="@L["Value"]" />
@@ -31,8 +31,8 @@
 
         @foreach (var stage in Result.Stages)
         {
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mt-2 rz-mb-1">@stage.StageName (@stage.Agent)</RadzenText>
-            <RadzenDataGrid Data="@stage.Steps" TItem="DryRunStepDto" Density="Density.Compact" class="rz-mb-2" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mt-2 rz-mb-1">@stage.StageName (@stage.Agent)</RadzenText>
+            <RadzenDataGrid Responsive="false" Data="@stage.Steps" TItem="DryRunStepDto" Density="Density.Compact" class="rz-mb-2" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true">
                 <Columns>
                     <RadzenDataGridColumn Property="StepName" Title="@L["Step"]" Width="150px" />
                     <RadzenDataGridColumn Property="OriginalCommand" Title="@L["OriginalCommand"]" />

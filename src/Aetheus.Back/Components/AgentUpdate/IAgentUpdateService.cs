@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.AgentUpdate;
 
@@ -12,13 +11,23 @@ namespace Aetheus.Back.Components.AgentUpdate;
 public interface IAgentUpdateService
 {
     /// <summary>Queues a self-update for one server. Throws <c>NotFoundException</c> if it doesn't exist.</summary>
-    Task<AgentUpdateResponse> QueueUpdateAsync(int serverId, CancellationToken ct = default);
+    Task<AgentUpdateResponse> QueueUpdateAsync(
+        int serverId,
+        string requestedBy,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Queues a self-update for every server in <paramref name="accessibleServerIds"/>
     /// (already filtered to the caller's administrable resources).
     /// </summary>
-    Task<AgentUpdateAllResponse> QueueUpdateAllAsync(List<int>? accessibleServerIds, CancellationToken ct = default);
+    Task<AgentUpdateAllResponse> QueueUpdateAllAsync(
+        List<int>? accessibleServerIds,
+        string requestedBy,
+        CancellationToken ct = default);
+
+    Task<AgentUpdateAllPreviewDto> PreviewUpdateAllAsync(
+        List<int>? accessibleServerIds,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Forwards a progress phase reported by the agent (item #3 of the plan) to UI clients on

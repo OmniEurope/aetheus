@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.AppBackups;
 
@@ -24,26 +21,7 @@ internal sealed class BackupRepository(AppDbContext db) : IBackupRepository
                 || (p.Server != null && p.Server.Name.Contains(search)));
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var ordered = (sortBy, sortDescending) switch
-        {
-            ("ProjectName", false) => query.OrderBy(p => p.Project!.Name),
-            ("ProjectName", true) => query.OrderByDescending(p => p.Project!.Name),
-            ("ServerName", false) => query.OrderBy(p => p.Server!.Name),
-            ("ServerName", true) => query.OrderByDescending(p => p.Server!.Name),
-            ("DbEngine", false) => query.OrderBy(p => p.DbEngine),
-            ("DbEngine", true) => query.OrderByDescending(p => p.DbEngine),
-            ("ScheduleCron", false) => query.OrderBy(p => p.ScheduleCron),
-            ("ScheduleCron", true) => query.OrderByDescending(p => p.ScheduleCron),
-            ("RetentionCount", false) => query.OrderBy(p => p.RetentionCount),
-            ("RetentionCount", true) => query.OrderByDescending(p => p.RetentionCount),
-            ("LastRunAt", false) => query.OrderBy(p => p.LastRunAt),
-            ("LastRunAt", true) => query.OrderByDescending(p => p.LastRunAt),
-            ("Enabled", false) => query.OrderBy(p => p.Enabled),
-            ("Enabled", true) => query.OrderByDescending(p => p.Enabled),
-            ("Name", true) => query.OrderByDescending(p => p.Name),
-            _ => query.OrderBy(p => p.Name)
-        };
-
+        var ordered = OrderPolicies(query, sortBy, sortDescending);
         var items = await ordered
             .Include(p => p.Project)
             .Include(p => p.Server)
@@ -54,8 +32,52 @@ internal sealed class BackupRepository(AppDbContext db) : IBackupRepository
         return (items, totalCount);
     }
 
+    private static IQueryable<BackupPolicy> OrderPolicies(
+        IQueryable<BackupPolicy> query,
+        string? sortBy,
+        bool sortDescending) => sortDescending
+            ? OrderPoliciesDescending(query, sortBy)
+            : OrderPoliciesAscending(query, sortBy);
+
+    private static IQueryable<BackupPolicy> OrderPoliciesAscending(
+        IQueryable<BackupPolicy> query,
+        string? sortBy) =>
+        sortBy switch
+        {
+            "ProjectName" => query.OrderBy(p => p.Project!.Name),
+            "ServerName" => query.OrderBy(p => p.Server!.Name),
+            "DbEngine" => query.OrderBy(p => p.DbEngine),
+            "ScheduleCron" => query.OrderBy(p => p.ScheduleCron),
+            "RetentionCount" => query.OrderBy(p => p.RetentionCount),
+            "LastRunAt" => query.OrderBy(p => p.LastRunAt),
+            "Enabled" => query.OrderBy(p => p.Enabled),
+            _ => query.OrderBy(p => p.Name)
+        };
+
+    private static IQueryable<BackupPolicy> OrderPoliciesDescending(
+        IQueryable<BackupPolicy> query,
+        string? sortBy) =>
+        sortBy switch
+        {
+            "ProjectName" => query.OrderByDescending(p => p.Project!.Name),
+            "ServerName" => query.OrderByDescending(p => p.Server!.Name),
+            "DbEngine" => query.OrderByDescending(p => p.DbEngine),
+            "ScheduleCron" => query.OrderByDescending(p => p.ScheduleCron),
+            "RetentionCount" => query.OrderByDescending(p => p.RetentionCount),
+            "LastRunAt" => query.OrderByDescending(p => p.LastRunAt),
+            "Enabled" => query.OrderByDescending(p => p.Enabled),
+            _ => query.OrderByDescending(p => p.Name)
+        };
+
     public async Task<BackupPolicy?> FindPolicyAsync(int id, CancellationToken ct = default)
         => await db.BackupPolicies.FirstOrDefaultAsync(p => p.Id == id, ct).ConfigureAwait(false);
+
+    public async Task<int?> GetProjectOrganizationIdAsync(int projectId, CancellationToken ct = default)
+        => await db.Projects.AsNoTracking()
+            .Where(project => project.Id == projectId)
+            .Select(project => (int?)project.OrganizationId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
     public async Task<List<BackupPolicy>> GetEnabledPoliciesAsync(CancellationToken ct = default)
         => await db.BackupPolicies

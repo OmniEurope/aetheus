@@ -23,42 +23,30 @@ public sealed record ProjectServerDto
     public ServerStatus? ServerStatus { get; init; }
 }
 
-public sealed record CreateProjectServerRequest
+public abstract record ProjectServerMutationRequest
+{
+    [Required]
+    [StringLength(200)]
+    public string DisplayName { get; init; } = string.Empty;
+
+    [Required]
+    [StringLength(500)]
+    public string Host { get; init; } = string.Empty;
+
+    [Range(1, 65535)]
+    public int? Port { get; init; }
+
+    [StringLength(2000)]
+    public string? Notes { get; init; }
+}
+
+public sealed record CreateProjectServerRequest : ProjectServerMutationRequest
 {
     [Required]
     public ProjectServerType Type { get; init; }
 
     [Range(1, int.MaxValue)]
     public int? ServerId { get; init; }
-
-    [Required]
-    [StringLength(200)]
-    public string DisplayName { get; init; } = string.Empty;
-
-    [Required]
-    [StringLength(500)]
-    public string Host { get; init; } = string.Empty;
-
-    [Range(1, 65535)]
-    public int? Port { get; init; }
-
-    [StringLength(2000)]
-    public string? Notes { get; init; }
 }
 
-public sealed record UpdateProjectServerRequest
-{
-    [Required]
-    [StringLength(200)]
-    public string DisplayName { get; init; } = string.Empty;
-
-    [Required]
-    [StringLength(500)]
-    public string Host { get; init; } = string.Empty;
-
-    [Range(1, 65535)]
-    public int? Port { get; init; }
-
-    [StringLength(2000)]
-    public string? Notes { get; init; }
-}
+public sealed record UpdateProjectServerRequest : ProjectServerMutationRequest;

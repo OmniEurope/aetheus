@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -111,7 +103,7 @@ public partial class ServerMailSection
         var (page, pageSize) = args.ToPageRequest();
         var (sortBy, descending) = GetSort(args, "Name");
         await LoadPageAsync(
-            () => Api.GetMailDomainsPageAsync(ServerId, page, pageSize, sortBy: sortBy, sortDescending: descending),
+            () => Api.Mail.GetMailDomainsPageAsync(ServerId, page, pageSize, sortBy: sortBy, sortDescending: descending),
             result => { _domains = result.Items; _domainCount = result.TotalCount; },
             value => _domainsLoading = value);
     }
@@ -121,7 +113,7 @@ public partial class ServerMailSection
         var (page, pageSize) = args.ToPageRequest();
         var (sortBy, descending) = GetSort(args, "Email");
         await LoadPageAsync(
-            () => Api.GetMailAccountsPageAsync(ServerId, page, pageSize, sortBy: sortBy, sortDescending: descending),
+            () => Api.Mail.GetMailAccountsPageAsync(ServerId, page, pageSize, sortBy: sortBy, sortDescending: descending),
             result => { _accounts = result.Items; _accountCount = result.TotalCount; },
             value => _accountsLoading = value);
     }
@@ -131,7 +123,7 @@ public partial class ServerMailSection
         var (page, pageSize) = args.ToPageRequest();
         var (sortBy, descending) = GetSort(args, "SourceEmail");
         await LoadPageAsync(
-            () => Api.GetMailAliasesPageAsync(ServerId, page, pageSize, sortBy: sortBy, sortDescending: descending),
+            () => Api.Mail.GetMailAliasesPageAsync(ServerId, page, pageSize, sortBy: sortBy, sortDescending: descending),
             result => { _aliases = result.Items; _aliasCount = result.TotalCount; },
             value => _aliasesLoading = value);
     }
@@ -175,7 +167,7 @@ public partial class ServerMailSection
         _actionRunning = true;
         try
         {
-            var success = await Api.ExecuteMailActionAsync(ServerId, new MailActionRequest { Action = action });
+            var success = await Api.Mail.ExecuteMailActionAsync(ServerId, new MailActionRequest { Action = action });
             if (success)
                 Toast.Success(L["TaskQueued"]);
             else
@@ -196,7 +188,7 @@ public partial class ServerMailSection
     {
         try
         {
-            var result = await Api.CreateMailDomainAsync(ServerId, new CreateMailDomainRequest
+            var result = await Api.Mail.CreateMailDomainAsync(ServerId, new CreateMailDomainRequest
             {
                 Name = _newDomainName,
                 DkimSelector = _newDkimSelector
@@ -231,7 +223,7 @@ public partial class ServerMailSection
 
     private async Task DeleteDomainAsync(int domainId)
     {
-        var success = await Api.DeleteMailDomainAsync(ServerId, domainId);
+        var success = await Api.Mail.DeleteMailDomainAsync(ServerId, domainId);
         if (success)
         {
             Toast.Success(L["TaskQueued"]);
@@ -247,7 +239,7 @@ public partial class ServerMailSection
     {
         try
         {
-            var result = await Api.CreateMailAccountAsync(ServerId, new CreateMailAccountRequest
+            var result = await Api.Mail.CreateMailAccountAsync(ServerId, new CreateMailAccountRequest
             {
                 Email = _newAccountEmail,
                 Password = _newAccountPassword,
@@ -285,7 +277,7 @@ public partial class ServerMailSection
 
     private async Task DeleteAccountAsync(int accountId)
     {
-        var success = await Api.DeleteMailAccountAsync(ServerId, accountId);
+        var success = await Api.Mail.DeleteMailAccountAsync(ServerId, accountId);
         if (success)
         {
             Toast.Success(L["TaskQueued"]);
@@ -301,11 +293,11 @@ public partial class ServerMailSection
     {
         try
         {
-            _dnsRecords = await Api.GetMailDnsRecordsAsync(ServerId, domain.Id);
+            _dnsRecords = await Api.Mail.GetMailDnsRecordsAsync(ServerId, domain.Id);
             await Dialog.OpenAsync<MailOperationDialog>(
                 $"{L["DnsRecords"]}: {_dnsRecords?.Domain}",
                 new Dictionary<string, object?> { { "Mode", MailDialogMode.DnsRecords }, { "DnsRecords", _dnsRecords } },
-                new DialogOptions { Width = "42rem" });
+                new DialogOptions { Width = "42rem", AutoFocusFirstElement = false });
         }
         catch (HttpRequestException ex)
         {
@@ -316,7 +308,7 @@ public partial class ServerMailSection
 
     private async Task FetchLogsAsync()
     {
-        var success = await Api.GetMailLogsAsync(ServerId, new MailLogRequest
+        var success = await Api.Mail.GetMailLogsAsync(ServerId, new MailLogRequest
         {
             LogType = _logType,
             Lines = _logLines
@@ -331,7 +323,7 @@ public partial class ServerMailSection
     {
         try
         {
-            var success = await Api.SetupMailAsync(ServerId, new MailSetupRequest
+            var success = await Api.Mail.SetupMailAsync(ServerId, new MailSetupRequest
             {
                 Hostname = _setupHostname,
                 Domain = _setupDomain,
@@ -380,7 +372,7 @@ public partial class ServerMailSection
     private async Task<MailDialogModel?> OpenMailDialogAsync(MailDialogMode mode, string title, MailDialogModel model, string width = "32rem")
     {
         if (mode is MailDialogMode.AddAccount or MailDialogMode.AddAlias && _dialogDomains.Count == 0)
-            _dialogDomains = await Api.GetMailDomainsAsync(ServerId);
+            _dialogDomains = await Api.Mail.GetMailDomainsAsync(ServerId);
         var result = await Dialog.OpenAsync<MailOperationDialog>(title,
             new Dictionary<string, object?>
             {
@@ -388,7 +380,7 @@ public partial class ServerMailSection
                 { "Model", model },
                 { "Domains", _dialogDomains.Count > 0 ? _dialogDomains : _domains }
             },
-            new DialogOptions { Width = width });
+            new DialogOptions { Width = width, AutoFocusFirstElement = false });
         return result as MailDialogModel;
     }
 
@@ -427,7 +419,7 @@ public partial class ServerMailSection
 
     private async Task CreateAliasAsync()
     {
-        var result = await Api.CreateMailAliasAsync(ServerId, _selectedAliasDomainId, new CreateMailAliasRequest
+        var result = await Api.Mail.CreateMailAliasAsync(ServerId, _selectedAliasDomainId, new CreateMailAliasRequest
         {
             SourceEmail = _newAliasSource,
             DestinationEmail = _newAliasDest
@@ -462,7 +454,7 @@ public partial class ServerMailSection
 
     private async Task DeleteAliasAsync(int aliasId)
     {
-        if (await Api.DeleteMailAliasAsync(ServerId, aliasId))
+        if (await Api.Mail.DeleteMailAliasAsync(ServerId, aliasId))
         {
             Toast.Success(L["AliasDeleted"]);
             if (_aliasesGrid is not null) await _aliasesGrid.Reload();
@@ -492,7 +484,7 @@ public partial class ServerMailSection
 
     private async Task RotateDkimKeyAsync()
     {
-        var result = await Api.RotateMailDkimKeyAsync(ServerId, _dkimRotationDomainId, new DkimRotationRequest
+        var result = await Api.Mail.RotateMailDkimKeyAsync(ServerId, _dkimRotationDomainId, new DkimRotationRequest
         {
             NewSelector = _dkimNewSelector
         });

@@ -59,7 +59,7 @@ public class ServersControllerTests
     {
         _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Read, Arg.Any<CancellationToken>())
             .Returns((List<int>?)null);
-        _serviceMock.GetServersAsync(Arg.Any<PaginationRequest>(), null, null, null, Arg.Any<CancellationToken>())
+        _serviceMock.GetServersAsync(Arg.Any<PaginationRequest>(), null, null, null, null, Arg.Any<CancellationToken>())
             .Returns(new PaginatedResult<ServerDto> { Items = [new ServerDto { Id = 1, Name = "srv" }], TotalCount = 1 });
 
         var result = await _sut.GetServers(new PaginationRequest(), ct: TestContext.Current.CancellationToken);
@@ -295,30 +295,6 @@ public class ServersControllerTests
             .Returns(false);
 
         var result = await _sut.GetServerVaults(1, TestContext.Current.CancellationToken);
-
-        Assert.IsType<ForbidResult>(result.Result);
-    }
-
-    [Fact]
-    public async Task GetServerReleases_Authorized_ReturnsOk()
-    {
-        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Read, Arg.Any<CancellationToken>())
-            .Returns(true);
-        _serviceMock.GetServerReleasesAsync(1, Arg.Any<CancellationToken>())
-            .Returns([]);
-
-        var result = await _sut.GetServerReleases(1, TestContext.Current.CancellationToken);
-
-        Assert.IsType<OkObjectResult>(result.Result);
-    }
-
-    [Fact]
-    public async Task GetServerReleases_Forbidden_ReturnsForbid()
-    {
-        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Read, Arg.Any<CancellationToken>())
-            .Returns(false);
-
-        var result = await _sut.GetServerReleases(1, TestContext.Current.CancellationToken);
 
         Assert.IsType<ForbidResult>(result.Result);
     }

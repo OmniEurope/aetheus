@@ -21,8 +21,8 @@ public class TasksRenderMarginTests : BunitContext
     {
         Items =
         [
-            new ServerTaskDto { Id = 1, Name = "deploy", Status = TaskExecutionStatus.Success, ServerName = "web-01", Executor = ExecutorType.Shell, CreatedAt = DateTime.UtcNow.AddMinutes(-5), ExitCode = 0 },
-            new ServerTaskDto { Id = 2, Name = "backup", Status = TaskExecutionStatus.Failed, ServerName = "db-01", Executor = ExecutorType.Docker, CreatedAt = DateTime.UtcNow.AddMinutes(-10), ExitCode = 1 },
+            new ServerTaskDto { Id = 1, ServerId = 7, Name = "deploy", Status = TaskExecutionStatus.Success, ServerName = "web-01", PipelineRunId = 42, Executor = ExecutorType.Shell, CreatedAt = DateTime.UtcNow.AddMinutes(-5), ExitCode = 0 },
+            new ServerTaskDto { Id = 2, ServerId = 8, Name = "backup", Status = TaskExecutionStatus.Failed, ServerName = "db-01", Executor = ExecutorType.Docker, CreatedAt = DateTime.UtcNow.AddMinutes(-10), ExitCode = 1 },
             new ServerTaskDto { Id = 3, Name = "scan", Status = TaskExecutionStatus.Running, ServerName = "web-01", Executor = ExecutorType.Shell, CreatedAt = DateTime.UtcNow },
             new ServerTaskDto { Id = 4, Name = "rotate", Status = TaskExecutionStatus.Pending, ServerName = "db-01", Executor = ExecutorType.Shell, CreatedAt = DateTime.UtcNow },
             new ServerTaskDto { Id = 5, Name = "cleanup", Status = TaskExecutionStatus.Cancelled, ServerName = "web-01", Executor = ExecutorType.Shell, CreatedAt = DateTime.UtcNow }
@@ -42,6 +42,8 @@ public class TasksRenderMarginTests : BunitContext
             Assert.Contains("deploy", cut.Markup);
             Assert.Contains("backup", cut.Markup);
             Assert.Contains("scan", cut.Markup);
+            Assert.Equal("/pipelines/runs/42", cut.Find("a[href='/pipelines/runs/42']").GetAttribute("href"));
+            Assert.Equal("/servers/8/overview", cut.Find("a[href='/servers/8/overview']").GetAttribute("href"));
         }, TimeSpan.FromSeconds(2));
     }
 

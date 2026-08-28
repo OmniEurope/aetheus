@@ -21,7 +21,7 @@
 
 @if (!_isNew && _detail is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
 }
 else
 {
@@ -31,7 +31,9 @@ else
             <RadzenColumn Size="12" SizeMD="6">
                 <RadzenStack Gap="1rem">
                     <RadzenFormField Text="@L["Name"]">
-                        <RadzenTextBox @bind-Value="_model.Name" Name="Name" />
+                        <RadzenTextBox @bind-Value="_model.Name"
+                                       @oninput="@(e => _model.Name = e.Value?.ToString() ?? string.Empty)"
+                                       Name="Name" />
                         <ValidationMessage For="@(() => _model.Name)" />
                     </RadzenFormField>
                     <RadzenFormField Text="@L["Description"]">
@@ -60,19 +62,27 @@ else
         <RadzenTemplateForm TItem="NewSecretModel" Data="@_newSecret" Submit="@AddSecret">
         <LocalizedDataAnnotationsValidator />
         <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mb-4" Wrap="FlexWrap.Wrap">
-            <RadzenTextBox @bind-Value="_newSecret.Key" Placeholder="@L["Key"]" />
+            <RadzenTextBox @bind-Value="_newSecret.Key"
+                           @oninput="@(e => _newSecret.Key = e.Value?.ToString() ?? string.Empty)"
+                           Placeholder="@L["Key"]" AutoComplete="false" />
             <ValidationMessage For="@(() => _newSecret.Key)" />
-            <RadzenPassword @bind-Value="_newSecret.Value" Placeholder="@L["Value"]" />
+            <RadzenPassword @bind-Value="_newSecret.Value" Name="Value"
+                            @oninput="@(e => _newSecret.Value = e.Value?.ToString() ?? string.Empty)"
+                            Placeholder="@L["Value"]" AutoComplete="false" />
+            <RadzenButton Icon="auto_fix_high" Size="ButtonSize.Small" ButtonType="ButtonType.Button"
+                          Click="@GenerateNewSecretValue" title="@GenerateHint(_newSecret.Key)"
+                          aria-label="@GenerateHint(_newSecret.Key)"
+                          ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
             <ValidationMessage For="@(() => _newSecret.Value)" />
             <RadzenDatePicker @bind-Value="_newSecret.ExpiresAt" Placeholder="@L["ExpiresAt"]" DateFormat="yyyy-MM-dd" />
             <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Add"]" Icon="add" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
             <div class="pipeline-list-spacer"></div>
-            <RadzenButton Text="@L["ExportKeys"]" Icon="download" Click="@ExportKeys" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
-            <RadzenButton Text="@L["Import"]" Icon="upload" Click="@ImportSecrets" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["ExportKeys"]" Icon="download" Click="@ExportKeys" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+            <RadzenButton Text="@L["Import"]" Icon="upload" Click="@ImportSecrets" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         </RadzenStack>
         </RadzenTemplateForm>
 
-        <RadzenDataGrid Data="@_detail.Secrets" TItem="VaultSecretDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+        <RadzenDataGrid Responsive="false" Data="@_detail.Secrets" TItem="VaultSecretDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
             <Columns>
                 <RadzenDataGridColumn Property="Key" Title="@L["Key"]">
                     <Template Context="secret">
@@ -108,7 +118,7 @@ else
                         <RadzenButton Icon="content_copy" Size="ButtonSize.Small" Click="@(() => CopyKeyReference(secret.Key))" title="@L["CopyKeyReference"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                         <RadzenButton Icon="history" Size="ButtonSize.Small" Click="@(() => ShowVersions(secret))" title="@L["History"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                         <RadzenButton Icon="edit" Size="ButtonSize.Small" Click="@(() => UpdateSecret(secret))" title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-                        <RadzenButton Icon="autorenew" Size="ButtonSize.Small" Click="@(() => RotateSecret(secret))" title="@L["Rotate"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        <RadzenButton Icon="autorenew" Size="ButtonSize.Small" Click="@(() => RotateSecret(secret))" title="@L["Rotate"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                         <RadzenButton Icon="delete" Size="ButtonSize.Small" Click="@(() => DeleteSecret(secret.Id))"
                             title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
                     </Template>

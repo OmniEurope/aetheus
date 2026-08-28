@@ -74,7 +74,7 @@ public class VariableLibraryEditExtendedTests : BunitContext
     // ImportEntries removed - calls Dialog.OpenAsync which hangs in bUnit
 
     [Fact]
-    public async Task AddEntry_EmptyKey_DoesNothing()
+    public async Task AddEntry_EmptyKey_MakesNoRequest()
     {
         var cut = RenderExisting();
 

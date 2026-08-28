@@ -17,6 +17,7 @@ namespace Aetheus.Back.Tests;
 public class ServerServiceManagementTests
 {
     private readonly IServerRepository _repo = Substitute.For<IServerRepository>();
+    private readonly IServerHeartbeatRepository _heartbeatRepoMock = Substitute.For<IServerHeartbeatRepository>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
     private readonly ITaskService _taskService = Substitute.For<ITaskService>();
     private readonly ServerService _sut;
@@ -33,7 +34,7 @@ public class ServerServiceManagementTests
         hub.Clients.Returns(clients);
         alertHub.Clients.Returns(clients);
 
-        _sut = new ServerService(_repo, hub, alertHub, _audit, _taskService,
+        _sut = new ServerService(_repo, _heartbeatRepoMock, hub, alertHub, _audit, _taskService,
             Options.Create(new BackgroundServicesOptions()), TimeProvider.System,
             Substitute.For<IDbTransactionScope>());
 
@@ -261,7 +262,7 @@ public class ServerServiceManagementTests
         var checkedAt = new DateTime(2026, 7, 14, 10, 0, 0, DateTimeKind.Utc);
         _repo.FindServerAsync(1, Arg.Any<CancellationToken>())
             .Returns(new Server { Id = 1, PatchManagementAvailable = true });
-        _repo.GetSecurityUpdatesStateAsync(1, Arg.Any<CancellationToken>()).Returns(new SecurityUpdatesState
+        _heartbeatRepoMock.GetSecurityUpdatesStateAsync(1, Arg.Any<CancellationToken>()).Returns(new SecurityUpdatesState
         {
             ServerId = 1,
             Probed = true,
@@ -349,7 +350,7 @@ public class ServerServiceManagementTests
     {
         _repo.FindServerAsync(1, Arg.Any<CancellationToken>())
             .Returns(new Server { Id = 1, FirewallManagementAvailable = true });
-        _repo.GetFirewallStateAsync(1, Arg.Any<CancellationToken>()).Returns(new FirewallState
+        _heartbeatRepoMock.GetFirewallStateAsync(1, Arg.Any<CancellationToken>()).Returns(new FirewallState
         {
             ServerId = 1,
             Installed = true,

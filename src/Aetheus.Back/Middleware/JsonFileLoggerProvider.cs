@@ -188,7 +188,8 @@ internal sealed class JsonFileLogger(
             },
             SourceContext = categoryName,
             Message = formatter(state, exception),
-            Exception = exception?.ToString()
+            Exception = exception?.ToString(),
+            CorrelationId = GetProperty(state, "CorrelationId")
         };
 
         // Non-blocking enqueue; drops if the bounded channel is saturated.
@@ -197,5 +198,14 @@ internal sealed class JsonFileLogger(
             Interlocked.Increment(ref dropCounter.Total);
             Interlocked.Increment(ref dropCounter.SinceLastWarning);
         }
+    }
+
+    private static string? GetProperty<TState>(TState state, string name)
+    {
+        if (state is not IEnumerable<KeyValuePair<string, object?>> properties)
+            return null;
+        var value = properties.FirstOrDefault(property =>
+            string.Equals(property.Key, name, StringComparison.Ordinal)).Value;
+        return value?.ToString();
     }
 }

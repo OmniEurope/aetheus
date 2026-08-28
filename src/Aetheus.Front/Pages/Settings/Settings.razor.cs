@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Validation;
-using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Settings;
 
@@ -52,20 +43,6 @@ public partial class Settings
     private readonly PasswordChangeModel _pwModel = new();
     private bool _pwBusy;
 
-    private sealed class PasswordChangeModel
-    {
-        [Required]
-        public string CurrentPassword { get; set; } = string.Empty;
-
-        [Required]
-        [StringLength(PasswordPolicy.MaximumLength, MinimumLength = PasswordPolicy.MinimumLength)]
-        public string NewPassword { get; set; } = string.Empty;
-
-        [Required]
-        [Compare(nameof(NewPassword))]
-        public string ConfirmPassword { get; set; } = string.Empty;
-    }
-
     private readonly record struct DropdownItem(string Label, string Value);
 
     private List<DropdownItem> _themes = [];
@@ -98,7 +75,7 @@ public partial class Settings
 
         try
         {
-            var me = await Api.GetCurrentUserAsync();
+            var me = await Api.Auth.GetCurrentUserAsync();
             _totpEnabled = me?.TotpEnabled ?? false;
         }
         catch (HttpRequestException) { /* graceful degradation */ }
@@ -154,29 +131,30 @@ public partial class Settings
         Toast.Success("Saved", "ProfileSaved");
     }
 
-    private async Task SaveAppearance()
+    private async Task OnThemeChangedAsync(object value)
     {
+        _theme = value?.ToString() ?? "dark";
         await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.Theme, _theme);
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.Lang, _language);
-
-        // Apply theme live without forcing a full reload (was causing the "Light selection ignored" bug
-        // when the reload race-condition prevented the startup script from picking up the new value).
         var cssUrl = _theme == "light" ? RadzenAssetUrls.LightTheme : RadzenAssetUrls.DarkTheme;
         await JS.InvokeVoidAsync("Aetheus.setTheme", cssUrl);
-        await JS.InvokeVoidAsync("Aetheus.setLang", _language);
-
         Toast.Success("Saved", "AppearanceSaved");
-        // Reload to ensure C# culture is rebuilt for IStringLocalizer.
+    }
+
+    private async Task OnLanguageChangedAsync(object value)
+    {
+        _language = value?.ToString() ?? "en";
+        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.Lang, _language);
+        await JS.InvokeVoidAsync("Aetheus.setLang", _language);
+        Toast.Success("Saved", "AppearanceSaved");
         Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
     }
 
-    private async Task SaveNotificationPreferences()
+    private async Task SaveNotificationPreferenceAsync(string key, bool value)
     {
-        // Real client-side persistence so the success toast reflects actual work (no server-side
-        // notification-preference store yet).
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.NotifEmail, _emailNotifications ? "true" : "false");
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.NotifPipeline, _pipelineAlerts ? "true" : "false");
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.NotifServer, _serverAlerts ? "true" : "false");
+        if (key == StorageKeys.NotifEmail) _emailNotifications = value;
+        else if (key == StorageKeys.NotifPipeline) _pipelineAlerts = value;
+        else if (key == StorageKeys.NotifServer) _serverAlerts = value;
+        await JS.InvokeVoidAsync("localStorage.setItem", key, value ? "true" : "false");
         Toast.Success("Saved", "PreferencesSaved");
     }
 
@@ -185,7 +163,7 @@ public partial class Settings
     private async Task ChangePassword()
     {
         _pwBusy = true;
-        var ok = await Api.ChangeOwnPasswordAsync(new ChangeUserPasswordRequest
+        var ok = await Api.Auth.ChangeOwnPasswordAsync(new ChangeUserPasswordRequest
         {
             CurrentPassword = _pwModel.CurrentPassword,
             NewPassword = _pwModel.NewPassword
@@ -205,15 +183,25 @@ public partial class Settings
     private async Task SetupTotp()
     {
         _totpBusy = true;
-        _totpSetup = await Api.SetupTotpAsync();
-        _totpBusy = false;
+        try
+        {
+            _totpSetup = await Api.Auth.SetupTotpAsync();
+            if (_totpSetup is not null)
+                Toast.Info("TotpSetup", "TotpSetup");
+            else
+                Toast.Error("Error", "SaveFailed");
+        }
+        finally
+        {
+            _totpBusy = false;
+        }
     }
 
     private async Task VerifyTotp()
     {
         if (string.IsNullOrWhiteSpace(_verifyCode)) return;
         _totpBusy = true;
-        var ok = await Api.VerifyTotpAsync(_verifyCode);
+        var ok = await Api.Auth.VerifyTotpAsync(_verifyCode);
         if (ok)
         {
             _totpEnabled = true;
@@ -232,7 +220,7 @@ public partial class Settings
     {
         if (string.IsNullOrWhiteSpace(_disablePassword)) return;
         _totpBusy = true;
-        var ok = await Api.DisableTotpAsync(_disablePassword);
+        var ok = await Api.Auth.DisableTotpAsync(_disablePassword);
         if (ok)
         {
             _totpEnabled = false;

@@ -38,7 +38,9 @@ public sealed class ServerInteractiveControlsTests : E2ETestBase
         await Expect(autoRefresh).ToBeCheckedAsync();
         var dockerResponse = await refreshResponse.WaitAsync(TimeSpan.FromSeconds(15));
         Assert.That(dockerResponse.Ok, Is.True, $"Docker auto-refresh returned HTTP {dockerResponse.Status}.");
-        await Expect(Page.GetByText("toto-web", new() { Exact = true }))
+        // Match the container row, not the bare text: the relations graph renders the same name as
+        // an SVG label, so GetByText resolves to two elements and trips Playwright strict mode.
+        await Expect(Page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex("toto-web") }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         await Page.GetByText("Auto-refresh", new() { Exact = true }).ClickAsync();
         await Expect(autoRefresh).Not.ToBeCheckedAsync();
@@ -67,7 +69,13 @@ public sealed class ServerInteractiveControlsTests : E2ETestBase
         await Page.GetByRole(AriaRole.Tab)
             .Filter(new() { Has = Page.GetByText("Relations", new() { Exact = true }) })
             .ClickAsync();
-        var graphNodes = Page.Locator(".docker-graph-svg [data-node]");
+        // TabRenderMode.Client keeps inactive panels in the DOM, so the graph nodes exist even
+        // before the tab opens. Wait for the canvas itself to be shown first: asserting on a node
+        // straight away reports "hidden" whether the tab failed to open or the graph has not been
+        // laid out yet, which tells us nothing about which one happened.
+        var graphSvg = Page.Locator(".docker-graph-svg");
+        await Expect(graphSvg).ToBeVisibleAsync(new() { Timeout = 10000 });
+        var graphNodes = graphSvg.Locator("[data-node]");
         await Expect(graphNodes.First).ToBeVisibleAsync(new() { Timeout = 10000 });
         var initialNodeCount = await graphNodes.CountAsync();
         var containersFilter = Page.GetByRole(AriaRole.Checkbox, new() { Name = "Containers", Exact = true });
@@ -79,6 +87,7 @@ public sealed class ServerInteractiveControlsTests : E2ETestBase
     [Test]
     public async Task Services_FollowToggle_RestartsLogRequestWithFollowEnabled()
     {
+        await ReenrollServerForTaskProbeAsync(_serverId);
         await NavigateToAsync($"servers/{_serverId}/services");
         var logsButton = Page.Locator("button[title='View logs']").First;
         await Expect(logsButton).ToBeVisibleAsync(new() { Timeout = 10000 });
@@ -126,19 +135,9 @@ public sealed class ServerInteractiveControlsTests : E2ETestBase
         {
             foreach (var taskId in taskIds)
             {
-                var status = await Page.EvaluateAsync<int>(
-                    """
-                    async ({ backendUrl, taskId }) => {
-                        const token = localStorage.getItem('aetheus_auth_token');
-                        const response = await fetch(`${backendUrl}/api/tasks/${taskId}/cancel`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                        return response.status;
-                    }
-                    """,
-                    new { backendUrl = BackendUrl, taskId });
-                Assert.That(status, Is.EqualTo(200), $"Service-log probe task {taskId} must be cancelled.");
+                await AssertTaskCancelledOrTerminalAsync(
+                    taskId,
+                    $"Service-log probe task {taskId} must be cancelled or already terminal.");
             }
         }
     }

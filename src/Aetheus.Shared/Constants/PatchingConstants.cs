@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 namespace Aetheus.Shared.Constants;
 
-/// <summary>Env-var contract for the <c>SystemPackageUpgrade</c> operation (PLAN-006 4.1).</summary>
+/// <summary>Env-var contract for the <c>SystemPackageUpgrade</c> operation (ADR-024 4.1).</summary>
 public static class PatchingConstants
 {
     /// <summary>When <c>"1"</c>, the agent runs a non-mutating dry-run (<c>apt-get -s upgrade</c>) and

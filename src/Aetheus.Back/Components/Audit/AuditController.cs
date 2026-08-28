@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Audit;
 
@@ -22,11 +18,14 @@ public class AuditController(IAuditService auditService, IAuditChainService chai
         [FromQuery] int? entityId = null,
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
+        [FromQuery, StringLength(50)] string? sortBy = null,
+        [FromQuery] bool sortDescending = true,
         CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         pageSize = PaginationDefaults.Clamp(pageSize);
-        return Ok(await auditService.GetLogsPagedAsync(page, pageSize, search, action, entityType, entityId, dateFrom, dateTo, ct));
+        return Ok(await auditService.GetLogsPagedAsync(page, pageSize, search, action, entityType, entityId, dateFrom, dateTo, ct,
+            sortBy, sortDescending));
     }
 
     [HttpGet("actions")]

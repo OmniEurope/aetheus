@@ -1,0 +1,13 @@
+# Toto Vulnerable
+
+Ce dépôt constitue le laboratoire négatif isolé des pipelines Aetheus.
+
+- La CI doit compiler et les tests doivent réussir.
+- La gate qualité doit refuser la couverture insuffisante, la duplication et la complexité volontaires.
+- La gate sécurité doit refuser les canaris synthétiques et les motifs de code dangereux détectés.
+- Aucun canari n'est un identifiant réel.
+- Ce projet ne possède ni environnement QA, ni candidate, ni release, ni pipeline de déploiement ou
+  de promotion.
+
+Un résultat vert de `toto-vulnerable-conformance` constitue une régression du banc de conformité :
+la campagne complète est conçue pour terminer en rouge aux deux gates attendues.

@@ -6,7 +6,9 @@ Collecte la télémétrie applicative, calcule l’état de santé et applique l
 
 ## Points d’entrée
 
-- API ou consommateur principal : `AppMonitoringController.cs et AppTelemetryController.cs`.
+- API ou consommateur principal : `AppMonitoringController.cs`, `AppTelemetryController.cs`,
+  `Ingest/IngestController.cs` et `PublicWebAnalyticsController.cs` (ingestion publique anonyme
+  `api/ingest/web-analytics/v1/public/{siteId}`).
 - Enregistrement DI : `AppMonitoringModuleExtensions.cs`.
 - Les interfaces `I*` définissent les contrats du module; les services portent la logique et les repositories l’accès persistant lorsqu’il existe.
 

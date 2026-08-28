@@ -10,8 +10,8 @@ public readonly record struct ParsedError(string ExceptionType, string Message, 
 
 /// <summary>
 /// Parses OTLP/HTTP JSON export payloads (proto3 JSON mapping) into flat series we actually store.
-/// PLAN-001 phases 2-4. Pure and testable; no EF, no HTTP. Handles the JSON encoding
-/// (<c>OTEL_EXPORTER_OTLP_PROTOCOL=http/json</c>); protobuf is rejected upstream with 415.
+/// ADR-021 phases 2-4. Pure and testable; no EF, no HTTP. The protobuf parser renders its generated
+/// messages through the same canonical proto3 JSON mapping so both wire encodings stay equivalent.
 /// </summary>
 public static class OtlpJsonParser
 {
@@ -132,7 +132,7 @@ public static class OtlpJsonParser
                 if (!sl.TryGetProperty("logRecords", out var records)) continue;
                 foreach (var lr in records.EnumerateArray())
                 {
-                    var severityNumber = lr.TryGetProperty("severityNumber", out var sn) ? (int)ReadLongLike(sn) : 0;
+                    var severityNumber = lr.TryGetProperty("severityNumber", out var sn) ? ReadSeverityNumber(sn) : 0;
                     var severityText = GetString(lr, "severityText");
                     var body = lr.TryGetProperty("body", out var b) ? ReadAnyValue(b) ?? string.Empty : string.Empty;
                     var ts = ReadUnixNano(lr, "timeUnixNano");
@@ -157,49 +157,37 @@ public static class OtlpJsonParser
             {
                 if (!ss.TryGetProperty("spans", out var spans)) continue;
                 foreach (var span in spans.EnumerateArray())
-                {
-                    var isError = span.TryGetProperty("status", out var status)
-                        && status.TryGetProperty("code", out var code)
-                        && ReadStatusCode(code) == 2; // STATUS_CODE_ERROR
-
-                    if (!span.TryGetProperty("events", out var events))
-                    {
-                        if (isError)
-                            result.Add(new ParsedError("SpanError", GetString(span, "name") ?? "error", null, ReadUnixNano(span, "endTimeUnixNano")));
-                        continue;
-                    }
-
-                    var hadException = false;
-                    foreach (var ev in events.EnumerateArray())
-                    {
-                        if (!string.Equals(GetString(ev, "name"), "exception", StringComparison.Ordinal)) continue;
-                        hadException = true;
-                        var attrs = ReadAttributeDict(ev);
-                        var type = attrs.GetValueOrDefault("exception.type", "Exception");
-                        var message = attrs.GetValueOrDefault("exception.message", string.Empty);
-                        var stack = attrs.GetValueOrDefault("exception.stacktrace");
-                        var topFrame = FirstStackFrame(stack);
-                        result.Add(new ParsedError(type, message, topFrame, ReadUnixNano(ev, "timeUnixNano")));
-                    }
-
-                    if (isError && !hadException)
-                        result.Add(new ParsedError("SpanError", GetString(span, "name") ?? "error", null, ReadUnixNano(span, "endTimeUnixNano")));
-                }
+                    AddSpanErrors(result, span);
             }
         }
         return result;
     }
 
-    private static string? FirstStackFrame(string? stack)
+    private static void AddSpanErrors(ICollection<ParsedError> result, JsonElement span)
     {
-        if (string.IsNullOrWhiteSpace(stack)) return null;
-        foreach (var raw in stack.Split('\n'))
+        var isError = span.TryGetProperty("status", out var status)
+                      && status.TryGetProperty("code", out var code)
+                      && ReadStatusCode(code) == 2;
+        if (!span.TryGetProperty("events", out var events))
         {
-            var line = raw.Trim();
-            if (line.Length > 0) return line.Length > 512 ? line[..512] : line;
+            if (isError) result.Add(CreateSpanError(span));
+            return;
         }
-        return null;
+        var hadException = false;
+        foreach (var exceptionEvent in events.EnumerateArray())
+        {
+            if (!string.Equals(GetString(exceptionEvent, "name"), "exception", StringComparison.Ordinal)) continue;
+            hadException = true;
+            var attributes = ReadAttributeDict(exceptionEvent);
+            var type = attributes.GetValueOrDefault("exception.type", "Exception");
+            result.Add(new ParsedError(
+                type, string.Empty, null, ReadUnixNano(exceptionEvent, "timeUnixNano")));
+        }
+        if (isError && !hadException) result.Add(CreateSpanError(span));
     }
+
+    private static ParsedError CreateSpanError(JsonElement span) =>
+        new("SpanError", GetString(span, "name") ?? "error", null, ReadUnixNano(span, "endTimeUnixNano"));
 
     private static string? GetString(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
@@ -218,6 +206,41 @@ public static class OtlpJsonParser
         JsonValueKind.String => code.GetString() == "STATUS_CODE_ERROR" ? 2 : (code.GetString() == "STATUS_CODE_OK" ? 1 : 0),
         _ => 0
     };
+
+    // Canonical proto3 JSON renders enum values symbolically (for example
+    // SEVERITY_NUMBER_ERROR), while hand-written OTLP/JSON clients may send the numeric value.
+    private static int ReadSeverityNumber(JsonElement severity) => severity.ValueKind switch
+    {
+        JsonValueKind.Number => (int)ReadLongLike(severity),
+        JsonValueKind.String => ReadSeverityNumber(severity.GetString()),
+        _ => 0
+    };
+
+    private static int ReadSeverityNumber(string? severity)
+    {
+        if (int.TryParse(severity, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
+            return numeric;
+
+        const string prefix = "SEVERITY_NUMBER_";
+        if (severity is null || !severity.StartsWith(prefix, StringComparison.Ordinal))
+            return 0;
+
+        var name = severity[prefix.Length..];
+        var baseValue = name switch
+        {
+            "UNSPECIFIED" => 0,
+            var value when value.StartsWith("TRACE", StringComparison.Ordinal) => 1,
+            var value when value.StartsWith("DEBUG", StringComparison.Ordinal) => 5,
+            var value when value.StartsWith("INFO", StringComparison.Ordinal) => 9,
+            var value when value.StartsWith("WARN", StringComparison.Ordinal) => 13,
+            var value when value.StartsWith("ERROR", StringComparison.Ordinal) => 17,
+            var value when value.StartsWith("FATAL", StringComparison.Ordinal) => 21,
+            _ => 0
+        };
+
+        var variant = name.Length > 0 && name[^1] is >= '2' and <= '4' ? name[^1] - '1' : 0;
+        return baseValue + variant;
+    }
 
     private static DateTime ReadUnixNano(JsonElement el, string prop)
     {

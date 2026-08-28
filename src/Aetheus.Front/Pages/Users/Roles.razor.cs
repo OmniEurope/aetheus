@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Users;
 
@@ -20,6 +11,7 @@ public partial class Roles : IAsyncDisposable
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
 
     private List<RoleDto> _roles = [];
     private RadzenDataGrid<RoleDto>? _grid;
@@ -31,6 +23,7 @@ public partial class Roles : IAsyncDisposable
     // Must start false so Radzen emits the initial LoadData callback. Starting with IsLoading=true
     // suppresses that callback in Radzen 11 and leaves the grid in a permanent loading state.
     private bool _loading;
+    private int _silentRefreshDepth;
     // RT4M: shared admin-hub subscription wrapper, owned and disposed by this page.
     private AdminEntitySubscription? _adminRt;
 
@@ -50,9 +43,14 @@ public partial class Roles : IAsyncDisposable
         _adminRt = new AdminEntitySubscription(HubFactory);
         await _adminRt.StartAsync(AdminEntities.Role, () => InvokeAsync(async () =>
         {
-            try { await LoadAsync(); } catch (HttpRequestException) { }
+            try { await RefreshSilentlyAsync(); } catch (HttpRequestException) { }
             StateHasChanged();
         }));
+
+        // Radzen does not consistently raise its first LoadData callback when this page is reached
+        // through client-side navigation. Load explicitly so the grid cannot stay at a false "0 total"
+        // until the user presses Refresh.
+        await LoadPageAsync();
     }
 
     private async Task LoadAsync()
@@ -76,17 +74,31 @@ public partial class Roles : IAsyncDisposable
 
     private async Task LoadPageAsync()
     {
-        _loading = true;
+        var showLoading = _silentRefreshDepth == 0;
+        if (showLoading) _loading = true;
         try
         {
-            var result = await Api.GetRoleDtosAsync(
+            var result = await Api.Auth.GetRoleDtosAsync(
                 _page, _pageSize, sortBy: _sortBy, sortDescending: _sortDescending);
             _roles = result.Items;
             _totalCount = result.TotalCount;
         }
         finally
         {
-            _loading = false;
+            if (showLoading) _loading = false;
+        }
+    }
+
+    private async Task RefreshSilentlyAsync()
+    {
+        _silentRefreshDepth++;
+        try
+        {
+            await LoadAsync();
+        }
+        finally
+        {
+            _silentRefreshDepth--;
         }
     }
 
@@ -107,7 +119,7 @@ public partial class Roles : IAsyncDisposable
     {
         var created = await Dialog.OpenAsync<RoleCreateDialog>(L["NewRole"],
             new Dictionary<string, object?>(),
-            new DialogOptions { Width = "520px", CloseDialogOnOverlayClick = false });
+            new DialogOptions { Width = "520px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
 
         // Land straight on the new role's page so the admin can set its permission matrix.
         if (created is RoleDto role)
@@ -123,17 +135,29 @@ public partial class Roles : IAsyncDisposable
 
         if (confirmed != true) return;
 
-        var success = await Api.DeleteRoleAsync(role.Id);
+        var success = await Api.Auth.DeleteRoleAsync(role.Id);
         if (success)
-            await LoadAsync();
+        {
+            await RefreshSilentlyAsync();
+            Toast.Success("Deleted", "Deleted");
+        }
+        else
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
     }
 
     private async Task OnClone(RoleDto role)
     {
-        var cloned = await Api.CloneRoleAsync(role.Id);
+        var cloned = await Api.Auth.CloneRoleAsync(role.Id);
         if (cloned is not null)
         {
+            Toast.Success("Created", "Saved");
             Nav.NavigateTo($"/admin/roles/{cloned.Id}");
+        }
+        else
+        {
+            Toast.Error("Error", "SaveFailed");
         }
     }
 

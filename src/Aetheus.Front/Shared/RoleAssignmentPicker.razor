@@ -1,0 +1,95 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<div class="role-assignment-picker">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
+        JustifyContent="JustifyContent.SpaceBetween" Gap="0.75rem" Wrap="FlexWrap.Wrap"
+        class="role-assignment-heading">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Roles"]</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                @L["RoleAssignmentHint"]
+            </RadzenText>
+        </div>
+        <RadzenBadge BadgeStyle="BadgeStyle.Light"
+            Text="@string.Format(L["SelectedRolesCount"], SelectedRoles.Count)" />
+    </RadzenStack>
+
+    @if (SelectedRoles.Count > 0)
+    {
+        <div class="role-assignment-selected" aria-label="@L["SelectedRoles"]">
+            @foreach (var role in SelectedRoles.Take(6))
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Primary" Text="@role" />
+            }
+            @if (SelectedRoles.Count > 6)
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@($"+{SelectedRoles.Count - 6}")" />
+            }
+        </div>
+    }
+
+    <div class="role-assignment-toolbar">
+        <RadzenIcon Icon="search" class="rz-color-secondary" />
+        <RadzenTextBox Value="@_search" @oninput="OnSearchInputAsync"
+            Placeholder="@L["SearchRoles"]" aria-label="@L["SearchRoles"]"
+            class="role-assignment-search" />
+        <LabeledToggle Kind="ToggleKind.Switch" Value="@_assignedOnly"
+            ValueChanged="@OnAssignedOnlyChanged" Text="@L["AssignedRolesOnly"]"
+            Class="role-assignment-filter" />
+        @if (!string.IsNullOrWhiteSpace(_search))
+        {
+            <RadzenButton Text="@L["ClearFilters"]" Icon="clear" Size="ButtonSize.Small"
+                Click="@ClearSearchAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+        }
+    </div>
+
+    <div class="role-assignment-grid">
+        <AetheusDataGrid @ref="_grid" TItem="RoleDto" Data="@_roles" Count="@_totalCount"
+            PageSize="25" IsLoading="@_loading" LoadData="@LoadDataAsync"
+            Density="Density.Compact" AllowSorting="true" AllowFiltering="true"
+            FilterMode="FilterMode.Advanced" EmptyText="@L["NoRecords"]">
+            <Columns>
+                <RadzenDataGridColumn TItem="RoleDto" Property="Name" Title="@L["Role"]" MinWidth="240px">
+                    <Template Context="role">
+                        <LabeledToggle Value="@IsSelected(role.Name)"
+                            ValueChanged="@(selected => OnRoleToggledAsync(role.Name, selected))"
+                            Text="@role.Name" Class="role-assignment-toggle" Disabled="@Disabled" />
+                        @if (!string.IsNullOrWhiteSpace(role.Description))
+                        {
+                            <RadzenText TextStyle="TextStyle.Caption"
+                                class="rz-color-secondary role-assignment-description">
+                                @role.Description
+                            </RadzenText>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="RoleDto" Property="PermissionCount"
+                    Title="@L["Permissions"]" Width="145px" Filterable="false">
+                    <Template Context="role">
+                        @if (_assignedOnly || InitialRoles.Count > 0)
+                        {
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">-</RadzenText>
+                        }
+                        else
+                        {
+                            <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@role.PermissionCount.ToString()" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="RoleDto" Property="UserCount"
+                    Title="@L["Users"]" Width="120px" Filterable="false">
+                    <Template Context="role">
+                        @if (_assignedOnly || InitialRoles.Count > 0)
+                        {
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">-</RadzenText>
+                        }
+                        else
+                        {
+                            @role.UserCount
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </AetheusDataGrid>
+    </div>
+</div>

@@ -142,6 +142,9 @@ public class VisualPipelineEditorTests : BunitContext
         Assert.Contains("aria-label=\"inherited-stage\"", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("Inherited: stage:inherited-stage", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("inherited-only", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains(
+            "vp-provenance-inherited",
+            cut.Find("[aria-label='inherited-stage']").ClassList);
     }
 
     [Fact]

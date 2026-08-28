@@ -7,19 +7,19 @@ internal static class PipelineYamlDiagnostics
 {
     private static readonly HashSet<string> KnownTopLevelKeys =
     [
-        "name", "trigger", "schedule", "source_branch", "branches", "on_success", "extends", "parameters",
+        "name", "trigger", "schedule", "source_branch", "branches", "supersede_running", "on_success", "extends", "parameters",
         "variables", "variable_libraries", "vaults", "stages"
     ];
 
     private static readonly HashSet<string> KnownStageKeys =
     [
-        "name", "agent", "os", "group", "environment", "pool", "condition",
+        "name", "agent", "os", "group", "environment", "pool", "execution_role", "condition",
         "depends_on", "variables", "steps", "jobs", "matrix", "strategy", "artifacts", "remove"
     ];
 
     private static readonly HashSet<string> KnownJobKeys =
     [
-        "name", "agent", "os", "pool", "environment", "condition",
+        "name", "agent", "os", "pool", "environment", "execution_role", "condition",
         "variables", "steps", "matrix", "strategy", "artifacts", "remove"
     ];
 
@@ -27,9 +27,12 @@ internal static class PipelineYamlDiagnostics
     [
         "name", "shell", "condition", "checkout", "working_directory", "timeout_seconds",
         "retry_count", "continue_on_error", "type", "version", "changelog", "target_files",
-        "pipeline", "variables", "artifact", "artifact_source_pipeline", "release", "target_directory", "allow_missing", "app",
+        "pipeline", "variables", "inherit_source", "source_branch", "source_commit", "artifact", "artifact_source_pipeline", "release", "target_directory", "allow_missing", "app",
         "compose", "health_timeout_seconds", "health_url", "backup_run", "min_coverage",
-        "max_complexity", "remove"
+        "coverage_tool", "coverage_language", "coverage_version", "max_complexity", "scanner", "analysis_scope",
+        "analysis_preset", "analysis_rules", "analysis_grading",
+        "target_url", "target_classification", "active", "api_specification_url", "api_specification_format",
+        "config_files", "remove"
     ];
 
     public static void AppendUnknownPropertyWarnings(string yaml, List<string> warnings, ILogger logger)

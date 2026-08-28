@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Reflection;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Shared.DTOs;
 
@@ -7,15 +6,13 @@ namespace Aetheus.Back.Tests.Pipelines;
 
 /// <summary>
 /// Guards B1: a trigger-only pipeline (every step <c>type: trigger</c>) needs no build workspace, so
-/// <c>PipelineRunService.RequiresWorkspace</c> must return false - which is what suppresses the injected
-/// System:Prepare / System:Cleanup stages. Any non-trigger step flips it back to true.
+/// <c>PipelineRunPreparationService.RequiresWorkspace</c> must return false - which is what suppresses
+/// the injected System:Prepare / System:Cleanup stages. Any non-trigger step flips it back to true.
 /// </summary>
 public class RequiresWorkspaceTests
 {
     private static bool Invoke(PipelineYamlDefinition definition) =>
-        (bool)typeof(PipelineRunService)
-            .GetMethod("RequiresWorkspace", BindingFlags.NonPublic | BindingFlags.Static)!
-            .Invoke(null, [definition])!;
+        PipelineRunPreparationService.RequiresWorkspace(definition);
 
     private static PipelineStepDefinition StepOfType(string? type) =>
         new() { Name = "s", Type = type };

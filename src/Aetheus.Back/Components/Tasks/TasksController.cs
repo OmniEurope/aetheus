@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Tasks;
 
@@ -97,26 +92,69 @@ public class TasksController(ITaskService taskService, IResourceAuthorizationSer
 
     [HttpPost("claim")]
     [Authorize(Policy = "AgentToken")]
-    public async Task<ActionResult<List<PendingTaskDto>>> ClaimPendingTasks([FromQuery] int serverId, [FromQuery] int? take, CancellationToken ct)
+    public async Task<ActionResult<List<PendingTaskDto>>> ClaimPendingTasks(
+        [FromQuery] int serverId,
+        [FromQuery] int? take,
+        [FromQuery] string? agentSessionId,
+        CancellationToken ct)
     {
         if (!IsAgentAuthorizedForServer(serverId))
             return Forbid();
+        if (agentSessionId is null
+            || agentSessionId.Length > 64
+            || !Guid.TryParseExact(agentSessionId, "N", out _))
+            return BadRequest("agentSessionId must be a 32-character GUID.");
 
         // take = the agent's free execution slots (absent on older agents = claim all).
-        return Ok(await taskService.GetPendingTasksAsync(serverId, take, ct));
+        return Ok(await taskService.GetPendingTasksAsync(serverId, take, agentSessionId, ct));
     }
 
-    [HttpPost("{id:int}/start")]
+    /// <summary>
+    /// The agent hands back work it claimed but cannot begin yet, so the task waits in Pending (which the
+    /// watchdog accepts while the runner is Online) instead of ageing out of Assigned in two minutes.
+    /// Requires a fenced lease: without proof of ownership, a caller could unqueue someone else's work.
+    /// </summary>
+    [HttpPost("{id:int}/release")]
     [Authorize(Policy = "AgentToken")]
-    public async Task<IActionResult> StartTask(int id, CancellationToken ct)
+    public async Task<IActionResult> ReleaseTask(
+        int id,
+        [FromBody] AgentTaskLeaseRequest lease,
+        CancellationToken ct)
     {
         var taskServerId = await taskService.GetTaskServerIdAsync(id, ct);
         if (taskServerId is null) return NotFound();
         if (!IsAgentAuthorizedForServer(taskServerId.Value))
             return Forbid();
+        if (!Guid.TryParseExact(lease.AgentSessionId, "N", out _) || lease.AgentSessionFencingToken <= 0)
+            return BadRequest();
 
-        var success = await taskService.StartTaskAsync(id, ct);
-        if (!success) return NotFound();
+        return await taskService.ReleaseAssignedTaskAsync(id, lease, ct)
+            ? Ok()
+            : Conflict();
+    }
+
+    [HttpPost("{id:int}/start")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<IActionResult> StartTask(
+        int id,
+        [FromBody] AgentTaskLeaseRequest lease,
+        CancellationToken ct)
+    {
+        var taskServerId = await taskService.GetTaskServerIdAsync(id, ct);
+        if (taskServerId is null) return NotFound();
+        if (!IsAgentAuthorizedForServer(taskServerId.Value))
+            return Forbid();
+        var hasFencedLease = Guid.TryParseExact(lease.AgentSessionId, "N", out _)
+            && lease.AgentSessionFencingToken > 0;
+        var legacyAllowed = !hasFencedLease
+            && await taskService.AllowsLegacyUnfencedTaskProtocolAsync(taskServerId.Value, ct);
+        if (!hasFencedLease && !legacyAllowed)
+            return BadRequest();
+
+        var success = hasFencedLease
+            ? await taskService.StartTaskAsync(id, lease, ct)
+            : await taskService.StartTaskAsync(id, ct);
+        if (!success) return Conflict();
         return Ok();
     }
 
@@ -128,10 +166,31 @@ public class TasksController(ITaskService taskService, IResourceAuthorizationSer
         if (taskServerId is null) return NotFound();
         if (!IsAgentAuthorizedForServer(taskServerId.Value))
             return Forbid();
+        var hasFencedLease = result.AgentSessionId is not null
+            && Guid.TryParseExact(result.AgentSessionId, "N", out _)
+            && result.AgentSessionFencingToken is > 0;
+        if (!hasFencedLease
+            && !await taskService.AllowsLegacyUnfencedTaskProtocolAsync(taskServerId.Value, ct))
+            return BadRequest();
 
         var success = await taskService.CompleteTaskAsync(id, result, ct);
-        if (!success) return NotFound();
+        if (!success) return Conflict();
         return Ok();
+    }
+
+    [HttpPost("{id:int}/deployment-build-refusal")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<IActionResult> ReportDeploymentBuildRefusal(
+        int id,
+        [FromBody] DeploymentBuildRefusalReport report,
+        CancellationToken ct)
+    {
+        var taskServerId = await taskService.GetTaskServerIdAsync(id, ct);
+        if (taskServerId is null) return NotFound();
+        if (!IsAgentAuthorizedForServer(taskServerId.Value)) return Forbid();
+
+        var success = await taskService.ReportDeploymentBuildRefusalAsync(id, report, ct);
+        return success ? Ok() : Conflict();
     }
 
     [HttpPost("{id:int}/cancel")]

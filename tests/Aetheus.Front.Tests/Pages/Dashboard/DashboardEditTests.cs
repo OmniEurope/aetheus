@@ -153,7 +153,7 @@ public class DashboardEditTests : BunitContext
     }
 
     [Fact]
-    public void OnDrop_NullDragIndex_DoesNothing()
+    public void OnDrop_NullDragIndex_LeavesTheOrderUnchanged()
     {
         var cut = RenderDashboard();
         typeof(DashboardEdit).GetField("_dragIndex", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, null);
@@ -172,7 +172,7 @@ public class DashboardEditTests : BunitContext
     }
 
     [Fact]
-    public void MoveUp_FirstWidget_DoesNothing()
+    public void MoveUp_FirstWidget_LeavesTheOrderUnchanged()
     {
         var cut = RenderDashboard();
         var widgets = typeof(DashboardEdit).GetField("_widgets", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
@@ -187,7 +187,7 @@ public class DashboardEditTests : BunitContext
     }
 
     [Fact]
-    public void MoveDown_LastWidget_DoesNothing()
+    public void MoveDown_LastWidget_LeavesTheOrderUnchanged()
     {
         var cut = RenderDashboard();
         var widgets = (System.Collections.IList)typeof(DashboardEdit).GetField("_widgets", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;

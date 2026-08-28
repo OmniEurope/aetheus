@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Cryptography;
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using OtpNet;
 
 namespace Aetheus.Back.Components.Auth;
@@ -86,7 +82,11 @@ public class TotpService(
         var base32Secret = encryption.DecryptValue(encryptedSecret);
         var secretBytes = Base32Encoding.ToBytes(base32Secret);
         var totp = new Totp(secretBytes, step: 30, totpSize: 6);
-        return totp.VerifyTotp(code, out _, new VerificationWindow(previous: 1, future: 1));
+        return totp.VerifyTotp(
+            timeProvider.GetUtcNow().UtcDateTime,
+            code,
+            out _,
+            new VerificationWindow(previous: 1, future: 1));
     }
 
     public async Task<bool> ConsumeRecoveryCodeAsync(int userId, string code, CancellationToken ct)

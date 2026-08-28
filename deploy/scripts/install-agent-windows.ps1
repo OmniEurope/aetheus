@@ -19,19 +19,89 @@ param(
     [string]$Token,
     [string]$Name,
     [string]$InstallDir = "C:\Program Files\AetheusAgent",
+    [string]$WorkDir = "C:\ProgramData\AetheusAgent",
     [string]$ServiceName = "AetheusAgent",
     # DEV ONLY: skip TLS certificate validation (backend API + pipeline git clones).
     # Auto-enabled when the server URL is localhost. Never use in production.
     [switch]$AllowInsecureCerts,
-    # Skip the pipeline-runner toolchain install (.NET SDK + git via winget/choco).
-    # The toolchain installs by default so the agent can build/clone pipelines.
+    # Skip the pipeline-runner host-tool install (Git via winget/choco).
+    # Application SDKs are provided by locked OCI images.
     [switch]$NoPipelineRunner,
+    # Suppress acknowledgement prompts for automated/local smoke installations.
+    [switch]$NonInteractive,
+    # Internal test hook: validate path safety before elevation or filesystem mutation.
+    [switch]$ValidatePathsOnly,
     # Internal (self-elevation): path of a transient file holding the registration
     # token, so the token never appears on the elevated process's command line.
     [string]$TokenFile
 )
 
 $ErrorActionPreference = "Stop"
+
+function Resolve-AgentDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$AllowProgramFiles
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [System.IO.Path]::IsPathRooted($Path)) {
+        throw "$Label must be an absolute path."
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $root = [System.IO.Path]::GetPathRoot($fullPath).TrimEnd('\', '/')
+    if ([string]::Equals($fullPath, $root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Label must not be a volume root."
+    }
+
+    $forbiddenRoots = @($env:WINDIR)
+    if (-not $AllowProgramFiles) {
+        $forbiddenRoots += @($env:ProgramFiles, ${env:ProgramFiles(x86)})
+    }
+    foreach ($forbidden in $forbiddenRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) {
+        $canonicalForbidden = [System.IO.Path]::GetFullPath($forbidden).TrimEnd('\', '/')
+        if ([string]::Equals($fullPath, $canonicalForbidden, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($canonicalForbidden + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "$Label must not be inside the protected directory '$canonicalForbidden'."
+        }
+    }
+
+    $cursor = $fullPath
+    while (-not (Test-Path -LiteralPath $cursor)) {
+        $parent = [System.IO.Path]::GetDirectoryName($cursor)
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { break }
+        $cursor = $parent
+    }
+    while (Test-Path -LiteralPath $cursor) {
+        $item = Get-Item -LiteralPath $cursor -Force
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Label must not traverse a symbolic link, junction or reparse point ('$cursor')."
+        }
+        $parent = [System.IO.Path]::GetDirectoryName($cursor)
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { break }
+        $cursor = $parent
+    }
+
+    return $fullPath
+}
+
+function Test-AgentPathContains {
+    param([string]$Parent, [string]$Child)
+    return [string]::Equals($Parent, $Child, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Child.StartsWith($Parent.TrimEnd('\', '/') + '\', [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+$InstallDir = Resolve-AgentDirectory -Path $InstallDir -Label "InstallDir" -AllowProgramFiles
+$WorkDir = Resolve-AgentDirectory -Path $WorkDir -Label "WorkDir"
+if ((Test-AgentPathContains -Parent $InstallDir -Child $WorkDir) -or
+    (Test-AgentPathContains -Parent $WorkDir -Child $InstallDir)) {
+    throw "InstallDir and WorkDir must not overlap."
+}
+if ($ValidatePathsOnly) {
+    Write-Output "PATHS_VALID"
+    exit 0
+}
 
 # --- Token handover from the unelevated instance (kept off the command line) ---
 if (-not $Token -and $TokenFile -and (Test-Path $TokenFile)) {
@@ -54,8 +124,12 @@ if (-not $isAdmin) {
         $argList += " -TokenFile `"$handoverFile`""
     }
     if ($Name)      { $argList += " -Name `"$Name`"" }
+    if ($InstallDir) { $argList += " -InstallDir `"$InstallDir`"" }
+    if ($WorkDir)    { $argList += " -WorkDir `"$WorkDir`"" }
+    if ($ServiceName) { $argList += " -ServiceName `"$ServiceName`"" }
     if ($AllowInsecureCerts) { $argList += " -AllowInsecureCerts" }
     if ($NoPipelineRunner)   { $argList += " -NoPipelineRunner" }
+    if ($NonInteractive)     { $argList += " -NonInteractive" }
     try {
         $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -Verb RunAs -Wait -PassThru
         # Start-Process does not populate $LASTEXITCODE: without -PassThru a
@@ -127,8 +201,6 @@ if (-not (Test-Path $exeSource)) {
     exit 1
 }
 
-$workDir = "C:\ProgramData\AetheusAgent"
-
 # --- Stop and remove existing service BEFORE copying files (exe is locked while running) ---
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
@@ -176,7 +248,7 @@ $aetheus.Add("MaxConcurrentTasks", 2)
 $aetheus.Add("WorkDirectory", $workDir)
 $aetheus.Add("LogRetentionDays", 30)
 $aetheus.Add("DockerStorageMaintenance", [ordered]@{
-    PolicyVersion = 2
+    PolicyVersion = 3
     Enabled = $true
     DryRun = $false
     DeploymentOnly = $false
@@ -184,8 +256,8 @@ $aetheus.Add("DockerStorageMaintenance", [ordered]@{
     MaintenanceIntervalMinutes = 60
     MaxCacheAgeHours = 168
     PressureCacheAgeHours = 24
-    ReservedSpaceGiB = 20
-    MaxCacheGiB = 80
+    ReservedSpaceGiB = 5
+    MaxCacheGiB = 15
     MinFreeSpaceGiB = 20
     PressureUsedPercent = 80
     NuGetCacheRetentionDays = 30
@@ -206,9 +278,9 @@ $config.Add("Logging", @{ LogLevel = @{ Default = "Information" } })
 Write-Info "Writing configuration to $configPath..."
 $config | ConvertTo-Json -Depth 6 | Set-Content -Path $configPath -Encoding UTF8
 
-# --- Pipeline-runner module: install the build/clone toolchain (.NET SDK + git) ---
+# --- Pipeline-runner module: install the host Git dependency ---
 # winget first (built into Windows 10/11), choco as fallback. Best-effort: a failure
-# is a warning, not fatal - pipelines that don't build .NET still run.
+# is a warning, not fatal.
 function Install-WithPackageManager {
     param([string]$Command, [string]$WingetId, [string]$ChocoId, [string]$Label)
     if (Get-Command $Command -ErrorAction SilentlyContinue) {
@@ -230,8 +302,7 @@ function Install-WithPackageManager {
 if (-not $NoPipelineRunner) {
     Write-Info "Pipeline-runner module: ensuring build/clone toolchain..."
     Install-WithPackageManager -Command "git"    -WingetId "Git.Git"               -ChocoId "git"        -Label "git"
-    Install-WithPackageManager -Command "dotnet" -WingetId "Microsoft.DotNet.SDK.10" -ChocoId "dotnet-sdk" -Label ".NET SDK"
-    # Refresh PATH so a freshly-installed dotnet/git is visible to this session.
+    # Refresh PATH so a freshly-installed Git is visible to this session.
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
@@ -251,7 +322,7 @@ try {
 }
 if ($probeRc -ne 0) {
     Write-Err "The agent runtime cannot reach $ServerUrl (probe exit $probeRc). Fix connectivity/TLS and re-run the installer."
-    Read-Host "Press Enter to exit"
+    if (-not $NonInteractive) { Read-Host "Press Enter to exit" }
     exit 1
 }
 
@@ -280,7 +351,7 @@ Start-Sleep -Seconds 3
 $svc = Get-Service -Name $ServiceName
 if ($svc.Status -ne 'Running') {
     Write-Err "Service failed to start. Check Windows Event Log."
-    Read-Host "Press Enter to exit"
+    if (-not $NonInteractive) { Read-Host "Press Enter to exit" }
     exit 1
 }
 
@@ -357,4 +428,4 @@ Write-Info "  Status : Get-Service $ServiceName"
 Write-Info "  Stop   : Stop-Service $ServiceName"
 Write-Info "  Logs   : $workDir\logs"
 Write-Info ""
-Read-Host "Press Enter to exit"
+if (-not $NonInteractive) { Read-Host "Press Enter to exit" }

@@ -23,7 +23,7 @@
 <UrlSyncedTabs Slugs="@(new[] { "manageable", "other", "system" })">
     <Tabs>
         <RadzenTabsItem Text="@($"{L["Manageable"]} ({ModuleCount})")" Icon="build">
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["InstalledServices"] (@ModuleInstalled.Count())</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["InstalledServices"] (@ModuleInstalled.Count())</RadzenText>
             @if (!ModuleInstalled.Any())
             {
                 <EmptyState Icon="build" Title="@L["NoServicesToDisplay"]" />
@@ -39,7 +39,7 @@
                     OnOpenModule="@OpenServiceModule" OnBulk="@BulkActionAsync" />
             }
 
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mt-6 rz-mb-2">@L["AvailableServices"] (@ModuleNotInstalled.Count())</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mt-6 rz-mb-2">@L["AvailableServices"] (@ModuleNotInstalled.Count())</RadzenText>
             @if (!ModuleNotInstalled.Any())
             {
                 <RadzenAlert AlertStyle="AlertStyle.Success" Variant="Variant.Flat" AllowClose="false">
@@ -55,7 +55,7 @@
         </RadzenTabsItem>
 
         <RadzenTabsItem Text="@($"{L["OtherServices"]} ({OtherCount})")" Icon="apps">
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["InstalledServices"] (@OtherInstalled.Count())</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["InstalledServices"] (@OtherInstalled.Count())</RadzenText>
             @if (!OtherInstalled.Any())
             {
                 <EmptyState Icon="build" Title="@L["NoServicesToDisplay"]" />
@@ -70,7 +70,7 @@
                     OnLogs="@ViewServiceLogsAsync" OnUninstall="@UninstallServiceAsync" OnBulk="@BulkActionAsync" />
             }
 
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mt-6 rz-mb-2">@L["AvailableServices"] (@OtherNotInstalled.Count())</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mt-6 rz-mb-2">@L["AvailableServices"] (@OtherNotInstalled.Count())</RadzenText>
             @if (!OtherNotInstalled.Any())
             {
                 <RadzenAlert AlertStyle="AlertStyle.Success" Variant="Variant.Flat" AllowClose="false">
@@ -92,10 +92,10 @@
             }
             else
             {
-                <RadzenDataGrid Data="@SystemServices" TItem="ServiceInfoDto" Density="Density.Compact"
+                <RadzenDataGrid Responsive="false" Data="@SystemServices" TItem="ServiceInfoDto" Density="Density.Compact"
                     AllowAlternatingRows="true"
                     AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                    AllowPaging="true" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center">
+                    AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25" PagerHorizontalAlign="HorizontalAlign.Center" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                     <Columns>
                         <RadzenDataGridColumn TItem="ServiceInfoDto" Property="Name" Title="@L["Service"]" />
                         <RadzenDataGridColumn TItem="ServiceInfoDto" Title="@L["Type"]" Width="120px">
@@ -133,7 +133,7 @@
         </RadzenStack>
         @if (_logsLoading && string.IsNullOrEmpty(_logsContent))
         {
-            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+            <AetheusLoader Size="AetheusLoaderSize.Small" />
         }
         else
         {
@@ -147,7 +147,7 @@
             @if (_logFollow)
             {
                 <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mt-2">
-                    <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.ExtraSmall" />
+                    <AetheusLoader Size="AetheusLoaderSize.ExtraSmall" Centered="false" />
                     <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-m-0">@L["FollowingLogs"]</RadzenText>
                 </RadzenStack>
             }

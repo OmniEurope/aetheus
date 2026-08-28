@@ -142,7 +142,7 @@ public class SettingsExtendedTests : BunitContext
     // ── VerifyTotp ────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task VerifyTotp_EmptyCode_DoesNothing()
+    public async Task VerifyTotp_EmptyCode_LeavesTheFlagOff()
     {
         StubDefaults();
         var cut = Render<SettingsPage>();
@@ -182,7 +182,7 @@ public class SettingsExtendedTests : BunitContext
     // ── DisableTotp ───────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task DisableTotp_EmptyPassword_DoesNothing()
+    public async Task DisableTotp_EmptyPassword_LeavesTheFlagOff()
     {
         StubDefaults();
         var cut = Render<SettingsPage>();

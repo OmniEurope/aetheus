@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -17,16 +16,20 @@ public interface IGitLightService
 
     Task<GitLightRepoDto?> GetRepositoryAsync(int id, CancellationToken ct = default);
     Task<GitLightRepoDto> CreateRepositoryAsync(CreateGitLightRepoRequest request, CancellationToken ct = default);
+    Task EnsureRepositoryInitializedAsync(int id, CancellationToken ct = default);
     Task<GitLightRepoDto?> UpdateRepositoryAsync(int id, UpdateGitLightRepoRequest request, CancellationToken ct = default);
     Task<bool> DeleteRepositoryAsync(int id, CancellationToken ct = default);
 
     // Commits
     Task<PaginatedResult<GitLightCommitDto>> GetCommitsAsync(int repoId, string? refName, int page, int pageSize, string? search = null, CancellationToken ct = default);
     Task<GitLightCommitDetailDto?> GetCommitDetailAsync(int repoId, string sha, CancellationToken ct = default);
+    Task<Dictionary<string, string>> GetCommitMessagesAsync(int repoId, IReadOnlyCollection<string> shas, CancellationToken ct = default);
 
     // Branches
     Task<List<GitLightBranchDto>> GetBranchesAsync(int repoId, CancellationToken ct = default);
     Task CreateBranchAsync(int repoId, CreateGitLightBranchRequest request, CancellationToken ct = default);
+    Task<(bool Success, string? CommitSha, string? Error)> ApplyPatchAsync(
+        int repoId, string branch, string patch, CancellationToken ct = default);
     Task DeleteBranchAsync(int repoId, string name, CancellationToken ct = default);
 
     // Tags

@@ -13,6 +13,7 @@ namespace Aetheus.Back.Components.PackageFeeds;
 public sealed class PackageFeedSyncGate
 {
     private readonly ConcurrentDictionary<int, SemaphoreSlim> _locks = new();
+    private readonly ConcurrentDictionary<int, DateTimeOffset> _deferredUntil = new();
 
     private SemaphoreSlim For(int feedId) => _locks.GetOrAdd(feedId, static _ => new SemaphoreSlim(1, 1));
 
@@ -25,4 +26,18 @@ public sealed class PackageFeedSyncGate
         if (_locks.TryGetValue(feedId, out var sem))
             sem.Release();
     }
+
+    public bool TryGetDeferral(int feedId, DateTimeOffset now, out DateTimeOffset deferredUntil)
+    {
+        if (_deferredUntil.TryGetValue(feedId, out deferredUntil) && deferredUntil > now)
+            return true;
+        _deferredUntil.TryRemove(feedId, out _);
+        return false;
+    }
+
+    public void DeferUntil(int feedId, DateTimeOffset deferredUntil) =>
+        _deferredUntil.AddOrUpdate(
+            feedId,
+            deferredUntil,
+            (_, current) => current > deferredUntil ? current : deferredUntil);
 }

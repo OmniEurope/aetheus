@@ -7,7 +7,7 @@
 # static config (apache vhost, certs, postfix, portsentry) is baked at image
 # build time. Real operations only: no faked success. LOCAL TEST ONLY.
 # =============================================================================
-set -u
+set -eu
 
 MARKER=/var/lib/vpssim-provisioned
 [ -e "$MARKER" ] && exit 0
@@ -30,6 +30,28 @@ log "Running an initial rkhunter scan to populate the log..."
 rkhunter --check --sk --nocolors --report-warnings-only \
     --skip-keypress >/dev/null 2>&1 || true
 log "  rkhunter scan done (log at /var/log/rkhunter.log)."
+
+# --- Demo TLS: keep the trust anchor equal to the certificate actually served.
+#     Dockerfile.vpssim generates the self-signed demo pair into /etc/letsencrypt, which is a NAMED
+#     VOLUME. A fresh volume receives the image copy, but an existing one masks it: after an image
+#     rebuild the box trusts the anchor baked in the new image while Apache still serves the older
+#     certificate from the volume, and the deployment probes fail with "The SSL connection could not
+#     be established" (nightly run 1220: anchor D5:C7..., served 7B:6F...). Anchoring the certificate
+#     that is really on disk removes the drift in both directions.
+#     This is not a TLS relaxation: the probes still require a valid chain, the simulated host simply
+#     provides the root for the certificate it serves, which a real Let's Encrypt host gets for free.
+DEMO_CERT=/etc/letsencrypt/live/demo.aetheus.sonytumen.com/fullchain.pem
+DEMO_ANCHOR=/usr/local/share/ca-certificates/aetheus-local-simulation-demo.crt
+if [ -f "$DEMO_CERT" ]; then
+    if ! cmp -s "$DEMO_CERT" "$DEMO_ANCHOR"; then
+        log "Re-anchoring the demo certificate actually present in /etc/letsencrypt..."
+        install -m 644 "$DEMO_CERT" "$DEMO_ANCHOR"
+        update-ca-certificates >/dev/null 2>&1 || log "  WARN: update-ca-certificates reported an error."
+    fi
+    log "  demo certificate and trust anchor are the same certificate."
+else
+    log "  WARN: no demo certificate at $DEMO_CERT; the deployment probes will refuse the chain."
+fi
 
 touch "$MARKER"
 log "First-boot provisioning complete."

@@ -2,12 +2,6 @@
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -84,17 +78,8 @@ public sealed class DeployOperationExecutor(
         envVars.TryGetValue("AETHEUS_DEPLOY_HEALTH_TIMEOUT", out var healthTimeoutStr);
         _ = int.TryParse(healthTimeoutStr, out var healthTimeoutSeconds);
         envVars.TryGetValue("AETHEUS_DEPLOY_HEALTH_URL", out var healthUrlValue);
-        string? healthUrl = null;
-        if (!string.IsNullOrWhiteSpace(healthUrlValue))
-        {
-            if (!DeployHealthUrlValidator.TryNormalize(healthUrlValue, out var normalizedHealthUrl))
-            {
-                await onOutput("Invalid AETHEUS_DEPLOY_HEALTH_URL: only absolute loopback HTTP(S) URLs are allowed", TaskLogLevel.Error)
-                    .ConfigureAwait(false);
-                return new ExecutorResult(-1, false);
-            }
-            healthUrl = normalizedHealthUrl;
-        }
+        var (healthUrlValid, healthUrl) = await ResolveHealthUrlAsync(healthUrlValue, onOutput).ConfigureAwait(false);
+        if (!healthUrlValid) return new ExecutorResult(-1, false);
 
         if (!int.TryParse(artifactIdStr, out var artifactId) || !int.TryParse(runIdStr, out var runId))
         {
@@ -103,7 +88,7 @@ public sealed class DeployOperationExecutor(
         }
 
         var isContainer = string.Equals(deployKind, "container", StringComparison.OrdinalIgnoreCase);
-        if (isContainer && !DeployLayout.IsSafeRelativePath(composeRel))
+        if (!IsValidComposePath(isContainer, composeRel))
         {
             await onOutput($"Invalid or unsafe compose path '{composeRel}'", TaskLogLevel.Error).ConfigureAwait(false);
             return new ExecutorResult(-1, false);
@@ -148,7 +133,7 @@ public sealed class DeployOperationExecutor(
             }
             DeployReleaseFileSystem.HardenTree(releaseDir);
 
-            // PLAN-001 phase 2: backend-computed app env (OTEL vars) carried under AETHEUS_DEPLOY_APPENV_*.
+            // ADR-021 phase 2: backend-computed app env (OTEL vars) carried under AETHEUS_DEPLOY_APPENV_*.
             var appEnv = ExtractAppEnv(envVars);
 
             return isContainer
@@ -167,7 +152,22 @@ public sealed class DeployOperationExecutor(
         }
     }
 
-    // ── App env injection (PLAN-001 phase 2 zero-config OTLP) ────────────────────────────────────
+    private static async Task<(bool IsValid, string? Url)> ResolveHealthUrlAsync(
+        string? value,
+        Func<string, TaskLogLevel, Task> onOutput)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return (true, null);
+        if (DeployHealthUrlValidator.TryNormalize(value, out var normalized)) return (true, normalized);
+        await onOutput(
+            "Invalid AETHEUS_DEPLOY_HEALTH_URL: only absolute loopback HTTP(S) URLs are allowed",
+            TaskLogLevel.Error).ConfigureAwait(false);
+        return (false, null);
+    }
+
+    private static bool IsValidComposePath(bool isContainer, string? composePath) =>
+        !isContainer || DeployLayout.IsSafeRelativePath(composePath);
+
+    // ── App env injection (ADR-021 phase 2 zero-config OTLP) ────────────────────────────────────
     private const string AppEnvPrefix = "AETHEUS_DEPLOY_APPENV_";
 
     internal static Dictionary<string, string> ExtractAppEnv(IReadOnlyDictionary<string, string> envVars)
@@ -414,7 +414,7 @@ public sealed class DeployOperationExecutor(
             }
         }
 
-        // PLAN-001 phase 2: pass the backend-computed OTEL env to the stack via --env-file (compose
+        // ADR-021 phase 2: pass the backend-computed OTEL env to the stack via --env-file (compose
         // substitutes ${VAR} and exposes them to services referencing env_file/environment).
         var envFile = WriteAppEnvFile(releaseDir, appEnv);
         var upArgs = new List<string> { "compose", "-p", project, "-f", composePath };

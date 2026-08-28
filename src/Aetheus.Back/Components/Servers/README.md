@@ -8,6 +8,7 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/api/servers` | GET | User | List servers (paginated, filterable by type/status) |
+| `/api/servers/agent-compatibility-summary` | GET | User | Compatibility totals for the caller-visible fleet |
 | `/api/servers/names` | GET | User | Server name list |
 | `/api/servers/{id}` | GET | User | Server detail |
 | `/api/servers/{id}` | PUT | User | Update server |
@@ -19,6 +20,7 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 | `/api/servers/{id}/diagnostic` | GET | User | Offline diagnostic summary |
 | `/api/servers/{id}/agent/update` | POST | Admin | Queue agent self-update |
 | `/api/servers/{id}/agent/progress` | POST | AgentToken | Report update progress |
+| `/api/servers/agent/update-all-preview` | GET | Admin | Preview fleet-wide agent updates |
 | `/api/servers/agent/update-all` | POST | Admin | Queue update for all servers |
 | `/api/servers/{id}/projects` | GET | User | Projects on server |
 | `/api/servers/{id}/pipelines` | GET | User | Pipelines targeting server |
@@ -49,7 +51,9 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 - `IServerAgentContactService` -- agent reachability probe
 - `IServerDiagnosticService` -- offline diagnostics
 - `IServerRepository` / `ServerRepository` -- EF data access
-- `ServerTimeoutService` -- background: marks servers offline on heartbeat timeout
+- `ServerHeartbeatProcessor` / `ServerHeartbeatCapabilityProjector` -- heartbeat ingestion and capability projection
+- `ServerDiagnosticAnalyzer`, `ServerAgentContactProbe`, `ServerServiceManager` -- diagnostics, reachability, service control collaborators
+- `ServerTimeoutService` (in `Services/`, outside this module) -- background: marks servers offline on heartbeat timeout
 
 ## Cross-Module Dependencies
 

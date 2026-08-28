@@ -38,7 +38,7 @@ public class OrganizationEditMethodTests : BunitContext
             new OrganizationDto(5, "New Org", "new-org", "", 0, 0, DateTime.UtcNow, DateTime.UtcNow));
 
         var modelField = typeof(OrganizationEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var model = (CreateOrganizationRequest)modelField.GetValue(cut.Instance)!;
+        var model = (OrganizationFormModel)modelField.GetValue(cut.Instance)!;
         model.Name = "New Org";
         model.Slug = "new-org";
 

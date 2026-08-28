@@ -41,7 +41,7 @@
             </ChildContent>
         </RadzenSplitButton>
         <RadzenButton Icon="description" Text="@L["ViewLogs"]" Size="ButtonSize.Small"
-            Click="@GetLogsAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@GetLogsAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
     }
 </RadzenStack>
 
@@ -69,7 +69,7 @@
                             <RadzenDataGridColumn TItem="PortsentryBlockedIpDto" Title="" Width="80px" TextAlign="TextAlign.End">
                                 <Template Context="b">
                                     <RadzenButton Icon="lock_open" Size="ButtonSize.ExtraSmall"
-                                        Click="@(() => UnblockIpAsync(b.IpAddress))" title="@L["Unblock"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                        Click="@(() => UnblockIpAsync(b.IpAddress))" title="@L["Unblock"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                                 </Template>
                             </RadzenDataGridColumn>
                     </Columns>

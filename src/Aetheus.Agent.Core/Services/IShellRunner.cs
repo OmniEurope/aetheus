@@ -2,7 +2,11 @@
 namespace Aetheus.Agent.Core.Services;
 
 /// <summary>Result of an argv (shell-free) process execution.</summary>
-public sealed record ShellExecResult(int ExitCode, string StdOut, string StdErr);
+public sealed record ShellExecResult(
+    int ExitCode,
+    string StdOut,
+    string StdErr,
+    bool Truncated = false);
 
 /// <summary>
 /// Cross-platform shell execution abstraction. Picks <c>cmd.exe</c> on Windows and <c>/bin/bash</c>
@@ -38,4 +42,19 @@ public interface IShellRunner
     /// other command output, etc.) and whenever the exit code matters.
     /// </summary>
     Task<ShellExecResult> RunExecAsync(string fileName, IReadOnlyList<string> args, CancellationToken ct, TimeSpan? timeout = null);
+
+    /// <summary>
+    /// Runs an executable in an explicit directory with an explicit environment. When
+    /// <paramref name="inheritEnvironment"/> is false, only a small runtime allow-list plus the
+    /// supplied variables is exposed to the child process.
+    /// </summary>
+    Task<ShellExecResult> RunExecAsync(
+        string fileName,
+        IReadOnlyList<string> args,
+        IReadOnlyDictionary<string, string> environmentVariables,
+        string workingDirectory,
+        bool inheritEnvironment,
+        int maxCapturedOutputBytes,
+        CancellationToken ct,
+        TimeSpan? timeout = null);
 }

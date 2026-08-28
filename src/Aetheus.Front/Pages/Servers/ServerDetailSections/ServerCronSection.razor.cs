@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Cronos;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -65,7 +59,7 @@ public partial class ServerCronSection
                 { "Schedule", string.Empty },
                 { "Command", string.Empty }
             },
-            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
 
         if (result is CronJobSaveRequest request)
             await SaveJobAsync(request);
@@ -82,7 +76,7 @@ public partial class ServerCronSection
                 { "Schedule", job.Schedule },
                 { "Command", job.Command }
             },
-            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
 
         if (result is CronJobSaveRequest request)
             await SaveJobAsync(request);
@@ -97,7 +91,7 @@ public partial class ServerCronSection
         }
 
         _actionRunning = true;
-        var success = await Api.SaveCronJobAsync(ServerId, request);
+        var success = await Api.ServerTools.SaveCronJobAsync(ServerId, request);
         if (success)
             Toast.Success(L["TaskQueued"]);
         else
@@ -108,7 +102,7 @@ public partial class ServerCronSection
     private async Task DeleteJobAsync(CronJobDto job)
     {
         _actionRunning = true;
-        var success = await Api.DeleteCronJobAsync(ServerId, new CronJobDeleteRequest { Id = job.Id, User = job.User });
+        var success = await Api.ServerTools.DeleteCronJobAsync(ServerId, new CronJobDeleteRequest { Id = job.Id, User = job.User });
         if (success)
             Toast.Success(L["TaskQueued"]);
         else

@@ -20,7 +20,8 @@ public class VariableSubstitutionTests : IDisposable
         var apiClient = Substitute.For<IServerApiClient>();
         _executor = new PipelineArtifactOperationExecutor(
             apiClient,
-            NullLogger<PipelineArtifactOperationExecutor>.Instance);
+            NullLogger<PipelineArtifactOperationExecutor>.Instance,
+            TimeProvider.System);
     }
 
     [Fact]

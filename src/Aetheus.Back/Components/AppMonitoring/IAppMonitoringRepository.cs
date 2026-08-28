@@ -3,11 +3,29 @@ using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
+public readonly record struct IngestKeyResolution(int AppId, DateTime? ValidUntilUtc);
+public readonly record struct AppUptimeWindowCounts(
+    int Up24h,
+    int Total24h,
+    int Up7d,
+    int Total7d,
+    int Up90d,
+    int Total90d);
+
 public interface IAppMonitoringRepository
 {
     Task<List<MonitoredApp>> GetAppsByProjectAsync(int projectId, CancellationToken ct = default);
     Task<MonitoredApp?> GetAppAsync(int id, CancellationToken ct = default);
     Task<MonitoredApp?> GetAppForUpdateAsync(int id, CancellationToken ct = default);
+    Task<MonitoredApp?> GetAppByAnalyticsSiteIdAsync(string siteId, CancellationToken ct = default);
+    Task<List<MonitoredApp>> GetAnalyticsKeyRotationCandidatesAsync(
+        DateTime createdBeforeUtc,
+        int maxCount,
+        CancellationToken ct = default);
+    Task<List<MonitoredApp>> GetAnalyticsConfiguredAppsPageAsync(
+        int afterId,
+        int maxCount,
+        CancellationToken ct = default);
     Task<int?> GetAppProjectIdAsync(int id, CancellationToken ct = default);
 
     /// <summary>Maps each project id to its OrganizationId (for per-org SignalR broadcast).</summary>
@@ -26,6 +44,11 @@ public interface IAppMonitoringRepository
 
     /// <summary>Status histogram across a set of accessible projects (null = all) for the dashboard tile.</summary>
     Task<List<MonitoredApp>> GetAppsForSummaryAsync(List<int>? accessibleProjectIds, CancellationToken ct = default);
+    /// <summary>Distinct active web sessions per monitored application after the supplied cutoff.</summary>
+    Task<Dictionary<int, int>> GetActiveVisitorCountsAsync(
+        IReadOnlyCollection<int> appIds,
+        DateTime activeAfterUtc,
+        CancellationToken ct = default);
     Task<long> GetTelemetryStorageBytesAsync(CancellationToken ct = default);
 
     Task AddAppAsync(MonitoredApp app, CancellationToken ct = default);
@@ -39,11 +62,24 @@ public interface IAppMonitoringRepository
     /// <summary>Aggregated uptime (up, total) from hourly rollups since a cutoff.</summary>
     Task<(int Up, int Total)> GetHourlyUptimeAsync(int appId, DateTime since, CancellationToken ct = default);
 
+    /// <summary>
+    /// Returns uptime windows for all requested apps in two grouped queries: raw 24h plus hourly
+    /// rollups for 7d/90d, with the unaggregated current-hour raw tail added to both rollup windows.
+    /// Missing ids have no samples and are omitted.
+    /// </summary>
+    Task<Dictionary<int, AppUptimeWindowCounts>> GetUptimeWindowsAsync(
+        IReadOnlyCollection<int> appIds,
+        DateTime nowUtc,
+        CancellationToken ct = default);
+
     Task SaveChangesAsync(CancellationToken ct = default);
 
     // --- OTLP ingestion (phase 2+) ---
     /// <summary>Resolves an ingest key hash to its enabled app id (null if unknown/disabled).</summary>
-    Task<int?> GetAppIdByIngestKeyHashAsync(string ingestKeyHash, CancellationToken ct = default);
+    Task<IngestKeyResolution?> ResolveIngestKeyHashAsync(
+        string ingestKeyHash,
+        DateTime nowUtc,
+        CancellationToken ct = default);
     /// <summary>Records a successful ingest touch and increments the dropped counter (surfaced in UI).</summary>
     Task TouchIngestAsync(int appId, long droppedDelta, DateTime now, CancellationToken ct = default);
 

@@ -9,16 +9,16 @@
         </RadzenStack>
     </RadzenAlert>
 }
-<RadzenDataGrid @ref="_grid" Data="@_versions" Count="@_totalCount" TItem="VariableEntryVersionDto"
+<RadzenDataGrid Responsive="false" @ref="_grid" Data="@_versions" Count="@_totalCount" TItem="VariableEntryVersionDto"
     IsLoading="@_loading" LoadData="@LoadDataAsync" AllowPaging="true" PageSize="25"
-    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+    Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true">
     <Columns>
         <RadzenDataGridColumn Property="Version" Title="#" Width="60px" />
         <RadzenDataGridColumn Property="Key" Title="@L["Key"]" />
         <RadzenDataGridColumn Property="Value" Title="@L["Value"]" />
         <RadzenDataGridColumn Property="ChangeType" Title="@L["Type"]" Width="100px">
             <Template Context="v">
-                <RadzenBadge BadgeStyle="@GetBadge(v.ChangeType)" Text="@L.Localize(v.ChangeType)" />
+                <RadzenBadge BadgeStyle="@ChangeTypeHelper.GetBadgeStyle(v.ChangeType)" Text="@L.Localize(v.ChangeType)" />
             </Template>
         </RadzenDataGridColumn>
         <RadzenDataGridColumn Property="ChangedAt" Title="@L["Date"]" FormatString="{0:g}" Width="160px" />

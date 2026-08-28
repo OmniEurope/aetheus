@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: EUPL-1.2
+namespace Aetheus.Front.Services;
+
+internal sealed class DebouncedAsyncAction(
+    Func<Task> action, ILogger logger, string logContext, TimeSpan? delay = null) : IAsyncDisposable
+{
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _sync = new();
+    private CancellationTokenSource? _pendingCancellation;
+    private Task? _pendingTask;
+    private bool _disposed;
+
+    internal CancellationToken LifetimeToken => _lifetime.Token;
+
+    internal Task ScheduleAsync()
+    {
+        lock (_sync)
+        {
+            if (_disposed) return Task.CompletedTask;
+            _pendingCancellation?.Cancel();
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            _pendingCancellation = cancellation;
+            _pendingTask = RunAsync(cancellation);
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task RunAsync(CancellationTokenSource cancellation)
+    {
+        var entered = false;
+        try
+        {
+            await Task.Delay(delay ?? TimeSpan.FromMilliseconds(250), cancellation.Token);
+            await _gate.WaitAsync(cancellation.Token);
+            entered = true;
+            if (!_disposed) await action();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex) { logger.LogWarning(ex, "{Context} Live reload failed", logContext); }
+        finally
+        {
+            if (entered) _gate.Release();
+            lock (_sync)
+            {
+                if (ReferenceEquals(_pendingCancellation, cancellation))
+                {
+                    _pendingCancellation = null;
+                    _pendingTask = null;
+                }
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Task? pending;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _lifetime.Cancel();
+            _pendingCancellation?.Cancel();
+            pending = _pendingTask;
+        }
+        if (pending is not null) await pending;
+        await _gate.WaitAsync();
+        _gate.Release();
+        _lifetime.Dispose();
+        _gate.Dispose();
+    }
+}

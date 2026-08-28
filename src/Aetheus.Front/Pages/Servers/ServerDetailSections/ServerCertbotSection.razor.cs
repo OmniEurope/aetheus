@@ -1,32 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
-public partial class ServerCertbotSection
+public partial class ServerCertbotSection : ServerActionSectionBase
 {
     [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private NotifyHelper Toast { get; set; } = default!;
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
 
     [Parameter, EditorRequired] public ServerDetailDto Server { get; set; } = default!;
     [Parameter, EditorRequired] public int ServerId { get; set; }
 
-    private bool _actionRunning;
     private string _certSearch = string.Empty;
-
-    // Confirmation dialog
-    private bool _confirmVisible;
-    private string _confirmTitle = string.Empty;
-    private string _confirmMessage = string.Empty;
-    private Func<Task>? _confirmAction;
 
     private CertbotDataDto Certbot => Server.Certbot;
 
@@ -44,27 +27,12 @@ public partial class ServerCertbotSection
 
     private async Task ExecuteActionAsync(CertbotAction action, string? certName = null)
     {
-        _actionRunning = true;
-        try
-        {
-            var success = await Api.ExecuteCertbotActionAsync(ServerId, new CertbotActionRequest
+        await ExecuteServerActionAsync(() => Api.ServerTools.ExecuteCertbotActionAsync(
+            ServerId, new CertbotActionRequest
             {
                 Action = action,
                 CertificateName = certName
-            });
-            if (success)
-                Toast.Success(L["TaskQueued"]);
-            else
-                Toast.Error(L["ActionFailed"]);
-        }
-        catch
-        {
-            Toast.Error(L["ActionFailed"]);
-        }
-        finally
-        {
-            _actionRunning = false;
-        }
+            }));
     }
 
     private async Task OpenCreateDialog()
@@ -72,27 +40,7 @@ public partial class ServerCertbotSection
         await Dialog.OpenAsync<ServerCertbotCreateDialog>(
             L["NewCertificate"],
             new Dictionary<string, object?> { { "ServerId", ServerId } },
-            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
     }
 
-    private void ShowConfirm(string title, string message, Func<Task> action)
-    {
-        _confirmTitle = title;
-        _confirmMessage = message;
-        _confirmAction = action;
-        _confirmVisible = true;
-    }
-
-    private async Task ConfirmAccepted()
-    {
-        _confirmVisible = false;
-        if (_confirmAction is not null)
-            await _confirmAction();
-    }
-
-    private void ConfirmCancelled()
-    {
-        _confirmVisible = false;
-        _confirmAction = null;
-    }
 }

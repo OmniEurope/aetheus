@@ -4,8 +4,10 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Logs;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Tasks;
+using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
@@ -16,7 +18,10 @@ namespace Aetheus.Back.Tests;
 public class TaskServiceTests
 {
     private readonly ITaskRepository _repo = Substitute.For<ITaskRepository>();
-    private readonly IPipelineRunService _pipelineRunService = Substitute.For<IPipelineRunService>();
+    // The orchestration port is gone: Tasks announces a settled step and Pipelines reacts, so the
+    // spy that used to stand in for the run service is now the dispatcher.
+    private readonly Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher _domainEvents =
+        Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>();
     private readonly ILogService _logService = Substitute.For<ILogService>();
     private readonly IHubContext<PipelineHub> _pipelineHub = Substitute.For<IHubContext<PipelineHub>>();
     private readonly IHubContext<ServerHub> _serverHub = Substitute.For<IHubContext<ServerHub>>();
@@ -41,8 +46,20 @@ public class TaskServiceTests
         // here we keep stored == plaintext so existing assertions on EnvironmentVariables hold.
         _encryption.EncryptValue(Arg.Any<string>()).Returns(ci => ci.Arg<string>());
         _encryption.DecryptValue(Arg.Any<string>()).Returns(ci => ci.Arg<string>());
-        _sut = new TaskService(_repo, _pipelineRunService, _logService, _pipelineHub, _serverHub, _auditMock, TimeProvider.System, _encryption, _artifactService,
-            Substitute.For<Microsoft.Extensions.Logging.ILogger<TaskService>>());
+        _repo.TryStartTaskAsync(
+                Arg.Any<ServerTask>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var task = call.ArgAt<ServerTask>(0);
+                task.Status = TaskExecutionStatus.Running;
+                task.StartedAt = call.ArgAt<DateTime>(1);
+                return true;
+            });
+        var taskQueueNotifier = new TaskQueueNotifier(
+            _serverHub,
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<TaskQueueNotifier>>());
+        _sut = new TaskService(_repo, _logService, _pipelineHub, _serverHub, _auditMock, TimeProvider.System, _encryption, _artifactService, taskQueueNotifier,
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<TaskService>>(), _domainEvents);
     }
 
     // --- GetTasksAsync ---
@@ -54,7 +71,7 @@ public class TaskServiceTests
         {
             new() { Id = 1, ServerId = 1, Name = "deploy", Command = "ls", Executor = ExecutorType.Shell, Status = TaskExecutionStatus.Success, Server = new Server { Name = "srv1" } }
         };
-        _repo.GetTasksPagedAsync(null, 1, 10, null, null, null, Arg.Any<CancellationToken>())
+        _repo.GetTasksPagedAsync(null, 1, 10, null, null, null, Arg.Any<CancellationToken>(), null, false)
             .Returns((tasks, 1));
 
         var result = await _sut.GetTasksAsync(new TaskPaginationRequest { Page = 1, PageSize = 10 }, accessibleServerIds: null, ct: TestContext.Current.CancellationToken);
@@ -67,23 +84,23 @@ public class TaskServiceTests
     [Fact]
     public async Task GetTasksAsync_WithStatusFilter_PassesStatusToRepository()
     {
-        _repo.GetTasksPagedAsync(null, 1, 25, TaskExecutionStatus.Success, null, null, Arg.Any<CancellationToken>())
+        _repo.GetTasksPagedAsync(null, 1, 25, TaskExecutionStatus.Success, null, null, Arg.Any<CancellationToken>(), null, false)
             .Returns((new List<ServerTask>(), 0));
 
         await _sut.GetTasksAsync(new TaskPaginationRequest { Status = TaskExecutionStatus.Success }, accessibleServerIds: null, ct: TestContext.Current.CancellationToken);
 
-        await _repo.Received(1).GetTasksPagedAsync(null, 1, 25, TaskExecutionStatus.Success, null, null, Arg.Any<CancellationToken>());
+        await _repo.Received(1).GetTasksPagedAsync(null, 1, 25, TaskExecutionStatus.Success, null, null, Arg.Any<CancellationToken>(), null, false);
     }
 
     [Fact]
     public async Task GetTasksAsync_WithServerId_PassesServerIdToRepository()
     {
-        _repo.GetTasksPagedAsync(null, 1, 25, null, null, 15, Arg.Any<CancellationToken>())
+        _repo.GetTasksPagedAsync(null, 1, 25, null, null, 15, Arg.Any<CancellationToken>(), null, false)
             .Returns((new List<ServerTask>(), 0));
 
         await _sut.GetTasksAsync(new TaskPaginationRequest { ServerId = 15 }, accessibleServerIds: null, ct: TestContext.Current.CancellationToken);
 
-        await _repo.Received(1).GetTasksPagedAsync(null, 1, 25, null, null, 15, Arg.Any<CancellationToken>());
+        await _repo.Received(1).GetTasksPagedAsync(null, 1, 25, null, null, 15, Arg.Any<CancellationToken>(), null, false);
     }
 
     // --- GetTaskAsync ---
@@ -157,13 +174,56 @@ public class TaskServiceTests
             new() { Id = 1, ServerId = 1, Name = "t1", Command = "c", Executor = ExecutorType.Shell, Status = TaskExecutionStatus.Pending },
             new() { Id = 2, ServerId = 1, Name = "t2", Command = "c", Executor = ExecutorType.Shell, Status = TaskExecutionStatus.Pending }
         };
-        _repo.ClaimPendingTasksAsync(1, Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(tasks);
+        _repo.ClaimPendingTasksAsync(
+            1,
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()).Returns(tasks);
         _repo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var result = await _sut.GetPendingTasksAsync(1, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, result.Count);
-        await _repo.Received(1).ClaimPendingTasksAsync(1, Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await _repo.Received(1).ClaimPendingTasksAsync(
+            1,
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetPendingTasksAsync_SystemCleanupCarriesWorkspacePurgeContract()
+    {
+        var cleanupStep = new PipelineStepRun
+        {
+            IsSystem = true,
+            StageName = PipelineRunService.SystemCleanupStage,
+            StepName = "Cleanup"
+        };
+        _repo.ClaimPendingTasksAsync(
+                1,
+                Arg.Any<int?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns([
+                new ServerTask
+                {
+                    Id = 17,
+                    ServerId = 1,
+                    PipelineRunId = 91,
+                    Name = "Cleanup",
+                    Command = "cleanup",
+                    PipelineStepRun = cleanupStep
+                }
+            ]);
+
+        var result = await _sut.GetPendingTasksAsync(
+            1,
+            agentSessionId: "session",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Single(result);
+        Assert.True(result[0].PurgeWorkspace);
     }
 
     // --- StartTaskAsync ---
@@ -193,6 +253,33 @@ public class TaskServiceTests
 
         Assert.True(result);
         Assert.Equal(TaskExecutionStatus.Running, task.Status);
+    }
+
+    [Fact]
+    public async Task StartTaskAsync_StaleFencingToken_DoesNotTransition()
+    {
+        var task = new ServerTask { Id = 1, ServerId = 1, Status = TaskExecutionStatus.Assigned };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+        _repo.TryStartTaskWithLeaseAsync(
+                task,
+                Arg.Any<string>(),
+                Arg.Any<long>(),
+                Arg.Any<DateTime>(),
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var result = await _sut.StartTaskAsync(
+            1,
+            new AgentTaskLeaseRequest
+            {
+                AgentSessionId = "11111111111111111111111111111111",
+                AgentSessionFencingToken = 1
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+        Assert.Equal(TaskExecutionStatus.Assigned, task.Status);
+        await _repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -246,6 +333,132 @@ public class TaskServiceTests
         Assert.Equal(TaskExecutionStatus.Success, task.Status);
         Assert.Equal(0, task.ExitCode);
         Assert.NotNull(task.CompletedAt);
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_SelfUpdateHandoff_RemainsRunningUntilHeartbeatConfirmation()
+    {
+        var task = new ServerTask
+        {
+            Id = 1,
+            ServerId = 2,
+            Operation = OperationKind.AgentSelfUpdate,
+            Status = TaskExecutionStatus.Running,
+            EnvironmentVariables = "{\"AETHEUS_UPDATE_DOWNLOAD_URL\":\"sensitive\"}"
+        };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+
+        var completed = await _sut.CompleteTaskAsync(
+            task.Id,
+            new TaskResultDto
+            {
+                Status = TaskExecutionStatus.Success,
+                ExitCode = 0
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(completed);
+        Assert.Equal(TaskExecutionStatus.Running, task.Status);
+        Assert.Null(task.CompletedAt);
+        Assert.Equal(TaskEnvProtection.EmptyEnv, task.EnvironmentVariables);
+        Assert.Contains(task.Logs, log =>
+            log.Message.Contains("awaiting confirmation", StringComparison.Ordinal));
+        await _repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReportDeploymentBuildRefusalAsync_PersistsClassifiedIncidentAndFailsTask()
+    {
+        var task = new ServerTask
+        {
+            Id = 17,
+            ServerId = 4,
+            Name = "build-on-deploy",
+            Status = TaskExecutionStatus.Running
+        };
+        _repo.FindTaskAsync(17, Arg.Any<CancellationToken>()).Returns(task);
+
+        var result = await _sut.ReportDeploymentBuildRefusalAsync(
+            17,
+            new DeploymentBuildRefusalReport
+            {
+                IncidentId = Guid.NewGuid(),
+                TaskId = 17,
+                OccurredAtUtc = DateTime.UtcNow,
+                Reason = "deployment-only agent refused a build stage"
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        Assert.Equal(TaskExecutionStatus.Failed, task.Status);
+        var incident = Assert.Single(task.Logs);
+        Assert.Equal(TaskLogLevel.Error, incident.Level);
+        Assert.Contains("[incident:BuildOnDeploymentTarget]", incident.Message, StringComparison.Ordinal);
+        await _repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReportDeploymentBuildRefusalAsync_ReplayOfFailedTaskIsIdempotent()
+    {
+        var task = new ServerTask
+        {
+            Id = 18,
+            ServerId = 4,
+            Name = "build-on-deploy",
+            Status = TaskExecutionStatus.Failed
+        };
+        _repo.FindTaskAsync(18, Arg.Any<CancellationToken>()).Returns(task);
+        var report = new DeploymentBuildRefusalReport
+        {
+            IncidentId = Guid.NewGuid(),
+            TaskId = 18,
+            OccurredAtUtc = DateTime.UtcNow,
+            Reason = "deployment-only agent refused a build stage"
+        };
+
+        Assert.True(await _sut.ReportDeploymentBuildRefusalAsync(
+            18, report, TestContext.Current.CancellationToken));
+        Assert.True(await _sut.ReportDeploymentBuildRefusalAsync(
+            18, report, TestContext.Current.CancellationToken));
+        await _repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_StaleFencingToken_DoesNotTransition()
+    {
+        var task = new ServerTask
+        {
+            Id = 1,
+            ServerId = 1,
+            Name = "t",
+            Status = TaskExecutionStatus.Running
+        };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+        _repo.TryCompleteTaskWithLeaseAsync(
+                task,
+                Arg.Any<string>(),
+                Arg.Any<long>(),
+                Arg.Any<TaskExecutionStatus>(),
+                Arg.Any<int>(),
+                Arg.Any<DateTime>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var result = await _sut.CompleteTaskAsync(
+            1,
+            new TaskResultDto
+            {
+                Status = TaskExecutionStatus.Success,
+                ExitCode = 0,
+                AgentSessionId = "11111111111111111111111111111111",
+                AgentSessionFencingToken = 1
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+        Assert.Equal(TaskExecutionStatus.Running, task.Status);
+        await _repo.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -320,8 +533,9 @@ public class TaskServiceTests
         Assert.Equal(TaskEnvProtection.EmptyEnv, task.EnvironmentVariables);
         await _repo.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
         await _repo.Received(1).SaveChangesAsync(CancellationToken.None);
-        await _pipelineRunService.Received(1).AdvanceStageAsync(12, "Deploy", Arg.Any<CancellationToken>());
-        await _pipelineRunService.Received(1).AdvanceStageAsync(12, "Deploy", CancellationToken.None);
+        await _domainEvents.Received(1).DispatchStrictAsync(
+            Arg.Is<PipelineStepTaskCompletedEvent>(e => e.PipelineRunId == 12 && e.StageName == "Deploy"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -344,6 +558,48 @@ public class TaskServiceTests
 
         await _artifactService.DidNotReceive().MarkDeployedAsync(
             Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("Run unit tests", "Build", TaskFailureCodes.TestsFailed)]
+    [InlineData("Compile application", "Test", TaskFailureCodes.BuildFailed)]
+    [InlineData("Invoke scanner", "Quality", TaskFailureCodes.ToolError)]
+    [InlineData("Contest deployment", "Quality", TaskFailureCodes.ToolError)]
+    [InlineData("Repackageable artifact", "Quality", TaskFailureCodes.ToolError)]
+    public async Task CompleteTaskAsync_PipelineFailure_ClassifiesVisibleFailure(
+        string taskName,
+        string groupName,
+        string expectedCode)
+    {
+        var task = new ServerTask
+        {
+            Id = 1,
+            ServerId = 1,
+            Name = taskName,
+            Status = TaskExecutionStatus.Running,
+            PipelineRunId = 12,
+            PipelineStepRunId = 13
+        };
+        var step = new PipelineStepRun
+        {
+            Id = 13,
+            PipelineRunId = 12,
+            StageName = groupName,
+            StepName = taskName,
+            GroupName = groupName
+        };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+        _repo.FindPipelineStepRunAsync(13, Arg.Any<CancellationToken>()).Returns(step);
+        _logService.GetTaskOutputVariableLinesAsync(1, Arg.Any<CancellationToken>()).Returns([]);
+
+        var completed = await _sut.CompleteTaskAsync(
+            1,
+            new TaskResultDto { Status = TaskExecutionStatus.Failed, ExitCode = 1 },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.True(completed);
+        Assert.Equal(expectedCode, task.FailureCode);
+        Assert.Contains(task.Logs, log => log.Message.Contains($"[incident:{expectedCode}]", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -427,8 +683,6 @@ public class TaskServiceTests
         _repo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         _logService.GetTaskOutputVariableLinesAsync(1, Arg.Any<CancellationToken>()).Returns(new List<string>());
 
-        _pipelineRunService.AdvanceStageAsync(10, "build", Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
 
         await _sut.CompleteTaskAsync(1, new TaskResultDto
         {
@@ -438,7 +692,9 @@ public class TaskServiceTests
 
         Assert.Equal(TaskExecutionStatus.Success, stepRun.Status);
         Assert.NotNull(stepRun.CompletedAt);
-        await _pipelineRunService.Received(1).AdvanceStageAsync(10, "build", Arg.Any<CancellationToken>());
+        await _domainEvents.Received(1).DispatchStrictAsync(
+            Arg.Is<PipelineStepTaskCompletedEvent>(e => e.PipelineRunId == 10 && e.StageName == "build"),
+            Arg.Any<CancellationToken>());
     }
 
     // --- CancelTaskAsync ---
@@ -490,7 +746,8 @@ public class TaskServiceTests
         var result = await _sut.CancelTaskAsync(1, ct: TestContext.Current.CancellationToken);
 
         Assert.False(result);
-        await _pipelineRunService.DidNotReceive().AdvanceStageAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _domainEvents.DidNotReceive().DispatchStrictAsync(
+            Arg.Any<PipelineStepTaskCompletedEvent>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -508,6 +765,7 @@ public class TaskServiceTests
 
         Assert.True(result); // the task itself was cancelled
         Assert.Equal(TaskExecutionStatus.Success, stepRun.Status); // step untouched (already terminal)
-        await _pipelineRunService.DidNotReceive().AdvanceStageAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _domainEvents.DidNotReceive().DispatchStrictAsync(
+            Arg.Any<PipelineStepTaskCompletedEvent>(), Arg.Any<CancellationToken>());
     }
 }

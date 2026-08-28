@@ -162,6 +162,71 @@ public sealed class GitLightCliServiceRepoTests : IDisposable
     }
 
     [Fact]
+    public async Task GetRootCommitPatchAsync_ReturnsInitialFileWithoutAssumingObjectFormat()
+    {
+        var patch = await _sut.GetRootCommitPatchAsync(
+            _dir,
+            _firstSha,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(patch.IsTruncated);
+        Assert.Contains("README.md", patch.Patch, StringComparison.Ordinal);
+        Assert.Contains("+# Hello", patch.Patch, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetCommitPatchAsync_LargeCommitRetainsOnlyBoundedOutput()
+    {
+        File.WriteAllText(
+            Path.Combine(_dir, "large.txt"),
+            new string('x', GitLightCliService.MaximumCommitPatchChars + 64 * 1024));
+        Git("add", ".");
+        Git("commit", "-m", "feat: add large patch");
+        var largeSha = Git("rev-parse", "HEAD").Trim();
+
+        var patch = await _sut.GetCommitPatchAsync(
+            _dir,
+            _secondSha,
+            largeSha,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(patch.IsTruncated);
+        Assert.Equal(GitLightCliService.MaximumCommitPatchChars, patch.Patch.Length);
+    }
+
+    [Fact]
+    public async Task RealRepository_ExposesMergeParentsBranchesAndMergeDiff()
+    {
+        Git("checkout", "-b", "feature/real-diff");
+        File.WriteAllText(Path.Combine(_dir, "feature.txt"), "feature content\n");
+        Git("add", ".");
+        Git("commit", "-m", "feat: feature branch");
+        Git("checkout", "main");
+        File.WriteAllText(Path.Combine(_dir, "main.txt"), "main content\n");
+        Git("add", ".");
+        Git("commit", "-m", "feat: main branch");
+        Git("merge", "--no-ff", "feature/real-diff", "-m", "merge: feature");
+        var mergeSha = Git("rev-parse", "HEAD").Trim();
+
+        var branches = await _sut.GetBranchesAsync(
+            _dir, "main", TestContext.Current.CancellationToken);
+        var commits = await _sut.GetCommitsAsync(
+            _dir, mergeSha, 0, 1, ct: TestContext.Current.CancellationToken);
+        var merge = Assert.Single(commits);
+        var patch = await _sut.GetCommitPatchAsync(
+            _dir,
+            merge.ParentShas[0],
+            merge.Sha,
+            TestContext.Current.CancellationToken);
+        var diff = GitUnifiedDiffParser.Parse(patch.Patch);
+
+        Assert.Contains(branches, branch => branch.Name == "main" && branch.IsDefault);
+        Assert.Contains(branches, branch => branch.Name == "feature/real-diff");
+        Assert.Equal(2, merge.ParentShas.Count);
+        Assert.Contains(diff.FileDiffs, file => file.Path == "feature.txt");
+    }
+
+    [Fact]
     public async Task CreateAndDeleteBranch_RoundTrips()
     {
         await _sut.CreateBranchAsync(_dir, "feature/x", "main", ct: TestContext.Current.CancellationToken);

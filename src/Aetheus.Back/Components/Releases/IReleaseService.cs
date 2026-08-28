@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Releases;
 
@@ -10,6 +8,14 @@ public interface IReleaseService
     Task<ReleaseDto?> GetReleaseAsync(int id, CancellationToken ct = default);
     Task<ReleaseRollbackPreviewDto> GetRollbackPreviewAsync(int id, CancellationToken ct = default);
     Task<List<ReleaseDto>> GetReleasesByRunAsync(int pipelineRunId, CancellationToken ct = default);
+
+    /// <summary>Releases of every project a server is involved in, enriched with their source
+    /// pipeline like every other release view.</summary>
+    Task<List<ReleaseDto>> GetServerReleasesAsync(int serverId, CancellationToken ct = default);
+
+    /// <summary>One page of a server's releases. Preferred over the unpaged overload for any UI.</summary>
+    Task<PaginatedResult<ReleaseDto>> GetServerReleasesAsync(
+        int serverId, PaginationRequest request, CancellationToken ct = default);
     Task<List<ReleaseDto>> SyncReleasesAsync(int projectId, CancellationToken ct = default);
     Task<ReleaseDto> TriggerReleaseBuildAsync(int releaseId, TriggerReleaseBuildRequest request, CancellationToken ct = default);
     Task<ReleaseRollbackDto> RollbackReleaseAsync(int releaseId, RollbackReleaseRequest request, CancellationToken ct = default);

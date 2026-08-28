@@ -114,6 +114,18 @@ public class DockerRelationsGraphTests : BunitContext
     }
 
     [Fact]
+    public void KindToggle_ThroughRenderedControl_UpdatesGraphFilter()
+    {
+        var cut = Render<DockerRelationsGraph>(p => p.Add(x => x.Docker, MakeDockerData()));
+
+        cut.FindAll(".labeled-toggle-native-input")[2].Change(false);
+
+        Assert.False(cut.Instance.KindFilter["network"]);
+        var json = cut.Instance.BuildData();
+        Assert.DoesNotContain("\"group\":\"network\"", json);
+    }
+
+    [Fact]
     public void BuildData_ImageTagNone_UsesRepositoryOnly()
     {
         var docker = new DockerDataDto
@@ -206,7 +218,7 @@ public class DockerRelationsGraphTests : BunitContext
     }
 
     [Fact]
-    public async Task OnGraphNodeClicked_Empty_DoesNothing()
+    public async Task OnGraphNodeClicked_Empty_LeavesItNull()
     {
         var cut = Render<DockerRelationsGraph>(p => p.Add(x => x.Docker, MakeDockerData()));
 
@@ -274,7 +286,7 @@ public class DockerRelationsGraphTests : BunitContext
     }
 
     [Fact]
-    public async Task RebuildAndLoad_WhenNotInitialized_DoesNothing()
+    public async Task RebuildAndLoad_WhenNotInitialized_LeavesItOut()
     {
         var cut = Render<DockerRelationsGraph>(p => p.Add(x => x.Docker, MakeDockerData()));
 
@@ -290,7 +302,7 @@ public class DockerRelationsGraphTests : BunitContext
     }
 
     [Fact]
-    public async Task ResetViewAsync_WhenNotInitialized_DoesNothing()
+    public async Task ResetViewAsync_WhenNotInitialized_LeavesItOut()
     {
         var cut = Render<DockerRelationsGraph>(p => p.Add(x => x.Docker, MakeDockerData()));
 

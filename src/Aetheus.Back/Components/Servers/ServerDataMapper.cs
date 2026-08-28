@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Servers;
@@ -63,6 +60,9 @@ internal static class ServerDataMapper
             Hostname = s.Hostname,
             OsDescription = s.OsDescription,
             AgentVersion = s.AgentVersion,
+            AgentProtocolVersion = s.AgentProtocolVersion,
+            AgentCapabilities = DeserializeDiagnostics(s.AgentCapabilitiesJson),
+            AgentUpdateReserved = s.AgentUpdateReserved,
             Status = s.Status,
             Type = s.Type,
             LastHeartbeat = s.LastHeartbeat,
@@ -81,6 +81,8 @@ internal static class ServerDataMapper
             RequireContainerIsolation = s.RequireContainerIsolation,
             InsecureTls = s.InsecureTls,
             CapabilityDiagnostics = DeserializeDiagnostics(s.CapabilityDiagnosticsJson)
+            ,
+            ScannerCapabilities = DeserializeDiagnostics(s.ScannerCapabilitiesJson)
         };
     }
 
@@ -133,36 +135,12 @@ internal static class ServerDataMapper
         return result;
     }
 
-    public static ServerTaskDto MapTaskDto(ServerTask t) => new()
-    {
-        Id = t.Id,
-        ServerId = t.ServerId,
-        Name = t.Name,
-        Command = t.Command,
-        Executor = t.Executor,
-        Status = t.Status,
-        CreatedAt = t.CreatedAt,
-        StartedAt = t.StartedAt,
-        CompletedAt = t.CompletedAt,
-        ExitCode = t.ExitCode,
-        TimeoutSeconds = t.TimeoutSeconds
-    };
+    public static ServerTaskDto MapTaskDto(ServerTask task) =>
+        TaskDtoMapper.ToServerDetailDto(task);
 
     public static DockerDataDto MapDockerDataDto(Server server) => new()
     {
-        Containers = server.DockerContainers.Select(c => new DockerContainerDto
-        {
-            ContainerId = c.ContainerId,
-            Name = c.Name,
-            Image = c.Image,
-            State = c.State,
-            Status = c.Status,
-            Ports = c.Ports,
-            Created = c.Created,
-            CpuPercent = c.CpuPercent,
-            MemoryUsageMb = c.MemoryUsageMb,
-            MemoryLimitMb = c.MemoryLimitMb
-        }).ToList(),
+        Containers = MapDockerContainers(server.DockerContainers),
         Images = server.DockerImages.Select(i => new DockerImageDto
         {
             ImageId = i.ImageId,
@@ -193,6 +171,22 @@ internal static class ServerDataMapper
             Mountpoint = v.Mountpoint
         }).ToList()
     };
+
+    public static List<DockerContainerDto> MapDockerContainers(
+        IEnumerable<DockerContainer> containers) =>
+        containers.Select(container => new DockerContainerDto
+        {
+            ContainerId = container.ContainerId,
+            Name = container.Name,
+            Image = container.Image,
+            State = container.State,
+            Status = container.Status,
+            Ports = container.Ports,
+            Created = container.Created,
+            CpuPercent = container.CpuPercent,
+            MemoryUsageMb = container.MemoryUsageMb,
+            MemoryLimitMb = container.MemoryLimitMb
+        }).ToList();
 
     public static ApacheDataDto MapApacheDataDto(Server server) => new()
     {

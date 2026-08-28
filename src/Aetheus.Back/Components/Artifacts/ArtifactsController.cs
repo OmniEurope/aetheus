@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Artifacts;
 
@@ -27,30 +22,22 @@ public class ArtifactsController(
     [HttpGet("{id:int}")]
     public async Task<ActionResult<PipelineArtifactDto>> GetArtifact(int id, CancellationToken ct)
     {
-        var artifact = await artifactService.GetArtifactAsync(id, ct);
-        if (artifact is null) return NotFound();
+        var (artifact, failure) = await GetAuthorizedArtifactAsync(id, Permission.Read, ct);
+        if (failure is not null) return failure;
 
-        if (artifact.ProjectId.HasValue &&
-            !await authz.HasPermissionAsync(User, ResourceType.Project, artifact.ProjectId.Value, Permission.Read, ct))
-            return Forbid();
-
-        return Ok(artifact);
+        return Ok(artifact!);
     }
 
     [HttpGet("{id:int}/download")]
     public async Task<IActionResult> DownloadArtifact(int id, CancellationToken ct)
     {
-        var artifact = await artifactService.GetArtifactAsync(id, ct);
-        if (artifact is null) return NotFound();
-
-        if (artifact.ProjectId.HasValue &&
-            !await authz.HasPermissionAsync(User, ResourceType.Project, artifact.ProjectId.Value, Permission.Read, ct))
-            return Forbid();
+        var (artifact, failure) = await GetAuthorizedArtifactAsync(id, Permission.Read, ct);
+        if (failure is not null) return failure;
 
         var stream = await artifactService.DownloadArtifactAsync(id, ct);
         if (stream is null) return NotFound();
 
-        return File(stream, "application/zip", $"{artifact.Name}.zip");
+        return File(stream, "application/zip", $"{artifact!.Name}.zip");
     }
 
     // Cross-agent deploy download. AgentToken-authorised, IDOR-safe: the service checks the agent is
@@ -111,17 +98,26 @@ public class ArtifactsController(
     public async Task<ActionResult<PipelineArtifactDto>> PromoteArtifact(
         int id, [FromBody] PromoteArtifactRequest request, CancellationToken ct)
     {
-        var artifact = await artifactService.GetArtifactAsync(id, ct);
-        if (artifact is null) return NotFound();
-
-        if (artifact.ProjectId.HasValue &&
-            !await authz.HasPermissionAsync(User, ResourceType.Project, artifact.ProjectId.Value, Permission.Write, ct))
-            return Forbid();
+        var (_, failure) = await GetAuthorizedArtifactAsync(id, Permission.Write, ct);
+        if (failure is not null) return failure;
 
         if (string.IsNullOrWhiteSpace(request.EnvironmentName))
             return BadRequest("EnvironmentName is required");
 
         var result = await artifactService.PromoteToEnvironmentAsync(id, request.EnvironmentName, ct);
         return Ok(result!);
+    }
+
+    private async Task<(PipelineArtifactDto? Artifact, ActionResult? Failure)> GetAuthorizedArtifactAsync(
+        int artifactId,
+        Permission permission,
+        CancellationToken ct)
+    {
+        var artifact = await artifactService.GetArtifactAsync(artifactId, ct);
+        if (artifact is null) return (null, NotFound());
+        if (artifact.ProjectId is { } projectId
+            && !await authz.HasPermissionAsync(User, ResourceType.Project, projectId, permission, ct))
+            return (null, Forbid());
+        return (artifact, null);
     }
 }

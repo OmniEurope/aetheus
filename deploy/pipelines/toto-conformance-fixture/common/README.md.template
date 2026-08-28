@@ -1,0 +1,15 @@
+# Toto
+
+Ce dépôt constitue le banc sain de conformité des pipelines Aetheus.
+
+- `conformance/v1` et le tag `toto-v1` identifient la baseline V-1.
+- `main`, `develop` et le tag `toto-v2` identifient la version V.
+- Les pipelines couvrent CI légère et complète, qualité, sécurité, QA éphémère, injection de paquets,
+  candidate, promotion, rollback binaire V-1 sur schéma V et teardown sans ressource résiduelle.
+- Le vault `toto-package-registry` reste vide après le seeding. L'opérateur fournit
+  `AETHEUS_PACKAGE_TOKEN` uniquement pour les scénarios d'injection ; la base URL HTTPS provient de la
+  bibliothèque de variables lorsqu'elle est configurée.
+- Aucun run, rapport, artefact, release ou succès n'est fabriqué par le seed.
+
+Ce projet est distinct de `Toto Vulnerable`, le laboratoire négatif attendu rouge, et de `Toto Demo`,
+réservé aux données d'interface.

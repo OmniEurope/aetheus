@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Mail;

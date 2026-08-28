@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 
 /// <summary>
-/// PLAN-006 4.2: reports ufw state + rules at heartbeat. Unlike apt patching, <c>ufw status</c> needs
+/// ADR-024 4.2: reports ufw state + rules at heartbeat. Unlike apt patching, <c>ufw status</c> needs
 /// root, so the read goes through the same root-owned <c>aetheus-firewall</c> helper - meaning full
 /// visibility (Active + rules) requires the firewall-manage grant. No-fake decoupling: the ufw binary is
 /// detected unprivileged (<c>Installed</c>), but Active/rules are only populated when the helper read

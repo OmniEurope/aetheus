@@ -2,7 +2,9 @@
 using System.Reflection;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
+using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -130,5 +132,25 @@ public class PipelineSchedulerServiceTests
 
         await runService.DidNotReceive().TriggerAutomatedRunAsync(
             Arg.Any<int>(), Arg.Any<string>(), Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckScheduledPipelines_ConfigurationRefusal_DoesNotAbortFollowingPipeline()
+    {
+        var pipelineRepo = Substitute.For<IPipelineRepository>();
+        var rejected = new Pipeline { Id = 8, Name = "rejected", YamlDefinition = "schedule: '0 0 * * * *'\nstages:\n  - name: build" };
+        var valid = new Pipeline { Id = 9, Name = "valid", YamlDefinition = "schedule: '0 0 * * * *'\nstages:\n  - name: build" };
+        pipelineRepo.GetScheduledPipelinesAsync(Arg.Any<CancellationToken>()).Returns([rejected, valid]);
+        pipelineRepo.GetPipelineIdsWithActiveRunsAsync(Arg.Any<CancellationToken>()).Returns([]);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 6, 16, 14, 0, 0, TimeSpan.Zero));
+        var (sut, runService) = BuildSut(pipelineRepo, clock);
+        runService.TriggerAutomatedRunAsync(8, "Scheduler", Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<PipelineRunDto?>(
+                new BadRequestException("invalid matrix")));
+
+        await sut.CheckScheduledPipelinesAsync(TestContext.Current.CancellationToken);
+
+        await runService.Received(1).TriggerAutomatedRunAsync(
+            9, "Scheduler", Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>());
     }
 }

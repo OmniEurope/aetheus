@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Radzen;
 
 namespace Aetheus.Front.Helpers;
 
@@ -14,6 +11,16 @@ internal static class PipelineHelper
         PipelineStatus.Running => BadgeStyle.Info,
         PipelineStatus.Cancelled => BadgeStyle.Warning,
         _ => BadgeStyle.Light
+    };
+
+    /// <summary>Colour for an analysis gate letter: A and B read as healthy, C as a warning, D and
+    /// below as a problem. Same scale the gate overview uses, so the compact badge in a run table and
+    /// the detailed view never tell two different stories.</summary>
+    internal static BadgeStyle GetGradeBadge(AnalysisGrade grade) => grade switch
+    {
+        AnalysisGrade.A or AnalysisGrade.B => BadgeStyle.Success,
+        AnalysisGrade.C => BadgeStyle.Warning,
+        _ => BadgeStyle.Danger
     };
 
     /// <summary>M: the step a non-terminal run is currently on, as "Stage · Step" (the running step,

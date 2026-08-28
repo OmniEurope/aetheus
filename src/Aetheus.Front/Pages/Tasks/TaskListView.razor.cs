@@ -1,15 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Tasks;
 
@@ -25,20 +14,20 @@ public partial class TaskListView : IAsyncDisposable
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private ListCacheService Cache { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
 
     /// <summary>When set, scope the list to a single server (per-server tasks view).</summary>
     [Parameter] public int? ServerId { get; set; }
+    [Parameter] public string? ServerName { get; set; }
 
     private AetheusDataGrid<ServerTaskDto>? _grid;
     private List<ServerTaskDto> _tasks = [];
     private int _totalCount;
     private bool _loading;
+    private bool _loadFailed;
     private string? _search;
     private TaskExecutionStatus? _statusFilter;
-    private List<TaskLogDto>? _selectedTaskLogs;
-    internal int _selectedTaskId;
     private HubConnection? _hubConnection;
     private bool _hasLoadedServerId;
     private int? _loadedServerId;
@@ -72,8 +61,6 @@ public partial class TaskListView : IAsyncDisposable
         if (_loadedServerId == ServerId) return;
 
         _loadedServerId = ServerId;
-        _selectedTaskId = 0;
-        _selectedTaskLogs = null;
         _tasks = [];
         _totalCount = 0;
         Cache.Seed<PaginatedResult<ServerTaskDto>>(CacheKey(1, 25, _search, _statusFilter), ApplyTasks);
@@ -84,8 +71,11 @@ public partial class TaskListView : IAsyncDisposable
         }
     }
 
-    private string CacheKey(int page, int pageSize, string? search, TaskExecutionStatus? status) =>
-        $"tasks:{ServerId}:{page}:{pageSize}:{search}:{status}";
+    // The sort is part of the key: two orders sharing one entry means the second is served the first
+    // one's rows, which is indistinguishable from a sort that does nothing.
+    private string CacheKey(int page, int pageSize, string? search, TaskExecutionStatus? status,
+        string? sortBy = null, bool sortDescending = true) =>
+        $"tasks:{ServerId}:{page}:{pageSize}:{search}:{status}:{sortBy}:{sortDescending}";
 
     private void ApplyTasks(PaginatedResult<ServerTaskDto> result)
     {
@@ -101,9 +91,9 @@ public partial class TaskListView : IAsyncDisposable
             // Task lifecycle events ride the servers hub (AllServers group). Any of them refreshes
             // the grid so a new/started/finished task surfaces without a manual reload.
             _hubConnection = HubFactory.Create("servers");
-            _hubConnection.On<object>("TaskQueued", _ => InvokeAsync(ReloadGridAsync));
-            _hubConnection.On<object>("TaskStarted", _ => InvokeAsync(ReloadGridAsync));
-            _hubConnection.On<object>("TaskCompleted", _ => InvokeAsync(ReloadGridAsync));
+            _hubConnection.On<object>("TaskQueued", _ => InvokeAsync(InvalidateAndReloadGridAsync));
+            _hubConnection.On<object>("TaskStarted", _ => InvokeAsync(InvalidateAndReloadGridAsync));
+            _hubConnection.On<object>("TaskCompleted", _ => InvokeAsync(InvalidateAndReloadGridAsync));
             // Group membership is per-connection and lost on auto-reconnect - re-join + reload.
             _hubConnection.RejoinOnReconnect(() => InvokeAsync(async () =>
             {
@@ -121,16 +111,25 @@ public partial class TaskListView : IAsyncDisposable
         if (_grid is not null) await _grid.Reload();
     }
 
+    private async Task InvalidateAndReloadGridAsync()
+    {
+        Cache.InvalidatePrefix("tasks:");
+        await ReloadGridAsync();
+    }
+
     private async Task OnLoadData(LoadDataArgs args)
     {
+        _loadFailed = false;
         var (page, pageSize) = args.ToPageRequest();
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(ServerTaskDto.CreatedAt), fallbackDescending: true);
         var serverId = ServerId;
         await Cache.RevalidateAsync(
-            CacheKey(page, pageSize, _search, _statusFilter),
-            () => Api.GetTasksAsync(page, pageSize, _search, _statusFilter, serverId),
+            CacheKey(page, pageSize, _search, _statusFilter, sortBy, sortDescending),
+            () => Api.Pipelines.GetTasksAsync(page, pageSize, _search, _statusFilter, serverId, sortBy, sortDescending),
             result => { if (ServerId == serverId) ApplyTasks(result); },
             loading => { if (ServerId == serverId) _loading = loading; },
-            () => InvokeAsync(StateHasChanged));
+            () => InvokeAsync(StateHasChanged),
+            _ => { if (ServerId == serverId) _loadFailed = true; });
     }
 
     private async Task ResetAndReload()
@@ -145,23 +144,20 @@ public partial class TaskListView : IAsyncDisposable
         await ResetAndReload();
     }
 
-    internal async Task ViewLogs(int taskId)
-    {
-        _selectedTaskId = taskId;
-        _selectedTaskLogs = await Api.GetTaskLogsAsync(taskId);
-        // Fire-and-forget the modal: awaiting OpenAsync would block until the dialog closes (and would
-        // hang a bUnit render test). The logs are already fetched, so just hand them to the dialog body.
-        _ = Dialog.OpenAsync<TaskLogsDialog>(
-            string.Format(L["TaskLogsTitle"], taskId),
-            new Dictionary<string, object?> { ["Logs"] = _selectedTaskLogs },
-            new DialogOptions { Width = "min(900px, 92vw)", Height = "70vh", Resizable = true, Draggable = true });
-    }
+    internal void OpenTask(ServerTaskDto task) => Nav.NavigateTo($"/tasks/{task.Id}");
 
     // A Pending/Assigned task whose server agent is offline cannot progress on its own - surface that
     // instead of an opaque "Pending". The timeout watchdog force-fails it after 30 min.
     internal static bool IsStalledOnOfflineAgent(ServerTaskDto task) =>
         task.ServerStatus == ServerStatus.Offline
         && task.Status is TaskExecutionStatus.Pending or TaskExecutionStatus.Assigned;
+
+    internal string GetSourceServerName(ServerTaskDto task) =>
+        !string.IsNullOrWhiteSpace(task.ServerName)
+            ? task.ServerName
+            : !string.IsNullOrWhiteSpace(ServerName)
+                ? ServerName
+                : $"#{task.ServerId}";
 
     internal static BadgeStyle GetTaskBadge(TaskExecutionStatus status) => status switch
     {
@@ -170,6 +166,17 @@ public partial class TaskListView : IAsyncDisposable
         TaskExecutionStatus.Running => BadgeStyle.Info,
         TaskExecutionStatus.Cancelled => BadgeStyle.Warning,
         _ => BadgeStyle.Light
+    };
+
+    internal static BadgeStyle GetFailureBadge(string failureCode) =>
+        failureCode == TaskFailureCodes.ToolError ? BadgeStyle.Warning : BadgeStyle.Danger;
+
+    internal static string GetFailureIcon(string failureCode) => failureCode switch
+    {
+        TaskFailureCodes.InfrastructureMismatch => "construction",
+        TaskFailureCodes.TestsFailed => "science",
+        TaskFailureCodes.BuildFailed => "build",
+        _ => "report_problem"
     };
 
     public async ValueTask DisposeAsync()

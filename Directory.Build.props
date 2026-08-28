@@ -2,9 +2,19 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Single SemVer source for every Aetheus assembly and distributed agent archive. -->
+    <VersionPrefix>1.1.0</VersionPrefix>
     <!-- Central version for production runtime images and the browser runtime packs.
          Server-side test hosts keep the runtime bundled with the pinned SDK. -->
-    <AetheusRuntimeImageVersion>10.0.10</AetheusRuntimeImageVersion>
+    <AetheusRuntimeImageVersion>10.0.11</AetheusRuntimeImageVersion>
+    <!-- The IL linker pack is a build tool, not a runtime target: it executes on the SDK's own
+         shared framework, so it must track the SDK pinned by global.json (10.0.202 bundles
+         10.0.6), NOT AetheusRuntimeImageVersion. Pointing it at the production runtime made
+         `dotnet publish` fail with NETSDK1144 inside the SDK image, which has no 10.0.11.
+         It is pinned rather than left implicit because its version is otherwise decided by
+         machine-global workload manifests and leaks into packages.lock.json, which then fails
+         locked-mode restore anywhere the manifests differ. Bump with the SDK in global.json. -->
+    <AetheusLinkerPackVersion>10.0.6</AetheusLinkerPackVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
@@ -13,11 +23,13 @@
          Release-canonical packages.lock.json files and make CI locked mode fail with NU1004. -->
     <NuGetLockFilePath Condition="'$(Configuration)' != 'Release'">$(MSBuildProjectDirectory)\obj\packages.$(Configuration).lock.json</NuGetLockFilePath>
     <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <!-- Product conventions must fail builds, not merely disappear into warning logs. -->
+    <WarningsAsErrors>$(WarningsAsErrors);PRM001;PRM002;PRM003</WarningsAsErrors>
   </PropertyGroup>
 
   <!-- Husky.NET: auto-install git hooks on restore (skipped in CI / Docker) -->
   <Target Name="HuskyInstall" BeforeTargets="Restore;CollectPackageReferences"
-          Condition="'$(HUSKY)' != '0' and '$(CI)' != 'true' and '$(DOTNET_RUNNING_IN_CONTAINER)' != 'true'">
+          Condition="'$(MSBuildProjectName)' == 'Aetheus.Back' and '$(HUSKY)' != '0' and '$(CI)' != 'true' and '$(DOTNET_RUNNING_IN_CONTAINER)' != 'true'">
     <Exec Command="dotnet tool restore" StandardOutputImportance="Low" StandardErrorImportance="High" />
     <Exec Command="dotnet husky install" StandardOutputImportance="Low" StandardErrorImportance="High"
           WorkingDirectory="$(MSBuildThisFileDirectory)" />

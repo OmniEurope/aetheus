@@ -45,9 +45,9 @@ public class ServerOverviewSectionTests : BunitContext
         var cut = Render<ServerOverviewSection>(p =>
             p.Add(x => x.Server, server)
              .Add(x => x.MetricsReceived, false));
-        // Without metrics the CPU/Memory/Disk tiles show indeterminate spinners instead of values.
+        // Without metrics the CPU/Memory/Disk tiles show branded loaders instead of values.
         Assert.Contains("essentials-grid", cut.Markup);
-        Assert.Contains("rz-progressbar-circular", cut.Markup);
+        Assert.Contains("aetheus-loader-logo", cut.Markup);
         Assert.DoesNotContain("CleanupApplyMode", cut.Markup);
     }
 

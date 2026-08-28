@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -52,7 +49,8 @@ public class GitRepository(AppDbContext db) : IGitRepository
 
     public async Task<(List<PullRequest> Items, int TotalCount)> GetPullRequestsPagedAsync(
         int gitConnectionId, string? search, int page, int pageSize,
-        PullRequestStatus? status = null, CancellationToken ct = default)
+        PullRequestStatus? status = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true)
     {
         var query = db.PullRequests
             .AsNoTracking()
@@ -83,7 +81,7 @@ public class GitRepository(AppDbContext db) : IGitRepository
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
         var items = await query
-            .OrderByDescending(p => p.ExternalCreatedAt)
+            .OrderByProperty(sortBy, sortDescending, p => p.ExternalCreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct)
@@ -137,4 +135,15 @@ public class GitRepository(AppDbContext db) : IGitRepository
     {
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Project behind a run, for authorizing a run-scoped git operation. An own-read: obtaining it by
+    /// injecting IPipelineRepository loaded a whole run with its pipeline to keep one integer, and is
+    /// what kept Git inside the cycle with Pipelines.
+    /// </summary>
+    public async Task<int?> GetRunProjectIdAsync(int pipelineRunId, CancellationToken ct = default) =>
+        await db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == pipelineRunId)
+            .Select(run => run.Pipeline.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 }

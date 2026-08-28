@@ -238,7 +238,7 @@ public class PipelineEditCoverageTests : BunitContext
     // ── OnTemplateSelected ────────────────────────────────────────────────────
 
     [Fact]
-    public async Task OnTemplateSelected_NonIntValue_DoesNothing()
+    public async Task OnTemplateSelected_NonIntValue_LeavesTheStateUnchanged()
     {
         var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, (int?)null));
         cut.WaitForState(() => cut.Markup.Length > 100, TimeSpan.FromSeconds(2));
@@ -274,6 +274,30 @@ public class PipelineEditCoverageTests : BunitContext
         var yaml = (string)model.GetType().GetProperty("YamlDefinition")!.GetValue(model)!;
         Assert.Contains("extends: Basic CI@3", yaml);
         Assert.DoesNotContain("stages:\n- name:", yaml);
+    }
+
+    [Fact]
+    public void NewPipeline_TemplateAndProjectQuery_AppliesTemplateToSelectedProject()
+    {
+        _handler.SetJsonResponse("api/pipelines/templates/1", new PipelineTemplateDto
+        {
+            Id = 1,
+            Name = "Basic CI",
+            Version = 3,
+            YamlContent = "name: basic-ci\ntrigger: manual\nstages: []"
+        });
+        _handler.SetJsonResponse(
+            "api/pipelines/templates/1/resolve?version=3",
+            "name: basic-ci\ntrigger: manual\nstages: []");
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://test/pipelines/new?projectId=1&templateId=1");
+
+        var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, (int?)null));
+        cut.WaitForState(() => ModelYaml(cut).Contains("extends: Basic CI@3", StringComparison.Ordinal));
+
+        var model = typeof(PipelineEdit).GetField("_model", Priv)!.GetValue(cut.Instance)!;
+        Assert.Equal(1, (int?)model.GetType().GetProperty("ProjectId")!.GetValue(model));
+        Assert.Contains("extends: Basic CI@3", ModelYaml(cut), StringComparison.Ordinal);
     }
 
     // ── HandleSaveOutcome ─────────────────────────────────────────────────────

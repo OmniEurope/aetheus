@@ -63,11 +63,11 @@
         @if (!string.IsNullOrWhiteSpace(_selectedFile))
         {
             <RadzenButton Text="@L["Download"]" Icon="download"
-                          Click="OnDownloadAsync" IsBusy="_isDownloading" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                          Click="OnDownloadAsync" IsBusy="_isDownloading" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         }
 
         <RadzenButton Text="@L["ExportCsv"]" Icon="file_download"
-                      Click="OnExportCsvAsync" IsBusy="_isExporting" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                      Click="OnExportCsvAsync" IsBusy="_isExporting" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
 
         <RadzenButton Text="@L["PurgeLogs"]" Icon="delete_sweep"
                       Click="OnPurgeAsync" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
@@ -76,17 +76,17 @@
 
 @if (_isLoading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" class="rz-my-4" />
+    <AetheusLoader Class="rz-my-4" />
 }
 else if (_entries is not null)
 {
-    <RadzenDataGrid Data="_accumulated" TItem="SystemLogEntryDto"
+    <RadzenDataGrid Responsive="false" Data="_accumulated" TItem="SystemLogEntryDto"
                     KeyProperty="Id"
-                    AllowPaging="false"
+                    AllowPaging="@(!AetheusGrid.Virtualization)"
                     AllowSorting="true"
                     Density="Density.Compact"
                     RowClick="@OnRowClick"
-                    class="rz-mb-4 aetheus-grid-fullheight aetheus-clickable-rows" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    class="rz-mb-4 aetheus-grid-fullheight aetheus-clickable-rows" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
         <Columns>
             <RadzenDataGridColumn TItem="SystemLogEntryDto" Property="Timestamp"
                                   Title="@L["Timestamp"]" Width="180px"

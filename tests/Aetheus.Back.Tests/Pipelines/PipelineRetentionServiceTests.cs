@@ -40,7 +40,7 @@ public class PipelineRetentionServiceTests
                 ["Retention:LogDays"] = "7"
             })
             .Build();
-        var (sut, pipelineRepo, logRepo, _) = BuildSut(config, clock);
+        var (sut, pipelineRepo, logRepo, taskRepo) = BuildSut(config, clock);
         pipelineRepo.DeleteRunsOlderThanAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>()).Returns(5);
         logRepo.DeleteLogsOlderThanAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>()).Returns(3);
 
@@ -50,13 +50,17 @@ public class PipelineRetentionServiceTests
         var expectedLogCutoff = new DateTime(2026, 6, 9, 12, 0, 0, DateTimeKind.Utc);
         await pipelineRepo.Received(1).DeleteRunsOlderThanAsync(expectedRunCutoff, Arg.Any<CancellationToken>());
         await logRepo.Received(1).DeleteLogsOlderThanAsync(expectedLogCutoff, Arg.Any<CancellationToken>());
+        await taskRepo.Received(1).DeleteCompletedTasksOlderThanAsync(
+            new DateTime(2026, 3, 18, 12, 0, 0, DateTimeKind.Utc),
+            expectedRunCutoff,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task PruneOldRunsAsync_DefaultRetention_Uses90And30DayCutoffs()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 6, 16, 0, 0, 0, TimeSpan.Zero));
-        var (sut, pipelineRepo, logRepo, _) = BuildSut(new ConfigurationBuilder().Build(), clock);
+        var (sut, pipelineRepo, logRepo, taskRepo) = BuildSut(new ConfigurationBuilder().Build(), clock);
 
         await sut.PruneOldRunsAsync(TestContext.Current.CancellationToken);
 
@@ -64,5 +68,9 @@ public class PipelineRetentionServiceTests
             new DateTime(2026, 3, 18, 0, 0, 0, DateTimeKind.Utc), Arg.Any<CancellationToken>());
         await logRepo.Received(1).DeleteLogsOlderThanAsync(
             new DateTime(2026, 5, 17, 0, 0, 0, DateTimeKind.Utc), Arg.Any<CancellationToken>());
+        await taskRepo.Received(1).DeleteCompletedTasksOlderThanAsync(
+            new DateTime(2026, 3, 18, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 3, 18, 0, 0, 0, DateTimeKind.Utc),
+            Arg.Any<CancellationToken>());
     }
 }

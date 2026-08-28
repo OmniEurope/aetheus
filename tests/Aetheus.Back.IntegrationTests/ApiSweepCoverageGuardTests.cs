@@ -55,9 +55,12 @@ public sealed class ApiSweepCoverageGuardTests
         ("api/servers/#/apps", "read-tested via ServerScopedGet_AsAdmin (interpolated route)"),
         ("api/servers/#/module-links", "read-tested via ServerScopedGet_AsAdmin (interpolated route)"),
         ("api/servers/#/configuration", "GET export returns 404 without a seeded config - not a success-read target"),
+        ("api/pipelines/runs", "read-tested via CheckpointResumePreview_AsAdmin with an interpolated seeded run id"),
         ("api/agent", "AgentInstaller: GET returns an install script, not a JSON collection"),
         ("api/external-repos", "ExternalRepos: gated by Features:ExternalRepos (off in test env) - 404 by design"),
         ("api/logs", "Logs: GET requires a seeded task id with on-disk logs"),
+        ("api/packages/nuget", "NuGet protocol reads require a PAT credential, not the admin JWT used by the generic read sweep"),
+        ("api/packages/npm", "npm protocol reads require a PAT credential, not the admin JWT used by the generic read sweep"),
     ];
 
     /// <summary>
@@ -75,6 +78,8 @@ public sealed class ApiSweepCoverageGuardTests
         // per-app ingest key carried in the request, not by a JWT - an anonymous-401 sweep does not apply.
         ["Aetheus.Back.Components.AppMonitoring.Ingest.IngestController"] =
             "OTLP ingest endpoint is [AllowAnonymous] (per-app ingest-key auth, not JWT) - no 401 to assert",
+        ["Aetheus.Back.Components.AppMonitoring.PublicWebAnalyticsController"] =
+            "Public browser analytics is anonymous by design and gated by declared origin, rate limit, body cap, and server-side pseudonymization",
     };
 
     /// <summary>

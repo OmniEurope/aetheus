@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Windows.Executors;
@@ -10,15 +9,14 @@ namespace Aetheus.Agent.Windows.Executors;
 public sealed class WindowsShellExecutor(
     ICommandValidator commandValidator,
     IOptions<AetheusAgentOptions> options,
-    ILogger<WindowsShellExecutor> logger) : IExecutor
+    ExecutorProcessRunner processRunner,
+    ILogger<WindowsShellExecutor> logger)
+    : ShellExecutorBase(commandValidator, options, processRunner, logger)
 {
-    private readonly AetheusAgentOptions _options = options.Value;
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+    private readonly Lazy<string> _cachedShell = new(() => DetectPowerShell(logger));
 
-    private static readonly Lazy<string> CachedShell = new(DetectPowerShell);
-
-    public ExecutorType Type => ExecutorType.Shell;
-
-    private static string DetectPowerShell()
+    private static string DetectPowerShell(ILogger logger)
     {
         foreach (var candidate in new[] { "pwsh", "powershell" })
         {
@@ -31,40 +29,42 @@ public sealed class WindowsShellExecutor(
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-                using var p = Process.Start(psi);
-                p?.WaitForExit(3000);
-                if (p?.ExitCode == 0) return candidate;
+                using var process = Process.Start(psi);
+                if (process is null)
+                {
+                    logger.LogWarning("PowerShell probe {Candidate} could not be started", candidate);
+                    continue;
+                }
+                if (!process.WaitForExit((int)ProbeTimeout.TotalMilliseconds))
+                {
+                    logger.LogWarning(
+                        "PowerShell probe {Candidate} exceeded {TimeoutSeconds}s and will be terminated",
+                        candidate,
+                        ProbeTimeout.TotalSeconds);
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit();
+                    continue;
+                }
+                if (process.ExitCode == 0) return candidate;
+                logger.LogDebug(
+                    "PowerShell probe {Candidate} exited with code {ExitCode}",
+                    candidate,
+                    process.ExitCode);
             }
-            catch { /* not found */ }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception
+                or InvalidOperationException
+                or NotSupportedException)
+            {
+                logger.LogDebug(ex, "PowerShell probe {Candidate} is unavailable", candidate);
+            }
         }
+        logger.LogWarning("No PowerShell probe succeeded; falling back to powershell");
         return "powershell";
     }
 
-    public async Task<ExecutorResult> ExecuteAsync(
-        string command,
-        Dictionary<string, string> environmentVariables,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken)
+    protected override ProcessStartInfo BuildProcessStartInfo(string command)
     {
-        if (!commandValidator.IsAllowed(command))
-        {
-            var reason = commandValidator.GetRejectionReason(command) ?? "Unknown";
-            logger.LogWarning("Command blocked by validator: {Reason}", reason);
-            await onOutput($"Command blocked by security policy - {reason}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
-
-        if (commandValidator.HasDangerousEnvironmentVariables(environmentVariables))
-        {
-            logger.LogWarning("Dangerous environment variables detected");
-            await onOutput("Blocked: dangerous environment variables detected", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
-
-        timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
-
-        var shell = CachedShell.Value;
+        var shell = _cachedShell.Value;
         var psi = new ProcessStartInfo
         {
             FileName = shell,
@@ -77,43 +77,9 @@ public sealed class WindowsShellExecutor(
         psi.ArgumentList.Add("-NonInteractive");
         psi.ArgumentList.Add("-Command");
         psi.ArgumentList.Add(command);
-
-        if (!string.IsNullOrWhiteSpace(_options.WorkDirectory) && Directory.Exists(_options.WorkDirectory))
-            psi.WorkingDirectory = _options.WorkDirectory;
-
-        foreach (var (key, value) in environmentVariables)
-            psi.Environment[key] = value;
-
-        // Dev mode: AllowInsecureCerts already disables TLS validation for the agent's own
-        // backend connection - git clones in pipeline steps must accept the same self-signed
-        // cert or every checkout fails. Never enabled in production config.
-        if (_options.AllowInsecureCerts)
-            psi.Environment["GIT_SSL_NO_VERIFY"] = "true";
-
-        logger.LogDebug("Executing {Shell} command (timeout={Timeout}s)", shell, timeoutSeconds);
-
-        using var process = new Process { StartInfo = psi };
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-        process.Start();
-
-        var stdoutTask = ExecutorHelper.StreamOutputAsync(process.StandardOutput, TaskLogLevel.Info, onOutput, timeoutCts.Token, logger);
-        var stderrTask = ExecutorHelper.StreamOutputAsync(process.StandardError, TaskLogLevel.Error, onOutput, timeoutCts.Token, logger);
-
-        try
-        {
-            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
-            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            return new ExecutorResult(process.ExitCode, false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning("Process timed out after {Timeout}s, killing", timeoutSeconds);
-            try { process.Kill(entireProcessTree: true); }
-            catch (System.ComponentModel.Win32Exception killEx) { logger.LogDebug(killEx, "Best-effort kill after timeout failed (Win32)"); }
-            catch (InvalidOperationException killEx) { logger.LogDebug(killEx, "Best-effort kill after timeout failed (process exited)"); }
-            return new ExecutorResult(-1, true);
-        }
+        return psi;
     }
+
+    protected override void LogExecution(int timeoutSeconds) =>
+        Logger.LogDebug("Executing {Shell} command (timeout={Timeout}s)", _cachedShell.Value, timeoutSeconds);
 }

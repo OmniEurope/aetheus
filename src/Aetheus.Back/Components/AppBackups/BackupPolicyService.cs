@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Cronos;
 
 namespace Aetheus.Back.Components.AppBackups;
@@ -19,7 +13,8 @@ internal sealed class BackupPolicyService(
     ITaskService taskService,
     IEncryptionService encryption,
     TimeProvider timeProvider,
-    IAuditService audit) : IBackupPolicyService
+    IAuditService audit,
+    IEntityChangeNotifier notifier) : IBackupPolicyService
 {
     public async Task<PaginatedResult<BackupPolicyDto>> GetPoliciesAsync(
         IReadOnlyCollection<int>? accessibleProjectIds, PaginationRequest request, CancellationToken ct = default)
@@ -63,6 +58,7 @@ internal sealed class BackupPolicyService(
         repo.AddPolicy(policy);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "BackupPolicy", policy.Id, policy.Name, ct).ConfigureAwait(false);
+        await BroadcastChangedAsync(policy.ProjectId, ct).ConfigureAwait(false);
         return Map(policy);
     }
 
@@ -91,6 +87,7 @@ internal sealed class BackupPolicyService(
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         await audit.LogAsync("Updated", "BackupPolicy", policy.Id, policy.Name, ct).ConfigureAwait(false);
+        await BroadcastChangedAsync(policy.ProjectId, ct).ConfigureAwait(false);
         return Map(policy);
     }
 
@@ -98,9 +95,11 @@ internal sealed class BackupPolicyService(
     {
         var policy = await repo.FindPolicyAsync(id, ct).ConfigureAwait(false);
         if (policy is null) return false;
+        var projectId = policy.ProjectId;
         repo.DeletePolicy(policy);
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         await audit.LogAsync("Deleted", "BackupPolicy", id, policy.Name, ct).ConfigureAwait(false);
+        await BroadcastChangedAsync(projectId, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -157,6 +156,7 @@ internal sealed class BackupPolicyService(
         policy.LastRunAt = now;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         await audit.LogAsync("BackupTriggered", "BackupPolicy", policy.Id, null, ct).ConfigureAwait(false);
+        await BroadcastChangedAsync(policy.ProjectId, ct).ConfigureAwait(false);
         return run.Id;
     }
 
@@ -175,6 +175,7 @@ internal sealed class BackupPolicyService(
 
         policy.LastRestoreCheckAt = timeProvider.GetUtcNow().UtcDateTime;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await BroadcastChangedAsync(policy.ProjectId, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> ApplyBackupResultAsync(int runId, int agentServerId, BackupExecuteResultDto result, CancellationToken ct = default)
@@ -187,7 +188,7 @@ internal sealed class BackupPolicyService(
         run.Sha256 = result.Sha256;
         run.Message = result.Message;
         run.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SaveRunAndBroadcastAsync(run, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -199,8 +200,27 @@ internal sealed class BackupPolicyService(
         run.RestoreCheckStatus = result.Verified ? RestoreCheckStatus.Verified : RestoreCheckStatus.Failed;
         run.RestoreCheckMessage = result.Message;
         run.RestoreCheckedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SaveRunAndBroadcastAsync(run, ct).ConfigureAwait(false);
         return true;
+    }
+
+    private async Task SaveRunAndBroadcastAsync(BackupRun run, CancellationToken ct)
+    {
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        var policy = await repo.FindPolicyAsync(run.BackupPolicyId, ct).ConfigureAwait(false);
+        if (policy is not null)
+            await BroadcastChangedAsync(policy.ProjectId, ct).ConfigureAwait(false);
+    }
+
+    private async Task BroadcastChangedAsync(int projectId, CancellationToken ct)
+    {
+        var organizationId = await repo.GetProjectOrganizationIdAsync(projectId, ct).ConfigureAwait(false);
+        await notifier.BroadcastOperationalAsync(
+            ResourceType.Project,
+            projectId,
+            OperationalRealtimeEvents.BackupChanged,
+            ct,
+            organizationId).ConfigureAwait(false);
     }
 
     private Dictionary<string, string> BuildBackupEnv(BackupPolicy policy, int runId)

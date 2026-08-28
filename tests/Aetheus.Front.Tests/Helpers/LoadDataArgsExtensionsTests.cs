@@ -88,4 +88,72 @@ public class LoadDataArgsExtensionsTests
     {
         Assert.Equal(25, LoadDataArgsExtensions.DefaultPageSize);
     }
+
+    private sealed record Row(string Name, int Size);
+
+    private static readonly List<Row> Rows =
+    [
+        new("beta", 2),
+        new("Alpha", 30),
+        new("gamma", 1)
+    ];
+
+    /// <summary>The whole collection is in memory, so a sort has to order all of it, not the slice the
+    /// pager happens to be showing.</summary>
+    [Fact]
+    public void ToClientPage_SortsTheWholeCollectionBeforeCuttingThePage()
+    {
+        var args = new LoadDataArgs { Skip = 0, Top = 2, OrderBy = "Size desc" };
+
+        var page = args.ToClientPage(Rows);
+
+        Assert.Equal([30, 2], page.Select(r => r.Size));
+    }
+
+    [Fact]
+    public void ToClientPage_FiltersCaseInsensitively_AndCountsWhatIsReachable()
+    {
+        var args = new LoadDataArgs
+        {
+            Skip = 0,
+            Top = 25,
+            Filters = [new FilterDescriptor { Property = "Name", FilterValue = "A" }]
+        };
+
+        var page = args.ToClientPage(Rows);
+
+        Assert.Equal(["beta", "Alpha", "gamma"], page.Select(r => r.Name));
+        Assert.Equal(3, args.ClientFilteredCount(Rows));
+    }
+
+    [Fact]
+    public void ToClientPage_NarrowsToTheMatchingRows()
+    {
+        var args = new LoadDataArgs
+        {
+            Skip = 0,
+            Top = 25,
+            Filters = [new FilterDescriptor { Property = "Name", FilterValue = "mm" }]
+        };
+
+        Assert.Equal("gamma", Assert.Single(args.ToClientPage(Rows)).Name);
+        Assert.Equal(1, args.ClientFilteredCount(Rows));
+    }
+
+    /// <summary>A filter or sort naming a property the row type does not have must narrow nothing.
+    /// Returning an empty page instead would blank a table over a column mismatch.</summary>
+    [Fact]
+    public void ToClientPage_IgnoresAnUnknownProperty()
+    {
+        var args = new LoadDataArgs
+        {
+            Skip = 0,
+            Top = 25,
+            OrderBy = "Nope desc",
+            Filters = [new FilterDescriptor { Property = "Nope", FilterValue = "x" }]
+        };
+
+        Assert.Equal(3, args.ToClientPage(Rows).Count);
+        Assert.Equal(3, args.ClientFilteredCount(Rows));
+    }
 }

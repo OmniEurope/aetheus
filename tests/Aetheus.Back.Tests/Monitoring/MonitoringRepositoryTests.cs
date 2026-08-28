@@ -109,6 +109,134 @@ public class MonitoringRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task ScopedDashboardQueries_FailClosedForEmptyListsAndCoverEveryPipelineOwnerPath()
+    {
+        var allowedProject = new Project { Name = "allowed" };
+        var deniedProject = new Project { Name = "denied" };
+        _db.Projects.AddRange(allowedProject, deniedProject);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var environment = new Aetheus.Back.Data.Entities.Environment
+        {
+            Name = "prod",
+            ProjectId = allowedProject.Id
+        };
+        var projectServer = new ProjectServer
+        {
+            ProjectId = allowedProject.Id,
+            DisplayName = "edge",
+            Host = "edge.example"
+        };
+        _db.Environments.Add(environment);
+        _db.ProjectServers.Add(projectServer);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var directProject = new Pipeline
+        { Name = "project", YamlDefinition = "y", ProjectId = allowedProject.Id };
+        var viaEnvironment = new Pipeline
+        { Name = "environment", YamlDefinition = "y", EnvironmentId = environment.Id };
+        var viaProjectServer = new Pipeline
+        { Name = "project-server", YamlDefinition = "y", ProjectServerId = projectServer.Id };
+        var directlyGranted = new Pipeline
+        { Name = "direct-grant", YamlDefinition = "y", ProjectId = deniedProject.Id };
+        var denied = new Pipeline
+        { Name = "denied", YamlDefinition = "y", ProjectId = deniedProject.Id };
+        _db.Pipelines.AddRange(
+            directProject,
+            viaEnvironment,
+            viaProjectServer,
+            directlyGranted,
+            denied);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        foreach (var pipeline in new[]
+                 { directProject, viaEnvironment, viaProjectServer, directlyGranted, denied })
+        {
+            _db.PipelineRuns.Add(new PipelineRun
+            {
+                PipelineId = pipeline.Id,
+                Status = PipelineStatus.Running,
+                StartedAt = DateTime.UtcNow
+            });
+        }
+
+        var allowedServer = new Server { Name = "allowed", Hostname = "allowed" };
+        var deniedServer = new Server { Name = "denied", Hostname = "denied" };
+        _db.Servers.AddRange(allowedServer, deniedServer);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.Tasks.AddRange(
+            new ServerTask
+            {
+                ServerId = allowedServer.Id,
+                Name = "allowed",
+                Command = "c",
+                Status = TaskExecutionStatus.Pending
+            },
+            new ServerTask
+            {
+                ServerId = deniedServer.Id,
+                Name = "denied",
+                Command = "c",
+                Status = TaskExecutionStatus.Pending
+            });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(await _repo.GetAllServersAsync([], TestContext.Current.CancellationToken));
+        Assert.Equal(0, await _repo.CountPendingTasksAsync([], TestContext.Current.CancellationToken));
+        Assert.Equal(
+            [allowedServer.Id],
+            (await _repo.GetAllServersAsync(
+                [allowedServer.Id],
+                TestContext.Current.CancellationToken)).Select(server => server.Id));
+        Assert.Equal(
+            1,
+            await _repo.CountPendingTasksAsync(
+                [allowedServer.Id],
+                TestContext.Current.CancellationToken));
+
+        Assert.Empty(await _repo.GetRecentProjectsAsync(
+            10, [], TestContext.Current.CancellationToken));
+        Assert.Equal(
+            [allowedProject.Id],
+            (await _repo.GetRecentProjectsAsync(
+                10,
+                [allowedProject.Id],
+                TestContext.Current.CancellationToken)).Select(project => project.Id));
+
+        var noAccess = await _repo.GetRecentRunsAsync(
+            10, [], [], TestContext.Current.CancellationToken);
+        Assert.Empty(noAccess);
+        Assert.Equal(
+            0,
+            await _repo.CountRunningPipelinesAsync(
+                [], [], TestContext.Current.CancellationToken));
+
+        var projectAccess = await _repo.GetRecentRunsAsync(
+            10,
+            [allowedProject.Id],
+            [],
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            [directProject.Id, viaEnvironment.Id, viaProjectServer.Id],
+            projectAccess.Select(run => run.PipelineId).Order());
+
+        var combinedAccess = await _repo.GetRecentRunsAsync(
+            10,
+            [allowedProject.Id],
+            [directlyGranted.Id],
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            [directProject.Id, viaEnvironment.Id, viaProjectServer.Id, directlyGranted.Id],
+            combinedAccess.Select(run => run.PipelineId).Order());
+        Assert.Equal(
+            4,
+            await _repo.CountRunningPipelinesAsync(
+                [allowedProject.Id],
+                [directlyGranted.Id],
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task GetServerMetricsSinceAsync_FiltersAndOrders()
     {
         var server = new Server { Name = "s", Hostname = "h" };
@@ -127,6 +255,32 @@ public class MonitoringRepositoryTests : IDisposable
         Assert.Equal(2, result.Count);
         Assert.Equal(20, result[0].CpuPercent);
         Assert.Equal(30, result[1].CpuPercent);
+    }
+
+    [Fact]
+    public async Task GetServerMetricsSinceAsync_AfterCursorAndTakeReturnBoundedLatestWindow()
+    {
+        var server = new Server { Name = "bounded", Hostname = "bounded-host" };
+        _db.Servers.Add(server);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var now = DateTime.UtcNow;
+        _db.ServerMetrics.AddRange(
+            Enumerable.Range(0, 5).Select(index => new ServerMetric
+            {
+                ServerId = server.Id,
+                Timestamp = now.AddMinutes(index),
+                CpuPercent = index
+            }));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetServerMetricsSinceAsync(
+            server.Id,
+            now.AddHours(-1),
+            TestContext.Current.CancellationToken,
+            afterUtc: now,
+            take: 2);
+
+        Assert.Equal([3, 4], result.Select(metric => metric.CpuPercent));
     }
 
     public void Dispose() => _db.Dispose();

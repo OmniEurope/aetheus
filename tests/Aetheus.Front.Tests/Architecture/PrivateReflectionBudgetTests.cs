@@ -12,17 +12,21 @@ public sealed class PrivateReflectionBudgetTests
     private static readonly IReadOnlyDictionary<string, int> MaximumOccurrences =
         new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["BindingFlags.NonPublic"] = 879,
-            [".GetMethod("] = 921,
-            [".GetField("] = 1293,
-            [".GetProperty("] = 314
+            // A360-10, 2026-08-21: tightened to the measured values, with no slack left. The audit
+            // observed this budget falling by about eleven a month, which is a ratchet loose enough to
+            // let a new test add debt as fast as an old one pays it. Every number here is now exactly
+            // what the tree contains, so any addition fails immediately rather than being absorbed.
+            ["BindingFlags.NonPublic"] = 864,
+            [".GetMethod("] = 907,
+            [".GetField("] = 1282,
+            [".GetProperty("] = 305
         };
 
     [Fact]
     public void PageTests_DoNotBypassConstructorsOrIncreasePrivateReflectionDebt()
     {
         var pagesDirectory = Path.Combine(FindRepoRoot(), "tests", "Aetheus.Front.Tests", "Pages");
-        var files = Directory.EnumerateFiles(pagesDirectory, "*.cs", SearchOption.AllDirectories).ToList();
+        var files = RepositoryScan.Enumerate(pagesDirectory, "*.cs").ToList();
         Assert.True(files.Count > 100, "The page-test source scan is unexpectedly small.");
 
         var sources = files.Select(File.ReadAllText).ToList();
@@ -60,15 +64,5 @@ public sealed class PrivateReflectionBudgetTests
         return count;
     }
 
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(PrivateReflectionBudgetTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

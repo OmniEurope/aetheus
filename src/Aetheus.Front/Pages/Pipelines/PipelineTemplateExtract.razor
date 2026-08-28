@@ -1,0 +1,55 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplateExtractionBase
+@page "/pipelines/{PipelineId:int}/template/extract"
+
+<PageTitle>@L["ExtractAsTemplate"] - Aetheus</PageTitle>
+
+<PageHeader Title="@L["ExtractAsTemplate"]" Icon="add_circle" BackHref="@($"/pipelines/{PipelineId}")" />
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_loadFailed)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">@L["LoadFailed"]</RadzenAlert>
+}
+else
+{
+    <EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+        <LocalizedDataAnnotationsValidator />
+        <RadzenRow Gap="1rem" class="rz-mt-3">
+            <RadzenColumn Size="12" SizeMD="6">
+                <RadzenFormField Text="@L["Name"]" class="rz-w-100">
+                    <RadzenTextBox @bind-Value="_model.TemplateName" class="rz-w-100" />
+                </RadzenFormField>
+                <ValidationMessage For="@(() => _model.TemplateName)" />
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeMD="6">
+                <RadzenFormField Text="@L["Category"]" class="rz-w-100">
+                    <RadzenTextBox @bind-Value="_model.Category" class="rz-w-100" />
+                </RadzenFormField>
+            </RadzenColumn>
+            <RadzenColumn Size="12">
+                <RadzenFormField Text="@L["Description"]" class="rz-w-100">
+                    <RadzenTextArea @bind-Value="_model.Description" Rows="3" class="rz-w-100" />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" class="rz-mt-3">@L["ExtractionParametersHelp"]</RadzenAlert>
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mt-3 rz-mb-2">@L["NewTemplateYaml"]</RadzenText>
+        <MonacoEditor Value="@_model.TemplateYamlContent" ValueChanged="@(value => _model.TemplateYamlContent = value)" />
+        <ValidationMessage For="@(() => _model.TemplateYamlContent)" />
+        <LabeledToggle @bind-Value="_model.RewritePipeline" Text="@L["RewritePipelineToPin"]" Class="rz-mt-3" />
+        @if (_model.RewritePipeline)
+        {
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mt-3 rz-mb-2">@L["RewrittenPipelineYaml"]</RadzenText>
+            <MonacoEditor Value="@_model.RewrittenPipelineYaml" ValueChanged="@(value => _model.RewrittenPipelineYaml = value)" />
+        }
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem" class="rz-mt-4">
+            <RadzenButton Text="@L["Cancel"]" Icon="close" Click="@Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+            <RadzenButton Text="@L["Extract"]" Icon="add_circle" ButtonType="ButtonType.Submit"
+                IsBusy="@_saving" Disabled="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+        </RadzenStack>
+    </EditForm>
+}

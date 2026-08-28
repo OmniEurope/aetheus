@@ -2,8 +2,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Aetheus.Agent.Core.Collectors;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -54,31 +52,13 @@ public sealed class TeamspeakServerQueryOperationExecutor(ITeamspeakQueryClient 
             return new ExecutorResult(-1, false);
         }
 
-        if (!envVars.TryGetValue("TEAMSPEAK_QUERY_PORT", out var portRaw) ||
-            !int.TryParse(portRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) ||
-            port is < 1 or > 65535)
-        {
-            await onOutput("Missing or invalid TEAMSPEAK_QUERY_PORT", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var queryPort = await ServerQueryHelper.GetQueryPortAsync(envVars, onOutput).ConfigureAwait(false);
+        if (queryPort is null) return new ExecutorResult(-1, false);
+        var port = queryPort.Value;
 
-        var credentialPath = ServerQueryHelper.ReadCredentialPath();
-        string credential;
-        try
-        {
-            credential = (await File.ReadAllTextAsync(credentialPath, cancellationToken).ConfigureAwait(false)).Trim();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            await onOutput($"Cannot read TeamSpeak query credential at {credentialPath}: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
-
-        if (string.IsNullOrEmpty(credential))
-        {
-            await onOutput("TeamSpeak query credential file is empty", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var credential = await ServerQueryHelper.ReadCredentialAsync(
+            onOutput, cancellationToken).ConfigureAwait(false);
+        if (credential is null) return new ExecutorResult(-1, false);
 
         // The TCP client writes the script verbatim and reads until the server closes on `quit`.
         // The credential is EscapeServerQuery-encoded so a password with spaces/special chars cannot

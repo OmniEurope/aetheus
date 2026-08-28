@@ -172,20 +172,27 @@ public sealed class MigrationRegressionTests(PostgresFixture fixture)
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync(migrations[targetIndex - 1], TestContext.Current.CancellationToken);
 
-        var server = new Server
+        var organizationId = await SeededOrganizationIdAsync(db);
+        int serverId;
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
         {
-            Name = "Legacy storage server",
-            Hostname = "legacy-storage",
-            OsDescription = "Linux",
-            IpAddress = "127.0.0.1",
-            AgentVersion = "1.0.0",
-            Tags = "[]",
-            OrganizationId = await SeededOrganizationIdAsync(db),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-        db.Servers.Add(server);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await using var command = connection.CreateCommand();
+            // This test deliberately parks the schema on an old migration. Insert only columns that
+            // existed then; using the current EF model would reference future columns by construction.
+            command.CommandText =
+                """
+                INSERT INTO "Servers"
+                    ("Name", "Hostname", "OsDescription", "IpAddress", "AgentVersion", "Status", "Type",
+                     "LastHeartbeat", "Tags", "CreatedAt", "UpdatedAt", "OrganizationId")
+                VALUES
+                    ('Legacy storage server', 'legacy-storage', 'Linux', '127.0.0.1', '1.0.0', 0, 0,
+                     NOW(), '[]', NOW(), NOW(), @organizationId)
+                RETURNING "Id";
+                """;
+            command.Parameters.AddWithValue("organizationId", organizationId);
+            serverId = Convert.ToInt32(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        }
 
         await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
         {
@@ -200,7 +207,7 @@ public sealed class MigrationRegressionTests(PostgresFixture fixture)
                     ('Stockage historique A', @serverId, 2, 2, 80, 300, 1, TRUE, NOW(), NOW()),
                     ('Stockage historique B', @serverId, 2, 2, 90, 300, 2, TRUE, NOW(), NOW());
                 """;
-            command.Parameters.AddWithValue("serverId", server.Id);
+            command.Parameters.AddWithValue("serverId", serverId);
             await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
 
@@ -214,8 +221,68 @@ public sealed class MigrationRegressionTests(PostgresFixture fixture)
             .Select(rule => rule.ProvisioningKey)
             .ToListAsync(TestContext.Current.CancellationToken);
         Assert.Collection(keys,
-            key => Assert.Equal($"storage-disk-warning:{server.Id}", key),
+            key => Assert.Equal($"storage-disk-warning:{serverId}", key),
             key => Assert.Null(key));
+    }
+
+    [Fact]
+    public async Task AddConfigurableQualityGates_BackfillsStableKeys_AndEnforcesScopeUniqueness()
+    {
+        await ResetDatabaseAsync();
+        await using var db = new AppDbContext(BuildOptions());
+        var migrations = db.Database.GetMigrations().ToList();
+        const string targetMigration = "20260726152803_AddConfigurableQualityGates";
+        var targetIndex = migrations.IndexOf(targetMigration);
+        Assert.True(targetIndex > 0, $"Could not locate migration {targetMigration} after a predecessor.");
+
+        var migrator = db.GetService<IMigrator>();
+        await migrator.MigrateAsync(migrations[targetIndex - 1], TestContext.Current.CancellationToken);
+        int legacyId;
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                INSERT INTO "AnalysisPolicies"
+                    ("Name", "MetricKey", "Operator", "Threshold", "Behavior", "Priority",
+                     "Enabled", "Version", "CreatedAt", "UpdatedAt")
+                VALUES
+                    ('Legacy coverage', 'coverage.line.percent', 2, 75, 1, 0,
+                     TRUE, 4, NOW(), NOW())
+                RETURNING "Id";
+                """;
+            legacyId = Convert.ToInt32(
+                await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        }
+
+        await migrator.MigrateAsync(targetMigration, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var legacy = await db.AnalysisPolicies.AsNoTracking()
+            .SingleAsync(item => item.Id == legacyId, TestContext.Current.CancellationToken);
+        Assert.Equal($"legacy.{legacyId}", legacy.PolicyKey);
+        Assert.False(legacy.NewFindingsOnly);
+        Assert.Equal(4, legacy.Version);
+
+        db.AnalysisPolicies.Add(new AnalysisPolicy
+        {
+            PolicyKey = legacy.PolicyKey,
+            Name = "Duplicate key",
+            MetricKey = "coverage.line.percent",
+            Operator = AnalysisPolicyOperator.LessThan,
+            Threshold = 80,
+            Behavior = AnalysisGateBehavior.Block,
+            Enabled = true,
+            Version = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(
+            () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
+        var postgres = Assert.IsType<PostgresException>(exception.InnerException);
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, postgres.SqlState);
+        Assert.Equal("IX_AnalysisPolicies_OrganizationId_ProjectId_PolicyKey", postgres.ConstraintName);
     }
 
     [Fact]

@@ -1,8 +1,8 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@* PLAN-001 phases 2-4: OTLP telemetry (metrics/logs/errors/ingestion) for the project's monitored apps. *@
+@* ADR-021 phases 2-4: OTLP telemetry (metrics/logs/errors/ingestion) for the project's monitored apps. *@
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
 }
 else if (_apps.Count == 0)
 {
@@ -22,6 +22,9 @@ else
            ?tab= query, so nesting a second UrlSyncedTabs would collide on it. *@
         <RadzenTabs>
             <Tabs>
+                <RadzenTabsItem Text="@L["Visitors"]" Icon="groups">
+                    <AppWebAnalyticsView AppId="_selectedApp.Id" />
+                </RadzenTabsItem>
                 <RadzenTabsItem Text="@L["Metrics"]" Icon="show_chart">
                     <AppMetricsView AppId="_selectedApp.Id" />
                 </RadzenTabsItem>

@@ -12,6 +12,8 @@ namespace Aetheus.Back.Tests;
 
 public class TotpServiceTests
 {
+    private static readonly DateTimeOffset FixedNow =
+        new(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
     private readonly IAuthRepository _repoMock = Substitute.For<IAuthRepository>();
     private readonly IEncryptionService _encryptionMock = Substitute.For<IEncryptionService>();
     private readonly IAuditService _auditMock = Substitute.For<IAuditService>();
@@ -20,7 +22,7 @@ public class TotpServiceTests
 
     public TotpServiceTests()
     {
-        _timeProvider.GetUtcNow().Returns(new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero));
+        _timeProvider.GetUtcNow().Returns(FixedNow);
 
         // Encryption round-trips: encrypt returns "enc:" prefix, decrypt strips it.
         _encryptionMock.EncryptValue(Arg.Any<string>()).Returns(ci => $"enc:{ci.Arg<string>()}");
@@ -122,7 +124,7 @@ public class TotpServiceTests
         var secret = KeyGeneration.GenerateRandomKey(20);
         var base32Secret = Base32Encoding.ToString(secret);
         var totp = new Totp(secret, step: 30, totpSize: 6);
-        var code = totp.ComputeTotp();
+        var code = totp.ComputeTotp(FixedNow.UtcDateTime);
 
         var user = new User { Id = 1, Username = "admin", TotpSecret = $"enc:{base32Secret}", TotpEnabled = false };
         _repoMock.FindUserByIdForUpdateAsync(1, Arg.Any<CancellationToken>()).Returns(user);
@@ -274,11 +276,24 @@ public class TotpServiceTests
         var secret = KeyGeneration.GenerateRandomKey(20);
         var base32Secret = Base32Encoding.ToString(secret);
         var totp = new Totp(secret, step: 30, totpSize: 6);
-        var code = totp.ComputeTotp();
+        var code = totp.ComputeTotp(FixedNow.UtcDateTime);
 
         var result = _sut.ValidateTotpCode($"enc:{base32Secret}", code);
 
         Assert.True(result);
+    }
+
+    [Fact]
+    public void ValidateTotpCode_CodeOutsideAcceptedWindow_ReturnsFalse()
+    {
+        var secret = KeyGeneration.GenerateRandomKey(20);
+        var base32Secret = Base32Encoding.ToString(secret);
+        var totp = new Totp(secret, step: 30, totpSize: 6);
+        var expiredCode = totp.ComputeTotp(FixedNow.AddMinutes(-2).UtcDateTime);
+
+        var result = _sut.ValidateTotpCode($"enc:{base32Secret}", expiredCode);
+
+        Assert.False(result);
     }
 
     [Fact]

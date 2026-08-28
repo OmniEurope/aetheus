@@ -49,7 +49,7 @@
             <RadzenIcon Icon="deployed_code" class="essential-icon" />
             <div class="essential-text">
                 <span class="essential-label">@L["AgentVersion"]</span>
-                <span class="essential-value">@FormatAgentVersion(Server.AgentVersion)</span>
+                <span class="essential-value">@FormatAgentVersionWithTarget()</span>
             </div>
         </div>
         <div class="essential-item">
@@ -107,7 +107,7 @@
         }
         else
         {
-            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+            <AetheusLoader Size="AetheusLoaderSize.Small" />
         }
     </RadzenCard>
     <RadzenCard>
@@ -120,7 +120,7 @@
         }
         else
         {
-            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+            <AetheusLoader Size="AetheusLoaderSize.Small" />
         }
     </RadzenCard>
     <RadzenCard>
@@ -133,7 +133,7 @@
         }
         else
         {
-            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+            <AetheusLoader Size="AetheusLoaderSize.Small" />
         }
     </RadzenCard>
     <a href="@($"/servers/{Server.Id}/services")" class="tile-link">
@@ -297,6 +297,26 @@
         </RadzenCard>
     </RadzenColumn>
 </RadzenRow>
+
+<RadzenCard class="rz-mb-4">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-3">
+        <RadzenIcon Icon="security" class="rz-color-secondary" />
+        <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0">@L["AnalysisScannerCapabilities"]</RadzenText>
+    </RadzenStack>
+    @if (Server.ScannerCapabilities.Count == 0)
+    {
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-m-0">@L["AnalysisScannerCapabilitiesUnknown"]</RadzenText>
+    }
+    else
+    {
+            <RadzenDataGrid Responsive="false" Data="@Server.ScannerCapabilities" TItem="string" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" Density="Density.Compact" class="analysis-table" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+            <Columns>
+                <RadzenDataGridColumn TItem="string" Title="@L["Status"]" Width="9rem"><Template Context="diagnostic"><RadzenBadge Text="@ScannerDiagnosticState(diagnostic)" BadgeStyle="@ScannerDiagnosticStyle(diagnostic)" /></Template></RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="string" Title="@L["Details"]"><Template Context="diagnostic">@diagnostic</Template></RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+    }
+</RadzenCard>
 
 @* H / E2: fill the bottom of the overview with the server's most recent tasks (was empty space). *@
 <RadzenCard class="rz-mb-4">

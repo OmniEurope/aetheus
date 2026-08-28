@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -7,8 +6,9 @@ public interface IPipelineService
 {
     Task<PaginatedResult<PipelineDto>> GetPipelinesAsync(PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
     Task<PipelineDto?> GetPipelineAsync(int id, CancellationToken ct = default);
-    Task<PipelineSourceDto?> GetPipelineSourceAsync(int projectId, string pipelineName, CancellationToken ct = default, string? sourceBranch = null);
-    Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(List<int>? accessibleIds = null, CancellationToken ct = default);
+    Task<PipelineSourceDto?> GetPipelineSourceAsync(int projectId, string pipelineName, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null);
+    Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default);
     Task<PaginatedResult<PipelineDependencyDto>> GetDependencyPageAsync(PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
     Task<PipelineDto> CreatePipelineAsync(CreatePipelineRequest request, CancellationToken ct = default);
     Task<PipelineDto?> UpdatePipelineAsync(int id, UpdatePipelineRequest request, CancellationToken ct = default);
@@ -27,5 +27,6 @@ public interface IPipelineService
     /// <summary>Creates or updates a pipeline from YAML content for a given project.</summary>
     Task<PipelineDto> UpsertPipelineFromYamlAsync(
         string name, string yamlContent, int projectId, string triggerType,
-        CancellationToken ct = default, string? sourceBranch = null, string? defaultBranch = null);
+        CancellationToken ct = default, string? sourceBranch = null, string? defaultBranch = null,
+        int? sourceRepositoryId = null);
 }

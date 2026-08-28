@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using Aetheus.Shared.Validation;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -32,11 +28,12 @@ public class PipelinesController(
     }
 
     [HttpGet("dependencies")]
-    public async Task<ActionResult<PipelineDependencyGroupsDto>> GetDependencies(CancellationToken ct)
+    public async Task<ActionResult<PipelineDependencyGroupsDto>> GetDependencies(
+        CancellationToken ct, [FromQuery] int? serverId = null)
     {
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new PipelineDependencyGroupsDto());
-        return Ok(await pipelineService.GetDependencyGroupsAsync(accessibleIds, ct));
+        return Ok(await pipelineService.GetDependencyGroupsAsync(accessibleIds, serverId, ct));
     }
 
     [HttpGet("runs/active")]
@@ -48,11 +45,12 @@ public class PipelinesController(
     }
 
     [HttpGet("runs/recent")]
-    public async Task<ActionResult<List<PipelineRunDto>>> GetRecentRuns([FromQuery] int? projectId, CancellationToken ct)
+    public async Task<ActionResult<List<PipelineRunDto>>> GetRecentRuns(
+        [FromQuery] int? projectId, CancellationToken ct, [FromQuery] int? serverId = null)
     {
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new List<PipelineRunDto>());
-        return Ok(await runService.GetRecentRunsAsync(accessibleIds, projectId, ct));
+        return Ok(await runService.GetRecentRunsAsync(accessibleIds, projectId, serverId, ct));
     }
 
     [HttpGet("{id:int}")]
@@ -76,7 +74,8 @@ public class PipelinesController(
         if (pipeline is null) return NotFound();
         if (pipeline.ProjectId is not { } projectId) return NoContent();
 
-        var source = await pipelineService.GetPipelineSourceAsync(projectId, pipeline.Name, ct, pipeline.SourceBranch);
+        var source = await pipelineService.GetPipelineSourceAsync(
+            projectId, pipeline.Name, ct, pipeline.SourceBranch, pipeline.SourceRepositoryId);
         return source is null ? NoContent() : Ok(source);
     }
 
@@ -159,7 +158,8 @@ public class PipelinesController(
 
         // Invalid queue-time parameters surface as a BadRequestException and become HTTP 400.
         var run = await runService.TriggerPreparedRunAsync(
-            runtimePreparation, parameters: request?.Parameters, ct: ct);
+            runtimePreparation, parameters: request?.Parameters, ct: ct,
+            idempotencyKey: request?.IdempotencyKey);
         if (run is null) return NotFound();
         return CreatedAtAction(nameof(GetRun), new { runId = run.Id }, run);
     }
@@ -218,7 +218,7 @@ public class PipelinesController(
     }
 
     [HttpGet("{id:int}/runs")]
-    public async Task<ActionResult<PaginatedResult<PipelineRunDto>>> GetRuns(int id, [FromQuery] PaginationRequest request, CancellationToken ct)
+    public async Task<ActionResult<PaginatedResult<PipelineRunDto>>> GetRuns(int id, [FromQuery] PipelineRunPaginationRequest request, CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Read, ct))
             return Forbid();
@@ -239,6 +239,14 @@ public class PipelinesController(
         return Ok(run);
     }
 
+    [HttpGet("runs/{runId:int}/queue")]
+    public async Task<ActionResult<PipelineRunQueueStateDto>> GetRunQueue(int runId, CancellationToken ct)
+    {
+        var pipelineId = await runService.GetPipelineIdForRunAsync(runId, ct);
+        if (pipelineId is null) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct)) return Forbid();
+        return Ok(await runService.GetRunQueueStateAsync(runId, ct));
+    }
     [HttpPost("validate")]
     [RequestSizeLimit(256 * 1024)]
     public async Task<ActionResult<YamlValidationResultDto>> ValidateYaml(
@@ -258,9 +266,11 @@ public class PipelinesController(
         if (!result.IsValid) return BadRequest(result);
         return Ok(result);
     }
-
     [HttpPost("{id:int}/dry-run")]
-    public async Task<ActionResult<DryRunResultDto>> DryRun(int id, [FromBody] Dictionary<string, string>? additionalVars, CancellationToken ct)
+    public async Task<ActionResult<DryRunResultDto>> DryRun(
+        int id,
+        [FromBody, BoundedDictionary(64, 200, 4000)] Dictionary<string, string>? additionalVars,
+        CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Write, ct))
             return Forbid();
@@ -274,7 +284,6 @@ public class PipelinesController(
         if (result is null) return NotFound();
         return Ok(result);
     }
-
     [HttpPost("runs/{runId:int}/cancel")]
     public async Task<IActionResult> CancelRun(int runId, CancellationToken ct)
     {
@@ -287,8 +296,7 @@ public class PipelinesController(
         if (!cancelled) return NotFound();
         return NoContent();
     }
-
-    /// <summary>Re-runs only the failed steps of a failed run (instead of a brand-new run).</summary>
+    /// <summary>Re-runs failed or cancelled steps of a terminal run (instead of a brand-new run).</summary>
     [HttpPost("runs/{runId:int}/retry-failed")]
     public async Task<ActionResult<PipelineRunDto>> RetryFailedSteps(int runId, CancellationToken ct)
     {
@@ -304,7 +312,6 @@ public class PipelinesController(
         if (run is null) return NotFound();
         return Ok(run);
     }
-
     /// <summary>G: re-launches a run - the current definition (a fresh run), or the source run's
     /// captured YAML snapshot pinned to its commit / floated to the branch head.</summary>
     [HttpPost("runs/{runId:int}/rerun")]
@@ -479,17 +486,35 @@ public class PipelinesController(
     // A full-solution Cobertura report (JSON-embedded, escaped) routinely exceeds the global 10 MB
     // Kestrel body cap, which reset the upload mid-stream and surfaced on the agent as "Error while
     // copying content to a stream". Raise the per-action cap so the coverage step can publish.
-    [RequestSizeLimit(104_857_600)]
+    [RequestSizeLimit(CoverageUploadLimits.MaxRawXmlBytes)]
     public async Task<ActionResult<PipelineCoverageSummaryDto>> PublishCoverage(
         int runId, [FromBody] PublishCoverageRequest request, CancellationToken ct)
     {
-        var serverIdClaim = User.FindFirst("ServerId")?.Value;
-        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
-        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+        return await PublishCoverageCore(runId, request, ct);
+    }
 
-        var summary = await artifactService.PublishCoverageAsync(runId, request, ct);
-        if (summary is null) return NotFound();
-        return Ok(summary);
+    [HttpPost("runs/{runId:int}/coverage/raw")]
+    [Authorize(Policy = "AgentToken")]
+    [Consumes("application/xml")]
+    [RequestSizeLimit(CoverageUploadLimits.MaxRawXmlBytes)]
+    public async Task<ActionResult<PipelineCoverageSummaryDto>> PublishCoverageRaw(
+        int runId, [FromQuery] string? stageName, [FromQuery] string? stepName, CancellationToken ct)
+    {
+        if (Request.ContentLength > CoverageUploadLimits.MaxRawXmlBytes)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
+        if (stageName?.Length > 200 || stepName?.Length > 200)
+            return BadRequest("Coverage stage and step names are limited to 200 characters.");
+
+        using var reader = new StreamReader(Request.Body);
+        var xmlContent = await reader.ReadToEndAsync(ct);
+        if (string.IsNullOrWhiteSpace(xmlContent))
+            return BadRequest("Coverage XML is required.");
+        return await PublishCoverageCore(runId, new PublishCoverageRequest
+        {
+            XmlContent = xmlContent,
+            StageName = stageName,
+            StepName = stepName
+        }, ct);
     }
 
     [HttpGet("runs/{runId:int}/lint")]
@@ -531,6 +556,18 @@ public class PipelinesController(
         if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
 
         return await artifactService.PublishComplexityAsync(runId, request, ct) ? Ok() : NotFound();
+    }
+
+    private async Task<ActionResult<PipelineCoverageSummaryDto>> PublishCoverageCore(
+        int runId, PublishCoverageRequest request, CancellationToken ct)
+    {
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        if (!await runService.IsServerAssignedToRunAsync(runId, agentServerId, ct)) return Forbid();
+
+        var summary = await artifactService.PublishCoverageAsync(runId, request, ct);
+        if (summary is null) return NotFound();
+        return Ok(summary);
     }
 
     // F-EXEC-1: a pipeline step is a free-form shell command, i.e. arbitrary code execution on

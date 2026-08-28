@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Git;
 
@@ -24,7 +18,7 @@ public partial class GitBranchCreateDialog
     private async Task Submit()
     {
         _submitting = true;
-        var success = await Api.CreateGitBranchAsync(RepoId, _request);
+        var success = await Api.Git.CreateGitBranchAsync(RepoId, _request);
         _submitting = false;
 
         if (success)

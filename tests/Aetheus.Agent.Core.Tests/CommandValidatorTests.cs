@@ -182,10 +182,41 @@ public class CommandValidatorTests
     }
 
     [Fact]
+    public void GetDangerousEnvironmentVariableNames_ReturnsEveryBlockedNameInStableOrder()
+    {
+        var envVars = new Dictionary<string, string>
+        {
+            ["SAFE"] = "value",
+            ["ENV"] = "prod",
+            ["LD_PRELOAD"] = "/tmp/hook.so"
+        };
+
+        var result = _sut.GetDangerousEnvironmentVariableNames(envVars);
+
+        Assert.Equal(["ENV", "LD_PRELOAD"], result);
+    }
+
+    [Fact]
     public void IsAllowed_WithNoPatterns_DeniesAll()
     {
         var opts = Options.Create(new AetheusAgentOptions { AllowedCommandPatterns = [] });
         var validator = new CommandValidator(opts);
         Assert.False(validator.IsAllowed("dotnet build"));
+    }
+
+    [Fact]
+    public void IsAllowed_PathologicalPattern_IsEvaluatedWithoutBacktrackingTimeout()
+    {
+        var opts = Options.Create(new AetheusAgentOptions
+        {
+            AllowedCommandPatterns = [@"^(a+)+$"]
+        });
+        var validator = new CommandValidator(opts);
+        var command = new string('a', 10_000) + "!";
+
+        var reason = validator.GetRejectionReason(command);
+
+        Assert.NotNull(reason);
+        Assert.Contains("No allow-list pattern matched", reason, StringComparison.Ordinal);
     }
 }

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -19,6 +18,8 @@ public class ServerTask
     public OperationKind Operation { get; set; } = OperationKind.None;
 
     public TaskExecutionStatus Status { get; set; } = TaskExecutionStatus.Pending;
+    /// <summary>Durable workspace cleanup queued for the original runner while it is offline.</summary>
+    public bool IsDeferredCleanup { get; set; }
     public int? PipelineRunId { get; set; }
     public int? PipelineStepRunId { get; set; }
 
@@ -26,6 +27,8 @@ public class ServerTask
     // hardened container (Executor = Container) instead of directly on the host. Runtime/Network
     // select the container runtime (runc/runsc/kata) and network policy (none/bridge).
     public string? ContainerImage { get; set; }
+    public string? ContainerToolchain { get; set; }
+    public string? ContainerShell { get; set; }
     public string? ContainerRuntime { get; set; }
     public string? ContainerNetwork { get; set; }
     // S-UX-35: optional per-run resource limits (docker run --memory / --cpus).
@@ -34,8 +37,18 @@ public class ServerTask
     public string EnvironmentVariables { get; set; } = "{}"; // JSON
     public int TimeoutSeconds { get; set; } = 300;
     public int? ExitCode { get; set; }
+    public string? FailureCode { get; set; }
+    public string? FailureReason { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? AssignedAt { get; set; }
+    /// <summary>Agent process lifetime that claimed this task. Null for legacy agents.</summary>
+    public string? AssignedAgentSessionId { get; set; }
+    /// <summary>Fencing token captured atomically when the task was assigned.</summary>
+    public long? AssignedAgentSessionFencingToken { get; set; }
+    /// <summary>Agent binary version captured atomically when this task is claimed.</summary>
+    public string? AssignedAgentVersion { get; set; }
+    /// <summary>Scanner-manifest contract captured from the claiming agent heartbeat.</summary>
+    public string? AssignedScannerManifestSha256 { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 

@@ -1,0 +1,20 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<div class="run-tile-link analysis-run-gate-tile" role="button" tabindex="0"
+     @onclick="@(() => GateRequested.InvokeAsync())"
+     @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await GateRequested.InvokeAsync(); })">
+    <RadzenCard class="run-overview-card">
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+            <RadzenIcon Icon="verified_user" class="run-tile-icon" /> @L["AnalysisGateOverview"]
+        </RadzenText>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.35rem">
+            <RadzenBadge BadgeStyle="@PipelineRunGatePresentation.GateStyle(Gate.Status)"
+                         Text="@L[PipelineRunGatePresentation.StatusKey(Gate.Status)]" />
+            @if (Gate.Grade?.OverallGrade is { } grade)
+            {
+                <strong class="@($"analysis-run-gate-grade {PipelineRunGatePresentation.GradeCss(grade)}")">@grade</strong>
+            }
+        </RadzenStack>
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@string.Format(L["AnalysisGateFindingsCount"], Gate.FindingCount)</RadzenText>
+    </RadzenCard>
+</div>

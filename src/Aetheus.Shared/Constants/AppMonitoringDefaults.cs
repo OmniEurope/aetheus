@@ -35,6 +35,18 @@ public static class AppMonitoringDefaults
     public const int DefaultHourlyRetentionDays = 90;
     public const int MinimumHourlyRetentionDays = 1;
     public const int MaximumHourlyRetentionDays = 3650;
+    public const int DefaultMetricDetailedRetentionDays = 30;
+    public const int MinimumMetricDetailedRetentionDays = 7;
+    public const int MaximumMetricDetailedRetentionDays = 90;
+    public const int DefaultMetricAggregateRetentionMonths = 13;
+    public const int MinimumMetricAggregateRetentionMonths = 1;
+    public const int MaximumMetricAggregateRetentionMonths = 36;
+    public const int DefaultLogRetentionDays = 14;
+    public const int MinimumLogRetentionDays = 1;
+    public const int MaximumLogRetentionDays = 90;
+    public const int DefaultTraceRetentionDays = 14;
+    public const int MinimumTraceRetentionDays = 1;
+    public const int MaximumTraceRetentionDays = 90;
     public const int DefaultAggregationLookbackHours = 6;
     public const int DefaultStartupCatchUpHours = 48;
     public const int MinimumAggregationLookbackHours = 1;
@@ -45,4 +57,31 @@ public static class AppMonitoringDefaults
     public const int MaximumSamplesPerMinutePerApp = 30_000;
     public const int MaximumSeriesPoints = 1500;
     public const int MaximumMetricHistoryHours = 2160;
+
+    public const int DefaultVisitorRetentionDays = 35;
+    public const int MinimumVisitorRetentionDays = 7;
+    public const int MaximumVisitorRetentionDays = 365;
+    public const int MaximumVisitorHistoryDays = 90;
+
+    public const int DefaultAnalyticsDetailedRetentionDays = 30;
+    public const int MinimumAnalyticsDetailedRetentionDays = 7;
+    public const int MaximumAnalyticsDetailedRetentionDays = 90;
+    public const int DefaultAnalyticsSessionRetentionDays = 90;
+    public const int MinimumAnalyticsSessionRetentionDays = 30;
+    public const int MaximumAnalyticsSessionRetentionDays = 180;
+    public const int DefaultAnalyticsAggregateRetentionMonths = 25;
+    public const int MinimumAnalyticsAggregateRetentionMonths = 13;
+    public const int MaximumAnalyticsAggregateRetentionMonths = 37;
+    public const int DefaultAnalyticsRejectionRetentionDays = 7;
+    public const int MinimumAnalyticsRejectionRetentionDays = 1;
+    public const int MaximumAnalyticsRejectionRetentionDays = 14;
+    public const int DefaultAnalyticsSessionTimeoutMinutes = 30;
+    public const int MinimumAnalyticsSessionTimeoutMinutes = 5;
+    public const int MaximumAnalyticsSessionTimeoutMinutes = 120;
+    public const int MaximumAnalyticsBatchSize = 100;
+    public const int MaximumAnalyticsRoutesPerApp = 500;
+    public const long DefaultAnalyticsStorageBudgetBytes = 104_857_600;
+    public const int MaximumIngestKeyLifetimeDays = 90;
+    public const int DefaultIngestKeyOverlapDays = 7;
+    public const int MaximumIngestKeyOverlapDays = 7;
 }

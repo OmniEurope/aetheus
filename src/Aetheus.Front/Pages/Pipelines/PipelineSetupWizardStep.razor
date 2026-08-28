@@ -1,0 +1,59 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Step == 0)
+{
+    <RadzenStack Gap="1rem" class="pipeline-setup-step">
+        <RadzenText TextStyle="TextStyle.H5">@L["SelectPipelineProject"]</RadzenText>
+        <RadzenFormField Text="@L["Project"]" class="rz-w-100">
+            <RadzenDropDown TValue="int?" Data="@Projects" TextProperty="Name" ValueProperty="Id"
+                            Value="@ProjectId" ValueChanged="@ProjectIdChanged" class="rz-w-100" />
+        </RadzenFormField>
+        <RadzenFormField Text="@L["PipelinePrefix"]" class="rz-w-100">
+            <RadzenTextBox Value="@Prefix" ValueChanged="@PrefixChanged" class="rz-w-100" />
+        </RadzenFormField>
+        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["PipelinePrefixHint"]</RadzenText>
+    </RadzenStack>
+}
+else if (Step == 1)
+{
+    <div class="pipeline-setup-step">
+        <RadzenText TextStyle="TextStyle.H5">@L["ApplicationArchitecture"]</RadzenText>
+        <div class="pipeline-setup-options">
+            @Option("web", L["Frontend"], L["FrontendPipelineHint"], Frontend, FrontendChanged)
+            @Option("dns", L["Backend"], L["BackendPipelineHint"], Backend, BackendChanged)
+            @Option("database", L["Database"], L["DatabasePipelineHint"], Database, DatabaseChanged)
+        </div>
+    </div>
+}
+else if (Step == 2)
+{
+    <div class="pipeline-setup-step">
+        <RadzenText TextStyle="TextStyle.H5">@L["SelectPipelineCapabilities"]</RadzenText>
+        <div class="pipeline-setup-options">
+            @Option("build", "CI", L["CiPipelineHint"], Ci, CiChanged)
+            @Option("analytics", L["Quality"], L["QualityPipelineHint"], Quality, QualityChanged)
+            @Option("security", L["Security"], L["SecurityPipelineHint"], Security, SecurityChanged)
+            @Option("science", "QA", L["QaPipelineHint"], Qa, QaChanged)
+            @Option("verified", L["Candidate"], L["CandidatePipelineHint"], Candidate, CandidateChanged)
+            @Option("bedtime", L["Nightly"], L["NightlyPipelineHint"], Nightly, NightlyChanged)
+            @Option("rocket_launch", L["ProductionDeployment"], L["ProductionPipelineHint"], Production, ProductionChanged)
+            @Option("bolt", L["FastDeploy"], L["FastPipelineHint"], FastDeploy, FastDeployChanged)
+            @Option("undo", L["Rollback"], L["RollbackPipelineHint"], Rollback, RollbackChanged)
+            @Option("inventory_2", L["Packages"], L["PackagesPipelineHint"], Packages, PackagesChanged)
+        </div>
+    </div>
+}
+else
+{
+    <div class="pipeline-setup-step">
+        <RadzenText TextStyle="TextStyle.H5">@L["PipelinesToCreate"]</RadzenText>
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat">
+            @ProjectName · @ArchitectureSummary · @SummaryItems.Count @L["Pipelines"]
+        </RadzenAlert>
+        <div class="pipeline-setup-summary">
+            @foreach (var item in SummaryItems)
+            {
+                <div><RadzenIcon Icon="account_tree" /><strong>@item.Name</strong><span>@item.TemplateName</span></div>
+            }
+        </div>
+    </div>
+}

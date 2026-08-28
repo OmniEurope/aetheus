@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.AspNetCore.Components;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 

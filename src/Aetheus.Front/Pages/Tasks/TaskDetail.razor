@@ -1,0 +1,138 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/tasks/{TaskId:int}"
+@using Aetheus.Front.Helpers
+
+<PageTitle>@($"{L["Task"]} #{TaskId}") - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="AetheusLoaderSize.Large" />
+}
+else if (_task is null)
+{
+    <Aetheus.Front.Shared.PageHeader Title="@($"{L["Task"]} #{TaskId}")" Icon="task_alt" BackHref="/tasks" />
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat">@L["TaskNotFound"]</RadzenAlert>
+}
+else
+{
+    <Aetheus.Front.Shared.PageHeader Title="@($"{L["Task"]} #{_task.Id}")" Icon="task_alt" BackHref="/tasks">
+        <ChildContent>
+            <RadzenBadge BadgeStyle="@TaskListView.GetTaskBadge(_task.Status)" Text="@L.Localize(_task.Status)" />
+            @if (!string.IsNullOrWhiteSpace(_task.FailureCode))
+            {
+                <RadzenBadge BadgeStyle="@TaskListView.GetFailureBadge(_task.FailureCode)"
+                    Icon="@TaskListView.GetFailureIcon(_task.FailureCode)" Text="@L[_task.FailureCode]" />
+            }
+        </ChildContent>
+        <Actions>
+            @if (CanCancel)
+            {
+                <RadzenButton Icon="cancel" Text="@L["CancelTask"]" Size="ButtonSize.Small"
+                    Click="@CancelTaskAsync" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+            }
+        </Actions>
+    </Aetheus.Front.Shared.PageHeader>
+
+    @if (!string.IsNullOrWhiteSpace(_task.FailureReason))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" class="rz-mt-4">
+            <strong>@L["FailureReason"]</strong>: @_task.FailureReason
+        </RadzenAlert>
+    }
+
+    <RadzenRow Gap="1rem" class="rz-mt-4">
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenCard>
+                <div class="detail-panel-title">
+                    <RadzenIcon Icon="info" class="run-tile-icon rz-color-primary" />
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Details"]</RadzenText>
+                </div>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Name"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@_task.Name</RadzenText>
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Server"]</RadzenText>
+                    <a href="@($"/servers/{_task.ServerId}/overview")" class="detail-value-link">@_task.ServerName</a>
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Source"]</RadzenText>
+                    @if (_task.PipelineRunId is { } pipelineRunId)
+                    {
+                        <a href="@($"/pipelines/runs/{pipelineRunId}")" class="detail-value-link">@($"{L["PipelineRun"]} #{pipelineRunId}")</a>
+                    }
+                    else
+                    {
+                        <span>@($"{L["Server"]}: {_task.ServerName}")</span>
+                    }
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Executor"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@_task.Executor</RadzenText>
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["TimeoutSeconds"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@_task.TimeoutSeconds</RadzenText>
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Exit"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@(_task.ExitCode?.ToString() ?? "-")</RadzenText>
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenCard>
+                <div class="detail-panel-title">
+                    <RadzenIcon Icon="schedule" class="run-tile-icon rz-color-info" />
+                    <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Duration"]</RadzenText>
+                </div>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Created"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@_task.CreatedAt.ToString("g")</RadzenText>
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Started"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@FormatDate(_task.StartedAt)</RadzenText>
+                </RadzenStack>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="detail-row">
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["Completed"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2">@FormatDate(_task.CompletedAt)</RadzenText>
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenColumn>
+    </RadzenRow>
+
+    @if (!string.IsNullOrWhiteSpace(_task.Command))
+    {
+        <RadzenCard class="rz-mt-4">
+            <div class="detail-panel-title">
+                <RadzenIcon Icon="code" class="run-tile-icon rz-color-secondary" />
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Command"]</RadzenText>
+            </div>
+            <pre class="exception-pre">@_task.Command</pre>
+        </RadzenCard>
+    }
+
+    <RadzenCard class="rz-mt-4">
+        <div class="detail-panel-title">
+            <RadzenIcon Icon="receipt_long" class="run-tile-icon rz-color-info" />
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["Logs"]</RadzenText>
+        </div>
+        <div class="task-log-viewer">
+            @if (_logs.Count == 0)
+            {
+                <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoLogsAvailable"]</RadzenText>
+            }
+            else
+            {
+                @foreach (var log in _logs)
+                {
+                    <div class="log-entry log-level-@log.Level.ToString().ToLowerInvariant()">
+                        <span class="log-timestamp">[@log.Timestamp.ToString("HH:mm:ss")]</span>
+                        <span>[@L.Localize(log.Level)]</span> @log.Message
+                    </div>
+                }
+            }
+        </div>
+    </RadzenCard>
+}

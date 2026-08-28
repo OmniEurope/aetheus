@@ -1,31 +1,39 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 
-public sealed partial class MailCollector(ILogger<MailCollector> logger, IShellRunner shell)
+public sealed partial class MailCollector(
+    ILogger<MailCollector> logger,
+    IShellRunner shell,
+    Func<string, bool>? fileExists = null)
     : BaseShellCollector<MailCollector>(logger, shell), IMailCollector
 {
+    private const string PostfixMainConfigPath = "/etc/postfix/main.cf";
+
     public async Task<MailDataDto> CollectAsync(CancellationToken ct = default)
     {
-        var hasPostfix = false;
+        var hasConfiguredPostfix = false;
         try
         {
-            hasPostfix = await DetectBinaryAsync("postfix", ct).ConfigureAwait(false);
-            if (!hasPostfix)
+            var hasPostfixBinary = await DetectBinaryAsync("postfix", ct).ConfigureAwait(false);
+            if (!hasPostfixBinary)
                 return new MailDataDto { IsInstalled = false };
 
+            var postfixVersion = await TryCollectConfiguredPostfixVersionAsync(ct).ConfigureAwait(false);
+            if (postfixVersion is null)
+                return new MailDataDto { IsInstalled = false };
+
+            hasConfiguredPostfix = true;
             var hasDovecot = await DetectBinaryAsync("dovecot", ct).ConfigureAwait(false);
 
-            var postfixVersionTask = CollectPostfixVersionAsync(ct);
             var dovecotVersionTask = hasDovecot ? CollectDovecotVersionAsync(ct) : Task.FromResult(string.Empty);
             var postfixRunningTask = CollectServiceRunningAsync("postfix", ct);
             var dovecotRunningTask = hasDovecot ? CollectServiceRunningAsync("dovecot", ct) : Task.FromResult(false);
             var queueTask = CollectQueueSizeAsync(ct);
             var domainsTask = CollectDomainsAsync(ct);
 
-            await Task.WhenAll(postfixVersionTask, dovecotVersionTask, postfixRunningTask, dovecotRunningTask, queueTask, domainsTask)
+            await Task.WhenAll(dovecotVersionTask, postfixRunningTask, dovecotRunningTask, queueTask, domainsTask)
                 .ConfigureAwait(false);
 
             return new MailDataDto
@@ -33,7 +41,7 @@ public sealed partial class MailCollector(ILogger<MailCollector> logger, IShellR
                 IsInstalled = true,
                 IsPostfixRunning = await postfixRunningTask.ConfigureAwait(false),
                 IsDovecotRunning = await dovecotRunningTask.ConfigureAwait(false),
-                PostfixVersion = await postfixVersionTask.ConfigureAwait(false),
+                PostfixVersion = postfixVersion,
                 DovecotVersion = await dovecotVersionTask.ConfigureAwait(false),
                 QueueSize = await queueTask.ConfigureAwait(false),
                 Domains = await domainsTask.ConfigureAwait(false)
@@ -41,12 +49,12 @@ public sealed partial class MailCollector(ILogger<MailCollector> logger, IShellR
         }
         catch (Exception ex)
         {
-            // F-ENG-06: a partial failure after postfix was found must not report mail as uninstalled,
+            // F-ENG-06: a partial failure after a configured postfix was found must not report mail as uninstalled,
             // and must be visible (LogWarning), not hidden in Debug.
-            Logger.LogWarning(ex, hasPostfix
-                ? "Mail data collection failed after detecting postfix; reporting installed"
+            Logger.LogWarning(ex, hasConfiguredPostfix
+                ? "Mail data collection failed after validating postfix; reporting installed"
                 : "Mail detection failed");
-            return new MailDataDto { IsInstalled = hasPostfix };
+            return new MailDataDto { IsInstalled = hasConfiguredPostfix };
         }
     }
 
@@ -59,18 +67,38 @@ public sealed partial class MailCollector(ILogger<MailCollector> logger, IShellR
         return res.ExitCode == 0 && !string.IsNullOrWhiteSpace(res.StdOut);
     }
 
-    private async Task<string> CollectPostfixVersionAsync(CancellationToken ct)
+    private async Task<string?> TryCollectConfiguredPostfixVersionAsync(CancellationToken ct)
     {
+        if (!(fileExists ?? File.Exists)(PostfixMainConfigPath))
+        {
+            Logger.LogDebug(
+                "Postfix binary found but {ConfigPath} is absent; skipping mail collection",
+                PostfixMainConfigPath);
+            return null;
+        }
+
         try
         {
             var res = await Shell.RunExecAsync("postconf", ["mail_version"], ct).ConfigureAwait(false);
+            if (res.ExitCode != 0)
+            {
+                Logger.LogDebug(
+                    "Postfix configuration validation failed with exit code {ExitCode}; skipping mail collection",
+                    res.ExitCode);
+                return null;
+            }
+
             var match = PostfixVersionRegex().Match(res.StdOut);
-            return match.Success ? match.Groups[1].Value : string.Empty;
+            if (match.Success)
+                return match.Groups[1].Value;
+
+            Logger.LogDebug("Postfix configuration validation returned no mail version; skipping mail collection");
+            return null;
         }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "Failed to get Postfix version");
-            return string.Empty;
+            Logger.LogDebug(ex, "Postfix configuration validation failed; skipping mail collection");
+            return null;
         }
     }
 

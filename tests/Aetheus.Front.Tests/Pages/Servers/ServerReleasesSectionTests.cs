@@ -18,7 +18,7 @@ public class ServerReleasesSectionTests : BunitContext
     [Fact]
     public void Renders_EmptyReleases_ShowsHeadingAndEmptyState()
     {
-        _handler.SetJsonResponse("api/servers/1/releases", new List<ReleaseDto>());
+        _handler.SetJsonResponse("api/servers/1/releases", new PaginatedResult<ReleaseDto>());
         var cut = Render<ServerReleasesSection>(p => p.Add(x => x.ServerId, 1));
         // Server-scope ReleasesList always renders the "Releases" heading, and the empty
         // grid shows the NoReleasesFound empty-state (not just an empty shell).
@@ -29,9 +29,12 @@ public class ServerReleasesSectionTests : BunitContext
     [Fact]
     public void Renders_WithReleases_ShowsVersionAndLink()
     {
-        _handler.SetJsonResponse("api/servers/1/releases", new List<ReleaseDto>
+        _handler.SetJsonResponse("api/servers/1/releases", new PaginatedResult<ReleaseDto>
         {
-            new() { Id = 5, Version = "1.0.0", Status = ReleaseStatus.Published, BranchName = "main" }
+            Items = [new() { Id = 5, Version = "1.0.0", Status = ReleaseStatus.Published, BranchName = "main" }],
+            TotalCount = 1,
+            Page = 1,
+            PageSize = 25
         });
         var cut = Render<ServerReleasesSection>(p => p.Add(x => x.ServerId, 1));
         // The release version is loaded into the grid and rendered as a link to /releases/{id}.

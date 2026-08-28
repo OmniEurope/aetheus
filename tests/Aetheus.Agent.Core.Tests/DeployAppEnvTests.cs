@@ -3,7 +3,7 @@ using Aetheus.Agent.Core.Operations;
 
 namespace Aetheus.Agent.Core.Tests;
 
-/// <summary>PLAN-001 phase 2 zero-config: the deploy executor's app-env extraction + env-file writing.</summary>
+/// <summary>ADR-021 phase 2 zero-config: the deploy executor's app-env extraction + env-file writing.</summary>
 public class DeployAppEnvTests
 {
     [Fact]

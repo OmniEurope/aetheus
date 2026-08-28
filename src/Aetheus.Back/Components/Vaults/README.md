@@ -26,7 +26,7 @@ AES-256 encrypted secret storage: vault CRUD, secret lifecycle (create/update/ro
 - `VaultsController` -- thin controller, RBAC-gated
 - `IVaultService` / `VaultService` -- vault/secret lifecycle, encryption, rotation
 - `IVaultRepository` / `VaultRepository` -- EF data access
-- `SecretExpirationService` -- background: alerts on expiring secrets
+- `SecretExpirationService` (in `Services/`, outside this module) -- background: alerts on expiring secrets
 
 ## Cross-Module Dependencies
 

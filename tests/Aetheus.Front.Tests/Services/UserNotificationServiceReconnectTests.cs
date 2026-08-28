@@ -45,7 +45,7 @@ public class UserNotificationServiceReconnectTests : BunitContext
     }
 
     [Fact]
-    public async Task DisposeAsync_AfterFailedStart_CancelsRetryLoop_DoesNotThrow()
+    public async Task DisposeAsync_AfterFailedStart_CancelsRetryLoop_LeavesItNull()
     {
         var sut = CreateService();
         await sut.StartAsync();

@@ -1,0 +1,100 @@
+# Exercises no package, one published package and multiple published packages on the same source SHA.
+name: toto-conformance-injection
+trigger: manual
+parameters:
+  - name: telemetryVersion
+    display_name: Exact Aetheus.Telemetry version
+    type: string
+    default: "0.1.0"
+  - name: telemetrySha256
+    display_name: Exact Aetheus.Telemetry package digest
+    type: string
+    required: true
+  - name: webAnalyticsVersion
+    display_name: Exact Aetheus.WebAnalytics version
+    type: string
+    default: "0.1.0"
+  - name: webAnalyticsSha256
+    display_name: Exact Aetheus.WebAnalytics package digest
+    type: string
+    required: true
+variables:
+  TELEMETRY_VERSION: "${{ parameters.telemetryVersion }}"
+  TELEMETRY_SHA256: "${{ parameters.telemetrySha256 }}"
+  WEB_ANALYTICS_VERSION: "${{ parameters.webAnalyticsVersion }}"
+  WEB_ANALYTICS_SHA256: "${{ parameters.webAnalyticsSha256 }}"
+
+stages:
+  - name: NoneCandidate
+    os: linux
+    steps:
+      - name: None
+        type: trigger
+        pipeline: toto-candidate
+        variables:
+          TOTO_ENABLE_TELEMETRY: "false"
+          TOTO_ENABLE_WEB_ANALYTICS: "false"
+        timeout_seconds: 10800
+
+  - name: NonePromotion
+    os: linux
+    depends_on: [NoneCandidate]
+    steps:
+      - name: PromoteNone
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(NoneCandidate.None.CANDIDATE_VERSION)"
+        timeout_seconds: 3600
+
+  - name: TelemetryCandidate
+    os: linux
+    depends_on: [NonePromotion]
+    steps:
+      - name: Telemetry
+        type: trigger
+        pipeline: toto-candidate
+        variables:
+          TOTO_ENABLE_TELEMETRY: "true"
+          TOTO_TELEMETRY_VERSION: "$(TELEMETRY_VERSION)"
+          TOTO_TELEMETRY_SHA256: "$(TELEMETRY_SHA256)"
+          TOTO_ENABLE_WEB_ANALYTICS: "false"
+        timeout_seconds: 10800
+
+  - name: TelemetryPromotion
+    os: linux
+    depends_on: [TelemetryCandidate]
+    steps:
+      - name: PromoteTelemetry
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(TelemetryCandidate.Telemetry.CANDIDATE_VERSION)"
+        timeout_seconds: 3600
+
+  - name: MultipleCandidate
+    os: linux
+    depends_on: [TelemetryPromotion]
+    steps:
+      - name: Multiple
+        type: trigger
+        pipeline: toto-candidate
+        variables:
+          TOTO_ENABLE_TELEMETRY: "true"
+          TOTO_TELEMETRY_VERSION: "$(TELEMETRY_VERSION)"
+          TOTO_TELEMETRY_SHA256: "$(TELEMETRY_SHA256)"
+          TOTO_ENABLE_WEB_ANALYTICS: "true"
+          TOTO_WEB_ANALYTICS_VERSION: "$(WEB_ANALYTICS_VERSION)"
+          TOTO_WEB_ANALYTICS_SHA256: "$(WEB_ANALYTICS_SHA256)"
+        timeout_seconds: 10800
+
+  - name: MultiplePromotion
+    os: linux
+    depends_on: [MultipleCandidate]
+    steps:
+      - name: PromoteMultiple
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(MultipleCandidate.Multiple.CANDIDATE_VERSION)"
+        timeout_seconds: 3600

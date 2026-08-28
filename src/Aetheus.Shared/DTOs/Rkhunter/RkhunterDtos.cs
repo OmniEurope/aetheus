@@ -7,12 +7,16 @@ namespace Aetheus.Shared.DTOs;
 public sealed record RkhunterDataDto
 {
     public bool IsInstalled { get; init; }
+    [StringLength(100)]
     public string Version { get; init; } = string.Empty;
+    [StringLength(100)]
     public string DatabaseVersion { get; init; } = string.Empty;
     public DateTime LastScanTime { get; init; }
+    [StringLength(100)]
     public string LastScanStatus { get; init; } = string.Empty;
     public int WarningCount { get; init; }
     public DateTime DatabaseLastUpdated { get; init; }
+    [StringLength(120)]
     public string? ScanScheduleCron { get; init; }
 }
 

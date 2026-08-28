@@ -6,7 +6,7 @@ namespace Aetheus.Shared.DTOs;
 
 // --- T-01: Test Case Management ---
 
-public sealed record TestSuiteDto
+public abstract record TestSuiteBaseDto
 {
     public int Id { get; init; }
     public int ProjectId { get; init; }
@@ -15,23 +15,19 @@ public sealed record TestSuiteDto
     public TestSuiteType Type { get; init; }
     public int? PipelineId { get; init; }
     public string? PipelineName { get; init; }
-    public int TestCaseCount { get; init; }
-    public int PassedCount { get; init; }
-    public int FailedCount { get; init; }
     public DateTime CreatedAt { get; init; }
 }
 
-public sealed record TestSuiteDetailDto
+public sealed record TestSuiteDto : TestSuiteBaseDto
 {
-    public int Id { get; init; }
-    public int ProjectId { get; init; }
-    public string Name { get; init; } = string.Empty;
-    public string? Description { get; init; }
-    public TestSuiteType Type { get; init; }
-    public int? PipelineId { get; init; }
-    public string? PipelineName { get; init; }
+    public int TestCaseCount { get; init; }
+    public int PassedCount { get; init; }
+    public int FailedCount { get; init; }
+}
+
+public sealed record TestSuiteDetailDto : TestSuiteBaseDto
+{
     public List<TestCaseDto> TestCases { get; init; } = [];
-    public DateTime CreatedAt { get; init; }
 }
 
 public sealed record CreateTestSuiteRequest

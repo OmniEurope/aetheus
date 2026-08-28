@@ -2,9 +2,6 @@
 using System.Globalization;
 using System.Text;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Constants;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Monitoring;
 

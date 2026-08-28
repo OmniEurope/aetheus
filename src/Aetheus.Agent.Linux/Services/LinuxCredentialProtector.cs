@@ -120,14 +120,26 @@ public sealed class LinuxCredentialProtector : ICredentialProtector, IDisposable
         // restricted location so already-deployed agents don't lose their keys.
         var legacyPath = GetLegacyKeyMaterialFilePath(fileName);
         if (File.Exists(legacyPath))
-        {
-            var legacyMaterial = File.ReadAllBytes(legacyPath);
-            WriteRestricted(path, legacyMaterial);
-            return legacyMaterial;
-        }
+            return MigrateLegacyMaterial(legacyPath, path);
 
         WriteRestricted(path, freshMaterial);
         return freshMaterial;
+    }
+
+    internal static byte[] MigrateLegacyMaterial(string legacyPath, string restrictedPath)
+    {
+        var legacyMaterial = File.ReadAllBytes(legacyPath);
+        WriteRestricted(restrictedPath, legacyMaterial);
+        var migratedMaterial = File.ReadAllBytes(restrictedPath);
+        if (!CryptographicOperations.FixedTimeEquals(legacyMaterial, migratedMaterial))
+            throw new CryptographicException("Migrated agent key material failed verification.");
+
+        // Delete only after the restricted copy exists and its bytes were verified. A failure before
+        // this point leaves the legacy copy intact so the deployed agent can retry without key loss.
+        File.Delete(legacyPath);
+        if (File.Exists(legacyPath))
+            throw new IOException("Legacy agent key material could not be removed after migration.");
+        return migratedMaterial;
     }
 
     // Atomically create the file with 0600 from the very first byte, closing the

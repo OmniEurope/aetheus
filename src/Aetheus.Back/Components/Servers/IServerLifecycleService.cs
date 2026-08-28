@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Servers;
 
@@ -11,7 +9,10 @@ namespace Aetheus.Back.Components.Servers;
 /// </summary>
 public interface IServerLifecycleService
 {
-    Task<PaginatedResult<ServerDto>> GetServersAsync(PaginationRequest request, ServerType? type = null, ServerStatus? status = null, List<int>? accessibleIds = null, CancellationToken ct = default);
+    Task<PaginatedResult<ServerDto>> GetServersAsync(PaginationRequest request, ServerType? type = null, ServerStatus? status = null, AgentCompatibilityStatus? compatibility = null, List<int>? accessibleIds = null, CancellationToken ct = default);
+    Task<AgentCompatibilitySummaryDto> GetAgentCompatibilitySummaryAsync(
+        List<int>? accessibleIds = null,
+        CancellationToken ct = default);
     Task<ServerDetailDto?> GetServerDetailAsync(int id, CancellationToken ct = default);
     Task<ServerDto?> UpdateServerAsync(int id, UpdateServerRequest request, CancellationToken ct = default);
 
@@ -35,7 +36,6 @@ public interface IServerLifecycleService
     Task<List<PipelineDto>> GetServerPipelinesAsync(int serverId, CancellationToken ct = default);
     Task<List<VariableLibraryDto>> GetServerVariableLibrariesAsync(int serverId, CancellationToken ct = default);
     Task<List<VaultDto>> GetServerVaultsAsync(int serverId, CancellationToken ct = default);
-    Task<List<ReleaseDto>> GetServerReleasesAsync(int serverId, CancellationToken ct = default);
     Task<PaginatedResult<ServerTaskDto>> GetServerTasksAsync(int serverId, PaginationRequest request, CancellationToken ct = default);
     Task<PaginatedResult<TaskLogDto>> GetServerLogsAsync(int serverId, PaginationRequest request, CancellationToken ct = default);
 }

@@ -1,0 +1,14 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<RadzenDataGrid Responsive="false" Data="@ParameterList" TItem="KeyValuePair<string, string>" Density="Density.Compact"
+                AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" class="run-params-grid" AllowColumnResize="true">
+    <Columns>
+        <RadzenDataGridColumn TItem="KeyValuePair<string, string>" Property="Key" Title="@L["Parameter"]" Width="40%" />
+        <RadzenDataGridColumn TItem="KeyValuePair<string, string>" Property="Value" Title="@L["Value"]">
+            <Template Context="parameter"><code>@parameter.Value</code></Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+<RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" class="rz-mt-3">
+    <Aetheus.Front.Shared.DialogCloseButton />
+</RadzenStack>

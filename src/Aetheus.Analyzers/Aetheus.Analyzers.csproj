@@ -8,7 +8,6 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <IsPackable>true</IsPackable>
     <PackageId>Aetheus.Analyzers</PackageId>
-    <Version>1.0.0</Version>
     <Authors>Aetheus</Authors>
     <Description>Custom Roslyn analyzers enforcing Aetheus coding standards (PRM001–PRM004)</Description>
     <PackageTags>analyzers;roslyn;aetheus</PackageTags>
@@ -16,7 +15,8 @@
     <DevelopmentDependency>true</DevelopmentDependency>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <NoWarn>RS2008;NU5128</NoWarn>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <AetheusMinimumAnalyzerSdkVersion>10.0.100</AetheusMinimumAnalyzerSdkVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,5 +28,10 @@
   <ItemGroup>
     <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
+
+  <Target Name="ValidateAnalyzerSdk" BeforeTargets="PrepareForBuild"
+          Condition="$([MSBuild]::VersionLessThan('$(NETCoreSdkVersion)', '$(AetheusMinimumAnalyzerSdkVersion)'))">
+    <Error Text="Aetheus.Analyzers requires .NET SDK $(AetheusMinimumAnalyzerSdkVersion) or newer; current SDK is $(NETCoreSdkVersion)." />
+  </Target>
 
 </Project>

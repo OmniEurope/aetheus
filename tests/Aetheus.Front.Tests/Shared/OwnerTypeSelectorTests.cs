@@ -269,4 +269,73 @@ public class OwnerTypeSelectorTests : BunitContext
         var result = await (Task<int?>)method.Invoke(cut.Instance, [10])!;
         Assert.Equal(2, result);
     }
+
+    // The parent assigns the owner inside an async load that finishes after the first render, so a
+    // selector that decides its mode on render one decides it from a null id. That is what made
+    // /pipelines/new?projectId=13 offer "Global" with no project dropdown.
+    [Fact]
+    public void LateArrivingProjectId_StillInfersProjectKind()
+    {
+        var cut = Render<OwnerTypeSelector>(p => p
+            .Add(x => x.Projects, MakeProjects()));
+        Assert.Equal(OwnerTypeSelector.OwnerKind.Global, ReadKind(cut.Instance));
+
+        cut.Render(p => p
+            .Add(x => x.Projects, MakeProjects())
+            .Add(x => x.ProjectId, 2));
+
+        Assert.Equal(OwnerTypeSelector.OwnerKind.Project, ReadKind(cut.Instance));
+        Assert.Equal(2, ReadSelectedProjectId(cut.Instance));
+    }
+
+    // The other half of the contract, and the reason the original code latched at all: choosing a
+    // scoped mode makes the parent clear every owner id, and re-inferring from those cleared ids
+    // would snap the selector straight back to Global before the user could pick an owner.
+    [Fact]
+    public async Task ExplicitKindChoice_SurvivesTheParentClearingEveryOwnerId()
+    {
+        var cut = Render<OwnerTypeSelector>(p => p
+            .Add(x => x.Projects, MakeProjects()));
+
+        var onKindChanged = typeof(OwnerTypeSelector).GetMethod("OnKindChanged", Priv)!;
+        await cut.InvokeAsync(() => (Task)onKindChanged.Invoke(
+            cut.Instance, [OwnerTypeSelector.OwnerKind.Project])!);
+
+        Assert.Equal(OwnerTypeSelector.OwnerKind.Project, ReadKind(cut.Instance));
+
+        cut.Render(p => p
+            .Add(x => x.Projects, MakeProjects())
+            .Add(x => x.ProjectId, (int?)null)
+            .Add(x => x.EnvironmentId, (int?)null)
+            .Add(x => x.ProjectServerId, (int?)null));
+
+        Assert.Equal(OwnerTypeSelector.OwnerKind.Project, ReadKind(cut.Instance));
+    }
+
+    // Symmetric: a user who deliberately goes back to Global must not be dragged into Project by a
+    // stale id the parent has not cleared yet.
+    [Fact]
+    public async Task ExplicitReturnToGlobal_IsNotOverriddenByABoundOwnerId()
+    {
+        var cut = Render<OwnerTypeSelector>(p => p
+            .Add(x => x.Projects, MakeProjects())
+            .Add(x => x.ProjectId, 1));
+        Assert.Equal(OwnerTypeSelector.OwnerKind.Project, ReadKind(cut.Instance));
+
+        var onKindChanged = typeof(OwnerTypeSelector).GetMethod("OnKindChanged", Priv)!;
+        await cut.InvokeAsync(() => (Task)onKindChanged.Invoke(
+            cut.Instance, [OwnerTypeSelector.OwnerKind.Global])!);
+
+        cut.Render(p => p
+            .Add(x => x.Projects, MakeProjects())
+            .Add(x => x.ProjectId, 1));
+
+        Assert.Equal(OwnerTypeSelector.OwnerKind.Global, ReadKind(cut.Instance));
+    }
+
+    private static OwnerTypeSelector.OwnerKind ReadKind(OwnerTypeSelector instance)
+        => (OwnerTypeSelector.OwnerKind)typeof(OwnerTypeSelector).GetField("_kind", Priv)!.GetValue(instance)!;
+
+    private static int? ReadSelectedProjectId(OwnerTypeSelector instance)
+        => (int?)typeof(OwnerTypeSelector).GetField("_selectedProjectId", Priv)!.GetValue(instance);
 }

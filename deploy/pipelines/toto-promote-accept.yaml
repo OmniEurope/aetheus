@@ -1,0 +1,48 @@
+# Toto adapter for the reusable application-promotion contract.
+name: toto-promote-accept
+extends: application-promotion@2
+trigger: manual
+variable_libraries:
+  - toto-observability
+variables:
+  APPLICATION_DEPLOY_PIPELINE: toto-deploy-accept-adapter
+  APPLICATION_VERIFY_PIPELINE: toto-verify-accept
+
+stages:
+  - name: Deploy
+    group: Deploy
+    execution_role: build
+    os: linux
+    environment: accept
+    steps:
+      - name: Deploy exact candidate bytes
+        type: trigger
+        pipeline: toto-deploy-accept-adapter
+        variables:
+          APPLICATION_CANDIDATE_VERSION: "$(CANDIDATE_VERSION)"
+        timeout_seconds: 3600
+
+  - name: Verify
+    group: Smoke
+    execution_role: build
+    os: linux
+    environment: accept
+    depends_on: [Deploy]
+    steps:
+      - name: Verify promoted application
+        type: trigger
+        pipeline: toto-verify-accept
+        timeout_seconds: 600
+
+  - name: MarkDeployed
+    group: Release
+    execution_role: build
+    os: linux
+    environment: accept
+    depends_on: [Verify]
+    steps:
+      - name: Mark the same candidate release as deployed
+        type: release
+        version: "$(CANDIDATE_VERSION)"
+        deployed: true
+        timeout_seconds: 300

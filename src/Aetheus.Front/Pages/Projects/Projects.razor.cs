@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
+using System.Text.Json;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Aetheus.Front.Pages.Projects;
 
@@ -32,11 +22,18 @@ public partial class Projects : IAsyncDisposable
     private bool _canWrite;
     private string? _search;
     private ProjectStatus? _statusFilter;
+    private ProjectSortOption _sortOption = ProjectSortOption.Activity;
+    private ProjectViewMode _viewMode = ProjectViewMode.Comfortable;
+    private bool _favoritesOnly;
+    private HashSet<int> _favoriteProjectIds = [];
 
     private List<object> _statusOptions = [];
+    private List<object> _sortOptions = [];
     private HubConnection? _hubConnection;
     private HubConnection? _pipelineHub;
     private readonly TrailingReloadCoalescer _pipelineReload = new(1000);
+    private const string FavoriteStorageKey = "aetheus.projects.favorites";
+    private const string ViewModeStorageKey = "aetheus.projects.view-mode";
 
     private string CacheKey => $"projects:{_search}:{_statusFilter}";
 
@@ -52,6 +49,12 @@ public partial class Projects : IAsyncDisposable
         [
             new { Text = L["Active"].Value, Value = (ProjectStatus?)ProjectStatus.Active },
             new { Text = L["Archived"].Value, Value = (ProjectStatus?)ProjectStatus.Archived }
+        ];
+        _sortOptions =
+        [
+            new { Text = L["SortByActivity"].Value, Value = ProjectSortOption.Activity },
+            new { Text = L["SortNameAscending"].Value, Value = ProjectSortOption.NameAscending },
+            new { Text = L["SortNameDescending"].Value, Value = ProjectSortOption.NameDescending }
         ];
         Breadcrumb.Set(new BreadcrumbItem(L["Projects"]));
         // MainLayout loads permissions in parallel with route activation, so this
@@ -69,6 +72,28 @@ public partial class Projects : IAsyncDisposable
         }
         catch (HttpRequestException) { } // 401 on expired JWT - redirect handled by AuthProvider
         await StartHubAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            var favoritesJson = await JS.InvokeAsync<string?>("localStorage.getItem", FavoriteStorageKey);
+            if (!string.IsNullOrWhiteSpace(favoritesJson))
+                _favoriteProjectIds = JsonSerializer.Deserialize<HashSet<int>>(favoritesJson) ?? [];
+
+            var viewMode = await JS.InvokeAsync<string?>("localStorage.getItem", ViewModeStorageKey);
+            if (Enum.TryParse<ProjectViewMode>(viewMode, ignoreCase: true, out var parsed))
+                _viewMode = parsed;
+        }
+        catch (JSException)
+        {
+            // Preferences are an enhancement; the project list remains fully usable without storage.
+        }
+
+        StateHasChanged();
     }
 
     private void OnPermissionsChanged()
@@ -137,8 +162,7 @@ public partial class Projects : IAsyncDisposable
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_hubConnection is not null)
         {
-            try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.Project); } catch { /* best-effort */ }
-            await _hubConnection.DisposeAsync();
+            await _hubConnection.LeaveEntityUpdatesAndDisposeAsync(ResourceType.Project);
             _hubConnection = null;
         }
         if (_pipelineHub is not null)
@@ -153,17 +177,109 @@ public partial class Projects : IAsyncDisposable
     {
         await Cache.RevalidateAsync(
             CacheKey,
-            () => Api.GetProjectsAsync(search: _search, status: _statusFilter),
+            FetchAllProjectsAsync,
             ApplyProjects,
             loading => _loading = loading,
             () => InvokeAsync(StateHasChanged));
+    }
+
+    private async Task<PaginatedResult<ProjectDto>> FetchAllProjectsAsync()
+    {
+        var items = await Api.Projects.GetAllProjectsAsync(
+            search: _search,
+            status: _statusFilter,
+            sortBy: "name");
+        return new PaginatedResult<ProjectDto>
+        {
+            Items = items,
+            TotalCount = items.Count,
+            Page = 1,
+            PageSize = items.Count
+        };
+    }
+
+    private IReadOnlyList<ProjectDto> VisibleProjects
+    {
+        get
+        {
+            IEnumerable<ProjectDto> query = _projects;
+            if (_favoritesOnly)
+                query = query.Where(project => _favoriteProjectIds.Contains(project.Id));
+
+            query = _sortOption switch
+            {
+                ProjectSortOption.NameAscending => query
+                    .OrderByDescending(project => _favoriteProjectIds.Contains(project.Id))
+                    .ThenBy(project => project.Name, StringComparer.CurrentCultureIgnoreCase),
+                ProjectSortOption.NameDescending => query
+                    .OrderByDescending(project => _favoriteProjectIds.Contains(project.Id))
+                    .ThenByDescending(project => project.Name, StringComparer.CurrentCultureIgnoreCase),
+                _ => query
+                    .OrderByDescending(project => _favoriteProjectIds.Contains(project.Id))
+                    .ThenByDescending(ActivityAt)
+                    .ThenBy(project => project.Name, StringComparer.CurrentCultureIgnoreCase)
+            };
+            return query.ToList();
+        }
+    }
+
+    private static string GitCommitHref(ProjectDto project) =>
+        project.InternalRepositoryId is { } repositoryId && !string.IsNullOrWhiteSpace(project.LastCommitSha)
+            ? $"/git-repositories/{repositoryId}/commits/{Uri.EscapeDataString(project.LastCommitSha)}"
+            : $"/git-repositories/commits/{project.LastCommitId}";
+
+    private static DateTime ActivityAt(ProjectDto project)
+    {
+        var activity = project.UpdatedAt;
+        if (project.LastCommitAt is { } commitAt && commitAt > activity) activity = commitAt;
+        if (project.LastRunAt is { } runAt && runAt > activity) activity = runAt;
+        return activity;
+    }
+
+    private async Task ApplyFilters()
+    {
+        await LoadData();
     }
 
     private async Task ClearFilters()
     {
         _search = null;
         _statusFilter = null;
+        _favoritesOnly = false;
         await LoadData();
+    }
+
+    private void ToggleFavoritesOnly() => _favoritesOnly = !_favoritesOnly;
+
+    private async Task ToggleFavoriteAsync(ProjectDto project)
+    {
+        if (!_favoriteProjectIds.Add(project.Id))
+            _favoriteProjectIds.Remove(project.Id);
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "localStorage.setItem",
+                FavoriteStorageKey,
+                JsonSerializer.Serialize(_favoriteProjectIds));
+        }
+        catch (JSException)
+        {
+            // Keep the in-memory preference for this session when storage is unavailable.
+        }
+    }
+
+    private async Task SetViewModeAsync(ProjectViewMode mode)
+    {
+        _viewMode = mode;
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", ViewModeStorageKey, mode.ToString());
+        }
+        catch (JSException)
+        {
+            // Keep the selected mode for this session when storage is unavailable.
+        }
     }
 
     /// <summary>Opens the create-project dialog; reloads the list when a project is created.</summary>
@@ -187,34 +303,49 @@ public partial class Projects : IAsyncDisposable
         }
     }
 
-    // B3KP: the "Repository" chip. An internal-mirror URL (this control plane's own
-    // /git/{id}/*.git smart-HTTP clone endpoint - a git protocol path, not a browsable page)
-    // deep-links to the internal git browser; a genuine external URL opens in a new tab.
-    private ValueTask OpenRepositoryAsync(ProjectDto project)
+    private void OpenProject(int projectId) => Nav.NavigateTo($"/projects/{projectId}");
+
+    private void OnProjectKeyDown(KeyboardEventArgs args, int projectId)
     {
-        if (IsInternalMirrorUrl(project.RepositoryUrl))
+        if (args.Key is "Enter" or " ")
+            OpenProject(projectId);
+    }
+
+    private static string ShortSha(string? sha) =>
+        string.IsNullOrWhiteSpace(sha) ? "-" : sha[..Math.Min(7, sha.Length)];
+
+    private static string ProductionStatusClass(ProjectProductionStatus status) =>
+        status switch
         {
-            Nav.NavigateTo($"/git-repositories?projectId={project.Id}");
-            return ValueTask.CompletedTask;
-        }
-        return JS.InvokeVoidAsync("open", project.RepositoryUrl!, "_blank", "noopener");
-    }
+            ProjectProductionStatus.Online => "online",
+            ProjectProductionStatus.Offline => "offline",
+            _ => "unavailable"
+        };
 
-    /// <summary>True when <paramref name="url"/> is one of our internal smart-HTTP mirror clone URLs
-    /// (<c>/git/{projectId}/{slug}.git</c>) rather than an external repository the browser can open.</summary>
-    internal static bool IsInternalMirrorUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return false;
-        var path = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.AbsolutePath : url;
-        return MirrorRepoPath.IsMirrorPath(path);
-    }
+    private static string RunStatusClass(PipelineStatus? status) =>
+        status?.ToString().ToLowerInvariant() ?? "unknown";
 
-    // B3KP: the git chip jumps to the project overview, which hosts the changelog/history tab.
-    private void OpenGitHistory(int projectId) => Nav.NavigateTo($"/projects/{projectId}/overview");
+    private static string GradeText(AnalysisGrade? grade) => grade?.ToString() ?? "-";
+
+    private static string GradeCss(AnalysisGrade? grade) =>
+        $"analysis-grade-{grade?.ToString().ToLowerInvariant() ?? "na"}";
 
     private static string TruncateText(string text, int maxLength)
     {
         if (text.Length <= maxLength) return text;
         return string.Concat(text.AsSpan(0, maxLength - 3), "...");
+    }
+
+    private enum ProjectSortOption
+    {
+        Activity,
+        NameAscending,
+        NameDescending
+    }
+
+    private enum ProjectViewMode
+    {
+        Comfortable,
+        Dense
     }
 }

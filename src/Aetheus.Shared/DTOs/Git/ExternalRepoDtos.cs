@@ -15,23 +15,11 @@ namespace Aetheus.Shared.DTOs;
 /// otherwise the clone step fails with a 401. The external credential supplied here never reaches the
 /// agent - it is used only by the backend to refresh the mirror.
 /// </remarks>
-public sealed record AttachExternalRepoRequest
+public sealed record AttachExternalRepoRequest : GitRepositoryCoordinatesRequest
 {
-    public int ProjectId { get; init; }
-
-    public GitProviderType ProviderType { get; init; }
-
     /// <summary>Required for self-hosted providers (Gitea / self-hosted GitLab); ignored for SaaS defaults.</summary>
     [StringLength(500)]
     public string? BaseUrl { get; init; }
-
-    [Required]
-    [StringLength(200)]
-    public string OwnerOrGroup { get; init; } = string.Empty;
-
-    [Required]
-    [StringLength(200)]
-    public string RepositoryName { get; init; } = string.Empty;
 
     [StringLength(200)]
     public string? DefaultBranch { get; init; }
@@ -52,8 +40,6 @@ public sealed record AttachExternalRepoRequest
 
     [StringLength(8000)]
     public string? KnownHosts { get; init; }
-
-    public bool AutoSyncEnabled { get; init; } = true;
 
     [Range(1, 1440)]
     public int FetchIntervalMinutes { get; init; } = 15;

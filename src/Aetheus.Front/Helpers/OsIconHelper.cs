@@ -8,6 +8,11 @@ namespace Aetheus.Front.Helpers;
 /// </summary>
 public static class OsIconHelper
 {
+    private static readonly string[] WindowsTokens = ["windows", "microsoft", "win32", "win64"];
+    private static readonly string[] MacTokens = ["darwin", "mac os", "macos", "osx"];
+    private static readonly string[] LinuxTokens =
+        ["linux", "ubuntu", "debian", "centos", "fedora", "rhel", "alpine", "arch", "suse", "unix"];
+
     public static string GetIcon(string? osDescription)
     {
         var family = GetFamily(osDescription);
@@ -47,20 +52,17 @@ public static class OsIconHelper
 
         var os = osDescription.ToLowerInvariant();
 
-        if (os.Contains("windows") || os.Contains("microsoft") || os.Contains("win32") || os.Contains("win64"))
+        if (ContainsAny(os, WindowsTokens))
             return OsFamily.Windows;
-
-        if (os.Contains("darwin") || os.Contains("mac os") || os.Contains("macos") || os.Contains("osx"))
+        if (ContainsAny(os, MacTokens))
             return OsFamily.MacOs;
-
-        if (os.Contains("linux") || os.Contains("ubuntu") || os.Contains("debian") ||
-            os.Contains("centos") || os.Contains("fedora") || os.Contains("rhel") ||
-            os.Contains("alpine") || os.Contains("arch") || os.Contains("suse") ||
-            os.Contains("unix"))
+        if (ContainsAny(os, LinuxTokens))
             return OsFamily.Linux;
-
         return OsFamily.Unknown;
     }
+
+    private static bool ContainsAny(string value, IEnumerable<string> tokens) =>
+        tokens.Any(value.Contains);
 
     private enum OsFamily
     {

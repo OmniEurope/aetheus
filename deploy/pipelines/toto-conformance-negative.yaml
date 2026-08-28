@@ -1,0 +1,23 @@
+# Expected-red probe: a post-deploy failure must still execute Toto's teardown.
+name: toto-conformance-negative
+trigger: manual
+
+stages:
+  - name: CI
+    os: linux
+    steps:
+      - name: Build the exact Toto artifact
+        type: trigger
+        pipeline: toto-ci
+        timeout_seconds: 3600
+
+  - name: ExpectedFailure
+    os: linux
+    depends_on: [CI]
+    steps:
+      - name: Inject failure after deploy and require QA teardown
+        type: trigger
+        pipeline: toto-qa
+        variables:
+          TOTO_CONFORMANCE_FAIL_AFTER_DEPLOY: "true"
+        timeout_seconds: 7200

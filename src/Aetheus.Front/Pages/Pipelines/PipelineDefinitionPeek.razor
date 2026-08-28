@@ -28,7 +28,7 @@
         </div>
         @if (_loading)
         {
-            <div class="run-yaml-code run-yaml-empty"><RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" /></div>
+            <div class="run-yaml-code run-yaml-empty"><AetheusLoader Size="AetheusLoaderSize.Small" /></div>
         }
         else if (_current is { } pk)
         {

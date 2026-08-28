@@ -1,0 +1,56 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PagedDataGridPageBase<AiRunnerProfileDto>
+@page "/admin/ai-profiles"
+
+<PageTitle>@L["AiRunnerProfiles"] - Aetheus</PageTitle>
+
+<PageHeader Title="@L["AiRunnerProfiles"]" Icon="smart_toy" />
+
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
+             JustifyContent="JustifyContent.SpaceBetween" class="rz-mt-4 rz-mb-3">
+    <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["AiRunnerProfilesDescription"]</RadzenText>
+    <RadzenButton Text="@L["Create"]" Icon="add" Click="@(() => OpenDialogAsync(null))"
+                  ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+</RadzenStack>
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else
+{
+    <RadzenDataGrid Responsive="false" @ref="_grid" Data="@_profiles" Count="@_totalCount"
+                    TItem="AiRunnerProfileDto" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
+                    LoadData="@LoadDataAsync" IsLoading="@_loading"
+                    Density="Density.Compact" AllowSorting="true" AllowFiltering="true"
+                    FilterMode="FilterMode.Advanced" class="rz-w-100" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
+        <EmptyTemplate>
+            <EmptyState Icon="smart_toy" Title="@L["NoAiRunnerProfiles"]"
+                        Description="@L["NoAiRunnerProfilesDescription"]" />
+        </EmptyTemplate>
+        <Columns>
+            <RadzenDataGridColumn TItem="AiRunnerProfileDto" Property="Name" Title="@L["Name"]" />
+            <RadzenDataGridColumn TItem="AiRunnerProfileDto" Property="Binary" Title="@L["Binary"]">
+                <Template Context="profile"><code>@profile.Binary</code></Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="AiRunnerProfileDto" Property="TimeoutSeconds" Title="@L["Timeout"]" Width="110px">
+                <Template Context="profile">@profile.TimeoutSeconds s</Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="AiRunnerProfileDto" Property="SendsDataExternally" Title="@L["ExternalData"]" Width="130px">
+                <Template Context="profile">
+                    <RadzenBadge BadgeStyle="@(profile.SendsDataExternally ? BadgeStyle.Warning : BadgeStyle.Success)"
+                                 Text="@(profile.SendsDataExternally ? L["Yes"] : L["No"])" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="AiRunnerProfileDto" Title="@L["Actions"]" Width="120px"
+                                  Sortable="false" Filterable="false" TextAlign="TextAlign.Center">
+                <Template Context="profile">
+                    <RadzenButton Icon="edit" Size="ButtonSize.ExtraSmall" Click="@(() => OpenDialogAsync(profile))"
+                                  title="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
+                    <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Click="@(() => DeleteAsync(profile))"
+                                  title="@L["Delete"]" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+}

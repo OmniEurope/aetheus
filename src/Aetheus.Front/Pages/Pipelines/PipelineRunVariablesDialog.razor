@@ -3,8 +3,8 @@
     <RadzenButton Icon="content_copy" Size="ButtonSize.Small"
                   Text="@L["Copy"]" Click="@CopyAllAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
 </RadzenStack>
-<RadzenDataGrid Data="@VariableList" TItem="KeyValuePair<string, string>" Density="Density.Compact"
-    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+<RadzenDataGrid Responsive="false" Data="@VariableList" TItem="KeyValuePair<string, string>" Density="Density.Compact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true">
     <Columns>
         <RadzenDataGridColumn TItem="KeyValuePair<string, string>" Property="Key" Title="@L["Key"]" />
         <RadzenDataGridColumn TItem="KeyValuePair<string, string>" Title="@L["Source"]" Width="7rem" Sortable="false">

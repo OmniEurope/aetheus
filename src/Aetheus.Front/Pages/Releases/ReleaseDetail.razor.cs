@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
+using Aetheus.Front.Pages.Git;
 using Microsoft.Extensions.Logging;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Releases;
 
@@ -24,6 +15,7 @@ public partial class ReleaseDetail : IAsyncDisposable
     [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
+    [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
 
     [Parameter] public int ReleaseId { get; set; }
 
@@ -34,6 +26,7 @@ public partial class ReleaseDetail : IAsyncDisposable
     private HubConnection? _hubConnection;
     private ReleaseRollbackPreviewDto? _rollbackPreview;
     private bool _canWrite;
+    private List<string> _linkedCommitMessages = [];
 
     // The Deliverables panel groups what the release ships (artifacts) and where it targets
     // (environment). Hide it when the release has neither, so we never render an empty panel.
@@ -62,18 +55,22 @@ public partial class ReleaseDetail : IAsyncDisposable
         if (!IsCurrent()) return;
         _release = null;
         _rollbackPreview = null;
+        _linkedCommitMessages = [];
         try
         {
             ReleaseDto? release;
-            try { release = await Api.GetReleaseAsync(releaseId); }
+            try { release = await Api.Projects.GetReleaseAsync(releaseId); }
             catch (HttpRequestException) { release = null; }
             if (!IsCurrent()) return;
 
             _release = release;
             if (release is not null)
             {
+                await LoadLinkedCommitMessagesAsync(release);
+                if (!IsCurrent()) return;
                 ProjectNav.Set(release.ProjectId);
-                var rollbackPreview = await Api.GetRollbackPreviewAsync(releaseId);
+                ReassertBreadcrumb(release);
+                var rollbackPreview = await Api.Projects.GetRollbackPreviewAsync(releaseId);
                 if (!IsCurrent()) return;
                 _rollbackPreview = rollbackPreview;
                 await StartHubAsync(release.ProjectId);
@@ -95,7 +92,7 @@ public partial class ReleaseDetail : IAsyncDisposable
     private async Task RollbackAsync()
     {
         if (_release is null || _rollbackPreview is not { CanRollback: true, TargetVersion: { } targetVersion }) return;
-        var pipelines = await Api.GetPipelinesAsync(pageSize: 100, projectId: _release.ProjectId);
+        var pipelines = await Api.Pipelines.GetPipelinesAsync(pageSize: 100, projectId: _release.ProjectId);
         var request = await Dialog.OpenAsync<RollbackReleaseDialog>(L["Rollback"].Value,
             new Dictionary<string, object?>
             {
@@ -104,9 +101,9 @@ public partial class ReleaseDetail : IAsyncDisposable
                 ["DeploymentAge"] = RelativeTime.FormatAgo(L, _release.PublishedAt ?? _release.DetectedAt),
                 ["ProjectId"] = _release.ProjectId,
                 ["Pipelines"] = pipelines.Items
-            }, new DialogOptions { Width = "520px" });
+            }, new DialogOptions { Width = "520px", AutoFocusFirstElement = false });
         if (request is not RollbackReleaseRequest rollbackRequest) return;
-        if (await Api.RollbackReleaseAsync(_release.Id, rollbackRequest) is not null)
+        if (await Api.Projects.RollbackReleaseAsync(_release.Id, rollbackRequest) is not null)
             Toast.Success("RollbackQueued", _release.Version);
     }
 
@@ -132,19 +129,29 @@ public partial class ReleaseDetail : IAsyncDisposable
         }
     }
 
-    private Task OnReleaseChanged(ReleaseDto release)
+    internal Task OnReleaseChanged(ReleaseDto release)
     {
         if (release.Id != ReleaseId) return Task.CompletedTask;
-        return InvokeAsync(() =>
+        return InvokeAsync(async () =>
         {
             _release = release;
+            ReassertBreadcrumb(release);
+            await LoadLinkedCommitMessagesAsync(release);
             StateHasChanged();
         });
     }
 
     private async Task ReloadAsync()
     {
-        try { _release = await Api.GetReleaseAsync(ReleaseId); }
+        try
+        {
+            _release = await Api.Projects.GetReleaseAsync(ReleaseId);
+            if (_release is not null)
+            {
+                ReassertBreadcrumb(_release);
+                await LoadLinkedCommitMessagesAsync(_release);
+            }
+        }
         catch (HttpRequestException ex)
         {
             // Transient: keep the prior release, but leave a debug signal so a stuck status
@@ -153,6 +160,12 @@ public partial class ReleaseDetail : IAsyncDisposable
         }
         StateHasChanged();
     }
+
+    private void ReassertBreadcrumb(ReleaseDto release) => Breadcrumb.Set(
+        new BreadcrumbItem(L["Projects"], "/projects"),
+        new BreadcrumbItem(release.ProjectName, $"/projects/{release.ProjectId}/overview"),
+        new BreadcrumbItem(L["Releases"], $"/projects/{release.ProjectId}/releases"),
+        new BreadcrumbItem(release.Version));
 
     public async ValueTask DisposeAsync()
     {
@@ -175,17 +188,59 @@ public partial class ReleaseDetail : IAsyncDisposable
         }
     }
 
-    private static string ShortSha(string commitHash) => commitHash[..Math.Min(8, commitHash.Length)];
-
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1024 => $"{bytes / 1024.0:F0} KB",
-        _ => $"{bytes} B"
-    };
-
     private sealed record ChangelogEntry(string? Type, string Text);
+
+    private IReadOnlyList<ChangelogEntry> VisibleChangelogEntries
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_release?.Changelog))
+                return ParseChangelogEntries(_release.Changelog);
+
+            return _release?.Commits
+                .Where(commit => !string.IsNullOrWhiteSpace(commit.Message))
+                .Select(commit => commit.Message!)
+                .Concat(_linkedCommitMessages)
+                .Distinct(StringComparer.Ordinal)
+                .SelectMany(ParseChangelogEntries)
+                .ToList() ?? [];
+        }
+    }
+
+    private async Task LoadLinkedCommitMessagesAsync(ReleaseDto release)
+    {
+        _linkedCommitMessages = [];
+        if (!string.IsNullOrWhiteSpace(release.Changelog)) return;
+        _linkedCommitMessages.AddRange(release.Commits
+            .Select(commit => commit.Message)
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .Select(message => message!));
+
+        var missingShas = release.Commits
+            .Where(commit => string.IsNullOrWhiteSpace(commit.Message))
+            .Select(commit => commit.Sha)
+            .Where(sha => !string.IsNullOrWhiteSpace(sha))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(200)
+            .ToList();
+        if (missingShas.Count == 0) return;
+
+        try
+        {
+            var repositories = await Api.Git.GetGitReposAsync(release.ProjectId);
+            var repositoryId = GitRepositorySelection.Resolve(repositories, release.RepositoryUrl);
+            if (repositoryId is null) return;
+
+            var messages = await Api.Git.GetGitCommitMessagesAsync(repositoryId.Value, missingShas);
+            foreach (var sha in missingShas)
+                if (messages.TryGetValue(sha, out var message) && !string.IsNullOrWhiteSpace(message))
+                    _linkedCommitMessages.Add(message);
+        }
+        catch (HttpRequestException)
+        {
+            // The release remains usable when historical Git metadata is unavailable.
+        }
+    }
 
     private static List<ChangelogEntry> ParseChangelogEntries(string changelog)
     {

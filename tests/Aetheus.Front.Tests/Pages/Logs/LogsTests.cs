@@ -55,7 +55,7 @@ public class LogsTests : BunitContext
     }
 
     [Fact]
-    public async Task StartWatching_WithNullFilter_DoesNothing()
+    public async Task StartWatching_WithNullFilter_LeavesItNull()
     {
         var cut = Render<LogsPage>();
 
@@ -120,7 +120,7 @@ public class LogsTests : BunitContext
     }
 
     [Fact]
-    public async Task ToggleUnmasked_WithNullCurrentWatch_DoesNothing()
+    public async Task ToggleUnmasked_WithNullCurrentWatch_LeavesTheFlagOff()
     {
         var cut = Render<LogsPage>();
 

@@ -3,7 +3,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
 }
 else
 {
@@ -21,7 +21,7 @@ else
         </RadzenText>
     }
 
-    <RadzenDataGrid Data="@_packages" TItem="PackageEntryDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+    <RadzenDataGrid Responsive="false" Data="@_packages" TItem="PackageEntryDto" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true">
         <EmptyTemplate>
             <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-p-4">@L["NoTrackedPackages"]</RadzenText>
         </EmptyTemplate>

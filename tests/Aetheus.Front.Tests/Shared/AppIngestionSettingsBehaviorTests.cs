@@ -14,7 +14,18 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
 {
     private readonly BunitTestHelper.TestHandler _handler;
 
-    public AppIngestionSettingsBehaviorTests() => _handler = BunitTestHelper.RegisterServices(this);
+    public AppIngestionSettingsBehaviorTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+        _handler.SetJsonResponse(
+            "web-analytics/configuration",
+            new AppWebAnalyticsConfigurationDto
+            {
+                SiteId = "test-site",
+                AllowedOrigins = ["https://example.test"],
+                StorageBudgetBytes = 104_857_600
+            });
+    }
 
     [Fact]
     public void ReadOnlyApp_LoadsAndRendersThresholdsWithoutMutationControls()
@@ -162,6 +173,50 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
             currentRequest => Assert.EndsWith("api/appmonitoring/apps/8/thresholds", currentRequest.Url, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task SaveWebAnalyticsConfiguration_UsesDedicatedEndpointWithoutSecret()
+    {
+        _handler.SetJsonResponse("api/appmonitoring/apps/7/thresholds", new List<AppMetricThresholdDto>());
+        _handler.SetJsonResponse(
+            HttpMethod.Put,
+            "api/appmonitoring/apps/7/web-analytics/configuration",
+            new AppWebAnalyticsConfigurationDto
+            {
+                Enabled = true,
+                PublicIngestEnabled = true,
+                SiteId = "portfolio-prod",
+                AllowedOrigins = ["https://portfolio.example"],
+                StorageBudgetBytes = 134_217_728,
+                PseudonymKeyVersion = 1
+            });
+        var changes = 0;
+        var cut = Render<AppIngestionSettings>(parameters => parameters
+            .Add(component => component.AppId, 7)
+            .Add(component => component.CanWrite, true)
+            .Add(component => component.OnChanged, () => changes++));
+        SetField(cut.Instance, "_analyticsEnabled", true);
+        SetField(cut.Instance, "_analyticsPublicIngestEnabled", true);
+        SetField(cut.Instance, "_analyticsSiteId", "portfolio-prod");
+        SetField(cut.Instance, "_analyticsOrigins", "https://portfolio.example");
+        SetField(cut.Instance, "_analyticsStorageBudgetBytes", 134_217_728L);
+
+        await InvokeAsync(cut, "SaveAnalyticsConfigurationAsync");
+
+        Assert.Contains(_handler.Requests, request =>
+            request.Method == "PUT"
+            && request.Url.EndsWith(
+                "api/appmonitoring/apps/7/web-analytics/configuration",
+                StringComparison.Ordinal));
+        Assert.Contains("\"siteId\":\"portfolio-prod\"", _handler.LastRequestBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("pseudonym", _handler.LastRequestBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, changes);
+    }
+
     private static Task InvokeAsync(IRenderedComponent<AppIngestionSettings> cut, string method) => cut.InvokeAsync(() =>
         (Task)typeof(AppIngestionSettings).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(cut.Instance, [])!);
+
+    private static void SetField<T>(AppIngestionSettings instance, string name, T value) =>
+        typeof(AppIngestionSettings)
+            .GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(instance, value);
 }

@@ -1,25 +1,18 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Backups;
 
-public partial class Backups
+public partial class Backups : IAsyncDisposable
 {
+    [Parameter] public int? ProjectId { get; set; }
+
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
 
     private List<BackupPolicyDto> _policies = [];
     private AetheusDataGrid<BackupPolicyDto>? _policyGrid;
@@ -37,6 +30,8 @@ public partial class Backups
     private int _runsTotalCount;
     private string? _runsSearch;
     private bool _runsLoading;
+    private HubConnection? _hubConnection;
+    private readonly TrailingReloadCoalescer _realtimeReload = new(500);
 
     private static readonly BackupDbEngine[] Engines = [BackupDbEngine.None, BackupDbEngine.Postgres, BackupDbEngine.MySql];
     private List<EnumOption<BackupDbEngine>> _engineOptions = [];
@@ -82,12 +77,13 @@ public partial class Backups
     protected override async Task OnInitializedAsync()
     {
         _engineOptions = Engines.Select(value => new EnumOption<BackupDbEngine>(L.Localize(value), value)).ToList();
-        Breadcrumb.Set(new BreadcrumbItem(L["Backups"]));
+        if (!ProjectId.HasValue)
+            Breadcrumb.Set(new BreadcrumbItem(L["Backups"]));
         try
         {
-            foreach (var p in await Api.GetAllProjectsAsync())
+            foreach (var p in await Api.Projects.GetAllProjectsAsync())
                 _projects.Add(new DropItem(p.Id, p.Name));
-            foreach (var s in await Api.GetAllServersAsync())
+            foreach (var s in await Api.Servers.GetAllServersAsync())
                 _servers.Add(new DropItem(s.Id, s.Name));
         }
         catch (HttpRequestException)
@@ -98,6 +94,37 @@ public partial class Backups
         {
             _loading = false;
         }
+        await StartRealtimeAsync();
+    }
+
+    private async Task StartRealtimeAsync()
+    {
+        try
+        {
+            _hubConnection = HubFactory.Create("entities");
+            _hubConnection.On<int>(OperationalRealtimeEvents.BackupChanged, projectId =>
+                !ProjectId.HasValue || ProjectId.Value == projectId
+                    ? InvokeAsync(() => _realtimeReload.RequestAsync(ReloadRealtimeAsync))
+                    : Task.CompletedTask);
+            _hubConnection.RejoinOnReconnect(() => InvokeAsync(async () =>
+            {
+                await _hubConnection.InvokeAsync("JoinEntityUpdates", ResourceType.Project);
+                await ReloadRealtimeAsync();
+            }));
+            await _hubConnection.StartAsync();
+            await _hubConnection.InvokeAsync("JoinEntityUpdates", ResourceType.Project);
+        }
+        catch { /* SignalR is best-effort; manual refresh remains available. */ }
+    }
+
+    private async Task ReloadRealtimeAsync()
+    {
+        var policyReload = _policyGrid?.Reload() ?? Task.CompletedTask;
+        var runsReload = _runsFor is null
+            ? Task.CompletedTask
+            : _runsGrid?.Reload() ?? Task.CompletedTask;
+        await Task.WhenAll(policyReload, runsReload);
+        StateHasChanged();
     }
 
     private async Task OnLoadPoliciesAsync(LoadDataArgs args)
@@ -107,8 +134,8 @@ public partial class Backups
         _loading = true;
         try
         {
-            var result = await Api.GetBackupPoliciesAsync(
-                page, pageSize, _policySearch, sortBy, sortDescending);
+            var result = await Api.Security.GetBackupPoliciesAsync(
+                page, pageSize, _policySearch, sortBy, sortDescending, ProjectId);
             _policies = result.Items;
             _policiesTotalCount = result.TotalCount;
         }
@@ -130,7 +157,7 @@ public partial class Backups
         if (_policyGrid is not null) await _policyGrid.Reload();
     }
 
-    private void NewPolicy() => _form = new PolicyForm();
+    private void NewPolicy() => _form = new PolicyForm { ProjectId = ProjectId ?? 0 };
 
     private void EditPolicy(BackupPolicyDto p) => _form = new PolicyForm
     {
@@ -165,7 +192,7 @@ public partial class Backups
 
             if (_form.Id == 0)
             {
-                var created = await Api.CreateBackupPolicyAsync(new CreateBackupPolicyRequest
+                var created = await Api.Security.CreateBackupPolicyAsync(new CreateBackupPolicyRequest
                 {
                     Name = _form.Name,
                     ProjectId = _form.ProjectId,
@@ -185,7 +212,7 @@ public partial class Backups
             }
             else
             {
-                var updated = await Api.UpdateBackupPolicyAsync(_form.Id, new UpdateBackupPolicyRequest
+                var updated = await Api.Security.UpdateBackupPolicyAsync(_form.Id, new UpdateBackupPolicyRequest
                 {
                     Name = _form.Name,
                     Enabled = _form.Enabled,
@@ -224,7 +251,7 @@ public partial class Backups
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var status = await Api.DeleteBackupPolicyAsync(p.Id);
+        var status = await Api.Security.DeleteBackupPolicyAsync(p.Id);
         if (status.Success)
         {
             Toast.Success("BackupDeleted", "BackupDeleted");
@@ -239,7 +266,7 @@ public partial class Backups
 
     private async Task RunNowAsync(BackupPolicyDto p)
     {
-        var status = await Api.RunBackupNowAsync(p.Id);
+        var status = await Api.Security.RunBackupNowAsync(p.Id);
         if (status.Success) Toast.Success("BackupRunQueued", "BackupRunQueued");
         else Toast.Error("BackupRunFailed", "BackupRunFailed");
     }
@@ -262,7 +289,7 @@ public partial class Backups
         _runsLoading = true;
         try
         {
-            var result = await Api.GetBackupRunsAsync(
+            var result = await Api.Security.GetBackupRunsAsync(
                 policyId, page, pageSize, _runsSearch, sortBy, sortDescending);
             if (_runsFor?.Id != policyId) return;
             _runs = result.Items;
@@ -315,4 +342,11 @@ public partial class Backups
         RestoreCheckStatus.Failed => L["BackupRestoreFailed"],
         _ => L["BackupRestoreUnverified"]
     };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is null) return;
+        await _hubConnection.LeaveEntityUpdatesAndDisposeAsync(ResourceType.Project);
+        _hubConnection = null;
+    }
 }

@@ -4,6 +4,8 @@ using Aetheus.Front.Pages;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -87,6 +89,24 @@ public class GitRepositoryDetailTests : BunitContext
     }
 
     [Fact]
+    public void Commits_DefaultToAllBranches()
+    {
+        SetupDefaultMocks();
+
+        var cut = Render<GitRepositoryDetail>(parameters => parameters.Add(component => component.Id, 1));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("AllBranches", cut.Markup, StringComparison.Ordinal);
+            Assert.Contains(_handler.Requests, request =>
+                request.Method == "GET"
+                && request.Url.Contains("api/git/repos/1/commits", StringComparison.Ordinal)
+                && (request.Url.Contains("ref=%2A", StringComparison.OrdinalIgnoreCase)
+                    || request.Url.Contains("ref=*", StringComparison.Ordinal)));
+        });
+    }
+
+    [Fact]
     public void RepositoryIdChange_ReloadsSameComponentInstance()
     {
         SetupDefaultMocks();
@@ -126,6 +146,49 @@ public class GitRepositoryDetailTests : BunitContext
     }
 
     [Fact]
+    public void BranchDeepLink_FiltersTheServerQueryInsteadOfLoadingOnlyTheFirstPage()
+    {
+        SetupDefaultMocks();
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("/git-repositories/1?tab=branches&branch=release%2F2026.08");
+
+        Render<GitRepositoryDetail>(parameters => parameters.Add(component => component.Id, 1));
+
+        Assert.Contains(_handler.Requests, request =>
+            request.Method == "GET"
+            && request.Url.Contains("api/git/repos/1/branches", StringComparison.Ordinal)
+            && request.Url.Contains("search=release%2F2026.08", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FileDeepLink_OpensTheRequestedBlobAtTheRequestedRevision()
+    {
+        SetupDefaultMocks();
+        _handler.SetJsonResponse("api/git/repos/1/blob", new GitLightBlobDto
+        {
+            Path = "src/Sample.cs",
+            Content = "line one\nline two\nline three",
+            Size = 28,
+            IsBinary = false
+        });
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("/git-repositories/1?tab=files&ref=0123456789abcdef&path=src%2FSample.cs&line=2");
+
+        var cut = Render<GitRepositoryDetail>(parameters => parameters.Add(component => component.Id, 1));
+
+        cut.WaitForAssertion(() => Assert.Contains("src/Sample.cs", cut.Markup));
+        Assert.Contains(_handler.Requests, request =>
+            request.Method == "GET"
+            && request.Url.Contains("api/git/repos/1/blob", StringComparison.Ordinal)
+            && request.Url.Contains("ref=0123456789abcdef", StringComparison.Ordinal)
+            && request.Url.Contains("path=src%2FSample.cs", StringComparison.Ordinal));
+        Assert.Contains(JSInterop.Invocations, invocation =>
+            invocation.Identifier == "monacoInterop.initReadOnly"
+            && invocation.Arguments.Count == 5
+            && Equals(invocation.Arguments[4], 2));
+    }
+
+    [Fact]
     public void Renders_Loading_ThenContent()
     {
         SetupDefaultMocks();
@@ -149,6 +212,17 @@ public class GitRepositoryDetailTests : BunitContext
         Assert.Contains("NotFound", cut.Markup);
     }
 
+    [Fact]
+    public void Renders_EmptyState_WhenProxyReturnsHtmlWithStatus200()
+    {
+        _handler.SetRawResponse("api/git/repos/999", "<html>upstream unavailable</html>");
+
+        var cut = Render<GitRepositoryDetail>(p => p.Add(x => x.Id, 999));
+
+        cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(3));
+        Assert.Contains("NotFound", cut.Markup);
+    }
+
     [Theory]
     [InlineData("main", "main", true)]
     [InlineData("main", "develop", false)]
@@ -168,10 +242,7 @@ public class GitRepositoryDetailTests : BunitContext
     [InlineData(1_500_000, " MB")]
     public void FormatSize_ReturnsExpected(long bytes, string expectedSuffix)
     {
-        var method = typeof(GitRepositoryDetail).GetMethod("FormatSize",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        var result = (string)method.Invoke(null, [bytes])!;
+        var result = GitRepositoryViewHelpers.FormatSize(bytes);
         Assert.EndsWith(expectedSuffix, result);
     }
 

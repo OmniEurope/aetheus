@@ -155,6 +155,15 @@ public class SelectorGuardTests
         Assert.DoesNotContain("string-only", classes);
     }
 
+    [Fact]
+    public void SelectorExtractor_IgnoresJavaScriptMethodCalls()
+    {
+        var classes = ExtractTargetedClasses(
+            """const ready = await page.locator("[data-viewport='ready']").getAttribute("class");""");
+
+        Assert.DoesNotContain("getAttribute", classes);
+    }
+
     private static IEnumerable<string> ExtractTargetedClasses(string line)
     {
         string[] nonSelectorFileExtensions = ["txt", "log", "png", "jpg", "jpeg", "webp", "json", "trx"];
@@ -167,6 +176,8 @@ public class SelectorGuardTests
             foreach (Match m in ClassTokenRegex.Matches(body))
             {
                 var token = m.Groups["cls"].Value;
+                if (body[(m.Index + m.Length)..].TrimStart().StartsWith('('))
+                    continue;
                 if (!nonSelectorFileExtensions.Contains(token, StringComparer.OrdinalIgnoreCase))
                     yield return token;
             }
@@ -184,7 +195,7 @@ public class SelectorGuardTests
 
     private static HashSet<string> LoadFrontClasses(string frontDir)
     {
-        var sources = Directory.EnumerateFiles(frontDir, "*.*", SearchOption.AllDirectories)
+        var sources = RepositoryScan.Enumerate(frontDir, "*.*")
             .Where(file => Path.GetExtension(file) is ".razor" or ".css" or ".html")
             .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
             .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
@@ -226,7 +237,7 @@ public class SelectorGuardTests
     private static IEnumerable<string> EnumerateE2ESourceFiles()
     {
         var e2eDir = Path.Combine(FindRepoRoot(), "tests", "Aetheus.E2E");
-        foreach (var file in Directory.EnumerateFiles(e2eDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(e2eDir, "*.cs"))
         {
             if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
             if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
@@ -240,14 +251,5 @@ public class SelectorGuardTests
     private static string RelativeToRepo(string path) =>
         Path.GetRelativePath(FindRepoRoot(), path).Replace(Path.DirectorySeparatorChar, '/');
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(SelectorGuardTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

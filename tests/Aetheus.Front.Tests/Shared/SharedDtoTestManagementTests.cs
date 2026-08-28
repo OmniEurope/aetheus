@@ -179,6 +179,30 @@ public class SharedDtoTestManagementTests
     }
 
     [Fact]
+    public void CreateVaultSecretRequest_Validation_AcceptsSigningCertificatePayload()
+    {
+        var req = new CreateVaultSecretRequest
+        {
+            Key = "AETHEUS_NUGET_SIGNING_PFX_BASE64",
+            Value = new string('a', 4_756)
+        };
+
+        Assert.Empty(ValidateModel(req));
+    }
+
+    [Fact]
+    public void CreateVaultSecretRequest_Validation_RejectsOversizedValue()
+    {
+        var req = new CreateVaultSecretRequest
+        {
+            Key = "SECRET",
+            Value = new string('a', KeyValueRequest.MaxValueLength + 1)
+        };
+
+        Assert.NotEmpty(ValidateModel(req));
+    }
+
+    [Fact]
     public void RotateVaultSecretRequest_Validation_Valid()
     {
         var req = new RotateVaultSecretRequest { Value = "new-secret" };

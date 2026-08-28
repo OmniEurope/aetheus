@@ -1,7 +1,8 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectPagedSectionBase<ProjectServerDto>
 @if (_servers is null)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
@@ -19,7 +20,12 @@ else
                         PageSize="25" EmptyText="@L["NoRecords"]" class="aetheus-clickable-rows"
                         RowClick="@OnRowClick">
             <EmptyTemplate>
-                <EmptyState Icon="dns" Title="@L["NoRecords"]" />
+                <EmptyState Icon="dns" Title="@L["NoProjectServers"]" Description="@L["EmptyProjectServersHint"]">
+                    <ActionContent>
+                        <RadzenButton Text="@L["AddServer"]" Icon="add" Click="@OpenAddDialogAsync"
+                            ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                    </ActionContent>
+                </EmptyState>
             </EmptyTemplate>
             <Columns>
                 <RadzenDataGridColumn TItem="ProjectServerDto" Property="DisplayName" Title="@L["Name"]">

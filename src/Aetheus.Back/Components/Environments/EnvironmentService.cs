@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 
 namespace Aetheus.Back.Components.Environments;
@@ -19,7 +15,8 @@ public class EnvironmentService(
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetEnvironmentsPagedAsync(
-            request.Search, projectId, page, pageSize, accessibleIds, ct).ConfigureAwait(false);
+            request.Search, projectId, page, pageSize, accessibleIds, ct,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<EnvironmentDto>
         {
@@ -38,6 +35,12 @@ public class EnvironmentService(
 
     public async Task<EnvironmentDto> CreateEnvironmentAsync(CreateEnvironmentRequest request, CancellationToken ct = default)
     {
+        ValidateDastConfiguration(request.Type, request.DastEnabled, request.DastIsEphemeral,
+            request.DastContainsRealData, request.DastAllowedHosts);
+        var source = request.SourceEnvironmentId is { } sourceEnvironmentId
+            ? await repo.GetEnvironmentForDuplicationAsync(sourceEnvironmentId, ct).ConfigureAwait(false)
+                ?? throw new NotFoundException($"Source environment {sourceEnvironmentId} not found.")
+            : null;
         var env = new Environment
         {
             Name = request.Name,
@@ -47,7 +50,16 @@ public class EnvironmentService(
             RequireApproval = request.RequireApproval,
             ApprovalTimeoutMinutes = request.ApprovalTimeoutMinutes,
             ApprovalInstructions = request.ApprovalInstructions,
-            Servers = request.ServerIds.Select(sid => new EnvironmentServer { ServerId = sid }).ToList()
+            DastEnabled = request.DastEnabled,
+            DastIsEphemeral = request.DastIsEphemeral,
+            DastContainsRealData = request.DastContainsRealData,
+            DastAllowedHosts = NormalizeDastHosts(request.DastAllowedHosts),
+            Servers = request.ServerIds.Select(sid => new EnvironmentServer { ServerId = sid }).ToList(),
+            Checks = source?.Checks.Select(CloneCheck).ToList() ?? [],
+            LinkedProjectServers = source?.LinkedProjectServers.Select(CloneProjectServerLink).ToList() ?? [],
+            Libraries = source?.Libraries.Select(CloneLibrary).ToList() ?? [],
+            Vaults = source?.Vaults.Select(CloneVault).ToList() ?? [],
+            Pipelines = source?.Pipelines.Select(ClonePipeline).ToList() ?? []
         };
 
         await repo.AddEnvironmentAsync(env, ct).ConfigureAwait(false);
@@ -60,6 +72,8 @@ public class EnvironmentService(
 
     public async Task<EnvironmentDto?> UpdateEnvironmentAsync(int id, UpdateEnvironmentRequest request, CancellationToken ct = default)
     {
+        ValidateDastConfiguration(request.Type, request.DastEnabled, request.DastIsEphemeral,
+            request.DastContainsRealData, request.DastAllowedHosts);
         var env = await repo.FindEnvironmentAsync(id, ct).ConfigureAwait(false);
         if (env is null) return null;
 
@@ -70,6 +84,10 @@ public class EnvironmentService(
         env.RequireApproval = request.RequireApproval;
         env.ApprovalTimeoutMinutes = request.ApprovalTimeoutMinutes;
         env.ApprovalInstructions = request.ApprovalInstructions;
+        env.DastEnabled = request.DastEnabled;
+        env.DastIsEphemeral = request.DastIsEphemeral;
+        env.DastContainsRealData = request.DastContainsRealData;
+        env.DastAllowedHosts = NormalizeDastHosts(request.DastAllowedHosts);
         // UpdatedAt is stamped centrally by AppDbContext.SaveChangesAsync.
 
         // Replace servers
@@ -147,46 +165,16 @@ public class EnvironmentService(
             RequireApproval = source.RequireApproval,
             ApprovalTimeoutMinutes = source.ApprovalTimeoutMinutes,
             ApprovalInstructions = source.ApprovalInstructions,
+            DastEnabled = source.DastEnabled,
+            DastIsEphemeral = source.DastIsEphemeral,
+            DastContainsRealData = source.DastContainsRealData,
+            DastAllowedHosts = source.DastAllowedHosts,
             Servers = source.Servers.Select(es => new Data.Entities.EnvironmentServer { ServerId = es.ServerId }).ToList(),
-            Checks = source.Checks.Select(c => new Data.Entities.EnvironmentCheck
-            {
-                Name = c.Name,
-                Type = c.Type,
-                Configuration = c.Configuration,
-                IsRequired = c.IsRequired,
-                TimeoutSeconds = c.TimeoutSeconds
-            }).ToList(),
-            LinkedProjectServers = source.LinkedProjectServers
-                .Select(lps => new Data.Entities.EnvironmentProjectServer { ProjectServerId = lps.ProjectServerId }).ToList(),
-            Libraries = source.Libraries.Select(l => new Data.Entities.VariableLibrary
-            {
-                Name = l.Name,
-                Description = l.Description,
-                Entries = l.Entries.Select(e => new Data.Entities.VariableLibraryEntry
-                {
-                    Key = e.Key,
-                    Value = e.Value
-                }).ToList()
-            }).ToList(),
-            Vaults = source.Vaults.Select(v => new Data.Entities.Vault
-            {
-                Name = v.Name,
-                Description = v.Description,
-                Secrets = v.Secrets.Select(s => new Data.Entities.VaultSecret
-                {
-                    Key = s.Key,
-                    EncryptedValue = s.EncryptedValue,
-                    ExpiresAt = s.ExpiresAt
-                }).ToList()
-            }).ToList(),
-            Pipelines = source.Pipelines.Select(p => new Data.Entities.Pipeline
-            {
-                Name = p.Name,
-                Description = p.Description,
-                YamlDefinition = p.YamlDefinition,
-                TriggerType = p.TriggerType,
-                CreatedByUsername = p.CreatedByUsername
-            }).ToList()
+            Checks = source.Checks.Select(CloneCheck).ToList(),
+            LinkedProjectServers = source.LinkedProjectServers.Select(CloneProjectServerLink).ToList(),
+            Libraries = source.Libraries.Select(CloneLibrary).ToList(),
+            Vaults = source.Vaults.Select(CloneVault).ToList(),
+            Pipelines = source.Pipelines.Select(ClonePipeline).ToList()
         };
 
         await repo.AddEnvironmentAsync(clone, ct).ConfigureAwait(false);
@@ -196,6 +184,50 @@ public class EnvironmentService(
         var result = await repo.GetEnvironmentWithServersAsync(clone.Id, ct).ConfigureAwait(false);
         return MapToDto(result!);
     }
+
+    private static Data.Entities.EnvironmentCheck CloneCheck(Data.Entities.EnvironmentCheck check) => new()
+    {
+        Name = check.Name,
+        Type = check.Type,
+        Configuration = check.Configuration,
+        IsRequired = check.IsRequired,
+        TimeoutSeconds = check.TimeoutSeconds
+    };
+
+    private static Data.Entities.EnvironmentProjectServer CloneProjectServerLink(
+        Data.Entities.EnvironmentProjectServer link) => new() { ProjectServerId = link.ProjectServerId };
+
+    private static Data.Entities.VariableLibrary CloneLibrary(Data.Entities.VariableLibrary library) => new()
+    {
+        Name = library.Name,
+        Description = library.Description,
+        Entries = library.Entries.Select(entry => new Data.Entities.VariableLibraryEntry
+        {
+            Key = entry.Key,
+            Value = entry.Value
+        }).ToList()
+    };
+
+    private static Data.Entities.Vault CloneVault(Data.Entities.Vault vault) => new()
+    {
+        Name = vault.Name,
+        Description = vault.Description,
+        Secrets = vault.Secrets.Select(secret => new Data.Entities.VaultSecret
+        {
+            Key = secret.Key,
+            EncryptedValue = secret.EncryptedValue,
+            ExpiresAt = secret.ExpiresAt
+        }).ToList()
+    };
+
+    private static Data.Entities.Pipeline ClonePipeline(Data.Entities.Pipeline pipeline) => new()
+    {
+        Name = pipeline.Name,
+        Description = pipeline.Description,
+        YamlDefinition = pipeline.YamlDefinition,
+        TriggerType = pipeline.TriggerType,
+        CreatedByUsername = pipeline.CreatedByUsername
+    };
 
     public Task<int?> GetProjectServerProjectIdAsync(int projectServerId, CancellationToken ct = default)
         => repo.GetProjectServerProjectIdAsync(projectServerId, ct);
@@ -237,6 +269,10 @@ public class EnvironmentService(
         RequireApproval = e.RequireApproval,
         ApprovalTimeoutMinutes = e.ApprovalTimeoutMinutes,
         ApprovalInstructions = e.ApprovalInstructions,
+        DastEnabled = e.DastEnabled,
+        DastIsEphemeral = e.DastIsEphemeral,
+        DastContainsRealData = e.DastContainsRealData,
+        DastAllowedHosts = e.DastAllowedHosts,
         Servers = e.Servers.Select(es => new EnvironmentServerDto
         {
             ServerId = es.ServerId,
@@ -246,4 +282,38 @@ public class EnvironmentService(
         CreatedAt = e.CreatedAt,
         UpdatedAt = e.UpdatedAt
     };
+
+    internal static void ValidateDastConfiguration(
+        EnvironmentType type,
+        bool enabled,
+        bool isEphemeral,
+        bool containsRealData,
+        string allowedHosts)
+    {
+        if (!enabled) return;
+        if (type == EnvironmentType.Production)
+            throw new Aetheus.Back.Exceptions.BadRequestException("DAST cannot be enabled on a production environment.");
+        var hosts = ParseDastHosts(allowedHosts);
+        if (hosts.Count == 0)
+            throw new Aetheus.Back.Exceptions.BadRequestException("DAST requires at least one explicitly allowed hostname.");
+        if (containsRealData)
+            throw new Aetheus.Back.Exceptions.BadRequestException("DAST cannot be enabled on an environment containing real data.");
+        if (!isEphemeral || type is not (EnvironmentType.Testing or EnvironmentType.Staging))
+            throw new Aetheus.Back.Exceptions.BadRequestException("DAST requires an ephemeral Testing or Staging environment.");
+    }
+
+    internal static IReadOnlyList<string> ParseDastHosts(string value)
+    {
+        var candidates = value
+            .Split([',', ';', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(host => host.TrimEnd('.').ToLowerInvariant())
+            .ToList();
+        if (candidates.Count > 50)
+            throw new Aetheus.Back.Exceptions.BadRequestException("DAST accepts at most 50 allowed hostnames.");
+        if (candidates.Any(host => Uri.CheckHostName(host) is not (UriHostNameType.Dns or UriHostNameType.IPv4 or UriHostNameType.IPv6)))
+            throw new Aetheus.Back.Exceptions.BadRequestException("Every DAST allowlist entry must be an exact valid hostname or IP address.");
+        return candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string NormalizeDastHosts(string value) => string.Join('\n', ParseDastHosts(value));
 }

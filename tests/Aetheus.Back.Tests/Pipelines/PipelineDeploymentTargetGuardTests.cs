@@ -12,7 +12,7 @@ public class PipelineDeploymentTargetGuardTests
         => PipelineDeploymentTargetGuard.ValidateVariables(new Dictionary<string, string>
         {
             [PipelineDeploymentTargetGuard.TargetVariable] = PipelineDeploymentTargetGuard.Production,
-            ["PUBLIC_APP_URL"] = "https://app.aetheus.example.com"
+            ["PUBLIC_APP_URL"] = "https://app.aetheus.sonytumen.com"
         });
 
     [Fact]
@@ -20,9 +20,9 @@ public class PipelineDeploymentTargetGuardTests
         => PipelineDeploymentTargetGuard.ValidateVariables(LocalVariables());
 
     [Theory]
-    [InlineData("PUBLIC_API_URL", "https://aetheus-api.example.com")]
+    [InlineData("PUBLIC_API_URL", "https://aetheus-api.sonytumen.com")]
     [InlineData("COMPOSE_PROJECT", "aetheus-prod")]
-    [InlineData("TARGET_SERVER", "production-host")]
+    [InlineData("TARGET_SERVER", "vps2577917")]
     [InlineData("PUBLIC_APP_URL", "https://example.com")]
     [InlineData("REPOSITORY_URL", "http://host.docker.internal:5300/git/1/aetheus.git")]
     public void ValidateVariables_Local_RejectsProductionOrNonLocalTargets(string key, string value)
@@ -43,26 +43,50 @@ public class PipelineDeploymentTargetGuardTests
     }
 
     [Fact]
-    public void ValidateServer_Local_RequiresDedicatedVpsSimAgent()
+    public void ValidateVariables_Local_AcceptsAnExplicitRenamedAgentSelector()
     {
         var variables = LocalVariables();
+        variables[PipelineDeploymentTargetGuard.LocalAgentVariable] = "renamed-local-runner";
 
-        Assert.Null(PipelineDeploymentTargetGuard.ValidateServer(variables,
-            new Server { Name = "release-vpssim", Hostname = "release-vpssim", OrganizationId = 1 }));
+        PipelineDeploymentTargetGuard.ValidateVariables(variables);
+    }
+
+    [Fact]
+    public void ValidateVariables_Local_RejectsMissingAgentSelector()
+    {
+        var variables = LocalVariables();
+        variables.Remove(PipelineDeploymentTargetGuard.LocalAgentVariable);
+
+        Assert.Throws<BadRequestException>(() => PipelineDeploymentTargetGuard.ValidateVariables(variables));
+    }
+
+    [Fact]
+    public void ValidateServer_Local_RequiresExactExplicitSelector()
+    {
+        var variables = LocalVariables();
+        var selectedRunner = new Server
+        {
+            Name = "local-runner",
+            Hostname = "vpssim",
+            OrganizationId = 1
+        };
+
+        Assert.Null(PipelineDeploymentTargetGuard.ValidateServer(variables, selectedRunner));
         Assert.NotNull(PipelineDeploymentTargetGuard.ValidateServer(variables,
-            new Server { Name = "production", Hostname = "prod-host", OrganizationId = 1 }));
+            new Server { Name = "other-runner", Hostname = "other-runner", OrganizationId = 1 }));
     }
 
     private static Dictionary<string, string> LocalVariables() => new(StringComparer.OrdinalIgnoreCase)
     {
         [PipelineDeploymentTargetGuard.TargetVariable] = PipelineDeploymentTargetGuard.Local,
+        [PipelineDeploymentTargetGuard.LocalAgentVariable] = "vpssim",
         ["REPOSITORY_URL"] = "https://host.docker.internal:5301/git/1/aetheus.git",
         ["PUBLIC_APP_URL"] = "https://app.aetheus.localhost",
         ["PUBLIC_API_URL"] = "https://api.aetheus.localhost",
         ["SITE_DOMAIN"] = "aetheus.localhost",
         ["APP_HOST"] = "app.aetheus.localhost",
         ["API_HOST"] = "api.aetheus.localhost",
-        ["COMPOSE_PROJECT"] = "aetheus-release-lab",
+        ["COMPOSE_PROJECT"] = "aetheus-local-sim",
         ["CERTBOT_MODE"] = "local",
         ["TLS_CA_FILE"] = "/etc/letsencrypt/live/aetheus.localhost/fullchain.pem"
     };

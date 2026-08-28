@@ -2,24 +2,21 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Aetheus.Back;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Git;
+using Aetheus.Back.Components.PackageRegistry;
 using Aetheus.Back.Components.PersonalAccessTokens;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Configuration;
-using Aetheus.Back.Data;
 using Aetheus.Back.Extensions;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Middleware;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
+using Aetheus.Telemetry;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -37,6 +34,15 @@ var fileLogLevel = Enum.TryParse<LogLevel>(
         ? lvl
         : builder.Environment.IsProduction() ? LogLevel.Warning : LogLevel.Information;
 builder.Logging.AddProvider(new JsonFileLoggerProvider(logDirectory, fileLogLevel));
+
+// Self-observability is deployment-controlled and remains disabled when the injected
+// AETHEUS_TELEMETRY_ENABLED variable is absent. Production deploy stages receive a
+// short-lived ingest key from the monitored application selected for this project.
+builder.Services.AddAetheusTelemetry(builder.Configuration, options =>
+{
+    options.ApplicationVersion = builder.Configuration["App:Version"];
+    options.EnvironmentName = builder.Environment.EnvironmentName.ToLowerInvariant();
+});
 
 // --- Time ---
 builder.Services.AddSingleton(TimeProvider.System);
@@ -213,23 +219,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             }
         };
 
-        // A Personal Access Token arrives as `Authorization: Bearer aeth_pat_...` (PLAN-006 4.5).
-        // JWT is the default Bearer scheme, so forward PAT-shaped tokens to the PAT handler - every
-        // existing [Authorize] endpoint then transparently accepts a PAT without per-endpoint wiring.
-        options.ForwardDefaultSelector = context =>
-        {
-            var header = context.Request.Headers.Authorization.ToString();
-            return header.StartsWith("Bearer " + PatConstants.TokenPrefix, StringComparison.Ordinal)
-                ? PatAuthenticationHandler.SchemeName
-                : null;
-        };
+        // JWT is the default Bearer scheme. Forward PAT-shaped tokens and endpoints explicitly
+        // protected by the AgentToken policy before the global rate limiter evaluates the principal.
+        options.ForwardDefaultSelector = BearerAuthenticationSchemeSelector.Resolve;
     })
     .AddScheme<AuthenticationSchemeOptions, AgentTokenAuthenticationHandler>(
         AgentTokenAuthenticationHandler.SchemeName, _ => { })
     .AddScheme<AuthenticationSchemeOptions, GitBasicAuthenticationHandler>(
         GitBasicAuthenticationHandler.SchemeName, _ => { })
     .AddScheme<AuthenticationSchemeOptions, PatAuthenticationHandler>(
-        PatAuthenticationHandler.SchemeName, _ => { });
+        PatAuthenticationHandler.SchemeName, _ => { })
+    .AddScheme<AuthenticationSchemeOptions, PackageRegistryAuthenticationHandler>(
+        PackageRegistryAuthenticationHandler.SchemeName, _ => { });
 
 builder.Services.AddAuthorization(options =>
 {
@@ -281,6 +282,7 @@ builder.Services.AddControllers(options =>
 {
     json.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
 });
+builder.Services.AddScoped<LoginValidationAuditFilter>();
 
 // Surface validation failures in the server logs so heartbeat / telemetry endpoints don't
 // fail silently with a generic 400 response - the agent only sees the status code by default.
@@ -350,111 +352,24 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(corsOrigins.Distinct().ToArray())
             .WithHeaders("Authorization", "Content-Type", "X-Api-Version", "X-Requested-With", "x-signalr-user-agent", "x-requested-with", "X-Aetheus-Renewal")
             .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+            .WithExposedHeaders(RequestErrorLoggingMiddleware.CorrelationHeader)
             .AllowCredentials()
             .SetPreflightMaxAge(BackendRuntimeDefaults.CorsPreflightMaxAge);
     });
 });
 
-// --- Rate limiting (login / external-login / agent registration) ---
-// Disabled when RateLimiting:Disabled=true (set by integration test fixtures).
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    var disabled = builder.Configuration.GetValue("RateLimiting:Disabled", false);
-    if (disabled)
-    {
-        options.AddPolicy("login", _ =>
-            System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("all"));
-        options.AddPolicy("webhook", _ =>
-            System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("all"));
-        options.AddPolicy("external-login", _ =>
-            System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("all"));
-        options.AddPolicy("otlp-ingest", _ =>
-            System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("all"));
-    }
-    else
-    {
-        options.AddPolicy("login", httpContext =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 5,
-                    Window = BackendRuntimeDefaults.RateLimitWindow,
-                    QueueLimit = 0
-                }));
-
-        options.AddPolicy("webhook", httpContext =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 30,
-                    Window = BackendRuntimeDefaults.RateLimitWindow,
-                    QueueLimit = 0
-                }));
-
-        // PLAN-001 phase 2: OTLP ingestion partitioned by the ingest key (falls back to IP when absent),
-        // so one app's flood can't starve another's telemetry. Generous window for high-frequency pushers.
-        options.AddPolicy("otlp-ingest", httpContext =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.Request.Headers["x-aetheus-ingest-key"].FirstOrDefault()
-                    ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 120,
-                    Window = BackendRuntimeDefaults.RateLimitWindow,
-                    QueueLimit = 0
-                }));
-
-        // #43: external-login is anonymous and provisions accounts on first hit. The "login"
-        // per-IP limit isn't enough on its own - a botnet across many IPs can still flood
-        // provisioning. Apply per-IP partition AND a global ceiling via a chained limiter.
-        options.AddPolicy("external-login", httpContext =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: "external-login:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 5,
-                    Window = BackendRuntimeDefaults.RateLimitWindow,
-                    QueueLimit = 0
-                }));
-        options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-        {
-            var path = httpContext.Request.Path.Value ?? string.Empty;
-            if (path.EndsWith("/api/auth/external-login", StringComparison.OrdinalIgnoreCase))
-            {
-                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                    "external-login-global",
-                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = 60,
-                        Window = BackendRuntimeDefaults.RateLimitWindow,
-                        QueueLimit = 0
-                    });
-            }
-
-            // F-24: per-user sliding-window cap on authenticated requests so a single compromised
-            // account can't hammer expensive endpoints. Anonymous traffic is bucketed per-IP.
-            var partitionKey = httpContext.User.Identity?.IsAuthenticated == true
-                ? "u:" + httpContext.User.Identity!.Name
-                : "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-
-            return System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
-                partitionKey,
-                _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
-                {
-                    PermitLimit = 600,
-                    Window = BackendRuntimeDefaults.RateLimitWindow,
-                    SegmentsPerWindow = 6,
-                    QueueLimit = 0
-                });
-        });
-    }
-});
+builder.Services.AddAetheusRateLimiting(builder.Configuration);
 
 // --- OpenAPI ---
 builder.Services.AddOpenApi();
+for (var partition = 0; partition < OpenApiDastPartition.Count; partition++)
+{
+    var currentPartition = partition;
+    builder.Services.AddOpenApi(
+        OpenApiDastPartition.DocumentName(currentPartition),
+        options => options.ShouldInclude = description =>
+            OpenApiDastPartition.Includes(description, currentPartition));
+}
 
 // --- Health Checks ---
 builder.Services.AddHealthChecks()
@@ -498,26 +413,44 @@ await using (var scope = app.Services.CreateAsyncScope())
     }
 
     await DbInitializer.SeedAsync(db, app.Configuration);
-
+    await scope.ServiceProvider.GetRequiredService<TotoConformanceSeeder>().SeedAsync();
     await DemoDataStartupSeeder.SeedIfEnabledAsync(scope.ServiceProvider, db, app.Environment, app.Configuration);
+    // Reconcile the canonical catalog last: optional demo seeders must not be able to
+    // recreate active non-canonical templates after the legacy archival pass.
+    await scope.ServiceProvider.GetRequiredService<DeliveryPipelineTemplateSeeder>().SeedAsync();
 
     // Audit 360 lot A: one-shot, idempotent re-encryption of any residual plaintext webhook secrets
     // written before secrets were encrypted at rest. Lets WebhookService decrypt strictly afterwards.
     var encryptionService = scope.ServiceProvider.GetRequiredService<Aetheus.Back.Services.IEncryptionService>();
     await Aetheus.Back.Components.Webhooks.WebhookSecretReencryption.RunAsync(db, encryptionService, startupLogger);
+    await Aetheus.Back.Components.Notifications.NotificationConfigurationReencryption.RunAsync(
+        db, encryptionService, startupLogger);
 }
 
 // --- Middleware ---
 // Behind the Apache reverse proxy (a loopback hop on the same host), restore the client's original
 // scheme/IP from the X-Forwarded-* headers BEFORE anything downstream reads Request.Scheme/Request.Host
 // - otherwise email links, OAuth redirects, 201 Location headers, and AgentInstaller URLs all emit
-// http:// instead of https://. Must run first, ahead of HSTS/security-headers/auth. Defaults already
-// restrict processing to loopback callers (127.0.0.0/8 and ::1 via KnownNetworks/KnownProxies), which
-// is exactly the Apache hop here - no extra KnownProxies configuration needed.
-app.UseForwardedHeaders(new ForwardedHeadersOptions
+// http:// instead of https://. Must run first, ahead of HSTS/security-headers/auth.
+//
+// The defaults accept forwarded headers only from loopback, and the previous claim that this "is
+// exactly the Apache hop here" holds solely when the backend runs directly on the host. In
+// production it runs in a container, so Apache reaches it through the Docker bridge gateway, never
+// 127.0.0.1: the defaults silently DROPPED X-Forwarded-Proto and every absolute URL came out as
+// http://. That is what made `dotnet nuget push` read an http:// publish endpoint from the v3 index
+// and refuse to publish, because NuGet requires HTTPS sources.
+//
+// Clearing both lists is safe HERE and only here: Compose binds the backend to 127.0.0.1:<port> on
+// the host, so nothing but the local Apache vhost can open a connection to it, and that vhost sets
+// X-Forwarded-Proto itself. If the port is ever published on a public interface these headers become
+// spoofable and this must be revisited.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-});
+};
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 // The public application and Git smart-HTTP endpoint are HTTPS-only in production. Forwarded
 // headers above make this work correctly behind Apache; local development deliberately keeps its
@@ -539,16 +472,23 @@ else
 }
 
 app.UseAetheusSecurityHeaders(corsOrigins);
+app.UseMiddleware<RequestErrorLoggingMiddleware>();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseResponseCompression();
-app.UseCors();
+// The public analytics endpoint validates its per-application origin against the database and
+// emits its own narrow CORS headers. The global static policy must not short-circuit its preflight.
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments(
+        "/api/ingest/web-analytics/v1/public",
+        StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseCors());
 // UseRateLimiter MUST run after UseAuthentication so the GlobalLimiter sees a populated HttpContext.User
 // (F-24): its per-user partition key reads User.Identity.IsAuthenticated, which is still false before
 // authentication runs, collapsing every authenticated caller onto a shared per-IP bucket.
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
-// Read-only Personal Access Token enforcement (PLAN-006 4.5): runs after authorization so
+// Read-only Personal Access Token enforcement (ADR-024 4.5): runs after authorization so
 // HttpContext.User carries the PAT principal; refuses mutating requests made with a read-only PAT.
 app.UseMiddleware<PatScopeEnforcementMiddleware>();
 

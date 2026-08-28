@@ -47,4 +47,25 @@ public class SecretScopingTests
 
         Assert.True(scoped.ContainsKey("GIT_PASSWORD")); // checkout preamble references the git creds implicitly
     }
+
+    [Fact]
+    public void ScopeStepEnvironment_TypedObservabilityPublisher_ReceivesOnlyItsDeclaredSecrets()
+    {
+        var legVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AETHEUS_PACKAGE_TOKEN"] = "token",
+            ["AETHEUS_NUGET_SIGNING_PFX_PASSWORD"] = "password",
+            ["AETHEUS_NUGET_SIGNING_CERTIFICATE_FINGERPRINT"] = "fingerprint",
+            ["UNRELATED_SECRET"] = "unrelated"
+        };
+        var secretKeys = legVars.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var step = new PipelineStepDefinition { Name = "publish", Type = "publish-observability" };
+
+        var scoped = PipelineRunHelpers.ScopeStepEnvironment(legVars, secretKeys, step);
+
+        Assert.True(scoped.ContainsKey("AETHEUS_PACKAGE_TOKEN"));
+        Assert.True(scoped.ContainsKey("AETHEUS_NUGET_SIGNING_PFX_PASSWORD"));
+        Assert.True(scoped.ContainsKey("AETHEUS_NUGET_SIGNING_CERTIFICATE_FINGERPRINT"));
+        Assert.False(scoped.ContainsKey("UNRELATED_SECRET"));
+    }
 }

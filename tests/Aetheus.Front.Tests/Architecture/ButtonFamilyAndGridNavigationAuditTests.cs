@@ -91,6 +91,44 @@ public class ButtonFamilyAndGridNavigationAuditTests
     }
 
     [Fact]
+    public void EverySharedGrid_UsesAdvancedDefaultsOrADocumentedServerConstraint()
+    {
+        var documentedFilterExceptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Pages/Organizations/Organizations.razor",
+            "Pages/Notifications/NotificationsAdmin.razor",
+            "Pages/PackageRegistry/PackageRegistryAdmin.razor",
+            "Pages/PackageFeeds/PackageFeedsAdmin.razor",
+            "Pages/Pipelines/PipelineEdit.razor",
+            "Pages/Servers/ServerDetailSections/ModuleLinksTab.razor"
+        };
+        var documentedSortExceptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Pages/Pipelines/PipelineEdit.razor"
+        };
+        var violations = new List<string>();
+
+        foreach (var (file, tag) in EnumerateSharedGridTags())
+        {
+            if (string.Equals(Attribute(tag, "AllowSorting"), "false", StringComparison.Ordinal)
+                && !documentedSortExceptions.Contains(file))
+                violations.Add($"{file}: sorting disabled without a documented server constraint");
+            if (string.Equals(Attribute(tag, "AllowFiltering"), "false", StringComparison.Ordinal)
+                && !documentedFilterExceptions.Contains(file))
+                violations.Add($"{file}: filtering disabled without a documented server constraint");
+        }
+
+        var sharedSource = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "src", "Aetheus.Front", "Shared", "AetheusDataGrid.razor.cs"));
+        Assert.Contains("public bool AllowSorting { get; set; } = true;", sharedSource);
+        Assert.Contains("public bool AllowFiltering { get; set; } = true;", sharedSource);
+        Assert.Contains("public FilterMode FilterMode { get; set; } = FilterMode.Advanced;", sharedSource);
+        Assert.True(violations.Count == 0,
+            "Shared grids must keep sorting and advanced filtering unless their paged endpoint cannot express them:\n  "
+            + string.Join("\n  ", violations));
+    }
+
+    [Fact]
     public void EveryRawGrid_UsesTheSharedCompactRowDensity()
     {
         var violations = new List<string>();
@@ -147,8 +185,9 @@ public class ButtonFamilyAndGridNavigationAuditTests
         Add(map, "Success", "Filled", "play_arrow", "play_circle", "replay", "rocket_launch", "publish", "build", "send", "restart_alt", "cloud_upload", "install_desktop");
         Add(map, "Danger", "Filled", "delete", "delete_forever", "delete_sweep", "remove", "block", "cancel", "stop", "remove_circle", "person_remove", "logout", "key_off", "link_off");
         Add(map, "Info", "Filled", "edit", "settings", "tune", "manage_accounts", "construction", "open_with");
-        Add(map, "Secondary", "Filled", "upload", "upload_file", "download", "file_download", "cloud_download", "system_update_alt", "check_circle", "format_align_left", "science", "visibility", "preview", "article", "auto_fix_high", "autorenew", "bar_chart", "campaign", "cell_tower", "center_focus_strong", "checklist", "cleaning_services", "description", "dns", "folder_open", "gpp_good", "gpp_maybe", "group", "inventory_2", "key", "link", "lock_open", "lock_reset", "merge_type", "message", "open_in_new", "person", "person_search", "receipt_long", "report_problem", "security", "terminal", "verified_user", "vpn_key", "wifi_tethering");
-        Add(map, "Light", "Text", "arrow_back", "arrow_downward", "arrow_forward", "arrow_upward", "clear", "close", "content_copy", "copy_all", "difference", "expand_more", "fit_screen", "help", "history", "home", "info", "label", "redo", "refresh", "search", "swap_horiz", "sync", "undo", "vertical_align_bottom", "vertical_align_top", "view_column", "wrap_text", "zoom_in", "zoom_out");
+        Add(map, "Light", "Filled", "upload", "upload_file", "download", "file_download", "cloud_download", "system_update_alt", "check_circle", "format_align_left", "science", "visibility", "preview", "article", "auto_fix_high", "autorenew", "bar_chart", "campaign", "cell_tower", "center_focus_strong", "checklist", "cleaning_services", "description", "dns", "folder_open", "gpp_good", "gpp_maybe", "group", "inventory_2", "key", "link", "lock_open", "lock_reset", "merge_type", "message", "open_in_new", "person", "person_search", "receipt_long", "report_problem", "security", "terminal", "verified_user", "vpn_key", "wifi_tethering");
+        Add(map, "Warning", "Text", "star");
+        Add(map, "Light", "Text", "arrow_back", "arrow_downward", "arrow_forward", "arrow_upward", "bug_report", "clear", "close", "content_copy", "copy_all", "crisis_alert", "difference", "expand_more", "fiber_new", "fit_screen", "grid_view", "help", "history", "home", "info", "label", "priority_high", "redo", "refresh", "schedule", "search", "swap_horiz", "sync", "undo", "verified", "vertical_align_bottom", "vertical_align_top", "view_column", "view_list", "wrap_text", "zoom_in", "zoom_out");
         return map;
     }
 
@@ -160,7 +199,7 @@ public class ButtonFamilyAndGridNavigationAuditTests
     private static IEnumerable<(string File, string Tag)> EnumerateButtonTags()
     {
         var front = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
-        foreach (var file in Directory.EnumerateFiles(front, "*.razor", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(front, "*.razor"))
         {
             var source = File.ReadAllText(file);
             foreach (Match match in Regex.Matches(source, @"<Radzen(?:Split)?Button\b(?:(?!/>).)*?/>", RegexOptions.Singleline))
@@ -171,11 +210,24 @@ public class ButtonFamilyAndGridNavigationAuditTests
     private static IEnumerable<(string File, string Tag)> EnumerateRawGridTags()
     {
         var front = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
-        foreach (var file in Directory.EnumerateFiles(front, "*.razor", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(front, "*.razor"))
         {
             var source = File.ReadAllText(file);
             foreach (Match match in Regex.Matches(source, @"<RadzenDataGrid\b(?:(?:""[^""]*"")|[^>])*?>", RegexOptions.Singleline))
                 yield return (Path.GetRelativePath(front, file), match.Value);
+        }
+    }
+
+    private static IEnumerable<(string File, string Tag)> EnumerateSharedGridTags()
+    {
+        var front = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
+        foreach (var file in RepositoryScan.Enumerate(front, "*.razor"))
+        {
+            var source = File.ReadAllText(file);
+            foreach (Match match in Regex.Matches(source,
+                         @"<(?:Aetheus\.Front\.Shared\.)?AetheusDataGrid\b(?:(?:""[^""]*"")|[^>])*?>",
+                         RegexOptions.Singleline))
+                yield return (Path.GetRelativePath(front, file).Replace('\\', '/'), match.Value);
         }
     }
 
@@ -188,14 +240,5 @@ public class ButtonFamilyAndGridNavigationAuditTests
     private static bool IsRollbackAction(string tag) =>
         tag.Contains("Rollback", StringComparison.OrdinalIgnoreCase);
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(ButtonFamilyAndGridNavigationAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

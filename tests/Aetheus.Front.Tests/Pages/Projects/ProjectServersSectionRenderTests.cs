@@ -21,8 +21,9 @@ public class ProjectServersSectionRenderTests : BunitContext
     {
         _handler.SetPaginatedJsonResponse("api/projects/1/servers", new List<ProjectServerDto>());
         var cut = Render<ProjectServersSection>(p => p.Add(x => x.ProjectId, 1));
-        cut.WaitForState(() => cut.Markup.Contains("NoRecords"), TimeSpan.FromSeconds(2));
-        Assert.Contains("NoRecords", cut.Markup);
+        cut.WaitForState(() => cut.Markup.Contains("NoProjectServers"), TimeSpan.FromSeconds(2));
+        Assert.Contains("NoProjectServers", cut.Markup);
+        Assert.Contains("AddServer", cut.Markup);
     }
 
     [Fact]

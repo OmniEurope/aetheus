@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -19,28 +16,28 @@ internal sealed class PipelineRunLiveConnection(
     int runId,
     Func<IReadOnlyCollection<int>> childRunIds,
     Func<Task> onReload,
-    Func<Func<Task>, Task> invokeAsync) : IAsyncDisposable
+    Func<Task> onQueueRefresh,
+    Func<Func<Task>, Task> invokeAsync,
+    Func<bool>? needsQueuePolling = null) : IAsyncDisposable
 {
     private HubConnection? _hub;
     // Run groups already joined: the parent run plus every loaded child run of an orchestration. A child
     // pipeline broadcasts its step events to ITS OWN run group, so without joining the children the parent
     // view only refreshed on a manual reload.
     private readonly HashSet<int> _joined = [];
-    private readonly object _reloadSync = new();
-    private readonly CancellationTokenSource _lifetimeCts = new();
-    private readonly SemaphoreSlim _reloadGate = new(1, 1);
-    private CancellationTokenSource? _reloadCts;
-    private Task? _reloadTask;
+    private readonly DebouncedAsyncAction _reload = new(onReload, logger, "[PipelineRun]");
+    private Task? _queuePollTask;
     private bool _disposed;
 
     public async Task StartAsync()
     {
         if (_disposed) return;
+        _queuePollTask ??= PollQueueAsync();
         _hub = hubFactory.Create("pipelines");
         _hub.On<int, int>("PipelineRunStarted", (_, _) => invokeAsync(ScheduleReloadAsync));
         _hub.On<int, PipelineStatus>("PipelineRunCompleted", (_, _) => invokeAsync(ScheduleReloadAsync));
         _hub.On<int>("PipelineRunCancelled", _ => invokeAsync(ScheduleReloadAsync));
-        _hub.On<int>("StepStarted", _ => invokeAsync(ScheduleReloadAsync));
+        _hub.On<int>("StepStarted", HandleStepStartedAsync);
         _hub.On<int, TaskExecutionStatus>("StepCompleted", (_, _) => invokeAsync(ScheduleReloadAsync));
         _hub.On<int, string, string>("ApprovalRequired", (_, _, _) => invokeAsync(ScheduleReloadAsync));
         _hub.On<int, string, string>("ApprovalResolved", (_, _, _) => invokeAsync(ScheduleReloadAsync));
@@ -61,13 +58,42 @@ internal sealed class PipelineRunLiveConnection(
         catch { /* Hub unavailable - degrade to static */ }
     }
 
+    private async Task PollQueueAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            while (await timer.WaitForNextTickAsync(_reload.LifetimeToken))
+            {
+                await invokeAsync(() => needsQueuePolling?.Invoke() == true
+                    ? onQueueRefresh()
+                    : Task.CompletedTask);
+            }
+        }
+        catch (OperationCanceledException) when (_reload.LifetimeToken.IsCancellationRequested) { }
+        catch (Exception ex) { logger.LogWarning(ex, "[PipelineRun] Queue polling failed"); }
+    }
+
     // Join the parent run group plus every currently-loaded child run group. Idempotent: only groups not
     // already joined are (re)joined. Call after each reload, since a triggered child run only appears once
     // its trigger step has fired.
     public async Task JoinGroupsAsync()
     {
         if (_disposed || _hub is not { State: HubConnectionState.Connected }) return;
-        foreach (var id in new[] { runId }.Concat(childRunIds()))
+        var desired = new HashSet<int>(DesiredRunIds());
+        foreach (var obsoleteId in _joined.Where(id => !desired.Contains(id)).ToList())
+        {
+            try
+            {
+                await _hub.InvokeAsync("LeavePipelineRunGroup", obsoleteId);
+                _joined.Remove(obsoleteId);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "[PipelineRun] Leave obsolete run group {Id} failed", obsoleteId);
+            }
+        }
+        foreach (var id in desired)
         {
             if (!_joined.Add(id)) continue;
             try { await _hub.InvokeAsync("JoinPipelineRunGroup", id); }
@@ -75,64 +101,25 @@ internal sealed class PipelineRunLiveConnection(
         }
     }
 
-    // Debounce: a burst of step events collapses to a single reload 250 ms after the last one.
-    private async Task ScheduleReloadAsync()
+    internal Task HandleStepStartedAsync(int stepId)
     {
-        lock (_reloadSync)
-        {
-            if (_disposed) return;
-            _reloadCts?.Cancel();
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
-            _reloadCts = cts;
-            _reloadTask = ReloadAfterDelayAsync(cts);
-        }
-        await Task.CompletedTask;
+        _ = stepId;
+        return invokeAsync(ScheduleReloadAsync);
     }
 
-    private async Task ReloadAfterDelayAsync(CancellationTokenSource cts)
-    {
-        var entered = false;
-        try
-        {
-            await Task.Delay(250, cts.Token);
-            await _reloadGate.WaitAsync(cts.Token);
-            entered = true;
-            if (_disposed) return;
-            await onReload();
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
-        catch (Exception ex) { logger.LogWarning(ex, "[PipelineRun] Live reload failed"); }
-        finally
-        {
-            if (entered) _reloadGate.Release();
-            lock (_reloadSync)
-            {
-                if (ReferenceEquals(_reloadCts, cts))
-                {
-                    _reloadCts = null;
-                    _reloadTask = null;
-                }
-            }
-            cts.Dispose();
-        }
-    }
+    internal IReadOnlyCollection<int> DesiredRunIds() =>
+        new[] { runId }.Concat(childRunIds()).Distinct().ToArray();
+
+    // Debounce: a burst of step events collapses to a single reload 250 ms after the last one.
+    private Task ScheduleReloadAsync() => _reload.ScheduleAsync();
 
     public async ValueTask DisposeAsync()
     {
-        Task? pendingReload;
-        lock (_reloadSync)
-        {
-            if (_disposed) return;
-            _disposed = true;
-            _lifetimeCts.Cancel();
-            _reloadCts?.Cancel();
-            pendingReload = _reloadTask;
-        }
-        if (pendingReload is not null)
-            await pendingReload;
-
-        await _reloadGate.WaitAsync();
-        _reloadGate.Release();
+        if (_disposed) return;
+        _disposed = true;
+        await _reload.DisposeAsync();
+        if (_queuePollTask is not null)
+            await _queuePollTask;
 
         if (_hub is not null)
         {
@@ -145,7 +132,5 @@ internal sealed class PipelineRunLiveConnection(
             await _hub.DisposeAsync();
         }
 
-        _lifetimeCts.Dispose();
-        _reloadGate.Dispose();
     }
 }

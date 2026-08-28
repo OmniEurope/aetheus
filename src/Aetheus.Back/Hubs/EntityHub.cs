@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Hubs;
@@ -19,7 +16,8 @@ public class EntityHub(IResourceAuthorizationService authz) : Hub
     // EntityChanged(Created) for a resource that did not exist when they joined - the per-resource group
     // is empty at creation time, so otherwise only admins would see it. Mirrors ServerHub's org fan-out.
     private static bool IsOrgScoped(ResourceType type) =>
-        type is ResourceType.Project or ResourceType.Server or ResourceType.Pipeline;
+        type is ResourceType.Project or ResourceType.Server or ResourceType.Pipeline
+            or ResourceType.PipelineTemplate;
 
     public async Task JoinEntityUpdates(ResourceType type)
     {

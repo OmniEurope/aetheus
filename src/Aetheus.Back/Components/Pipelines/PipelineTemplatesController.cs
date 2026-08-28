@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -111,7 +107,7 @@ public class PipelineTemplatesController(
     [HttpPost("{id:int}/resolve")]
     public async Task<ActionResult<string>> ResolveTemplate(
         int id,
-        [FromBody] Dictionary<string, string>? parameters,
+        [FromBody, BoundedDictionary(64, 200, 4000)] Dictionary<string, string>? parameters,
         CancellationToken ct,
         [FromQuery] int? version = null)
     {

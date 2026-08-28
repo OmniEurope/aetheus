@@ -69,7 +69,9 @@ public sealed class PipelineRetentionService(
         var taskRetentionDays = Math.Clamp(configuration.GetValue("Retention:TaskDays", 90), 1, 3650);
         var taskCutoff = timeProvider.GetUtcNow().UtcDateTime.AddDays(-taskRetentionDays);
         var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
-        var deletedTasks = await taskRepo.DeleteCompletedTasksOlderThanAsync(taskCutoff, ct).ConfigureAwait(false);
+        var deletedTasks = await taskRepo
+            .DeleteCompletedTasksOlderThanAsync(taskCutoff, runCutoff, ct)
+            .ConfigureAwait(false);
 
         if (deletedTasks > 0)
             logger.LogInformation("Retention: deleted {Count} completed tasks older than {Days} days", deletedTasks, taskRetentionDays);

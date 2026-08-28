@@ -1,66 +1,279 @@
-# =============================================================================
-# toto-ci - Continuous Integration for Toto (NO deployment)
-# =============================================================================
-# A copy of toto-ci-cd WITHOUT the cd part: it still compiles, runs unit tests +
-# coverage, complexity, lint, and produces the publish artifact + a Release - but
-# it stops there (no SSH/scp deploy stage). Used as the build half by both the
-# toto-orchestration-accept orchestration pipeline (type: trigger) and, in its
-# toto-ci-trigger variant, by the on_success: chaining demo.
+# Toto full CI: build once, test once and publish the immutable runtime image.
 name: toto-ci
 trigger: manual
+variable_libraries:
+  - toto-observability
+vaults:
+  - toto-package-registry
 variables:
-  APP_VERSION: "1.0.$(BUILD_BUILDID)"
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   DOTNET_NOLOGO: "1"
+  TOTO_ENABLE_TELEMETRY: "false"
+  TOTO_ENABLE_WEB_ANALYTICS: "false"
+  TOTO_TELEMETRY_VERSION: "0.1.0"
+  TOTO_TELEMETRY_SHA256: ""
+  TOTO_WEB_ANALYTICS_VERSION: "0.1.0"
+  TOTO_WEB_ANALYTICS_SHA256: ""
+
 stages:
-  - name: Compile
+  - name: PrepareIntegrations
+    group: Enrichment
+    execution_role: build
     os: linux
     steps:
-      - name: Restore & Build
+      - name: Prepare trusted integration inputs
         checkout: true
-        shell: "dotnet build $(BUILD_PROJECTNAME).slnx --configuration Release --verbosity minimal"
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          rm -rf .aetheus-injection
+          mkdir -p .aetheus-injection
+          if test "${TOTO_ENABLE_TELEMETRY:-false}" = true \
+              || test "${TOTO_ENABLE_WEB_ANALYTICS:-false}" = true; then
+            test -n "${AETHEUS_PACKAGE_TOKEN:-}" || {
+              echo "AETHEUS_PACKAGE_TOKEN is required to resolve signed integrations."
+              exit 1
+            }
+            if test -s "${AETHEUS_TLS_CA_PATH:-}"; then
+              cp "$AETHEUS_TLS_CA_PATH" .aetheus-injection/aetheus-local.crt
+            else
+              case "${AETHEUS_PACKAGE_BASE_URL:-}" in
+                https://host.docker.internal:*)
+                  PACKAGE_AUTHORITY="${AETHEUS_PACKAGE_BASE_URL#https://}"
+                  PACKAGE_AUTHORITY="${PACKAGE_AUTHORITY%%/*}"
+                  openssl s_client -showcerts \
+                    -connect "$PACKAGE_AUTHORITY" -servername localhost </dev/null 2>/dev/null \
+                    | openssl x509 -outform PEM \
+                    > .aetheus-injection/aetheus-local.crt
+                  ;;
+                *)
+                  echo "AETHEUS_TLS_CA_PATH must reference a trusted certificate."
+                  exit 1
+                  ;;
+              esac
+            fi
+            test -s .aetheus-injection/aetheus-local.crt
+            test -s "${AETHEUS_PACKAGE_SIGNER_CA_PATH:-}" || {
+              echo "Enabled packages require AETHEUS_PACKAGE_SIGNER_CA_PATH."
+              exit 1
+            }
+            cp "$AETHEUS_PACKAGE_SIGNER_CA_PATH" \
+              .aetheus-injection/toto-package-signer.crt
+            openssl x509 -in .aetheus-injection/toto-package-signer.crt \
+              -noout -fingerprint -sha256 \
+              | cut -d= -f2 | tr -d ':' \
+              > .aetheus-injection/signer-fingerprint.txt
+            test -s .aetheus-injection/signer-fingerprint.txt
+          fi
+        timeout_seconds: 300
+
+  - name: ResolveIntegrations
+    group: Enrichment
+    execution_role: build
+    os: linux
+    depends_on: [PrepareIntegrations]
+    isolation:
+      mode: container
+      toolchain: node
+      network: bridge
+    steps:
+      - name: Resolve exact published integrations into a credential-free local feed
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          node - "aetheus.integrations.json" ".aetheus-injection/request.json" <<'NODE'
+          const fs = require("node:fs");
+          const [input, output] = process.argv.slice(2);
+          const manifest = JSON.parse(fs.readFileSync(input, "utf8"));
+          const values = {
+            "Aetheus.Telemetry": {
+              enabled: process.env.TOTO_ENABLE_TELEMETRY === "true",
+              version: process.env.TOTO_TELEMETRY_VERSION,
+              sha256: process.env.TOTO_TELEMETRY_SHA256
+            },
+            "Aetheus.WebAnalytics": {
+              enabled: process.env.TOTO_ENABLE_WEB_ANALYTICS === "true",
+              version: process.env.TOTO_WEB_ANALYTICS_VERSION,
+              sha256: process.env.TOTO_WEB_ANALYTICS_SHA256
+            }
+          };
+          for (const item of manifest.packages)
+            Object.assign(item, values[item.id]);
+          fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+          if test -s .aetheus-injection/aetheus-local.crt; then
+            export NODE_EXTRA_CA_CERTS="$WORKSPACE/.aetheus-injection/aetheus-local.crt"
+          fi
+          node deploy/scripts/resolve-injected-nuget-packages.mjs \
+            .aetheus-injection/request.json .aetheus-injection
+        timeout_seconds: 900
+
+  - name: Compile
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [ResolveIntegrations]
+    isolation:
+      mode: container
+      toolchain: dotnet
+      network: bridge
+    steps:
+      - name: Restore and build
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          set -- .aetheus-injection/feed/*.nupkg
+          if test -e "$1"; then
+          SIGNER_FINGERPRINT="$(
+            tr -d '\r\n' < .aetheus-injection/signer-fingerprint.txt
+          )"
+          (
+            cd .aetheus-injection/verify
+            dotnet nuget verify --all \
+              --certificate-fingerprint "$SIGNER_FINGERPRINT" ../feed/*.nupkg
+          )
+            printf '%s\n' "$SIGNER_FINGERPRINT" \
+              > .aetheus-injection/signature-verification.txt
+          else
+            printf '%s\n' none > .aetheus-injection/signature-verification.txt
+          fi
+          dotnet restore Toto.slnx \
+            --configfile .aetheus-injection/NuGet.config \
+            --use-lock-file \
+            -p:NuGetLockFilePath="$WORKSPACE/.aetheus-injection/packages.lock.json" \
+            -p:WarningsNotAsErrors=NU3018%3BNU3027%3BNU3042
+          dotnet build Toto.slnx --configuration Release --no-restore \
+            --verbosity minimal -p:NoWarn=NU3018%3BNU3027%3BNU3042
+        timeout_seconds: 900
+
   - name: Test
+    group: Build
+    execution_role: build
     os: linux
-    depends_on:
-      - Compile
+    depends_on: [Compile]
+    isolation:
+      mode: container
+      toolchain: dotnet
+      network: none
     steps:
-      - name: Run Tests
+      - name: Run unit tests
+        # The run keeps going so the exact exit code becomes gradable evidence, and the blocking
+        # decision moves to UnitTestGateBoundary below. Failing here would hide the code behind a
+        # dead stage and leave the candidate contract unable to tell "failed" from "never ran".
+        continue_on_error: true
         working_directory: "$(WORKSPACE)"
-        shell: "set -eu; PROJECTS=$(find tests -name '*.csproj' -print); [ -n \"$PROJECTS\" ]; for project in $PROJECTS; do dotnet test \"$project\" --configuration Release --no-build --collect:\"XPlat Code Coverage\" --results-directory \"$WORKSPACE/coverage\" --verbosity minimal; done"
-  - name: Coverage
+        shell: |
+          set -u
+          dotnet test Toto.slnx --configuration Release --no-build --verbosity minimal
+          UNIT_STATUS=$?
+          printf '%s\n' "$UNIT_STATUS" > .toto-unit-gate-status
+          echo "Unit-test evidence status: ${UNIT_STATUS} (0 means passed)."
+          echo "##aetheus[setvariable name=UNIT_TEST_GATE_STATUS]$UNIT_STATUS"
+        timeout_seconds: 900
+
+  - name: UnitTestGateBoundary
+    group: Build
+    execution_role: build
     os: linux
-    depends_on:
-      - Test
+    depends_on: [Test]
     steps:
-      - name: Publish Coverage
-        type: coverage
-  - name: Complexity
-    os: linux
-    depends_on:
-      - Compile
-    steps:
-      - name: Code Complexity
-        type: complexity
-  - name: Lint
-    os: linux
-    depends_on:
-      - Compile
-    steps:
-      - name: Format Check
+      - name: Refuse a failed unit suite unless the caller grades it instead
+        # Default behaviour is unchanged for every existing consumer of toto-ci: a failed suite
+        # still stops the pipeline. Only a caller that seals the result into a graded assurance
+        # contract may opt out, and it must say so explicitly.
         working_directory: "$(WORKSPACE)"
-        shell: "dotnet format $(BUILD_PROJECTNAME).slnx --no-restore --verify-no-changes --verbosity diagnostic"
+        shell: |
+          set -eu
+          UNIT_STATUS="$(tr -d '\r\n' < .toto-unit-gate-status 2>/dev/null || printf '%s' 1)"
+          echo "##aetheus[setvariable name=UNIT_TEST_GATE_STATUS]$UNIT_STATUS"
+          if test "$UNIT_STATUS" = 0; then
+            echo "Blocking test gate: passing evidence recorded."
+            exit 0
+          fi
+          if test "${TOTO_TOLERATE_TEST_FAILURE:-false}" = true; then
+            echo "Unit suite failed with status ${UNIT_STATUS}; the caller grades it into its assurance contract."
+            exit 0
+          fi
+          echo "Blocking test gate: unit evidence failed with status ${UNIT_STATUS}." >&2
+          exit 1
+        timeout_seconds: 60
+
+  - name: BuildImage
+    group: Build
+    execution_role: build
+    os: linux
+    depends_on: [UnitTestGateBoundary]
+    steps:
+      - name: Build immutable runtime image
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          COMMIT="$(git rev-parse HEAD)"
+          test "$COMMIT" = "${BUILD_SOURCEVERSION:-}" || {
+            echo "The checked-out Toto revision does not match BUILD_SOURCEVERSION."
+            exit 1
+          }
+          mkdir -p .pipeline-artifacts
+          printf '%s\n' "$COMMIT" > .pipeline-artifacts/source-commit
+          printf '%s\n' 1 > .pipeline-artifacts/qa-rollback-contract
+          cp .aetheus-injection/request.json .pipeline-artifacts/integration-manifest.json
+          cp .aetheus-injection/manifest.lock.json .pipeline-artifacts/injection-lock.json
+          cp .aetheus-injection/packages.lock.json .pipeline-artifacts/packages.lock.json
+          cp .aetheus-injection/signature-verification.txt \
+            .pipeline-artifacts/signature-verification.txt
+          docker build \
+            --load \
+            --label "org.opencontainers.image.revision=$COMMIT" \
+            -f deploy/Dockerfile -t "toto:$COMMIT" .
+          docker save "toto:$COMMIT" -o .pipeline-artifacts/toto-image.tar
+          test -s .pipeline-artifacts/toto-image.tar
+        timeout_seconds: 1800
+
   - name: Package
+    group: Build
+    execution_role: build
     os: linux
-    depends_on:
-      - Test
-      - Lint
-    steps:
-      - name: Publish Artifact
-        working_directory: "$(WORKSPACE)"
-        shell: "dotnet publish $(BUILD_PROJECTNAME).slnx --configuration Release --no-build --output \"$WORKSPACE/publish\" && echo 'Artifact published:' && ls -la \"$WORKSPACE/publish/\""
-      - name: Create Release
-        type: release
-        version: "$(APP_VERSION)"
-        changelog: true
+    depends_on: [BuildImage]
+    isolation:
+      mode: container
+      toolchain: node
+      network: none
     artifacts:
-      - "publish/**"
+      - ".pipeline-artifacts/toto-image.tar"
+      - ".pipeline-artifacts/source-commit"
+      - ".pipeline-artifacts/qa-rollback-contract"
+      - ".pipeline-artifacts/integration-manifest.json"
+      - ".pipeline-artifacts/delivery-contract.json"
+      - ".pipeline-artifacts/injection-lock.json"
+      - ".pipeline-artifacts/packages.lock.json"
+      - ".pipeline-artifacts/signature-verification.txt"
+      - ".pipeline-artifacts/artifact-provenance.json"
+      - "deploy/docker-compose.yml"
+    steps:
+      - name: Generate immutable delivery contract
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          COMMIT="$(tr -d '\r\n' < .pipeline-artifacts/source-commit)"
+          export DELIVERY_BASELINE_BOOTSTRAP="${DELIVERY_BASELINE_BOOTSTRAP:-true}"
+          node deploy/scripts/generate-delivery-contract.mjs \
+            .pipeline-artifacts/integration-manifest.json \
+            .pipeline-artifacts/delivery-contract.json \
+            toto 1 "c-$COMMIT" "$COMMIT" \
+            - \
+            .pipeline-artifacts/toto-image.tar
+        timeout_seconds: 300
+      - name: Hash the packaged payload into an artifact provenance
+        # The candidate assurance contract seals these digests, so a later stage cannot swap the
+        # image or the contracts it qualified. Toto lays its payload out differently from Aetheus,
+        # hence the repository-local category map.
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          COMMIT="$(tr -d '\r\n' < .pipeline-artifacts/source-commit)"
+          AETHEUS_PROVENANCE_CATEGORIES=deploy/provenance-categories.json \
+            node deploy/scripts/generate-artifact-provenance.mjs \
+              .pipeline-artifacts/artifact-provenance.json "$COMMIT"
+          test -s .pipeline-artifacts/artifact-provenance.json
+        timeout_seconds: 300

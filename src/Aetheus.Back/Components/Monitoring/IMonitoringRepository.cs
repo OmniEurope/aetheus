@@ -17,5 +17,10 @@ public interface IMonitoringRepository
 
     Task<List<Project>> GetRecentProjectsAsync(int count, List<int>? accessibleProjectIds = null, CancellationToken ct = default);
 
-    Task<List<ServerMetric>> GetServerMetricsSinceAsync(int serverId, DateTime since, CancellationToken ct = default);
+    Task<List<ServerMetric>> GetServerMetricsSinceAsync(
+        int serverId,
+        DateTime since,
+        CancellationToken ct = default,
+        DateTime? afterUtc = null,
+        int take = 1_000);
 }

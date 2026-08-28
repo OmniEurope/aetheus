@@ -59,7 +59,7 @@ public class AlertNotificationServiceTests
     }
 
     [Fact]
-    public async Task DisposeAsync_WithoutStart_DoesNotThrow()
+    public async Task DisposeAsync_WithoutStart_LeavesTheValueUnchanged()
     {
         var (svc, _, _) = CreateService();
         await svc.DisposeAsync();
@@ -104,6 +104,13 @@ internal sealed class CountingHubConnectionFactory(IConfiguration config, AuthSt
 {
     public int CreateCount { get; private set; }
     public int SendCount { get; private set; }
+    public int StopAllCount { get; private set; }
+
+    public override async Task StopAllAsync()
+    {
+        StopAllCount++;
+        await base.StopAllAsync();
+    }
 
     public override HubConnection Create(string hubPath, IRetryPolicy? retryPolicy = null)
     {

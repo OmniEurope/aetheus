@@ -7,8 +7,8 @@ set -e
 # deploy.sh - Aetheus Remote Deployment
 # =============================================================================
 APPNAME="aetheus"
-# Public placeholders, overridable through the environment for a real deployment.
-GITREMOTE="${GITREMOTE:-https://github.com/your-organization/aetheus.git}"
+# Host-specific defaults, overridable via environment so the script is not hard-pinned to one host.
+GITREMOTE="${GITREMOTE:-https://github.com/SonyTumen/aetheus.git}"
 SERVERNAME="${SERVERNAME:-example.com}"
 BASE_PORT_FRONT=10021
 BASE_PORT_BACK=10022
@@ -23,7 +23,6 @@ PULL_ONLY=0
 ROTATE_JWT=0
 FORCE=0
 WIPE=0
-SKIP_AGENTS=0
 AGENT_BUILD=0
 
 show_help() {
@@ -45,17 +44,14 @@ Options:
   -p               Git pull only (no Docker build/restart)
   -k               Regenerate JWT key
   -f               Force deploy even if no git changes (also skips -w confirmation)
-  -s               Skip agent publishing (faster build; agent downloads will
-                   be missing from the resulting image until rebuilt without -s)
   -a               Agent build: bump only the 4th version part (1.2.3 -> 1.2.3.1)
                    instead of the patch. Use for deploys that only change agent
-                   code. A subsequent normal deploy resets the 4th part. Cannot
-                   be combined with -s.
+                   code. A subsequent normal deploy resets the 4th part.
   -h               Show this help message
 HELP
 }
 
-while getopts "e:b:rdwxpkfsah" opt; do
+while getopts "e:b:rdwxpkfah" opt; do
     case $opt in
         e) ENV="$OPTARG" ;;
         b) GITBRANCH="$OPTARG" ;;
@@ -66,20 +62,11 @@ while getopts "e:b:rdwxpkfsah" opt; do
         p) PULL_ONLY=1 ;;
         k) ROTATE_JWT=1 ;;
         f) FORCE=1 ;;
-        s) SKIP_AGENTS=1 ;;
         a) AGENT_BUILD=1 ;;
         h) show_help; exit 0 ;;
         *) show_help; exit 1 ;;
     esac
 done
-
-# -a bumps the agent version part; -s skips publishing the agents entirely.
-# Asking for both is contradictory - fail fast rather than produce an image
-# whose APP_VERSION advertises an agent build that was never compiled.
-if [ "$AGENT_BUILD" = "1" ] && [ "$SKIP_AGENTS" = "1" ]; then
-    echo "ERROR: -a (agent build) and -s (skip agents) are mutually exclusive." >&2
-    exit 1
-fi
 
 increment_patch() {
     _ver="$1"
@@ -235,14 +222,6 @@ echo ""
 export APPNAME ENV PORT_FRONT PORT_BACK DB_USER
 export FRONT_URL API_BASE_URL FRONT_URL_ACCEPT FRONT_URL_PROD
 
-# Toggle agent publishing in Dockerfile.back via build arg. -s sets BUILD_AGENTS=0.
-if [ "$SKIP_AGENTS" = "1" ]; then
-    BUILD_AGENTS=0
-    echo "  Skip agents: yes (-s) - agent downloads will be absent from the new image"
-else
-    BUILD_AGENTS=1
-fi
-export BUILD_AGENTS
 
 if [ "$PULL_ONLY" = "1" ]; then
     echo ">>> Pull-only mode (-p): syncing git repository only"
@@ -513,6 +492,8 @@ else
     git clone -b "$GITBRANCH" "$GITREMOTE" "$REPO_DIR"
     cd "$REPO_DIR"
 fi
+SOURCE_COMMIT=$(git rev-parse HEAD)
+export SOURCE_COMMIT
 
 echo ">>> Building and starting containers..."
 

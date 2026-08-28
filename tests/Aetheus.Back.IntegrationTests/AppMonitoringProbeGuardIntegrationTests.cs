@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aetheus.Back.IntegrationTests;
 
 /// <summary>
-/// PLAN-001 phase 1: end-to-end coverage of the agent ownership guard on
+/// ADR-021 phase 1: end-to-end coverage of the agent ownership guard on
 /// <c>POST /api/appmonitoring/agent/probe-results</c>. An agent may only report results for apps hosted
 /// on its own server; reporting for another server's app must be rejected (mirrors the LogsController guard).
 /// </summary>

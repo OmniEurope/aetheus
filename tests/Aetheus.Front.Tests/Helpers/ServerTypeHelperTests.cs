@@ -25,7 +25,7 @@ public class ServerTypeHelperTests
     [Theory]
     [InlineData(ServerType.Normal, BadgeStyle.Info)]
     [InlineData(ServerType.Build, BadgeStyle.Warning)]
-    [InlineData(ServerType.Docker, BadgeStyle.Secondary)]
+    [InlineData(ServerType.Docker, BadgeStyle.Light)]
     public void GetBadgeStyle_ReturnsExpectedStyle(ServerType type, BadgeStyle expected)
     {
         Assert.Equal(expected, ServerTypeHelper.GetBadgeStyle(type));

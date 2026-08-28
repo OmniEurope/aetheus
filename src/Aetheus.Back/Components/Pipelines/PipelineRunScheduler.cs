@@ -1,0 +1,428 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
+using Aetheus.Back.Components.Pipelines.Events;
+using Aetheus.Back.Components.Tasks;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Hubs;
+using Aetheus.Shared.Helpers;
+using Aetheus.Back.Services.DomainEvents;
+using Microsoft.AspNetCore.SignalR;
+using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+/// <summary>
+/// The stage-advancement side of the engine, seen from the operations that have to re-enter it
+/// (cancel, resume, retry).
+///
+/// It is passed to those operations as a <b>parameter</b>, never injected into them: cancellation and
+/// advancement call each other, and an injected dependency in both directions would be a DI cycle.
+/// During the breakdown <see cref="PipelineRunService"/> satisfies it explicitly; at the end the
+/// scheduler does.
+/// </summary>
+public interface IPipelineRunScheduler
+{
+    /// <summary>Dispatches the next stage, or finalizes the run when nothing is left to do.</summary>
+    Task AdvanceToNextStageOrCompleteAsync(
+        int pipelineRunId, IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>Serialized stage advance after a task completed.</summary>
+    Task AdvanceStageAsync(
+        int pipelineRunId, string completedStageName, IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>Periodic reconcile pass for a run whose completions may have been missed.</summary>
+    Task ReconcileRunAsync(int pipelineRunId, IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>Resumes a run once its post-stage artifact collection settled.</summary>
+    Task ContinueAfterArtifactCollectionAsync(
+        int pipelineRunId, TaskExecutionStatus collectionStatus,
+        IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>Completes a waiting `type: trigger` step from its finished child run.</summary>
+    Task<bool> ResolveCompletedTriggerStepAsync(
+        PipelineStepRun step, PipelineStatus childStatus,
+        IReadOnlyDictionary<string, string> childOutputs,
+        IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>Re-dispatches the pending stage of an already-open run, scoping secrets per step.</summary>
+    Task DispatchNextStageWithScopedSecretsAsync(
+        PipelineRun run, PipelineYamlDefinition definition,
+        IPipelineChildRunLauncher launcher, CancellationToken ct);
+}
+
+
+/// <summary>
+/// Advances a run one stage at a time. Every completion, retry, approval and reconciliation pass enters
+/// here, and every one of them is serialized per run by <see cref="RunAdvanceLock.Shared"/> - two passes
+/// running concurrently for the same run is the double-dispatch bug that lock exists to prevent.
+/// </summary>
+public sealed class PipelineRunScheduler(
+    IPipelineRepository repo,
+    IHubContext<PipelineHub> pipelineHub,
+    IPipelineVariableResolver variableResolver,
+    IPipelineRunFinalizer finalizer,
+    IPipelineRunDefinitionParser definitions,
+    IPipelineSystemTaskFactory systemTasks,
+    IPipelineStageDispatchPlanner planner,
+    IEncryptionService encryption,
+    IPostgresLeaderLease operationLock,
+    TimeProvider timeProvider,
+    ILogger<PipelineRunScheduler> logger) : IPipelineRunScheduler
+{
+    public async Task AdvanceStageAsync(int pipelineRunId, string completedStageName, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        await operationLock.RunSerializedAsync(
+            $"pipeline-run-advance:{pipelineRunId}",
+            async lockToken =>
+            {
+                using var runLock = await RunAdvanceLock.Shared.AcquireAsync(pipelineRunId, lockToken).ConfigureAwait(false);
+                await AdvanceStageLockedAsync(pipelineRunId, completedStageName, launcher, lockToken).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> ResolveCompletedTriggerStepAsync(
+        PipelineStepRun step,
+        PipelineStatus childStatus,
+        IReadOnlyDictionary<string, string> childOutputs,
+        IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(childOutputs);
+
+        var resolved = false;
+        await operationLock.RunSerializedAsync(
+            $"pipeline-run-advance:{step.PipelineRunId}",
+            async lockToken =>
+            {
+                using var runLock = await RunAdvanceLock.Shared.AcquireAsync(step.PipelineRunId, lockToken).ConfigureAwait(false);
+                var status = childStatus == PipelineStatus.Success
+                    ? TaskExecutionStatus.Success
+                    : TaskExecutionStatus.Failed;
+                var exitCode = childStatus == PipelineStatus.Success ? 0 : 1;
+                var outputsJson = childOutputs.Count == 0
+                    ? null
+                    : JsonSerializer.Serialize(childOutputs);
+                var failureCode = childStatus == PipelineStatus.Success
+                    ? null
+                    : TaskFailureCodes.ToolError;
+                var failureReason = childStatus == PipelineStatus.Success
+                    ? null
+                    : $"Triggered run {step.TriggeredRunId} completed with status {childStatus}.";
+                resolved = await repo.TryResolveTriggeredStepAsync(
+                    step.Id,
+                    status,
+                    exitCode,
+                    outputsJson,
+                    failureCode,
+                    failureReason,
+                    timeProvider.GetUtcNow().UtcDateTime,
+                    lockToken).ConfigureAwait(false);
+                if (!resolved)
+                    return;
+
+                logger.LogInformation(
+                    "Trigger step {StepId} (run {ParentRun}) resolved {Status} from child run {ChildRun}",
+                    step.Id, step.PipelineRunId, status, step.TriggeredRunId);
+                await AdvanceStageLockedAsync(step.PipelineRunId, step.StageName, launcher, lockToken).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+        return resolved;
+    }
+
+    public async Task ReconcileRunAsync(int pipelineRunId, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        await operationLock.RunSerializedAsync(
+            $"pipeline-run-advance:{pipelineRunId}",
+            async lockToken =>
+            {
+                using var runLock = await RunAdvanceLock.Shared.AcquireAsync(pipelineRunId, lockToken).ConfigureAwait(false);
+                if (!await repo.IsRunStillRunningAsync(pipelineRunId, lockToken).ConfigureAwait(false)) return;
+                await AdvanceToNextStageOrCompleteAsync(pipelineRunId, launcher, lockToken).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    private async Task AdvanceStageLockedAsync(int pipelineRunId, string completedStageName, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        if (!await repo.IsRunStillRunningAsync(pipelineRunId, ct).ConfigureAwait(false)) return;
+
+        var allDone = await repo.AreAllStepsInStageCompletedAsync(pipelineRunId, completedStageName, ct).ConfigureAwait(false);
+        if (!allDone) return;
+
+        var failedSteps = await repo.GetFailedStepRunsInStageAsync(pipelineRunId, completedStageName, ct).ConfigureAwait(false);
+
+        if (await TryRetryFailedStepAsync(pipelineRunId, failedSteps, launcher, ct).ConfigureAwait(false))
+            return;
+
+        if (HasNonContinuableFailures(failedSteps))
+        {
+            // User-defined failure/finally stages must run before the pipeline becomes terminal.
+            // Otherwise an `always()` teardown remains Pending forever and leaks its environment.
+            if (await TryContinueWithFailureHandlersAsync(pipelineRunId, launcher, ct).ConfigureAwait(false))
+                return;
+
+            // A workspace cleanup is part of the run, not fire-and-forget work after its terminal
+            // transition. Keep the run active until the cleanup reports back; its completion will
+            // re-enter this scheduler and finalize the run from the original failed step.
+            if (await systemTasks.DispatchCleanupIfPendingAsync(pipelineRunId, ct).ConfigureAwait(false))
+                return;
+            var finalStatus = await finalizer.IsCancellationRequestedAsync(pipelineRunId, ct).ConfigureAwait(false)
+                ? PipelineStatus.Cancelled
+                : PipelineStatus.Failed;
+            await finalizer.CompleteRunAsync(pipelineRunId, finalStatus, ct).ConfigureAwait(false);
+            return;
+        }
+
+        // S-TECH-ARCR: if the completed stage produces artifacts, the next stage may consume them on a
+        // DIFFERENT agent. Dispatching the next stage before the collection task finishes lets that
+        // consumer resolve an artifact that has not been collected yet ("could not resolve the artifact",
+        // run #51). So when a collection task is dispatched, WAIT: the next stage is advanced only once
+        // that task completes, routed back through ContinueAfterArtifactCollectionAsync.
+        if (await DispatchPostStageArtifactCollectionAsync(pipelineRunId, completedStageName, launcher, ct).ConfigureAwait(false))
+            return;
+
+        await AdvanceToNextStageOrCompleteAsync(pipelineRunId, launcher, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Re-entry point after a post-stage artifact-collection task finishes (S-TECH-ARCR). Advances to the
+    /// next stage (or completes the run) under the per-run lock, exactly where <see cref="AdvanceStageLockedAsync"/>
+    /// deferred it. Artifact publication is part of the producing stage's contract: a failed, cancelled, or
+    /// timed-out collection fails the run instead of allowing a fake green with no consumable artifact.
+    /// </summary>
+    public async Task ContinueAfterArtifactCollectionAsync(
+        int pipelineRunId, TaskExecutionStatus collectionStatus, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        using var runLock = await RunAdvanceLock.Shared.AcquireAsync(pipelineRunId, ct).ConfigureAwait(false);
+        if (!await repo.IsRunStillRunningAsync(pipelineRunId, ct).ConfigureAwait(false)) return;
+
+        if (collectionStatus != TaskExecutionStatus.Success)
+        {
+            await repo.AppendRunWarningsAsync(pipelineRunId,
+                [$"Artifact collection ended with status {collectionStatus}; the run cannot publish its declared artifact."],
+                ct).ConfigureAwait(false);
+            if (await systemTasks.DispatchCleanupIfPendingAsync(pipelineRunId, ct).ConfigureAwait(false))
+                return;
+            await finalizer.CompleteRunAsync(pipelineRunId, PipelineStatus.Failed, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await AdvanceToNextStageOrCompleteAsync(pipelineRunId, launcher, ct).ConfigureAwait(false);
+    }
+
+    private async Task<bool> TryRetryFailedStepAsync(int pipelineRunId, List<PipelineStepRun> failedSteps, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        PipelineStepRun? retriable = null;
+        foreach (var candidate in failedSteps.Where(step => step.RetryCount > 0))
+        {
+            if (await repo.IsStepRetryEligibleAsync(pipelineRunId, candidate.Id, ct).ConfigureAwait(false))
+            {
+                retriable = candidate;
+                break;
+            }
+        }
+        if (retriable is null) return false;
+
+        retriable.RetryCount--;
+        retriable.Status = TaskExecutionStatus.Pending;
+        retriable.ExitCode = null;
+        retriable.StartedAt = null;
+        retriable.CompletedAt = null;
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        var retryRun = await repo.GetPipelineRunWithPipelineAsync(pipelineRunId, ct).ConfigureAwait(false);
+        if (retryRun?.Pipeline is not null)
+        {
+            var retryDef = definitions.Parse(retryRun);
+            if (retryDef is not null)
+            {
+                await DispatchNextStageWithScopedSecretsAsync(retryRun, retryDef, launcher, ct).ConfigureAwait(false);
+            }
+        }
+        return true;
+    }
+
+    private static bool HasNonContinuableFailures(List<PipelineStepRun> failedSteps)
+    {
+        return failedSteps.Count > 0 && !failedSteps.All(s => s.ContinueOnError);
+    }
+
+    private async Task<bool> TryContinueWithFailureHandlersAsync(int pipelineRunId, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        var run = await repo.GetPipelineRunWithPipelineAsync(pipelineRunId, ct).ConfigureAwait(false);
+        if (run?.Pipeline is null) return false;
+
+        var definition = definitions.Parse(run);
+        if (definition is null) return false;
+
+        var failureHandlerStages = YamlParsingHelper.FlattenJobs(definition)
+            .Where(stage => PipelineStageDispatchPlanner.IsFailureHandlerCondition(stage.Condition))
+            .Select(stage => stage.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (failureHandlerStages.Count == 0) return false;
+
+        var pendingSteps = await repo.GetPendingStepRunsAsync(pipelineRunId, ct).ConfigureAwait(false);
+        if (!pendingSteps.Any(step => failureHandlerStages.Contains(step.StageName))) return false;
+
+        var blockedSteps = pendingSteps
+            .Where(step => step.StageName != PipelineRunService.SystemCleanupStage && !failureHandlerStages.Contains(step.StageName))
+            .ToList();
+        if (blockedSteps.Count > 0)
+        {
+            finalizer.MarkStepsAs(blockedSteps, TaskExecutionStatus.Cancelled);
+            await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
+        await AdvanceToNextStageOrCompleteAsync(pipelineRunId, launcher, ct).ConfigureAwait(false);
+        return true;
+    }
+
+
+    // Retry / resume dispatch WITH the same per-step secret scoping as the first dispatch: resolve the
+    // secret-key set so each step's task env carries only the secrets it references, instead of the full
+    // secret set. (Previously these paths re-injected every secret into every step - over-exposure.)
+    public async Task DispatchNextStageWithScopedSecretsAsync(
+        PipelineRun run, PipelineYamlDefinition definition,
+        IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        var (resolvedVars, secretKeys) = await ResolveFullVariablesWithSecretsForRunAsync(run, definition, ct).ConfigureAwait(false);
+        var pendingSteps = await repo.GetPendingStepRunsAsync(run.Id, ct).ConfigureAwait(false);
+        // Same redundancy as in AdvanceToNextStageOrCompleteAsync: the caller hands us the run, so its
+        // pipeline id is already here when the navigation is loaded.
+        var pipelineIdForRun = run.Pipeline?.Id
+            ?? await repo.GetPipelineIdForRunAsync(run.Id, ct).ConfigureAwait(false);
+        var organizationId = pipelineIdForRun is null
+            ? null
+            : await repo.GetPipelineOrganizationIdAsync(pipelineIdForRun.Value, ct).ConfigureAwait(false);
+        await planner.CreateTasksForNextStageAsync(run.Id, definition, resolvedVars, pendingSteps, organizationId, secretKeys, launcher, ct).ConfigureAwait(false);
+    }
+
+    public async Task AdvanceToNextStageOrCompleteAsync(
+        int pipelineRunId, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        var run = await repo.GetPipelineRunWithPipelineAsync(pipelineRunId, ct).ConfigureAwait(false);
+        if (run?.Pipeline is null) return;
+
+        var definition = definitions.Parse(run);
+        if (definition is null) return;
+
+        var (resolvedVars, secretKeys) = await ResolveFullVariablesWithSecretsForRunAsync(run, definition, ct).ConfigureAwait(false);
+
+        // A360-15: the run was loaded WITH its pipeline three lines above, so asking the database which
+        // pipeline this run belongs to was a round trip for a value already in hand.
+        var organizationId = await repo
+            .GetPipelineOrganizationIdAsync(run.Pipeline.Id, ct).ConfigureAwait(false);
+
+        // Loop: CreateTasksForNextStageAsync may cancel stages (condition=false), which unblocks
+        // downstream stages. Keep re-evaluating until either a task is dispatched or no pending
+        // steps remain.
+        for (var guard = 0; guard < 10; guard++)
+        {
+            if (guard > 0 && !await finalizer.IsRunActiveAsync(pipelineRunId, ct).ConfigureAwait(false)) return;
+
+            var pendingSteps = await repo.GetPendingStepRunsAsync(pipelineRunId, ct).ConfigureAwait(false);
+            if (pendingSteps.Count == 0)
+            {
+                var finalStatus = HasCancellationRequest(run.AdditionalVariablesJson)
+                    ? PipelineStatus.Cancelled
+                    : await repo.HasAnyFailedStepInRunAsync(pipelineRunId, ct).ConfigureAwait(false)
+                        ? PipelineStatus.Failed
+                        : PipelineStatus.Success;
+                await finalizer.CompleteRunAsync(pipelineRunId, finalStatus, ct).ConfigureAwait(false);
+                if (finalStatus == PipelineStatus.Success)
+                    await pipelineHub.Clients.Groups(HubGroups.PipelineRunUpdates(pipelineRunId, run.Pipeline.Id)).SendAsync("PipelineRunCompleted", pipelineRunId, PipelineStatus.Success, ct).ConfigureAwait(false);
+                return;
+            }
+
+            var hadCancelled = await planner.CreateTasksForNextStageAsync(pipelineRunId, definition, resolvedVars, pendingSteps, organizationId, secretKeys, launcher, ct).ConfigureAwait(false);
+            if (!hadCancelled) return;
+        }
+    }
+
+    /// <summary>Returns true if any stage was cancelled (condition=false), signaling the caller to re-evaluate.</summary>
+    // First-dispatch convenience: the caller already resolved (resolvedVars, secretKeys) - reuse them (so
+    // run parameters/additionalVars are preserved) while still scoping secrets per step. Computes the
+    // pending steps + owning org, then defers to the scoping overload.
+
+
+    // --- ServerTask creation & dispatch (per-stage steps, system tasks, artifact collection) ---
+    /// <returns><c>true</c> if an artifact-collection task was dispatched (the caller must then wait for it
+    /// before advancing, S-TECH-ARCR); <c>false</c> if the stage has no artifacts / no resolvable server.</returns>
+    private async Task<bool> DispatchPostStageArtifactCollectionAsync(int runId, string stageName, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        var run = await repo.GetPipelineRunWithPipelineAsync(runId, ct).ConfigureAwait(false);
+        if (run?.Pipeline is null) return false;
+
+        var definition = definitions.Parse(run);
+        if (definition is null) return false;
+
+        var stageDef = YamlParsingHelper.FlattenJobs(definition).FirstOrDefault(s => s.Name == stageName);
+        if (stageDef is null || stageDef.Artifacts.Count == 0) return false;
+
+        var organizationId = await repo.GetPipelineOrganizationIdAsync(run.Pipeline.Id, ct).ConfigureAwait(false);
+        var producerServerId = await repo.GetStageProducerServerIdAsync(runId, stageName, ct).ConfigureAwait(false);
+        if (producerServerId is null) return false;
+        var server = await repo.FindOnlineServerByIdAsync(producerServerId.Value, ct: ct).ConfigureAwait(false);
+        if (server is null || organizationId is not null && server.OrganizationId != organizationId.Value) return false;
+        if (server is null) return false;
+
+        var resolvedVars = await ResolveFullVariablesForRunAsync(run, definition, ct).ConfigureAwait(false);
+        InjectStageSystemVariables(resolvedVars, stageName, server);
+        var isWindows = OsTypeHelper.IsWindows(server.OsType, server.OsDescription);
+        if (isWindows && resolvedVars.TryGetValue("WORKSPACE", out var ws) && !ws.Contains(":\\"))
+            resolvedVars["WORKSPACE"] = PipelineCommandBuilder.GetDefaultWorkspace(runId, isWindows: true);
+        var workspace = resolvedVars.GetValueOrDefault("WORKSPACE", "");
+        if (stageDef.Isolation?.IsContainer == true)
+            workspace = PipelineSystemTaskFactory.ContainerWorkspace;
+
+        var resolvedPatterns = stageDef.Artifacts
+            .Select(p => SubstituteVariables(p, resolvedVars))
+            .ToList();
+
+        var artifactVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AETHEUS_ARTIFACT_NAME"] = $"{stageName}-artifacts",
+            ["AETHEUS_RUN_ID"] = runId.ToString(),
+            ["AETHEUS_STAGE_NAME"] = stageName,
+            ["AETHEUS_WORKING_DIR"] = workspace,
+            ["AETHEUS_WORKSPACE_MODE"] =
+                stageDef.Isolation?.IsContainer == true ? "container" : "process"
+        };
+
+        var task = new ServerTask
+        {
+            ServerId = server.Id,
+            Name = $"Collect Artifacts ({stageName})",
+            Command = JsonSerializer.Serialize(resolvedPatterns),
+            PipelineRunId = runId,
+            EnvironmentVariables = TaskEnvProtection.Protect(encryption, JsonSerializer.Serialize(artifactVars)),
+            TimeoutSeconds = PipelineCommandBuilder.ArtifactCollectionTimeoutSeconds,
+            Operation = OperationKind.PipelineCollectArtifacts
+        };
+        repo.TrackTask(task);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        logger.LogInformation("Dispatched artifact collection task for run {RunId} stage {Stage}", runId, stageName);
+        return true;
+    }
+
+    // --- Variable resolution (delegated to the injected IPipelineVariableResolver) ---
+    // F-009: thin wrappers keeping call sites terse while the logic lives in its own type.
+
+    private Task<(Dictionary<string, string> Resolved, List<string> Warnings, HashSet<string> SecretKeys)> ResolveVariablesWithWarningsAsync(
+        PipelineYamlDefinition definition, int? projectId, Dictionary<string, string>? additionalVariables, CancellationToken ct,
+        int? pipelineId = null, int? runId = null, string? pipelineName = null, int? buildNumber = null)
+        => variableResolver.ResolveVariablesWithWarningsAsync(definition, projectId, additionalVariables, ct, pipelineId, runId, pipelineName, buildNumber);
+
+    private static void InjectStageSystemVariables(
+        Dictionary<string, string> stageVars, string stageName, Server server)
+        => PipelineVariableResolver.InjectStageSystemVariables(stageVars, stageName, server);
+
+    private Task<Dictionary<string, string>> ResolveFullVariablesForRunAsync(
+        PipelineRun run, PipelineYamlDefinition definition, CancellationToken ct)
+        => variableResolver.ResolveFullVariablesForRunAsync(run, definition, ct);
+
+    private Task<(Dictionary<string, string> Resolved, HashSet<string> SecretKeys)> ResolveFullVariablesWithSecretsForRunAsync(
+        PipelineRun run, PipelineYamlDefinition definition, CancellationToken ct)
+        => variableResolver.ResolveFullVariablesWithSecretsForRunAsync(run, definition, ct);
+}

@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
@@ -86,7 +87,7 @@ public class PipelineServiceTests
         {
             new() { Id = 21, Status = PipelineStatus.Success }
         };
-        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(
+        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(
         [
             new PipelineDto { Id = 1, Name = "release", RecentRuns = recentRuns, YamlDefinition = "name: release\ntrigger: manual\non_success:\n  - pipeline: deploy\nstages: []" },
             new PipelineDto { Id = 2, Name = "deploy", YamlDefinition = "name: deploy\ntrigger: manual\nstages: []" }
@@ -108,7 +109,7 @@ public class PipelineServiceTests
     [Fact]
     public async Task GetDependencyGroupsAsync_UsesTriggerFromYamlInsteadOfStaleStoredValue()
     {
-        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(
+        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(
         [
             new PipelineDto { Id = 1, Name = "hook", TriggerType = PipelineTriggerType.Manual,
                 YamlDefinition = "name: hook\ntrigger: webhook\nstages: []" }
@@ -403,8 +404,16 @@ public class PipelineServiceTests
     [Fact]
     public async Task UpsertPipelineFromYamlAsync_ExistingPipeline_RefreshesItsAutomatedTriggerType()
     {
-        var existing = new Pipeline { Id = 5, Name = "aetheus-release", TriggerType = PipelineTriggerType.Manual, Runs = [] };
+        var existing = new Pipeline
+        {
+            Id = 5,
+            Name = "aetheus-release",
+            TriggerType = PipelineTriggerType.Manual,
+            CreatedByUsername = "alice",
+            Runs = []
+        };
         _repoMock.FindPipelineByNameAndProjectAsync("aetheus-release", 1, Arg.Any<CancellationToken>()).Returns(existing);
+        _repoMock.IsActiveUsernameAsync("alice", Arg.Any<CancellationToken>()).Returns(true);
         _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         await _sut.UpsertPipelineFromYamlAsync("aetheus-release", "name: aetheus-release\ntrigger: webhook\nstages: []", 1, "webhook", ct: TestContext.Current.CancellationToken);
@@ -415,6 +424,7 @@ public class PipelineServiceTests
     [Fact]
     public async Task UpsertPipelineFromYamlAsync_NewPipeline_BroadcastsCreatedToProjectOrganization()
     {
+        _repoMock.GetProjectOwnerUsernameAsync(1, Arg.Any<CancellationToken>()).Returns("orgowner");
         _repoMock.GetPipelineOwnerOrganizationIdAsync(1, null, null, Arg.Any<CancellationToken>()).Returns(9);
         _repoMock.AddPipelineAsync(Arg.Any<Pipeline>(), Arg.Any<CancellationToken>())
             .Returns(call =>
@@ -428,6 +438,20 @@ public class PipelineServiceTests
 
         await _notifier.Received(1).BroadcastAsync(
             ResourceType.Pipeline, 41, EntityChangeOps.Created, Arg.Any<CancellationToken>(), 9);
+    }
+
+    [Fact]
+    public async Task UpsertPipelineFromYamlAsync_NewPipelineWithoutResolvableOwner_FailsClosed()
+    {
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            _sut.UpsertPipelineFromYamlAsync(
+                "new-pipeline", "name: new-pipeline\ntrigger: manual\nstages: []", 1, "manual",
+                ct: TestContext.Current.CancellationToken));
+
+        Assert.Contains("no authenticated pusher or organization owner", exception.Message, StringComparison.Ordinal);
+        await _repoMock.DidNotReceive().AddPipelineAsync(Arg.Any<Pipeline>(), Arg.Any<CancellationToken>());
+        await _notifier.DidNotReceiveWithAnyArgs().BroadcastAsync(
+            default, default, default!, TestContext.Current.CancellationToken, default);
     }
 
     [Fact]
@@ -461,9 +485,11 @@ public class PipelineServiceTests
             Name = "aetheus-nightly",
             SourceBranch = null,
             TriggerType = PipelineTriggerType.Schedule,
+            CreatedByUsername = "alice",
             Runs = []
         };
         _repoMock.FindPipelineByNameAndProjectAsync("aetheus-nightly", 1, Arg.Any<CancellationToken>()).Returns(existing);
+        _repoMock.IsActiveUsernameAsync("alice", Arg.Any<CancellationToken>()).Returns(true);
         _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         await _sut.UpsertPipelineFromYamlAsync(
@@ -501,6 +527,37 @@ public class PipelineServiceTests
     }
 
     [Fact]
+    public async Task UpsertPipelineFromYamlAsync_CanonicalYamlBranch_RepairsStaleBranchAndTrigger()
+    {
+        var existing = new Pipeline
+        {
+            Id = 29,
+            Name = "aetheus-quality",
+            SourceBranch = "codex/sync-11ad",
+            YamlDefinition = "trigger: webhook",
+            TriggerType = PipelineTriggerType.Webhook,
+            CreatedByUsername = "alice",
+            Runs = []
+        };
+        _repoMock.FindPipelineByNameAndProjectAsync("aetheus-quality", 1, Arg.Any<CancellationToken>()).Returns(existing);
+        _repoMock.IsActiveUsernameAsync("alice", Arg.Any<CancellationToken>()).Returns(true);
+
+        await _sut.UpsertPipelineFromYamlAsync(
+            "aetheus-quality",
+            "name: aetheus-quality\ntrigger: manual\nsource_branch: develop\nstages: []",
+            1,
+            "manual",
+            TestContext.Current.CancellationToken,
+            "develop",
+            "main");
+
+        Assert.Equal("develop", existing.SourceBranch);
+        Assert.Equal(PipelineTriggerType.Manual, existing.TriggerType);
+        Assert.Contains("trigger: manual", existing.YamlDefinition, StringComparison.Ordinal);
+        await _repoMock.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task UpsertPipelineFromYamlAsync_ExistingSystemOwner_NoPusher_FallsBackToProjectOwner()
     {
         // No HttpContext (background git-push sync) - resolve the project's org Owner instead.
@@ -512,6 +569,22 @@ public class PipelineServiceTests
         await _sut.UpsertPipelineFromYamlAsync("aetheus-ci", "name: aetheus-ci\ntrigger: manual\nstages: []", 1, "manual", ct: TestContext.Current.CancellationToken);
 
         Assert.Equal("orgowner", existing.CreatedByUsername);
+    }
+
+    [Fact]
+    public async Task UpsertPipelineFromYamlAsync_ExistingUnresolvableOwnerWithoutReplacement_FailsClosed()
+    {
+        var existing = new Pipeline { Id = 5, Name = "aetheus-ci", CreatedByUsername = "system", Runs = [] };
+        _repoMock.FindPipelineByNameAndProjectAsync("aetheus-ci", 1, Arg.Any<CancellationToken>()).Returns(existing);
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            _sut.UpsertPipelineFromYamlAsync(
+                "aetheus-ci", "name: aetheus-ci\ntrigger: manual\nstages: []", 1, "manual",
+                ct: TestContext.Current.CancellationToken));
+
+        Assert.Contains("no authenticated pusher or organization owner", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("system", existing.CreatedByUsername);
+        await _repoMock.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -848,7 +921,7 @@ public class PipelineServiceTests
             trigger: manual
             isolation:
               mode: container
-              image: alpine
+              image: alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
               memory: definitely-not-a-limit
             stages:
               - name: build
@@ -919,6 +992,97 @@ public class PipelineServiceTests
     }
 
     [Fact]
+    public void ValidateYamlStrict_TriggerMaySelectIndependentConformanceBranch()
+    {
+        const string yaml = """
+            name: conformance
+            trigger: manual
+            stages:
+              - name: baseline
+                steps:
+                  - name: launch-v1
+                    type: trigger
+                    pipeline: candidate
+                    inherit_source: false
+                    source_branch: conformance/v1
+                    source_commit: "$(CANDIDATE_COMMIT)"
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(System.Environment.NewLine, result.Errors));
+        var step = Assert.Single(Assert.Single(result.Definition!.Stages).Steps);
+        Assert.False(step.InheritSource);
+        Assert.Equal("conformance/v1", step.SourceBranch);
+        Assert.Equal("$(CANDIDATE_COMMIT)", step.SourceCommit);
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_TriggerMaySupplyChildParameters()
+    {
+        const string yaml = """
+            name: conformance
+            trigger: manual
+            stages:
+              - name: promote
+                steps:
+                  - name: launch-promotion
+                    type: trigger
+                    pipeline: promotion
+                    parameters:
+                      candidateVersion: "$(CANDIDATE_VERSION)"
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(System.Environment.NewLine, result.Errors));
+        var step = Assert.Single(Assert.Single(result.Definition!.Stages).Steps);
+        Assert.Equal("$(CANDIDATE_VERSION)", step.Parameters["candidateVersion"]);
+    }
+
+    [Theory]
+    [InlineData("""
+        name: invalid
+        trigger: manual
+        stages:
+          - name: baseline
+            steps:
+              - name: launch-v1
+                type: trigger
+                pipeline: candidate
+                inherit_source: false
+        """)]
+    [InlineData("""
+        name: invalid
+        trigger: manual
+        stages:
+          - name: baseline
+            steps:
+              - name: launch-v1
+                type: trigger
+                pipeline: candidate
+                source_branch: conformance/v1
+        """)]
+    [InlineData("""
+        name: invalid
+        trigger: manual
+        stages:
+          - name: baseline
+            steps:
+              - name: launch-v1
+                type: trigger
+                pipeline: candidate
+                source_commit: "$(CANDIDATE_COMMIT)"
+        """)]
+    public void ValidateYamlStrict_TriggerIndependentSourceContractIsFailClosed(string yaml)
+    {
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("source_", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ValidateYamlStrict_StageWithoutAgent_ReturnsWarning()
     {
         var yaml = """
@@ -935,6 +1099,30 @@ public class PipelineServiceTests
 
         Assert.True(result.IsValid);
         Assert.Contains(result.Warnings, w => w.Contains("affinity"));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_LegacyCoverageThresholdReturnsMigrationWarning()
+    {
+        const string yaml = """
+            name: quality
+            stages:
+              - name: Analysis
+                agent: build
+                steps:
+                  - name: Coverage
+                    type: coverage
+                    min_coverage: 75
+                    target_files: [coverage.xml]
+                  - name: Gate
+                    type: analysis-gate
+                    analysis_scope: quality
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(' ', result.Errors));
+        Assert.Contains(result.Warnings, warning => warning.Contains("legacy min_coverage", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1098,7 +1286,31 @@ public class PipelineServiceTests
                   - name: restore previous
                     type: restore-artifacts
                     release: previous-deployed
+                    artifact: BuildArtifacts-artifacts
                     target_directory: .nminus1
+                    allow_missing: true
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(System.Environment.NewLine, result.Errors));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_RestoreArtifactsAllowMissing_AllowsOptionalProducerArtifact()
+    {
+        var yaml = """
+            name: candidate
+            trigger: manual
+            stages:
+              - name: assurance
+                agent: linux
+                steps:
+                  - name: restore advisory summary
+                    type: restore-artifacts
+                    artifact: analysis-summary-json
+                    artifact_source_pipeline: quality
+                    target_directory: .assurance-input/quality
                     allow_missing: true
             """;
 
@@ -1129,6 +1341,49 @@ public class PipelineServiceTests
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error => error.Contains("allow_missing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_LatestCandidateTemplate_IsValid()
+    {
+        var yaml = DeliveryPipelineTemplateSeeder.ReadResource("application-candidate-v7.yaml");
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid,
+            string.Join(System.Environment.NewLine, result.Errors.Concat(result.Warnings)));
+    }
+
+    [Theory]
+    [InlineData("toto-ci-light.yaml")]
+    [InlineData("toto-ci-light-adapter.yaml")]
+    [InlineData("toto-ci.yaml")]
+    [InlineData("toto-quality.yaml")]
+    [InlineData("toto-security.yaml")]
+    [InlineData("toto-qa.yaml")]
+    [InlineData("toto-candidate.yaml")]
+    [InlineData("toto-baseline-candidate.yaml")]
+    [InlineData("toto-promote-accept.yaml")]
+    [InlineData("toto-deploy-accept-adapter.yaml")]
+    [InlineData("toto-verify-accept.yaml")]
+    [InlineData("toto-conformance.yaml")]
+    [InlineData("toto-conformance-cancellable.yaml")]
+    [InlineData("toto-conformance-injection.yaml")]
+    [InlineData("toto-conformance-negative.yaml")]
+    [InlineData("toto-conformance-stale.yaml")]
+    [InlineData("toto-vulnerable-conformance.yaml")]
+    public void ValidateYamlStrict_TotoConformanceDefinitions_AreValid(string fileName)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        var yaml = File.ReadAllText(Path.Combine(directory.FullName, "deploy", "pipelines", fileName));
+
+        var result = _sut.ValidateYamlStrict(ResolveSeededDeliveryTemplate(yaml));
+
+        Assert.True(result.IsValid,
+            string.Join(System.Environment.NewLine, result.Errors.Concat(result.Warnings)));
     }
 
     [Theory]
@@ -1211,5 +1466,46 @@ public class PipelineServiceTests
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.Contains("at least one step"));
+    }
+
+    private string ResolveSeededDeliveryTemplate(string yaml)
+    {
+        var definition = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(yaml);
+        if (string.IsNullOrWhiteSpace(definition.Extends))
+            return yaml;
+
+        var reference = definition.Extends.Split('@', 2, StringSplitOptions.TrimEntries);
+        Assert.Equal(2, reference.Length);
+        Assert.True(int.TryParse(reference[1], out var version));
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        var templateYaml = File.ReadAllText(Path.Combine(
+            directory.FullName,
+            "deploy",
+            "pipeline-templates",
+            $"{reference[0]}-v{version}.yaml"));
+        _repoMock.FindTemplateByNameAsync(reference[0], 0, Arg.Any<CancellationToken>())
+            .Returns(new PipelineTemplate
+            {
+                Id = 999,
+                Name = reference[0],
+                OrganizationId = 0,
+                LatestVersion = version,
+                Versions =
+                [
+                    new PipelineTemplateVersion
+                    {
+                        Version = version,
+                        YamlContent = templateYaml
+                    }
+                ]
+            });
+        return new PipelineTemplateResolver(_repoMock)
+            .ResolveAsync(yaml, 0)
+            .GetAwaiter()
+            .GetResult()
+            .Yaml;
     }
 }

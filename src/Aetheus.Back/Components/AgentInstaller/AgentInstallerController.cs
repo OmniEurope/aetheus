@@ -2,8 +2,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Aetheus.Back.Components.Auth;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.AgentInstaller;
 
@@ -33,17 +31,16 @@ public partial class AgentInstallerController(
         CancellationToken ct = default)
     {
         // F-19: prefer the registration token from a header (not a query string, since query
-        // strings are routinely captured in proxy/access logs). Keep the legacy query parameter
-        // as a fallback only in Development.
+        // strings are routinely captured in proxy/access logs). The legacy query parameter remains
+        // an intentional compatibility fallback in every environment; new clients must use a header.
         var headerToken = Request.Headers["X-Registration-Token"].FirstOrDefault();
+        var effectiveToken = string.IsNullOrEmpty(headerToken) ? token : headerToken;
         var auth = Request.Headers.Authorization.FirstOrDefault();
-        if (string.IsNullOrEmpty(headerToken) && !string.IsNullOrEmpty(auth)
+        if (string.IsNullOrEmpty(effectiveToken) && !string.IsNullOrEmpty(auth)
             && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            headerToken = auth["Bearer ".Length..].Trim();
+            effectiveToken = auth["Bearer ".Length..].Trim();
         }
-        var effectiveToken = headerToken;
-        if (string.IsNullOrEmpty(effectiveToken)) effectiveToken = token;
 
         if (string.IsNullOrWhiteSpace(effectiveToken))
             return BadRequest(new Aetheus.Shared.DTOs.ApiError { Message = "Missing registration token." });

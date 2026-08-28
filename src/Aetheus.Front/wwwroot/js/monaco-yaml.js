@@ -1,3 +1,85 @@
+function completionRange(model, position) {
+    const word = model.getWordUntilPosition(position);
+    return {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn
+    };
+}
+
+function completionItem(label, kind, insertText, range) {
+    return { label, kind, insertText, range };
+}
+
+function parentKeyAt(model, position) {
+    const lines = model.getValue().split('\n');
+    for (let index = position.lineNumber - 2; index >= 0; index--) {
+        const match = lines[index].match(/^(\w[\w_]*):/);
+        if (match) return match[1];
+    }
+    return '';
+}
+
+function listValueCompletions(model, position, text, suggestions, range) {
+    if (!/^\s*-\s*/.test(text)) return [];
+    const names = {
+        variable_libraries: suggestions.libraryNames,
+        vaults: suggestions.vaultNames
+    }[parentKeyAt(model, position)];
+    if (!names) return [];
+    return names.map(name => completionItem(
+        name, monaco.languages.CompletionItemKind.Value, name, range));
+}
+
+function agentCompletions(text, suggestions, range) {
+    if (!/^\s*agent:\s*/.test(text) || !suggestions.serverNames) return [];
+    return suggestions.serverNames.map(name => completionItem(
+        name, monaco.languages.CompletionItemKind.Value, name, range));
+}
+
+function variableCompletions(text, suggestions, range) {
+    if (!/\$\([A-Za-z_]*$/.test(text) || !suggestions.variableKeys) return [];
+    return suggestions.variableKeys.map(key => completionItem(
+        key, monaco.languages.CompletionItemKind.Variable, key + ')', range));
+}
+
+function keywordCompletions(text, range) {
+    if (!/^\w*$/.test(text.trim())) return [];
+    const keywords = [
+        'name', 'trigger', 'variables', 'variable_libraries',
+        'vaults', 'stages', 'steps', 'shell', 'agent',
+        'depends_on', 'timeout_seconds', 'type',
+        'analysis_scope', 'analysis_preset', 'analysis_rules', 'analysis_grading',
+        'key', 'minimum', 'maximum', 'operator', 'threshold',
+        'metric', 'category', 'scanner', 'rule', 'severity',
+        'new_findings_only', 'branch', 'environment',
+        'behavior', 'priority', 'enabled', 'minimum_grade',
+        'required_domains', 'domain', 'direction',
+        'a', 'b', 'c', 'd', 'e', 'required'
+    ];
+    return keywords.map(keyword => completionItem(
+        keyword, monaco.languages.CompletionItemKind.Keyword, keyword + ': ', range));
+}
+
+function yamlCompletions(model, position, suggestions) {
+    const text = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column
+    });
+    const range = completionRange(model, position);
+    return {
+        suggestions: [
+            ...listValueCompletions(model, position, text, suggestions, range),
+            ...agentCompletions(text, suggestions, range),
+            ...variableCompletions(text, suggestions, range),
+            ...keywordCompletions(text, range)
+        ]
+    };
+}
+
 window.monacoInterop = {
     _editors: {},
     _disposables: {},
@@ -150,99 +232,7 @@ window.monacoInterop = {
         if (typeof monaco === 'undefined') return;
 
         const disposable = monaco.languages.registerCompletionItemProvider('yaml', {
-            provideCompletionItems: function (model, position) {
-                const textUntilPosition = model.getValueInRange({
-                    startLineNumber: position.lineNumber,
-                    startColumn: 1,
-                    endLineNumber: position.lineNumber,
-                    endColumn: position.column
-                });
-
-                const word = model.getWordUntilPosition(position);
-                const range = {
-                    startLineNumber: position.lineNumber,
-                    startColumn: word.startColumn,
-                    endLineNumber: position.lineNumber,
-                    endColumn: word.endColumn
-                };
-
-                const items = [];
-
-                const trimmed = textUntilPosition.trim();
-
-                if (/^\s*-\s*/.test(textUntilPosition)) {
-                    const lines = model.getValue().split('\n');
-                    let parentKey = '';
-                    for (let i = position.lineNumber - 2; i >= 0; i--) {
-                        const line = lines[i];
-                        const match = line.match(/^(\w[\w_]*):/);
-                        if (match) {
-                            parentKey = match[1];
-                            break;
-                        }
-                    }
-
-                    if (parentKey === 'variable_libraries' && suggestions.libraryNames) {
-                        suggestions.libraryNames.forEach(name => {
-                            items.push({
-                                label: name,
-                                kind: monaco.languages.CompletionItemKind.Value,
-                                insertText: name,
-                                range: range
-                            });
-                        });
-                    } else if (parentKey === 'vaults' && suggestions.vaultNames) {
-                        suggestions.vaultNames.forEach(name => {
-                            items.push({
-                                label: name,
-                                kind: monaco.languages.CompletionItemKind.Value,
-                                insertText: name,
-                                range: range
-                            });
-                        });
-                    }
-                }
-
-                if (/^\s*agent:\s*/.test(textUntilPosition) && suggestions.serverNames) {
-                    suggestions.serverNames.forEach(name => {
-                        items.push({
-                            label: name,
-                            kind: monaco.languages.CompletionItemKind.Value,
-                            insertText: name,
-                            range: range
-                        });
-                    });
-                }
-
-                if (/\$\([A-Za-z_]*$/.test(textUntilPosition) && suggestions.variableKeys) {
-                    suggestions.variableKeys.forEach(key => {
-                        items.push({
-                            label: key,
-                            kind: monaco.languages.CompletionItemKind.Variable,
-                            insertText: key + ')',
-                            range: range
-                        });
-                    });
-                }
-
-                if (/^\w*$/.test(trimmed)) {
-                    const keywords = [
-                        'name', 'trigger', 'variables', 'variable_libraries',
-                        'vaults', 'stages', 'steps', 'shell', 'agent',
-                        'depends_on', 'timeout_seconds'
-                    ];
-                    keywords.forEach(kw => {
-                        items.push({
-                            label: kw,
-                            kind: monaco.languages.CompletionItemKind.Keyword,
-                            insertText: kw + ': ',
-                            range: range
-                        });
-                    });
-                }
-
-                return { suggestions: items };
-            }
+            provideCompletionItems: (model, position) => yamlCompletions(model, position, suggestions)
         });
 
         this._globalCompletionDisposable = disposable;
@@ -315,14 +305,15 @@ window.monacoInterop = {
     disposeDiffEditor: function (elementId) {
         const entry = this._diffEditors[elementId];
         if (entry) {
+            entry.editor.setModel(null);
+            entry.editor.dispose();
             entry.originalModel.dispose();
             entry.modifiedModel.dispose();
-            entry.editor.dispose();
             delete this._diffEditors[elementId];
         }
     },
 
-    initReadOnly: async function (elementId, content, language, isDark) {
+    initReadOnly: async function (elementId, content, language, isDark, lineNumber) {
         await this._ensureMonacoLoaded();
 
         const container = document.getElementById(elementId);
@@ -345,7 +336,7 @@ window.monacoInterop = {
             fontSize: 14,
             fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
             lineNumbers: 'on',
-            renderLineHighlight: 'none',
+            renderLineHighlight: lineNumber ? 'line' : 'none',
             folding: true,
             domReadOnly: true,
             padding: { top: 8, bottom: 8 },
@@ -357,6 +348,17 @@ window.monacoInterop = {
         });
 
         this._editors[elementId] = editor;
+        if (lineNumber) {
+            const model = editor.getModel();
+            const targetLine = Math.min(Math.max(1, Number(lineNumber)), model.getLineCount());
+            editor.setSelection({
+                startLineNumber: targetLine,
+                startColumn: 1,
+                endLineNumber: targetLine,
+                endColumn: model.getLineMaxColumn(targetLine)
+            });
+            editor.revealLineInCenter(targetLine);
+        }
     },
 
     disposeEditor: function (elementId) {

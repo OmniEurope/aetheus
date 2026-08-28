@@ -9,7 +9,7 @@ namespace Aetheus.Shared.Validation;
 public sealed class HttpsUrlAttribute : ValidationAttribute
 {
     public HttpsUrlAttribute()
-        : base("The {0} field must be an absolute HTTPS URL.")
+        : base("The {0} field must be an absolute HTTPS URL without embedded credentials. Store credentials in a ServiceConnection or Vault instead.")
     {
     }
 
@@ -17,6 +17,7 @@ public sealed class HttpsUrlAttribute : ValidationAttribute
     {
         if (value is null || string.IsNullOrWhiteSpace(value.ToString())) return true;
         return Uri.TryCreate(value.ToString(), UriKind.Absolute, out var uri)
-            && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+            && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrEmpty(uri.UserInfo);
     }
 }

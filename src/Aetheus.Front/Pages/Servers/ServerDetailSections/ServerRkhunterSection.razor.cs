@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -57,7 +50,7 @@ public partial class ServerRkhunterSection
     private async Task ExecuteActionAsync(RkhunterAction action)
     {
         _actionRunning = true;
-        var success = await Api.ExecuteRkhunterActionAsync(ServerId, new RkhunterActionRequest { Action = action });
+        var success = await Api.Security.ExecuteRkhunterActionAsync(ServerId, new RkhunterActionRequest { Action = action });
         _actionRunning = false;
         if (success)
         {
@@ -74,7 +67,7 @@ public partial class ServerRkhunterSection
         {
             MailOnWarning = _setupMailOnWarning?.Trim() ?? string.Empty
         };
-        var success = await Api.SetupRkhunterAsync(ServerId, request);
+        var success = await Api.Security.SetupRkhunterAsync(ServerId, request);
         if (success)
         {
             Toast.Success("TaskCreated");
@@ -93,7 +86,7 @@ public partial class ServerRkhunterSection
                 { "Kind", ServerSetupKind.Rkhunter },
                 { "Model", new ServerSetupDialogModel { MailOnWarning = _setupMailOnWarning } }
             },
-            new DialogOptions { Width = "32rem" });
+            new DialogOptions { Width = "32rem", AutoFocusFirstElement = false });
         if (result is not ServerSetupDialogModel model) return;
         _setupMailOnWarning = model.MailOnWarning;
         await SetupAsync();
@@ -101,19 +94,19 @@ public partial class ServerRkhunterSection
 
     private async Task GetLogsAsync()
     {
-        var success = await Api.GetRkhunterLogsAsync(ServerId, new RkhunterLogRequest());
+        var success = await Api.Security.GetRkhunterLogsAsync(ServerId, new RkhunterLogRequest());
         if (success)
             Toast.Success("TaskCreated");
     }
 
     private async Task LoadWarningsAsync()
     {
-        _warnings = await Api.GetRkhunterWarningsAsync(ServerId);
+        _warnings = await Api.Security.GetRkhunterWarningsAsync(ServerId);
     }
 
     private async Task LoadScanHistoryAsync()
     {
-        _scanHistory = await Api.GetRkhunterScanHistoryAsync(ServerId);
+        _scanHistory = await Api.Security.GetRkhunterScanHistoryAsync(ServerId);
     }
 
     /// <summary>
@@ -136,7 +129,7 @@ public partial class ServerRkhunterSection
         try
         {
             var cron = string.IsNullOrWhiteSpace(_scheduleCron) ? null : _scheduleCron.Trim();
-            var success = await Api.SetRkhunterScheduleAsync(ServerId, new RkhunterScheduleRequest { CronExpression = cron });
+            var success = await Api.Security.SetRkhunterScheduleAsync(ServerId, new RkhunterScheduleRequest { CronExpression = cron });
             if (success)
             {
                 _scheduleCron = cron ?? string.Empty;
@@ -161,7 +154,7 @@ public partial class ServerRkhunterSection
     {
         "clean" => "check_circle",
         "warning" => "warning",
-        _ => "help_outline"
+        _ => "help"
     };
 
     private static string GetScanStatusColor(string status) => status switch
@@ -175,7 +168,7 @@ public partial class ServerRkhunterSection
     {
         "clean" => BadgeStyle.Success,
         "warning" => BadgeStyle.Warning,
-        _ => BadgeStyle.Secondary
+        _ => BadgeStyle.Light
     };
 
     private string LocalizeScanStatus(string status) => status.ToLowerInvariant() switch

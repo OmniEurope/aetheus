@@ -1,0 +1,23 @@
+# Prepares and deploys the explicit V-1 branch before the current candidate is exercised.
+name: toto-baseline-candidate
+trigger: manual
+
+stages:
+  - name: Candidate
+    os: linux
+    steps:
+      - name: Validate baseline candidate
+        type: trigger
+        pipeline: toto-candidate
+        timeout_seconds: 7200
+
+  - name: Promote
+    os: linux
+    depends_on: [Candidate]
+    steps:
+      - name: Deploy baseline candidate to accept
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(CANDIDATE_VERSION)"
+        timeout_seconds: 3600

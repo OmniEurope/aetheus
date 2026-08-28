@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Globalization;
+using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Validation;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+/// <summary>
+/// Turns a <c>bluegreen-*</c> step definition into the validated task environment the agent expects.
+///
+/// This lives apart from the dispatcher because the checks are the interesting part: the four
+/// operations act on a live environment, so a definition that is merely plausible is not enough.
+/// Every value is validated here, before a task is ever created, and a rejection carries the reason
+/// so the step fails honestly instead of the agent discovering the problem mid-cutover.
+/// </summary>
+internal sealed record BlueGreenStepBinding
+{
+    internal required string Project { get; init; }
+    internal required Dictionary<string, string> Variables { get; init; }
+
+    internal static bool TryBind(
+        OperationKind operation,
+        PipelineStepDefinition stepDef,
+        Func<string?, string> substitute,
+        IReadOnlyDictionary<string, string> baseVariables,
+        out BlueGreenStepBinding? binding,
+        out string error)
+    {
+        binding = null;
+
+        var project = substitute(stepDef.Project);
+        if (!OperationTargetValidator.IsValid(operation, project))
+        {
+            error = $"invalid or missing 'project' '{project}'.";
+            return false;
+        }
+
+        if (!TryStateDir(substitute(stepDef.StateDir), out var stateDir, out error)
+            || !TryPorts(substitute(stepDef.Ports), out var ports, out error))
+        {
+            return false;
+        }
+
+        var composeFiles = substitute(stepDef.ComposeFiles);
+        var envFile = substitute(stepDef.EnvFile);
+        if (composeFiles.Length == 0 || envFile.Length == 0)
+        {
+            error = "'compose_files' and 'env_file' are required.";
+            return false;
+        }
+
+        var reloadHelper = substitute(stepDef.ReloadHelper);
+        var revision = substitute(stepDef.Revision);
+        var upstreamTemplate = substitute(stepDef.UpstreamTemplate);
+        var upstreamConf = substitute(stepDef.UpstreamConf);
+        var migrationsDir = substitute(stepDef.MigrationsDir);
+
+        if (!TryOperationRequirements(
+                operation, reloadHelper, revision, upstreamTemplate, upstreamConf, migrationsDir, out error))
+        {
+            return false;
+        }
+
+        if (!TryComposeEnv(substitute(stepDef.ComposeEnv), baseVariables, out var composeEnv, out error))
+            return false;
+
+        binding = new BlueGreenStepBinding
+        {
+            Project = project,
+            Variables = new Dictionary<string, string>(baseVariables, StringComparer.OrdinalIgnoreCase)
+            {
+                ["AETHEUS_BG_STATE_DIR"] = stateDir,
+                ["AETHEUS_BG_ENV_FILE"] = envFile,
+                ["AETHEUS_BG_COMPOSE_FILES"] = composeFiles,
+                ["AETHEUS_BG_PORT_FRONT_BLUE"] = ports[0],
+                ["AETHEUS_BG_PORT_BACK_BLUE"] = ports[1],
+                ["AETHEUS_BG_PORT_FRONT_GREEN"] = ports[2],
+                ["AETHEUS_BG_PORT_BACK_GREEN"] = ports[3],
+                ["AETHEUS_BG_RELOAD_HELPER"] = reloadHelper,
+                ["AETHEUS_BG_REVISION"] = revision,
+                ["AETHEUS_BG_UPSTREAM_TEMPLATE"] = upstreamTemplate,
+                ["AETHEUS_BG_UPSTREAM_CONF"] = upstreamConf,
+                ["AETHEUS_BG_MIGRATIONS_DIR"] = migrationsDir
+            }
+        };
+        foreach (var (name, value) in composeEnv)
+            binding.Variables[ComposeEnvPrefix + name] = value;
+        error = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// Prefix carrying the Compose interpolation variables to the agent. The values already travel in
+    /// the task environment, but only the names listed under this prefix reach the
+    /// <c>docker compose</c> child process, so the forwarded set stays explicit and auditable instead
+    /// of being "whatever the run happened to define".
+    /// </summary>
+    internal const string ComposeEnvPrefix = "AETHEUS_BG_COMPOSE_ENV_";
+
+    /// <summary>Bounds the forwarded set; a definition needing more is describing something else.</summary>
+    private const int MaxComposeEnvEntries = 32;
+
+    /// <summary>
+    /// Resolves <c>compose_env</c> against the run variables. An unresolvable name is refused rather
+    /// than dropped: Compose substitutes its own default for a variable it cannot see, so a missing
+    /// image tag would start the placeholder image instead of the one CI built, and the step would
+    /// report a successful cutover of the wrong thing.
+    /// </summary>
+    private static bool TryComposeEnv(
+        string raw,
+        IReadOnlyDictionary<string, string> baseVariables,
+        out List<KeyValuePair<string, string>> composeEnv,
+        out string error)
+    {
+        composeEnv = [];
+        error = string.Empty;
+        var names = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (names.Length == 0) return true;
+        if (names.Length > MaxComposeEnvEntries)
+        {
+            error = $"'compose_env' lists {names.Length} variables, more than the {MaxComposeEnvEntries} allowed.";
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in names)
+        {
+            if (!IsEnvironmentName(name))
+            {
+                error = $"'compose_env' entry '{name}' is not a valid environment variable name.";
+                return false;
+            }
+            if (!seen.Add(name))
+            {
+                error = $"'compose_env' lists '{name}' twice.";
+                return false;
+            }
+            if (!baseVariables.TryGetValue(name, out var value) || value.Length == 0)
+            {
+                error = $"'compose_env' names '{name}', which this run does not define; "
+                    + "Compose would silently fall back to its own default.";
+                return false;
+            }
+            composeEnv.Add(new KeyValuePair<string, string>(name, value));
+        }
+        return true;
+    }
+
+    private static bool IsEnvironmentName(string name) =>
+        name.Length > 0
+        && (char.IsAsciiLetter(name[0]) || name[0] == '_')
+        && name.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
+
+    private static bool TryStateDir(string stateDir, out string validated, out string error)
+    {
+        validated = stateDir;
+        if (stateDir.Length == 0 || !stateDir.StartsWith('/') || stateDir.Contains("..", StringComparison.Ordinal))
+        {
+            error = $"'state_dir' must be an absolute path without traversal, got '{stateDir}'.";
+            return false;
+        }
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryPorts(string raw, out string[] ports, out string error)
+    {
+        ports = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (ports.Length != 4 || !ports.All(IsPort))
+        {
+            error = "'ports' must list four valid ports as frontBlue,backBlue,frontGreen,backGreen.";
+            return false;
+        }
+        if (ports.Distinct(StringComparer.Ordinal).Count() != 4)
+        {
+            error = "'ports' must be four distinct values.";
+            return false;
+        }
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool IsPort(string value) =>
+        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port is > 0 and <= 65535;
+
+    /// <summary>
+    /// What each blue-green operation requires of its own fields. Extracted from <c>TryBind</c> so the
+    /// binder keeps one job (shape the binding) and this keeps the other (say what an operation needs),
+    /// which is also what keeps <c>TryBind</c> under the repository's complexity budget.
+    /// </summary>
+    private static bool TryOperationRequirements(
+        OperationKind operation,
+        string reloadHelper,
+        string revision,
+        string upstreamTemplate,
+        string upstreamConf,
+        string migrationsDir,
+        out string error)
+    {
+        error = string.Empty;
+        switch (operation)
+        {
+            case OperationKind.BlueGreenSwitch:
+                return TrySwitchFields(reloadHelper, revision, upstreamTemplate, upstreamConf, out error);
+
+            // Without the migration sources the expand/contract gate cannot inspect what is about to run
+            // against a schema the previous colour is still serving, so refuse rather than skip it.
+            case OperationKind.BlueGreenMigrate when migrationsDir.Length == 0:
+                error = "'migrations_dir' is required so the expand/contract gate can inspect pending migrations.";
+                return false;
+
+            case OperationKind.BlueGreenRollback when upstreamConf.Length == 0 || reloadHelper.Length == 0:
+                error = "'upstream_conf' and 'reload_helper' are required to restore traffic.";
+                return false;
+
+            // rollback and retire hand reload_helper to `sudo -n` exactly like switch does, so they get
+            // the same shape check. The real boundary is argv execution plus an argv-exact sudoers rule,
+            // but a validation present on one of three paths reads as an oversight, not defense in depth.
+            case OperationKind.BlueGreenRollback or OperationKind.BlueGreenRetire when reloadHelper.Length > 0:
+                return TryReloadHelperShape(reloadHelper, out error);
+
+            default:
+                return true;
+        }
+    }
+
+    /// <summary>
+    /// The shape every privileged reload helper must have, wherever it is used: an absolute path, no
+    /// traversal, no whitespace. Whitespace matters because the value reaches a `sudo -n` grant, and a
+    /// space is what would turn one granted command into two.
+    /// </summary>
+    private static bool TryReloadHelperShape(string reloadHelper, out string error)
+    {
+        if (!reloadHelper.StartsWith('/')
+            || reloadHelper.Contains("..", StringComparison.Ordinal)
+            || reloadHelper.Any(char.IsWhiteSpace))
+        {
+            error = $"'reload_helper' must be an absolute path with no whitespace, got '{reloadHelper}'.";
+            return false;
+        }
+        error = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// The reload helper is invoked argv-exact through sudo, so it must be a fixed absolute path.
+    /// Allowing whitespace or traversal would let a variable turn the grant into an arbitrary
+    /// privileged command.
+    /// </summary>
+    private static bool TrySwitchFields(
+        string reloadHelper, string revision, string upstreamTemplate, string upstreamConf, out string error)
+    {
+        if (!TryReloadHelperShape(reloadHelper, out error)) return false;
+        if (revision.Length == 0)
+        {
+            error = "'revision' is required so the journal records what was deployed.";
+            return false;
+        }
+        // Rendering the template is the switch. Allowing the step to omit it would produce a reload
+        // of the configuration already in place, reported as a successful cutover.
+        if (upstreamTemplate.Length == 0 || upstreamConf.Length == 0)
+        {
+            error = "'upstream_template' and 'upstream_conf' are required: without them the switch would reload the live configuration unchanged.";
+            return false;
+        }
+        error = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// Maps a step type to its operation, or <see cref="OperationKind.None"/> when the type is not one
+    /// of the five. A catch-all default would turn a typo such as <c>bluegreen-swtich</c> into a
+    /// commit against a live environment, so an unrecognised type is refused rather than guessed.
+    /// </summary>
+    internal static OperationKind OperationFor(string type) => type switch
+    {
+        "bluegreen-migrate" => OperationKind.BlueGreenMigrate,
+        "bluegreen-up" => OperationKind.BlueGreenUp,
+        "bluegreen-switch" => OperationKind.BlueGreenSwitch,
+        "bluegreen-commit" => OperationKind.BlueGreenCommit,
+        "bluegreen-rollback" => OperationKind.BlueGreenRollback,
+        "bluegreen-retire" => OperationKind.BlueGreenRetire,
+        _ => OperationKind.None
+    };
+}

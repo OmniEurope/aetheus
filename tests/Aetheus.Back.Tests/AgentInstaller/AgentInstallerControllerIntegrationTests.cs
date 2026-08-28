@@ -114,6 +114,20 @@ public class AgentInstallerControllerIntegrationTests : IClassFixture<CustomWebA
     }
 
     [Fact]
+    public async Task GetInstaller_LegacyQueryToken_RemainsAvailableOutsideDevelopment()
+    {
+        var token = await CreateRegistrationTokenAsync();
+
+        var response = await _client.GetAsync(
+            $"/api/agent/installer/linux?token={Uri.EscapeDataString(token)}",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(token, body);
+    }
+
+    [Fact]
     public async Task GetInstaller_InvalidToken_Returns400()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/agent/installer/linux");

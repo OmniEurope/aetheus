@@ -1,0 +1,23 @@
+{
+  "agentSessionId": "fixture-v2-session",
+  "agentVersion": "1.0.0",
+  "agentProtocolVersion": 2,
+  "agentCapabilities": [
+    "agent.self-update",
+    "artifact.collect",
+    "artifact.restore",
+    "pipeline.build",
+    "shell.execute"
+  ],
+  "dockerAvailable": false,
+  "pipelineRunnerAvailable": true,
+  "cpuPercent": 2,
+  "memoryUsedMb": 512,
+  "memoryTotalMb": 2048,
+  "disks": [],
+  "services": [],
+  "sudoersHashes": {},
+  "futureOptionalCollector": {
+    "ignoredByProtocol2": true
+  }
+}

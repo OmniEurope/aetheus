@@ -10,14 +10,20 @@ namespace Aetheus.Agent.Core.Tests;
 
 public class AppProbeWorkerTests
 {
-    private sealed class StubHandler(HttpStatusCode status) : HttpMessageHandler
+    private sealed class StubHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sendAsync) : HttpMessageHandler
     {
+        public StubHandler(HttpStatusCode status)
+            : this((_, _) => Task.FromResult(new HttpResponseMessage(status)))
+        {
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(status));
+            => sendAsync(request, cancellationToken);
     }
 
     private static (AppProbeWorker Worker, IServerApiClient Api, FakeTimeProvider Time) Build(
-        HttpStatusCode probeStatus = HttpStatusCode.OK)
+        HttpMessageHandler? handler = null)
     {
         var api = Substitute.For<IServerApiClient>();
         api.GetAppProbesAsync(Arg.Any<CancellationToken>()).Returns(new List<AppProbeConfigDto>
@@ -28,7 +34,7 @@ public class AppProbeWorkerTests
         var enrollment = Substitute.For<IEnrollmentService>();
         enrollment.IsEnrolled.Returns(true);
 
-        var http = new HttpClient(new StubHandler(probeStatus));
+        var http = new HttpClient(handler ?? new StubHandler(HttpStatusCode.OK));
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(http);
 
@@ -45,6 +51,38 @@ public class AppProbeWorkerTests
 
         await api.Received(1).ReportAppProbeResultsAsync(
             Arg.Is<List<AppProbeResultDto>>(r => r.Count == 1 && r[0].MonitoredAppId == 1 && r[0].IsUp),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunTick_UnexpectedStatus_ReportsDownWithActualStatus()
+    {
+        var (worker, api, _) = Build(new StubHandler(HttpStatusCode.InternalServerError));
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await api.Received(1).ReportAppProbeResultsAsync(
+            Arg.Is<List<AppProbeResultDto>>(results =>
+                results.Count == 1
+                && !results[0].IsUp
+                && results[0].StatusCode == 500
+                && results[0].Error == "Unexpected status 500 (expected 200)"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunTick_RequestFailure_ReportsDownWithoutStatus()
+    {
+        var handler = new StubHandler((_, _) =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("connection failed")));
+        var (worker, api, _) = Build(handler);
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await api.Received(1).ReportAppProbeResultsAsync(
+            Arg.Is<List<AppProbeResultDto>>(results =>
+                results.Count == 1
+                && !results[0].IsUp
+                && results[0].StatusCode == null
+                && results[0].Error == "connection failed"),
             Arg.Any<CancellationToken>());
     }
 

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.RegularExpressions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Operations;
 
 /// <summary>
-/// Parses <c>ufw status numbered</c> output (PLAN-006 4.2). Pure + shell-free so the firewall collector
+/// Parses <c>ufw status numbered</c> output (ADR-024 4.2). Pure + shell-free so the firewall collector
 /// can reuse it and it is unit-testable without a ufw box. Output shape:
 /// <code>
 /// Status: active

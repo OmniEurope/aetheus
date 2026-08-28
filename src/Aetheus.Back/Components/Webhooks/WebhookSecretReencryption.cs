@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Cryptography;
-using Aetheus.Back.Data;
-using Aetheus.Back.Services;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Webhooks;
 

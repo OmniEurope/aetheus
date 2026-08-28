@@ -4,7 +4,7 @@ using Aetheus.Agent.Core.Operations;
 namespace Aetheus.Back.Tests.Architecture;
 
 /// <summary>
-/// PLAN-006 4.1: the argv-exact <c>AETHEUS_PATCH</c> sudoers drop-in written by
+/// ADR-024 4.1: the argv-exact <c>AETHEUS_PATCH</c> sudoers drop-in written by
 /// <c>deploy/scripts/install-agent-linux.sh</c> must match the exact argv the agent sends via
 /// <c>sudo -n ...</c> (<see cref="SystemPackageUpgradeExecutor.BuildAptUpgradeArgv"/>). A drift in the
 /// binary path, verb, or the <c>-y</c> flag would make sudo reject the call at runtime (capability dead
@@ -37,14 +37,5 @@ public class PatchSudoersAuditTests
         Assert.Contains("write_patch_manage_sudoers", script, StringComparison.Ordinal);
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(PatchSudoersAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

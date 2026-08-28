@@ -49,17 +49,39 @@ public sealed class SudoersReadAclAuditTests
         }
     }
 
+    /// <summary>
+    /// The reverse direction, and the one whose absence cost a capability. The other test proves every
+    /// HASHED file gets the ACL; nothing proved that every drop-in the installer WRITES is hashed.
+    /// <c>/etc/sudoers.d/aetheus-certbot</c> fell through that gap: the installer creates it,
+    /// <c>BuildEffectiveCapabilities</c> derives <c>certbot.manage</c> from
+    /// <c>sudoersHashes.ContainsKey("aetheus-certbot")</c>, but the collector never read the file, so
+    /// the key never existed and the capability was unreachable on every host. The symptom was silent:
+    /// no diagnostic, no error, just a certificate the platform declined to issue.
+    /// </summary>
+    [Fact]
+    public void Every_installed_sudoers_dropin_is_hashed()
+    {
+        var script = ReadInstallScript();
+
+        var installed = Regex
+            .Matches(script, @"SUDOERS_FILE=""(/etc/sudoers\.d/aetheus-[a-z-]+)""")
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.NotEmpty(installed);
+
+        var hashed = SudoersHashCollector.KnownSudoersFiles.ToHashSet(StringComparer.Ordinal);
+        var unhashed = installed.Where(file => !hashed.Contains(file)).ToList();
+
+        Assert.True(
+            unhashed.Count == 0,
+            "install-agent-linux.sh installs sudoers drop-ins that SudoersHashCollector never reads, so "
+            + "every capability derived from them is unreachable:\n" + string.Join("\n", unhashed));
+    }
+
     private static string ReadInstallScript()
         => File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", "install-agent-linux.sh"));
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(SudoersReadAclAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Agent.Core.Tests.RepositoryScan.Root;
 }

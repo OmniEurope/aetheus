@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Audit;
 
@@ -19,6 +11,7 @@ public partial class AuditLogs : IDisposable
     [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
     [Inject] private DialogService Dialog { get; set; } = default!;
     [Inject] private ClipboardService Clipboard { get; set; } = default!;
+    [Inject] private NotifyHelper Notify { get; set; } = default!;
     [Inject] private ListCacheService Cache { get; set; } = default!;
 
     private List<AuditLogDto> _logs = [];
@@ -48,8 +41,8 @@ public partial class AuditLogs : IDisposable
 
         try
         {
-            var actionsTask = Api.GetAuditActionsAsync();
-            var typesTask = Api.GetAuditEntityTypesAsync();
+            var actionsTask = Api.Monitoring.GetAuditActionsAsync();
+            var typesTask = Api.Monitoring.GetAuditEntityTypesAsync();
             await Task.WhenAll(actionsTask, typesTask);
             _actionOptions = await actionsTask;
             _entityOptions = await typesTask;
@@ -65,8 +58,10 @@ public partial class AuditLogs : IDisposable
         }
     }
 
-    private string CacheKey(int page, int pageSize) =>
-        $"audit:{page}:{pageSize}:{_search}:{_actionFilter}:{_entityFilter}:{_dateFrom:o}:{_dateTo:o}";
+    // The sort is part of the key: two orders sharing one entry means the second is served the first
+    // one's rows, which is indistinguishable from a sort that does nothing.
+    private string CacheKey(int page, int pageSize, string? sortBy = null, bool sortDescending = true) =>
+        $"audit:{page}:{pageSize}:{_search}:{_actionFilter}:{_entityFilter}:{_dateFrom:o}:{_dateTo:o}:{sortBy}:{sortDescending}";
 
     private void ApplyLogs(PaginatedResult<AuditLogDto> result)
     {
@@ -77,9 +72,11 @@ public partial class AuditLogs : IDisposable
     private async Task LoadData(LoadDataArgs args)
     {
         var (page, pageSize) = args.ToPageRequest(50);
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(AuditLogDto.Timestamp), fallbackDescending: true);
         await Cache.RevalidateAsync(
-            CacheKey(page, pageSize),
-            () => Api.GetAuditLogsAsync(page, pageSize, _search, _actionFilter, _entityFilter, null, _dateFrom, _dateTo),
+            CacheKey(page, pageSize, sortBy, sortDescending),
+            () => Api.Monitoring.GetAuditLogsAsync(page, pageSize, _search, _actionFilter, _entityFilter, null, _dateFrom, _dateTo,
+                sortBy, sortDescending),
             ApplyLogs,
             loading => _loading = loading,
             () => InvokeAsync(StateHasChanged));
@@ -88,7 +85,7 @@ public partial class AuditLogs : IDisposable
     private async Task ReloadData()
     {
         _loading = true;
-        var result = await Api.GetAuditLogsAsync(1, 50, _search, _actionFilter, _entityFilter, null, _dateFrom, _dateTo);
+        var result = await Api.Monitoring.GetAuditLogsAsync(1, 50, _search, _actionFilter, _entityFilter, null, _dateFrom, _dateTo);
         _logs = result.Items;
         _count = result.TotalCount;
         _loading = false;
@@ -110,7 +107,7 @@ public partial class AuditLogs : IDisposable
         // Structured detail (actor / action / target / time) + server-verified chain-integrity badge.
         await Dialog.OpenAsync<AuditDetailDialog>(L["AuditEntryDetail"],
             new Dictionary<string, object?> { ["Log"] = log },
-            new DialogOptions { Width = "700px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "700px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
     }
 
     private async Task VerifyChainAsync()
@@ -119,11 +116,23 @@ public partial class AuditLogs : IDisposable
         StateHasChanged();
         try
         {
-            _chainResult = await Api.VerifyAuditChainAsync();
+            _chainResult = await Api.Monitoring.VerifyAuditChainAsync();
+            if (_chainResult is not null)
+            {
+                Notify.Notify(
+                    _chainResult.IsValid ? NotificationSeverity.Success : NotificationSeverity.Error,
+                    "AuditVerifyChain",
+                    _chainResult.IsValid ? L["AuditChainIntact"] : L["AuditChainBroken"]);
+            }
+            else
+            {
+                Notify.Error("Error", "OperationFailed");
+            }
         }
         catch (HttpRequestException)
         {
             _chainResult = null; // honest "unavailable", never an optimistic green
+            Notify.Error("Error", "OperationFailed");
         }
         finally
         {

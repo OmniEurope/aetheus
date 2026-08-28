@@ -76,6 +76,48 @@ public class ServiceConnectionTesterTests
     }
 
     [Fact]
+    public async Task Test_DockerBearerChallenge_ExchangesTokenAndRetriesRegistry()
+    {
+        var handler = new DockerBearerChallengeHandler();
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient("service-connection-test").Returns(new HttpClient(handler));
+        var sut = new ServiceConnectionTester(factory, NullLogger<ServiceConnectionTester>.Instance);
+
+        var result = await sut.TestAsync(
+            ServiceConnectionType.DockerRegistry,
+            "https://registry.example",
+            "{\"username\":\"alice\",\"password\":\"secret\"}",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(ServiceConnectionTestStatus.Valid, result.Status);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal("Basic", handler.Requests[0].Authorization?.Scheme);
+        Assert.Equal("https://auth.example/token?service=registry.example&scope=registry%3Acatalog%3A%2A",
+            handler.Requests[1].Uri);
+        Assert.Equal("Basic", handler.Requests[1].Authorization?.Scheme);
+        Assert.Equal("Bearer", handler.Requests[2].Authorization?.Scheme);
+        Assert.Equal("issued-token", handler.Requests[2].Authorization?.Parameter);
+    }
+
+    [Fact]
+    public async Task Test_DockerBearerChallenge_WhenTokenServiceRejects_ReturnsInvalid()
+    {
+        var handler = new DockerBearerChallengeHandler(tokenStatus: HttpStatusCode.Unauthorized);
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient("service-connection-test").Returns(new HttpClient(handler));
+        var sut = new ServiceConnectionTester(factory, NullLogger<ServiceConnectionTester>.Instance);
+
+        var result = await sut.TestAsync(
+            ServiceConnectionType.DockerRegistry,
+            "https://registry.example",
+            "{\"username\":\"alice\",\"password\":\"wrong\"}",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(ServiceConnectionTestStatus.Invalid, result.Status);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task Test_TransportFailure_ReturnsError_NotGreen()
     {
         var factory = Substitute.For<IHttpClientFactory>();
@@ -99,4 +141,40 @@ public class ServiceConnectionTesterTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => throw new HttpRequestException("connect failed");
     }
+
+    private sealed class DockerBearerChallengeHandler(
+        HttpStatusCode tokenStatus = HttpStatusCode.OK) : HttpMessageHandler
+    {
+        public List<CapturedRequest> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(new CapturedRequest(
+                request.RequestUri!.ToString(),
+                request.Headers.Authorization));
+
+            if (Requests.Count == 1)
+            {
+                var challenge = new HttpResponseMessage(HttpStatusCode.Unauthorized);
+                challenge.Headers.WwwAuthenticate.ParseAdd(
+                    "Bearer realm=\"https://auth.example/token\",service=\"registry.example\",scope=\"registry:catalog:*\"");
+                return Task.FromResult(challenge);
+            }
+
+            if (Requests.Count == 2)
+            {
+                return Task.FromResult(new HttpResponseMessage(tokenStatus)
+                {
+                    Content = new StringContent(
+                        tokenStatus == HttpStatusCode.OK ? "{\"token\":\"issued-token\"}" : "{}")
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
+    }
+
+    private sealed record CapturedRequest(string Uri, System.Net.Http.Headers.AuthenticationHeaderValue? Authorization);
 }

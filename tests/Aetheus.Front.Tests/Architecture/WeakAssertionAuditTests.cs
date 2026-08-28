@@ -35,7 +35,7 @@ public class WeakAssertionAuditTests
 
         var offenders = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(testsDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(testsDir, "*.cs"))
         {
             // Skip this guard's own source - it necessarily contains the patterns in its regexes.
             if (Path.GetFileName(file) == "WeakAssertionAuditTests.cs") continue;
@@ -134,14 +134,5 @@ public class WeakAssertionAuditTests
             if (source[i] is not ('\r' or '\n')) source[i] = ' ';
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(WeakAssertionAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

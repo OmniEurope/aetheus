@@ -18,6 +18,8 @@ public class ProjectPipelinesSectionTests : BunitContext
         _handler = BunitTestHelper.RegisterServices(this);
         _handler.SetJsonResponse("api/pipelines/dependencies", new PipelineDependencyGroupsDto());
         _handler.SetJsonResponse("api/pipelines/runs/recent", new List<PipelineRunDto>());
+        _handler.SetJsonResponse("api/pipelines/favorites", new PipelineFavoritesDto());
+        _handler.SetJsonResponse("api/pipelines/fleet", new PaginatedResult<PipelineFleetItemDto>());
     }
 
     [Fact]
@@ -26,8 +28,8 @@ public class ProjectPipelinesSectionTests : BunitContext
         var cut = Render<ProjectPipelinesSection>(p =>
             p.Add(x => x.Pipelines, null)
              .Add(x => x.ProjectId, 1));
-        // Null pipelines → only the loading spinner renders (no header/grid yet).
-        Assert.Contains("rz-progressbar-circular", cut.Markup);
+        // Null pipelines → only the branded loading indicator renders (no header/grid yet).
+        Assert.Contains("aetheus-loader-logo", cut.Markup);
     }
 
     [Fact]
@@ -42,7 +44,7 @@ public class ProjectPipelinesSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task NewPipeline_Navigates_ToNewPipelineWithProjectId()
+    public async Task NewPipeline_Navigates_ToSetupWizardWithProjectId()
     {
         var cut = Render<ProjectPipelinesSection>(p =>
             p.Add(x => x.Pipelines, new List<PipelineDto>())
@@ -53,7 +55,7 @@ public class ProjectPipelinesSectionTests : BunitContext
         await cut.InvokeAsync(() => method.Invoke(cut.Instance, []));
 
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
-        Assert.Contains("pipelines/new", nav.Uri);
+        Assert.Contains("pipelines/setup", nav.Uri);
         Assert.Contains("projectId=7", nav.Uri);
     }
 

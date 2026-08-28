@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
+global using Aetheus.Agent.Core.Configuration;
+global using Aetheus.Agent.Core.Executors;
 global using Aetheus.Agent.Core.Services;
+global using Aetheus.Shared.Analysis;
+global using Aetheus.Shared.Constants;
+global using Aetheus.Shared.DTOs;
+global using Aetheus.Shared.Enums;
+global using Aetheus.Shared.Helpers;
+global using Aetheus.Shared.Validation;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Options;

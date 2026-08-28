@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Validation;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Users;
 
@@ -18,6 +11,8 @@ public partial class UserCreateDialog
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
 
+    // Optional seed for direct consumers. Production callers leave it empty so the picker uses
+    // the paginated roles endpoint instead of receiving the complete role collection.
     [Parameter] public List<string> AvailableRoles { get; set; } = [];
 
     // Unambiguous set (no 0/O/1/l/I) so a generated password stays legible when revealed/copied.
@@ -38,14 +33,6 @@ public partial class UserCreateDialog
         Toast.Info("GeneratePassword", "PasswordGenerated");
     }
 
-    private void OnRoleToggled(string role, bool isChecked)
-    {
-        if (isChecked && !_model.Roles.Contains(role))
-            _model.Roles.Add(role);
-        else if (!isChecked)
-            _model.Roles.Remove(role);
-    }
-
     private async Task OnSubmit()
     {
         _busy = true;
@@ -53,7 +40,7 @@ public partial class UserCreateDialog
 
         try
         {
-            var created = await Api.CreateUserAsync(new CreateUserRequest
+            var outcome = await Api.Auth.CreateUserAsync(new CreateUserRequest
             {
                 Username = _model.Username,
                 Password = _model.Password,
@@ -62,18 +49,21 @@ public partial class UserCreateDialog
                 Roles = _model.Roles
             });
 
-            if (created is not null)
+            if (outcome.Value is { } created)
             {
                 Toast.Success("Created", "UserCreated");
                 Dialog.Close(created);
                 return;
             }
 
-            _error = L["Error"].Value;
+            _error = string.IsNullOrWhiteSpace(outcome.Error?.Message)
+                ? L["SaveFailed"].Value
+                : outcome.Error.Message;
         }
         catch (HttpRequestException)
         {
-            _error = L["Error"].Value;
+            _error = L["SaveFailed"].Value;
+            Toast.Error("Error", "SaveFailed");
         }
         _busy = false;
     }

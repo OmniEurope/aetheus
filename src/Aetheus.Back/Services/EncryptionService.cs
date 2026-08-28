@@ -68,12 +68,12 @@ public sealed class EncryptionService(IConfiguration config, IHostEnvironment en
             return Encoding.UTF8.GetString(plain);
         }
 
-        // Legacy AES-CBC fallback. Hardening (#21): off by default - set Auth:AllowLegacyCbc=true
+        // Legacy AES-CBC fallback. Hardening (#21): off by default - enable Auth:AllowLegacyCbc
         // only during a one-time migration window. Once all records have been re-encrypted via a
         // round-trip Decrypt+Encrypt, this branch must be deleted.
         var allowLegacy = config.GetValue("Auth:AllowLegacyCbc", false);
         if (!allowLegacy)
-            throw new CryptographicException("Legacy AES-CBC ciphertext is rejected. Run the re-encryption tool with Auth:AllowLegacyCbc=true.");
+            throw new CryptographicException("Legacy AES-CBC ciphertext is rejected. Enable Auth:AllowLegacyCbc only while running the re-encryption tool.");
 
         return DecryptLegacyCbc(raw, DeriveKeyV1Legacy());
     }

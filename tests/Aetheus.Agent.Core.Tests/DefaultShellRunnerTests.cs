@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aetheus.Agent.Core.Tests;
 
+[Collection(ProcessSpawningTestCollection.Name)]
 public sealed class DefaultShellRunnerTests
 {
     private readonly DefaultShellRunner _runner = new(NullLogger<DefaultShellRunner>.Instance);
@@ -74,7 +75,7 @@ public sealed class DefaultShellRunnerTests
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
                 _runner.RunExecAsync(file, args, TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(100)));
 
-            await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
             Assert.False(File.Exists(marker), "The descendant process survived cancellation and wrote its marker.");
         }
         finally
@@ -121,11 +122,11 @@ public sealed class DefaultShellRunnerTests
         {
             var windowsMarker = marker.Replace("'", "''", StringComparison.Ordinal);
             var child = "powershell.exe -NoLogo -NoProfile -NonInteractive -Command " +
-                $"\"Start-Sleep -Seconds 1; [IO.File]::WriteAllText('{windowsMarker}', 'child-survived')\"";
+                $"\"Start-Sleep -Milliseconds 500; [IO.File]::WriteAllText('{windowsMarker}', 'child-survived')\"";
             return ("cmd.exe", ["/d", "/s", "/c", child]);
         }
 
         var escapedMarker = marker.Replace("'", "'\\''", StringComparison.Ordinal);
-        return ("/bin/sh", ["-c", $"/bin/sh -c 'sleep 1; printf child-survived > \\\"{escapedMarker}\\\"' & wait"]);
+        return ("/bin/sh", ["-c", $"/bin/sh -c 'sleep 0.5; printf child-survived > \\\"{escapedMarker}\\\"' & wait"]);
     }
 }

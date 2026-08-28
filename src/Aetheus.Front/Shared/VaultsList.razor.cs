@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -48,8 +39,10 @@ public partial class VaultsList : IAsyncDisposable
     private string CacheKey => $"vaults:server:{ServerId}";
 
     // Server-paginated (global/project) scope cache key, distinct from the server-detail CacheKey above.
-    private string PagedCacheKey(int page, int pageSize, string? search) =>
-        $"vaults:{ProjectId}:{page}:{pageSize}:{search}";
+    // The sort is part of the key: two orders sharing one entry means the second is served the first
+    // one's rows, which is indistinguishable from a sort that does nothing.
+    private string PagedCacheKey(int page, int pageSize, string? search, string? sortBy = null, bool sortDescending = false) =>
+        $"vaults:{ProjectId}:{page}:{pageSize}:{search}:{sortBy}:{sortDescending}";
 
     private void ApplyVaultsPage(PaginatedResult<VaultDto> result)
     {
@@ -84,7 +77,7 @@ public partial class VaultsList : IAsyncDisposable
 
     private async Task LoadServerVaultsAsync()
     {
-        _serverAll = await Api.GetServerVaultsAsync(ServerId!.Value);
+        _serverAll = await Api.Servers.GetServerVaultsAsync(ServerId!.Value);
         _totalCount = _serverAll.Count;
         Cache.Set(CacheKey, _serverAll);
     }
@@ -102,17 +95,17 @@ public partial class VaultsList : IAsyncDisposable
         if (IsServerScope)
         {
             // Server-detail scope: page the in-memory list (already cached via LoadServerVaultsAsync).
-            var skip = args.Skip ?? 0;
-            var top = args.Top ?? 25;
-            _vaults = _serverAll.Skip(skip).Take(top).ToList();
-            _totalCount = _serverAll.Count;
+            _vaults = args.ToClientPage(_serverAll);
+            _totalCount = args.ClientFilteredCount(_serverAll);
             return;
         }
 
         var (page, pageSize) = args.ToPageRequest();
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(VaultDto.Name));
         await Cache.RevalidateAsync(
-            PagedCacheKey(page, pageSize, _search),
-            () => Api.GetVaultsAsync(page: page, pageSize: pageSize, search: _search, projectId: ProjectId),
+            PagedCacheKey(page, pageSize, _search, sortBy, sortDescending),
+            () => Api.Variables.GetVaultsAsync(page: page, pageSize: pageSize, search: _search, projectId: ProjectId,
+                sortBy: sortBy, sortDescending: sortDescending),
             ApplyVaultsPage,
             loading => _loading = loading,
             () => InvokeAsync(StateHasChanged));
@@ -169,8 +162,7 @@ public partial class VaultsList : IAsyncDisposable
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_hubConnection is not null)
         {
-            try { await _hubConnection.InvokeAsync("LeaveEntityUpdates", ResourceType.Vault); } catch { /* best-effort */ }
-            await _hubConnection.DisposeAsync();
+            await _hubConnection.LeaveEntityUpdatesAndDisposeAsync(ResourceType.Vault);
             _hubConnection = null;
         }
     }

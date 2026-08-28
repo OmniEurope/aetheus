@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "id": "Aetheus.Telemetry",
+      "version": "0.1.0",
+      "enabled": false,
+      "sha256": "",
+      "enabledProperty": "EnableAetheusTelemetry",
+      "versionProperty": "AetheusTelemetryVersion"
+    },
+    {
+      "id": "Aetheus.WebAnalytics",
+      "version": "0.1.0",
+      "enabled": false,
+      "sha256": "",
+      "enabledProperty": "EnableAetheusWebAnalytics",
+      "versionProperty": "AetheusWebAnalyticsVersion"
+    }
+  ]
+}

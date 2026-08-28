@@ -17,14 +17,8 @@ public class AgentTokenAuthenticationHandler(
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!Request.Headers.TryGetValue("Authorization", out var authHeader))
+        if (!AuthorizationHeaderParser.TryGetCredentials(Request, "Bearer", out var token))
             return AuthenticateResult.NoResult();
-
-        var header = authHeader.ToString();
-        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return AuthenticateResult.NoResult();
-
-        var token = header["Bearer ".Length..].Trim();
         if (string.IsNullOrEmpty(token))
             return AuthenticateResult.Fail("Empty token.");
 

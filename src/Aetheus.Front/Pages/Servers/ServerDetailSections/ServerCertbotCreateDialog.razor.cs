@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -46,7 +39,7 @@ public partial class ServerCertbotCreateDialog
         try
         {
             var domains = _model.Domains.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-            var success = await Api.CreateCertbotCertificateAsync(ServerId, new CertbotCreateRequest
+            var success = await Api.ServerTools.CreateCertbotCertificateAsync(ServerId, new CertbotCreateRequest
             {
                 Domains = string.Join(",", domains),
                 Email = _model.Email,

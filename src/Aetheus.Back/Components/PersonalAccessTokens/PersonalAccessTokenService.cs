@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
+using System.ComponentModel.DataAnnotations;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.PersonalAccessTokens;
 
@@ -18,6 +17,9 @@ internal sealed class PersonalAccessTokenService(
 
     public async Task<CreatedPersonalAccessTokenDto> CreateAsync(int userId, CreatePersonalAccessTokenRequest request, CancellationToken ct = default)
     {
+        if (request.ExpirationDays is < 1 or > 90)
+            throw new ValidationException("Personal access tokens must expire within 1 to 90 days.");
+
         var plaintext = PatConstants.TokenPrefix + AuthTokenHelper.GenerateSecureToken();
         var now = timeProvider.GetUtcNow().UtcDateTime;
 

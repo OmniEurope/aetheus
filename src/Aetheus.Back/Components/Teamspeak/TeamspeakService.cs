@@ -1,27 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Teamspeak;
 
 public class TeamspeakService(ITeamspeakRepository repo, IServerRepository serverRepo, IAuditService audit, IEncryptionService encryption, ITaskService taskService) : ITeamspeakService
 {
-    // Persist a queued task AND push the "TaskQueued" SignalR event so the top-bar tracker shows it
-    // live (and can later flip it Running/Completed). Mirrors ServerServiceManager (see ITaskService).
-    private async Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
-    {
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await taskService.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
-    }
+    private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+        => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
 
     // S-TECH-W9K7: stand-in stored in the plaintext-at-rest Command column for secret-bearing
     // ServerQuery actions; the real command rides in the encrypted TEAMSPEAK_QUERY_CMD env var.

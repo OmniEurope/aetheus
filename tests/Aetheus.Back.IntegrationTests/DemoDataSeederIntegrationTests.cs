@@ -38,6 +38,9 @@ public sealed class DemoDataSeederIntegrationTests(PostgresFixture fixture)
         var orgId = await verify.Organizations.Where(o => o.Slug == "aetheus").Select(o => o.Id).SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(3, await verify.Servers.CountAsync(s => s.OrganizationId == orgId, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(3, await verify.Servers.CountAsync(
+            s => s.OrganizationId == orgId && s.Status == Aetheus.Shared.Enums.ServerStatus.Offline,
+            cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(3, await verify.ServiceInfos.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(2, await verify.DockerContainers.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(2, await verify.DockerImages.CountAsync(cancellationToken: TestContext.Current.CancellationToken));

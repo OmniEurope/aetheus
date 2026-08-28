@@ -24,11 +24,13 @@ public class PipelineVariableResolverTests
         => _sut = new PipelineVariableResolver(
             _varLib, _vault, _repo, new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), TimeProvider.System);
 
-    private static PipelineRun NewRun(Project? project, string additionalVarsJson = "{}", string? commitHash = null) => new()
+    private static PipelineRun NewRun(
+        Project? project, string additionalVarsJson = "{}", string? commitHash = null, int buildNumber = 0) => new()
     {
         Id = 42,
         PipelineId = 7,
         CommitHash = commitHash,
+        BuildNumber = buildNumber,
         AdditionalVariablesJson = additionalVarsJson,
         Pipeline = new Pipeline { Id = 7, Name = "build", ProjectId = project is null ? null : 1, Project = project }
     };
@@ -42,12 +44,43 @@ public class PipelineVariableResolverTests
         var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
 
         Assert.Equal("42", vars["BUILD_BUILDID"]);
+        Assert.Equal("20042", vars["BUILD_RUN_PORT"]);
         Assert.Equal("7", vars["BUILD_PIPELINEID"]);
         Assert.Equal("1", vars["BUILD_PROJECTID"]);
         Assert.Equal("App", vars["BUILD_PROJECTNAME"]);
         Assert.Equal("https://repo", vars["REPOSITORY_URL"]);
         Assert.Equal("develop", vars["DEFAULT_BRANCH"]);
         Assert.Equal("true", vars["CI"]);
+    }
+
+    [Fact]
+    public async Task ResolveFullVariablesForRunAsync_ExposesPerPipelineBuildNumberDistinctFromRunId()
+    {
+        var run = NewRun(project: null, buildNumber: 3);
+        var def = new PipelineYamlDefinition { Name = "build", Trigger = "manual" };
+
+        var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
+
+        // The run id is globally monotonic and jumps between runs of the same pipeline; the build
+        // number is the per-pipeline sequence a version pattern should use.
+        Assert.Equal("3", vars["BUILD_PIPELINE_RUNNUMBER"]);
+        Assert.Equal("42", vars["BUILD_BUILDID"]);
+    }
+
+    [Fact]
+    public async Task ResolveFullVariablesForRunAsync_SubstitutesBuildNumberIntoVersionPattern()
+    {
+        var run = NewRun(project: null, buildNumber: 12);
+        var def = new PipelineYamlDefinition
+        {
+            Name = "build",
+            Trigger = "manual",
+            Variables = new Dictionary<string, string> { ["APP_VERSION"] = "1.1.$(BUILD_PIPELINE_RUNNUMBER)" }
+        };
+
+        var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
+
+        Assert.Equal("1.1.12", vars["APP_VERSION"]);
     }
 
     [Fact]
@@ -123,9 +156,26 @@ public class PipelineVariableResolverTests
     }
 
     [Fact]
-    public async Task ResolveFullVariablesForRunAsync_MapsDeclaredDiagnosticParameterIntoProtectedVariable()
+    public async Task ResolveFullVariablesForRunAsync_NormalizesEmptyYamlVariable()
     {
-        var run = NewRun(project: null, additionalVarsJson: "{\"releaseLabFailQa\":\"true\",\"parameters.releaseLabFailQa\":\"true\"}");
+        var run = NewRun(new Project { Name = "App", DefaultBranch = "main", OrganizationId = 1 });
+        var def = new PipelineYamlDefinition
+        {
+            Name = "build",
+            Trigger = "manual",
+            Variables = new Dictionary<string, string> { ["PACKAGE_DIGEST"] = null! }
+        };
+
+        var vars = await _sut.ResolveFullVariablesForRunAsync(
+            run, def, TestContext.Current.CancellationToken);
+
+        Assert.Equal(string.Empty, vars["PACKAGE_DIGEST"]);
+    }
+
+    [Fact]
+    public async Task ResolveFullVariablesForRunAsync_MapsDeclaredParameterIntoVariable()
+    {
+        var run = NewRun(project: null, additionalVarsJson: "{\"runSmokeChecks\":\"true\",\"parameters.runSmokeChecks\":\"true\"}");
         var def = new PipelineYamlDefinition
         {
             Name = "release",
@@ -134,20 +184,20 @@ public class PipelineVariableResolverTests
             [
                 new PipelineTemplateParameterDefinition
                 {
-                    Name = "releaseLabFailQa",
+                    Name = "runSmokeChecks",
                     Type = "boolean",
                     Default = "false"
                 }
             ],
             Variables = new Dictionary<string, string>
             {
-                ["AETHEUS_RELEASE_LAB_FAIL_QA"] = "$(releaseLabFailQa)"
+                ["AETHEUS_RUN_SMOKE_CHECKS"] = "$(runSmokeChecks)"
             }
         };
 
         var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
 
-        Assert.Equal("true", vars["releaseLabFailQa"]);
-        Assert.Equal("true", vars["AETHEUS_RELEASE_LAB_FAIL_QA"]);
+        Assert.Equal("true", vars["runSmokeChecks"]);
+        Assert.Equal("true", vars["AETHEUS_RUN_SMOKE_CHECKS"]);
     }
 }

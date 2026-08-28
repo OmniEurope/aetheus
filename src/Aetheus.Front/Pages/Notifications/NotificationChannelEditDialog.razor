@@ -1,9 +1,10 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits EntityEditDialogBase
 @using Aetheus.Shared.Enums
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
 }
 else
 {

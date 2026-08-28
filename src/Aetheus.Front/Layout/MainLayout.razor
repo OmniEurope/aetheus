@@ -12,12 +12,14 @@
 
 <a href="#main-content" class="skip-link">@L["SkipToContent"]</a>
 
-<RadzenLayout data-testid="blazor-ready">
+<RadzenLayout data-testid="blazor-ready"
+              data-viewport="@(_viewportKnown ? "ready" : "pending")"
+              class="@(_viewportKnown ? "viewport-ready" : "viewport-pending")">
     <RadzenHeader>
         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0" class="rz-px-2 rz-px-sm-4 header-bar">
-            @if (Auth.IsAuthenticated)
+            @if (AuthenticatedChromeReady)
             {
-                <RadzenSidebarToggle Click="@(() => _sidebarExpanded = !_sidebarExpanded)" aria-label="@L["ToggleSidebar"]" />
+                <RadzenSidebarToggle Click="@ToggleSidebar" aria-label="@L["ToggleSidebar"]" />
             }
             <a href="/" class="app-home-link">
                 <img src="aetheus-icon.svg" alt="" class="app-header-icon" />
@@ -51,11 +53,11 @@
                     }
                 </RadzenStack>
             }
-            @if (Auth.IsAuthenticated)
+            @if (AuthenticatedChromeReady)
             {
                 <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
                     @{
-                        var connected = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
+                        var connected = BackendConnected;
                         var reconnecting = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Reconnecting;
                         var connClass = connected ? "header-conn-online" : reconnecting ? "header-conn-warning" : "header-conn-offline";
                     }
@@ -77,7 +79,7 @@
                             aria-controls="user-menu-popover"
                             aria-expanded="@_userMenuOpen"
                             class="header-action-btn header-user-btn">
-                            <RadzenIcon Icon="person" class="header-icon" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            <RadzenIcon Icon="person" class="header-icon" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                             <span class="display-name">@Auth.Username</span>
                             <RadzenIcon Icon="@(_userMenuOpen ? "expand_less" : "expand_more")" class="header-icon" />
                         </RadzenButton>
@@ -149,12 +151,12 @@
         </RadzenStack>
     </RadzenHeader>
 
-    @if (Auth.IsAuthenticated && !Auth.MustChangePassword)
+    @if (AuthenticatedChromeReady && !Auth.MustChangePassword)
     {
         <RadzenSidebar @bind-Expanded="@_sidebarExpanded" Responsive="false" class="sidebar-width" role="navigation" aria-label="@L["MainNavigation"]">
-            <NavMenu />
+            <NavMenu OnNavigate="@OnSidebarNavigationRequested" />
         </RadzenSidebar>
-        @if (_sidebarExpanded)
+        @if (_isMobile && _sidebarExpanded)
         {
             <div class="sidebar-backdrop" @onclick="@(() => _sidebarExpanded = false)"></div>
         }
@@ -170,27 +172,16 @@
                     <RadzenButton Text="@L["ReloadNow"]" Icon="refresh" Click="@OnReloadClick" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
                 </RadzenAlert>
             }
-            @if (Auth.IsAuthenticated && !Auth.MustChangePassword && Breadcrumb.Items.Count > 0)
+            @if (Auth.IsAuthenticated && !AuthenticatedChromeReady)
             {
-                <RadzenBreadCrumb class="rz-mb-3">
-                    @foreach (var item in Breadcrumb.Items)
-                    {
-                        @if (item.Href is not null)
-                        {
-                            <RadzenBreadCrumbItem Text="@item.Text" Path="@item.Href" />
-                        }
-                        else
-                        {
-                            <RadzenBreadCrumbItem Text="@item.Text" />
-                        }
-                    }
-                </RadzenBreadCrumb>
+                <AetheusLoader Size="AetheusLoaderSize.Large" Class="session-bootstrap-loader" />
             }
-            @if (_initialized)
+            else if (_initialized)
             {
+                <AppBreadcrumb />
                 @if (CanAccessCurrentRoute)
                 {
-                    <ErrorBoundary @ref="_errorBoundary">
+                    <LoggedErrorBoundary @ref="_errorBoundary">
                         <ChildContent>
                             @Body
                         </ChildContent>
@@ -208,7 +199,7 @@
                                 </RadzenStack>
                             </RadzenCard>
                         </ErrorContent>
-                    </ErrorBoundary>
+                    </LoggedErrorBoundary>
                 }
                 else if (Auth.IsAuthenticated && !Auth.MustChangePassword)
                 {
@@ -227,3 +218,4 @@
 <RadzenDialog />
 <RadzenNotification />
 <RadzenTooltip />
+

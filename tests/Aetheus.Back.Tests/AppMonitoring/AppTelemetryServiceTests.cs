@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.AppMonitoring.Ingest;
+using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -28,8 +30,9 @@ public class AppTelemetryServiceTests : IDisposable
         var hasher = new IngestKeyHasher(Options.Create(new JwtOptions { SigningKey = "unit-test-signing-key-least-32-bytes!!" }));
         _sut = new AppTelemetryService(
             new AppMonitoringRepository(_db), new AppMetricRepository(_db),
-            new AppLogRepository(_db), new AppErrorRepository(_db),
-            hasher, _ingestService, _time);
+            new AppLogRepository(_db), new AppErrorRepository(_db), new AppVisitorRepository(_db),
+            hasher, _ingestService, Substitute.For<IAuditService>(),
+            new ConfigurationBuilder().Build(), _time);
         _db.MonitoredApps.Add(new MonitoredApp { Id = 1, ProjectId = 1, Name = "app" });
         _db.SaveChanges();
     }
@@ -91,9 +94,41 @@ public class AppTelemetryServiceTests : IDisposable
         Assert.NotNull(app.IngestKeyHash);
         Assert.NotEqual("old-hash", app.IngestKeyHash);
         Assert.Equal(generated.CreatedAt, app.IngestKeyCreatedAt);
+        Assert.Equal(generated.CreatedAt.AddDays(90), app.IngestKeyExpiresAt);
         _ingestService.Received(1).InvalidateKeyCache("old-hash");
         _ingestService.Received(1).InvalidateKeyCache(app.IngestKeyHash!);
         Assert.Null(await _sut.GenerateIngestKeyAsync(999, ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GenerateIngestKey_AcceptsPreviousKeyOnlyDuringSevenDayOverlap()
+    {
+        var app = await _db.MonitoredApps.SingleAsync(
+            item => item.Id == 1,
+            TestContext.Current.CancellationToken);
+        app.Enabled = true;
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await _sut.GenerateIngestKeyAsync(1, TestContext.Current.CancellationToken);
+        var firstHash = app.IngestKeyHash!;
+
+        _time.Advance(TimeSpan.FromDays(1));
+        await _sut.GenerateIngestKeyAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.Equal(firstHash, app.PreviousIngestKeyHash);
+        Assert.Equal(_time.GetUtcNow().UtcDateTime.AddDays(7), app.PreviousIngestKeyValidUntil);
+        Assert.Equal(2, app.IngestKeyVersion);
+        var repository = new AppMonitoringRepository(_db);
+        var duringOverlap = await repository.ResolveIngestKeyHashAsync(
+            firstHash,
+            _time.GetUtcNow().UtcDateTime.AddDays(6),
+            TestContext.Current.CancellationToken);
+        var afterOverlap = await repository.ResolveIngestKeyHashAsync(
+            firstHash,
+            _time.GetUtcNow().UtcDateTime.AddDays(8),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(1, duringOverlap?.AppId);
+        Assert.Equal(app.PreviousIngestKeyValidUntil, duringOverlap?.ValidUntilUtc);
+        Assert.Null(afterOverlap);
     }
 
     [Fact]
@@ -109,6 +144,7 @@ public class AppTelemetryServiceTests : IDisposable
         await _db.Entry(app).ReloadAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(app.IngestKeyHash);
         Assert.Null(app.IngestKeyCreatedAt);
+        Assert.Null(app.IngestKeyExpiresAt);
         _ingestService.Received(1).InvalidateKeyCache("revoked-hash");
         Assert.False(await _sut.RevokeIngestKeyAsync(999, ct: TestContext.Current.CancellationToken));
     }
@@ -150,6 +186,22 @@ public class AppTelemetryServiceTests : IDisposable
         Assert.True(await _sut.DeleteThresholdAsync(created.Id, ct: TestContext.Current.CancellationToken));
         Assert.Empty(await _sut.GetThresholdsAsync(1, ct: TestContext.Current.CancellationToken));
         Assert.False(await _sut.DeleteThresholdAsync(999, ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GetVisitorSeries_FillsMissingDays_AndCountsDailyIdentities()
+    {
+        var today = DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime);
+        _db.AppVisitorIdentities.AddRange(
+            new AppVisitorIdentity { MonitoredAppId = 1, DayUtc = today, FingerprintHash = "a", FirstSeenAt = _time.GetUtcNow().UtcDateTime },
+            new AppVisitorIdentity { MonitoredAppId = 1, DayUtc = today, FingerprintHash = "b", FirstSeenAt = _time.GetUtcNow().UtcDateTime },
+            new AppVisitorIdentity { MonitoredAppId = 1, DayUtc = today.AddDays(-2), FingerprintHash = "c", FirstSeenAt = _time.GetUtcNow().UtcDateTime.AddDays(-2) });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var series = await _sut.GetVisitorSeriesAsync(1, 3, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, series.Today);
+        Assert.Equal([1, 0, 2], series.Points.Select(point => point.UniqueVisitors));
     }
 
     [Fact]

@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Data;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Aetheus.Back.Services;
@@ -33,6 +31,7 @@ public sealed class DbTransactionScope(AppDbContext db) : IDbTransactionScope, I
             await _transaction.RollbackAsync(ct).ConfigureAwait(false);
             await _transaction.DisposeAsync().ConfigureAwait(false);
             _transaction = null;
+            db.ChangeTracker.Clear();
         }
     }
 

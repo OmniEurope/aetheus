@@ -1,0 +1,12 @@
+namespace Toto.Domain;
+
+public sealed record TodoContract(int Id, string Title, bool IsDone, int? Priority);
+
+public static class TodoTitle
+{
+    public static string Normalize(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        return value.Trim();
+    }
+}

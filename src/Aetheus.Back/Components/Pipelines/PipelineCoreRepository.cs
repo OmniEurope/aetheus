@@ -1,20 +1,25 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Back.Components.Shared;
-using Aetheus.Back.Data;
+using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 // Core pipeline data access (paged lists, CRUD, run/step/template/artifact/approval queries).
 // Extracted from the former PipelineRepository partial into a focused collaborator; the
 // PipelineRepository facade composes this plus the resolver/coverage/lifecycle collaborators.
-internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeProvider, ILogger logger)
+internal sealed class PipelineCoreRepository(
+    AppDbContext db,
+    TimeProvider timeProvider,
+    ILogger logger,
+    IPipelineTaskLifecycle taskLifecycle)
 {
+    private readonly PipelineTriggerTransitionRepository _triggerTransitions = new(db);
     private readonly PipelineArtifactRepository _artifacts = new(db);
+    private readonly PipelineCancellationRepository _cancellation =
+        new(db, timeProvider, taskLifecycle);
+    private readonly PipelineRunStatusRepository _runStatusRepository = new(db, logger);
+    private readonly PipelineBuildNumberRepository _buildNumbers = new(db);
 
     public async Task<(List<Pipeline> Items, int TotalCount)> GetPipelinesPagedAsync(
         string? search, PipelineTriggerType? triggerType, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
@@ -153,6 +158,13 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    public Task<int> ReserveNextBuildNumberAsync(int pipelineId, CancellationToken ct = default)
+        => _buildNumbers.ReserveNextAsync(pipelineId, ct);
+
+    public async Task<(PipelineRun Run, bool Created)> GetOrAddPipelineRunAsync(
+        PipelineRun run, CancellationToken ct = default)
+        => await PipelineRunIdempotencyWriter.GetOrAddAsync(db, run, ct).ConfigureAwait(false);
+
     public void TrackPipelineStepRun(PipelineStepRun stepRun)
     {
         db.PipelineStepRuns.Add(stepRun);
@@ -173,6 +185,11 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
         db.Tasks.Add(task);
     }
 
+    public void TrackDastExecutionLease(DastExecutionLease lease)
+    {
+        db.DastExecutionLeases.Add(lease);
+    }
+
     public async Task<List<PipelineRun>> GetRunsAsync(int pipelineId, int count, CancellationToken ct = default)
     {
         return await db.PipelineRuns
@@ -190,16 +207,19 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
     // scalar run fields + step summary chips, so the heavy per-run payload (YamlSnapshot,
     // resolved-variables JSON, step commands, output variables, artifacts) never leaves the
     // database - and output variables never bypass the secret masking GetRunAsync applies.
-    public async Task<(List<PipelineRunDto> Items, int TotalCount)> GetRunsPagedAsync(int pipelineId, int page, int pageSize, CancellationToken ct = default)
+    public async Task<(List<PipelineRunDto> Items, int TotalCount)> GetRunsPagedAsync(
+        int pipelineId, int page, int pageSize, PipelineRunPaginationRequest? request = null, CancellationToken ct = default)
     {
-        var query = db.PipelineRuns.AsNoTracking().Where(r => r.PipelineId == pipelineId);
+        var query = PipelineRunQuery.ApplyFilters(
+            db.PipelineRuns.AsNoTracking().Where(r => r.PipelineId == pipelineId), request);
+
         var total = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
-            .OrderByDescending(r => r.StartedAt)
+        var items = await PipelineRunQuery.ApplySort(query, request, timeProvider.GetUtcNow().UtcDateTime)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(PipelineRunHelpers.RunListProjection)
             .ToListAsync(ct).ConfigureAwait(false);
+        items = items.Select(PipelineRunHelpers.HydrateListWarnings).ToList();
         return (items, total);
     }
 
@@ -227,6 +247,7 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
         return await db.PipelineStepRuns
             .AsNoTracking()
             .Where(s => s.PipelineRunId == runId && s.Status == TaskExecutionStatus.Success && s.OutputVariablesJson != null)
+            .OrderBy(s => s.Order)
             .Select(s => new StepOutputProjection(s.StageName, s.StepName, s.OutputVariablesJson))
             .ToListAsync(ct).ConfigureAwait(false);
     }
@@ -289,12 +310,20 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
             .AnyAsync(s => s.Status != TaskExecutionStatus.Success && s.Status != TaskExecutionStatus.Failed && s.Status != TaskExecutionStatus.Timeout && s.Status != TaskExecutionStatus.Cancelled, ct)
             .ConfigureAwait(false);
     }
-
-    // Tracked (no AsNoTracking) so the trigger-completion handler can mutate the returned steps and save.
+    // The persisted transition is atomic and id-based; callers only need the step context.
     public async Task<List<PipelineStepRun>> FindStepRunsByTriggeredRunIdAsync(int triggeredRunId, CancellationToken ct = default)
         => await db.PipelineStepRuns
+            .AsNoTracking()
             .Where(s => s.TriggeredRunId == triggeredRunId)
             .ToListAsync(ct).ConfigureAwait(false);
+
+    public async Task<bool> TryResolveTriggeredStepAsync(
+        int stepId, TaskExecutionStatus status, int exitCode,
+        string? outputVariablesJson, string? failureCode, string? failureReason,
+        DateTime completedAt,
+        CancellationToken ct = default)
+        => await _triggerTransitions.TryResolveAsync(
+            stepId, status, exitCode, outputVariablesJson, failureCode, failureReason, completedAt, ct).ConfigureAwait(false);
 
     public async Task<List<int>> GetTriggeredChildRunIdsAsync(int parentRunId, CancellationToken ct = default)
         => await db.PipelineStepRuns.AsNoTracking()
@@ -369,6 +398,17 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
             .ToList();
     }
 
+    public Task<bool> HasActiveArtifactCollectionAsync(
+        int runId,
+        CancellationToken ct = default) =>
+        db.Tasks.AnyAsync(
+            task => task.PipelineRunId == runId
+                && task.Operation == OperationKind.PipelineCollectArtifacts
+                && (task.Status == TaskExecutionStatus.Pending
+                    || task.Status == TaskExecutionStatus.Assigned
+                    || task.Status == TaskExecutionStatus.Running),
+            ct);
+
     public async Task<bool> IsRunStillRunningAsync(int runId, CancellationToken ct = default)
     {
         return await db.PipelineRuns
@@ -379,26 +419,8 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
 
     public async Task UpdatePipelineRunStatusAsync(int runId, PipelineStatus status, CancellationToken ct = default)
     {
-        // Safety net: if marking as Failed but no step actually failed or timed out (all Success/Cancelled)
-        // AND at least one non-system step succeeded → override to Success.
-        // Timeout counts as a failure here so a timed-out step can never be masked back to green.
-        if (status == PipelineStatus.Failed)
-        {
-            try
-            {
-                var hasFailed = await db.PipelineStepRuns
-                    .AnyAsync(s => s.PipelineRunId == runId && (s.Status == TaskExecutionStatus.Failed || s.Status == TaskExecutionStatus.Timeout), ct).ConfigureAwait(false);
-                var hasSucceeded = await db.PipelineStepRuns
-                    .AnyAsync(s => s.PipelineRunId == runId && !s.IsSystem && s.Status == TaskExecutionStatus.Success, ct).ConfigureAwait(false);
-                logger.LogDebug("Run {RunId} safety net: hasFailed={H1} hasSucceeded={H2}", runId, hasFailed, hasSucceeded);
-                if (!hasFailed && hasSucceeded)
-                    status = PipelineStatus.Success;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Safety net query failed for run {RunId}", runId);
-            }
-        }
+        status = await _runStatusRepository.ResolveTerminalStatusAsync(runId, status, ct)
+            .ConfigureAwait(false);
 
         // Atomic update: only transition from Running to a terminal status.
         // Prevents concurrent AdvanceStageAsync calls from racing (first writer wins).
@@ -458,49 +480,26 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
 
     // Pool, environment and organization resolution is delegated to PipelineServerResolver.
 
-    public async Task CancelPendingStepRunsAsync(int runId, CancellationToken ct = default)
-    {
-        var pendingSteps = await db.PipelineStepRuns
-            .Where(s => s.PipelineRunId == runId &&
-                        (s.Status == TaskExecutionStatus.Pending || s.Status == TaskExecutionStatus.Assigned))
-            .ToListAsync(ct).ConfigureAwait(false);
+    public Task CancelActiveStepRunsAndTasksAsync(int runId, CancellationToken ct = default)
+        => _cancellation.CancelActiveStepRunsAndTasksAsync(runId, ct);
 
-        foreach (var step in pendingSteps)
-        {
-            step.Status = TaskExecutionStatus.Cancelled;
-            step.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
-        }
+    public Task CancelPendingStepRunsAsync(int runId, CancellationToken ct = default)
+        => _cancellation.CancelPendingStepRunsAsync(runId, ct);
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+    public Task RequestPipelineRunCancellationAsync(int runId, CancellationToken ct = default)
+        => _cancellation.RequestPipelineRunCancellationAsync(runId, ct);
 
-    public async Task<int> ResetFailedStepRunsAsync(int runId, CancellationToken ct = default)
-    {
-        var failedSteps = await db.PipelineStepRuns
-            .Where(s => s.PipelineRunId == runId && (s.Status == TaskExecutionStatus.Failed || s.Status == TaskExecutionStatus.Timeout))
-            .ToListAsync(ct).ConfigureAwait(false);
+    public Task CancelPendingStepRunsExceptStagesAsync(
+        int runId,
+        IReadOnlyCollection<string> preservedStages,
+        CancellationToken ct = default)
+        => _cancellation.CancelPendingStepRunsExceptStagesAsync(runId, preservedStages, ct);
 
-        if (failedSteps.Count == 0) return 0;
-
-        foreach (var step in failedSteps)
-        {
-            step.Status = TaskExecutionStatus.Pending;
-            step.ExitCode = null;
-            step.StartedAt = null;
-            step.CompletedAt = null;
-        }
-
-        // Atomically re-open the run so the existing scheduler can pick the steps back up.
-        var run = await db.PipelineRuns.FindAsync([runId], ct).ConfigureAwait(false);
-        if (run is not null)
-        {
-            run.Status = PipelineStatus.Running;
-            run.CompletedAt = null;
-        }
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return failedSteps.Count;
-    }
+    public Task CancelOrphanedRunningStepRunsExceptStagesAsync(
+        int runId,
+        IReadOnlyCollection<string> preservedStages,
+        CancellationToken ct = default)
+        => _cancellation.CancelOrphanedRunningStepRunsExceptStagesAsync(runId, preservedStages, ct);
 
     public Task<List<PipelineArtifact>> GetArtifactsAsync(int runId, CancellationToken ct = default)
         => _artifacts.GetArtifactsAsync(runId, ct);
@@ -535,11 +534,23 @@ internal sealed class PipelineCoreRepository(AppDbContext db, TimeProvider timeP
 
     public async Task<Data.Entities.Environment?> FindEnvironmentByNameAsync(string name, CancellationToken ct = default)
     {
+        // AsSplitQuery: two collection Includes on one query is a cartesian product (servers x checks).
+        // AsNoTracking: every caller reads this environment to decide something, none of them mutates
+        // it, and tracking an environment with its whole server list is the expensive half of the call.
         return await db.Environments
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(e => e.Servers).ThenInclude(es => es.Server)
             .Include(e => e.Checks)
             .FirstOrDefaultAsync(e => e.Name == name, ct).ConfigureAwait(false);
     }
+
+    public Task<Data.Entities.Environment?> FindEnvironmentByNameForProjectAsync(
+        string name,
+        int projectId,
+        CancellationToken ct = default) =>
+        db.Environments.AsNoTracking()
+            .FirstOrDefaultAsync(environment => environment.Name == name && environment.ProjectId == projectId, ct);
 
     public async Task<List<TestResult>> GetTestResultsAsync(int runId, CancellationToken ct = default)
     {

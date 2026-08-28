@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated outputs and pinned third-party frontend assets"
+paths = [
+  '''(^|/)(bin|obj|node_modules)/''',
+  '''(^|/)\.analysis-[^/]+/''',
+  '''(^|/)\.pipeline-artifacts/''',
+  '''(^|/)\.qa-test-results/''',
+  '''(^|/)coverage[^/]*/''',
+  '''(^|/)src/Aetheus\.Front/wwwroot/lib/'''
+]

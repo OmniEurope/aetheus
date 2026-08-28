@@ -20,13 +20,44 @@ public class DialogConventionGuardTests
             [Path.Combine("Shared", "WizardDialog.razor")] = "Custom overlay with its own Escape and cancel contract."
         };
 
+    /// <summary>
+    /// Radzen focuses the first form field when a dialog opens, which makes a screen reader announce
+    /// that field before the dialog's own title - the user hears "Name, edit" with no idea what they
+    /// are naming. Every dialog therefore opts out, so focus lands on the dialog itself.
+    /// </summary>
+    [Fact]
+    public void EveryDialogOptions_DisablesFirstElementAutoFocus()
+    {
+        var frontDir = FrontDirectory();
+        var violations = new List<string>();
+
+        foreach (var file in RepositoryScan.Enumerate(frontDir, "*.*")
+                     .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                                    || path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)))
+        {
+            var source = File.ReadAllText(file);
+            var declared = System.Text.RegularExpressions.Regex.Matches(source, @"new DialogOptions\b").Count;
+            if (declared == 0) continue;
+
+            var optedOut = System.Text.RegularExpressions.Regex
+                .Matches(source, @"AutoFocusFirstElement\s*=\s*false").Count;
+            if (optedOut < declared)
+                violations.Add($"{Path.GetRelativePath(frontDir, file)} ({declared} DialogOptions, {optedOut} opted out)");
+        }
+
+        Assert.True(violations.Count == 0,
+            "Every DialogOptions must set AutoFocusFirstElement = false so the dialog title is "
+            + "announced before its first field (claude-ui-patterns.md):\n  "
+            + string.Join("\n  ", violations.Order(StringComparer.Ordinal)));
+    }
+
     [Fact]
     public void DialogOptions_StayDismissibleUnlessDocumented()
     {
         var frontDir = FrontDirectory();
         var violations = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(frontDir, "*.*", SearchOption.AllDirectories)
+        foreach (var file in RepositoryScan.Enumerate(frontDir, "*.*")
                      .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
                                     || path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)))
         {
@@ -59,7 +90,7 @@ public class DialogConventionGuardTests
         var frontDir = FrontDirectory();
         var violations = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(frontDir, "*Dialog.razor", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(frontDir, "*Dialog.razor"))
         {
             var relative = Path.GetRelativePath(frontDir, file);
             if (NonRadzenDialogComponents.ContainsKey(relative)) continue;
@@ -85,15 +116,5 @@ public class DialogConventionGuardTests
 
     private static string FrontDirectory() => Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
 
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(DialogConventionGuardTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

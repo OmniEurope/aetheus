@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Extensions;
-using Aetheus.Shared.Constants;
 
 namespace Aetheus.Back.Components.ExternalRepos;
 
@@ -8,17 +7,21 @@ namespace Aetheus.Back.Components.ExternalRepos;
 /// Single source of truth for the internal smart-HTTP clone URL of an external-repo mirror. Both the
 /// attach path (<see cref="ExternalRepoService"/>) and the clone-resolve path
 /// (<see cref="RepoSourceResolver"/>) build it here so the stored URL and the recomputed URL can never
-/// diverge in dev / behind a proxy. Resolution is config-first (<c>Aetheus:PublicApiBaseUrl</c>
-/// wins, per <see cref="HostUrlExtensions.ResolvePublicApiUrl"/>); the request host is only a dev
-/// fallback used when an HttpContext is available and no canonical URL is configured.
+/// diverge in dev / behind a proxy. Resolution is config-first (<c>GitLight:CloneBaseUrl</c>, then
+/// <c>Aetheus:PublicApiBaseUrl</c> per <see cref="HostUrlExtensions.ResolvePublicApiUrl"/>); the
+/// request host is only a dev fallback used when an HttpContext is available and no canonical URL
+/// is configured.
 /// </summary>
 internal static class MirrorCloneUrl
 {
     public static string Build(IConfiguration config, HttpContext? httpContext, int projectId, string slug)
     {
-        var baseUrl = httpContext is not null
-            ? HostUrlExtensions.ResolvePublicApiUrl(config, httpContext)
-            : (config["Aetheus:PublicApiBaseUrl"] ?? string.Empty).TrimEnd('/');
+        var cloneBaseUrl = config["GitLight:CloneBaseUrl"];
+        var baseUrl = !string.IsNullOrWhiteSpace(cloneBaseUrl)
+            ? cloneBaseUrl.TrimEnd('/')
+            : httpContext is not null
+                ? HostUrlExtensions.ResolvePublicApiUrl(config, httpContext)
+                : (config["Aetheus:PublicApiBaseUrl"] ?? string.Empty).TrimEnd('/');
 
         return $"{baseUrl}/{MirrorRepoPath.Build(projectId, slug)}";
     }

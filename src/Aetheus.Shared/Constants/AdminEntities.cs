@@ -13,4 +13,6 @@ public static class AdminEntities
     public const string Organization = "Organization";
     public const string Plugin = "Plugin";
     public const string RegistrationToken = "RegistrationToken";
+    public const string PackageFeed = "PackageFeed";
+    public const string PackageRegistry = "PackageRegistry";
 }

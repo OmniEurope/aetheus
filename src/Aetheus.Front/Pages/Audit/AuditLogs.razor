@@ -22,7 +22,7 @@
             <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@L["AuditIntegrityUnavailable"]" />
         }
         <RadzenButton Icon="verified_user" Text="@L["AuditVerifyChain"]" Size="ButtonSize.Small"
-            Click="@VerifyChainAsync" IsBusy="_verifyingChain" BusyText="@L["AuditVerifying"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@VerifyChainAsync" IsBusy="_verifyingChain" BusyText="@L["AuditVerifying"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="refresh" Size="ButtonSize.Small"
             Click="@ReloadData" title="@L["Refresh"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
     </Actions>
@@ -45,7 +45,6 @@
         }
     </Filters>
 </Aetheus.Front.Shared.PageHeader>
-
 <AetheusDataGrid TItem="AuditLogDto" Data="@_logs" Count="@_count" LoadData="@LoadData"
     PageSize="50" AllowSorting="true" IsLoading="@_loading" Density="Density.Compact" FullHeight="true">
     <Columns>
@@ -62,11 +61,10 @@
         </RadzenDataGridColumn>
         <RadzenDataGridColumn TItem="AuditLogDto" Property="EntityType" Title="@L["EntityType"]" Width="160px" />
         <RadzenDataGridColumn TItem="AuditLogDto" Property="EntityId" Title="@L["ID"]" Width="80px" />
-        <RadzenDataGridColumn TItem="AuditLogDto" Property="Details" Title="@L["Details"]" />
         <RadzenDataGridColumn TItem="AuditLogDto" Title="@L["Actions"]" MinWidth="15rem" Sortable="false" Filterable="false">
             <Template Context="log">
                 <RadzenButton Text="@L["ViewDetails"]" Icon="visibility"
-                              Click="@(() => ShowDetailsDialogAsync(log))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                              Click="@(() => ShowDetailsDialogAsync(log))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                 @if (!string.IsNullOrWhiteSpace(log.Details))
                 {
                     <RadzenButton Text="@L["CopyDetails"]" Icon="content_copy"
@@ -74,5 +72,6 @@
                 }
             </Template>
         </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="AuditLogDto" Property="Details" Title="@L["Details"]" />
     </Columns>
 </AetheusDataGrid>

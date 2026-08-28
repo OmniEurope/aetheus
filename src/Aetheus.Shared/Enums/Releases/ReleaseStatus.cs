@@ -15,5 +15,9 @@ public enum ReleaseStatus
     /// Set by the deploy-success closure: a successful <c>type: deploy</c> task flips any linked
     /// release here (via <c>IArtifactService.MarkDeployedAsync</c> from <c>TaskService.CompleteTaskAsync</c>)
     /// and applies the Deployed retention window. No migration - the column is the same <c>int</c> enum.</summary>
-    Deployed = 6
+    Deployed = 6,
+
+    /// <summary>The release was deployed successfully and was later replaced by a newer deployment.
+    /// Keeping this distinct from Published preserves the authoritative V-1 deployment lineage.</summary>
+    Superseded = 7
 }

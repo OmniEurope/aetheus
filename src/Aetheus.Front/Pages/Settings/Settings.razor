@@ -24,15 +24,13 @@
             <RadzenCard class="rz-mt-2">
                 <RadzenStack Gap="1rem" class="settings-form">
                     <RadzenFormField Text="@L["Theme"]">
-                        <RadzenDropDown @bind-Value="_theme" Data="@_themes"
+                        <RadzenDropDown Value="@_theme" Change="@OnThemeChangedAsync" Data="@_themes"
                             TextProperty="Label" ValueProperty="Value" class="rz-w-100" />
                     </RadzenFormField>
                     <RadzenFormField Text="@L["Language"]">
-                        <RadzenDropDown @bind-Value="_language" Data="@_languages"
+                        <RadzenDropDown Value="@_language" Change="@OnLanguageChangedAsync" Data="@_languages"
                             TextProperty="Label" ValueProperty="Value" class="rz-w-100" />
                     </RadzenFormField>
-                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveAppearance"
-                        class="btn-fit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
                 </RadzenStack>
             </RadzenCard>
         </RadzenTabsItem>
@@ -41,13 +39,11 @@
             <RadzenCard class="rz-mt-2">
                 <RadzenStack Gap="0.75rem" class="settings-form">
                     <LabeledToggle Kind="ToggleKind.Switch" TextFirst="true" Class="labeled-toggle-spread"
-                        @bind-Value="_emailNotifications" Text="@L["EmailNotifications"]" />
+                        Value="@_emailNotifications" ValueChanged="@(value => SaveNotificationPreferenceAsync(StorageKeys.NotifEmail, value))" Text="@L["EmailNotifications"]" />
                     <LabeledToggle Kind="ToggleKind.Switch" TextFirst="true" Class="labeled-toggle-spread"
-                        @bind-Value="_pipelineAlerts" Text="@L["PipelineAlerts"]" />
+                        Value="@_pipelineAlerts" ValueChanged="@(value => SaveNotificationPreferenceAsync(StorageKeys.NotifPipeline, value))" Text="@L["PipelineAlerts"]" />
                     <LabeledToggle Kind="ToggleKind.Switch" TextFirst="true" Class="labeled-toggle-spread"
-                        @bind-Value="_serverAlerts" Text="@L["ServerAlerts"]" />
-                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveNotificationPreferences"
-                        class="btn-fit" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                        Value="@_serverAlerts" ValueChanged="@(value => SaveNotificationPreferenceAsync(StorageKeys.NotifServer, value))" Text="@L["ServerAlerts"]" />
                 </RadzenStack>
             </RadzenCard>
         </RadzenTabsItem>
@@ -55,7 +51,7 @@
         <RadzenTabsItem Text="@L["Security"]">
             <RadzenCard class="rz-mt-2">
                 <RadzenStack Gap="1rem" class="settings-form">
-                    <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["TwoFactorAuth"]</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["TwoFactorAuth"]</RadzenText>
 
                     @if (_totpEnabled)
                     {
@@ -67,7 +63,7 @@
                             <RadzenFormField Text="@L["Password"]">
                                 <RadzenPassword @bind-Value="_disablePassword" class="rz-w-100" />
                             </RadzenFormField>
-                            <RadzenButton Text="@L["Disable2FA"]" Icon="lock_open" Click="@DisableTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            <RadzenButton Text="@L["Disable2FA"]" Icon="lock_open" Click="@DisableTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                         </RadzenStack>
                     }
                     else if (_totpSetup is not null)
@@ -100,7 +96,7 @@
                         <RadzenAlert AlertStyle="AlertStyle.Warning" Shade="Shade.Lighter" AllowClose="false">
                             @L["TotpNotEnabled"]
                         </RadzenAlert>
-                        <RadzenButton Text="@L["Enable2FA"]" Icon="security" Click="@SetupTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                        <RadzenButton Text="@L["Enable2FA"]" Icon="security" Click="@SetupTotp" class="btn-fit" IsBusy="@_totpBusy" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     }
                 </RadzenStack>
             </RadzenCard>
@@ -109,7 +105,7 @@
                 <RadzenTemplateForm TItem="PasswordChangeModel" Data="@_pwModel" Submit="@ChangePassword">
                     <LocalizedDataAnnotationsValidator />
                     <RadzenStack Gap="1rem" class="settings-form">
-                        <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@L["ChangePassword"]</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@L["ChangePassword"]</RadzenText>
                         <RadzenFormField Text="@L["CurrentPassword"]">
                             <RadzenPassword @bind-Value="_pwModel.CurrentPassword" Name="CurrentPassword" class="rz-w-100" />
                             <ValidationMessage For="@(() => _pwModel.CurrentPassword)" />
@@ -123,7 +119,7 @@
                             <ValidationMessage For="@(() => _pwModel.ConfirmPassword)" />
                         </RadzenFormField>
                         <RadzenButton ButtonType="ButtonType.Submit" Text="@L["ChangePassword"]" Icon="lock_reset"
-                            class="btn-fit" IsBusy="@_pwBusy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            class="btn-fit" IsBusy="@_pwBusy" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     </RadzenStack>
                 </RadzenTemplateForm>
             </RadzenCard>
@@ -159,3 +155,4 @@
         </RadzenTabsItem>
     </Tabs>
 </RadzenTabs>
+

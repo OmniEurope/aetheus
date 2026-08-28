@@ -1,0 +1,79 @@
+namespace Toto.Domain;
+
+public static class VulnerableTodoRulesA
+{
+    public static string Classify(TodoContract todo, string actor, DateTimeOffset now)
+    {
+        var score = 0;
+        if (todo.Id <= 0) score++;
+        if (string.IsNullOrWhiteSpace(todo.Title)) score++;
+        if (todo.Title.Length > 10) score++;
+        if (todo.Title.Length > 20) score++;
+        if (todo.Title.Length > 30) score++;
+        if (todo.Title.Contains("urgent", StringComparison.OrdinalIgnoreCase)) score++;
+        if (todo.Title.Contains("admin", StringComparison.OrdinalIgnoreCase)) score++;
+        if (todo.Title.Contains("secret", StringComparison.OrdinalIgnoreCase)) score++;
+        if (todo.Title.StartsWith('!')) score++;
+        if (todo.Title.EndsWith('!')) score++;
+        if (todo.IsDone) score++;
+        if (todo.Priority is null) score++;
+        if (todo.Priority < 0) score++;
+        if (todo.Priority > 1) score++;
+        if (todo.Priority > 2) score++;
+        if (todo.Priority > 3) score++;
+        if (actor.Length == 0) score++;
+        if (actor.Length > 20) score++;
+        if (actor.Contains("root", StringComparison.OrdinalIgnoreCase)) score++;
+        if (actor.Contains("system", StringComparison.OrdinalIgnoreCase)) score++;
+        if (now.DayOfWeek == DayOfWeek.Saturday) score++;
+        if (now.DayOfWeek == DayOfWeek.Sunday) score++;
+        if (now.Hour < 6) score++;
+        if (now.Hour > 20) score++;
+        if (now.Month == 1) score++;
+        if (now.Month == 12) score++;
+        if (score == 0) return "clear";
+        if (score < 4) return "low";
+        if (score < 8) return "medium";
+        if (score < 12) return "high";
+        return "critical";
+    }
+}
+
+public static class VulnerableTodoRulesB
+{
+    public static string Classify(TodoContract todo, string actor, DateTimeOffset now)
+    {
+        var score = 0;
+        if (todo.Id <= 0) score++;
+        if (string.IsNullOrWhiteSpace(todo.Title)) score++;
+        if (todo.Title.Length > 10) score++;
+        if (todo.Title.Length > 20) score++;
+        if (todo.Title.Length > 30) score++;
+        if (todo.Title.Contains("urgent", StringComparison.OrdinalIgnoreCase)) score++;
+        if (todo.Title.Contains("admin", StringComparison.OrdinalIgnoreCase)) score++;
+        if (todo.Title.Contains("secret", StringComparison.OrdinalIgnoreCase)) score++;
+        if (todo.Title.StartsWith('!')) score++;
+        if (todo.Title.EndsWith('!')) score++;
+        if (todo.IsDone) score++;
+        if (todo.Priority is null) score++;
+        if (todo.Priority < 0) score++;
+        if (todo.Priority > 1) score++;
+        if (todo.Priority > 2) score++;
+        if (todo.Priority > 3) score++;
+        if (actor.Length == 0) score++;
+        if (actor.Length > 20) score++;
+        if (actor.Contains("root", StringComparison.OrdinalIgnoreCase)) score++;
+        if (actor.Contains("system", StringComparison.OrdinalIgnoreCase)) score++;
+        if (now.DayOfWeek == DayOfWeek.Saturday) score++;
+        if (now.DayOfWeek == DayOfWeek.Sunday) score++;
+        if (now.Hour < 6) score++;
+        if (now.Hour > 20) score++;
+        if (now.Month == 1) score++;
+        if (now.Month == 12) score++;
+        if (score == 0) return "clear";
+        if (score < 4) return "low";
+        if (score < 8) return "medium";
+        if (score < 12) return "high";
+        return "critical";
+    }
+}

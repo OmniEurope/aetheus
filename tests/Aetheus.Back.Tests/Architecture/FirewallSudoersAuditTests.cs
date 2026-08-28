@@ -4,7 +4,7 @@ using Aetheus.Agent.Core.Operations;
 namespace Aetheus.Back.Tests.Architecture;
 
 /// <summary>
-/// PLAN-006 4.2: the <c>aetheus-firewall</c> sudoers drop-in written by
+/// ADR-024 4.2: the <c>aetheus-firewall</c> sudoers drop-in written by
 /// <c>deploy/scripts/install-agent-linux.sh</c> must grant exactly the root-owned helper path the agent
 /// invokes (<see cref="FirewallOperationExecutor.HelperPath"/>). A drift means the capability is dead on
 /// arrival. Also pins the opt-in flag + helper writer + anti-lockout logic being present.
@@ -38,14 +38,5 @@ public class FirewallSudoersAuditTests
         Assert.Contains("would close the administration port", script, StringComparison.Ordinal);
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(FirewallSudoersAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

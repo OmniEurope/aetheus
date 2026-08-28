@@ -10,6 +10,11 @@ public interface IPostgresLeaderLease
         string leaseName,
         Func<CancellationToken, Task> leaderWork,
         CancellationToken stoppingToken);
+
+    Task RunSerializedAsync(
+        string operationName,
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -17,13 +22,62 @@ public interface IPostgresLeaderLease
 /// blue-green overlap only one backend therefore schedules, reconciles, or prunes data.
 /// A heartbeat detects a severed lease connection and cancels the leader work fail-closed.
 /// </summary>
-public sealed class PostgresLeaderLease(
-    IConfiguration configuration,
-    ILogger<PostgresLeaderLease> logger) : IPostgresLeaderLease
+public sealed class PostgresLeaderLease : IPostgresLeaderLease
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReleaseTimeout = TimeSpan.FromSeconds(5);
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<PostgresLeaderLease> _logger;
+    private readonly TimeSpan _retryDelay;
+
+    public PostgresLeaderLease(
+        IConfiguration configuration,
+        ILogger<PostgresLeaderLease> logger)
+        : this(configuration, logger, RetryDelay)
+    {
+    }
+
+    internal PostgresLeaderLease(
+        IConfiguration configuration,
+        ILogger<PostgresLeaderLease> logger,
+        TimeSpan retryDelay)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(retryDelay, TimeSpan.Zero);
+        _configuration = configuration;
+        _logger = logger;
+        _retryDelay = retryDelay;
+    }
+
+    public async Task RunSerializedAsync(
+        string operationName,
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationName);
+        ArgumentNullException.ThrowIfNull(operation);
+
+        var connectionString = _configuration.GetConnectionString("Default")
+            ?? throw new InvalidOperationException("ConnectionStrings:Default is required for operation locks.");
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using (var acquire = new NpgsqlCommand(
+            "SELECT pg_advisory_lock(hashtextextended(@name, 0))", connection))
+        {
+            acquire.Parameters.AddWithValue("name", operationName);
+            await acquire.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await operation(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await ReleaseLeaseAsync(connection, operationName).ConfigureAwait(false);
+        }
+    }
 
     public async Task RunAsLeaderAsync(
         string leaseName,
@@ -33,7 +87,7 @@ public sealed class PostgresLeaderLease(
         ArgumentException.ThrowIfNullOrWhiteSpace(leaseName);
         ArgumentNullException.ThrowIfNull(leaderWork);
 
-        var connectionString = configuration.GetConnectionString("Default")
+        var connectionString = _configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is required for hosted-service leader leases.");
 
         while (!stoppingToken.IsCancellationRequested)
@@ -49,11 +103,11 @@ public sealed class PostgresLeaderLease(
                 var acquired = (bool)(await acquire.ExecuteScalarAsync(stoppingToken).ConfigureAwait(false) ?? false);
                 if (!acquired)
                 {
-                    await Task.Delay(RetryDelay, stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(_retryDelay, stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
-                logger.LogInformation("Acquired PostgreSQL leader lease {LeaseName}", leaseName);
+                _logger.LogInformation("Acquired PostgreSQL leader lease {LeaseName}", leaseName);
                 using var leaseLost = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 var work = leaderWork(leaseLost.Token);
                 try
@@ -84,10 +138,13 @@ public sealed class PostgresLeaderLease(
             {
                 return;
             }
-            catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                logger.LogError(ex, "Lost or could not acquire PostgreSQL leader lease {LeaseName}", leaseName);
-                await Task.Delay(RetryDelay, stoppingToken).ConfigureAwait(false);
+                _logger.LogCritical(
+                    ex,
+                    "Leader worker {LeaseName} failed; its lease was released and the worker will restart without stopping the backend",
+                    leaseName);
+                await Task.Delay(_retryDelay, stoppingToken).ConfigureAwait(false);
             }
         }
     }
@@ -108,9 +165,9 @@ public sealed class PostgresLeaderLease(
             release.Parameters.AddWithValue("name", leaseName);
             var released = (bool)(await release.ExecuteScalarAsync(releaseTimeout.Token).ConfigureAwait(false) ?? false);
             if (released)
-                logger.LogInformation("Released PostgreSQL leader lease {LeaseName}", leaseName);
+                _logger.LogInformation("Released PostgreSQL leader lease {LeaseName}", leaseName);
             else
-                logger.LogWarning("PostgreSQL session did not own leader lease {LeaseName} during release", leaseName);
+                _logger.LogWarning("PostgreSQL session did not own leader lease {LeaseName} during release", leaseName);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException or OperationCanceledException or InvalidOperationException)
         {
@@ -118,7 +175,7 @@ public sealed class PostgresLeaderLease(
             // If the explicit unlock cannot be proven, invalidate the pool so this physical session is
             // closed on disposal and PostgreSQL releases all of its session-scoped advisory locks.
             NpgsqlConnection.ClearPool(connection);
-            logger.LogWarning(ex, "Could not explicitly release PostgreSQL leader lease {LeaseName}; invalidated its connection pool", leaseName);
+            _logger.LogWarning(ex, "Could not explicitly release PostgreSQL leader lease {LeaseName}; invalidated its connection pool", leaseName);
         }
     }
 }

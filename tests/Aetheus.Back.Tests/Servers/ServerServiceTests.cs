@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
@@ -14,6 +16,7 @@ namespace Aetheus.Back.Tests;
 public class ServerServiceTests
 {
     private readonly IServerRepository _repoMock = Substitute.For<IServerRepository>();
+    private readonly IServerHeartbeatRepository _heartbeatRepoMock = Substitute.For<IServerHeartbeatRepository>();
     private readonly IHubContext<ServerHub> _hubMock = Substitute.For<IHubContext<ServerHub>>();
     private readonly IHubContext<AlertHub> _alertHubMock = Substitute.For<IHubContext<AlertHub>>();
     private readonly IAuditService _auditMock = Substitute.For<IAuditService>();
@@ -35,9 +38,10 @@ public class ServerServiceTests
         alertClientsMock.Groups(Arg.Any<IReadOnlyList<string>>()).Returns(groupMock);
         _alertHubMock.Clients.Returns(alertClientsMock);
 
-        _sut = new ServerService(_repoMock, _hubMock, _alertHubMock, _auditMock,
+        _sut = new ServerService(_repoMock, _heartbeatRepoMock, _hubMock, _alertHubMock, _auditMock,
             Substitute.For<Aetheus.Back.Components.Tasks.ITaskService>(),
-            Options.Create(_backgroundOptions), TimeProvider.System, Substitute.For<IDbTransactionScope>());
+            Options.Create(_backgroundOptions), TimeProvider.System, Substitute.For<IDbTransactionScope>(),
+            updateConfirmation: null);
     }
 
     // --- GetServersAsync ---
@@ -296,13 +300,13 @@ public class ServerServiceTests
             DockerVolumes = []
         };
         _repoMock.FindServerAsync(1, Arg.Any<CancellationToken>()).Returns(server);
-        _repoMock.AddMetricAsync(Arg.Any<ServerMetric>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceServicesAsync(Arg.Any<int>(), Arg.Any<List<ServiceInfo>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerContainersAsync(Arg.Any<int>(), Arg.Any<List<DockerContainer>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerImagesAsync(Arg.Any<int>(), Arg.Any<List<DockerImage>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerComposeStacksAsync(Arg.Any<int>(), Arg.Any<List<DockerComposeStack>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerNetworksAsync(Arg.Any<int>(), Arg.Any<List<DockerNetwork>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerVolumesAsync(Arg.Any<int>(), Arg.Any<List<DockerVolume>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.AddMetricAsync(Arg.Any<ServerMetric>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceServicesAsync(Arg.Any<int>(), Arg.Any<List<ServiceInfo>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerContainersAsync(Arg.Any<int>(), Arg.Any<List<DockerContainer>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerImagesAsync(Arg.Any<int>(), Arg.Any<List<DockerImage>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerComposeStacksAsync(Arg.Any<int>(), Arg.Any<List<DockerComposeStack>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerNetworksAsync(Arg.Any<int>(), Arg.Any<List<DockerNetwork>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerVolumesAsync(Arg.Any<int>(), Arg.Any<List<DockerVolume>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var heartbeat = new ServerHeartbeatDto
@@ -338,19 +342,19 @@ public class ServerServiceTests
         await _sut.ProcessHeartbeatAsync(1, heartbeat, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(ServerStatus.Online, server.Status);
-        await _repoMock.Received(1).AddMetricAsync(Arg.Is<ServerMetric>(m =>
+        await _heartbeatRepoMock.Received(1).AddMetricAsync(Arg.Is<ServerMetric>(m =>
             m.CpuPercent == 55 && m.DiskUsedGb == 50 && m.DiskTotalGb == 100
             && m.BuildCacheBytes == 1234 && m.BuildCacheReclaimableBytes == 567
             && m.DeploymentOnly && !m.BuildActive && m.LastBuildAttemptAtUtc.HasValue
             && m.StorageMaintenanceDryRun && m.Timestamp > default(DateTime)),
             Arg.Any<CancellationToken>());
-        await _repoMock.Received(1).ReplaceServicesAsync(server.Id, Arg.Is<List<ServiceInfo>>(l => l.Count == 1), Arg.Any<CancellationToken>());
-        await _repoMock.Received(1).ReplaceDockerContainersAsync(server.Id, Arg.Is<List<DockerContainer>>(l => l.Count == 1), Arg.Any<CancellationToken>());
-        await _repoMock.Received(1).ReplaceDockerImagesAsync(server.Id,
+        await _heartbeatRepoMock.Received(1).ReplaceServicesAsync(server.Id, Arg.Is<List<ServiceInfo>>(l => l.Count == 1), Arg.Any<CancellationToken>());
+        await _heartbeatRepoMock.Received(1).ReplaceDockerContainersAsync(server.Id, Arg.Is<List<DockerContainer>>(l => l.Count == 1), Arg.Any<CancellationToken>());
+        await _heartbeatRepoMock.Received(1).ReplaceDockerImagesAsync(server.Id,
             Arg.Is<List<DockerImage>>(l => l.Count == 1 && l[0].Repository == "nginx"), Arg.Any<CancellationToken>());
-        await _repoMock.Received(1).ReplaceDockerComposeStacksAsync(server.Id, Arg.Is<List<DockerComposeStack>>(l => l.Count == 1), Arg.Any<CancellationToken>());
-        await _repoMock.Received(1).ReplaceDockerNetworksAsync(server.Id, Arg.Is<List<DockerNetwork>>(l => l.Count == 1), Arg.Any<CancellationToken>());
-        await _repoMock.Received(1).ReplaceDockerVolumesAsync(server.Id, Arg.Is<List<DockerVolume>>(l => l.Count == 1), Arg.Any<CancellationToken>());
+        await _heartbeatRepoMock.Received(1).ReplaceDockerComposeStacksAsync(server.Id, Arg.Is<List<DockerComposeStack>>(l => l.Count == 1), Arg.Any<CancellationToken>());
+        await _heartbeatRepoMock.Received(1).ReplaceDockerNetworksAsync(server.Id, Arg.Is<List<DockerNetwork>>(l => l.Count == 1), Arg.Any<CancellationToken>());
+        await _heartbeatRepoMock.Received(1).ReplaceDockerVolumesAsync(server.Id, Arg.Is<List<DockerVolume>>(l => l.Count == 1), Arg.Any<CancellationToken>());
         await _repoMock.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
         var alertClient = _alertHubMock.Clients.Group(HubGroups.Alerts);
         await alertClient.Received(1).SendCoreAsync(
@@ -426,13 +430,13 @@ public class ServerServiceTests
             DockerVolumes = []
         };
         _repoMock.FindServerAsync(1, Arg.Any<CancellationToken>()).Returns(server);
-        _repoMock.AddMetricAsync(Arg.Any<ServerMetric>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceServicesAsync(Arg.Any<int>(), Arg.Any<List<ServiceInfo>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerContainersAsync(Arg.Any<int>(), Arg.Any<List<DockerContainer>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerImagesAsync(Arg.Any<int>(), Arg.Any<List<DockerImage>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerComposeStacksAsync(Arg.Any<int>(), Arg.Any<List<DockerComposeStack>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerNetworksAsync(Arg.Any<int>(), Arg.Any<List<DockerNetwork>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerVolumesAsync(Arg.Any<int>(), Arg.Any<List<DockerVolume>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.AddMetricAsync(Arg.Any<ServerMetric>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceServicesAsync(Arg.Any<int>(), Arg.Any<List<ServiceInfo>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerContainersAsync(Arg.Any<int>(), Arg.Any<List<DockerContainer>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerImagesAsync(Arg.Any<int>(), Arg.Any<List<DockerImage>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerComposeStacksAsync(Arg.Any<int>(), Arg.Any<List<DockerComposeStack>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerNetworksAsync(Arg.Any<int>(), Arg.Any<List<DockerNetwork>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerVolumesAsync(Arg.Any<int>(), Arg.Any<List<DockerVolume>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         await _sut.ProcessHeartbeatAsync(1, new ServerHeartbeatDto
@@ -445,7 +449,7 @@ public class ServerServiceTests
             Docker = new DockerDataDto()
         }, ct: TestContext.Current.CancellationToken);
 
-        await _repoMock.Received(1).AddMetricAsync(
+        await _heartbeatRepoMock.Received(1).AddMetricAsync(
             Arg.Is<ServerMetric>(m => m.DiskTotalGb == 300 && m.DiskUsedGb == 120),
             Arg.Any<CancellationToken>());
     }
@@ -528,20 +532,6 @@ public class ServerServiceTests
         Assert.Equal(1, result[0].SecretCount);
     }
 
-    // --- GetServerReleasesAsync ---
-
-    [Fact]
-    public async Task GetServerReleasesAsync_ReturnsMappedList()
-    {
-        _repoMock.GetReleasesForServerAsync(1, Arg.Any<CancellationToken>())
-            .Returns([new Release { Id = 2, ProjectId = 1, Project = new Project { Name = "P1" }, Version = "1.0.0", BranchName = "main", Status = ReleaseStatus.Published }]);
-
-        var result = await _sut.GetServerReleasesAsync(1, ct: TestContext.Current.CancellationToken);
-
-        Assert.Single(result);
-        Assert.Equal("1.0.0", result[0].Version);
-        Assert.Equal(ReleaseStatus.Published, result[0].Status);
-    }
 
     // --- GetServerTasksAsync ---
 
@@ -550,7 +540,16 @@ public class ServerServiceTests
     {
         var tasks = new List<ServerTask>
         {
-            new() { Id = 1, ServerId = 1, Name = "deploy", Command = "echo hi", Status = TaskExecutionStatus.Success }
+            new()
+            {
+                Id = 1,
+                ServerId = 1,
+                Name = "deploy",
+                Command = "echo hi",
+                Status = TaskExecutionStatus.Success,
+                PipelineRunId = 42,
+                PipelineStepRunId = 84
+            }
         };
         _repoMock.GetTasksPagedAsync(1, 1, 10, Arg.Any<CancellationToken>())
             .Returns((tasks, 1));
@@ -559,6 +558,8 @@ public class ServerServiceTests
 
         Assert.Equal(1, result.TotalCount);
         Assert.Equal("deploy", result.Items[0].Name);
+        Assert.Equal(42, result.Items[0].PipelineRunId);
+        Assert.Equal(84, result.Items[0].PipelineStepRunId);
     }
 
     // --- GetServerLogsAsync ---
@@ -697,6 +698,32 @@ public class ServerServiceTests
         Assert.Equal(OsType.Windows, server.OsType);
     }
 
+    [Fact]
+    public async Task ProcessHeartbeatAsync_MissingContract_DoesNotInferPreviousProtocolOrCapabilities()
+    {
+        var server = new Server
+        {
+            Id = 1,
+            Name = "srv",
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilitiesJson = "[\"agent.self-update\"]",
+            PipelineRunnerEnabled = true,
+            Services = [],
+            DockerContainers = [],
+            DockerImages = [],
+            DockerComposeStacks = [],
+            DockerNetworks = [],
+            DockerVolumes = []
+        };
+        SetupHeartbeatMocks(server);
+
+        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(server.AgentProtocolVersion);
+        Assert.Equal("[]", server.AgentCapabilitiesJson);
+        Assert.False(server.PipelineRunnerEnabled);
+    }
+
     // --- Pipeline-runner gate self-heal at heartbeat (secure-by-default) ---
 
     [Fact]
@@ -733,13 +760,45 @@ public class ServerServiceTests
     }
 
     [Fact]
-    public async Task ProcessHeartbeatAsync_LegacyPositiveSudoersInventory_EnablesReportedCapability()
+    public async Task ProcessHeartbeatAsync_MissingCapabilityContract_DoesNotEnableDeployment()
     {
         var server = CapabilityServer(enabled: false);
         SetupHeartbeatMocks(server);
 
         await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with
         {
+            SudoersHashes = new Dictionary<string, string> { ["aetheus-deploy"] = new('A', 64) }
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(server.DeploymentTargetAvailable);
+    }
+
+    [Fact]
+    public async Task ProcessHeartbeatAsync_ModernAgent_DisablesDeploymentWhenFunctionalProbeFailed()
+    {
+        var server = CapabilityServer(enabled: true);
+        SetupHeartbeatMocks(server);
+
+        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with
+        {
+            AgentCapabilities = [AgentCapabilities.PipelineBuild],
+            SudoersInventoryAvailable = true,
+            SudoersHashes = new Dictionary<string, string> { ["aetheus-deploy"] = new('A', 64) }
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(server.DeploymentTargetAvailable);
+    }
+
+    [Fact]
+    public async Task ProcessHeartbeatAsync_ModernAgent_EnablesDeploymentOnlyAfterFunctionalProbe()
+    {
+        var server = CapabilityServer(enabled: false);
+        SetupHeartbeatMocks(server);
+
+        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with
+        {
+            AgentCapabilities = [AgentCapabilities.PipelineBuild, AgentCapabilities.Deployment],
+            SudoersInventoryAvailable = true,
             SudoersHashes = new Dictionary<string, string> { ["aetheus-deploy"] = new('A', 64) }
         }, ct: TestContext.Current.CancellationToken);
 
@@ -793,7 +852,12 @@ public class ServerServiceTests
         };
         SetupHeartbeatMocks(server);
 
-        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with { PipelineRunnerAvailable = true }, ct: TestContext.Current.CancellationToken);
+        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with
+        {
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilities = [AgentCapabilities.PipelineBuild],
+            PipelineRunnerAvailable = true
+        }, ct: TestContext.Current.CancellationToken);
 
         Assert.False(server.PipelineRunnerEnabled);
     }
@@ -818,7 +882,12 @@ public class ServerServiceTests
         };
         SetupHeartbeatMocks(server);
 
-        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with { PipelineRunnerAvailable = true }, ct: TestContext.Current.CancellationToken);
+        await _sut.ProcessHeartbeatAsync(1, MinimalHeartbeat() with
+        {
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilities = [AgentCapabilities.PipelineBuild],
+            PipelineRunnerAvailable = true
+        }, ct: TestContext.Current.CancellationToken);
 
         Assert.True(server.PipelineRunnerEnabled);
     }
@@ -826,13 +895,13 @@ public class ServerServiceTests
     private void SetupHeartbeatMocks(Server server)
     {
         _repoMock.FindServerAsync(server.Id, Arg.Any<CancellationToken>()).Returns(server);
-        _repoMock.AddMetricAsync(Arg.Any<ServerMetric>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceServicesAsync(Arg.Any<int>(), Arg.Any<List<ServiceInfo>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerContainersAsync(Arg.Any<int>(), Arg.Any<List<DockerContainer>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerImagesAsync(Arg.Any<int>(), Arg.Any<List<DockerImage>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerComposeStacksAsync(Arg.Any<int>(), Arg.Any<List<DockerComposeStack>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerNetworksAsync(Arg.Any<int>(), Arg.Any<List<DockerNetwork>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repoMock.ReplaceDockerVolumesAsync(Arg.Any<int>(), Arg.Any<List<DockerVolume>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.AddMetricAsync(Arg.Any<ServerMetric>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceServicesAsync(Arg.Any<int>(), Arg.Any<List<ServiceInfo>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerContainersAsync(Arg.Any<int>(), Arg.Any<List<DockerContainer>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerImagesAsync(Arg.Any<int>(), Arg.Any<List<DockerImage>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerComposeStacksAsync(Arg.Any<int>(), Arg.Any<List<DockerComposeStack>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerNetworksAsync(Arg.Any<int>(), Arg.Any<List<DockerNetwork>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _heartbeatRepoMock.ReplaceDockerVolumesAsync(Arg.Any<int>(), Arg.Any<List<DockerVolume>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         _repoMock.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
     }
 

@@ -26,6 +26,21 @@ public class VaultEditTests : BunitContext
     }
 
     [Fact]
+    public void NewVault_NameInputUpdatesTheFormModel()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
+
+        var cut = Render<VaultEdit>();
+        cut.Find("input[name='Name']").Input("observability-package-publication");
+
+        var model = typeof(VaultEdit)
+            .GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!;
+        var name = model.GetType().GetProperty("Name")!.GetValue(model);
+        Assert.Equal("observability-package-publication", name);
+    }
+
+    [Fact]
     public void Renders_ExistingVaultPage()
     {
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
@@ -89,7 +104,7 @@ public class VaultEditTests : BunitContext
     }
 
     [Fact]
-    public async Task AddSecret_WithEmptyKey_DoesNothing()
+    public async Task AddSecret_WithEmptyKey_MakesNoRequest()
     {
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
         _handler.SetJsonResponse("api/vaults/1", new VaultDetailDto

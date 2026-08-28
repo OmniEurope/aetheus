@@ -57,6 +57,112 @@ public class ProjectsTests : BunitContext
     }
 
     [Fact]
+    public void ProjectCard_RendersCommitRunProductionAndParentLinks()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items =
+            [
+                new ProjectDto
+                {
+                    Id = 1,
+                    Name = "Operational",
+                    Status = ProjectStatus.Active,
+                    LastCommitId = 42,
+                    LastCommitSha = "0123456789abcdef",
+                    LastCommitMessage = "Ship project cards",
+                    LastCommitAt = new DateTime(2026, 7, 30, 9, 0, 0, DateTimeKind.Utc),
+                    LastRunId = 52,
+                    LastRunName = "Deploy",
+                    LastRunStatus = PipelineStatus.Success,
+                    LastRunAt = new DateTime(2026, 7, 30, 9, 5, 0, DateTimeKind.Utc),
+                    ParentRunId = 51,
+                    ParentRunName = "Release",
+                    LatestGateGrade = AnalysisGrade.B,
+                    ProductionStatus = ProjectProductionStatus.Online,
+                    OnlineUserCount = 8
+                }
+            ],
+            TotalCount = 1
+        });
+        var cut = Render<ProjectsPage>();
+        cut.WaitForState(() => cut.Markup.Contains("Operational"), TimeSpan.FromSeconds(2));
+
+        Assert.Contains("href=\"/git-repositories/commits/42\"", cut.Markup);
+        Assert.Contains("href=\"/pipelines/runs/52\"", cut.Markup);
+        Assert.Contains("href=\"/pipelines/runs/51\"", cut.Markup);
+        Assert.Contains("project-production-status online", cut.Markup);
+        Assert.Contains("project-online-users", cut.Markup);
+        Assert.Contains("project-gate-grade analysis-grade-b", cut.Markup);
+        Assert.Contains("href=\"/projects/1/quality\"", cut.Markup);
+        Assert.Contains("OnlineUsers", cut.Markup);
+        Assert.DoesNotContain("PipelineCount", cut.Markup);
+        Assert.DoesNotContain("Repository", cut.Markup);
+    }
+
+    [Fact]
+    public void ProjectCommit_DeepLinksToItsInternalRepositoryWhenKnown()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items =
+            [
+                new ProjectDto
+                {
+                    Id = 1,
+                    Name = "Repository project",
+                    Status = ProjectStatus.Active,
+                    InternalRepositoryId = 7,
+                    LastCommitId = 42,
+                    LastCommitSha = "0123456789abcdef"
+                }
+            ],
+            TotalCount = 1
+        });
+
+        var cut = Render<ProjectsPage>();
+
+        cut.WaitForAssertion(() =>
+            Assert.Contains("href=\"/git-repositories/7/commits/0123456789abcdef\"", cut.Markup));
+    }
+
+    [Fact]
+    public void DenseView_SwitchesToCompactPortfolioList()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items = [new ProjectDto { Id = 1, Name = "Dense", Status = ProjectStatus.Active }],
+            TotalCount = 1
+        });
+
+        var cut = Render<ProjectsPage>();
+        cut.WaitForState(() => cut.Markup.Contains("Dense"), TimeSpan.FromSeconds(2));
+        cut.Find("button[title='DenseView']").Click();
+
+        Assert.Contains("project-dense-list", cut.Markup);
+        Assert.DoesNotContain("project-card-grid\"", cut.Markup);
+    }
+
+    [Fact]
+    public void FavoriteButton_PinsProjectAndPersistsPreference()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
+        {
+            Items = [new ProjectDto { Id = 7, Name = "Favorite me", Status = ProjectStatus.Active }],
+            TotalCount = 1
+        });
+
+        var cut = Render<ProjectsPage>();
+        cut.WaitForState(() => cut.Markup.Contains("Favorite me"), TimeSpan.FromSeconds(2));
+        cut.Find("button[title='AddToFavorites']").Click();
+
+        Assert.Contains("project-favorite active", cut.Markup);
+        Assert.Contains(JSInterop.Invocations, invocation =>
+            invocation.Identifier == "localStorage.setItem"
+            && Equals(invocation.Arguments[0], "aetheus.projects.favorites"));
+    }
+
+    [Fact]
     public async Task NewProject_OpensDialog()
     {
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
@@ -77,3 +183,4 @@ public class ProjectsTests : BunitContext
         Assert.True(opened);
     }
 }
+

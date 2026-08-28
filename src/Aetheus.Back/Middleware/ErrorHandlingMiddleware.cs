@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Text.Json;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Middleware;
 
@@ -32,6 +30,12 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
         {
             context.Response.StatusCode = 499; // Client Closed Request
         }
+        catch (BadHttpRequestException ex)
+        {
+            // Kestrel uses BadHttpRequestException for protocol failures such as an exceeded
+            // endpoint body limit. Preserve its explicit 4xx status instead of hiding it as 500.
+            await WriteErrorAsync(context, (HttpStatusCode)ex.StatusCode, ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unhandled exception for {Method} {Path}", context.Request.Method, context.Request.Path);
@@ -43,7 +47,11 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
     {
         context.Response.StatusCode = (int)statusCode;
         context.Response.ContentType = "application/json";
-        var error = new ApiError { Message = message };
+        var error = new ApiError
+        {
+            Message = message,
+            CorrelationId = context.TraceIdentifier
+        };
         await context.Response.WriteAsync(JsonSerializer.Serialize(error, JsonOptions));
     }
 }

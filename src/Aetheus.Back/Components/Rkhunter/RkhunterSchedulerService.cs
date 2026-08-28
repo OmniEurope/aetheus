@@ -2,9 +2,6 @@
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Cronos;
 
 namespace Aetheus.Back.Components.Rkhunter;

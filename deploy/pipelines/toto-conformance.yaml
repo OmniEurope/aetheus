@@ -1,0 +1,34 @@
+# A pipeline testing the pipeline system: deploy V-1, validate V, roll back, then promote V.
+name: toto-conformance
+trigger: manual
+
+stages:
+  - name: Baseline
+    os: linux
+    steps:
+      - name: Prepare and deploy deterministic V-1
+        type: trigger
+        pipeline: toto-baseline-candidate
+        inherit_source: false
+        source_branch: conformance/v1
+        timeout_seconds: 10800
+
+  - name: CurrentCandidate
+    os: linux
+    depends_on: [Baseline]
+    steps:
+      - name: Validate current V candidate
+        type: trigger
+        pipeline: toto-candidate
+        timeout_seconds: 10800
+
+  - name: PromoteCurrent
+    os: linux
+    depends_on: [CurrentCandidate]
+    steps:
+      - name: Promote current candidate without rebuild
+        type: trigger
+        pipeline: toto-promote-accept
+        parameters:
+          candidateVersion: "$(CANDIDATE_VERSION)"
+        timeout_seconds: 3600

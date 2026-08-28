@@ -124,4 +124,31 @@ public class TaskTrackerServiceReconnectTests : BunitContext
 
         Assert.Equal(0, sut.Count);
     }
+
+    [Fact]
+    public async Task RetryLoop_FailsTwiceThenSucceeds_StopsAndPublishesSeed()
+    {
+        var connectCalls = 0;
+        var seededTaskIds = new List<int>();
+        var announcedDelays = new List<int>();
+
+        var connected = await TaskTrackerService.RetryUntilConnectedAsync(
+            _ =>
+            {
+                connectCalls++;
+                if (connectCalls < 3)
+                    return Task.FromResult(false);
+                seededTaskIds.Add(42);
+                return Task.FromResult(true);
+            },
+            [TimeSpan.Zero],
+            announcedDelays.Add,
+            () => true,
+            Xunit.TestContext.Current.CancellationToken);
+
+        Assert.True(connected);
+        Assert.Equal(3, connectCalls);
+        Assert.Equal([0, 0, 0], announcedDelays);
+        Assert.Equal([42], seededTaskIds);
+    }
 }

@@ -38,14 +38,14 @@ public class ErrorNotificationHandlerTests
     }
 
     [Fact]
-    public async Task SendAsync_BadRequest_NotifiesWarning()
+    public async Task SendAsync_BadRequest_NotifiesError()
     {
         var (notif, handler, client) = CreateSetup(HttpStatusCode.BadRequest);
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
         Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Warning, notif.Messages[0].Severity);
+        Assert.Equal(NotificationSeverity.Error, notif.Messages[0].Severity);
         Assert.Equal("Error 400", notif.Messages[0].Summary);
         client.Dispose();
         handler.Dispose();
@@ -119,6 +119,22 @@ public class ErrorNotificationHandlerTests
     }
 
     [Fact]
+    public async Task SendAsync_JsonStringBody_ExtractsMessage()
+    {
+        var (notif, handler, client) = CreateSetup(
+            HttpStatusCode.BadRequest,
+            "Pipeline definition is invalid.");
+
+        await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"),
+            Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Equal("Pipeline definition is invalid.", Assert.Single(notif.Messages).Detail);
+        client.Dispose();
+        handler.Dispose();
+    }
+
+    [Fact]
     public async Task SendAsync_UnknownStatusCode_ShowsGenericMessage()
     {
         var (notif, handler, client) = CreateSetup(HttpStatusCode.Gone);
@@ -144,7 +160,8 @@ public class ErrorNotificationHandlerTests
         var innerHandler = new OneShotStubHandler(HttpStatusCode.BadRequest, json);
         var localizerMock = Substitute.For<IStringLocalizer<AppStrings>>();
         localizerMock[Arg.Any<string>()].Returns(ci => new LocalizedString((string)ci[0], (string)ci[0]));
-        var handler = new ErrorNotificationHandler(notif, localizerMock) { InnerHandler = innerHandler };
+        var toast = new NotifyHelper(notif, localizerMock);
+        var handler = new ErrorNotificationHandler(toast, localizerMock) { InnerHandler = innerHandler };
         var client = new HttpClient(handler);
 
         // Default ResponseContentRead makes HttpClient buffer the content after the pipeline; without
@@ -165,7 +182,8 @@ public class ErrorNotificationHandlerTests
         var innerHandler = new StubHandler(statusCode, jsonBody);
         var localizerMock = Substitute.For<IStringLocalizer<AppStrings>>();
         localizerMock[Arg.Any<string>()].Returns(ci => new LocalizedString((string)ci[0], (string)ci[0]));
-        var handler = new ErrorNotificationHandler(notif, localizerMock)
+        var toast = new NotifyHelper(notif, localizerMock);
+        var handler = new ErrorNotificationHandler(toast, localizerMock)
         {
             InnerHandler = innerHandler
         };

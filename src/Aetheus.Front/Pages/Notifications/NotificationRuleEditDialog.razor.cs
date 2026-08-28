@@ -1,27 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Notifications;
 
-public partial class NotificationRuleEditDialog : ComponentBase
+public partial class NotificationRuleEditDialog : EntityEditDialogBase
 {
-    [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private UiActions Ui { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-
     [Parameter] public NotificationRuleDto? Rule { get; set; }
     [Parameter] public List<NotificationChannelDto> Channels { get; set; } = [];
 
     private bool IsEdit => Rule is not null;
     private EditModel _model = new();
-    private bool _busy;
 
     protected override void OnInitialized()
     {
@@ -43,41 +30,37 @@ public partial class NotificationRuleEditDialog : ComponentBase
 
     private async Task SubmitAsync()
     {
-        _busy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             var filter = string.IsNullOrWhiteSpace(_model.FilterJson) ? null : _model.FilterJson;
             if (IsEdit)
             {
                 await Ui.RunAsync(
-                    () => Api.UpdateNotificationRuleAsync(Rule!.Id, new UpdateNotificationRuleRequest
+                    () => Api.Monitoring.UpdateNotificationRuleAsync(Rule!.Id, new UpdateNotificationRuleRequest
                     {
                         EventType = _model.EventType,
                         FilterJson = filter,
                         IsEnabled = _model.IsEnabled
                     }),
                     "Updated",
-                    _ => { Dialog.Close(true); return Task.CompletedTask; },
+                    _ => CloseAfterSuccessAsync(),
                     successTitleKey: "Updated");
             }
             else
             {
                 await Ui.RunAsync(
-                    () => Api.CreateNotificationRuleAsync(new CreateNotificationRuleRequest
+                    () => Api.Monitoring.CreateNotificationRuleAsync(new CreateNotificationRuleRequest
                     {
                         NotificationChannelId = _model.NotificationChannelId,
                         EventType = _model.EventType,
                         FilterJson = filter
                     }),
                     "Created",
-                    _ => { Dialog.Close(true); return Task.CompletedTask; },
+                    _ => CloseAfterSuccessAsync(),
                     successTitleKey: "Created");
             }
-        }
-        finally { _busy = false; }
+        });
     }
-
-    private void Cancel() => Dialog.Close(false);
 
     private sealed class EditModel
     {

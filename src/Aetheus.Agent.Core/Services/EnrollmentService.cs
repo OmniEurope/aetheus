@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Aetheus.Agent.Core.Configuration;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Options;
 
@@ -71,18 +72,23 @@ public sealed class EnrollmentService(
 
         logger.LogInformation("Enrolling agent with server {ServerUrl}...", _options.ServerUrl);
 
+        var dockerAvailable = await DockerProbe.IsAvailableAsync(shell, ct).ConfigureAwait(false);
+        var pipelineRunnerAvailable = await PipelineRunnerProbe.IsAvailableAsync(shell, ct).ConfigureAwait(false);
         var request = new ServerRegistrationRequest
         {
             RegistrationToken = registrationToken,
             Hostname = !string.IsNullOrWhiteSpace(_options.Name) ? _options.Name : Environment.MachineName,
             OsDescription = RuntimeInformation.OSDescription,
             AgentVersion = typeof(EnrollmentService).Assembly.GetName().Version?.ToString(3) ?? "1.0.0",
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilities = BuildRegistrationCapabilities(dockerAvailable, pipelineRunnerAvailable),
             IpAddress = GetLocalIpAddress(),
             AgentInstalledAt = InstallInfoReader.Read(_options.WorkDirectory),
-            DockerAvailable = await DockerProbe.IsAvailableAsync(shell, ct).ConfigureAwait(false),
-            // Report the pipeline-runner toolchain (.NET SDK + git) so the backend defaults the
+            DockerAvailable = dockerAvailable,
+            // Report the host workspace capability (Git); application SDKs are resolved in OCI
+            // containers and Docker availability is reported separately, so the backend defaults the
             // per-server PipelineRunnerEnabled gate from reality instead of authorising every box.
-            PipelineRunnerAvailable = await PipelineRunnerProbe.IsAvailableAsync(shell, ct).ConfigureAwait(false),
+            PipelineRunnerAvailable = pipelineRunnerAvailable,
             // S-DES-23: report the dev-only TLS-bypass mode at enrollment (known before first heartbeat).
             InsecureTls = _options.AllowInsecureCerts
         };
@@ -130,6 +136,16 @@ public sealed class EnrollmentService(
         agentState.ServerId is { } sid
             ? PersistCredentialsAsync(sid, bearerToken, ct)
             : Task.CompletedTask;
+
+    private static List<string> BuildRegistrationCapabilities(bool dockerAvailable, bool pipelineRunnerAvailable)
+    {
+        var capabilities = new HashSet<string>(AgentCapabilities.SoftwareCapabilities, StringComparer.Ordinal);
+        if (!pipelineRunnerAvailable)
+            capabilities.Remove(AgentCapabilities.PipelineBuild);
+        if (dockerAvailable)
+            capabilities.Add(AgentCapabilities.DockerExecution);
+        return capabilities.Order(StringComparer.Ordinal).ToList();
+    }
 
     private async Task PersistCredentialsAsync(int serverId, string bearerToken, CancellationToken ct)
     {

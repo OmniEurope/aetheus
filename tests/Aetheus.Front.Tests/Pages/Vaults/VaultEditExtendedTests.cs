@@ -72,7 +72,7 @@ public class VaultEditExtendedTests : BunitContext
     // RotateSecret removed - calls Dialog.Confirm which hangs in bUnit
 
     [Fact]
-    public async Task AddSecret_EmptyKey_DoesNothing()
+    public async Task AddSecret_EmptyKey_MakesNoRequest()
     {
         SetupVault();
         var cut = RenderExisting();

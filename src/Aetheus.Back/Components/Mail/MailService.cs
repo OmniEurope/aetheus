@@ -1,27 +1,36 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.Json;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Mail;
 
 public class MailService(IMailRepository repo, IAuditService audit, IEncryptionService encryption, IServerRepository serverRepo, ITaskService taskService) : IMailService
 {
-    // Persist a queued task AND push the "TaskQueued" SignalR event so the top-bar tracker shows it
-    // live (and can later flip it Running/Completed). Mirrors ServerServiceManager (see ITaskService).
-    private async Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+    private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
+        => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
+
+    private async Task<MailAccount> GetAccountForServerAsync(
+        int serverId, int accountId, CancellationToken ct)
     {
-        await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
-        await taskService.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
+        var account = await repo.GetAccountAsync(accountId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException($"Mail account {accountId} not found.");
+        return account.MailDomain.ServerId == serverId
+            ? account
+            : throw new NotFoundException($"Mail account {accountId} not found on this server.");
+    }
+
+    private async Task<MailAlias> GetAliasForServerAsync(
+        int serverId, int aliasId, CancellationToken ct)
+    {
+        var alias = await repo.GetAliasAsync(aliasId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException($"Mail alias {aliasId} not found.");
+        return alias.MailDomain.ServerId == serverId
+            ? alias
+            : throw new NotFoundException($"Mail alias {aliasId} not found.");
     }
 
     public async Task<MailDataDto> GetStateAsync(int serverId, CancellationToken ct = default)
@@ -182,11 +191,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
 
     public async Task<MailAccountDto> UpdateAccountAsync(int serverId, int accountId, UpdateMailAccountRequest request, CancellationToken ct = default)
     {
-        var account = await repo.GetAccountAsync(accountId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Mail account {accountId} not found.");
-
-        if (account.MailDomain.ServerId != serverId)
-            throw new NotFoundException($"Mail account {accountId} not found on this server.");
+        var account = await GetAccountForServerAsync(serverId, accountId, ct).ConfigureAwait(false);
 
         if (request.QuotaMb.HasValue)
             account.QuotaMb = request.QuotaMb.Value;
@@ -220,11 +225,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
 
     public async Task DeleteAccountAsync(int serverId, int accountId, CancellationToken ct = default)
     {
-        var account = await repo.GetAccountAsync(accountId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Mail account {accountId} not found.");
-
-        if (account.MailDomain.ServerId != serverId)
-            throw new NotFoundException($"Mail account {accountId} not found on this server.");
+        var account = await GetAccountForServerAsync(serverId, accountId, ct).ConfigureAwait(false);
 
         var domain = account.MailDomain.Name;
         var email = account.Email;
@@ -477,11 +478,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
 
     public async Task<MailAliasDto> UpdateAliasAsync(int serverId, int aliasId, UpdateMailAliasRequest request, CancellationToken ct = default)
     {
-        var alias = await repo.GetAliasAsync(aliasId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Mail alias {aliasId} not found.");
-
-        if (alias.MailDomain.ServerId != serverId)
-            throw new NotFoundException($"Mail alias {aliasId} not found.");
+        var alias = await GetAliasForServerAsync(serverId, aliasId, ct).ConfigureAwait(false);
 
         if (request.IsActive.HasValue)
             alias.IsActive = request.IsActive.Value;
@@ -504,11 +501,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
 
     public async Task DeleteAliasAsync(int serverId, int aliasId, CancellationToken ct = default)
     {
-        var alias = await repo.GetAliasAsync(aliasId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Mail alias {aliasId} not found.");
-
-        if (alias.MailDomain.ServerId != serverId)
-            throw new NotFoundException($"Mail alias {aliasId} not found.");
+        var alias = await GetAliasForServerAsync(serverId, aliasId, ct).ConfigureAwait(false);
 
         await repo.DeleteAliasAsync(alias, ct).ConfigureAwait(false);
 

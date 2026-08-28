@@ -8,12 +8,15 @@ public sealed record TeamspeakDataDto
 {
     public bool IsInstalled { get; init; }
     public bool IsRunning { get; init; }
+    [StringLength(100)]
     public string Version { get; init; } = string.Empty;
+    [StringLength(100)]
     public string Platform { get; init; } = string.Empty;
     public long UptimeSeconds { get; init; }
     public int OnlineClients { get; init; }
     public int MaxClients { get; init; }
     public int ChannelCount { get; init; }
+    [StringLength(200)]
     public string ServerName { get; init; } = string.Empty;
     public int VoicePort { get; init; }
     public int QueryPort { get; init; }
@@ -25,6 +28,7 @@ public sealed record TeamspeakDataDto
 public sealed record TeamspeakChannelDto
 {
     public int Id { get; init; }
+    [StringLength(200)]
     public string Name { get; init; } = string.Empty;
     public int ParentId { get; init; }
     public int Order { get; init; }
@@ -38,11 +42,16 @@ public sealed record TeamspeakChannelDto
 public sealed record TeamspeakClientDto
 {
     public int ClientId { get; init; }
+    [StringLength(200)]
     public string UniqueId { get; init; } = string.Empty;
+    [StringLength(200)]
     public string Nickname { get; init; } = string.Empty;
     public int ChannelId { get; init; }
+    [StringLength(200)]
     public string ChannelName { get; init; } = string.Empty;
+    [StringLength(100)]
     public string Platform { get; init; } = string.Empty;
+    [StringLength(100)]
     public string Version { get; init; } = string.Empty;
     public long IdleTimeSeconds { get; init; }
     public long ConnectionTimeSeconds { get; init; }
@@ -52,9 +61,13 @@ public sealed record TeamspeakClientDto
 public sealed record TeamspeakBanDto
 {
     public int BanId { get; init; }
+    [StringLength(45)]
     public string Ip { get; init; } = string.Empty;
+    [StringLength(200)]
     public string UniqueId { get; init; } = string.Empty;
+    [StringLength(200)]
     public string Nickname { get; init; } = string.Empty;
+    [StringLength(1000)]
     public string Reason { get; init; } = string.Empty;
     public long Duration { get; init; }
     public long Created { get; init; }

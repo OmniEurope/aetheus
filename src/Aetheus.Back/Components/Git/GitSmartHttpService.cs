@@ -2,13 +2,11 @@
 using System.Diagnostics;
 using System.Text;
 using Aetheus.Back.Components.Auth;
-using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Services.DomainEvents;
 using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -19,9 +17,9 @@ public class GitSmartHttpService(
     IGitLightRepository lightRepo,
     IAuthService authService,
     IWebhookService webhookService,
-    IPipelineService pipelineService,
-    IPipelineRunService pipelineRunService,
-    IPipelineRepository pipelineRepo,
+    // No IPipelineService, no IPipelineRunService: what a push means for pipelines is decided by the
+    // module that owns them, through GitPushProcessedEvent.
+    IDomainEventDispatcher domainEvents,
     IGitLightCliService cli,
     IHubContext<GitRealtimeHub> hub,
     IOptions<GitLightOptions> options,
@@ -37,12 +35,7 @@ public class GitSmartHttpService(
     public async Task<(string ContentType, byte[] Body)?> GetInfoRefsAsync(
         int projectId, string slug, string service, CancellationToken ct = default)
     {
-        if (!AllowedServices.Contains(service)) return null;
-
-        var entity = await lightRepo.FindBySlugAsync(projectId, slug, ct).ConfigureAwait(false);
-        if (entity is null) return null;
-
-        var diskPath = ResolveSafeRepositoryPath(projectId, slug);
+        var diskPath = await ResolveServiceDiskPathAsync(projectId, slug, service, ct).ConfigureAwait(false);
         if (diskPath is null) return null;
 
         // Hardening (High #13): use ArgumentList to avoid any string concatenation that could
@@ -83,12 +76,7 @@ public class GitSmartHttpService(
     public async Task<GitSmartHttpResponse?> ExecuteServiceAsync(
         int projectId, string slug, string service, Stream requestBody, CancellationToken ct = default)
     {
-        if (!AllowedServices.Contains(service)) return null;
-
-        var entity = await lightRepo.FindBySlugAsync(projectId, slug, ct).ConfigureAwait(false);
-        if (entity is null) return null;
-
-        var diskPath = ResolveSafeRepositoryPath(projectId, slug);
+        var diskPath = await ResolveServiceDiskPathAsync(projectId, slug, service, ct).ConfigureAwait(false);
         if (diskPath is null) return null;
 
         var psi = CreateServiceProcessStartInfo(service, diskPath, advertiseRefs: false);
@@ -164,6 +152,13 @@ public class GitSmartHttpService(
             timeoutCts.Dispose();
             throw;
         }
+        catch
+        {
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { /* already exited */ }
+            process.Dispose();
+            timeoutCts.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -171,6 +166,17 @@ public class GitSmartHttpService(
     /// the configured <see cref="GitLightOptions.RepositoriesPath"/> root. Returns <c>null</c>
     /// when the resolved path escapes the root (defense against path-traversal slugs).
     /// </summary>
+    private async Task<string?> ResolveServiceDiskPathAsync(
+        int projectId,
+        string slug,
+        string service,
+        CancellationToken ct)
+    {
+        if (!AllowedServices.Contains(service)) return null;
+        var repository = await lightRepo.FindBySlugAsync(projectId, slug, ct).ConfigureAwait(false);
+        return repository is null ? null : ResolveSafeRepositoryPath(projectId, slug);
+    }
+
     private string? ResolveSafeRepositoryPath(int projectId, string slug)
     {
         var candidate = GitRepoPathResolver.TryResolve(_options.RepositoriesPath, projectId, slug);
@@ -228,45 +234,72 @@ public class GitSmartHttpService(
         entity.LastPushAt = timeProvider.GetUtcNow().UtcDateTime;
         entity.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
 
-        // Fix HEAD after push: if HEAD points to a branch with no commits (e.g. bare repo
-        // created with --initial-branch main but user pushed to master), re-point HEAD
-        // to the actual default branch so that HEAD-based operations (pipeline sync,
-        // git log, clone with DEFAULT_BRANCH) work correctly.
-        var diskPath = ResolveSafeRepositoryPath(projectId, slug);
-        if (diskPath is not null)
-        {
-            var detected = await cli.DetectDefaultBranchAsync(diskPath, postReceiveCt).ConfigureAwait(false);
-            if (!string.IsNullOrEmpty(detected) && detected != entity.DefaultBranch)
-            {
-                await cli.SetHeadAsync(diskPath, detected, postReceiveCt).ConfigureAwait(false);
-                entity.DefaultBranch = detected;
-                logger.LogInformation("Updated HEAD of {Slug} to {Branch}", slug, detected);
-            }
-        }
-
+        await UpdateDefaultBranchAsync(entity, projectId, slug, postReceiveCt).ConfigureAwait(false);
         await lightRepo.SaveChangesAsync(postReceiveCt).ConfigureAwait(false);
-
-        // G7LM: a push freshens the project's "last git update"; drop the cached value so the project
-        // list/detail tiles don't show a stale date for up to the 10-min TTL.
         cache.Remove(ProjectCacheKeys.GitUpdate(projectId));
+        await BroadcastPushAsync(entity.Id, slug, postReceiveCt).ConfigureAwait(false);
+        await FirePushWebhookAsync(entity, projectId, slug, postReceiveCt).ConfigureAwait(false);
+        // What this push means for pipelines - synchronising the definitions it carries, triggering
+        // what it should trigger - is decided by the module that owns pipelines. Driving that from
+        // here is what made the transport depend on the orchestrator.
+        //
+        // The path is resolved here rather than carried as a slug: the traversal check belongs to
+        // this module, and a subscriber must not be able to reconstruct a repository path itself.
+        //
+        // A360-21: Publish, not DispatchAsync. This runs inside git-receive-pack, and the subscriber
+        // synchronises definitions and launches pipelines - which now includes a full preflight, with
+        // an outbound HTTP call per environment. Awaiting all of that made `git push` hang for as long
+        // as the orchestrator took, for work whose result the push does not use: the objects are
+        // already on disk and the refs already updated by the time we get here. The event was always
+        // declared as observer semantics; it is now dispatched that way.
+        domainEvents.Publish(
+            new Events.GitPushProcessedEvent(
+                projectId,
+                entity.Id,
+                slug,
+                entity.Name,
+                entity.DefaultBranch,
+                ResolveSafeRepositoryPath(projectId, slug) ?? string.Empty,
+                updatedRefs));
+    }
 
-        // Realtime: notify any client viewing this repo to refresh branches/commits.
+    private async Task UpdateDefaultBranchAsync(
+        Data.Entities.GitInternalRepo entity,
+        int projectId,
+        string slug,
+        CancellationToken ct)
+    {
+        var diskPath = ResolveSafeRepositoryPath(projectId, slug);
+        if (diskPath is null) return;
+        var detected = await cli.DetectDefaultBranchAsync(diskPath, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(detected) || detected == entity.DefaultBranch) return;
+        await cli.SetHeadAsync(diskPath, detected, ct).ConfigureAwait(false);
+        entity.DefaultBranch = detected;
+        logger.LogInformation("Updated HEAD of {Slug} to {Branch}", slug, detected);
+    }
+
+    private async Task BroadcastPushAsync(int repositoryId, string slug, CancellationToken ct)
+    {
         try
         {
-            var group = hub.Clients.Group(GitRealtimeGroups.Repository(entity.Id));
-            await group.SendAsync(GitRealtimeEvents.RepositoryChanged, entity.Id, postReceiveCt).ConfigureAwait(false);
-            await group.SendAsync(GitRealtimeEvents.BranchesChanged, entity.Id, postReceiveCt).ConfigureAwait(false);
-            await group.SendAsync(GitRealtimeEvents.CommitsChanged, entity.Id, postReceiveCt).ConfigureAwait(false);
-            await group.SendAsync(GitRealtimeEvents.TagsChanged, entity.Id, postReceiveCt).ConfigureAwait(false);
+            var group = hub.Clients.Group(GitRealtimeGroups.Repository(repositoryId));
+            await group.SendAsync(GitRealtimeEvents.RepositoryChanged, repositoryId, ct).ConfigureAwait(false);
+            await group.SendAsync(GitRealtimeEvents.BranchesChanged, repositoryId, ct).ConfigureAwait(false);
+            await group.SendAsync(GitRealtimeEvents.CommitsChanged, repositoryId, ct).ConfigureAwait(false);
+            await group.SendAsync(GitRealtimeEvents.TagsChanged, repositoryId, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to broadcast git realtime push event for {Slug}", slug);
         }
+    }
 
-        // Fire webhooks inline within the request scope. WebhookService uses a named
-        // HttpClient with its own timeout, so this stays bounded and avoids the
-        // scoped-service capture that a Task.Run would introduce.
+    private async Task FirePushWebhookAsync(
+        Data.Entities.GitInternalRepo entity,
+        int projectId,
+        string slug,
+        CancellationToken ct)
+    {
         try
         {
             await webhookService.FireEventAsync("git.push", new
@@ -275,106 +308,24 @@ public class GitSmartHttpService(
                 slug,
                 repository = entity.Name,
                 pushedAt = entity.LastPushAt
-            }, postReceiveCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
         catch (HttpRequestException ex)
         {
             logger.LogWarning(ex, "Failed to fire git.push webhook for {Slug}", slug);
         }
-        catch (TaskCanceledException ex) when (!postReceiveCt.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "git.push webhook timed out for {Slug}", slug);
         }
-
-        // Sync first: a push that changes trigger/branch declarations must affect the selection
-        // immediately, rather than only on the following push.
-        foreach (var update in updatedRefs)
-            await SyncPipelinesFromRepoAsync(entity, update, postReceiveCt).ConfigureAwait(false);
-
-        // Trigger webhook-type pipelines for the branch refs that this receive-pack actually updated.
-        try
-        {
-            var webhookPipelines = await pipelineService.GetWebhookTriggeredPipelinesForProjectAsync(projectId, postReceiveCt).ConfigureAwait(false);
-            foreach (var pipeline in webhookPipelines)
-            {
-                if (await pipelineService.HasActiveRunAsync(pipeline.Id, postReceiveCt).ConfigureAwait(false)) continue;
-
-                var definition = YamlParsingHelper.ParseAndValidate(pipeline.YamlDefinition, logger);
-                if (definition is null || !updatedRefs.Any(update => PipelineBranchFilter.Matches(definition.Branches, update.Reference, logger)))
-                    continue;
-
-                var matchingUpdate = updatedRefs.First(update =>
-                    PipelineBranchFilter.Matches(definition.Branches, update.Reference, logger));
-
-                logger.LogInformation("Git push triggering pipeline {PipelineId} ({PipelineName})", pipeline.Id, pipeline.Name);
-                await pipelineRunService.TriggerAutomatedRunAsync(pipeline.Id, "GitPush",
-                    new Dictionary<string, string>
-                    {
-                        ["WEBHOOK_REF"] = matchingUpdate.Reference,
-                        ["AETHEUS_SOURCE_COMMIT"] = matchingUpdate.NewObjectId
-                    }, postReceiveCt).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to trigger pipelines on push for {Slug}", slug);
-        }
-
     }
 
-    private async Task SyncPipelinesFromRepoAsync(
-        Data.Entities.GitInternalRepo gitRepo, GitRefUpdate update, CancellationToken ct)
-    {
-        try
-        {
-            var diskPath = ResolveSafeRepositoryPath(gitRepo.ProjectId, gitRepo.Slug);
-            if (diskPath is null || gitRepo.ProjectId == 0) return;
-
-            var sourceBranch = update.Reference["refs/heads/".Length..];
-            var tree = await cli.GetTreeAsync(diskPath, update.NewObjectId, ".pipeline", ct).ConfigureAwait(false);
-            var yamlFiles = tree.Where(e => e.Name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
-                                          || e.Name.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)).ToList();
-            if (yamlFiles.Count == 0) return;
-
-            foreach (var file in yamlFiles)
-            {
-                var blob = await cli.GetBlobAsync(
-                    diskPath, update.NewObjectId, $".pipeline/{file.Name}", ct).ConfigureAwait(false);
-                if (blob is null || string.IsNullOrWhiteSpace(blob.Content)) continue;
-
-                var definition = YamlParsingHelper.ParseAndValidate(blob.Content, logger);
-                if (definition is null)
-                {
-                    logger.LogWarning("Invalid pipeline YAML in .pipeline/{File} for repo {Repo}", file.Name, gitRepo.Name);
-                    continue;
-                }
-
-                var pipelineName = definition.Name;
-                if (string.IsNullOrWhiteSpace(pipelineName))
-                    pipelineName = Path.GetFileNameWithoutExtension(file.Name);
-
-                await pipelineService.UpsertPipelineFromYamlAsync(
-                    pipelineName, blob.Content, gitRepo.ProjectId, definition.Trigger, ct,
-                    sourceBranch, gitRepo.DefaultBranch).ConfigureAwait(false);
-                logger.LogInformation(
-                    "Synced pipeline '{Name}' from {Commit}:.pipeline/{File}",
-                    pipelineName, update.NewObjectId, file.Name);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to sync pipelines from .pipeline/ for repo {Repo}", gitRepo.Name);
-        }
-    }
 
     public Task<bool> ValidateBasicAuthAsync(string username, string password, CancellationToken ct = default)
         => authService.ValidateBasicAuthAsync(username, password, ct);
 
-    public async Task<bool> IsRunActiveAsync(int runId, CancellationToken ct = default)
-    {
-        var run = await pipelineRepo.GetPipelineRunWithPipelineAsync(runId, ct).ConfigureAwait(false);
-        return run?.Status == PipelineStatus.Running;
-    }
+    public Task<bool> IsRunActiveAsync(int runId, CancellationToken ct = default)
+        => lightRepo.IsRunActiveAsync(runId, ct);
 
     private static byte[] PktLine(string data)
     {

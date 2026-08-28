@@ -20,7 +20,7 @@ public class GitServiceFullTests
 
     public GitServiceFullTests()
     {
-        _sut = new GitService(_repoMock, _pipelineRepoMock, _auditMock, _loggerMock, TimeProvider.System);
+        _sut = new GitService(_repoMock, _auditMock, _loggerMock, TimeProvider.System);
     }
 
     // --- GitConnection CRUD ---

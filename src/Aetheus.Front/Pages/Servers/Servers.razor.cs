@@ -1,16 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers;
 
@@ -30,14 +18,19 @@ public partial class Servers : IAsyncDisposable
 
     private AetheusDataGrid<ServerDto>? _grid;
     private List<ServerDto> _servers = [];
+    private readonly HashSet<int> _pendingDeleteIds = [];
     private int _totalCount;
     private bool _loading;
+    private bool _loadFailed;
     internal bool _canWrite;
     internal string? _search;
     internal ServerType? _typeFilter;
     internal ServerStatus? _statusFilter;
+    internal AgentCompatibilityStatus? _compatibilityFilter;
     private List<object> _typeOptions = [];
     private List<object> _statusOptions = [];
+    private List<object> _compatibilityOptions = [];
+    private AgentCompatibilitySummaryDto _compatibilitySummary = new();
     private HubConnection? _hubConnection;
 
     // --- Column chooser (S-FEAT-10): per-user column visibility persisted to localStorage ---
@@ -102,7 +95,7 @@ public partial class Servers : IAsyncDisposable
     // return visit renders the previous page instantly while the live fetch revalidates in the
     // background. SignalR patches keep the rendered rows fresh, so the cache only smooths the paint.
     private string CacheKey(int page, int pageSize, string? sortBy, bool sortDescending) =>
-        $"servers:{page}:{pageSize}:{_search}:{_typeFilter}:{_statusFilter}:{sortBy}:{sortDescending}";
+        $"servers:{page}:{pageSize}:{_search}:{_typeFilter}:{_statusFilter}:{_compatibilityFilter}:{sortBy}:{sortDescending}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -117,6 +110,21 @@ public partial class Servers : IAsyncDisposable
             new { Text = L.Localize(ServerStatus.Online), Value = (ServerStatus?)ServerStatus.Online },
             new { Text = L.Localize(ServerStatus.Offline), Value = (ServerStatus?)ServerStatus.Offline }
         ];
+        _compatibilityOptions =
+        [
+            new { Text = L["AgentCompatibility_UpToDate"].Value, Value = (AgentCompatibilityStatus?)AgentCompatibilityStatus.UpToDate },
+            new { Text = L["AgentCompatibility_UpdateRecommended"].Value, Value = (AgentCompatibilityStatus?)AgentCompatibilityStatus.UpdateRecommended },
+            new { Text = L["AgentCompatibility_UpdateRequired"].Value, Value = (AgentCompatibilityStatus?)AgentCompatibilityStatus.UpdateRequired },
+            new { Text = L["AgentCompatibility_Unknown"].Value, Value = (AgentCompatibilityStatus?)AgentCompatibilityStatus.Unknown }
+        ];
+        try
+        {
+            _compatibilitySummary = await Api.Servers.GetAgentCompatibilitySummaryAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _compatibilitySummary = new AgentCompatibilitySummaryDto();
+        }
         Breadcrumb.Set(new BreadcrumbItem(L["Servers"]));
         // Subscribe BEFORE reading: MainLayout loads permissions in parallel with
         // route activation, so the page can mount before they're ready. Without
@@ -151,10 +159,10 @@ public partial class Servers : IAsyncDisposable
             // Lifecycle events (register/update/remove/offline) reload the whole grid - rare. Heartbeats
             // (~every 30s PER server) are coalesced into a single trailing reload (see OnHeartbeatAsync)
             // so a large fleet's clustered heartbeats can't thrash the grid.
-            _hubConnection.On<ServerDto>("ServerRegistered", _ => InvokeAsync(ReloadGridAsync));
-            _hubConnection.On<ServerDto>("ServerUpdated", _ => InvokeAsync(ReloadGridAsync));
-            _hubConnection.On<int>("ServerRemoved", _ => InvokeAsync(ReloadGridAsync));
-            _hubConnection.On<int>("ServerOffline", _ => InvokeAsync(ReloadGridAsync));
+            _hubConnection.On<ServerDto>("ServerRegistered", _ => InvokeAsync(InvalidateAndReloadGridAsync));
+            _hubConnection.On<ServerDto>("ServerUpdated", _ => InvokeAsync(InvalidateAndReloadGridAsync));
+            _hubConnection.On<int>("ServerRemoved", _ => InvokeAsync(InvalidateAndReloadGridAsync));
+            _hubConnection.On<int>("ServerOffline", _ => InvokeAsync(InvalidateAndReloadGridAsync));
             _hubConnection.On<int, ServerHeartbeatDto>("ServerHeartbeat", (id, heartbeat) => InvokeAsync(() => OnHeartbeatAsync(id, heartbeat)));
             // Group membership is per-connection and lost on auto-reconnect - re-join + reload to
             // catch broadcasts missed while disconnected (e.g. a server enrolled during a blip).
@@ -175,6 +183,12 @@ public partial class Servers : IAsyncDisposable
     private async Task ReloadGridAsync()
     {
         if (_grid is not null) await _grid.Reload();
+    }
+
+    private async Task InvalidateAndReloadGridAsync()
+    {
+        Cache.InvalidatePrefix("servers:");
+        await ReloadGridAsync();
     }
 
     private const int HeartbeatDebounceMs = 5000;
@@ -215,20 +229,21 @@ public partial class Servers : IAsyncDisposable
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
         if (_hubConnection is not null)
         {
-            try { await _hubConnection.InvokeAsync("LeaveAllServers"); } catch { /* best-effort */ }
-            await _hubConnection.DisposeAsync();
+            await _hubConnection.LeaveAllServersAndDisposeAsync();
             _hubConnection = null;
         }
     }
 
     private void ApplyServers(PaginatedResult<ServerDto> result)
     {
-        _servers = result.Items;
-        _totalCount = result.TotalCount;
+        var optimisticRowsStillReturned = result.Items.Count(server => _pendingDeleteIds.Contains(server.Id));
+        _servers = result.Items.Where(server => !_pendingDeleteIds.Contains(server.Id)).ToList();
+        _totalCount = Math.Max(0, result.TotalCount - optimisticRowsStillReturned);
     }
 
     private async Task OnLoadData(LoadDataArgs args)
     {
+        _loadFailed = false;
         var (page, pageSize) = args.ToPageRequest();
 
         string? sortBy = null;
@@ -245,10 +260,13 @@ public partial class Servers : IAsyncDisposable
         // in-flight SignalR heartbeat patch, but the background fetch overwrites it either way.
         await Cache.RevalidateAsync(
             CacheKey(page, pageSize, sortBy, sortDescending),
-            () => Api.GetServersAsync(page, pageSize, _search, _typeFilter, _statusFilter, sortBy, sortDescending),
+            () => Api.Servers.GetServersAsync(
+                page, pageSize, _search, _typeFilter, _statusFilter, sortBy, sortDescending,
+                _compatibilityFilter),
             ApplyServers,
             loading => _loading = loading,
-            () => InvokeAsync(StateHasChanged));
+            () => InvokeAsync(StateHasChanged),
+            _ => _loadFailed = true);
     }
 
     private async Task ResetAndReload()
@@ -266,6 +284,7 @@ public partial class Servers : IAsyncDisposable
         _search = null;
         _typeFilter = null;
         _statusFilter = null;
+        _compatibilityFilter = null;
         await ResetAndReload();
     }
 
@@ -281,17 +300,40 @@ public partial class Servers : IAsyncDisposable
         => Dialog.OpenAsync<ContactAgentDialog>(
             L["ContactAgent"],
             new Dictionary<string, object?> { { "ServerId", server.Id }, { "ServerName", server.Name } },
-            new DialogOptions { Width = "480px", CloseDialogOnOverlayClick = false });
+            new DialogOptions { Width = "480px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
 
     private async Task OnUpdateAllAgents()
     {
+        AgentUpdateAllPreviewDto? preview;
+        try
+        {
+            preview = await Api.Servers.PreviewUpdateAllAgentsAsync();
+        }
+        catch (HttpRequestException)
+        {
+            Toast.Error("Error", "UpdateAgentFailed");
+            return;
+        }
+        if (preview is null)
+        {
+            Toast.Error("Error", "UpdateAgentFailed");
+            return;
+        }
+
         var confirmed = await Dialog.Confirm(
-            L["UpdateAllAgentsConfirm"],
+            string.Format(
+                L["UpdateAllAgentsPreview"],
+                preview.TargetVersion,
+                preview.AffectedCount,
+                preview.AlreadyUpToDateCount,
+                preview.OfflineCount,
+                preview.IncompatibleCount,
+                preview.BusyCount),
             L["UpdateAllAgents"],
             new ConfirmOptions { OkButtonText = L["UpdateAllAgents"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
 
-        var result = await Api.UpdateAllAgentsAsync();
+        var result = await Api.Servers.UpdateAllAgentsAsync();
         if (result is not null)
             Toast.Success("UpdateAllAgents", "UpdateAllAgentsQueued", result.QueuedCount);
         else
@@ -300,16 +342,68 @@ public partial class Servers : IAsyncDisposable
 
     private async Task OnDeleteServer(ServerDto server)
     {
+        if (_pendingDeleteIds.Contains(server.Id)) return;
+
         var confirmed = await Dialog.Confirm(
             string.Format(L["DeleteServerConfirm"], server.Name),
             L["DeleteServer"],
             new ConfirmOptions { OkButtonText = L["Delete"], CancelButtonText = L["Cancel"] });
         if (confirmed != true) return;
 
-        var deleted = await Api.DeleteServerAsync(server.Id);
-        if (deleted)
+        await DeleteServerConfirmedAsync(server);
+    }
+
+    internal async Task DeleteServerConfirmedAsync(ServerDto server)
+    {
+        if (_pendingDeleteIds.Contains(server.Id)) return;
+
+        // Server removal cleans a large relation graph in one backend transaction. Hide the row
+        // immediately while that safe cleanup completes; ApplyServers keeps realtime/cache reloads
+        // from briefly reintroducing it. A failed request removes the optimistic guard and reloads
+        // the persisted state, so the row is restored instead of silently disappearing.
+        var removedIndex = _servers.FindIndex(item => item.Id == server.Id);
+        var deleteSucceeded = false;
+        _pendingDeleteIds.Add(server.Id);
+        // Replace the collection reference so Radzen observes the data change immediately; mutating
+        // the existing List in place can leave its internal row view unchanged until the next reload.
+        _servers = _servers.Where(item => item.Id != server.Id).ToList();
+        _totalCount = Math.Max(0, _totalCount - 1);
+        Cache.InvalidatePrefix("servers:");
+        StateHasChanged();
+
+        try
         {
-            Toast.Success(L["ServerDeleted"]);
+            var deleted = await Api.Servers.DeleteServerAsync(server.Id);
+            if (deleted)
+            {
+                deleteSucceeded = true;
+                Toast.Success(L["ServerDeleted"]);
+            }
+            else
+            {
+                Toast.Error("Error", "DeleteFailed");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
+        catch (TaskCanceledException)
+        {
+            Toast.Error("Error", "DeleteFailed");
+        }
+        finally
+        {
+            _pendingDeleteIds.Remove(server.Id);
+            Cache.InvalidatePrefix("servers:");
+            if (!deleteSucceeded && removedIndex >= 0 && _servers.All(item => item.Id != server.Id))
+            {
+                var restored = _servers.ToList();
+                restored.Insert(Math.Min(removedIndex, restored.Count), server);
+                _servers = restored;
+                _totalCount++;
+                StateHasChanged();
+            }
             if (_grid is not null) await _grid.Reload();
         }
     }

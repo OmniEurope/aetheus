@@ -18,11 +18,36 @@ public class LoginTests : BunitContext
     [Fact]
     public void Renders_LoginForm()
     {
+        _handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
         var cut = Render<Login>();
 
         Assert.Contains("Login", cut.Markup);
         Assert.Contains("Username", cut.Markup);
         Assert.Contains("Password", cut.Markup);
+    }
+
+    [Fact]
+    public void PublicDemo_ShowsCredentials()
+    {
+        _handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto { Enabled = true });
+
+        var cut = Render<Login>();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("PublicDemo", cut.Markup);
+            Assert.Contains("PublicDemoCredentials", cut.Markup);
+        });
+    }
+
+    [Fact]
+    public void RegularEnvironment_HidesPublicDemoCredentials()
+    {
+        _handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
+
+        var cut = Render<Login>();
+
+        cut.WaitForAssertion(() => Assert.DoesNotContain("PublicDemoCredentials", cut.Markup));
     }
 
     [Fact]
@@ -108,6 +133,27 @@ public class LoginTests : BunitContext
     }
 
     [Fact]
+    public void Submit_WithRememberMeChecked_SendsRememberMeTrue()
+    {
+        _handler.SetJsonResponse("auth/login", new LoginResponse { Token = "jwt-token" });
+        var cut = Render<Login>();
+
+        cut.Find("input[name='Username']").Input("admin");
+        cut.Find("input[name='Password']").Input("secret");
+        cut.Find("input.labeled-toggle-native-input").Change(true);
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() => Assert.Contains(
+            _handler.RequestDetails,
+            request => request.Method == "POST" && request.Url.EndsWith("auth/login", StringComparison.Ordinal)));
+        var body = _handler.RequestDetails.Last(request =>
+            request.Method == "POST" && request.Url.EndsWith("auth/login", StringComparison.Ordinal)).Body;
+        var request = System.Text.Json.JsonSerializer.Deserialize<LoginRequest>(
+            body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.True(request!.RememberMe);
+    }
+
+    [Fact]
     public async Task OnSubmit_WithNullResult_ShowsError()
     {
         // A JSON `null` login response makes LoginAsync return null → the invalid-credentials branch.
@@ -123,3 +169,4 @@ public class LoginTests : BunitContext
         Assert.False((bool)typeof(Login).GetField("_loading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(cut.Instance)!);
     }
 }
+

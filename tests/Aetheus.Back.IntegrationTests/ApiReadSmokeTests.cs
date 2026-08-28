@@ -41,6 +41,7 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/monitoring/dashboard")]
     [InlineData("/api/plugins")]
     [InlineData("/api/package-feeds")]
+    [InlineData("/api/package-registry")]
     [InlineData("/api/system-logs/files")]
     [InlineData("/api/releases")]
     [InlineData("/api/pipelines")]
@@ -62,6 +63,8 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/auth/registration-tokens")]
     [InlineData("/api/personal-access-tokens")]
     [InlineData("/api/backups")]
+    [InlineData("/api/analysis/policies/global")]
+    [InlineData("/api/ai/profiles")]
     // Covers both AppMonitoringController and AppTelemetryController (shared api/appmonitoring prefix).
     [InlineData("/api/appmonitoring/summary")]
     [InlineData("/metrics")]
@@ -130,6 +133,23 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
             $"GET {prefix}{{projectId}} returned {(int)response.StatusCode}. Body: {Truncate(body)}");
         Assert.False(string.IsNullOrWhiteSpace(body),
             $"GET {prefix}{{projectId}} returned 200 with an empty body.");
+    }
+
+    [Fact]
+    public async Task CheckpointResumePreview_AsAdmin_ReturnsNonEmpty200()
+    {
+        using var client = fixture.CreateAdminClient();
+        var route = $"/api/pipelines/runs/{fixture.PipelineRunId}/checkpoint-resume-preview";
+
+        using var response = await client.GetAsync(
+            route, cancellationToken: TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"GET {route} returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body)}");
+        Assert.False(string.IsNullOrWhiteSpace(body),
+            $"GET {route} returned 200 with an empty body.");
     }
 
     private static string Truncate(string value) =>

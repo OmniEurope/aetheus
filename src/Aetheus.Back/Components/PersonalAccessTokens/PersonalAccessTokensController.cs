@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.PersonalAccessTokens;
 
 /// <summary>
-/// Manages the calling user's Personal Access Tokens (PLAN-006 4.5). A PAT can never be used to mint
+/// Manages the calling user's Personal Access Tokens (ADR-024 4.5). A PAT can never be used to mint
 /// or revoke tokens (no token laundering): every action rejects a PAT-authenticated principal, so only
 /// an interactive JWT session can manage tokens.
 /// <para>Note: pinning to the JWT scheme alone is insufficient - the JWT bearer handler's

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 
@@ -158,130 +156,20 @@ public sealed partial class TeamspeakCollector(ILogger<TeamspeakCollector> logge
 
         try
         {
-            var lines = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            string? serverInfoLine = null;
-            string? clientListLine = null;
-            string? channelListLine = null;
-            string? banListLine = null;
-
-            for (var i = 0; i < lines.Length; i++)
-            {
-                var line = lines[i].Trim();
-                if (line.StartsWith("virtualserver_name=", StringComparison.Ordinal) ||
-                    line.Contains("virtualserver_name=", StringComparison.Ordinal))
-                    serverInfoLine = line;
-                else if (line.StartsWith("clid=", StringComparison.Ordinal))
-                    clientListLine = line;
-                else if (line.StartsWith("cid=", StringComparison.Ordinal) && line.Contains("channel_name=", StringComparison.Ordinal))
-                    channelListLine = line;
-                else if (line.StartsWith("banid=", StringComparison.Ordinal))
-                    banListLine = line;
-            }
-
-            var serverName = string.Empty;
-            var version = string.Empty;
-            var platform = string.Empty;
-            long uptimeSeconds = 0;
-            // Init to 0 (= "not collected"), NOT the TeamSpeak defaults 32/9987 (F-ENG-07): if there is no
-            // serverinfo line, those defaults would otherwise be reported as if they had been measured.
-            int maxClients = 0, voicePort = 0;
-
-            if (serverInfoLine is not null)
-            {
-                serverName = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(serverInfoLine, "virtualserver_name"));
-                version = ServerQueryHelper.GetValue(serverInfoLine, "virtualserver_version");
-                platform = ServerQueryHelper.GetValue(serverInfoLine, "virtualserver_platform");
-                _ = long.TryParse(ServerQueryHelper.GetValue(serverInfoLine, "virtualserver_uptime"), out uptimeSeconds);
-                _ = int.TryParse(ServerQueryHelper.GetValue(serverInfoLine, "virtualserver_maxclients"), out maxClients);
-                _ = int.TryParse(ServerQueryHelper.GetValue(serverInfoLine, "virtualserver_port"), out voicePort);
-            }
-
-            var channels = new List<TeamspeakChannelDto>();
-            if (channelListLine is not null)
-            {
-                foreach (var record in channelListLine.Split('|'))
-                {
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "cid"), out var cid);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "pid"), out var pid);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_order"), out var order);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "total_clients"), out var totalClients);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_maxclients"), out var chMaxClients);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_flag_default"), out var isDefault);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_flag_password"), out var hasPassword);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_flag_permanent"), out var isPermanent);
-
-                    channels.Add(new TeamspeakChannelDto
-                    {
-                        Id = cid,
-                        Name = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "channel_name")),
-                        ParentId = pid,
-                        Order = order,
-                        TotalClients = totalClients,
-                        MaxClients = chMaxClients,
-                        IsDefault = isDefault == 1,
-                        HasPassword = hasPassword == 1,
-                        IsPermanent = isPermanent == 1
-                    });
-                }
-            }
-
-            var clients = new List<TeamspeakClientDto>();
-            if (clientListLine is not null)
-            {
-                foreach (var record in clientListLine.Split('|'))
-                {
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "clid"), out var clid);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "cid"), out var cid);
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "client_type"), out var clientType);
-                    _ = long.TryParse(ServerQueryHelper.GetValue(record, "client_idle_time"), out var idleMilliseconds);
-                    _ = long.TryParse(ServerQueryHelper.GetValue(record, "connection_connected_time"), out var connectedMilliseconds);
-
-                    clients.Add(new TeamspeakClientDto
-                    {
-                        ClientId = clid,
-                        UniqueId = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_unique_identifier")),
-                        Nickname = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_nickname")),
-                        ChannelId = cid,
-                        Platform = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_platform")),
-                        Version = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_version")),
-                        IdleTimeSeconds = idleMilliseconds / 1000,
-                        ConnectionTimeSeconds = connectedMilliseconds / 1000,
-                        IsServerQuery = clientType == 1
-                    });
-                }
-            }
-
-            var bans = new List<TeamspeakBanDto>();
-            if (banListLine is not null)
-            {
-                foreach (var record in banListLine.Split('|'))
-                {
-                    _ = int.TryParse(ServerQueryHelper.GetValue(record, "banid"), out var banId);
-                    _ = long.TryParse(ServerQueryHelper.GetValue(record, "duration"), out var duration);
-                    _ = long.TryParse(ServerQueryHelper.GetValue(record, "created"), out var created);
-                    bans.Add(new TeamspeakBanDto
-                    {
-                        BanId = banId,
-                        Ip = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "ip")),
-                        UniqueId = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "uid")),
-                        Nickname = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "lastnickname")),
-                        Reason = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "reason")),
-                        Duration = duration,
-                        Created = created
-                    });
-                }
-            }
-
+            var lines = FindQueryLines(raw);
+            var server = ParseServerInfo(lines.ServerInfo);
+            var channels = ParseChannels(lines.Channels);
+            var clients = ParseClients(lines.Clients);
+            var bans = ParseBans(lines.Bans);
             var onlineClients = clients.Count(c => !c.IsServerQuery);
-
             dto = dto with
             {
-                ServerName = serverName,
-                Version = version,
-                Platform = platform,
-                UptimeSeconds = uptimeSeconds,
-                MaxClients = maxClients,
-                VoicePort = voicePort,
+                ServerName = server.Name,
+                Version = server.Version,
+                Platform = server.Platform,
+                UptimeSeconds = server.UptimeSeconds,
+                MaxClients = server.MaxClients,
+                VoicePort = server.VoicePort,
                 OnlineClients = onlineClients,
                 ChannelCount = channels.Count,
                 Channels = channels,
@@ -296,6 +184,75 @@ public sealed partial class TeamspeakCollector(ILogger<TeamspeakCollector> logge
 
         return dto;
     }
+
+    private static QueryLines FindQueryLines(string raw)
+    {
+        string? server = null, clients = null, channels = null, bans = null;
+        foreach (var rawLine in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.Contains("virtualserver_name=", StringComparison.Ordinal)) server = line;
+            else if (line.StartsWith("clid=", StringComparison.Ordinal)) clients = line;
+            else if (line.StartsWith("cid=", StringComparison.Ordinal) && line.Contains("channel_name=", StringComparison.Ordinal)) channels = line;
+            else if (line.StartsWith("banid=", StringComparison.Ordinal)) bans = line;
+        }
+        return new QueryLines(server, clients, channels, bans);
+    }
+
+    private static ServerInfo ParseServerInfo(string? line)
+    {
+        if (line is null) return new ServerInfo(string.Empty, string.Empty, string.Empty, 0, 0, 0);
+        _ = long.TryParse(ServerQueryHelper.GetValue(line, "virtualserver_uptime"), out var uptime);
+        _ = int.TryParse(ServerQueryHelper.GetValue(line, "virtualserver_maxclients"), out var maxClients);
+        _ = int.TryParse(ServerQueryHelper.GetValue(line, "virtualserver_port"), out var voicePort);
+        return new ServerInfo(
+            ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(line, "virtualserver_name")),
+            ServerQueryHelper.GetValue(line, "virtualserver_version"),
+            ServerQueryHelper.GetValue(line, "virtualserver_platform"), uptime, maxClients, voicePort);
+    }
+
+    private static List<TeamspeakChannelDto> ParseChannels(string? line) =>
+        line is null ? [] : line.Split('|').Select(ParseChannel).ToList();
+
+    private static TeamspeakChannelDto ParseChannel(string record)
+    {
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "cid"), out var cid);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "pid"), out var pid);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_order"), out var order);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "total_clients"), out var totalClients);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_maxclients"), out var maxClients);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_flag_default"), out var isDefault);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_flag_password"), out var hasPassword);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "channel_flag_permanent"), out var isPermanent);
+        return new TeamspeakChannelDto { Id = cid, Name = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "channel_name")), ParentId = pid, Order = order, TotalClients = totalClients, MaxClients = maxClients, IsDefault = isDefault == 1, HasPassword = hasPassword == 1, IsPermanent = isPermanent == 1 };
+    }
+
+    private static List<TeamspeakClientDto> ParseClients(string? line) =>
+        line is null ? [] : line.Split('|').Select(ParseClient).ToList();
+
+    private static TeamspeakClientDto ParseClient(string record)
+    {
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "clid"), out var id);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "cid"), out var channelId);
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "client_type"), out var type);
+        _ = long.TryParse(ServerQueryHelper.GetValue(record, "client_idle_time"), out var idle);
+        _ = long.TryParse(ServerQueryHelper.GetValue(record, "connection_connected_time"), out var connected);
+        return new TeamspeakClientDto { ClientId = id, UniqueId = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_unique_identifier")), Nickname = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_nickname")), ChannelId = channelId, Platform = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_platform")), Version = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "client_version")), IdleTimeSeconds = idle / 1000, ConnectionTimeSeconds = connected / 1000, IsServerQuery = type == 1 };
+    }
+
+    private static List<TeamspeakBanDto> ParseBans(string? line) =>
+        line is null ? [] : line.Split('|').Select(ParseBan).ToList();
+
+    private static TeamspeakBanDto ParseBan(string record)
+    {
+        _ = int.TryParse(ServerQueryHelper.GetValue(record, "banid"), out var id);
+        _ = long.TryParse(ServerQueryHelper.GetValue(record, "duration"), out var duration);
+        _ = long.TryParse(ServerQueryHelper.GetValue(record, "created"), out var created);
+        return new TeamspeakBanDto { BanId = id, Ip = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "ip")), UniqueId = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "uid")), Nickname = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "lastnickname")), Reason = ServerQueryHelper.UnescapeServerQuery(ServerQueryHelper.GetValue(record, "reason")), Duration = duration, Created = created };
+    }
+
+    private sealed record QueryLines(string? ServerInfo, string? Clients, string? Channels, string? Bans);
+    private sealed record ServerInfo(string Name, string Version, string Platform, long UptimeSeconds, int MaxClients, int VoicePort);
 
     [GeneratedRegex(@"query_port\s*=\s*(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex QueryPortRegex();

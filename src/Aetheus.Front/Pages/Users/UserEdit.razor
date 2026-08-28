@@ -6,7 +6,9 @@
 
 <PageTitle>@(_isNew ? L["NewUser"] : _user?.Username ?? L["User"]) - Aetheus</PageTitle>
 
-<Aetheus.Front.Shared.PageHeader Title="@(_isNew ? L["NewUser"] : _user?.Username ?? "")" Icon="person" BackHref="/users">
+<div class="iam-page iam-detail-page">
+<Aetheus.Front.Shared.PageHeader Title="@(_isNew ? L["NewUser"] : _user?.Username ?? "")" Icon="person"
+    Subtitle="@L["UserManagement"]" BackHref="/users" Class="iam-entity-header">
     <ChildContent>
         @if (!_isNew && _user is not null)
         {
@@ -24,11 +26,12 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" class="rz-mt-4" />
+    <AetheusLoader Size="AetheusLoaderSize.Large" Class="rz-mt-4" />
 }
 else if (_isNew)
 {
-    <RadzenTemplateForm TItem="UserModel" Data="@_model" Submit="@OnSubmit" class="rz-mt-4 form-narrow">
+    <RadzenCard class="iam-detail-card">
+    <RadzenTemplateForm TItem="UserModel" Data="@_model" Submit="@OnSubmit" class="form-narrow">
         <LocalizedDataAnnotationsValidator />
         <RadzenStack Gap="1rem">
             <RadzenFormField Text="@L["Username"]">
@@ -44,23 +47,21 @@ else if (_isNew)
                 <ValidationMessage For="@(() => _model.Password)" />
             </RadzenFormField>
             <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.MustChangePassword" Text="@L["MustChangePassword"]" />
-            <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mt-2">@L["Roles"]</RadzenText>
-            @foreach (var role in _availableRoles)
-            {
-                <LabeledToggle Value="@_model.Roles.Contains(role)" ValueChanged="@(v => OnRoleToggled(role, v))" Text="@role" />
-            }
+            <RoleAssignmentPicker @bind-SelectedRoles="_model.Roles" />
         </RadzenStack>
         <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-4">
             <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Create"]" Icon="save" IsBusy="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
         </RadzenStack>
     </RadzenTemplateForm>
+    </RadzenCard>
 }
 else
 {
-    <UrlSyncedTabs class="rz-mt-4" Change="@OnTabChanged" Slugs="@(new[] { "general", "roles", "organizations", "security" })">
+    <UrlSyncedTabs Change="@OnTabChanged" Slugs="@(new[] { "general", "roles", "organizations", "security", "audit" })">
         <Tabs>
             <RadzenTabsItem Text="@L["General"]">
-                <RadzenTemplateForm TItem="UserModel" Data="@_model" Submit="@OnSubmit" class="rz-mt-2 form-narrow">
+                <RadzenCard class="iam-detail-card">
+                <RadzenTemplateForm TItem="UserModel" Data="@_model" Submit="@OnSubmit" class="form-narrow">
                     <LocalizedDataAnnotationsValidator />
                     <RadzenStack Gap="1rem">
                         <RadzenFormField Text="@L["Username"]">
@@ -71,30 +72,34 @@ else
                             <RadzenTextBox @bind-Value="_model.Email" Name="Email" />
                             <ValidationMessage For="@(() => _model.Email)" />
                         </RadzenFormField>
-                        <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.IsActive" Text="@L["Active"]" />
-                        <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_model.MustChangePassword" Text="@L["MustChangePassword"]" />
+                        <LabeledToggle Kind="ToggleKind.Switch" Value="@_model.IsActive"
+                            ValueChanged="@OnActiveChangedAsync" Disabled="@_savingFlags" Text="@L["Active"]" />
+                        <LabeledToggle Kind="ToggleKind.Switch" Value="@_model.MustChangePassword"
+                            ValueChanged="@OnMustChangePasswordChangedAsync" Disabled="@_savingFlags" Text="@L["MustChangePassword"]" />
                     </RadzenStack>
                     <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-4">
                         <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Save"]" Icon="save" IsBusy="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
                     </RadzenStack>
                 </RadzenTemplateForm>
+                </RadzenCard>
             </RadzenTabsItem>
 
             <RadzenTabsItem Text="@L["Roles"]">
-                <RadzenTemplateForm TItem="UserModel" Data="@_model" Submit="@OnSubmit" class="rz-mt-2 form-narrow">
-                <LocalizedDataAnnotationsValidator />
-                <RadzenStack Gap="0.75rem">
-                    @foreach (var role in _availableRoles)
+                <RadzenCard class="iam-detail-card iam-role-assignment-card">
+                    <RoleAssignmentPicker SelectedRoles="@_model.Roles"
+                        SelectedRolesChanged="@OnRolesChangedAsync" Disabled="@_savingRoles" />
+                    @if (_savingRoles || _rolesSaved)
                     {
-                        <LabeledToggle Value="@_model.Roles.Contains(role)" ValueChanged="@(v => OnRoleToggled(role, v))" Text="@role" />
+                        <div class="iam-role-autosave-status" aria-live="polite">
+                            <RadzenIcon Icon="@(_savingRoles ? "sync" : "check_circle")" />
+                            <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">
+                                @(_savingRoles ? L["Saving"] : L["Saved"])
+                            </RadzenText>
+                        </div>
                     }
-                    <div>
-                        <RadzenButton ButtonType="ButtonType.Submit" Text="@L["Save"]" Icon="save" IsBusy="@_saving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                    </div>
-                </RadzenStack>
-                </RadzenTemplateForm>
+                </RadzenCard>
 
-                <RadzenCard class="rz-mt-4">
+                <RadzenCard class="iam-detail-card rz-mt-3">
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" class="rz-mb-2">
                         <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@L["EffectivePermissions"]</RadzenText>
                         <RadzenButton Icon="refresh" Size="ButtonSize.ExtraSmall"
@@ -108,8 +113,8 @@ else
                         }
                         else
                         {
-                            <RadzenDataGrid TItem="EffectivePermissionDto" Data="@_effectivePermissions"
-                                Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                            <RadzenDataGrid Responsive="false" TItem="EffectivePermissionDto" Data="@_effectivePermissions"
+                                Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                                 <Columns>
                                     <RadzenDataGridColumn TItem="EffectivePermissionDto" Title="@L["ResourceType"]" Width="160px">
                                         <Template Context="perm">
@@ -132,9 +137,10 @@ else
             </RadzenTabsItem>
 
             <RadzenTabsItem Text="@L["Organizations"]">
+                <RadzenCard class="iam-detail-card">
                 @if (_loadingOrgs)
                 {
-                    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+                    <AetheusLoader />
                 }
                 else
                 {
@@ -156,8 +162,8 @@ else
                     }
                     else
                     {
-                        <RadzenDataGrid TItem="UserOrganizationDto" Data="@_userOrgs" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                            RowClick="@(args => { if (args.Data is { } organization) Nav.NavigateTo($"/admin/organizations/{organization.OrganizationId}"); })" class="aetheus-clickable-rows">
+                        <RadzenDataGrid Responsive="false" TItem="UserOrganizationDto" Data="@_userOrgs" Density="Density.Compact" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
+                            RowClick="@(args => { if (args.Data is { } organization) Nav.NavigateTo($"/admin/organizations/{organization.OrganizationId}"); })" class="aetheus-clickable-rows" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
                             <Columns>
                                 <RadzenDataGridColumn TItem="UserOrganizationDto" Property="Name" Title="@L["Organization"]">
                                     <Template Context="o">
@@ -181,12 +187,15 @@ else
                         </RadzenDataGrid>
                     }
                 }
+                </RadzenCard>
             </RadzenTabsItem>
 
             <RadzenTabsItem Text="@L["Security"]">
-                <RadzenCard class="rz-mt-2">
+                <div class="iam-security-grid">
+                <RadzenCard class="iam-detail-card">
                     <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["ChangePassword"]</RadzenText>
-                    <RadzenTemplateForm TItem="PasswordChangeModel" Data="@_passwordChange" Submit="@OnChangePassword">
+                    <RadzenTemplateForm TItem="PasswordChangeModel" Data="@_passwordChange"
+                        Submit="@OnChangePassword" InvalidSubmit="@OnInvalidPasswordSubmit">
                     <LocalizedDataAnnotationsValidator />
                     <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
                         <RadzenFormField Text="@L["NewPassword"]">
@@ -194,7 +203,7 @@ else
                             <ValidationMessage For="@(() => _passwordChange.NewPassword)" />
                         </RadzenFormField>
                         <RadzenButton ButtonType="ButtonType.Submit" Text="@L["ChangePassword"]" Icon="lock_reset"
-                            BusyText="@L["Saving"]" IsBusy="@_changingPassword" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            BusyText="@L["Saving"]" IsBusy="@_changingPassword" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     </RadzenStack>
                     </RadzenTemplateForm>
                     <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem" class="rz-mt-2">
@@ -206,7 +215,7 @@ else
 
                 @if (_user is not null)
                 {
-                    <RadzenCard class="rz-mt-4">
+                    <RadzenCard class="iam-detail-card">
                         <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["Information"]</RadzenText>
                         <RadzenStack Gap="0.5rem">
                             <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
@@ -225,7 +234,13 @@ else
                         </RadzenStack>
                     </RadzenCard>
                 }
+                </div>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="@L["AuditTrail"]">
+                <EntityAuditTrail EntityType="User" EntityId="@Id!.Value" />
             </RadzenTabsItem>
         </Tabs>
     </UrlSyncedTabs>
 }
+</div>

@@ -8,7 +8,7 @@ namespace Aetheus.Shared.Validation;
 /// caller cannot DoS the API with megabytes of K/V pairs. Caps the entry count and the length
 /// of each key and value.
 /// </summary>
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false)]
 public sealed class BoundedDictionaryAttribute(int maxEntries, int maxKeyLength, int maxValueLength) : ValidationAttribute
 {
     protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)

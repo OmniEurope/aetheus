@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
 /// <summary>
-/// A per-app, per-metric alert threshold (PLAN-001 phase 2). When the latest ingested value for
+/// A per-app, per-metric alert threshold (ADR-021 phase 2). When the latest ingested value for
 /// <see cref="MetricName"/> breaches the comparison, an <c>app.metric.threshold</c> notification fires.
 /// </summary>
 public class AppMetricThreshold

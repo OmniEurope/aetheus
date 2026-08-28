@@ -1,5 +1,4 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@page "/pipelines/fleet"
 
 <PageTitle>@L["PipelineFleet"] - Aetheus</PageTitle>
 
@@ -31,10 +30,10 @@
         <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">@L["LoadError"]</RadzenAlert>
     }
 
-    <RadzenDataGrid @ref="_grid" Data="@_items" TItem="PipelineFleetItemDto" Count="@_totalCount"
-                    LoadData="@LoadDataAsync" IsLoading="@_loading" AllowPaging="true" PageSize="25"
+    <RadzenDataGrid Responsive="false" @ref="_grid" Data="@_items" TItem="PipelineFleetItemDto" Count="@_totalCount"
+                    LoadData="@LoadDataAsync" IsLoading="@_loading" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="25"
                     AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced"
-                    Density="Density.Compact" EmptyText="@L["NoRecords"]">
+                    Density="Density.Compact" EmptyText="@L["NoRecords"]" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
         <Columns>
             <RadzenDataGridColumn TItem="PipelineFleetItemDto" Property="PipelineName" Title="@L["Pipeline"]" MinWidth="14rem">
                 <Template Context="item">
@@ -59,7 +58,7 @@
                     @if (item.Freshness == PipelineFleetFreshness.Outdated && item.LatestVersion is not null && CanUpdate(item))
                     {
                         <RadzenButton Text="@L["Update"]" Icon="system_update_alt" Size="ButtonSize.Small"
-                                      Click="@(() => OpenUpdateAsync(item))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                                      Click="@(() => OpenUpdateAsync(item))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     }
                 </Template>
             </RadzenDataGridColumn>

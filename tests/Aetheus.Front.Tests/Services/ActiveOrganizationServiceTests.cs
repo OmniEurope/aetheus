@@ -120,7 +120,7 @@ public class ActiveOrganizationServiceTests : BunitContext
     }
 
     [Fact]
-    public async Task SetActiveAsync_InvalidId_DoesNothing()
+    public async Task SetActiveAsync_InvalidId_LeavesTheValueUnchanged()
     {
         var orgs = new List<MyOrganizationDto> { MakeOrg(1, "Org1") };
         _handler.SetJsonResponse("api/organizations/me", orgs);

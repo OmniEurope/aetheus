@@ -33,7 +33,15 @@ public sealed class DemoDataSeederTests
             (await db.AppSettings.SingleAsync(x => x.Key == markerKey, cancellationToken: TestContext.Current.CancellationToken)).Value);
         Assert.All(await db.Servers.ToListAsync(cancellationToken: TestContext.Current.CancellationToken), server => Assert.NotEqual(0, server.OrganizationId));
         Assert.Contains(await db.Servers.ToListAsync(cancellationToken: TestContext.Current.CancellationToken), server =>
-            server.Type == ServerType.Build && server.OsType == OsType.Windows && server.PipelineRunnerEnabled);
+            server.Type == ServerType.Build && server.OsType == OsType.Windows);
+        Assert.All(
+            await db.Servers.Where(server => server.Name == "web-01" || server.Name == "build-01")
+                .ToListAsync(cancellationToken: TestContext.Current.CancellationToken),
+            server =>
+            {
+                Assert.Equal(ServerStatus.Offline, server.Status);
+                Assert.False(server.PipelineRunnerEnabled);
+            });
         var demoPipelines = await db.Pipelines
             .Where(pipeline => pipeline.Name == "Build & Deploy Site" || pipeline.Name == "API CI")
             .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -58,8 +66,8 @@ public sealed class DemoDataSeederTests
         Assert.Equal(2, await db.BackupPolicies.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Single(await db.AppSettings.Where(x => x.Key == markerKey).ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
         await db.Entry(webServer).ReloadAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(ServerStatus.Online, webServer.Status);
-        Assert.Equal(clock.GetUtcNow().UtcDateTime, webServer.LastHeartbeat);
+        Assert.Equal(ServerStatus.Offline, webServer.Status);
+        Assert.Equal(now.UtcDateTime, webServer.LastHeartbeat);
     }
 
     [Fact]

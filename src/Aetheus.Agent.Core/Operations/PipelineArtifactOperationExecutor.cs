@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Agent.Core.Operations;
 
 public sealed class PipelineArtifactOperationExecutor(
     IServerApiClient apiClient,
-    ILogger<PipelineArtifactOperationExecutor> logger) : IOperationExecutor
+    ILogger<PipelineArtifactOperationExecutor> logger,
+    TimeProvider timeProvider) : IOperationExecutor
 {
     public bool CanHandle(OperationKind kind) => kind is
         OperationKind.PipelineCollectArtifacts or
@@ -36,11 +34,11 @@ public sealed class PipelineArtifactOperationExecutor(
             OperationKind.PipelineSubstituteVariables => await PipelineVariableSubstituter.SubstituteAsync(
                 target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             OperationKind.PipelinePublishCoverage => await PipelineCoveragePublisher.PublishAsync(
-                apiClient, logger, target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
+                apiClient, logger, timeProvider, target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             OperationKind.PipelinePublishLint => await PipelineQualityPublisher.PublishLintAsync(
-                apiClient, logger, target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
+                apiClient, logger, timeProvider, target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             OperationKind.PipelinePublishComplexity => await PipelineQualityPublisher.PublishComplexityAsync(
-                apiClient, logger, envVars, onOutput, cancellationToken).ConfigureAwait(false),
+                apiClient, logger, timeProvider, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             OperationKind.PipelineRestoreArtifacts => await PipelineArtifactRestorer.RestoreAsync(
                 apiClient, logger, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             _ => new ExecutorResult(-1, false)

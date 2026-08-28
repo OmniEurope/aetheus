@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -14,6 +13,10 @@ public class PipelineStepRun
     public int? ServerId { get; set; }
     public int? TaskId { get; set; }
     public int? ExitCode { get; set; }
+    /// <summary>Structured category for failures produced by the pipeline scheduler itself.</summary>
+    public string? FailureCode { get; set; }
+    /// <summary>Bounded human-readable diagnostic for failures that did not create a server task.</summary>
+    public string? FailureReason { get; set; }
     public string? OutputVariablesJson { get; set; }
     public int RetryCount { get; set; }
     public bool ContinueOnError { get; set; }
@@ -22,6 +25,8 @@ public class PipelineStepRun
     public string? GroupName { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    public string? SkippedCondition { get; set; }
+    public string? SkippedConditionVariablesJson { get; set; }
 
     /// <summary>type: trigger - the id of the child pipeline run this step launched and is waiting on.
     /// The step stays <see cref="TaskExecutionStatus.Running"/> (no agent task) until that run completes;

@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Pages.Git;
 

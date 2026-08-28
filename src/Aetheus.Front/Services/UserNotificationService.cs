@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Aetheus.Front.Services;
 
@@ -115,7 +113,7 @@ public sealed class UserNotificationService(
         // the effective permission set actually differs from what the client currently holds.
         try
         {
-            var summary = await api.GetMyPermissionsAsync().ConfigureAwait(false);
+            var summary = await api.Auth.GetMyPermissionsAsync().ConfigureAwait(false);
             if (summary is not null && HasChanged(summary.EffectivePermissions))
                 Fire();
         }
@@ -126,16 +124,21 @@ public sealed class UserNotificationService(
     }
 
     private bool HasChanged(List<EffectivePermissionDto> latest)
+        => EffectivePermissionsChanged(permissions.GetPermissions(), latest);
+
+    internal static bool EffectivePermissionsChanged(
+        IReadOnlyCollection<EffectivePermissionDto> current,
+        IReadOnlyCollection<EffectivePermissionDto> latest)
     {
-        var current = permissions.GetPermissions();
         if (current.Count != latest.Count) return true;
         var currentKeys = current.Select(Key).ToHashSet();
         return latest.Any(p => !currentKeys.Contains(Key(p)));
 
-        static string Key(EffectivePermissionDto p) => $"{p.ResourceType}:{p.ResourceId}:{p.Permission}:{p.GrantedByRole}";
+        static string Key(EffectivePermissionDto p) => $"{p.ResourceType}:{p.ResourceId}:{p.Permission}";
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>Ends the current user's subscription and cancels every deferred notification.</summary>
+    public async Task StopAsync()
     {
         _startRetryCts?.Cancel();
         _startRetryCts?.Dispose();
@@ -145,10 +148,17 @@ public sealed class UserNotificationService(
             _debounce?.Dispose();
             _debounce = null;
         }
-        if (_hub is not null)
+        var hub = _hub;
+        _hub = null;
+        if (hub is not null)
         {
-            await _hub.DisposeAsync().ConfigureAwait(false);
-            _hub = null;
+            try { await hub.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UserNotification] Hub dispose failed: {ex.Message}");
+            }
         }
     }
+
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 }

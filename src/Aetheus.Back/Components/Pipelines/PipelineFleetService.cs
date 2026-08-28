@@ -2,9 +2,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -14,7 +11,8 @@ internal sealed class PipelineFleetService(
     IPipelineService pipelineService,
     IPipelineTemplateService templateService,
     IPipelineTemplateResolver templateResolver,
-    IAuditService audit) : IPipelineFleetService
+    IAuditService audit,
+    IDbTransactionScope? transaction = null) : IPipelineFleetService
 {
     private static readonly Regex ExtendsLinePattern = new(
         @"^(?<prefix>\s*extends\s*:\s*)(?<reference>[^#\r\n]+)(?<suffix>\s*(?:#.*)?)$",
@@ -26,51 +24,8 @@ internal sealed class PipelineFleetService(
         IReadOnlyCollection<int>? accessiblePipelineIds,
         CancellationToken ct = default)
     {
-        var templates = await pipelineRepository.GetTemplatesAsync(ct).ConfigureAwait(false);
-        var templateIndex = BuildTemplateIndex(templates);
-        var candidates = await fleetRepository.GetCandidatesAsync(
-            organizationIds, accessiblePipelineIds, request.Search, request.ProjectId, ct).ConfigureAwait(false);
-        if (candidates.Count > PipelineFleetRepository.MaxCandidateCount)
-            throw new BadRequestException(
-                $"The fleet query exceeds {PipelineFleetRepository.MaxCandidateCount} pipelines. Narrow the search or project filter.");
-        var filtered = candidates.Select(row => MapFleetItem(row, templateIndex))
-            .Where(item => request.TemplateId is null || item.TemplateId == request.TemplateId)
-            .Where(item => request.Freshness is null || item.Freshness == request.Freshness);
-        var items = Sort(filtered, request.SortBy, request.SortDescending).ToList();
-        var (page, pageSize) = request.Normalize();
-        return new PaginatedResult<PipelineFleetItemDto>
-        {
-            Items = items.Skip((page - 1) * pageSize).Take(pageSize).ToList(),
-            TotalCount = items.Count,
-            Page = page,
-            PageSize = pageSize
-        };
-    }
-
-    private static IOrderedEnumerable<PipelineFleetItemDto> Sort(
-        IEnumerable<PipelineFleetItemDto> items, string? sortBy, bool descending)
-    {
-        var key = sortBy?.Trim().ToLowerInvariant();
-        return (key, descending) switch
-        {
-            ("pipelinename", false) => items.OrderBy(item => item.PipelineName, StringComparer.OrdinalIgnoreCase),
-            ("pipelinename", true) => items.OrderByDescending(item => item.PipelineName, StringComparer.OrdinalIgnoreCase),
-            ("ownername", false) => items.OrderBy(item => item.OwnerName, StringComparer.OrdinalIgnoreCase),
-            ("ownername", true) => items.OrderByDescending(item => item.OwnerName, StringComparer.OrdinalIgnoreCase),
-            ("templatename", false) => items.OrderBy(item => item.TemplateName is null)
-                .ThenBy(item => item.TemplateName, StringComparer.OrdinalIgnoreCase),
-            ("templatename", true) => items.OrderByDescending(item => item.TemplateName is not null)
-                .ThenByDescending(item => item.TemplateName, StringComparer.OrdinalIgnoreCase),
-            ("pinnedversion", false) => items.OrderBy(item => item.PinnedVersion),
-            ("pinnedversion", true) => items.OrderByDescending(item => item.PinnedVersion),
-            ("latestversion", false) => items.OrderBy(item => item.LatestVersion),
-            ("latestversion", true) => items.OrderByDescending(item => item.LatestVersion),
-            ("freshness", false) => items.OrderBy(item => item.Freshness),
-            ("freshness", true) => items.OrderByDescending(item => item.Freshness),
-            _ => items.OrderBy(item => item.TemplateName is null)
-                .ThenBy(item => item.TemplateName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(item => item.PipelineName, StringComparer.OrdinalIgnoreCase)
-        };
+        return await fleetRepository.GetPageAsync(
+            request, organizationIds, accessiblePipelineIds, ct).ConfigureAwait(false);
     }
 
     public async Task<PipelineFleetItemDto> GetItemAsync(int pipelineId, CancellationToken ct = default)
@@ -83,12 +38,7 @@ internal sealed class PipelineFleetService(
     public async Task<PipelineFleetUpdatePreviewDto> PreviewUpdateAsync(
         int pipelineId, int targetVersion, CancellationToken ct = default)
     {
-        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
-        var reference = ParseReference(row.YamlDefinition)
-            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
-        var template = await pipelineRepository.FindTemplateByNameAsync(
-            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
-            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+        var (row, reference, template) = await GetTemplateContextAsync(pipelineId, ct).ConfigureAwait(false);
         var currentVersion = reference.Version ?? template.LatestVersion;
         var parameters = ExtractDefaultParameters(row.YamlDefinition);
         var currentYaml = RewriteReference(row.YamlDefinition, reference.Name, currentVersion);
@@ -151,10 +101,7 @@ internal sealed class PipelineFleetService(
         int pipelineId, ExtractPipelineTemplateRequest request, CancellationToken ct = default)
     {
         var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
-        if (ParseReference(row.YamlDefinition) is not null)
-            throw new BadRequestException("Only an off-catalog pipeline can be extracted as a new template.");
-
-        var template = await templateService.CreateTemplateAsync(new CreatePipelineTemplateRequest
+        var createRequest = new CreatePipelineTemplateRequest
         {
             Name = request.TemplateName,
             Description = request.Description,
@@ -164,55 +111,106 @@ internal sealed class PipelineFleetService(
                 ? row.YamlDefinition
                 : request.TemplateYamlContent,
             ChangelogEntry = $"Extracted from pipeline '{row.PipelineName}'"
-        }, ct).ConfigureAwait(false);
-
-        if (request.RewritePipeline)
+        };
+        if (ParseReference(row.YamlDefinition) is { } existingReference)
         {
-            var yaml = string.IsNullOrWhiteSpace(request.RewrittenPipelineYaml)
-                ? $"name: {QuoteYaml(row.PipelineName)}\nextends: {QuoteYaml(template.Name + "@1")}\nstages: []\n"
-                : request.RewrittenPipelineYaml;
-            await RewritePipelineAsync(row, yaml, ct).ConfigureAwait(false);
+            if (existingReference.Version == 1
+                && string.Equals(
+                    existingReference.Name, request.TemplateName, StringComparison.OrdinalIgnoreCase))
+            {
+                var existingTemplate = await pipelineRepository.FindTemplateByNameAsync(
+                    request.TemplateName, row.OrganizationId, ct).ConfigureAwait(false);
+                if (existingTemplate is not null)
+                {
+                    var firstVersion = await GetVersionAsync(existingTemplate, 1, ct).ConfigureAwait(false);
+                    if ((string.IsNullOrWhiteSpace(request.TemplateYamlContent)
+                            || string.Equals(
+                                firstVersion.YamlContent,
+                                request.TemplateYamlContent,
+                                StringComparison.Ordinal))
+                        && string.Equals(
+                            firstVersion.ChangelogEntry,
+                            createRequest.ChangelogEntry,
+                            StringComparison.Ordinal))
+                    {
+                        return await templateService.GetTemplateAsync(existingTemplate.Id, ct)
+                            .ConfigureAwait(false)
+                            ?? throw new NotFoundException(
+                                $"Pipeline template {existingTemplate.Id} was not found.");
+                    }
+                }
+            }
+            throw new BadRequestException("Only an off-catalog pipeline can be extracted as a new template.");
         }
-        return template;
+
+        if (!request.RewritePipeline)
+            return await templateService.CreateTemplateAsync(createRequest, ct).ConfigureAwait(false);
+
+        var rewrittenYaml = string.IsNullOrWhiteSpace(request.RewrittenPipelineYaml)
+            ? $"name: {QuoteYaml(row.PipelineName)}\nextends: {QuoteYaml(request.TemplateName + "@1")}\nstages: []\n"
+            : request.RewrittenPipelineYaml;
+        return await PublishWithGitCompensationAsync(
+            row,
+            rewrittenYaml,
+            () => templateService.CreateTemplateAsync(createRequest, ct),
+            ct).ConfigureAwait(false);
     }
 
     public async Task<PipelineTemplateDto> PromoteAsync(
         int pipelineId, PromotePipelineTemplateRequest request, CancellationToken ct = default)
     {
-        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
-        var reference = ParseReference(row.YamlDefinition)
-            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
-        var template = await pipelineRepository.FindTemplateByNameAsync(
-            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
-            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+        var (row, reference, template) = await GetTemplateContextAsync(pipelineId, ct).ConfigureAwait(false);
 
-        var published = await templateService.UpdateTemplateAsync(template.Id, new UpdatePipelineTemplateRequest
+        var updateRequest = new UpdatePipelineTemplateRequest
         {
             Name = template.Name,
             Description = template.Description,
             Category = template.Category,
             YamlContent = request.YamlContent,
             ChangelogEntry = request.ChangelogEntry
-        }, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException($"Pipeline template {template.Id} was not found.");
+        };
 
-        if (request.RebaseSourcePipeline)
+        if (!request.RebaseSourcePipeline)
+            return await templateService.UpdateTemplateAsync(template.Id, updateRequest, ct).ConfigureAwait(false)
+                ?? throw new NotFoundException($"Pipeline template {template.Id} was not found.");
+
+        if (reference.Version == template.LatestVersion)
         {
-            var yaml = $"name: {QuoteYaml(row.PipelineName)}\nextends: {QuoteYaml(template.Name + "@" + published.Version)}\nstages: []\n";
-            await RewritePipelineAsync(row, yaml, ct).ConfigureAwait(false);
+            var latest = await GetVersionAsync(template, template.LatestVersion, ct).ConfigureAwait(false);
+            if (string.Equals(latest.YamlContent, request.YamlContent, StringComparison.Ordinal)
+                && string.Equals(
+                    latest.ChangelogEntry,
+                    request.ChangelogEntry,
+                    StringComparison.Ordinal))
+            {
+                return await templateService.GetTemplateAsync(template.Id, ct).ConfigureAwait(false)
+                    ?? throw new NotFoundException($"Pipeline template {template.Id} was not found.");
+            }
         }
-        return published;
+
+        var expectedVersion = template.LatestVersion + 1;
+        var rewrittenYaml =
+            $"name: {QuoteYaml(row.PipelineName)}\nextends: {QuoteYaml(template.Name + "@" + expectedVersion)}\nstages: []\n";
+        return await PublishWithGitCompensationAsync(
+            row,
+            rewrittenYaml,
+            async () =>
+            {
+                var published = await templateService.UpdateTemplateAsync(template.Id, updateRequest, ct)
+                    .ConfigureAwait(false)
+                    ?? throw new NotFoundException($"Pipeline template {template.Id} was not found.");
+                if (published.Version != expectedVersion)
+                    throw new ConflictException(
+                        "The template version changed while the source pipeline was being rebased.");
+                return published;
+            },
+            ct).ConfigureAwait(false);
     }
 
     public async Task<PipelinePromotePreviewDto> PreviewPromotionAsync(
         int pipelineId, CancellationToken ct = default)
     {
-        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
-        var reference = ParseReference(row.YamlDefinition)
-            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
-        var template = await pipelineRepository.FindTemplateByNameAsync(
-            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
-            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+        var (row, reference, template) = await GetTemplateContextAsync(pipelineId, ct).ConfigureAwait(false);
         var effective = await templateResolver.ResolveAsync(
             row.YamlDefinition, row.OrganizationId, ExtractDefaultParameters(row.YamlDefinition), ct)
             .ConfigureAwait(false);
@@ -244,9 +242,58 @@ internal sealed class PipelineFleetService(
             ?? throw new NotFoundException($"Pipeline {row.PipelineId} was not found.");
     }
 
+    private async Task<T> PublishWithGitCompensationAsync<T>(
+        PipelineFleetRow row,
+        string rewrittenYaml,
+        Func<Task<T>> publish,
+        CancellationToken ct)
+    {
+        var gitWasRewritten = false;
+        try
+        {
+            async Task<T> WorkAsync()
+            {
+                await RewritePipelineAsync(row, rewrittenYaml, ct).ConfigureAwait(false);
+                gitWasRewritten = true;
+                return await publish().ConfigureAwait(false);
+            }
+
+            return transaction is { IsRelational: true }
+                ? await transaction.ExecuteInTransactionAsync(WorkAsync, ct).ConfigureAwait(false)
+                : await WorkAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            if (gitWasRewritten)
+            {
+                await RewritePipelineAsync(row, row.YamlDefinition, CancellationToken.None)
+                    .ConfigureAwait(false);
+                await audit.LogAsync(
+                    "TemplatePublicationCompensated",
+                    "Pipeline",
+                    row.PipelineId,
+                    "The source pipeline was restored after template publication failed.",
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            throw;
+        }
+    }
+
     private async Task<PipelineFleetRow> GetRowAsync(int pipelineId, CancellationToken ct) =>
         await fleetRepository.GetAsync(pipelineId, ct).ConfigureAwait(false)
         ?? throw new NotFoundException($"Pipeline {pipelineId} was not found.");
+
+    private async Task<PipelineFleetTemplateContext> GetTemplateContextAsync(
+        int pipelineId, CancellationToken ct)
+    {
+        var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);
+        var reference = ParseReference(row.YamlDefinition)
+            ?? throw new BadRequestException("This pipeline is outside the template catalog.");
+        var template = await pipelineRepository.FindTemplateByNameAsync(
+            reference.Name, row.OrganizationId, ct).ConfigureAwait(false)
+            ?? throw new BadRequestException($"Pipeline template '{reference.Name}' was not found.");
+        return new PipelineFleetTemplateContext(row, reference, template);
+    }
 
     private static PipelineFleetItemDto MapFleetItem(
         PipelineFleetRow row,
@@ -382,4 +429,8 @@ internal sealed class PipelineFleetService(
         $"name: template-resolution\nextends: {QuoteYaml(name + "@" + version)}\nstages: []\n";
 
     private sealed record TemplateReference(string Name, int? Version);
+    private sealed record PipelineFleetTemplateContext(
+        PipelineFleetRow Row,
+        TemplateReference Reference,
+        Data.Entities.PipelineTemplate Template);
 }

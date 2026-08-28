@@ -82,12 +82,27 @@ public class AuthRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task FindUserWithRolesAsync_InactiveUser_ReturnsNull()
+    public async Task FindUserWithRolesAsync_InactiveUser_ReturnsForAuditableInteractiveRejection()
     {
         _db.Users.Add(new User { Username = "bob", PasswordHash = "x", IsActive = false });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Null(await _repo.FindUserWithRolesAsync("bob", ct: TestContext.Current.CancellationToken));
+        var result = await _repo.FindUserWithRolesAsync("bob", ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(result);
+        Assert.False(result.IsActive);
+    }
+
+    [Fact]
+    public async Task FindUserWithRolesAsync_LegacyMixedCaseUsername_IsFoundCaseInsensitively()
+    {
+        _db.Users.Add(new User { Username = "LegacyAdmin", PasswordHash = "x", IsActive = true });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.FindUserWithRolesAsync(
+            "legacyadmin", ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("LegacyAdmin", result.Username);
     }
 
     [Fact]
@@ -130,6 +145,48 @@ public class AuthRepositoryTests : IDisposable
         _repo.AddServerToken(new ServerToken { ServerId = server.Id, TokenHash = "hash", ExpiresAt = DateTime.UtcNow.AddDays(1) });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, await _db.ServerTokens.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task TryPersistServerEnrollmentAsync_ConsumesTokenAndRejectsReplayWithoutExtraServer()
+    {
+        var registrationToken = new RegistrationToken
+        {
+            Token = "registration-hash",
+            ExpiresAt = DateTime.UtcNow.AddHours(1)
+        };
+        _db.RegistrationTokens.Add(registrationToken);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var winner = new Server { Name = "winner", Hostname = "winner" };
+        var won = await _repo.TryPersistServerEnrollmentAsync(
+            registrationToken.Id,
+            winner,
+            new ServerToken
+            {
+                Server = winner,
+                TokenHash = "winner-token",
+                ExpiresAt = DateTime.UtcNow.AddDays(1)
+            },
+            TestContext.Current.CancellationToken);
+        var loser = new Server { Name = "loser", Hostname = "loser" };
+        var lost = await _repo.TryPersistServerEnrollmentAsync(
+            registrationToken.Id,
+            loser,
+            new ServerToken
+            {
+                Server = loser,
+                TokenHash = "loser-token",
+                ExpiresAt = DateTime.UtcNow.AddDays(1)
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(won);
+        Assert.False(lost);
+        Assert.Single(await _db.Servers.ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await _db.ServerTokens.ToListAsync(TestContext.Current.CancellationToken));
+        Assert.True(registrationToken.IsUsed);
+        Assert.Equal(winner.Id, registrationToken.UsedByServerId);
     }
 
     [Fact]

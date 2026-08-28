@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: application-release-fast-template
+trigger: manual
+variables:
+  APPLICATION_HAS_FRONTEND: "true"
+  APPLICATION_HAS_BACKEND: "true"
+  APPLICATION_HAS_DATABASE: "false"
+  APPLICATION_ROLLBACK_ENABLED: "true"
+
+stages:
+  - name: FastRelease
+    group: Deploy
+    execution_role: deploy
+    os: linux
+    steps:
+      - name: Run project fast release adapter
+        working_directory: "$(WORKSPACE)"
+        shell: |
+          set -eu
+          test -f .pipeline/scripts/release-fast.sh
+          APPLICATION_HAS_FRONTEND="$(APPLICATION_HAS_FRONTEND)" \
+          APPLICATION_HAS_BACKEND="$(APPLICATION_HAS_BACKEND)" \
+          APPLICATION_HAS_DATABASE="$(APPLICATION_HAS_DATABASE)" \
+          APPLICATION_ROLLBACK_ENABLED="$(APPLICATION_ROLLBACK_ENABLED)" \
+            sh .pipeline/scripts/release-fast.sh
+        timeout_seconds: 7200

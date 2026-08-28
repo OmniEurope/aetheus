@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -41,7 +35,7 @@ public partial class AppLogsView
         _loading = true;
         try
         {
-            var result = await Api.GetAppLogsAsync(AppId, hours: 24, minSeverity: _minSeverity, search: _search, page: 1, pageSize: 200);
+            var result = await Api.Monitoring.GetAppLogsAsync(AppId, hours: 24, minSeverity: _minSeverity, search: _search, page: 1, pageSize: 200);
             _logs = result.Items;
             _total = result.TotalCount;
         }
@@ -62,7 +56,7 @@ public partial class AppLogsView
         >= 13 => BadgeStyle.Warning,  // WARN
         >= 9 => BadgeStyle.Info,      // INFO
         >= 5 => BadgeStyle.Light,     // DEBUG
-        _ => BadgeStyle.Secondary     // TRACE / unspecified
+        _ => BadgeStyle.Light     // TRACE / unspecified
     };
 
     private static string SeverityLabel(AppLogEntryDto e) =>

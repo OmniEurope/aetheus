@@ -6,6 +6,7 @@ using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
 using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -18,6 +19,7 @@ public class PipelineTemplateServiceTests
     private readonly IAuditService _auditMock = Substitute.For<IAuditService>();
     private readonly ILogger<PipelineTemplateService> _loggerMock = Substitute.For<ILogger<PipelineTemplateService>>();
     private readonly IOrganizationRepository _organizationRepository = Substitute.For<IOrganizationRepository>();
+    private readonly IEntityChangeNotifier _notifier = Substitute.For<IEntityChangeNotifier>();
     private readonly PipelineTemplateService _sut;
 
     public PipelineTemplateServiceTests()
@@ -25,16 +27,32 @@ public class PipelineTemplateServiceTests
         _organizationRepository.GetDefaultOrganizationIdAsync(Arg.Any<CancellationToken>()).Returns(1);
         _sut = new PipelineTemplateService(
             _repoMock, _auditMock, _loggerMock, TimeProvider.System,
-            _organizationRepository, new PipelineTemplateResolver(_repoMock));
+            _organizationRepository, new PipelineTemplateResolver(_repoMock), _notifier);
     }
 
     [Fact]
     public async Task GetTemplatesAsync_ReturnsMappedSummaries()
     {
-        _repoMock.GetTemplatesAsync(Arg.Any<CancellationToken>())
+        _repoMock.GetTemplateSummariesAsync(Arg.Any<CancellationToken>())
             .Returns([
-                new PipelineTemplate { Id = 1, Name = "T1", Description = "desc", Category = "CI", Version = 1 },
-                new PipelineTemplate { Id = 2, Name = "T2", Description = "desc2", Category = "CD", Version = 2 }
+                new PipelineTemplateSummaryDto
+                {
+                    Id = 1,
+                    Name = "T1",
+                    Description = "desc",
+                    Category = "CI",
+                    Version = 1,
+                    PipelineCount = 2,
+                    LatestRunAt = new DateTime(2026, 8, 10, 9, 30, 0)
+                },
+                new PipelineTemplateSummaryDto
+                {
+                    Id = 2,
+                    Name = "T2",
+                    Description = "desc2",
+                    Category = "CD",
+                    Version = 2
+                }
             ]);
 
         var result = await _sut.GetTemplatesAsync(ct: TestContext.Current.CancellationToken);
@@ -42,6 +60,8 @@ public class PipelineTemplateServiceTests
         Assert.Equal(2, result.Count);
         Assert.Equal("T1", result[0].Name);
         Assert.Equal("CI", result[0].Category);
+        Assert.Equal(2, result[0].PipelineCount);
+        Assert.Equal(new DateTime(2026, 8, 10, 9, 30, 0), result[0].LatestRunAt);
     }
 
     [Fact]
@@ -136,6 +156,12 @@ public class PipelineTemplateServiceTests
         Assert.Contains("v1:", result.Changelog);
         await _repoMock.Received(1).AddTemplateAsync(Arg.Any<PipelineTemplate>(), Arg.Any<CancellationToken>());
         await _auditMock.Received(1).LogAsync("Created", "PipelineTemplate", Arg.Any<int>(), "New", Arg.Any<CancellationToken>());
+        await _notifier.Received(1).BroadcastAsync(
+            ResourceType.PipelineTemplate,
+            Arg.Any<int>(),
+            EntityChangeOps.Created,
+            Arg.Any<CancellationToken>(),
+            1);
     }
 
     [Fact]
@@ -172,6 +198,12 @@ public class PipelineTemplateServiceTests
         Assert.Equal("name: old\nstages: []", template.Versions.Single(version => version.Version == 2).YamlContent);
         Assert.Equal("name: updated\nstages: []", template.Versions.Single(version => version.Version == 3).YamlContent);
         await _repoMock.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _notifier.Received(1).BroadcastAsync(
+            ResourceType.PipelineTemplate,
+            template.Id,
+            EntityChangeOps.Updated,
+            Arg.Any<CancellationToken>(),
+            template.OrganizationId);
     }
 
     [Fact]
@@ -269,6 +301,12 @@ public class PipelineTemplateServiceTests
         Assert.True(result);
         await _repoMock.Received(1).RemoveTemplateAsync(template, Arg.Any<CancellationToken>());
         await _auditMock.Received(1).LogAsync("Deleted", "PipelineTemplate", 1, "T1", Arg.Any<CancellationToken>());
+        await _notifier.Received(1).BroadcastAsync(
+            ResourceType.PipelineTemplate,
+            template.Id,
+            EntityChangeOps.Deleted,
+            Arg.Any<CancellationToken>(),
+            template.OrganizationId);
     }
 
     [Fact]
@@ -442,6 +480,36 @@ public class PipelineTemplateServiceTests
 
         Assert.NotNull(result);
         Assert.Contains("staging", result);
+    }
+
+    [Fact]
+    public async Task ResolveTemplateAsync_OptionalParameterWithoutValue_SubstitutesEmptyString()
+    {
+        var yaml = """
+            name: test
+            trigger: manual
+            parameters:
+              - name: digest
+                type: string
+                default: ""
+            variables:
+              PACKAGE_DIGEST: "${{ parameters.digest }}"
+            stages:
+              - name: build
+                steps:
+                  - name: verify
+                    shell: test -z "$PACKAGE_DIGEST"
+            """;
+
+        var result = await _sut.ResolveTemplateAsync(
+            yaml,
+            new Dictionary<string, string>(),
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("${{", result, StringComparison.Ordinal);
+        var resolved = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(result);
+        Assert.Equal(string.Empty, resolved.Variables["PACKAGE_DIGEST"]);
     }
 
     [Fact]

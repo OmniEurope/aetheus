@@ -1,4 +1,5 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits AgentInstallOptionsComponentBase
 @* Install step: instructions + download button + one-shot installer link. *@
 <RadzenStack Gap="1rem">
     <p>@L["WizardInstallDescription"]</p>
@@ -11,7 +12,7 @@
     <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" Wrap="FlexWrap.Wrap">
         <RadzenButton Text="@DownloadLabel"
                       Icon="download"
-                      Click="@OpenDownloadAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                      Click="@OpenDownloadAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         @if (!string.IsNullOrWhiteSpace(InstallerToken))
         {
             <RadzenButton Text="@(_linkCopied ? L["WizardInstallerLinkCopied"] : L["WizardCopyInstallerLink"])"

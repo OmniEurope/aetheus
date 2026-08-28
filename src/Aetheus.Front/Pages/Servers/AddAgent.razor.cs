@@ -1,16 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Servers;
 
@@ -49,7 +37,7 @@ public partial class AddAgent : IAsyncDisposable
     // managed server in one copy-paste (the common onboarding case). This is a UI
     // convenience only - the installer itself stays secure-by-default (a bare install
     // with no emitted flags grants zero privilege). Operators untick to harden.
-    // The wizard defaults to the secure, non-root installation profile.
+    // See docs/claudes/claude-deployment.md "Add-Agent wizard defaults" (owner decision 2026-06-21).
     private bool _includePipelineRunner = true;
     private bool _includeServerManagement = true;
     // Deployment agent (cross-agent deploy target) is opt-in OFF by default: most onboarded hosts are
@@ -114,7 +102,7 @@ public partial class AddAgent : IAsyncDisposable
     {
         try
         {
-            _serverBaseUrl = (await Api.GetAgentServerUrlAsync()
+            _serverBaseUrl = (await Api.Security.GetAgentServerUrlAsync()
                 ?? (Config["ApiBaseUrl"] ?? DefaultApiBaseUrl)).TrimEnd('/');
         }
         catch (HttpRequestException)
@@ -314,11 +302,13 @@ public partial class AddAgent : IAsyncDisposable
         _tokenGenerating = true;
         RefreshSteps();
 
-        _generatedToken = await Api.CreateRegistrationTokenAsync(_tokenExpirationHours);
+        _generatedToken = await Api.Auth.CreateRegistrationTokenAsync(_tokenExpirationHours);
         _tokenGenerating = false;
 
         if (_generatedToken is null)
             Toast.Error("Error", "WizardTokenFailed");
+        else
+            Toast.Success("Generated", "WizardTokenGenerated");
 
         RefreshSteps();
     }

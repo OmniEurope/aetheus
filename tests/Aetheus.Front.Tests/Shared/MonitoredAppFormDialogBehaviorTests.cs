@@ -44,6 +44,33 @@ public sealed class MonitoredAppFormDialogBehaviorTests : BunitContext
     }
 
     [Fact]
+    public void InputEvents_AreSentByTheCreateForm()
+    {
+        ArrangeLookups();
+        _handler.SetJsonResponse(HttpMethod.Post, "api/appmonitoring/projects/7/apps",
+            new MonitoredAppDto { Id = 11, ProjectId = 7, Name = "PortfolioTest public" });
+        var cut = Render<MonitoredAppFormDialog>(p => p.Add(x => x.ProjectId, 7));
+
+        cut.Find("input[name='Name']").Input("PortfolioTest public");
+        cut.Find("input[name='ProbeUrl']").Input("https://sonytumen.com/");
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() => Assert.Contains(
+            _handler.Requests,
+            request => request.Method == "POST"
+                       && request.Url.EndsWith("api/appmonitoring/projects/7/apps", StringComparison.Ordinal)));
+        var body = _handler.RequestDetails.Last(request =>
+            request.Method == "POST"
+            && request.Url.EndsWith("api/appmonitoring/projects/7/apps", StringComparison.Ordinal)).Body;
+        var request = System.Text.Json.JsonSerializer.Deserialize<CreateMonitoredAppRequest>(
+            body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        Assert.Equal("PortfolioTest public", request!.Name);
+        Assert.Equal("https://sonytumen.com/", request.ProbeUrl);
+        Assert.Equal(7, request.ProjectId);
+    }
+
+    [Fact]
     public async Task Edit_CopiesProbeConfiguration_AndUsesAppEndpoint()
     {
         ArrangeLookups();

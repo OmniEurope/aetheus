@@ -2,12 +2,13 @@
 using Aetheus.Back.Components.AgentInstaller;
 using Aetheus.Back.Components.AgentPools;
 using Aetheus.Back.Components.AgentUpdate;
+using Aetheus.Back.Components.AiTasks;
 using Aetheus.Back.Components.Alerts;
+using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Components.Apache;
 using Aetheus.Back.Components.AppBackups;
 using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.Artifacts;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Certbot;
 using Aetheus.Back.Components.Cron;
@@ -24,6 +25,7 @@ using Aetheus.Back.Components.Monitoring;
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Components.PackageFeeds;
+using Aetheus.Back.Components.PackageRegistry;
 using Aetheus.Back.Components.PersonalAccessTokens;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Plugins;
@@ -37,7 +39,6 @@ using Aetheus.Back.Components.ServerModules;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.ServiceConnections;
 using Aetheus.Back.Components.Settings;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Components.SystemLogs;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Components.Teamspeak;
@@ -72,6 +73,7 @@ internal static class AetheusModulesExtensions
             .AddDockerModule()
             .AddApacheModule()
             .AddTasksModule()
+            .AddAiTasksModule()
             .AddPipelinesModule()
             .AddArtifactsModule()
             .AddProjectsModule()
@@ -94,10 +96,12 @@ internal static class AetheusModulesExtensions
             .AddServiceConnectionsModule()
             .AddWebhooksModule()
             .AddAlertsModule()
+            .AddAnalysisModule(configuration)
             .AddGitModule(configuration)
             .AddExternalReposModule(configuration)
             .AddWorkItemsModule()
             .AddPackageFeedsModule()
+            .AddPackageRegistryModule()
             .AddTestManagementModule()
             .AddDashboardsModule()
             .AddPluginsModule()

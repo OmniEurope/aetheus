@@ -8,9 +8,13 @@ public sealed record PortsentryDataDto
 {
     public bool IsInstalled { get; init; }
     public bool IsRunning { get; init; }
+    [StringLength(100)]
     public string Version { get; init; } = string.Empty;
+    [StringLength(20)]
     public string Mode { get; init; } = string.Empty;
+    [StringLength(500)]
     public string TcpPorts { get; init; } = string.Empty;
+    [StringLength(500)]
     public string UdpPorts { get; init; } = string.Empty;
     public int BlockedCount { get; init; }
     public List<PortsentryBlockedIpDto> BlockedIps { get; init; } = [];
@@ -18,9 +22,12 @@ public sealed record PortsentryDataDto
 
 public sealed record PortsentryBlockedIpDto
 {
+    [StringLength(45)]
     public string IpAddress { get; init; } = string.Empty;
+    [StringLength(20)]
     public string Protocol { get; init; } = string.Empty;
     public DateTime BlockedAt { get; init; }
+    [StringLength(1000)]
     public string Reason { get; init; } = string.Empty;
 }
 

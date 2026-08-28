@@ -1,0 +1,49 @@
+# =============================================================================
+# toto-legacy-accept-deploy - full release acceptance deployment for local Toto
+# =============================================================================
+# The full release orchestration reaches this pipeline only after CI and the
+# disposable QA runtime check. It builds the exact checked-out revision, waits
+# for Docker Compose health, then probes the live Todo API on the accept port.
+name: toto-legacy-accept-deploy
+trigger: manual
+
+stages:
+  - name: Verify
+    os: linux
+    environment: accept
+    steps:
+      - name: Check Docker Compose v2
+        shell: "docker --version && docker compose version"
+        timeout_seconds: 60
+
+  - name: Deploy
+    os: linux
+    group: Deploy
+    environment: accept
+    depends_on:
+      - Verify
+    steps:
+      - name: Build checked-out revision and start stack
+        checkout: true
+        working_directory: "$(WORKSPACE)"
+        timeout_seconds: 1800
+        shell: |
+          set -eu
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          docker build -f deploy/Dockerfile -t "toto-accept:full-$SOURCE_COMMIT" .
+          export TOTO_IMAGE="toto-accept:full-$SOURCE_COMMIT"
+          docker compose -p toto-accept -f deploy/docker-compose.yml up -d --wait
+
+  - name: Readiness
+    os: linux
+    group: Smoke
+    environment: accept
+    depends_on:
+      - Deploy
+    steps:
+      - name: Verify live Todo API
+        timeout_seconds: 120
+        shell: |
+          set -eu
+          curl -fsS http://127.0.0.1:8090/api/todos >/dev/null
+          echo "Full acceptance readiness passed."

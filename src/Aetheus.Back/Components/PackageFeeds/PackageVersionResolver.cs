@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.PackageFeeds;
 
@@ -9,7 +7,10 @@ namespace Aetheus.Back.Components.PackageFeeds;
 /// Resolves latest package versions against real registries (NuGet, npm, PyPI) over the SSRF-guarded
 /// "package-feeds" HttpClient. Maven / Docker / Generic have no resolver yet and return Unsupported.
 /// </summary>
-public sealed class PackageVersionResolver(IHttpClientFactory httpClientFactory, ILogger<PackageVersionResolver> logger)
+public sealed class PackageVersionResolver(
+    IHttpClientFactory httpClientFactory,
+    ILogger<PackageVersionResolver> logger,
+    TimeProvider timeProvider)
     : IPackageVersionResolver
 {
     public async Task<PackageResolveResult> ResolveLatestAsync(
@@ -47,9 +48,7 @@ public sealed class PackageVersionResolver(IHttpClientFactory httpClientFactory,
         var origin = ResolveOrigin(upstreamUrl) ?? PackageRegistryDefaults.NuGet;
         var id = name.ToLowerInvariant();
         using var response = await Client().GetAsync($"{origin}/v3-flatcontainer/{Uri.EscapeDataString(id)}/index.json", ct).ConfigureAwait(false);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return new PackageResolveResult(PackageResolveOutcome.NotFound, null, null);
-        response.EnsureSuccessStatusCode();
+        if (TryGetEarlyResult(response, out var earlyResult)) return earlyResult;
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
         if (!doc.RootElement.TryGetProperty("versions", out var versions) || versions.GetArrayLength() == 0)
@@ -72,9 +71,7 @@ public sealed class PackageVersionResolver(IHttpClientFactory httpClientFactory,
         // {base}/{name} -> { "dist-tags": { "latest": v }, "time": { v: iso } }.
         var origin = ResolveOrigin(upstreamUrl) ?? PackageRegistryDefaults.Npm;
         using var response = await Client().GetAsync($"{origin}/{Uri.EscapeDataString(name)}", ct).ConfigureAwait(false);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return new PackageResolveResult(PackageResolveOutcome.NotFound, null, null);
-        response.EnsureSuccessStatusCode();
+        if (TryGetEarlyResult(response, out var earlyResult)) return earlyResult;
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
         var root = doc.RootElement;
@@ -95,9 +92,7 @@ public sealed class PackageVersionResolver(IHttpClientFactory httpClientFactory,
         // {base}/pypi/{name}/json -> { "info": { "version": v }, "releases": { v: [ { "upload_time_iso_8601" } ] } }.
         var origin = ResolveOrigin(upstreamUrl) ?? PackageRegistryDefaults.PyPi;
         using var response = await Client().GetAsync($"{origin}/pypi/{Uri.EscapeDataString(name)}/json", ct).ConfigureAwait(false);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return new PackageResolveResult(PackageResolveOutcome.NotFound, null, null);
-        response.EnsureSuccessStatusCode();
+        if (TryGetEarlyResult(response, out var earlyResult)) return earlyResult;
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
         var root = doc.RootElement;
@@ -112,6 +107,37 @@ public sealed class PackageVersionResolver(IHttpClientFactory httpClientFactory,
             published = dt.ToUniversalTime();
 
         return new PackageResolveResult(PackageResolveOutcome.Resolved, latest, published);
+    }
+
+    private bool TryGetEarlyResult(
+        HttpResponseMessage response,
+        out PackageResolveResult result)
+    {
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        {
+            result = RateLimited(response);
+            return true;
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            result = new PackageResolveResult(PackageResolveOutcome.NotFound, null, null);
+            return true;
+        }
+
+        response.EnsureSuccessStatusCode();
+        result = default!;
+        return false;
+    }
+
+    private PackageResolveResult RateLimited(HttpResponseMessage response)
+    {
+        var retry = response.Headers.RetryAfter?.Delta;
+        if (retry is null && response.Headers.RetryAfter?.Date is { } retryAt)
+            retry = retryAt - timeProvider.GetUtcNow();
+        if (retry <= TimeSpan.Zero)
+            retry = null;
+        return new PackageResolveResult(PackageResolveOutcome.RateLimited, null, null, retry);
     }
 
     private static string? ResolveOrigin(string? url)

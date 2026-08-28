@@ -7,7 +7,7 @@ using Aetheus.Shared.Enums;
 namespace Aetheus.Back.IntegrationTests;
 
 /// <summary>
-/// End-to-end exercise of the Personal Access Token auth path (PLAN-006 4.5) through the REAL HTTP
+/// End-to-end exercise of the Personal Access Token auth path (ADR-024 4.5) through the REAL HTTP
 /// pipeline backed by PostgreSQL: a PAT presented as <c>Authorization: Bearer aeth_pat_...</c> is
 /// forwarded from the JWT scheme, resolves to the owner's live identity, and is bounded by scope,
 /// RBAC, and revocation - none of which the InMemory unit suite can prove (no real forwarding,

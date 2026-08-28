@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Configuration;
 

@@ -21,7 +21,7 @@
             <RadzenStack AlignItems="AlignItems.Center" class="rz-mt-4" Gap="0.75rem">
                 @if (!ManualReconnecting)
                 {
-                    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+                    <AetheusLoader Centered="false" />
                 }
                 <RadzenButton Text="@L["ManualReconnect"]" Icon="refresh" Size="ButtonSize.Small" Click="@OnManualReconnect"
                               IsBusy="@ManualReconnecting" Disabled="@ManualReconnecting" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />

@@ -184,7 +184,7 @@ public class AddAgentTests : BunitContext
     }
 
     [Fact]
-    public async Task CopyTokenAsync_WithNullToken_DoesNothing()
+    public async Task CopyTokenAsync_WithNullToken_LeavesTheFlagOff()
     {
         var cut = Render<AddAgent>();
         typeof(AddAgent).GetField("_generatedToken", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, null);

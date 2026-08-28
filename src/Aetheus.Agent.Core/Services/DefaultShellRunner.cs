@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
-using Aetheus.Agent.Core.Configuration;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Agent.Core.Services;
@@ -23,23 +23,7 @@ public sealed class DefaultShellRunner(ILogger<DefaultShellRunner> logger) : ISh
         psi.ArgumentList.Add(isWindows ? "/c" : "-c");
         psi.ArgumentList.Add(command);
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(timeout ?? AgentRuntimeDefaults.ShellCommandTimeout);
-
-        using var process = Process.Start(psi)!;
-        try
-        {
-            // Drain stdout and stderr concurrently to avoid blocking when stderr buffer fills.
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-            await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync(timeoutCts.Token)).ConfigureAwait(false);
-            return await stdoutTask.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            KillTree(process);
-            throw;
-        }
+        return await RunForOutputAsync(psi, null, ct, timeout).ConfigureAwait(false);
     }
 
     public async Task<string> RunWithStdinAsync(string fileName, IReadOnlyList<string> args, string stdin, CancellationToken ct, TimeSpan? timeout = null)
@@ -61,18 +45,34 @@ public sealed class DefaultShellRunner(ILogger<DefaultShellRunner> logger) : ISh
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
+        return await RunForOutputAsync(psi, stdin, ct, timeout).ConfigureAwait(false);
+    }
+
+    private static async Task<string> RunForOutputAsync(
+        ProcessStartInfo psi,
+        string? standardInput,
+        CancellationToken ct,
+        TimeSpan? timeout)
+    {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout ?? AgentRuntimeDefaults.ShellCommandTimeout);
 
         using var process = Process.Start(psi)!;
         try
         {
-            await process.StandardInput.WriteAsync(stdin.AsMemory(), timeoutCts.Token).ConfigureAwait(false);
-            process.StandardInput.Close();
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(
+                    standardInput.AsMemory(), timeoutCts.Token).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
             var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-            await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync(timeoutCts.Token)).ConfigureAwait(false);
+            await Task.WhenAll(
+                stdoutTask,
+                stderrTask,
+                process.WaitForExitAsync(timeoutCts.Token)).ConfigureAwait(false);
             return await stdoutTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -83,6 +83,32 @@ public sealed class DefaultShellRunner(ILogger<DefaultShellRunner> logger) : ISh
     }
 
     public async Task<ShellExecResult> RunExecAsync(string fileName, IReadOnlyList<string> args, CancellationToken ct, TimeSpan? timeout = null)
+        => await RunExecCoreAsync(
+            fileName, args, null, null, inheritEnvironment: true, null, ct, timeout).ConfigureAwait(false);
+
+    public async Task<ShellExecResult> RunExecAsync(
+        string fileName,
+        IReadOnlyList<string> args,
+        IReadOnlyDictionary<string, string> environmentVariables,
+        string workingDirectory,
+        bool inheritEnvironment,
+        int maxCapturedOutputBytes,
+        CancellationToken ct,
+        TimeSpan? timeout = null)
+        => await RunExecCoreAsync(
+            fileName, args, environmentVariables, workingDirectory, inheritEnvironment,
+            maxCapturedOutputBytes, ct, timeout)
+            .ConfigureAwait(false);
+
+    private async Task<ShellExecResult> RunExecCoreAsync(
+        string fileName,
+        IReadOnlyList<string> args,
+        IReadOnlyDictionary<string, string>? environmentVariables,
+        string? workingDirectory,
+        bool inheritEnvironment,
+        int? maxCapturedOutputBytes,
+        CancellationToken ct,
+        TimeSpan? timeout)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentNullException.ThrowIfNull(args);
@@ -95,6 +121,23 @@ public sealed class DefaultShellRunner(ILogger<DefaultShellRunner> logger) : ISh
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        if (!string.IsNullOrWhiteSpace(workingDirectory))
+            psi.WorkingDirectory = workingDirectory;
+        if (!inheritEnvironment)
+        {
+            psi.Environment.Clear();
+            foreach (var key in RuntimeEnvironmentAllowList)
+            {
+                var value = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrEmpty(value))
+                    psi.Environment[key] = value;
+            }
+        }
+        if (environmentVariables is not null)
+        {
+            foreach (var variable in environmentVariables)
+                psi.Environment[variable.Key] = variable.Value;
+        }
         // ArgumentList escapes each argument independently - no shell, no interpolation.
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
@@ -105,14 +148,20 @@ public sealed class DefaultShellRunner(ILogger<DefaultShellRunner> logger) : ISh
         using var process = Process.Start(psi)!;
         string stdout;
         string stderr;
+        bool truncated;
         try
         {
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+            var stdoutTask = ReadOutputAsync(
+                process.StandardOutput, maxCapturedOutputBytes, timeoutCts.Token);
+            var stderrTask = ReadOutputAsync(
+                process.StandardError, maxCapturedOutputBytes, timeoutCts.Token);
             await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync(timeoutCts.Token)).ConfigureAwait(false);
 
-            stdout = await stdoutTask.ConfigureAwait(false);
-            stderr = await stderrTask.ConfigureAwait(false);
+            var capturedStdout = await stdoutTask.ConfigureAwait(false);
+            var capturedStderr = await stderrTask.ConfigureAwait(false);
+            stdout = capturedStdout.Value;
+            stderr = capturedStderr.Value;
+            truncated = capturedStdout.Truncated || capturedStderr.Truncated;
         }
         catch (OperationCanceledException)
         {
@@ -128,8 +177,57 @@ public sealed class DefaultShellRunner(ILogger<DefaultShellRunner> logger) : ISh
             logger.LogDebug("Exec '{File}' exited {Exit}; stderr: {Stderr}", fileName, process.ExitCode, snippet.Trim());
         }
 
-        return new ShellExecResult(process.ExitCode, stdout, stderr);
+        return new ShellExecResult(process.ExitCode, stdout, stderr, truncated);
     }
+
+    private static async Task<CapturedOutput> ReadOutputAsync(
+        StreamReader reader,
+        int? maxCapturedOutputBytes,
+        CancellationToken ct)
+    {
+        if (maxCapturedOutputBytes is null)
+            return new CapturedOutput(await reader.ReadToEndAsync(ct).ConfigureAwait(false), false);
+
+        var maximum = Math.Max(1, maxCapturedOutputBytes.Value);
+        var retained = new StringBuilder(Math.Min(maximum, 8192));
+        var buffer = new char[4096];
+        var truncated = false;
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
+            if (read == 0) break;
+            var remainingCharacters = maximum - retained.Length;
+            if (remainingCharacters > 0)
+                retained.Append(buffer, 0, Math.Min(read, remainingCharacters));
+            if (read > remainingCharacters)
+                truncated = true;
+        }
+
+        var value = retained.ToString();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        if (bytes.Length > maximum)
+        {
+            value = System.Text.Encoding.UTF8.GetString(bytes.AsSpan(0, maximum));
+            truncated = true;
+        }
+        return new CapturedOutput(value, truncated);
+    }
+
+    private static readonly string[] RuntimeEnvironmentAllowList =
+    [
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "ComSpec",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE"
+    ];
+
+    private readonly record struct CapturedOutput(string Value, bool Truncated);
 
     // A cancelled/timed-out run must not orphan the child: a stuck docker/systemctl/tar
     // would otherwise outlive `using process` and accumulate on the host.

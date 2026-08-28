@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
 using System.Text;
-using Aetheus.Back.Components.Audit;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 
@@ -40,84 +34,94 @@ public class AuthService(
 
     public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
-        // Try DB user first. Username is case- and surrounding-whitespace-insensitive (see
-        // NormalizeLoginName): "Admin", "ADMIN", " admin " all resolve to the stored "admin".
-        var user = await repo.FindUserWithRolesAsync(NormalizeLoginName(request.Username), ct).ConfigureAwait(false);
-        if (user is not null)
+        User? user = null;
+        try
         {
-            // F-011: check lockout before password verification
-            var now = timeProvider.GetUtcNow().UtcDateTime;
-            if (user.LockoutEndUtc is not null && user.LockoutEndUtc > now)
-                return null; // Still locked out - return same response as invalid credentials
-
-            if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            // Inactive users are deliberately returned here so their rejected attempts remain
+            // distinguishable in the append-only audit trail. Every other auth path still checks
+            // IsActive before issuing access.
+            user = await repo.FindUserWithRolesAsync(NormalizeLoginName(request.Username), ct).ConfigureAwait(false);
+            if (user is not null)
             {
-                await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
-                return null;
+                if (!user.IsActive)
+                {
+                    await LoginAuditRecorder.RecordFailureAsync(audit, httpContextAccessor, "Inactive", user, request.Username, ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                return await LoginDatabaseUserAsync(user, request, ct).ConfigureAwait(false);
             }
 
-            // F-010: TOTP check - if enabled, require a valid code or recovery code
-            if (user.TotpEnabled)
-            {
-                if (string.IsNullOrEmpty(request.TotpCode) && string.IsNullOrEmpty(request.RecoveryCode))
-                    return new LoginResponse { TotpRequired = true };
-
-                if (!string.IsNullOrEmpty(request.TotpCode))
-                {
-                    if (!totpService.ValidateTotpCode(user.TotpSecret!, request.TotpCode))
-                    {
-                        await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
-                        return null;
-                    }
-                }
-                else if (!string.IsNullOrEmpty(request.RecoveryCode))
-                {
-                    if (!await totpService.ConsumeRecoveryCodeAsync(user.Id, request.RecoveryCode, ct).ConfigureAwait(false))
-                    {
-                        await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
-                        return null;
-                    }
-                }
-            }
-
-            // Successful login - reset lockout counters
-            if (user.FailedLoginCount > 0 || user.LockoutEndUtc is not null)
-                await repo.ResetFailedLoginAsync(user.Id, ct).ConfigureAwait(false);
-
-            // F-013: login anomaly detection - log IP/UA and flag new IPs
-            await DetectLoginAnomalyAsync(user.Username, user.Id, ct).ConfigureAwait(false);
-
-            var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-            var claims = BuildUserClaims(user, roles);
-            var response = await GenerateTokenResponseWithRefreshAsync(claims, user.Id, request.RememberMe, ct).ConfigureAwait(false);
-            return response with { MustChangePassword = user.MustChangePassword };
+            var bootstrap = await LoginBootstrapAsync(request, ct).ConfigureAwait(false);
+            if (bootstrap is null)
+                await LoginAuditRecorder.RecordFailureAsync(audit, httpContextAccessor, "InvalidCredentials", null, request.Username, ct).ConfigureAwait(false);
+            return bootstrap;
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Interactive login failed unexpectedly for {Username}", LoginAuditRecorder.Sanitize(request.Username, 100));
+            await LoginAuditRecorder.RecordFailureAsync(audit, httpContextAccessor, "Error", user, request.Username, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
 
-        // Fallback: config-based admin only when no DB users exist.
-        // In non-Development environments we refuse to authenticate via this fallback unless an
-        // explicit, non-default Auth:AdminPassword has been configured - prevents the well-known
-        // admin/admin pair from ever working in production.
+    private async Task<LoginResponse?> LoginDatabaseUserAsync(
+        User user,
+        LoginRequest request,
+        CancellationToken ct)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        if (user.LockoutEndUtc is not null && user.LockoutEndUtc > now)
+        {
+            await LoginAuditRecorder.RecordFailureAsync(audit, httpContextAccessor, "LockedOut", user, request.Username, ct).ConfigureAwait(false);
+            return null;
+        }
+        if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        {
+            await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
+            await LoginAuditRecorder.RecordFailureAsync(audit, httpContextAccessor, "InvalidCredentials", user, request.Username, ct).ConfigureAwait(false);
+            return null;
+        }
+        var (secondFactorValid, challenge) = await ValidateSecondFactorAsync(user, request, ct).ConfigureAwait(false);
+        if (!secondFactorValid) return challenge;
+        if (user.FailedLoginCount > 0 || user.LockoutEndUtc is not null)
+            await repo.ResetFailedLoginAsync(user.Id, ct).ConfigureAwait(false);
+        await DetectLoginAnomalyAsync(user.Username, user.Id, ct).ConfigureAwait(false);
+        var roles = user.UserRoles.Select(item => item.Role.Name).ToList();
+        var claims = BuildUserClaims(user, roles);
+        var response = await GenerateTokenResponseWithRefreshAsync(
+            claims, user.Id, request.RememberMe, ct).ConfigureAwait(false);
+        return response with { MustChangePassword = user.MustChangePassword };
+    }
+
+    private async Task<(bool IsValid, LoginResponse? Challenge)> ValidateSecondFactorAsync(
+        User user,
+        LoginRequest request,
+        CancellationToken ct)
+    {
+        if (!user.TotpEnabled) return (true, null);
+        if (string.IsNullOrEmpty(request.TotpCode) && string.IsNullOrEmpty(request.RecoveryCode))
+            return (false, new LoginResponse { TotpRequired = true });
+        var accepted = !string.IsNullOrEmpty(request.TotpCode)
+            ? totpService.ValidateTotpCode(user.TotpSecret!, request.TotpCode)
+            : await totpService.ConsumeRecoveryCodeAsync(user.Id, request.RecoveryCode!, ct).ConfigureAwait(false);
+        if (accepted) return (true, null);
+        await HandleFailedLoginAsync(user, ct).ConfigureAwait(false);
+        await LoginAuditRecorder.RecordFailureAsync(audit, httpContextAccessor, "InvalidSecondFactor", user, request.Username, ct).ConfigureAwait(false);
+        return (false, null);
+    }
+
+    private async Task<LoginResponse?> LoginBootstrapAsync(LoginRequest request, CancellationToken ct)
+    {
         var hasDbUsers = await repo.AnyUsersExistAsync(ct).ConfigureAwait(false);
-        if (hasDbUsers) return null;
+        var match = BootstrapCredentialPolicy.Match(request, config, timeProvider, hasDbUsers);
+        return match is null ? null : BuildBootstrapResponse(request, match.ExpiresAt);
+    }
 
-        var adminUser = config["Auth:AdminUser"] ?? "admin";
-        var adminPass = config["Auth:AdminPassword"];
 
-        if (string.IsNullOrEmpty(adminPass))
-            return null;
-
-        // Bitwise AND so both comparisons always run - no timing oracle.
-        var lengthSafeUser = PadOrTrim(request.Username, adminUser.Length);
-        var lengthSafePass = PadOrTrim(request.Password, adminPass.Length);
-        var userOk = CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(lengthSafeUser),
-            Encoding.UTF8.GetBytes(adminUser));
-        var passOk = CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(lengthSafePass),
-            Encoding.UTF8.GetBytes(adminPass));
-        if (!(userOk & passOk))
-            return null;
-
+    private LoginResponse BuildBootstrapResponse(LoginRequest request, DateTimeOffset? expiresAt)
+    {
         // Bootstrap admin does not support TOTP or refresh tokens - short-lived JWT only.
         var bootstrapStamp = config["Auth:BootstrapStamp"] ?? "bootstrap";
         return GenerateTokenResponse([
@@ -125,7 +129,7 @@ public class AuthService(
             new Claim(ClaimTypes.NameIdentifier, "bootstrap"),
             new Claim(AetheusClaimTypes.SecurityStamp, bootstrapStamp),
             new Claim(ClaimTypes.Role, "Admin")
-        ], request.RememberMe);
+        ], request.RememberMe, expiresAt?.UtcDateTime);
     }
 
     // --- Lockout helpers (F-011) ---
@@ -150,9 +154,7 @@ public class AuthService(
 
     private async Task DetectLoginAnomalyAsync(string username, int userId, CancellationToken ct)
     {
-        var httpContext = httpContextAccessor.HttpContext;
-        var clientIp = httpContext?.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        var userAgent = SanitizeUserAgent(httpContext?.Request.Headers.UserAgent.ToString());
+        var (clientIp, userAgent) = LoginAuditRecorder.GetClientContext(httpContextAccessor);
 
         // Check if this IP was seen in recent logins for this user. Null-safe: login must never
         // break because anomaly logging couldn't read history (the pattern handles a null result).
@@ -167,14 +169,6 @@ public class AuthService(
 
         // Always log the successful login with IP/UA for future anomaly checks
         await audit.LogAsync("Login", "User", userId, $"IP: {clientIp}, UA: {userAgent}", ct).ConfigureAwait(false);
-    }
-
-    // Strip CR/LF and control characters and truncate to prevent audit-log injection via crafted User-Agent.
-    private static string SanitizeUserAgent(string? userAgent)
-    {
-        if (string.IsNullOrEmpty(userAgent)) return "unknown";
-        var cleaned = new string(userAgent.Where(c => !char.IsControl(c)).ToArray());
-        return cleaned.Length > 200 ? cleaned[..200] : cleaned;
     }
 
     public async Task<bool> UnlockUserAsync(int userId, CancellationToken ct = default)
@@ -203,12 +197,17 @@ public class AuthService(
         return claims;
     }
 
-    private LoginResponse GenerateTokenResponse(List<Claim> claims, bool rememberMe = false)
+    private LoginResponse GenerateTokenResponse(
+        List<Claim> claims,
+        bool rememberMe = false,
+        DateTime? notAfterUtc = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var lifetime = rememberMe ? jwtOptions.RememberMeLifetime : jwtOptions.DefaultLifetime;
         var expiration = timeProvider.GetUtcNow().UtcDateTime.Add(lifetime);
+        if (notAfterUtc is not null && notAfterUtc.Value < expiration)
+            expiration = notAfterUtc.Value;
 
         var token = new JwtSecurityToken(
             issuer: jwtOptions.Issuer,
@@ -561,7 +560,7 @@ public class AuthService(
     {
         // Same case-insensitivity as LoginAsync (git CLI users type their username by hand).
         var user = await repo.FindUserWithRolesAsync(NormalizeLoginName(username), ct).ConfigureAwait(false);
-        if (user is null) return false;
+        if (user is null || !user.IsActive) return false;
 
         if (user.LockoutEndUtc.HasValue && user.LockoutEndUtc.Value > timeProvider.GetUtcNow().UtcDateTime)
             return false;
@@ -589,10 +588,4 @@ public class AuthService(
 
     private string HashToken(string token) => AuthTokenHelper.HashToken(jwtOptions.SigningKey, token);
 
-    private static string PadOrTrim(string input, int targetLength)
-    {
-        input ??= string.Empty;
-        if (input.Length == targetLength) return input;
-        return input.PadRight(targetLength, '\0');
-    }
 }

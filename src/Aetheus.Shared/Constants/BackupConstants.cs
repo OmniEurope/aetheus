@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 namespace Aetheus.Shared.Constants;
 
-/// <summary>Env-var contract for the backup operations (PLAN-006 4.3). The DB password rides in a
+/// <summary>Env-var contract for the backup operations (ADR-024 4.3). The DB password rides in a
 /// protected (encrypted) env var, off the process list, never interpolated into a shell.</summary>
 public static class BackupConstants
 {

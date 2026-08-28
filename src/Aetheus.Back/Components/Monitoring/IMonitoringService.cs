@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Monitoring;
 
@@ -14,5 +13,10 @@ public interface IMonitoringService
         List<int>? accessibleProjectIds,
         List<int>? accessiblePipelineIds,
         CancellationToken ct);
-    Task<List<ServerMetricDto>> GetServerMetricsAsync(int serverId, int hours, CancellationToken ct = default);
+    Task<List<ServerMetricDto>> GetServerMetricsAsync(
+        int serverId,
+        int hours,
+        CancellationToken ct = default,
+        DateTime? afterUtc = null,
+        int take = 1_000);
 }

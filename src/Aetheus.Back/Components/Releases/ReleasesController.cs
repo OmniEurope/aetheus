@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Aetheus.Back.Components.Releases;
@@ -18,6 +13,30 @@ public class ReleasesController(
     IConfiguration configuration,
     IPipelineRunService pipelineRunService) : ControllerBase
 {
+    /// <summary>
+    /// Releases of every project a server is involved in.
+    ///
+    /// Relocated from ServersController with its route unchanged: the endpoint is published as
+    /// <c>api/servers/{serverId}/releases</c> and the frontend calls it by that path, so moving the
+    /// controller must not move the URL. The authorization is still the SERVER's Read permission -
+    /// the resource being scoped is the server, whatever module now serves the request.
+    ///
+    /// A360-18: this was the only list endpoint of the module that returned an unbounded list, on a
+    /// table built for long retention. It is paginated now, like every other list route. The response
+    /// shape changed from List to PaginatedResult, and its single consumer (the front's ReleasesList in
+    /// server scope) moved with it - there is no other caller, so no compatibility route is kept for a
+    /// shape nobody else reads.
+    /// </summary>
+    [HttpGet("/api/servers/{serverId:int}/releases")]
+    public async Task<ActionResult<PaginatedResult<ReleaseDto>>> GetServerReleases(
+        int serverId, [FromQuery] PaginationRequest request, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await service.GetServerReleasesAsync(serverId, request, ct));
+    }
+
     [HttpGet]
     public async Task<ActionResult<PaginatedResult<ReleaseDto>>> GetReleases(
         [FromQuery] int? projectId, [FromQuery] PaginationRequest request, CancellationToken ct)

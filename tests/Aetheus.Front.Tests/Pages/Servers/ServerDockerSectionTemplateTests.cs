@@ -201,11 +201,12 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task InspectPanel_StateSetViaMethod()
     {
         var cut = RenderDockerSection(5);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("RequestInspectAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        var method = typeof(DockerContainersTab).GetMethod("RequestInspectAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
-        var inspectId = (string?)typeof(ServerDockerSection).GetField("_inspectContainerId", BF)!.GetValue(cut.Instance);
+        var inspectId = (string?)typeof(DockerContainersTab).GetField("_inspectContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", inspectId);
     }
 
@@ -215,9 +216,10 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task InspectContent_SetViaTaskCompleted()
     {
         var cut = RenderDockerSection(6);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("RequestInspectAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        var method = typeof(DockerContainersTab).GetMethod("RequestInspectAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -228,7 +230,7 @@ public class ServerDockerSectionTemplateTests : BunitContext
             Output = "{\"Id\": \"abc123\"}"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_inspectContent", BF)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_inspectContent", BF)!.GetValue(tab.Instance);
         Assert.NotNull(content);
     }
 
@@ -238,11 +240,12 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task ShellPanel_StateSetViaOpenShell()
     {
         var cut = RenderDockerSection(7);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenShell", BF)!;
-        await cut.InvokeAsync(() => method.Invoke(cut.Instance, ["abc123def456ghi", "nginx"]));
+        var method = typeof(DockerContainersTab).GetMethod("OpenShell", BF)!;
+        await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"]));
 
-        var shellId = (string?)typeof(ServerDockerSection).GetField("_shellContainerId", BF)!.GetValue(cut.Instance);
+        var shellId = (string?)typeof(DockerContainersTab).GetField("_shellContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", shellId);
     }
 
@@ -252,11 +255,12 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task EnvVarsPanel_StateSetViaMethod()
     {
         var cut = RenderDockerSection(8);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("RequestEnvVarsAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "nginx"])!);
+        var method = typeof(DockerContainersTab).GetMethod("RequestEnvVarsAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"])!);
 
-        var envId = (string?)typeof(ServerDockerSection).GetField("_envContainerId", BF)!.GetValue(cut.Instance);
+        var envId = (string?)typeof(DockerContainersTab).GetField("_envContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", envId);
     }
 
@@ -266,9 +270,10 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task EnvContent_SetViaTaskCompleted()
     {
         var cut = RenderDockerSection(9);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("RequestEnvVarsAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "nginx"])!);
+        var method = typeof(DockerContainersTab).GetMethod("RequestEnvVarsAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"])!);
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -279,7 +284,7 @@ public class ServerDockerSectionTemplateTests : BunitContext
             Output = "[\"PATH=/usr/bin\",\"HOME=/root\"]"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_envContent", BF)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_envContent", BF)!.GetValue(tab.Instance);
         Assert.NotNull(content);
     }
 
@@ -289,10 +294,11 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task ConfirmRemoveContainer_OpensConfirmationDialog()
     {
         var cut = RenderDockerSection(10);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("ConfirmRemoveContainerAsync", BF)!;
+        var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", BF)!;
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "nginx"])!);
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"])!);
 
         Assert.Equal(1, dialog.OpenCount);
         Assert.Equal("RemoveContainerConfirm", dialog.LastConfirmMessage);
@@ -305,10 +311,11 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task LimitsDialog_OpenedViaMethod_PassesContainerId()
     {
         var cut = RenderDockerSection(11);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenResourceLimitsDialog", BF)!;
+        var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BF)!;
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
         Assert.Equal("abc123def456ghi", dialog.LastParameters!["ContainerId"]);
     }
@@ -322,13 +329,13 @@ public class ServerDockerSectionTemplateTests : BunitContext
             HttpMethod.Get,
             "api/servers/12/docker/compose/webapp-stack/file",
             System.Net.HttpStatusCode.OK);
-        var cut = RenderDockerSection(12);
+        var cut = RenderDockerSection(12).FindComponent<DockerComposeTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenComposeEditorAsync", BF)!;
+        var method = typeof(DockerComposeTab).GetMethod("OpenComposeEditorAsync", BF)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["webapp-stack"])!);
 
-        var visible = (bool)typeof(ServerDockerSection).GetField("_composeEditorVisible", BF)!.GetValue(cut.Instance)!;
-        var stack = (string?)typeof(ServerDockerSection).GetField("_composeEditorStack", BF)!.GetValue(cut.Instance);
+        var visible = (bool)typeof(DockerComposeTab).GetField("_composeEditorVisible", BF)!.GetValue(cut.Instance)!;
+        var stack = (string?)typeof(DockerComposeTab).GetField("_composeEditorStack", BF)!.GetValue(cut.Instance);
         Assert.True(visible);
         Assert.Equal("webapp-stack", stack);
     }
@@ -343,9 +350,10 @@ public class ServerDockerSectionTemplateTests : BunitContext
             "api/servers/13/docker/compose/webapp-stack/file",
             System.Net.HttpStatusCode.OK);
         var cut = RenderDockerSection(13);
+        var composeTab = cut.FindComponent<DockerComposeTab>();
 
-        var openMethod = typeof(ServerDockerSection).GetMethod("OpenComposeEditorAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)openMethod.Invoke(cut.Instance, ["webapp-stack"])!);
+        var openMethod = typeof(DockerComposeTab).GetMethod("OpenComposeEditorAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)openMethod.Invoke(composeTab.Instance, ["webapp-stack"])!);
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -356,7 +364,7 @@ public class ServerDockerSectionTemplateTests : BunitContext
             Output = "version: '3'\nservices:\n  web:\n    image: nginx"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_composeEditorContent", BF)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerComposeTab).GetField("_composeEditorContent", BF)!.GetValue(composeTab.Instance);
         Assert.NotNull(content);
         Assert.Contains("nginx", content!);
     }
@@ -367,11 +375,12 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task LogsPanel_StateSetViaToggle()
     {
         var cut = RenderDockerSection(14);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("ToggleLogsAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        var method = typeof(DockerContainersTab).GetMethod("ToggleLogsAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
-        var logsId = (string?)typeof(ServerDockerSection).GetField("_logsContainerId", BF)!.GetValue(cut.Instance);
+        var logsId = (string?)typeof(DockerContainersTab).GetField("_logsContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", logsId);
     }
 
@@ -382,11 +391,12 @@ public class ServerDockerSectionTemplateTests : BunitContext
     {
         _handler.SetJsonResponse("api/servers/15/docker/containers/logs", "log output here");
         var cut = RenderDockerSection(15);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("ToggleLogsAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi"])!);
+        var method = typeof(DockerContainersTab).GetMethod("ToggleLogsAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_logsContent", BF)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_logsContent", BF)!.GetValue(tab.Instance);
         Assert.NotNull(content);
     }
 
@@ -396,11 +406,12 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task BrowsePanel_StateSetViaOpenFileBrowser()
     {
         var cut = RenderDockerSection(16);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenFileBrowserAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "nginx"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenFileBrowserAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"])!);
 
-        var browseId = (string?)typeof(ServerDockerSection).GetField("_browseContainerId", BF)!.GetValue(cut.Instance);
+        var browseId = (string?)typeof(DockerContainersTab).GetField("_browseContainerId", BF)!.GetValue(tab.Instance);
         Assert.Equal("abc123def456ghi", browseId);
     }
 
@@ -410,9 +421,10 @@ public class ServerDockerSectionTemplateTests : BunitContext
     public async Task BrowseContent_SetViaTaskCompleted()
     {
         var cut = RenderDockerSection(17);
+        var tab = cut.FindComponent<DockerContainersTab>();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenFileBrowserAsync", BF)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["abc123def456ghi", "nginx"])!);
+        var method = typeof(DockerContainersTab).GetMethod("OpenFileBrowserAsync", BF)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"])!);
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -423,7 +435,7 @@ public class ServerDockerSectionTemplateTests : BunitContext
             Output = "bin  etc  usr"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_browseContent", BF)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_browseContent", BF)!.GetValue(tab.Instance);
         Assert.Equal("bin  etc  usr", content);
     }
 }

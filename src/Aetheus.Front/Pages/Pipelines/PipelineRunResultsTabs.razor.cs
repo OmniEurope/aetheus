@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -15,6 +11,7 @@ public partial class PipelineRunResultsTabs
     [Parameter, EditorRequired] public IReadOnlyDictionary<int, List<TaskLogDto>> StepLogs { get; set; } = default!;
     [Parameter, EditorRequired] public IReadOnlyList<PipelineStepRunDto> LintSteps { get; set; } = default!;
     [Parameter] public bool HasLintTab { get; set; }
+    [Parameter] public EventCallback<PipelineArtifactDto> ArtifactDownloadRequested { get; set; }
     [Parameter] public EventCallback<int> CoverageLogsRequested { get; set; }
     [Parameter] public EventCallback<int> LintLogsRequested { get; set; }
 

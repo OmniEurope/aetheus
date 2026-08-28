@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Dashboard;
 
@@ -22,6 +13,7 @@ public partial class Home : IAsyncDisposable
     [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private ListCacheService Cache { get; set; } = default!;
+    [Inject] private TaskTrackerService TaskTracker { get; set; } = default!;
 
     private DashboardOverviewDto? _dashboard;
     private AppMonitoringSummaryDto? _appSummary;
@@ -36,7 +28,7 @@ public partial class Home : IAsyncDisposable
     // payload for every notification.
     private readonly TrailingReloadCoalescer _dashboardCoalescer = new(1000);
 
-    // PLAN-001: app-status changes broadcast a Project "Updated" on the entities hub. Coalesce the burst
+    // ADR-021: app-status changes broadcast a Project "Updated" on the entities hub. Coalesce the burst
     // (many apps flipping at once) into one trailing reload of the monitoring tile.
     private readonly TrailingReloadCoalescer _appSummaryCoalescer = new(2000);
     private const string DashboardCacheKey = "dashboard:overview";
@@ -65,13 +57,19 @@ public partial class Home : IAsyncDisposable
         }
 
         Permissions.OnPermissionsChanged += OnPermissionsChanged;
+        TaskTracker.OnChanged += OnTrackedTasksChanged;
+
+        // A user without any readable dashboard resource gets the empty state without leaking
+        // aggregate counts or opening realtime subscriptions for data they cannot access.
+        if (Permissions.IsLoaded && !CanViewDashboard)
+            return;
 
         Cache.Seed<DashboardOverviewDto>(DashboardCacheKey, value => _dashboard = value);
         Cache.Seed<AppMonitoringSummaryDto>(AppSummaryCacheKey, value => _appSummary = value);
 
         try
         {
-            _dashboard = await Api.GetDashboardAsync();
+            _dashboard = await Api.Monitoring.GetDashboardAsync();
             if (_dashboard is not null) Cache.Set(DashboardCacheKey, _dashboard);
         }
         catch (HttpRequestException ex)
@@ -82,7 +80,7 @@ public partial class Home : IAsyncDisposable
 
         try
         {
-            _appSummary = await Api.GetAppMonitoringSummaryAsync();
+            _appSummary = await Api.Monitoring.GetAppMonitoringSummaryAsync();
             if (_appSummary is not null) Cache.Set(AppSummaryCacheKey, _appSummary);
         }
         catch (HttpRequestException ex)
@@ -94,6 +92,12 @@ public partial class Home : IAsyncDisposable
     }
 
     private void OnPermissionsChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnTrackedTasksChanged()
+    {
+        if (Auth.IsAdmin)
+            _ = _dashboardCoalescer.RequestAsync(ReloadAsync, _lifetimeCts.Token);
+    }
 
     // Keep the dashboard cards and grids fresh: server lifecycle/heartbeat changes the
     // online/offline counts, pipeline run events change "recent runs". Best-effort - a hub
@@ -155,7 +159,7 @@ public partial class Home : IAsyncDisposable
     {
         try
         {
-            _appSummary = await Api.GetAppMonitoringSummaryAsync();
+            _appSummary = await Api.Monitoring.GetAppMonitoringSummaryAsync();
             if (_appSummary is not null) Cache.Set(AppSummaryCacheKey, _appSummary);
         }
         catch (HttpRequestException) { /* hub-triggered reload - silent on auth failure */ }
@@ -173,7 +177,7 @@ public partial class Home : IAsyncDisposable
         {
             try
             {
-                _dashboard = await Api.GetDashboardAsync();
+                _dashboard = await Api.Monitoring.GetDashboardAsync();
                 if (_dashboard is not null) Cache.Set(DashboardCacheKey, _dashboard);
             }
             catch (HttpRequestException) { /* hub-triggered reload - silent on auth failure */ }
@@ -196,6 +200,7 @@ public partial class Home : IAsyncDisposable
     {
         _lifetimeCts.Cancel();
         Permissions.OnPermissionsChanged -= OnPermissionsChanged;
+        TaskTracker.OnChanged -= OnTrackedTasksChanged;
         if (_serversHub is not null)
         {
             try { await _serversHub.InvokeAsync("LeaveAllServers"); } catch { /* best-effort */ }

@@ -78,14 +78,5 @@ public class ManageablePackagesSudoersAuditTests
             Assert.Contains(Cmnd(PackageOperationExecutor.BuildAptArgv("remove", pkg)), block, StringComparison.Ordinal);
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(ManageablePackagesSudoersAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

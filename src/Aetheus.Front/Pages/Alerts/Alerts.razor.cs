@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Alerts;
 
@@ -31,7 +22,7 @@ public partial class Alerts : IAsyncDisposable
         Breadcrumb.Set(new BreadcrumbItem(L["Alerts"]));
         // Re-render when a new fired alert lands so the "Recent alerts" section stays live.
         AlertNotify.OnChange += OnRecentAlertsChanged;
-        try { _alerts = await Api.GetAlertRulesAsync(); }
+        try { _alerts = await Api.Monitoring.GetAlertRulesAsync(); }
         catch (HttpRequestException) { _alerts = []; }
         _loading = false;
         await ConnectToHub();
@@ -71,7 +62,7 @@ public partial class Alerts : IAsyncDisposable
 
     private async Task ReloadFromHubAsync()
     {
-        try { _alerts = await Api.GetAlertRulesAsync(); }
+        try { _alerts = await Api.Monitoring.GetAlertRulesAsync(); }
         catch (HttpRequestException) { /* hub-triggered reload - silent on auth failure */ }
         StateHasChanged();
     }
@@ -86,11 +77,11 @@ public partial class Alerts : IAsyncDisposable
         var result = await Dialog.OpenAsync<AlertEditDialog>(
             alert is null ? L["Create"] : L["Edit"],
             new Dictionary<string, object?> { ["Alert"] = alert },
-            new DialogOptions { Width = "720px", CloseDialogOnOverlayClick = true });
+            new DialogOptions { Width = "720px", CloseDialogOnOverlayClick = true, AutoFocusFirstElement = false });
 
         if (result is true)
         {
-            try { _alerts = await Api.GetAlertRulesAsync(); }
+            try { _alerts = await Api.Monitoring.GetAlertRulesAsync(); }
             catch (HttpRequestException) { /* expired JWT - redirect handled by AuthProvider */ }
             StateHasChanged();
         }
@@ -103,9 +94,9 @@ public partial class Alerts : IAsyncDisposable
         if (confirmed != true) return;
 
         await Ui.RunAsync(
-            () => Api.DeleteAlertRuleAsync(id),
+            () => Api.Monitoring.DeleteAlertRuleAsync(id),
             "Deleted",
-            async () => _alerts = await Api.GetAlertRulesAsync(),
+            async () => _alerts = await Api.Monitoring.GetAlertRulesAsync(),
             errorKey: "DeleteFailed",
             successTitleKey: "Deleted");
     }

@@ -65,4 +65,35 @@ public class GitLightMaintenanceServiceTests
 
         await cli.DidNotReceive().RunGcAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task RunMaintenanceAsync_ReconcilesDefaultBranchOutsideListRequest()
+    {
+        var (sut, lightRepo, cli, lightService) = BuildSut();
+        var diskPath = Path.Combine(Path.GetTempPath(), "aetheus-gitbranch-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(diskPath);
+        try
+        {
+            var repo = new GitInternalRepo
+            {
+                Id = 3,
+                ProjectId = 2,
+                Slug = "repo-3",
+                DefaultBranch = "main"
+            };
+            lightRepo.GetAllAsync(Arg.Any<CancellationToken>()).Returns([repo]);
+            lightService.ResolveDiskPath(2, "repo-3").Returns(diskPath);
+            cli.DetectDefaultBranchAsync(diskPath, Arg.Any<CancellationToken>())
+                .Returns("develop");
+
+            await sut.RunMaintenanceAsync(TestContext.Current.CancellationToken);
+
+            Assert.Equal("develop", repo.DefaultBranch);
+            await lightRepo.Received(1).SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Directory.Delete(diskPath, recursive: true);
+        }
+    }
 }

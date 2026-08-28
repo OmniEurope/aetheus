@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Text;
+using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Front.Helpers;
 
@@ -10,16 +10,5 @@ namespace Aetheus.Front.Helpers;
 /// </summary>
 public static class PipelineGitPath
 {
-    public static string ForPipeline(string name) => $".pipeline/{Slugify(name)}.yaml";
-
-    private static string Slugify(string name)
-    {
-        var sb = new StringBuilder(name.Length);
-        foreach (var ch in name.Trim().ToLowerInvariant())
-            sb.Append(char.IsLetterOrDigit(ch) ? ch : '-');
-        var slug = sb.ToString().Trim('-');
-        while (slug.Contains("--", StringComparison.Ordinal))
-            slug = slug.Replace("--", "-", StringComparison.Ordinal);
-        return string.IsNullOrEmpty(slug) ? "pipeline" : slug;
-    }
+    public static string ForPipeline(string name) => $".pipeline/{PipelineGitPathPolicy.Slugify(name)}.yaml";
 }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -20,9 +19,20 @@ public class Server
 
     public string IpAddress { get; set; } = string.Empty;
     public string AgentVersion { get; set; } = string.Empty;
+    public int? AgentProtocolVersion { get; set; }
+    [MaxLength(8192)]
+    public string? AgentCapabilitiesJson { get; set; }
+    public bool AgentUpdateReserved { get; set; }
+    public DateTime? AgentUpdateReservedAt { get; set; }
     public ServerStatus Status { get; set; } = ServerStatus.Offline;
     public ServerType Type { get; set; } = ServerType.Normal;
     public DateTime LastHeartbeat { get; set; }
+    /// <summary>Current agent process lifetime holding the exclusive polling lease.</summary>
+    public string? AgentSessionId { get; set; }
+    /// <summary>Monotone fencing token incremented whenever a different agent session acquires the lease.</summary>
+    public long AgentSessionFencingToken { get; set; }
+    /// <summary>UTC expiry of the current agent polling lease.</summary>
+    public DateTime? AgentSessionLeaseExpiresAt { get; set; }
     public string Tags { get; set; } = string.Empty; // JSON array
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -58,14 +68,14 @@ public class Server
     /// action the agent could not perform.</summary>
     public bool PackageManagementAvailable { get; set; }
 
-    /// <summary>PLAN-006 4.1: auto-detected agent capability - the patch-manage sudoers drop-in
+    /// <summary>ADR-024 4.1: auto-detected agent capability - the patch-manage sudoers drop-in
     /// (<c>/etc/sudoers.d/aetheus-patch</c>) is present, so the agent can APPLY pending OS updates via
     /// <c>apt-get upgrade</c> under the controlled-sudo recipe. Derived every heartbeat from the reported
     /// sudoers hashes (self-heals both ways); gates the Apply-updates API. Pending-update visibility does
     /// not require it (the dry-run probe is unprivileged).</summary>
     public bool PatchManagementAvailable { get; set; }
 
-    /// <summary>PLAN-006 4.2: auto-detected agent capability - the firewall-manage sudoers drop-in
+    /// <summary>ADR-024 4.2: auto-detected agent capability - the firewall-manage sudoers drop-in
     /// (<c>/etc/sudoers.d/aetheus-firewall</c>) is present, so the agent can mutate ufw rules via the
     /// root-owned helper. Derived every heartbeat from the reported sudoers hashes (self-heals both ways);
     /// gates the open/close/toggle API. Firewall visibility also depends on it (ufw status needs root).</summary>
@@ -117,6 +127,7 @@ public class Server
     /// </summary>
     [MaxLength(4096)]
     public string? CapabilityDiagnosticsJson { get; set; }
+    public string? ScannerCapabilitiesJson { get; set; }
 
     public int OrganizationId { get; set; }
     public Organization Organization { get; set; } = null!;
@@ -124,6 +135,7 @@ public class Server
     // Navigation
     public List<ServerToken> Tokens { get; set; } = [];
     public List<ServerTask> Tasks { get; set; } = [];
+    public List<AgentUpdateRequest> AgentUpdateRequests { get; set; } = [];
     public List<ServerMetric> Metrics { get; set; } = [];
     public List<ServiceInfo> Services { get; set; } = [];
     public List<DockerContainer> DockerContainers { get; set; } = [];

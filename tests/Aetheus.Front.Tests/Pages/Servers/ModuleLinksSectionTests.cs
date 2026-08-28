@@ -163,7 +163,7 @@ public class ModuleLinksSectionTests : BunitContext
     // ── AddLinkAsync: failure → swallows error, leaves component intact ────────
 
     [Fact]
-    public async Task AddLinkAsync_Failure_DoesNotThrow()
+    public async Task AddLinkAsync_Failure_StillPostsTheLink()
     {
         _handler.SetResponse(HttpMethod.Post, "api/servers/1/module-links", System.Net.HttpStatusCode.BadRequest);
         var cut = RenderTab();

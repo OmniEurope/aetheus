@@ -72,7 +72,7 @@ public class OrganizationDetailRenderTests : BunitContext
     }
 
     [Fact]
-    public async Task OnAddMember_WithNullUserId_DoesNothing()
+    public async Task OnAddMember_WithNullUserId_MakesNoRequest()
     {
         var cut = Render<OrganizationDetail>(p => p.Add(x => x.Id, 1));
         await cut.InvokeAsync(() => Task.CompletedTask);

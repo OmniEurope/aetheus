@@ -1,0 +1,38 @@
+version: 1
+toolchains:
+  dotnet:
+    version: "10.0.202"
+    image: "mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b"
+    path: "."
+    shell: "bash"
+    caches:
+      - name: "nuget"
+        target: "/home/aetheus/.nuget/packages"
+        lock_file: "global.json"
+  node:
+    version: "24.4.1"
+    image: "node:24.4.1-alpine@sha256:820e86612c21d0636580206d802a726f2595366e1b867e564cbc652024151e8a"
+    path: "toolchains/node"
+    shell: "sh"
+    caches:
+      - name: "npm"
+        target: "/home/aetheus/.npm"
+        lock_file: "package-lock.json"
+  java:
+    version: "25.0.2"
+    image: "eclipse-temurin:25.0.2_10-jdk-noble@sha256:b866059783e3dd2dd183937b713e77d0fd94d87ce7bdd4ed4a77d79e97a276cd"
+    path: "toolchains/java"
+    shell: "bash"
+    caches:
+      - name: "maven"
+        target: "/home/aetheus/.m2/repository"
+        lock_file: "pom.xml"
+  python:
+    version: "3.14.1"
+    image: "python:3.14.1-slim-bookworm@sha256:5d17fc066275d26bb2ffe05bc89367dc665310200b5f4cfa8b294e97dc679bff"
+    path: "toolchains/python"
+    shell: "bash"
+    caches:
+      - name: "pip"
+        target: "/home/aetheus/.cache/pip"
+        lock_file: "requirements.lock"

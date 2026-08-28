@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Aetheus.WebAnalytics;
 using Microsoft.AspNetCore.ResponseCompression;
 
 var settingsPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "appsettings.json");
+var apiBaseUrl = Environment.GetEnvironmentVariable("API_BASE_URL");
 if (File.Exists(settingsPath))
 {
-    var apiBaseUrl = Environment.GetEnvironmentVariable("API_BASE_URL");
     var appVersion = Environment.GetEnvironmentVariable("APP_VERSION");
     if (!string.IsNullOrWhiteSpace(apiBaseUrl) || !string.IsNullOrWhiteSpace(appVersion))
     {
@@ -51,10 +55,67 @@ builder.Services.AddResponseCompression(options =>
 });
 builder.Services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Optimal);
 builder.Services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Optimal);
+builder.Services.AddAetheusWebAnalytics(builder.Configuration);
 
 var app = builder.Build();
 
 app.UseResponseCompression();
+
+var cspConnectSources = new List<string> { "'self'" };
+if (Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var apiUri))
+{
+    cspConnectSources.Add(apiUri.GetLeftPart(UriPartial.Authority));
+    var webSocketScheme = apiUri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws";
+    cspConnectSources.Add($"{webSocketScheme}://{apiUri.Authority}");
+}
+
+// Blazor's published index contains a generated inline import map. The shell also has two
+// deliberately inline boot snippets that must run before/after the framework loader. Keep
+// script-src strict by authorizing only the exact inline content shipped in this image.
+// HTML parsing normalizes CRLF/CR to LF before CSP hashes are evaluated, so hash that form.
+var indexPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html");
+var inlineScriptHashes = new List<string>();
+if (File.Exists(indexPath))
+{
+    var indexHtml = await File.ReadAllTextAsync(indexPath);
+    foreach (Match match in Regex.Matches(
+                 indexHtml,
+                 "<script\\b(?![^>]*\\bsrc\\s*=)[^>]*>(?<content>.*?)</script>",
+                 RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant))
+    {
+        var normalizedContent = match.Groups["content"].Value
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        var hash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedContent)));
+        inlineScriptHashes.Add($"'sha256-{hash}'");
+    }
+}
+
+var contentSecurityPolicy =
+    "default-src 'self'; " +
+    $"script-src 'self' 'wasm-unsafe-eval' blob: {string.Join(' ', inlineScriptHashes.Distinct())}; " +
+    "worker-src 'self' blob:; " +
+    "style-src 'self'; " +
+    "style-src-elem 'self' 'unsafe-inline'; " +
+    "style-src-attr 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; " +
+    "font-src 'self' data:; " +
+    $"connect-src {string.Join(' ', cspConnectSources.Distinct())}; " +
+    "frame-ancestors 'none'; " +
+    "base-uri 'self'; " +
+    "form-action 'self'";
+
+// QA scans this container directly, before an Apache reverse proxy is involved. Emit the same
+// browser protections here so static assets, fallback HTML and error responses are all covered.
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    context.Response.Headers["Content-Security-Policy"] = contentSecurityPolicy;
+    await next();
+});
 
 // The published index contains the generated import map for the exact Blazor
 // runtime files shipped by this image. Reusing it after a blue/green switch can
@@ -84,6 +145,9 @@ app.Use(async (context, next) =>
 
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
+app.MapGet("/aetheus-analytics/v1/configuration", (AetheusWebAnalyticsOptions options) =>
+    Results.Ok(new { enabled = options.Enabled }));
+app.MapAetheusWebAnalytics();
 app.MapFallbackToFile("index.html");
 
 app.Run();

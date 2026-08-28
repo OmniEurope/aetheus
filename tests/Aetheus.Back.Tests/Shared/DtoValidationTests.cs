@@ -44,6 +44,7 @@ public class DtoValidationTests
     [Theory]
     [InlineData("https://git.example.com/team/repo.git", true)]
     [InlineData("http://git.example.com/team/repo.git", false)]
+    [InlineData("https://user:token@git.example.com/team/repo.git", false)]
     [InlineData("ssh://git@git.example.com/team/repo.git", false)]
     [InlineData("not-a-url", false)]
     public void ProjectRepositoryUrl_RequiresHttps(string url, bool valid)
@@ -51,6 +52,19 @@ public class DtoValidationTests
         var errors = Validate(new CreateProjectRequest { Name = "Project", RepositoryUrl = url });
 
         Assert.Equal(valid, !errors.Any(e => e.MemberNames.Contains(nameof(CreateProjectRequest.RepositoryUrl))));
+    }
+
+    [Fact]
+    public void ProjectRepositoryUrl_WithCredentials_ExplainsSecretStorageAlternatives()
+    {
+        var error = Assert.Single(Validate(new CreateProjectRequest
+        {
+            Name = "Project",
+            RepositoryUrl = "https://user:token@git.example.com/team/repo.git"
+        }), candidate => candidate.MemberNames.Contains(nameof(CreateProjectRequest.RepositoryUrl)));
+
+        Assert.Contains("ServiceConnection", error.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("Vault", error.ErrorMessage, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -184,5 +198,52 @@ public class DtoValidationTests
 
         Assert.Contains(Validate(request),
             error => error.MemberNames.Contains(nameof(ModuleLinkPageRequest.ResourceIdentifiers)));
+    }
+
+    [Fact]
+    public void AgentHeartbeat_RejectsOversizedCapabilityAndDiagnosticItems()
+    {
+        var request = new ServerHeartbeatDto
+        {
+            AgentCapabilities = [new string('c', 201)],
+            CapabilityDiagnostics = [new string('d', 1001)]
+        };
+
+        var errors = Validate(request);
+
+        Assert.Contains(errors,
+            error => error.MemberNames.Contains(nameof(ServerHeartbeatDto.AgentCapabilities)));
+        Assert.Contains(errors,
+            error => error.MemberNames.Contains(nameof(ServerHeartbeatDto.CapabilityDiagnostics)));
+    }
+
+    [Fact]
+    public void ConfigureWebAnalytics_RejectsOversizedAllowedOrigin()
+    {
+        var request = new ConfigureAppWebAnalyticsRequest
+        {
+            SiteId = "site",
+            AllowedOrigins = ["https://" + new string('a', 2049)]
+        };
+
+        Assert.Contains(Validate(request),
+            error => error.MemberNames.Contains(nameof(ConfigureAppWebAnalyticsRequest.AllowedOrigins)));
+    }
+
+    [Fact]
+    public void BackupResult_RejectsOversizedAgentControlledPathsAndMessages()
+    {
+        var request = new BackupExecuteResultDto
+        {
+            ArchivePath = new string('/', 4097),
+            Message = new string('m', 2001)
+        };
+
+        var errors = Validate(request);
+
+        Assert.Contains(errors,
+            error => error.MemberNames.Contains(nameof(BackupExecuteResultDto.ArchivePath)));
+        Assert.Contains(errors,
+            error => error.MemberNames.Contains(nameof(BackupExecuteResultDto.Message)));
     }
 }

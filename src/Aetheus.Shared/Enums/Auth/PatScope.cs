@@ -2,7 +2,7 @@
 namespace Aetheus.Shared.Enums;
 
 /// <summary>
-/// Scope of a Personal Access Token (PLAN-006 4.5). The scope narrows what a PAT can do; it is
+/// Scope of a Personal Access Token (ADR-024 4.5). The scope narrows what a PAT can do; it is
 /// always re-intersected with the bearer's CURRENT RBAC permissions at request time, so a PAT can
 /// never grant more than the user currently holds.
 /// </summary>

@@ -1,0 +1,20 @@
+# Independent post-deployment verification adapter used by the shared promotion template.
+name: toto-verify-accept
+trigger: manual
+variables:
+  TOTO_ACCEPT_PORT: "10090"
+
+stages:
+  - name: Smoke
+    group: Smoke
+    execution_role: build
+    os: linux
+    environment: accept
+    steps:
+      - name: Verify promoted API and integration endpoint
+        shell: |
+          set -eu
+          curl -fsS "http://127.0.0.1:$(TOTO_ACCEPT_PORT)/health/ready" >/dev/null
+          curl -fsS "http://127.0.0.1:$(TOTO_ACCEPT_PORT)/api/todos" >/dev/null
+          curl -fsS "http://127.0.0.1:$(TOTO_ACCEPT_PORT)/api/integrations" >/dev/null
+        timeout_seconds: 120

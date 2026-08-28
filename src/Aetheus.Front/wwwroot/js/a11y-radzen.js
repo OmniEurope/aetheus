@@ -48,8 +48,13 @@
         // Once the grid-family roles are gone, remove only state attributes that native table elements
         // do not support. Keep aria-sort on <th>: its implicit columnheader role supports the attribute
         // and exposes the active sort direction to assistive technologies.
-        var sortAttrs = grid.querySelectorAll(
-            "[aria-colindex],[aria-rowindex],[aria-colcount],[aria-rowcount],[aria-selected]");
+        // The grid element itself is included, not just its descendants: with AllowVirtualization
+        // Radzen puts aria-rowcount on the OUTER .rz-data-grid, exactly where stripGridRoles has just
+        // removed role="grid". aria-rowcount is only valid on grid/table/treegrid, so leaving it there
+        // is a CRITICAL aria-allowed-attr violation - the one that appeared the day every table was
+        // switched to infinite scroll. querySelectorAll never returns the root, hence the explicit union.
+        var sortAttrs = [grid].concat(Array.prototype.slice.call(grid.querySelectorAll(
+            "[aria-colindex],[aria-rowindex],[aria-colcount],[aria-rowcount],[aria-selected]")));
         for (var k = 0; k < sortAttrs.length; k++) {
             var s = sortAttrs[k];
             s.removeAttribute("aria-colindex");

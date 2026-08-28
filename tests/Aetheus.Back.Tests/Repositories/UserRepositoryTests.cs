@@ -108,6 +108,19 @@ public class UserRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task FindByUsernameAsync_LegacyMixedCaseUsername_IsFoundCaseInsensitively()
+    {
+        _db.Users.Add(new User { Username = "LegacyUser", PasswordHash = "h" });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.FindByUsernameAsync(
+            "legacyuser", ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("LegacyUser", result.Username);
+    }
+
+    [Fact]
     public async Task FindUserAsync_Found()
     {
         var user = new User { Username = "u1", PasswordHash = "h" };

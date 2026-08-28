@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Buffers;
+using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Services;
 
 public sealed class ServerApiClient(
-    IHttpClientFactory httpClientFactory) : IServerApiClient
+    IHttpClientFactory httpClientFactory,
+    AgentState agentState) : IServerApiClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -41,17 +45,45 @@ public sealed class ServerApiClient(
     {
         // take = free execution slots: the backend claims only what this agent can run now
         // (self-update tasks are claimed regardless - they bypass the concurrency gate).
-        return await PostAsync<List<PendingTaskDto>>($"api/tasks/claim?serverId={serverId}&take={freeSlots}", new { }, ct).ConfigureAwait(false) ?? [];
+        var session = Uri.EscapeDataString(agentState.SessionId);
+        var tasks = await PostAsync<List<PendingTaskDto>>(
+            $"api/tasks/claim?serverId={serverId}&take={freeSlots}&agentSessionId={session}",
+            new { },
+            ct).ConfigureAwait(false) ?? [];
+        foreach (var task in tasks)
+            agentState.TrackTaskLease(task.Id, task.AgentSessionFencingToken);
+        return tasks;
     }
 
     public async Task StartTaskAsync(int taskId, CancellationToken ct = default)
     {
-        await PostAsync($"api/tasks/{taskId}/start", new { }, ct).ConfigureAwait(false);
+        await PostAsync($"api/tasks/{taskId}/start", agentState.GetTaskLease(taskId), ct).ConfigureAwait(false);
+    }
+
+    public async Task ReleaseTaskAsync(int taskId, CancellationToken ct = default)
+    {
+        await PostAsync($"api/tasks/{taskId}/release", agentState.GetTaskLease(taskId), ct).ConfigureAwait(false);
     }
 
     public async Task CompleteTaskAsync(int taskId, TaskResultDto result, CancellationToken ct = default)
     {
-        await PostAsync($"api/tasks/{taskId}/complete", result, ct).ConfigureAwait(false);
+        var fencedResult = result with
+        {
+            AgentSessionId = agentState.SessionId,
+            AgentSessionFencingToken = agentState.GetTaskFencingToken(taskId)
+        };
+        await PostAsync($"api/tasks/{taskId}/complete", fencedResult, ct).ConfigureAwait(false);
+        agentState.ReleaseTaskLease(taskId);
+    }
+
+    public async Task ReportDeploymentBuildRefusalAsync(
+        DeploymentBuildRefusalReport report,
+        CancellationToken ct = default)
+    {
+        await PostAsync(
+            $"api/tasks/{report.TaskId}/deployment-build-refusal",
+            report,
+            ct).ConfigureAwait(false);
     }
 
     public async Task ReportBackupResultAsync(int runId, BackupExecuteResultDto result, CancellationToken ct = default)
@@ -82,7 +114,7 @@ public sealed class ServerApiClient(
         }
     }
 
-    public async Task UploadArtifactAsync(int runId, string name, string? stageName, Stream zipContent, CancellationToken ct = default)
+    public async Task<PipelineArtifactDto?> UploadArtifactAsync(int runId, string name, string? stageName, Stream zipContent, CancellationToken ct = default)
     {
         // Transfer client: no retry (the stream is partially consumed on failure) and a
         // timeout sized for multi-hundred-MB uploads, unlike the 30s RPC pipeline.
@@ -100,6 +132,7 @@ public sealed class ServerApiClient(
         request.Headers.ExpectContinue = true;
         using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
         await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<PipelineArtifactDto>(JsonOptions, ct).ConfigureAwait(false);
     }
 
     public async Task<Stream?> DownloadArtifactAsync(int artifactId, int deployRunId, CancellationToken ct = default)
@@ -117,8 +150,35 @@ public sealed class ServerApiClient(
         try
         {
             await using var src = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            await src.CopyToAsync(temp, ct).ConfigureAwait(false);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = ArrayPool<byte>.Shared.Rent(81920);
+            var download = Stopwatch.StartNew();
+            var hashElapsed = TimeSpan.Zero;
+            long bytes = 0;
+            try
+            {
+                int read;
+                while ((read = await src.ReadAsync(buffer.AsMemory(0, buffer.Length), ct).ConfigureAwait(false)) > 0)
+                {
+                    var hashStopwatch = Stopwatch.StartNew();
+                    hash.AppendData(buffer, 0, read);
+                    hashStopwatch.Stop();
+                    hashElapsed += hashStopwatch.Elapsed;
+                    await temp.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                    bytes = checked(bytes + read);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+            download.Stop();
             temp.Position = 0;
+            ArtifactDownloadTelemetry.Register(temp, new ArtifactDownloadMeasurement(
+                Convert.ToHexStringLower(hash.GetHashAndReset()),
+                bytes,
+                download.Elapsed,
+                hashElapsed));
             return temp;
         }
         catch
@@ -147,8 +207,30 @@ public sealed class ServerApiClient(
 
     public async Task PublishCoverageAsync(int runId, string xmlContent, string? stageName, string? stepName, CancellationToken ct = default)
     {
-        var request = new { XmlContent = xmlContent, StageName = stageName, StepName = stepName };
-        await PostAsync($"api/pipelines/runs/{runId}/coverage", request, ct).ConfigureAwait(false);
+        // Coverage can approach the 100 MiB report cap. JSON wrapping escapes XML attributes and
+        // can push an otherwise valid report over that limit, so the agent uses the raw bounded
+        // transfer endpoint. The legacy JSON endpoint remains available for older agents.
+        var utf8Bytes = Encoding.UTF8.GetByteCount(xmlContent);
+        if (utf8Bytes > CoverageUploadLimits.MaxRawXmlBytes)
+        {
+            throw new HttpRequestException(
+                $"Coverage XML is {utf8Bytes} UTF-8 bytes; maximum is {CoverageUploadLimits.MaxRawXmlBytes}.",
+                inner: null,
+                statusCode: System.Net.HttpStatusCode.RequestEntityTooLarge);
+        }
+
+        var query = $"api/pipelines/runs/{runId}/coverage/raw";
+        if (!string.IsNullOrWhiteSpace(stageName))
+            query += $"?stageName={Uri.EscapeDataString(stageName)}";
+        if (!string.IsNullOrWhiteSpace(stepName))
+            query += $"{(query.Contains('?') ? '&' : '?')}stepName={Uri.EscapeDataString(stepName)}";
+
+        using var client = httpClientFactory.CreateClient("AetheusServerTransfer");
+        using var content = new StringContent(xmlContent, Encoding.UTF8, "application/xml");
+        using var request = new HttpRequestMessage(HttpMethod.Post, query) { Content = content };
+        request.Headers.ExpectContinue = true;
+        using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
     }
 
     public async Task PublishLintAsync(int runId, string sarifContent, string? stageName, string? stepName, CancellationToken ct = default)
@@ -171,15 +253,45 @@ public sealed class ServerApiClient(
         await PostAsync($"api/pipelines/runs/{runId}/complexity", request, ct).ConfigureAwait(false);
     }
 
+    public Task<AnalysisReportDto?> PublishAnalysisReportAsync(
+        int runId,
+        PublishAnalysisReportRequest request,
+        CancellationToken ct = default) =>
+        PostTransferAsync<AnalysisReportDto>($"api/analysis/runs/{runId}/reports", request, ct);
+
+    public async Task<AnalysisRunGateDto?> GetAnalysisRunGateAsync(
+        int runId,
+        string scope,
+        CancellationToken ct = default)
+    {
+        using var client = httpClientFactory.CreateClient("AetheusServer");
+        using var response = await client.GetAsync(
+            $"api/analysis/runs/{runId}/gate?scope={Uri.EscapeDataString(scope)}",
+            ct).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<AnalysisRunGateDto>(JsonOptions, ct).ConfigureAwait(false);
+    }
+
+    public Task<AiRunResultDto?> PublishAiRunResultAsync(
+        PublishAiRunResultRequest request,
+        CancellationToken ct = default) =>
+        PostTransferAsync<AiRunResultDto>("api/ai/results", request, ct);
+
     public async Task AppendLogAsync(AppendLogRequest log, CancellationToken ct = default)
     {
-        await PostAsync("api/logs", log, ct).ConfigureAwait(false);
+        await PostAsync("api/logs", StampLogLease(log), ct).ConfigureAwait(false);
     }
 
     public async Task AppendLogBatchAsync(List<AppendLogRequest> logs, CancellationToken ct = default)
     {
-        await PostAsync("api/logs/batch", logs, ct).ConfigureAwait(false);
+        await PostAsync("api/logs/batch", logs.Select(StampLogLease).ToList(), ct).ConfigureAwait(false);
     }
+
+    private AppendLogRequest StampLogLease(AppendLogRequest log) => log with
+    {
+        AgentSessionId = agentState.SessionId,
+        AgentSessionFencingToken = agentState.GetTaskFencingToken(log.TaskId)
+    };
 
     public async Task<Dictionary<int, string>> GetTaskStatusesAsync(List<int> taskIds, CancellationToken ct = default)
     {
@@ -212,6 +324,17 @@ public sealed class ServerApiClient(
         using var client = httpClientFactory.CreateClient("AetheusServer");
         using var response = await client.PostAsJsonAsync(url, body, JsonOptions, ct).ConfigureAwait(false);
         await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+    }
+
+    private async Task<T?> PostTransferAsync<T>(string url, object body, CancellationToken ct)
+    {
+        // Completed scanner reports can contain tens of thousands of normalized records and the
+        // endpoint accepts up to 100 MiB. Use the bounded 10-minute transfer client without retries:
+        // the 30-second RPC resilience budget is intentionally reserved for small control messages.
+        using var client = httpClientFactory.CreateClient("AetheusServerTransfer");
+        using var response = await client.PostAsJsonAsync(url, body, JsonOptions, ct).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions, ct).ConfigureAwait(false);
     }
 
     // Surfaces the response body in the exception message so agent logs reveal which model

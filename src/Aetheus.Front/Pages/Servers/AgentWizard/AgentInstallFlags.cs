@@ -31,9 +31,9 @@ internal static class AgentInstallFlags
         // certbot-manage is precisely what --module server-management does NOT grant, so a deploy host must
         // emit it explicitly (least privilege: a working deploy host needs no server-management bundle).
         if (includeDeploymentAgent) flags += " --module deployment --enable-certbot-manage";
-        // PLAN-006 4.1: patch-manage is an independent opt-in (broad apt-get upgrade grant), never bundled.
+        // ADR-024 4.1: patch-manage is an independent opt-in (broad apt-get upgrade grant), never bundled.
         if (includePatchManagement) flags += " --enable-patch-manage";
-        // PLAN-006 4.2: firewall-manage is an independent opt-in (ufw helper).
+        // ADR-024 4.2: firewall-manage is an independent opt-in (ufw helper).
         if (includeFirewallManagement) flags += " --enable-firewall-manage";
         // --enable-docker (docker-group membership) is implied by server-management, so only add it
         // standalone when the operator wants container isolation WITHOUT the full server-admin posture.

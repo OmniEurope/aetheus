@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Net;
 using System.Runtime.CompilerServices;
 
 namespace Aetheus.Front.Services;
@@ -111,12 +112,12 @@ public sealed class ListCacheService(TimeProvider timeProvider)
     /// the existing <c>catch (HttpRequestException)</c> at every call site.
     /// </summary>
     /// <param name="key">Stable cache key encoding the full query (page + size + every filter + sort).</param>
-    /// <param name="fetch">The live fetch (e.g. an <c>Api.GetXAsync(...)</c> call).</param>
+    /// <param name="fetch">The live fetch (e.g. an <c>Api.Domain.GetXAsync(...)</c> call).</param>
     /// <param name="apply">Assigns the result to the component (items + total count).</param>
     /// <param name="setLoading">Sets the component's loading flag (drives the grid spinner).</param>
     /// <param name="render">Triggers a re-render (typically <c>() => InvokeAsync(StateHasChanged)</c>).</param>
     public async Task RevalidateAsync<T>(string key, Func<Task<T>> fetch, Action<T> apply,
-        Action<bool> setLoading, Func<Task> render) where T : class
+        Action<bool> setLoading, Func<Task> render, Action<HttpRequestException>? onError = null) where T : class
     {
         var owner = apply.Target ?? setLoading.Target ?? _staticRevalidationOwner;
         var version = _revalidationVersions.GetValue(owner, _ => new RevalidationVersion());
@@ -134,7 +135,13 @@ public sealed class ListCacheService(TimeProvider timeProvider)
             Set(key, fresh);
             if (IsCurrent()) apply(fresh);
         }
-        catch (HttpRequestException) { /* 401 on expired JWT: redirect handled by AuthProvider */ }
+        catch (HttpRequestException ex)
+        {
+            // Authentication failures are owned by AuthProvider. Every other transport/backend failure
+            // must be observable so the list can keep stale rows while offering a truthful Retry state.
+            if (ex.StatusCode != HttpStatusCode.Unauthorized)
+                onError?.Invoke(ex);
+        }
         if (!IsCurrent()) return;
         setLoading(false);
         await render();

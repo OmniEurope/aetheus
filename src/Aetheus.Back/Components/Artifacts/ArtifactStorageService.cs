@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Cryptography;
-using Aetheus.Back.Exceptions;
 
 namespace Aetheus.Back.Components.Artifacts;
 
@@ -25,24 +24,43 @@ public sealed class ArtifactStorageService(IConfiguration configuration) : IArti
         var safeName = Path.GetFileName(normalized);
         if (string.IsNullOrWhiteSpace(safeName) || safeName != normalized)
             throw new BadRequestException("Invalid artifact file name.");
-        var relativePath = Path.Combine(projectId.ToString(), pipelineId.ToString(), runId.ToString(), safeName);
+        var relativeDirectory = Path.Combine(projectId.ToString(), pipelineId.ToString(), runId.ToString());
+        var relativePath = Path.Combine(relativeDirectory, safeName);
         // Route through SafeResolvePath like the read/delete paths (closes the audit-noted asymmetry).
         // Safe already (int ids + normalized name), but the traversal guard is now applied uniformly.
         var fullPath = SafeResolvePath(relativePath);
 
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
 
-        // Compute the SHA-256 of the exact bytes written, in a single streaming pass (no re-read):
-        // the CryptoStream tees the copy into SHA256 while forwarding to the file.
-        using var sha = SHA256.Create();
-        await using (var fileStream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
-        await using (var cryptoStream = new CryptoStream(fileStream, sha, CryptoStreamMode.Write, leaveOpen: true))
+        // First stream into a unique temporary file and hash the exact bytes. The final path includes
+        // both that digest and a publication id, and FileMode.CreateNew makes the move non-overwriting.
+        // A retry of the same logical artifact therefore creates a new immutable object instead of
+        // changing bytes referenced by an existing database row.
+        var temporaryPath = Path.Combine(Path.GetDirectoryName(fullPath)!, $".{Guid.NewGuid():N}.upload");
+        try
         {
-            await content.CopyToAsync(cryptoStream, ct).ConfigureAwait(false);
-            await cryptoStream.FlushFinalBlockAsync(ct).ConfigureAwait(false);
-        }
+            using var sha = SHA256.Create();
+            await using (var fileStream = new FileStream(
+                temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            await using (var cryptoStream = new CryptoStream(fileStream, sha, CryptoStreamMode.Write, leaveOpen: true))
+            {
+                await content.CopyToAsync(cryptoStream, ct).ConfigureAwait(false);
+                await cryptoStream.FlushFinalBlockAsync(ct).ConfigureAwait(false);
+            }
 
-        return (relativePath, Convert.ToHexStringLower(sha.Hash!));
+            var digest = Convert.ToHexStringLower(sha.Hash!);
+            var extension = Path.GetExtension(safeName);
+            var stem = Path.GetFileNameWithoutExtension(safeName);
+            var immutableName = $"{stem}.{digest}.{Guid.NewGuid():N}{extension}";
+            relativePath = Path.Combine(relativeDirectory, immutableName);
+            fullPath = SafeResolvePath(relativePath);
+            File.Move(temporaryPath, fullPath, overwrite: false);
+            return (relativePath, digest);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
     }
 
     public Task DeleteArtifactAsync(string filePath, CancellationToken ct = default)

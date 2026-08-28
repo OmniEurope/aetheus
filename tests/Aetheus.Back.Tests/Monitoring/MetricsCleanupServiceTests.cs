@@ -11,10 +11,10 @@ namespace Aetheus.Back.Tests;
 
 public class MetricsCleanupServiceTests
 {
-    private static (MetricsCleanupService Sut, IServerRepository Repo) BuildSut(
+    private static (MetricsCleanupService Sut, IServerHeartbeatRepository Repo) BuildSut(
         IConfiguration config, FakeTimeProvider clock)
     {
-        var repo = Substitute.For<IServerRepository>();
+        var repo = Substitute.For<IServerHeartbeatRepository>();
         var sp = new ServiceCollection().AddScoped(_ => repo).BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
         var logger = Substitute.For<ILogger<MetricsCleanupService>>();

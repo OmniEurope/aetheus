@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <Version Condition="'$(Version)' == ''">1.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,10 +18,24 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Aetheus.Shared\Aetheus.Shared.csproj" />
+    <ProjectReference Include="..\Aetheus.Analyzers\Aetheus.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\.aetheus\security-rules\opengrep\aetheus-security.yml"
+                      LogicalName="Aetheus.Agent.Core.AnalysisRules.opengrep.aetheus-security.yml" />
+    <EmbeddedResource Include="..\..\deploy\scripts\zap-active-automation.sh"
+                      LogicalName="Aetheus.Agent.Core.AnalysisHarnesses.zap-active-automation.sh" />
+    <EmbeddedResource Include="..\..\deploy\scripts\publish-observability-package.sh"
+                      LogicalName="Aetheus.Agent.Core.PublicationHarnesses.publish-observability-package.sh" />
+    <EmbeddedResource Include="..\..\deploy\scripts\promote-observability-packages.sh"
+                      LogicalName="Aetheus.Agent.Core.PublicationHarnesses.promote-observability-packages.sh" />
   </ItemGroup>
 
 </Project>

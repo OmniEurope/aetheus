@@ -63,8 +63,8 @@ public class SystemLogsExtendedTests : BunitContext
     [InlineData("Warning", BadgeStyle.Warning)]
     [InlineData("Information", BadgeStyle.Info)]
     [InlineData("Debug", BadgeStyle.Light)]
-    [InlineData("Verbose", BadgeStyle.Secondary)]
-    [InlineData("Unknown", BadgeStyle.Secondary)]
+    [InlineData("Verbose", BadgeStyle.Light)]
+    [InlineData("Unknown", BadgeStyle.Light)]
     public void GetBadgeStyle_AllLevels_ReturnExpected(string level, BadgeStyle expected)
     {
         var method = typeof(SystemLogs).GetMethod("GetBadgeStyle", PrivStatic)!;
@@ -163,7 +163,7 @@ public class SystemLogsExtendedTests : BunitContext
     // ── OnDownloadAsync ───────────────────────────────────────────────────────
 
     [Fact]
-    public async Task OnDownloadAsync_NoFileSelected_DoesNothing()
+    public async Task OnDownloadAsync_NoFileSelected_LeavesTheFlagOff()
     {
         var cut = RenderPage();
         typeof(SystemLogs).GetField("_selectedFile", Priv)!.SetValue(cut.Instance, null);
@@ -205,7 +205,7 @@ public class SystemLogsExtendedTests : BunitContext
     // ── OnCopyCorrelationIdAsync ──────────────────────────────────────────────
 
     [Fact]
-    public async Task OnCopyCorrelationIdAsync_DoesNotThrow()
+    public async Task OnCopyCorrelationIdAsync_WritesToTheClipboard()
     {
         var cut = RenderPage();
         var method = typeof(SystemLogs).GetMethod("OnCopyCorrelationIdAsync", Priv)!;
@@ -231,7 +231,7 @@ public class SystemLogsExtendedTests : BunitContext
     // ── Dispose ───────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Dispose_WithTimers_DoesNotThrow()
+    public async Task Dispose_WithTimers_LeavesTheFlagOn()
     {
         var cut = RenderPage();
         var toggle = typeof(SystemLogs).GetMethod("ToggleAutoRefresh", Priv)!;

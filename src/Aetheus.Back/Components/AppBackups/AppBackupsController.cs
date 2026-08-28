@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.AppBackups;
 
 /// <summary>
-/// PLAN-006 4.3: orchestrated app-backup policies. Policies are project-owned; management is authorized
+/// ADR-024 4.3: orchestrated app-backup policies. Policies are project-owned; management is authorized
 /// against the owning project's RBAC. Agent result callbacks use the AgentToken scheme + an IDOR guard.
 /// </summary>
 [ApiController]
@@ -19,9 +14,15 @@ public sealed class AppBackupsController(IBackupPolicyService service, IResource
 {
     [HttpGet]
     public async Task<ActionResult<PaginatedResult<BackupPolicyDto>>> GetPolicies(
-        [FromQuery] PaginationRequest request, CancellationToken ct)
+        [FromQuery] PaginationRequest request, [FromQuery] int? projectId, CancellationToken ct)
     {
         var accessible = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Project, Permission.Read, ct);
+        if (projectId.HasValue)
+        {
+            if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId.Value, Permission.Read, ct))
+                return Forbid();
+            accessible = [projectId.Value];
+        }
         return Ok(await service.GetPoliciesAsync(accessible, request, ct));
     }
 

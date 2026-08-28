@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.RegularExpressions;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Core.Collectors;
 
@@ -106,7 +105,7 @@ public sealed partial class RkhunterCollector(ILogger<RkhunterCollector> logger,
     {
         try
         {
-            if (File.Exists(MirrorsDatPath))
+            if (_fileExists(MirrorsDatPath))
             {
                 foreach (var line in File.ReadLines(MirrorsDatPath))
                 {
@@ -114,7 +113,7 @@ public sealed partial class RkhunterCollector(ILogger<RkhunterCollector> logger,
                         return line.Trim();
                 }
             }
-            if (File.Exists(RkhunterDatPath))
+            if (_fileExists(RkhunterDatPath))
                 return new DateTimeOffset(File.GetLastWriteTimeUtc(RkhunterDatPath))
                     .ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
         }
@@ -129,7 +128,7 @@ public sealed partial class RkhunterCollector(ILogger<RkhunterCollector> logger,
     {
         try
         {
-            if (!File.Exists(LogPath))
+            if (!_fileExists(LogPath))
                 return (DateTime.MinValue, "none", 0);
 
             // Was: grep -E 'System checks summary|Warning|[Started]' LOG | tail -20
@@ -166,7 +165,7 @@ public sealed partial class RkhunterCollector(ILogger<RkhunterCollector> logger,
     {
         try
         {
-            if (File.Exists(RkhunterDatPath))
+            if (_fileExists(RkhunterDatPath))
                 return File.GetLastWriteTimeUtc(RkhunterDatPath);
         }
         catch (Exception ex)

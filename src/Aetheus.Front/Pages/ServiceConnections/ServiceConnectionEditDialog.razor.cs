@@ -1,29 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.ServiceConnections;
 
-public partial class ServiceConnectionEditDialog : ComponentBase
+public partial class ServiceConnectionEditDialog : EntityEditDialogBase
 {
-    [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private UiActions Ui { get; set; } = default!;
-    [Inject] private NotifyHelper Toast { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
-    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
-
     /// <summary>The connection being edited; <c>null</c> opens the dialog in create mode.</summary>
     [Parameter] public int? ConnectionId { get; set; }
 
     private bool IsEdit => ConnectionId is not null;
     private EditModel _model = new();
-    private bool _busy;
     private bool _loading;
 
     private List<object> _types = [];
@@ -38,7 +23,7 @@ public partial class ServiceConnectionEditDialog : ComponentBase
         _loading = true;
         try
         {
-            var detail = await Api.GetServiceConnectionAsync(id);
+            var detail = await Api.Settings.GetServiceConnectionAsync(id);
             if (detail is not null)
             {
                 _model = new EditModel
@@ -58,13 +43,12 @@ public partial class ServiceConnectionEditDialog : ComponentBase
 
     private async Task SubmitAsync()
     {
-        _busy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             if (IsEdit)
             {
                 await Ui.RunAsync(
-                    () => Api.UpdateServiceConnectionAsync(ConnectionId!.Value, new UpdateServiceConnectionRequest
+                    () => Api.Settings.UpdateServiceConnectionAsync(ConnectionId!.Value, new UpdateServiceConnectionRequest
                     {
                         Name = _model.Name,
                         Description = _model.Description,
@@ -73,13 +57,13 @@ public partial class ServiceConnectionEditDialog : ComponentBase
                         ConfigurationJson = string.IsNullOrWhiteSpace(_model.ConfigurationJson) ? "{}" : _model.ConfigurationJson
                     }),
                     "Updated",
-                    _ => { Dialog.Close(true); return Task.CompletedTask; },
+                    _ => CloseAfterSuccessAsync(),
                     successTitleKey: "Updated");
             }
             else
             {
                 await Ui.RunAsync(
-                    () => Api.CreateServiceConnectionAsync(new CreateServiceConnectionRequest
+                    () => Api.Settings.CreateServiceConnectionAsync(new CreateServiceConnectionRequest
                     {
                         Name = _model.Name,
                         Description = _model.Description,
@@ -89,14 +73,11 @@ public partial class ServiceConnectionEditDialog : ComponentBase
                         ConfigurationJson = string.IsNullOrWhiteSpace(_model.ConfigurationJson) ? "{}" : _model.ConfigurationJson
                     }),
                     "Created",
-                    _ => { Dialog.Close(true); return Task.CompletedTask; },
+                    _ => CloseAfterSuccessAsync(),
                     successTitleKey: "Created");
             }
-        }
-        finally { _busy = false; }
+        });
     }
-
-    private void Cancel() => Dialog.Close(false);
 
     // Local form model so create/edit share one binding surface (Update has no Type; Create does).
     private sealed class EditModel

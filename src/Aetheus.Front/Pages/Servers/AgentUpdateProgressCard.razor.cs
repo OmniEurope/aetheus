@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers;
 
@@ -19,13 +11,14 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
 {
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
+    [Inject] private AuthStateProvider Auth { get; set; } = default!;
+    [Inject] private ClientErrorReporter ErrorReporter { get; set; } = default!;
 
     [Parameter, EditorRequired] public int ServerId { get; set; }
     [Parameter, EditorRequired] public HubConnection? Hub { get; set; }
-    /// <summary>Heartbeat version of the latest <c>Server.AgentVersion</c>. The card compares
-    /// to the version captured when <c>LaunchingUpdater</c> fired; a new (different) version on
-    /// the next heartbeat is the proof that the update succeeded (transitions to <c>Done</c>).</summary>
+    /// <summary>Retained for source compatibility; heartbeats alone never confirm an update.</summary>
     [Parameter] public string? CurrentAgentVersion { get; set; }
+    [Parameter] public AgentUpdateRequestSummaryDto? Request { get; set; }
     /// <summary>Invoked from the Retry button shown in the Failed state (S-DES-17). Wired by the
     /// parent to its UpdateAgent action so a failed self-update can be relaunched in place.</summary>
     [Parameter] public EventCallback OnRetry { get; set; }
@@ -33,9 +26,9 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
     private AgentUpdatePhase? _phase;
     private int _percent;
     private string? _message;
-    private string? _versionAtLaunch;
     private DateTime _showDoneUntil = DateTime.MinValue;
     private bool _fadingOut;
+    private int? _requestId;
 
     // Registered handlers - kept so we can detach them in DisposeAsync to avoid leaks if the
     // hub connection survives this component (it always does - the connection is owned by
@@ -43,10 +36,13 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
     private IDisposable? _onQueued;
     private IDisposable? _onProgress;
     private IDisposable? _onOffline;
+    private IDisposable? _onConfirmed;
+    private IDisposable? _onFailed;
     private System.Threading.Timer? _staleTimer;
 
     protected override void OnParametersSet()
     {
+        ApplyPersistedRequest();
         if (Hub is null) return;
         Subscribe(Hub);
         // OnParametersSet can fire on each render; guard against double-subscribe by storing
@@ -63,7 +59,6 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
             _phase = AgentUpdatePhase.Queued;
             _percent = 0;
             _message = null;
-            _versionAtLaunch = CurrentAgentVersion;
             StartStaleTimer(120);
             _ = InvokeAsync(StateHasChanged);
         });
@@ -79,8 +74,6 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
             _phase = dto.Phase;
             _percent = dto.Percent;
             _message = dto.Message;
-            if (dto.Phase == AgentUpdatePhase.LaunchingUpdater)
-                _versionAtLaunch = CurrentAgentVersion;
             if (dto.Phase is AgentUpdatePhase.Failed or AgentUpdatePhase.Done)
                 CancelStaleTimer();
             else
@@ -100,27 +93,36 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
             _message = L["AgentUpdateRestartingHint"];
             _ = InvokeAsync(StateHasChanged);
         });
+
+        _onConfirmed ??= hub.On<int, int>("AgentUpdateConfirmed", (serverId, requestId) =>
+        {
+            if (serverId != ServerId) return;
+            HandleConfirmed(requestId, Request?.TargetVersion);
+        });
+
+        _onFailed ??= hub.On<int, int>("AgentUpdateFailed", (serverId, requestId) =>
+        {
+            if (serverId != ServerId) return;
+            _requestId = requestId;
+            CancelStaleTimer();
+            _phase = AgentUpdatePhase.Failed;
+            _percent = 0;
+            _message = Request?.FailureDiagnostic ?? L["AgentUpdateFailed"];
+            _ = InvokeAsync(StateHasChanged);
+        });
     }
 
-    /// <summary>
-    /// Called by ServerDetail's Heartbeat handler. When the agent comes back online during an
-    /// update (phase is LaunchingUpdater or AgentOffline), the binary swap and restart succeeded
-    /// - transition to Done and auto-hide after 5 seconds.
-    /// </summary>
-    public void HandleHeartbeat(string newAgentVersion)
+    public void HandleConfirmed(int requestId, string? targetVersion)
     {
-        if (_phase is not (AgentUpdatePhase.AgentOffline or AgentUpdatePhase.LaunchingUpdater))
-            return;
-
+        _requestId = requestId;
         CancelStaleTimer();
         _phase = AgentUpdatePhase.Done;
         _percent = 100;
-        _message = !string.IsNullOrEmpty(newAgentVersion)
-            ? string.Format(L["AgentUpdateDoneHint"], newAgentVersion)
+        _message = !string.IsNullOrEmpty(targetVersion)
+            ? string.Format(L["AgentUpdateDoneHint"], targetVersion)
             : null;
-        // S-UX-24: surface success as a toast too (the inline card auto-hides after 5s).
-        if (!string.IsNullOrEmpty(newAgentVersion))
-            Toast.Success("AgentUpdated", "AgentUpdateDoneHint", newAgentVersion);
+        if (!string.IsNullOrEmpty(targetVersion))
+            Toast.Success("AgentUpdated", "AgentUpdateDoneHint", targetVersion);
         _showDoneUntil = DateTime.Now.AddSeconds(5);
         _ = InvokeAsync(async () =>
         {
@@ -136,6 +138,38 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// Compatibility seam for older parents. A heartbeat alone is deliberately insufficient:
+    /// confirmation arrives through <c>AgentUpdateConfirmed</c> after backend validation.
+    /// </summary>
+    public void HandleHeartbeat(string newAgentVersion)
+    {
+    }
+
+    private void ApplyPersistedRequest()
+    {
+        if (Request is null || Request.RequestId == _requestId) return;
+        _requestId = Request.RequestId;
+        _message = Request.FailureDiagnostic;
+        (_phase, _percent) = Request.Status switch
+        {
+            AgentUpdateRequestStatus.WaitingForIdle => (AgentUpdatePhase.Queued, 0),
+            AgentUpdateRequestStatus.Queued => (AgentUpdatePhase.Queued, 0),
+            AgentUpdateRequestStatus.Downloading => (AgentUpdatePhase.Downloading, 20),
+            AgentUpdateRequestStatus.Staging => (AgentUpdatePhase.Extracting, 60),
+            AgentUpdateRequestStatus.Handoff => (AgentUpdatePhase.AgentOffline, 95),
+            AgentUpdateRequestStatus.Confirmed => (AgentUpdatePhase.Done, 100),
+            AgentUpdateRequestStatus.Failed => (AgentUpdatePhase.Failed, 0),
+            _ => ((AgentUpdatePhase?)null, 0)
+        };
+        if (Request.Status == AgentUpdateRequestStatus.WaitingForIdle)
+        {
+            _message = string.Format(
+                L["AgentUpdateWaitingForTasks"],
+                Request.BlockingTaskCount);
+        }
+    }
+
     // S-DES-17: relaunch a failed self-update. Clear the card first so the parent's trigger drives
     // a fresh Queued→… cycle through the existing hub events.
     private async Task RetryAsync()
@@ -147,6 +181,10 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
         StateHasChanged();
         await OnRetry.InvokeAsync();
     }
+
+    private string? FailureLogsPath => _requestId is { } requestId
+        ? $"/admin/system-logs?search={Uri.EscapeDataString(LogCorrelationIds.AgentUpdate(requestId))}"
+        : null;
 
     private string PhaseLabel(AgentUpdatePhase? phase) => phase switch
     {
@@ -201,6 +239,13 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
             _phase = AgentUpdatePhase.Failed;
             _percent = 0;
             _message = L["AgentUpdateTimeoutHint"];
+            if (_requestId is { } requestId)
+            {
+                ErrorReporter.Report(
+                    LogCorrelationIds.AgentUpdate(requestId),
+                    L["AgentUpdateFailed"],
+                    _message);
+            }
             _ = InvokeAsync(StateHasChanged);
         }, null, TimeSpan.FromSeconds(seconds), Timeout.InfiniteTimeSpan);
     }
@@ -217,6 +262,8 @@ public partial class AgentUpdateProgressCard : IAsyncDisposable
         _onQueued?.Dispose();
         _onProgress?.Dispose();
         _onOffline?.Dispose();
+        _onConfirmed?.Dispose();
+        _onFailed?.Dispose();
         return ValueTask.CompletedTask;
     }
 }

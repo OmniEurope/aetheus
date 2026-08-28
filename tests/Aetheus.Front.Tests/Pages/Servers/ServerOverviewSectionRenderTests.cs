@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Front.Resources;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.Enums;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Localization;
+using NSubstitute;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -52,6 +56,78 @@ public class ServerOverviewSectionRenderTests : BunitContext
         // (FormatAgentVersion truncates "1.5.0.1234" -> "v1.5.0").
         Assert.Contains("10.0.0.1", cut.Markup);
         Assert.Contains("v1.5.0", cut.Markup);
+    }
+
+    [Fact]
+    public void Essentials_ShowsInstalledAndTargetVersions_WhenUpdateIsAvailable()
+    {
+        var localizer = Services.GetRequiredService<IStringLocalizer<AppStrings>>();
+        localizer["AgentVersionUpdateAvailable"]
+            .Returns(new LocalizedString("AgentVersionUpdateAvailable", "{0} → target {1}"));
+        var server = BuildServer() with
+        {
+            AgentVersion = "1.0.1547",
+            AgentCompatibility = new AgentCompatibilityDto
+            {
+                Status = AgentCompatibilityStatus.UpdateRecommended,
+                InstalledVersion = "1.0.1547",
+                TargetVersion = "1.0.1552"
+            }
+        };
+
+        var cut = Render<ServerOverviewSection>(parameters => parameters
+            .Add(component => component.Server, server));
+
+        var agentVersionItem = cut.FindAll(".essential-item")
+            .Single(item => item.TextContent.Contains("AgentVersion", StringComparison.Ordinal));
+        Assert.Contains("v1.0.1547 → target 1.0.1552", agentVersionItem.TextContent);
+    }
+
+    [Fact]
+    public void Essentials_ShowsOnlyInstalledVersion_WhenAgentIsCurrent()
+    {
+        var server = BuildServer() with
+        {
+            AgentVersion = "1.0.1552",
+            AgentCompatibility = new AgentCompatibilityDto
+            {
+                Status = AgentCompatibilityStatus.UpToDate,
+                InstalledVersion = "1.0.1552",
+                TargetVersion = "1.0.1552"
+            }
+        };
+
+        var cut = Render<ServerOverviewSection>(parameters => parameters
+            .Add(component => component.Server, server));
+
+        Assert.Contains("v1.0.1552", cut.Markup);
+        Assert.DoesNotContain("→ target", cut.Markup);
+    }
+
+    [Fact]
+    public void Essentials_DoesNotShowTarget_WhenTargetMatchesInstalledVersion()
+    {
+        var localizer = Services.GetRequiredService<IStringLocalizer<AppStrings>>();
+        localizer["AgentVersionUpdateAvailable"]
+            .Returns(new LocalizedString("AgentVersionUpdateAvailable", "{0} → target {1}"));
+        var server = BuildServer() with
+        {
+            AgentVersion = "1.0.1552",
+            AgentCompatibility = new AgentCompatibilityDto
+            {
+                Status = AgentCompatibilityStatus.UpdateRecommended,
+                InstalledVersion = "1.0.1552",
+                TargetVersion = "1.0.1552"
+            }
+        };
+
+        var cut = Render<ServerOverviewSection>(parameters => parameters
+            .Add(component => component.Server, server));
+
+        var agentVersionItem = cut.FindAll(".essential-item")
+            .Single(item => item.TextContent.Contains("AgentVersion", StringComparison.Ordinal));
+        Assert.Contains("v1.0.1552", agentVersionItem.TextContent);
+        Assert.DoesNotContain("→ target", agentVersionItem.TextContent);
     }
 
     [Fact]

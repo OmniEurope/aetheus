@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -34,7 +30,7 @@ public class GitSmartHttpController(IGitSmartHttpService smartHttp, IResourceAut
             && !await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Read, ct))
             return Forbid();
 
-        var result = await smartHttp.ExecuteServiceAsync(projectId, slug, "git-upload-pack", Request.Body, ct);
+        var result = await ExecuteServiceAsync(projectId, slug, "git-upload-pack", ct);
         if (result is null) return NotFound();
 
         return new FileStreamResult(result.Body, result.ContentType);
@@ -51,7 +47,7 @@ public class GitSmartHttpController(IGitSmartHttpService smartHttp, IResourceAut
         if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Write, ct))
             return Forbid();
 
-        var result = await smartHttp.ExecuteServiceAsync(projectId, slug, "git-receive-pack", Request.Body, ct);
+        var result = await ExecuteServiceAsync(projectId, slug, "git-receive-pack", ct);
         if (result is null) return NotFound();
 
         // Mark as pushed after successful receive
@@ -64,4 +60,14 @@ public class GitSmartHttpController(IGitSmartHttpService smartHttp, IResourceAut
     // was minted for - never write - so the run can clone its own mirror without a real user grant.
     private bool IsRunScoped(int projectId) =>
         User.HasClaim(GitBasicAuthenticationHandler.RunScopeClaim, projectId.ToString());
+
+    private async Task<GitSmartHttpResponse?> ExecuteServiceAsync(
+        int projectId,
+        string slug,
+        string service,
+        CancellationToken ct)
+    {
+        await using var body = GitSmartHttpRequestBody.Open(Request);
+        return await smartHttp.ExecuteServiceAsync(projectId, slug, service, body, ct);
+    }
 }

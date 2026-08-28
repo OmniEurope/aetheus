@@ -5,38 +5,14 @@ using Aetheus.Shared.Validation;
 
 namespace Aetheus.Shared.DTOs;
 
-public sealed record VaultDto
+public sealed record VaultDto : OwnedResourceDto
 {
-    public int Id { get; init; }
-    public string Name { get; init; } = string.Empty;
-    public string Description { get; init; } = string.Empty;
-    public int? ProjectId { get; init; }
-    public string? ProjectName { get; init; }
-    public int? EnvironmentId { get; init; }
-    public string? EnvironmentName { get; init; }
-    public int? ProjectServerId { get; init; }
-    public string? ProjectServerName { get; init; }
     public int SecretCount { get; init; }
-    public DateTime CreatedAt { get; init; }
-    public DateTime UpdatedAt { get; init; }
-    public Guid RowVersion { get; init; }
 }
 
-public sealed record VaultDetailDto
+public sealed record VaultDetailDto : OwnedResourceDto
 {
-    public int Id { get; init; }
-    public string Name { get; init; } = string.Empty;
-    public string Description { get; init; } = string.Empty;
-    public int? ProjectId { get; init; }
-    public string? ProjectName { get; init; }
-    public int? EnvironmentId { get; init; }
-    public string? EnvironmentName { get; init; }
-    public int? ProjectServerId { get; init; }
-    public string? ProjectServerName { get; init; }
     public int SecretCount { get; init; }
-    public DateTime CreatedAt { get; init; }
-    public DateTime UpdatedAt { get; init; }
-    public Guid RowVersion { get; init; }
     public List<VaultSecretDto> Secrets { get; init; } = [];
 }
 
@@ -58,61 +34,19 @@ public sealed record VaultSecretVersionDto
     public ChangeType ChangeType { get; init; }
 }
 
-[ExactlyOneOwner]
-public sealed record CreateVaultRequest
+[AtMostOneOwner]
+public sealed record CreateVaultRequest : OwnedResourceRequest;
+
+[AtMostOneOwner]
+public sealed record UpdateVaultRequest : VersionedOwnedResourceRequest;
+
+public sealed record CreateVaultSecretRequest : KeyValueRequest
 {
-    [Required]
-    [StringLength(100)]
-    public string Name { get; init; } = string.Empty;
-
-    [StringLength(500)]
-    public string Description { get; init; } = string.Empty;
-
-    public int? ProjectId { get; init; }
-    public int? EnvironmentId { get; init; }
-    public int? ProjectServerId { get; init; }
-}
-
-[ExactlyOneOwner]
-public sealed record UpdateVaultRequest
-{
-    [Required]
-    [StringLength(100)]
-    public string Name { get; init; } = string.Empty;
-
-    [StringLength(500)]
-    public string Description { get; init; } = string.Empty;
-
-    public int? ProjectId { get; init; }
-    public int? EnvironmentId { get; init; }
-    public int? ProjectServerId { get; init; }
-
-    public Guid RowVersion { get; init; }
-}
-
-public sealed record CreateVaultSecretRequest
-{
-    [Required]
-    [StringLength(100)]
-    public string Key { get; init; } = string.Empty;
-
-    [Required]
-    [StringLength(4000)]
-    public string Value { get; init; } = string.Empty;
-
     public DateTime? ExpiresAt { get; init; }
 }
 
-public sealed record UpdateVaultSecretRequest
+public sealed record UpdateVaultSecretRequest : KeyValueRequest
 {
-    [Required]
-    [StringLength(100)]
-    public string Key { get; init; } = string.Empty;
-
-    [Required]
-    [StringLength(4000)]
-    public string Value { get; init; } = string.Empty;
-
     public DateTime? ExpiresAt { get; init; }
 }
 
@@ -123,7 +57,7 @@ public sealed record UpdateVaultSecretRequest
 public sealed record RotateVaultSecretRequest
 {
     [Required]
-    [StringLength(4000)]
+    [StringLength(KeyValueRequest.MaxValueLength)]
     public string Value { get; init; } = string.Empty;
 
     public DateTime? ExpiresAt { get; init; }

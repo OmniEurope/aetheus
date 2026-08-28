@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.ServiceConnections;
 
@@ -19,7 +15,8 @@ public class ServiceConnectionService(
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetPagedAsync(
-            request.Search, projectId, page, pageSize, accessibleIds, ct).ConfigureAwait(false);
+            request.Search, projectId, page, pageSize, accessibleIds, ct,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<ServiceConnectionDto>
         {
@@ -44,7 +41,8 @@ public class ServiceConnectionService(
             ProjectId = connection.ProjectId,
             ProjectName = connection.Project?.Name,
             Url = connection.Url,
-            ConfigurationJson = encryption.DecryptValue(connection.EncryptedPayload),
+            ConfigurationJson = SensitiveConfigurationJson.MaskSecrets(
+                encryption.DecryptValue(connection.EncryptedPayload)),
             CreatedAt = connection.CreatedAt,
             UpdatedAt = connection.UpdatedAt
         };
@@ -77,7 +75,11 @@ public class ServiceConnectionService(
         connection.Description = request.Description;
         connection.ProjectId = request.ProjectId;
         connection.Url = request.Url;
-        connection.EncryptedPayload = encryption.EncryptValue(request.ConfigurationJson);
+        var existingConfiguration = encryption.DecryptValue(connection.EncryptedPayload);
+        var restoredConfiguration = SensitiveConfigurationJson.RestoreMaskedSecrets(
+            existingConfiguration,
+            request.ConfigurationJson);
+        connection.EncryptedPayload = encryption.EncryptValue(restoredConfiguration);
         connection.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);

@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.Releases;
 public interface IReleaseRepository
 {
     Task<(List<Release> Items, int TotalCount)> GetReleasesPagedAsync(
-        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
+        string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true);
 
     Task<List<Release>> GetProjectReleasesAsync(int projectId, CancellationToken ct = default);
 
@@ -31,6 +32,15 @@ public interface IReleaseRepository
     Task<List<Release>> GetByPipelineRunIdAsync(int pipelineRunId, CancellationToken ct = default);
 
     Task<int> GetMaxBuildNumberAsync(int projectId, CancellationToken ct = default);
+
+    /// <summary>Releases of every project a server is involved in; see the implementation for why it
+    /// lives here rather than in Servers.</summary>
+    Task<List<Release>> GetReleasesForServerAsync(int serverId, CancellationToken ct = default);
+
+    /// <summary>One page of a server's releases, newest first, with the total count.</summary>
+    Task<(List<Release> Items, int TotalCount)> GetReleasesForServerPagedAsync(
+        int serverId, int page, int pageSize, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true);
 
     Task SaveChangesAsync(CancellationToken ct = default);
 }

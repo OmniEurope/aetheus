@@ -36,7 +36,7 @@ public class ServiceConnectionServiceTests
     }
 
     [Fact]
-    public async Task GetConnectionAsync_Found_DecryptsPayload()
+    public async Task GetConnectionAsync_Found_MasksDecryptedSecrets()
     {
         _repo.GetDetailAsync(1, Arg.Any<CancellationToken>())
             .Returns(new ServiceConnection
@@ -46,12 +46,13 @@ public class ServiceConnectionServiceTests
                 Type = ServiceConnectionType.Generic,
                 EncryptedPayload = "encrypted-data"
             });
-        _encryption.DecryptValue("encrypted-data").Returns("{\"pat\":\"secret\"}");
+        _encryption.DecryptValue("encrypted-data").Returns("{\"pat\":\"secret\",\"tenant\":\"north\"}");
 
         var result = await _sut.GetConnectionAsync(1, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
-        Assert.Equal("{\"pat\":\"secret\"}", result.ConfigurationJson);
+        Assert.Equal("{\"pat\":\"***\",\"tenant\":\"north\"}", result.ConfigurationJson);
+        Assert.DoesNotContain("secret", result.ConfigurationJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -117,6 +118,25 @@ public class ServiceConnectionServiceTests
         Assert.NotNull(result);
         Assert.Equal("updated", result.Name);
         await _audit.Received(1).LogAsync("Updated", "ServiceConnection", 1, "updated", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateConnectionAsync_MaskedSecret_PreservesExistingSecret()
+    {
+        _repo.FindAsync(1, Arg.Any<CancellationToken>())
+            .Returns(new ServiceConnection { Id = 1, Name = "old", EncryptedPayload = "old-enc" });
+        _encryption.DecryptValue("old-enc")
+            .Returns("{\"pat\":\"real-secret\",\"tenant\":\"old\"}");
+        _encryption.EncryptValue("{\"pat\":\"real-secret\",\"tenant\":\"new\"}")
+            .Returns("new-enc");
+
+        await _sut.UpdateConnectionAsync(1, new UpdateServiceConnectionRequest
+        {
+            Name = "updated",
+            ConfigurationJson = "{\"pat\":\"***\",\"tenant\":\"new\"}"
+        }, ct: TestContext.Current.CancellationToken);
+
+        _encryption.Received(1).EncryptValue("{\"pat\":\"real-secret\",\"tenant\":\"new\"}");
     }
 
     [Fact]

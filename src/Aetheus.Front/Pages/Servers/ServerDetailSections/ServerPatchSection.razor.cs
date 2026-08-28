@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -34,7 +28,7 @@ public partial class ServerPatchSection
         _loading = true;
         try
         {
-            _status = await Api.GetSecurityUpdatesAsync(ServerId);
+            _status = await Api.Security.GetSecurityUpdatesAsync(ServerId);
         }
         catch (HttpRequestException)
         {
@@ -68,7 +62,7 @@ public partial class ServerPatchSection
         _busy = true;
         try
         {
-            var taskId = await Api.UpgradeSystemAsync(ServerId, dryRun);
+            var taskId = await Api.Security.UpgradeSystemAsync(ServerId, dryRun);
             if (taskId is not null)
                 Toast.Success(successKey, successKey);
             else

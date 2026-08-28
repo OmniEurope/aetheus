@@ -20,4 +20,10 @@ internal static class AuthTokenHelper
         var bytes = HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(token));
         return Convert.ToBase64String(bytes);
     }
+
+    public static string PadOrTrim(string input, int targetLength)
+    {
+        input ??= string.Empty;
+        return input.Length == targetLength ? input : input.PadRight(targetLength, '\0');
+    }
 }

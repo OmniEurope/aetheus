@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Aetheus.Shared.Helpers;
+using Aetheus.Shared.Validation;
 using Microsoft.AspNetCore.Http;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -23,6 +19,8 @@ public class PipelineService(
     IOrganizationRepository organizationRepository) : IPipelineService
 {
     private IPipelineTemplateResolver TemplateResolver => templateResolver;
+    private readonly PipelineOwnershipResolver _ownership = new(
+        repo, httpContextAccessor, logger);
     public async Task<PaginatedResult<PipelineDto>> GetPipelinesAsync(PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
@@ -42,15 +40,19 @@ public class PipelineService(
     public async Task<PipelineDto?> GetPipelineAsync(int id, CancellationToken ct = default)
     {
         var pipeline = await repo.GetPipelineWithRunsAsync(id, ct).ConfigureAwait(false);
-        return pipeline is null ? null : MapToDto(pipeline);
+        return pipeline is null ? null : PipelineDtoMapper.Map(pipeline);
     }
 
-    public Task<PipelineSourceDto?> GetPipelineSourceAsync(int projectId, string pipelineName, CancellationToken ct = default, string? sourceBranch = null)
-        => pipelineGit.GetPipelineSourceAsync(projectId, pipelineName, ct, sourceBranch);
+    public Task<PipelineSourceDto?> GetPipelineSourceAsync(
+        int projectId, string pipelineName, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null)
+        => pipelineGit.GetPipelineSourceAsync(
+            projectId, pipelineName, ct, sourceBranch, sourceRepositoryId);
 
-    public async Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(List<int>? accessibleIds = null, CancellationToken ct = default)
+    public async Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(
+        List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default)
     {
-        var pipelines = await repo.GetPipelinesForDependencyGraphAsync(accessibleIds, ct).ConfigureAwait(false);
+        var pipelines = await repo.GetPipelinesForDependencyGraphAsync(accessibleIds, serverId, ct).ConfigureAwait(false);
         return PipelineDependencyGraphBuilder.Build(pipelines, ValidateYaml);
     }
 
@@ -77,23 +79,25 @@ public class PipelineService(
             YamlDefinition = request.YamlDefinition,
             TriggerType = ParseTriggerType(request.YamlDefinition),
             ProjectId = request.ProjectId,
+            SourceRepositoryId = request.SourceRepositoryId,
             SourceBranch = request.SourceBranch?.Trim(),
             EnvironmentId = request.EnvironmentId,
             ProjectServerId = request.ProjectServerId,
             // F-EXEC-1b: record the creator so webhook/scheduler runs can be authorized
             // against a principal (interactive runs authorize the live caller instead).
-            CreatedByUsername = CurrentUsername()
+            CreatedByUsername = _ownership.CurrentUsername
         };
+        PipelineTemplateReferenceMetadata.Apply(pipeline, request.YamlDefinition);
         // Git-first: commit to the project's internal repo BEFORE persisting the DB mirror, so a git
         // failure aborts the create instead of leaving a DB-only definition that diverges from git.
         await PipelineAuthoritativeGitCoordinator.CommitCreateAsync(
-            pipeline, pipelineGit, logger, CurrentUsername() ?? "system", ct).ConfigureAwait(false);
+            pipeline, pipelineGit, logger, _ownership.CurrentUsername ?? "system", ct).ConfigureAwait(false);
         await repo.AddPipelineAsync(pipeline, ct).ConfigureAwait(false);
         await PipelineAuthoritativeGitCoordinator.CopyToLinkedEnvironmentProjectAsync(
-            pipeline, repo, pipelineGit, logger, CurrentUsername() ?? "system", ct).ConfigureAwait(false);
+            pipeline, repo, pipelineGit, logger, _ownership.CurrentUsername ?? "system", ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "Pipeline", pipeline.Id, pipeline.Name, ct).ConfigureAwait(false);
         await BroadcastPipelineChangeAsync(pipeline, EntityChangeOps.Created, ct).ConfigureAwait(false);
-        return MapToDto(pipeline);
+        return PipelineDtoMapper.Map(pipeline);
     }
 
     public async Task<PipelineDto?> UpdatePipelineAsync(int id, UpdatePipelineRequest request, CancellationToken ct = default)
@@ -103,13 +107,15 @@ public class PipelineService(
 
         var snapshot = PipelineStateSnapshot.Capture(pipeline);
         var previousLocation = snapshot.ProjectId is { } oldProjectId
-            ? new PipelineGitDefinitionLocation(oldProjectId, snapshot.Name, snapshot.SourceBranch)
+            ? new PipelineGitDefinitionLocation(
+                oldProjectId, snapshot.Name, snapshot.SourceBranch, snapshot.SourceRepositoryId)
             : null;
         var nextBranch = request.SourceBranch?.Trim();
         var nextLocation = request.ProjectId is { } newProjectId
-            ? new PipelineGitDefinitionLocation(newProjectId, request.Name, nextBranch)
+            ? new PipelineGitDefinitionLocation(
+                newProjectId, request.Name, nextBranch, request.SourceRepositoryId)
             : null;
-        var actor = CurrentUsername() ?? "system";
+        var actor = _ownership.CurrentUsername ?? "system";
 
         // Git is authoritative. Rename/move and content replacement happen before the DB mirror and
         // use one commit when source and destination share a repo/branch.
@@ -122,8 +128,10 @@ public class PipelineService(
         pipeline.Name = request.Name;
         pipeline.Description = request.Description;
         pipeline.YamlDefinition = request.YamlDefinition;
+        PipelineTemplateReferenceMetadata.Apply(pipeline, request.YamlDefinition);
         pipeline.TriggerType = ParseTriggerType(request.YamlDefinition);
         pipeline.ProjectId = request.ProjectId;
+        pipeline.SourceRepositoryId = request.SourceRepositoryId;
         pipeline.SourceBranch = nextBranch;
         pipeline.EnvironmentId = request.EnvironmentId;
         pipeline.ProjectServerId = request.ProjectServerId;
@@ -132,7 +140,7 @@ public class PipelineService(
         // authorized user - this is the documented remediation to re-enable its automated
         // (webhook/scheduler) triggers. Existing ownership is never silently reassigned.
         if (string.IsNullOrEmpty(pipeline.CreatedByUsername))
-            pipeline.CreatedByUsername = CurrentUsername();
+            pipeline.CreatedByUsername = _ownership.CurrentUsername;
 
         try
         {
@@ -152,10 +160,10 @@ public class PipelineService(
             throw;
         }
         await PipelineAuthoritativeGitCoordinator.CopyToLinkedEnvironmentProjectAsync(
-            pipeline, repo, pipelineGit, logger, CurrentUsername() ?? "system", ct).ConfigureAwait(false);
+            pipeline, repo, pipelineGit, logger, _ownership.CurrentUsername ?? "system", ct).ConfigureAwait(false);
         await audit.LogAsync("Updated", "Pipeline", pipeline.Id, pipeline.Name, ct).ConfigureAwait(false);
         await BroadcastPipelineChangeAsync(pipeline, EntityChangeOps.Updated, ct).ConfigureAwait(false);
-        return MapToDto(pipeline);
+        return PipelineDtoMapper.Map(pipeline);
     }
 
     public async Task<bool> DeletePipelineAsync(int id, CancellationToken ct = default)
@@ -164,9 +172,10 @@ public class PipelineService(
         if (pipeline is null) return false;
         var name = pipeline.Name;
         var location = pipeline.ProjectId is { } projectId
-            ? new PipelineGitDefinitionLocation(projectId, pipeline.Name, pipeline.SourceBranch)
+            ? new PipelineGitDefinitionLocation(
+                projectId, pipeline.Name, pipeline.SourceBranch, pipeline.SourceRepositoryId)
             : null;
-        var actor = CurrentUsername() ?? "system";
+        var actor = _ownership.CurrentUsername ?? "system";
         var (gitOutcome, gitError) = await pipelineGit.ApplyProjectPipelineChangeAsync(
             location, null, null, actor, ct).ConfigureAwait(false);
         if (gitOutcome == GitWriteOutcome.Failed)
@@ -230,69 +239,15 @@ public class PipelineService(
             return new YamlValidationResultDto { IsValid = false, Errors = ["Empty YAML definition."] };
         }
 
-        // Semantic validation
-        if (definition.VariableLibraries.Any(n => string.IsNullOrWhiteSpace(n)))
-            errors.Add("Variable library names cannot be empty.");
+        PipelineDefinitionValidator.ValidateDefinitionBasics(definition, errors, warnings);
+        PipelineDefinitionValidator.ValidateStages(definition, errors, warnings);
 
-        if (definition.Vaults.Any(n => string.IsNullOrWhiteSpace(n)))
-            errors.Add("Vault names cannot be empty.");
-
-        if (definition.Branches.Any(string.IsNullOrWhiteSpace))
-            errors.Add("Branch filter entries cannot be empty.");
-
-        if (!string.IsNullOrWhiteSpace(definition.SourceBranch)
-            && !PipelineBranchValidator.IsValid(definition.SourceBranch))
-            errors.Add("The configured source_branch is invalid.");
-
-        // The branch filter only gates the webhook trigger; on any other trigger it is silently ignored.
-        if (definition.Branches.Count > 0 && !string.Equals(definition.Trigger, "webhook", StringComparison.OrdinalIgnoreCase))
-            warnings.Add("`branches:` filter only applies to the webhook trigger; it will be ignored for this trigger type.");
-
-        if (definition.Stages.Count == 0)
-            errors.Add("Pipeline must have at least one stage.");
-
-        foreach (var stage in definition.Stages)
-        {
-            if (string.IsNullOrWhiteSpace(stage.Name))
-                errors.Add("Stage name cannot be empty.");
-
-            if (OsTypeHelper.IsUnrecognized(stage.Os))
-                warnings.Add($"Stage '{stage.Name}' has an unrecognized os '{stage.Os}' - expected 'linux' or 'windows'; it will be ignored (no OS constraint).");
-
-            if (stage.Jobs.Count > 0)
-            {
-                // New format: stages > jobs > steps
-                foreach (var job in stage.Jobs)
-                {
-                    if (string.IsNullOrWhiteSpace(job.Name))
-                        errors.Add($"Job name cannot be empty in stage '{stage.Name}'.");
-                    if (string.IsNullOrWhiteSpace(job.Agent) && string.IsNullOrWhiteSpace(job.Pool) && string.IsNullOrWhiteSpace(job.Environment)
-                        && string.IsNullOrWhiteSpace(stage.Agent) && string.IsNullOrWhiteSpace(stage.Pool) && string.IsNullOrWhiteSpace(stage.Environment))
-                        warnings.Add($"Job '{job.Name}' in stage '{stage.Name}' has no agent/pool/environment - will use run affinity.");
-                    if (OsTypeHelper.IsUnrecognized(job.Os))
-                        warnings.Add($"Job '{job.Name}' in stage '{stage.Name}' has an unrecognized os '{job.Os}' - expected 'linux' or 'windows'; it will be ignored (no OS constraint).");
-                    if (job.Steps.Count == 0)
-                        errors.Add($"Job '{job.Name}' in stage '{stage.Name}' must have at least one step.");
-                    ValidateSteps(errors, job.Steps, $"stage '{stage.Name}' / job '{job.Name}'");
-                }
-            }
-            else
-            {
-                // Legacy format: stages > steps
-                if (string.IsNullOrWhiteSpace(stage.Agent) && string.IsNullOrWhiteSpace(stage.Pool) && string.IsNullOrWhiteSpace(stage.Environment))
-                    warnings.Add($"Stage '{stage.Name}' has no agent/pool/environment - will use run affinity.");
-                if (stage.Steps.Count == 0)
-                    errors.Add($"Stage '{stage.Name}' must have at least one step.");
-                ValidateSteps(errors, stage.Steps, $"stage '{stage.Name}'");
-            }
-        }
-
-        // S-UX-MXVL: reject shell-shaped matrix values at SAVE/validate time too (same check the run-creation
-        // path applies), so the author sees the error in the editor immediately instead of only at first run.
         var effectiveStages = YamlParsingHelper.FlattenJobs(definition);
         errors.AddRange(PipelineRunHelpers.ValidateMatrixValues(effectiveStages));
+        errors.AddRange(PipelineRunHelpers.ValidateIsolationDefinitions(definition.Isolation, effectiveStages));
         errors.AddRange(PipelineRunHelpers.ValidateIsolationLimits(effectiveStages));
         errors.AddRange(PipelineRunHelpers.ValidateExecutionRoles(effectiveStages));
+        errors.AddRange(PipelineAnalysisGateOrderingValidator.Validate(effectiveStages));
 
         PipelineYamlDiagnostics.AppendUnknownPropertyWarnings(yaml, warnings, logger);
 
@@ -322,9 +277,17 @@ public class PipelineService(
 
         try
         {
+            // No queue-time values: this is a save, not a launch. Passing an empty set instead made
+            // the resolver answer the launch question ("can this start now") and reject any pipeline
+            // declaring a required parameter without a default - a shape the repository-sync path
+            // stores happily and that aetheus-deploy-prod actually ships. The declaration itself is
+            // still validated below; a missing value is refused where it matters, in TriggerRun.
             var resolution = await TemplateResolver.ResolveAsync(
-                yaml, resolvedOrganizationId.Value, new Dictionary<string, string>(), ct).ConfigureAwait(false);
+                yaml, resolvedOrganizationId.Value, parameters: null, ct).ConfigureAwait(false);
             var structural = ValidateYamlStrict(resolution.Yaml);
+            var declarationErrors = PipelineParameterResolver.ValidateDeclarations(resolution.Definition.Parameters);
+            if (declarationErrors.Count > 0)
+                return new YamlValidationResultDto { IsValid = false, Errors = declarationErrors };
             var sourceWarnings = ValidateYamlStrict(yaml).Warnings;
             var warnings = structural.Warnings.Concat(sourceWarnings).Distinct(StringComparer.Ordinal).ToList();
             if (resolution.UsesLegacyReference)
@@ -339,57 +302,6 @@ public class PipelineService(
         {
             return new YamlValidationResultDto { IsValid = false, Errors = [exception.Message] };
         }
-    }
-
-    // Step `type:` values that do real work without a `shell` command (handled by dedicated dispatch
-    // branches in PipelineRunService). Keep in sync with those branches.
-    private static readonly HashSet<string> KnownTypedStepTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "release", "substitute", "coverage", "complexity", "lint", "artifacts",
-        "deploy", "apache-proxy", "certbot", "trigger", "restore-artifacts", "restore-backup"
-    };
-
-    private static void ValidateSteps(List<string> errors, List<PipelineStepDefinition> steps, string context)
-    {
-        foreach (var step in steps)
-        {
-            if (string.IsNullOrWhiteSpace(step.Name))
-                errors.Add($"Step name cannot be empty in {context}.");
-            // Typed steps carry their work in fields other than `shell` (no shell command required).
-            var isTypedStep = !string.IsNullOrWhiteSpace(step.Type)
-                && KnownTypedStepTypes.Contains(step.Type);
-            if (string.IsNullOrWhiteSpace(step.Shell) && !step.Checkout && !isTypedStep)
-                errors.Add($"Step '{step.Name}' in {context} must have a shell command or checkout enabled.");
-            if (step.RetryCount < 0)
-                errors.Add($"Step '{step.Name}' retry_count cannot be negative.");
-            if (string.Equals(step.Type, "restore-artifacts", StringComparison.OrdinalIgnoreCase))
-            {
-                var hasUpstreamSource = !string.IsNullOrWhiteSpace(step.Artifact)
-                    || !string.IsNullOrWhiteSpace(step.ArtifactSourcePipeline);
-                var hasReleaseSource = !string.IsNullOrWhiteSpace(step.Release);
-                if (hasReleaseSource && hasUpstreamSource)
-                    errors.Add($"Step '{step.Name}' in {context} must select either 'release' or the 'artifact'/'artifact_source_pipeline' pair, not both.");
-                else if (!hasReleaseSource
-                         && (string.IsNullOrWhiteSpace(step.Artifact)
-                             || string.IsNullOrWhiteSpace(step.ArtifactSourcePipeline)))
-                    errors.Add($"Step '{step.Name}' in {context} requires 'release' or both 'artifact' and 'artifact_source_pipeline'.");
-                if (!IsSafeRelativeDirectory(step.TargetDirectory))
-                    errors.Add($"Step '{step.Name}' in {context} target_directory must be a safe relative path.");
-                if (step.AllowMissing
-                    && !string.Equals(step.Release?.Trim(), "latest-published", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(step.Release?.Trim(), "previous-published", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(step.Release?.Trim(), "previous-deployed", StringComparison.OrdinalIgnoreCase))
-                    errors.Add($"Step '{step.Name}' in {context} allow_missing is only valid with release: latest-published, previous-published, or previous-deployed.");
-            }
-        }
-    }
-
-    private static bool IsSafeRelativeDirectory(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return true;
-        if (Path.IsPathRooted(path)) return false;
-        return !path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
-            .Any(segment => segment is "." or "..");
     }
 
     private PipelineTriggerType ParseTriggerType(string yaml)
@@ -412,6 +324,7 @@ public class PipelineService(
             Name = p.Name,
             TriggerType = p.TriggerType,
             ProjectId = p.ProjectId,
+            SourceRepositoryId = p.SourceRepositoryId,
             SourceBranch = p.SourceBranch,
             YamlDefinition = p.YamlDefinition,
             CreatedAt = p.CreatedAt,
@@ -424,84 +337,137 @@ public class PipelineService(
 
     public async Task<PipelineDto> UpsertPipelineFromYamlAsync(
         string name, string yamlContent, int projectId, string triggerType,
-        CancellationToken ct = default, string? sourceBranch = null, string? defaultBranch = null)
+        CancellationToken ct = default, string? sourceBranch = null, string? defaultBranch = null,
+        int? sourceRepositoryId = null)
     {
         var configuredSourceBranch = ValidateYaml(yamlContent)?.SourceBranch?.Trim();
         var existing = await repo.FindPipelineByNameAndProjectAsync(name, projectId, ct).ConfigureAwait(false);
-        if (existing is not null)
-        {
-            if (!string.IsNullOrWhiteSpace(sourceBranch))
-            {
-                var effectiveExistingBranch = string.IsNullOrWhiteSpace(existing.SourceBranch)
-                    ? defaultBranch
-                    : existing.SourceBranch;
-                if (!string.Equals(effectiveExistingBranch, sourceBranch, StringComparison.Ordinal))
-                    return MapToDto(existing);
-            }
+        return existing is null
+            ? await CreateSyncedPipelineAsync(
+                name, yamlContent, projectId, triggerType, configuredSourceBranch,
+                sourceBranch, defaultBranch, sourceRepositoryId, ct).ConfigureAwait(false)
+            : await UpdateSyncedPipelineAsync(
+                existing, name, yamlContent, projectId, triggerType, configuredSourceBranch,
+                sourceBranch, defaultBranch, sourceRepositoryId, ct).ConfigureAwait(false);
+    }
 
-            existing.YamlDefinition = yamlContent;
-            if (!string.IsNullOrWhiteSpace(configuredSourceBranch))
-                existing.SourceBranch = string.Equals(configuredSourceBranch, defaultBranch, StringComparison.Ordinal)
-                    ? null
-                    : configuredSourceBranch;
-            existing.TriggerType = triggerType.Equals("webhook", StringComparison.OrdinalIgnoreCase)
-                ? PipelineTriggerType.Webhook
-                : triggerType.Equals("schedule", StringComparison.OrdinalIgnoreCase)
-                    ? PipelineTriggerType.Schedule
-                    : PipelineTriggerType.Manual;
-            existing.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-
-            // Git is authoritative for project pipelines. When an authenticated pusher changes the YAML,
-            // automated execution must be authorized with THAT revision author's Server.Admin grants,
-            // never with a previous owner's broader grants. Background syncs have no current principal and
-            // keep a resolvable owner; they repair only legacy/unresolvable ownership as before.
-            var syncActor = CurrentUsername();
-            if (!string.IsNullOrEmpty(syncActor))
-            {
-                if (!string.Equals(syncActor, existing.CreatedByUsername, StringComparison.Ordinal))
-                {
-                    logger.LogInformation(
-                        "Transferred pipeline '{Name}' (id {Id}) automated-run ownership from '{Old}' to git revision author '{New}'",
-                        existing.Name, existing.Id, existing.CreatedByUsername, syncActor);
-                    existing.CreatedByUsername = syncActor;
-                }
-            }
-            else if (await IsUnresolvableOwnerAsync(existing.CreatedByUsername, ct).ConfigureAwait(false))
-            {
-                var repaired = await ResolveSyncOwnerAsync(projectId, ct).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(repaired)) existing.CreatedByUsername = repaired;
-            }
-
-            await repo.SaveChangesAsync(ct).ConfigureAwait(false);
-            await BroadcastPipelineChangeAsync(existing, EntityChangeOps.Updated, ct).ConfigureAwait(false);
-            return MapToDto(existing);
-        }
-
-        // F-INF-02: own the auto-synced pipeline with a REAL user (the current pusher, else the project's org
-        // Owner) rather than the non-existent "system", which the F-EXEC-1b gate can never resolve and which
-        // therefore blocked chained release triggers. Fall back to "system" only if nothing resolves.
-        var owner = await ResolveSyncOwnerAsync(projectId, ct).ConfigureAwait(false);
-
+    private async Task<PipelineDto> CreateSyncedPipelineAsync(
+        string name,
+        string yamlContent,
+        int projectId,
+        string triggerType,
+        string? configuredSourceBranch,
+        string? sourceBranch,
+        string? defaultBranch,
+        int? sourceRepositoryId,
+        CancellationToken ct)
+    {
+        var owner = await _ownership.ResolveAsync(projectId, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(owner))
+            throw _ownership.MissingOwner(projectId, name);
         var pipeline = new Pipeline
         {
             Name = name,
             YamlDefinition = yamlContent,
-            SourceBranch = string.IsNullOrWhiteSpace(configuredSourceBranch ?? sourceBranch)
-                || string.Equals(configuredSourceBranch ?? sourceBranch, defaultBranch, StringComparison.Ordinal)
-                    ? null
-                    : configuredSourceBranch ?? sourceBranch,
-            TriggerType = triggerType.Equals("webhook", StringComparison.OrdinalIgnoreCase)
-                ? PipelineTriggerType.Webhook
-                : triggerType.Equals("schedule", StringComparison.OrdinalIgnoreCase)
-                    ? PipelineTriggerType.Schedule
-                    : PipelineTriggerType.Manual,
+            SourceBranch = NormalizeSourceBranch(configuredSourceBranch ?? sourceBranch, defaultBranch),
+            TriggerType = ParseTriggerTypeValue(triggerType),
             ProjectId = projectId,
-            CreatedByUsername = string.IsNullOrEmpty(owner) ? "system" : owner
+            SourceRepositoryId = sourceRepositoryId,
+            CreatedByUsername = owner
         };
+        PipelineTemplateReferenceMetadata.Apply(pipeline, yamlContent);
         await repo.AddPipelineAsync(pipeline, ct).ConfigureAwait(false);
         await BroadcastPipelineChangeAsync(pipeline, EntityChangeOps.Created, ct).ConfigureAwait(false);
-        return MapToDto(pipeline);
+        return PipelineDtoMapper.Map(pipeline);
     }
+
+    private async Task<PipelineDto> UpdateSyncedPipelineAsync(
+        Pipeline existing,
+        string name,
+        string yamlContent,
+        int projectId,
+        string triggerType,
+        string? configuredSourceBranch,
+        string? sourceBranch,
+        string? defaultBranch,
+        int? sourceRepositoryId,
+        CancellationToken ct)
+    {
+        EnsureRepositoryBinding(existing, name, sourceRepositoryId);
+        if (!MatchesRequestedSourceBranch(existing, configuredSourceBranch, sourceBranch, defaultBranch))
+            return PipelineDtoMapper.Map(existing);
+        existing.YamlDefinition = yamlContent;
+        PipelineTemplateReferenceMetadata.Apply(existing, yamlContent);
+        existing.SourceRepositoryId = sourceRepositoryId ?? existing.SourceRepositoryId;
+        if (!string.IsNullOrWhiteSpace(configuredSourceBranch))
+            existing.SourceBranch = NormalizeSourceBranch(configuredSourceBranch, defaultBranch);
+        existing.TriggerType = ParseTriggerTypeValue(triggerType);
+        existing.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await UpdateSyncOwnershipAsync(existing, projectId, name, ct).ConfigureAwait(false);
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await BroadcastPipelineChangeAsync(existing, EntityChangeOps.Updated, ct).ConfigureAwait(false);
+        return PipelineDtoMapper.Map(existing);
+    }
+
+    private static void EnsureRepositoryBinding(Pipeline existing, string name, int? sourceRepositoryId)
+    {
+        if (sourceRepositoryId is { } incomingRepositoryId
+            && existing.SourceRepositoryId is { } currentRepositoryId
+            && incomingRepositoryId != currentRepositoryId)
+            throw new ConflictException(
+                $"Pipeline '{name}' is already bound to source repository {currentRepositoryId}; repository {incomingRepositoryId} cannot replace it implicitly.");
+    }
+
+    private static bool MatchesRequestedSourceBranch(
+        Pipeline existing,
+        string? configuredSourceBranch,
+        string? sourceBranch,
+        string? defaultBranch)
+    {
+        if (string.IsNullOrWhiteSpace(sourceBranch)) return true;
+        if (!string.IsNullOrWhiteSpace(configuredSourceBranch)
+            && string.Equals(configuredSourceBranch, sourceBranch, StringComparison.Ordinal))
+            return true;
+        var effectiveExistingBranch = string.IsNullOrWhiteSpace(existing.SourceBranch)
+            ? defaultBranch
+            : existing.SourceBranch;
+        return string.Equals(effectiveExistingBranch, sourceBranch, StringComparison.Ordinal);
+    }
+
+    private async Task UpdateSyncOwnershipAsync(
+        Pipeline pipeline,
+        int projectId,
+        string name,
+        CancellationToken ct)
+    {
+        var syncActor = _ownership.CurrentUsername;
+        if (!string.IsNullOrEmpty(syncActor))
+        {
+            if (string.Equals(syncActor, pipeline.CreatedByUsername, StringComparison.Ordinal)) return;
+            logger.LogInformation(
+                "Transferred pipeline '{Name}' (id {Id}) automated-run ownership from '{Old}' to git revision author '{New}'",
+                pipeline.Name, pipeline.Id, pipeline.CreatedByUsername, syncActor);
+            pipeline.CreatedByUsername = syncActor;
+            return;
+        }
+        if (!await _ownership.IsUnresolvableAsync(pipeline.CreatedByUsername, ct).ConfigureAwait(false)) return;
+        var repaired = await _ownership.ResolveAsync(projectId, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(repaired)) throw _ownership.MissingOwner(projectId, name);
+        pipeline.CreatedByUsername = repaired;
+    }
+
+    private static string? NormalizeSourceBranch(string? branch, string? defaultBranch) =>
+        string.IsNullOrWhiteSpace(branch)
+        || string.Equals(branch, defaultBranch, StringComparison.Ordinal)
+            ? null
+            : branch;
+
+    private static PipelineTriggerType ParseTriggerTypeValue(string triggerType) =>
+        triggerType.Equals("webhook", StringComparison.OrdinalIgnoreCase)
+            ? PipelineTriggerType.Webhook
+            : triggerType.Equals("schedule", StringComparison.OrdinalIgnoreCase)
+                ? PipelineTriggerType.Schedule
+                : PipelineTriggerType.Manual;
 
     private async Task BroadcastPipelineChangeAsync(Pipeline pipeline, string operation, CancellationToken ct)
     {
@@ -511,63 +477,4 @@ public class PipelineService(
             ResourceType.Pipeline, pipeline.Id, operation, ct, organizationId).ConfigureAwait(false);
     }
 
-    // Owner resolution shared by create and self-heal: the current pusher, else the project's org Owner.
-    private async Task<string?> ResolveSyncOwnerAsync(int projectId, CancellationToken ct)
-    {
-        var owner = CurrentUsername();
-        if (string.IsNullOrEmpty(owner))
-            owner = await repo.GetProjectOwnerUsernameAsync(projectId, ct).ConfigureAwait(false);
-        return owner;
-    }
-
-    // An owner the F-EXEC-1b gate can never authorize: the "system" sentinel, a blank value, or a username
-    // that no longer maps to an active user. These are the exact rows that strand chained/automated triggers.
-    private async Task<bool> IsUnresolvableOwnerAsync(string? owner, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(owner) || string.Equals(owner, "system", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return !await repo.IsActiveUsernameAsync(owner, ct).ConfigureAwait(false);
-    }
-
-    // F-EXEC-1b: current authenticated principal (same accessor pattern as AuditService).
-    // Pipeline create/update endpoints are [Authorize]d, so this is non-null in production.
-    private string? CurrentUsername() =>
-        httpContextAccessor.HttpContext?.User?.Identity?.Name;
-
-    private static PipelineDto MapToDto(Pipeline p)
-    {
-        var lastRun = p.Runs.FirstOrDefault();
-        return new PipelineDto
-        {
-            Id = p.Id,
-            Name = p.Name,
-            Description = p.Description,
-            YamlDefinition = p.YamlDefinition,
-            TriggerType = p.TriggerType,
-            ProjectId = p.ProjectId,
-            ProjectName = p.Project?.Name,
-            SourceBranch = p.SourceBranch,
-            EnvironmentId = p.EnvironmentId,
-            EnvironmentName = p.Environment?.Name,
-            ProjectServerId = p.ProjectServerId,
-            ProjectServerName = p.ProjectServer?.DisplayName,
-            LastRunStatus = lastRun?.Status,
-            LastRunAt = lastRun?.StartedAt,
-            RecentRuns = p.Runs.Select(r =>
-            {
-                var firstStep = r.StepRuns.FirstOrDefault(s => !s.IsSystem && s.ServerId != null);
-                return new PipelineRunSummaryDto
-                {
-                    Id = r.Id,
-                    Status = r.Status,
-                    StartedAt = r.StartedAt,
-                    CompletedAt = r.CompletedAt,
-                    ServerName = firstStep?.Server?.Name,
-                    ServerOs = firstStep?.Server?.OsDescription
-                };
-            }).ToList(),
-            CreatedAt = p.CreatedAt,
-            UpdatedAt = p.UpdatedAt
-        };
-    }
 }

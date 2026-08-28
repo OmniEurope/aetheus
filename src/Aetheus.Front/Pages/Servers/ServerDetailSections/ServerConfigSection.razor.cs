@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -31,7 +24,7 @@ public partial class ServerConfigSection
     private async Task ExportConfigAsync()
     {
         _configExporting = true;
-        var yaml = await Api.ExportServerConfigAsync(ServerId);
+        var yaml = await Api.Servers.ExportServerConfigAsync(ServerId);
         if (yaml is not null)
         {
             _configYaml = yaml;
@@ -54,7 +47,7 @@ public partial class ServerConfigSection
     {
         if (string.IsNullOrWhiteSpace(_configImportYaml)) return;
         _configValidating = true;
-        _configValidation = await Api.ValidateServerConfigAsync(ServerId, _configImportYaml);
+        _configValidation = await Api.Servers.ValidateServerConfigAsync(ServerId, _configImportYaml);
         _configValidating = false;
     }
 
@@ -62,7 +55,7 @@ public partial class ServerConfigSection
     {
         if (string.IsNullOrWhiteSpace(_configImportYaml)) return;
         _configPreviewing = true;
-        _configPreview = await Api.PreviewServerConfigAsync(ServerId, _configImportYaml);
+        _configPreview = await Api.Servers.PreviewServerConfigAsync(ServerId, _configImportYaml);
         if (_configPreview is null)
             Toast.Error("Configuration", "ConfigPreviewFailed");
         _configPreviewing = false;
@@ -72,7 +65,7 @@ public partial class ServerConfigSection
     {
         if (string.IsNullOrWhiteSpace(_configImportYaml)) return;
         _configDeploying = true;
-        var result = await Api.DeployServerConfigAsync(ServerId, _configImportYaml);
+        var result = await Api.Servers.DeployServerConfigAsync(ServerId, _configImportYaml);
         if (result is not null)
         {
             Toast.Success("Configuration", "ConfigDeploySuccess", result.TasksCreated);
@@ -92,6 +85,6 @@ public partial class ServerConfigSection
         "pull" or "create" or "deploy" or "enable" => BadgeStyle.Success,
         "update" => BadgeStyle.Info,
         "unchanged" => BadgeStyle.Light,
-        _ => BadgeStyle.Secondary
+        _ => BadgeStyle.Light
     };
 }

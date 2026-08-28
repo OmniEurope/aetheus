@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Services;
 using Aetheus.Shared.DTOs;
 using NSubstitute;
@@ -12,16 +13,20 @@ public class ServerApiClientTests
 {
     private readonly ServerApiClient _sut;
     private readonly MockHttpMessageHandler _handler;
+    private readonly AgentState _agentState = new();
 
     public ServerApiClientTests()
     {
         _handler = new MockHttpMessageHandler();
-        var httpClient = new HttpClient(_handler) { BaseAddress = new Uri("http://localhost:5301/") };
 
         var factoryMock = Substitute.For<IHttpClientFactory>();
-        factoryMock.CreateClient("AetheusServer").Returns(httpClient);
+        factoryMock.CreateClient("AetheusServer").Returns(_ =>
+            new HttpClient(_handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:5301/")
+            });
 
-        _sut = new ServerApiClient(factoryMock);
+        _sut = new ServerApiClient(factoryMock, _agentState);
     }
 
     [Fact]
@@ -66,7 +71,9 @@ public class ServerApiClientTests
 
         Assert.Single(result);
         Assert.Equal("Deploy", result[0].Name);
-        AssertRequest(HttpMethod.Post, "/api/tasks/claim?serverId=1&take=2");
+        AssertRequest(
+            HttpMethod.Post,
+            $"/api/tasks/claim?serverId=1&take=2&agentSessionId={_agentState.SessionId}");
         Assert.Empty(JsonDocument.Parse(_handler.CapturedBody!).RootElement.EnumerateObject());
     }
 
@@ -77,7 +84,46 @@ public class ServerApiClientTests
 
         await Assert.ThrowsAsync<HttpRequestException>(
             () => _sut.GetPendingTasksAsync(1, 2, TestContext.Current.CancellationToken));
-        AssertRequest(HttpMethod.Post, "/api/tasks/claim?serverId=1&take=2");
+        AssertRequest(
+            HttpMethod.Post,
+            $"/api/tasks/claim?serverId=1&take=2&agentSessionId={_agentState.SessionId}");
+    }
+
+    [Fact]
+    public async Task ClaimedTask_PropagatesFencingTokenToTransitionsAndLogs()
+    {
+        _handler.SetResponse(HttpStatusCode.OK, new List<PendingTaskDto>
+        {
+            new()
+            {
+                Id = 7,
+                AgentSessionId = _agentState.SessionId,
+                AgentSessionFencingToken = 3,
+                Name = "fenced"
+            }
+        });
+        await _sut.GetPendingTasksAsync(1, 1, TestContext.Current.CancellationToken);
+
+        _handler.SetResponse(HttpStatusCode.OK);
+        await _sut.StartTaskAsync(7, TestContext.Current.CancellationToken);
+        var lease = DeserializeBody<AgentTaskLeaseRequest>();
+        Assert.Equal(_agentState.SessionId, lease.AgentSessionId);
+        Assert.Equal(3, lease.AgentSessionFencingToken);
+
+        await _sut.AppendLogAsync(
+            new AppendLogRequest { TaskId = 7, Message = "line" },
+            TestContext.Current.CancellationToken);
+        var log = DeserializeBody<AppendLogRequest>();
+        Assert.Equal(_agentState.SessionId, log.AgentSessionId);
+        Assert.Equal(3, log.AgentSessionFencingToken);
+
+        await _sut.CompleteTaskAsync(
+            7,
+            new TaskResultDto { TaskId = 7, Status = Aetheus.Shared.Enums.TaskExecutionStatus.Success },
+            TestContext.Current.CancellationToken);
+        var result = DeserializeBody<TaskResultDto>();
+        Assert.Equal(_agentState.SessionId, result.AgentSessionId);
+        Assert.Equal(3, result.AgentSessionFencingToken);
     }
 
     [Fact]

@@ -6,7 +6,7 @@
         <RadzenBadge Text="@_totalCount.ToString()" BadgeStyle="BadgeStyle.Info" />
         <div class="blade-content-spacer"></div>
         <RadzenButton Icon="auto_fix_high" Text="@L["AutoDetect"]" Size="ButtonSize.Small"
-            Click="@AutoDetectAsync" IsBusy="@_detecting" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+            Click="@AutoDetectAsync" IsBusy="@_detecting" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         <RadzenButton Icon="add_link" Text="@L["AddLink"]" Size="ButtonSize.Small"
             Click="@OpenAddDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
     </RadzenStack>
@@ -16,7 +16,7 @@
 
     <AetheusDataGrid @ref="_grid" Data="@_links" TItem="LinkedResourceDto"
         Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
-        PageSize="25" Density="Density.Compact" AllowFiltering="false" EmptyText="@L["NoRecords"]">
+        PageSize="25" Density="Density.Compact" EmptyText="@L["NoRecords"]">
             <Columns>
                 <RadzenDataGridColumn TItem="LinkedResourceDto" Property="Type" Title="@L["Type"]" Width="120px">
                     <Template Context="l">
@@ -26,7 +26,7 @@
                 <RadzenDataGridColumn TItem="LinkedResourceDto" Property="Identifier" Title="@L["Resource"]" />
                 <RadzenDataGridColumn TItem="LinkedResourceDto" Property="IsAutoDetected" Title="@L["Source"]" Width="120px">
                     <Template Context="l">
-                        <RadzenBadge BadgeStyle="@(l.IsAutoDetected ? BadgeStyle.Light : BadgeStyle.Secondary)"
+                        <RadzenBadge BadgeStyle="@(l.IsAutoDetected ? BadgeStyle.Light : BadgeStyle.Light)"
                             Text="@(l.IsAutoDetected ? L["Auto"] : L["Manual"])" />
                     </Template>
                 </RadzenDataGridColumn>

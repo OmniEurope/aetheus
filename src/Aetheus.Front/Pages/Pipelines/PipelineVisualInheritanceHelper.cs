@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -12,7 +12,7 @@ internal static class PipelineVisualInheritanceHelper
         var result = inheritedStages.ToList();
         foreach (var localStage in localStages)
         {
-            var index = FindByName(result, localStage.Name, stage => stage.Name);
+            var index = CaseInsensitiveNameLookup.FindIndex(result, localStage.Name, stage => stage.Name);
             if (localStage.Remove)
             {
                 if (index >= 0) result.RemoveAt(index);
@@ -36,7 +36,7 @@ internal static class PipelineVisualInheritanceHelper
         var result = inheritedJobs.ToList();
         foreach (var localJob in localJobs)
         {
-            var index = FindByName(result, localJob.Name, job => job.Name);
+            var index = CaseInsensitiveNameLookup.FindIndex(result, localJob.Name, job => job.Name);
             if (localJob.Remove)
             {
                 if (index >= 0) result.RemoveAt(index);
@@ -57,7 +57,7 @@ internal static class PipelineVisualInheritanceHelper
         var result = inheritedSteps.ToList();
         foreach (var localStep in localSteps)
         {
-            var index = FindByName(result, localStep.Name, step => step.Name);
+            var index = CaseInsensitiveNameLookup.FindIndex(result, localStep.Name, step => step.Name);
             if (localStep.Remove)
             {
                 if (index >= 0) result.RemoveAt(index);
@@ -74,10 +74,4 @@ internal static class PipelineVisualInheritanceHelper
         return result;
     }
 
-    private static int FindByName<T>(IReadOnlyList<T> items, string name, Func<T, string> selector)
-    {
-        for (var index = 0; index < items.Count; index++)
-            if (string.Equals(selector(items[index]), name, StringComparison.OrdinalIgnoreCase)) return index;
-        return -1;
-    }
 }

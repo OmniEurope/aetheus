@@ -97,7 +97,7 @@ public class VaultEditRenderTests : BunitContext
     }
 
     [Fact]
-    public async Task AddSecret_WithEmptyKey_DoesNothing()
+    public async Task AddSecret_WithEmptyKey_MakesNoRequest()
     {
         SetupStubs();
 

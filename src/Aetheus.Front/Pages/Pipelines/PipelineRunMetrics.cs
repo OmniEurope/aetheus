@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -43,7 +41,7 @@ public sealed class PipelineRunMetrics
         {
             try
             {
-                var points = await api.GetCoverageTrendAsync(runId);
+                var points = await api.Analysis.GetCoverageTrendAsync(runId);
                 CoverageTrend = points
                     .Select(p => new CoverageTrendVm($"#{p.RunId}", Math.Round(p.LineRate * 100, 1), Math.Round(p.BranchRate * 100, 1)))
                     .ToList();
@@ -55,7 +53,7 @@ public sealed class PipelineRunMetrics
         {
             try
             {
-                var points = await api.GetComplexityTrendAsync(runId);
+                var points = await api.Analysis.GetComplexityTrendAsync(runId);
                 ComplexityTrend = points
                     .Select(p => new ComplexityTrendVm($"#{p.RunId}", Math.Round(p.AvgCyclomatic, 1), Math.Round(p.MaxCyclomatic, 1),
                         p.CrapAvg.HasValue ? Math.Round(p.CrapAvg.Value, 1) : null))

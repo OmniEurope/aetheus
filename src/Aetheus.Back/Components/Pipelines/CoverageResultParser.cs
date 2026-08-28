@@ -2,9 +2,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Xml.Linq;
-using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Back.Components.Pipelines;

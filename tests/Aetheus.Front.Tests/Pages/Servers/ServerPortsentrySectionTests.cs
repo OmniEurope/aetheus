@@ -125,7 +125,7 @@ public class ServerPortsentrySectionTests : BunitContext
     }
 
     [Fact]
-    public async Task AddWhitelistIpAsync_EmptyIp_DoesNothing()
+    public async Task AddWhitelistIpAsync_EmptyIp_ProducesNothing()
     {
         var cut = RenderInstalled();
 

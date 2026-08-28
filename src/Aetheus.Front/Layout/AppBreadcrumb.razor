@@ -1,0 +1,27 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<nav class="app-breadcrumb" aria-label="@L["BreadcrumbNavigation"]" data-testid="app-breadcrumb">
+    <ol class="app-breadcrumb-list">
+        @for (var index = 0; index < Breadcrumb.Items.Count; index++)
+        {
+            var item = Breadcrumb.Items[index];
+            var current = index == Breadcrumb.Items.Count - 1;
+            <li class="app-breadcrumb-item">
+                @if (item.IsLoading)
+                {
+                    <span class="app-breadcrumb-skeleton"
+                          aria-current="@(current ? "page" : null)"
+                          aria-label="@L["Loading"]"
+                          role="status"></span>
+                }
+                else if (!current && !string.IsNullOrWhiteSpace(item.Href))
+                {
+                    <a href="@item.Href" title="@item.Text">@item.Text</a>
+                }
+                else
+                {
+                    <span aria-current="@(current ? "page" : null)" title="@item.Text">@item.Text</span>
+                }
+            </li>
+        }
+    </ol>
+</nav>

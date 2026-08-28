@@ -18,7 +18,7 @@
 
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else if (_forbidden)
 {
@@ -32,7 +32,7 @@ else
 {
     @foreach (var group in FilteredGroups)
     {
-        <RadzenText TextStyle="TextStyle.H6" class="rz-mt-4 rz-mb-2">@group.Key</RadzenText>
+        <RadzenText TextStyle="TextStyle.H5" class="rz-mt-4 rz-mb-2">@group.Key</RadzenText>
         <RadzenCard class="rz-p-0">
             @foreach (var ep in group)
             {

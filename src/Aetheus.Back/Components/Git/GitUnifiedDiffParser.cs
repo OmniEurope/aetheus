@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -11,26 +10,32 @@ namespace Aetheus.Back.Components.Git;
 /// </summary>
 public static class GitUnifiedDiffParser
 {
-    /// <summary>The well-known SHA git resolves to the empty tree. Used as the "from" side so a root
-    /// commit (no parent) still yields a full add-everything diff.</summary>
-    public const string EmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-
     private const string BlockMarker = "diff --git ";
 
-    /// <summary>True when <paramref name="sha"/> is a plausible git object id: 4-64 lowercase-hex chars.
+    /// <summary>True when <paramref name="sha"/> is a plausible git object id: 4-64 hex chars.
     /// Defence-in-depth on a route-supplied sha before it reaches a git command.</summary>
     public static bool IsSha(string? sha) =>
         !string.IsNullOrEmpty(sha) && sha.Length is >= 4 and <= 64 && IsHex(sha);
 
     /// <summary>Splits a unified patch into file blocks and parses each into a <see cref="FileDiffDto"/>.</summary>
-    public static PullRequestDiffDto Parse(string? patch)
+    public static PullRequestDiffDto Parse(
+        string? patch,
+        int maxFiles = int.MaxValue,
+        bool sourceTruncated = false)
     {
-        if (string.IsNullOrEmpty(patch)) return new PullRequestDiffDto();
+        if (string.IsNullOrEmpty(patch))
+            return new PullRequestDiffDto { IsTruncated = sourceTruncated };
 
         var files = new List<FileDiffDto>();
         int totalAdd = 0, totalDel = 0;
+        var truncated = sourceTruncated;
         foreach (var block in SplitBlocks(patch))
         {
+            if (files.Count >= Math.Max(1, maxFiles))
+            {
+                truncated = true;
+                break;
+            }
             var file = ParseBlock(block);
             if (file is null) continue;
             totalAdd += file.Additions;
@@ -41,7 +46,8 @@ public static class GitUnifiedDiffParser
         return new PullRequestDiffDto
         {
             FileDiffs = files,
-            Stats = new DiffStatsDto { Additions = totalAdd, Deletions = totalDel, FilesChanged = files.Count }
+            Stats = new DiffStatsDto { Additions = totalAdd, Deletions = totalDel, FilesChanged = files.Count },
+            IsTruncated = truncated
         };
     }
 
@@ -109,7 +115,9 @@ public static class GitUnifiedDiffParser
     private static bool IsHex(string s)
     {
         foreach (var c in s)
-            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            if (!((c >= '0' && c <= '9')
+                  || (c >= 'a' && c <= 'f')
+                  || (c >= 'A' && c <= 'F')))
                 return false;
         return true;
     }

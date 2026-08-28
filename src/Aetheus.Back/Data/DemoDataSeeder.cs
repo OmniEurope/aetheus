@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 using ProjectEnvironment = Aetheus.Back.Data.Entities.Environment;
 
 namespace Aetheus.Back.Data;
@@ -49,11 +47,7 @@ public static class DemoDataSeeder
 
         // Historical timestamps are anchored to the dataset version, not to startup time. This makes a
         // partially populated database safely replayable without producing a second history on every attempt.
-        // Presence is intentionally different: the two interactive demo agents must remain actionable after
-        // a dated seed is replayed, otherwise the timeout monitor immediately marks them offline and every
-        // local/QA task, service-log and Docker interaction returns 409.
         var now = DateTime.SpecifyKind(versionDate.ToDateTime(new TimeOnly(12, 0)), DateTimeKind.Utc);
-        var presenceNow = timeProvider.GetUtcNow().UtcDateTime;
 
         var servers = new[]
         {
@@ -61,18 +55,18 @@ public static class DemoDataSeeder
             {
                 Name = "web-01", Hostname = "web-01.demo.local", IpAddress = "10.0.0.11",
                 OsType = OsType.Linux, OsDescription = "Ubuntu 24.04 LTS",
-                Status = ServerStatus.Online, Type = ServerType.Normal,
-                PipelineRunnerEnabled = true, DockerAvailable = true,
-                AgentVersion = "1.0.0", LastHeartbeat = presenceNow, OrganizationId = orgId,
+                Status = ServerStatus.Offline, Type = ServerType.Normal,
+                PipelineRunnerEnabled = false, DockerAvailable = true,
+                AgentVersion = "1.0.0", LastHeartbeat = now, OrganizationId = orgId,
                 Tags = "[\"web\",\"prod\"]"
             },
             new Server
             {
                 Name = "build-01", Hostname = "build-01.demo.local", IpAddress = "10.0.0.21",
                 OsType = OsType.Windows, OsDescription = "Windows Server 2022",
-                Status = ServerStatus.Online, Type = ServerType.Build,
-                PipelineRunnerEnabled = true,
-                AgentVersion = "1.0.0", LastHeartbeat = presenceNow, OrganizationId = orgId,
+                Status = ServerStatus.Offline, Type = ServerType.Build,
+                PipelineRunnerEnabled = false,
+                AgentVersion = "1.0.0", LastHeartbeat = now, OrganizationId = orgId,
                 Tags = "[\"build\"]"
             },
             new Server
@@ -91,8 +85,11 @@ public static class DemoDataSeeder
         db.Servers.AddRange(missingServers);
         foreach (var server in existingServers.Values.Where(server => server.Name is "web-01" or "build-01"))
         {
-            server.Status = ServerStatus.Online;
-            server.LastHeartbeat = presenceNow;
+            // These rows are visual demo inventory only: no agent emits heartbeats or polls their
+            // task queue. Advertising synthetic presence produces a delayed false Offline event and
+            // warning toast after every local/QA startup.
+            server.Status = ServerStatus.Offline;
+            server.PipelineRunnerEnabled = false;
         }
         await db.SaveChangesAsync().ConfigureAwait(false);
         servers = servers.Select(s => existingServers.GetValueOrDefault(s.Name) ?? s).ToArray();
@@ -172,7 +169,8 @@ public static class DemoDataSeeder
             },
             new Project
             {
-                Name = "Toto", Description = "Projet de référence QA : CI, QA et déploiement d'acceptation",
+                Name = TotoConformanceSeeder.DemoProjectName,
+                Description = "Projet de démonstration QA : CI, QA et déploiement d'acceptation",
                 Status = ProjectStatus.Active, OrganizationId = orgId, Tags = "[\"demo\",\"qa\",\"toto\"]"
             }
         };

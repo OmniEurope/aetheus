@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Projects;
 
@@ -63,7 +55,7 @@ public partial class ProjectEdit
             .ToList();
 
         await Ui.RunAsync(
-            () => Api.CreateProjectAsync(new CreateProjectRequest
+            () => Api.Projects.CreateProjectAsync(new CreateProjectRequest
             {
                 Name = _model.Name,
                 Description = _model.Description,

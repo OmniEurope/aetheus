@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
@@ -22,7 +23,7 @@ public class OrganizationServiceTests
     {
         _repo.GetMembersForNotificationAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns([]);
-        _sut = new OrganizationService(_repo, _authz, TimeProvider.System, Substitute.For<IAdminChangeNotifier>(), _userNotifier);
+        _sut = new OrganizationService(_repo, _authz, TimeProvider.System, Substitute.For<IAdminChangeNotifier>(), _userNotifier, Substitute.For<IAuditService>());
     }
 
     [Fact]

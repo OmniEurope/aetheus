@@ -23,15 +23,23 @@ public class StaticAssetAuditTests
         Assert.Contains("presentationTables[i].removeAttribute(\"role\")", source, StringComparison.Ordinal);
     }
 
-    private static string FindRepoRoot()
+    [Fact]
+    public void MonacoDiffEditor_DetachesModelsBeforeDisposingThem()
     {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(StaticAssetAuditTests).Assembly.Location)!);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx"))) return directory.FullName;
-            directory = directory.Parent;
-        }
+        var root = FindRepoRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Front", "wwwroot", "js", "monaco-yaml.js"));
+        var disposeStart = source.IndexOf("disposeDiffEditor: function", StringComparison.Ordinal);
+        var detachIndex = source.IndexOf("entry.editor.setModel(null)", disposeStart, StringComparison.Ordinal);
+        var editorDisposeIndex = source.IndexOf("entry.editor.dispose()", disposeStart, StringComparison.Ordinal);
+        var originalModelDisposeIndex = source.IndexOf("entry.originalModel.dispose()", disposeStart, StringComparison.Ordinal);
+        var modifiedModelDisposeIndex = source.IndexOf("entry.modifiedModel.dispose()", disposeStart, StringComparison.Ordinal);
 
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
+        Assert.True(disposeStart >= 0);
+        Assert.True(detachIndex > disposeStart);
+        Assert.True(editorDisposeIndex > detachIndex);
+        Assert.True(originalModelDisposeIndex > editorDisposeIndex);
+        Assert.True(modifiedModelDisposeIndex > originalModelDisposeIndex);
     }
+
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

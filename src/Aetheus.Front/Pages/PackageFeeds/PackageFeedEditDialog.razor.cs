@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.ComponentModel.DataAnnotations;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.PackageFeeds;
 
@@ -22,7 +13,12 @@ public partial class PackageFeedEditDialog : ComponentBase
     private bool _busy;
 
     private static readonly List<object> _types = Enum.GetValues<PackageFeedType>()
+        .Where(IsCreationSupported)
         .Select(t => (object)new { Text = t.ToString(), Value = t }).ToList();
+    internal static int SupportedCreationTypeCount => _types.Count;
+
+    private static bool IsCreationSupported(PackageFeedType type)
+        => type is PackageFeedType.NuGet or PackageFeedType.Npm or PackageFeedType.PyPI;
 
     // Prefill the upstream URL with the public registry default for the chosen type (editable).
     private void OnTypeChanged() => _model.UpstreamUrl = _model.FeedType switch
@@ -39,7 +35,7 @@ public partial class PackageFeedEditDialog : ComponentBase
         try
         {
             await Ui.RunAsync(
-                () => Api.CreatePackageFeedAsync(new CreatePackageFeedRequest
+                () => Api.Packages.CreatePackageFeedAsync(new CreatePackageFeedRequest
                 {
                     Name = _model.Name,
                     Description = _model.Description,

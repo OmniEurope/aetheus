@@ -10,7 +10,7 @@ public class GitUnifiedDiffParserTests
     [InlineData("4b825dc642cb6eb9a060e54bf8d69288fbee4904", true)]
     [InlineData("abc", false)]          // too short
     [InlineData("z1b2c3d", false)]      // non-hex
-    [InlineData("A1B2C3D", false)]      // uppercase (git emits lowercase)
+    [InlineData("A1B2C3D", true)]       // route input is case-insensitive hexadecimal
     [InlineData(null, false)]
     [InlineData("", false)]
     public void IsSha_ValidatesHex(string? sha, bool expected) =>
@@ -127,5 +127,27 @@ public class GitUnifiedDiffParserTests
         var diff = GitUnifiedDiffParser.Parse(patch);
         Assert.Equal(2, diff.Stats.FilesChanged);
         Assert.Equal(new[] { "a.txt", "c.txt" }, diff.FileDiffs.Select(f => f.Path));
+    }
+
+    [Fact]
+    public void Parse_FileLimit_ReturnsBoundedDiffMarkedTruncated()
+    {
+        const string patch = """
+            diff --git a/a.txt b/a.txt
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -0,0 +1 @@
+            +a
+            diff --git a/b.txt b/b.txt
+            --- a/b.txt
+            +++ b/b.txt
+            @@ -0,0 +1 @@
+            +b
+            """;
+
+        var diff = GitUnifiedDiffParser.Parse(patch, maxFiles: 1);
+
+        Assert.True(diff.IsTruncated);
+        Assert.Equal("a.txt", Assert.Single(diff.FileDiffs).Path);
     }
 }

@@ -32,7 +32,7 @@ public sealed class SvgCultureInvariantAuditTests
         var sinksScanned = 0;
 
         foreach (var pattern in new[] { "*.cs", "*.razor" })
-            foreach (var file in Directory.EnumerateFiles(frontDir, pattern, SearchOption.AllDirectories))
+            foreach (var file in RepositoryScan.Enumerate(frontDir, pattern))
             {
                 if (IsGenerated(file)) continue;
                 var source = File.ReadAllText(file);
@@ -182,14 +182,5 @@ public sealed class SvgCultureInvariantAuditTests
         || file.EndsWith(".g.cs", StringComparison.Ordinal)
         || file.EndsWith(".razor.g.cs", StringComparison.Ordinal);
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(SvgCultureInvariantAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

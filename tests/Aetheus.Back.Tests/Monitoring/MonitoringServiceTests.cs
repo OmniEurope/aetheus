@@ -30,7 +30,7 @@ public class MonitoringServiceTests
         _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(servers);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(5);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(2);
-        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -56,10 +56,10 @@ public class MonitoringServiceTests
                 Id = 1, PipelineId = 10, Status = PipelineStatus.Success,
                 StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow,
                 Pipeline = new Pipeline { Id = 10, Name = "CI" },
-                StepRuns = [new PipelineStepRun { Id = 1, StepName = "Build", StageName = "build", Status = TaskExecutionStatus.Success }]
+                StepRuns = [new PipelineStepRun { Id = 1, StepName = "Build", StageName = "build", Status = TaskExecutionStatus.Success, TriggeredRunId = 2 }]
             }
         };
-        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
+        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -67,6 +67,7 @@ public class MonitoringServiceTests
         Assert.Equal("CI", result.RecentRuns[0].PipelineName);
         Assert.Single(result.RecentRuns[0].Steps);
         Assert.Equal("Build", result.RecentRuns[0].Steps[0].StepName);
+        Assert.Equal(2, result.RecentRuns[0].Steps[0].TriggeredRunId);
     }
 
     [Fact]
@@ -75,7 +76,7 @@ public class MonitoringServiceTests
         _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
-        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -97,7 +98,7 @@ public class MonitoringServiceTests
         _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(servers);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
-        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -161,7 +162,7 @@ public class MonitoringServiceTests
         {
             new() { Id = 1, PipelineId = 1, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow, Pipeline = null!, StepRuns = [] }
         };
-        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
+        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -169,3 +170,4 @@ public class MonitoringServiceTests
         Assert.Equal(string.Empty, result.RecentRuns[0].PipelineName);
     }
 }
+

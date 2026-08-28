@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.Git;
 
@@ -28,6 +27,17 @@ internal static partial class GitLightMapper
         CreatedAt = r.CreatedAt,
         LastPushAt = r.LastPushAt
     };
+
+    /// <summary>Translates a pull-request sort key from the DTO's vocabulary to the entity's.
+    /// <para>The grid sends the DTO property name, and the DTO's <c>CreatedAt</c> is the entity's
+    /// <see cref="PullRequest.ExternalCreatedAt"/> (when the PR was opened upstream). Passing the name
+    /// through untranslated would order by the row's own audit <c>CreatedAt</c> instead: a real column,
+    /// so no error, just an order that disagrees with the dates on screen. It lives beside the mapping
+    /// it mirrors, so the two cannot drift apart.</para></summary>
+    public static string? MapPrSortKey(string? sortBy) =>
+        string.Equals(sortBy, nameof(InternalPullRequestDto.CreatedAt), StringComparison.OrdinalIgnoreCase)
+            ? nameof(PullRequest.ExternalCreatedAt)
+            : sortBy;
 
     public static InternalPullRequestDto MapPrToDto(PullRequest p) => new()
     {

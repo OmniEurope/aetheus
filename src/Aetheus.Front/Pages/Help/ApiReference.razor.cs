@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Text.Json;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Help;
 
@@ -52,7 +48,7 @@ public partial class ApiReference
 
         try
         {
-            using var doc = await Api.GetOpenApiSpecAsync();
+            using var doc = await Api.Servers.GetOpenApiSpecAsync();
             if (doc is not null)
             {
                 Parse(doc);

@@ -11,7 +11,9 @@ public sealed record MailDataDto
     public bool IsInstalled { get; init; }
     public bool IsPostfixRunning { get; init; }
     public bool IsDovecotRunning { get; init; }
+    [StringLength(100)]
     public string PostfixVersion { get; init; } = string.Empty;
+    [StringLength(100)]
     public string DovecotVersion { get; init; } = string.Empty;
     public int QueueSize { get; init; }
     public List<MailDomainDto> Domains { get; init; } = [];
@@ -23,8 +25,10 @@ public sealed record MailDataDto
 public sealed record MailDomainDto
 {
     public int Id { get; init; }
+    [StringLength(253)]
     public string Name { get; init; } = string.Empty;
     public bool IsActive { get; init; } = true;
+    [StringLength(63)]
     public string DkimSelector { get; init; } = "default";
     public bool HasSpf { get; init; }
     public bool HasDkim { get; init; }
@@ -37,7 +41,9 @@ public sealed record MailDomainDto
 public sealed record MailAccountDto
 {
     public int Id { get; init; }
+    [StringLength(254)]
     public string Email { get; init; } = string.Empty;
+    [StringLength(253)]
     public string Domain { get; init; } = string.Empty;
     public bool IsActive { get; init; } = true;
     public int QuotaMb { get; init; }
@@ -98,7 +104,7 @@ public sealed record CreateMailAccountRequest
     public string Email { get; init; } = string.Empty;
 
     [Required]
-    [StringLength(128, MinimumLength = 8)]
+    [StringLength(PasswordPolicy.MaximumLength, MinimumLength = PasswordPolicy.MinimumLength)]
     public string Password { get; init; } = string.Empty;
 
     [Range(0, 102400)]
@@ -112,7 +118,7 @@ public sealed record UpdateMailAccountRequest
     [Range(0, 102400)]
     public int? QuotaMb { get; init; }
 
-    [StringLength(128, MinimumLength = 8)]
+    [StringLength(PasswordPolicy.MaximumLength, MinimumLength = PasswordPolicy.MinimumLength)]
     public string? NewPassword { get; init; }
 }
 
@@ -121,6 +127,7 @@ public sealed record UpdateMailAccountRequest
 public sealed record MailLogRequest
 {
     [Required]
+    [StringLength(20)]
     [RegularExpression("^(postfix|dovecot)$")]
     public string LogType { get; init; } = "postfix";
 
@@ -150,7 +157,7 @@ public sealed record MailSetupRequest
     public string AdminEmail { get; init; } = string.Empty;
 
     [Required]
-    [StringLength(128, MinimumLength = 8)]
+    [StringLength(PasswordPolicy.MaximumLength, MinimumLength = PasswordPolicy.MinimumLength)]
     public string AdminPassword { get; init; } = string.Empty;
 
     [Range(0, 102400)]

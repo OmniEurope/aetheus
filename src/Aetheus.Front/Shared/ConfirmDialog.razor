@@ -5,7 +5,7 @@
 {
     <div class="dialog-overlay" @onclick="OnCancelClick" @onkeydown="OnKeyDown" tabindex="0" @ref="_overlayRef">
         <RadzenCard class="confirm-dialog-card" @onclick:stopPropagation="true">
-            <RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@Title</RadzenText>
+            <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@Title</RadzenText>
             <RadzenText TextStyle="TextStyle.Body2" class="rz-mb-4">@Message</RadzenText>
             <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem">
                 <RadzenButton Text="@L["Cancel"]" Icon="close" Click="OnCancelClick" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />

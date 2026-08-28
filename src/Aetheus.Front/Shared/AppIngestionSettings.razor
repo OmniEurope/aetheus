@@ -1,6 +1,6 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@* PLAN-001 phase 2: OTLP ingestion key management + per-metric alert thresholds. *@
-<RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["IngestionKey"]</RadzenText>
+@* ADR-021 phase 2: OTLP ingestion key management + per-metric alert thresholds. *@
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["IngestionKey"]</RadzenText>
 
 <RadzenCard class="rz-mb-3">
     @if (App?.HasIngestKey == true)
@@ -28,8 +28,10 @@
             <RadzenButton Icon="content_copy" Click="@CopyKeyAsync" title="@L["Copy"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
         </RadzenStack>
         <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2">
-            <code>OTEL_EXPORTER_OTLP_ENDPOINT=@IngestEndpoint</code><br />
-            <code>OTEL_EXPORTER_OTLP_PROTOCOL=http/json</code><br />
+            <code>OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=@MetricsEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=@LogsEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=@TracesEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf</code><br />
             <code>OTEL_EXPORTER_OTLP_HEADERS=x-aetheus-ingest-key=&lt;key&gt;</code>
         </RadzenText>
     }
@@ -38,7 +40,7 @@
     {
         <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-3">
             <RadzenButton Text="@(App?.HasIngestKey == true ? L["RegenerateKey"] : L["GenerateKey"])" Icon="vpn_key"
-                          Click="@GenerateKeyAsync" IsBusy="@_busy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                          Click="@GenerateKeyAsync" IsBusy="@_busy" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
             @if (App?.HasIngestKey == true)
             {
                 <RadzenButton Text="@L["RevokeIngestKey"]" Icon="key_off" Click="@RevokeKeyAsync" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
@@ -47,9 +49,75 @@
     }
 </RadzenCard>
 
-<RadzenText TextStyle="TextStyle.H6" class="rz-mb-2">@L["MetricThresholds"]</RadzenText>
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["WebAnalyticsConfiguration"]</RadzenText>
 
-<RadzenDataGrid Data="@_thresholds" TItem="AppMetricThresholdDto" Density="Density.Compact" EmptyText="@L["NoThresholds"]" class="rz-mb-3" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+<RadzenCard class="rz-mb-3">
+    @if (_analyticsLoading)
+    {
+        <AetheusLoader Size="AetheusLoaderSize.Small" />
+    }
+    else
+    {
+        <RadzenStack Gap="0.75rem">
+            <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_analyticsEnabled"
+                           Disabled="@(!CanWrite)" Text="@L["EnableWebAnalytics"]" />
+            <LabeledToggle Kind="ToggleKind.Switch" @bind-Value="_analyticsPublicIngestEnabled"
+                           Disabled="@(!CanWrite)" Text="@L["EnablePublicWebAnalyticsIngest"]" />
+            <RadzenStack Gap="0.25rem">
+                <RadzenLabel Text="@L["AnalyticsSiteId"]" />
+                <RadzenTextBox @bind-Value="_analyticsSiteId"
+                               @oninput="@(e => _analyticsSiteId = e.Value?.ToString() ?? string.Empty)"
+                               Disabled="@(!CanWrite)" class="w-rem-20" />
+            </RadzenStack>
+            <RadzenStack Gap="0.25rem">
+                <RadzenLabel Text="@L["AnalyticsAllowedOrigins"]" />
+                <RadzenTextArea @bind-Value="_analyticsOrigins"
+                                @oninput="@(e => _analyticsOrigins = e.Value?.ToString() ?? string.Empty)"
+                                Rows="3" Disabled="@(!CanWrite)"
+                                Placeholder="https://example.com" class="rz-w-100" />
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                    @L["AnalyticsAllowedOriginsHint"]
+                </RadzenText>
+            </RadzenStack>
+            <RadzenStack Gap="0.25rem">
+                <RadzenLabel Text="@L["AnalyticsStorageBudgetBytes"]" />
+                <RadzenNumeric TValue="long" @bind-Value="_analyticsStorageBudgetBytes"
+                               Min="1048576" Max="10737418240" Disabled="@(!CanWrite)" class="w-rem-20" />
+            </RadzenStack>
+            @if (_analyticsConfiguration is not null)
+            {
+                <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">
+                    @string.Format(L["AnalyticsKeyVersion"], _analyticsConfiguration.PseudonymKeyVersion,
+                        _analyticsConfiguration.PseudonymKeyCreatedAt?.ToString("g") ?? "-")
+                </RadzenText>
+                @if (_analyticsConfiguration.PublicIngestEnabled)
+                {
+                    <RadzenText TextStyle="TextStyle.Caption">
+                        <code>@PublicAnalyticsEndpoint</code>
+                    </RadzenText>
+                }
+            }
+            @if (CanWrite)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveAnalyticsConfigurationAsync"
+                                  IsBusy="@_analyticsBusy" ButtonStyle="ButtonStyle.Primary"
+                                  Variant="Variant.Filled" />
+                    @if ((_analyticsConfiguration?.PseudonymKeyVersion ?? 0) > 0)
+                    {
+                        <RadzenButton Text="@L["RotateAnalyticsKey"]" Icon="vpn_key"
+                                      Click="@RotateAnalyticsKeyAsync" IsBusy="@_analyticsBusy"
+                                      ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                    }
+                </RadzenStack>
+            }
+        </RadzenStack>
+    }
+</RadzenCard>
+
+<RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["MetricThresholds"]</RadzenText>
+
+<RadzenDataGrid Responsive="false" Data="@_thresholds" TItem="AppMetricThresholdDto" Density="Density.Compact" EmptyText="@L["NoThresholds"]" class="rz-mb-3" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
     <Columns>
         <RadzenDataGridColumn TItem="AppMetricThresholdDto" Property="MetricName" Title="@L["Metric"]" />
         <RadzenDataGridColumn TItem="AppMetricThresholdDto" Property="Operator" Title="@L["Operator"]" Width="150px" />
@@ -77,7 +145,9 @@
     <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
         <RadzenStack Gap="0.25rem">
             <RadzenLabel Text="@L["Metric"]" />
-            <RadzenTextBox @bind-Value="_newThreshold.MetricName" class="w-rem-16" />
+            <RadzenTextBox @bind-Value="_newThreshold.MetricName"
+                           @oninput="@(e => _newThreshold.MetricName = e.Value?.ToString() ?? string.Empty)"
+                           class="w-rem-16" />
         </RadzenStack>
         <RadzenStack Gap="0.25rem">
             <RadzenLabel Text="@L["Operator"]" />
@@ -85,7 +155,13 @@
         </RadzenStack>
         <RadzenStack Gap="0.25rem">
             <RadzenLabel Text="@L["Threshold"]" />
-            <RadzenNumeric @bind-Value="_newThreshold.Threshold" class="w-rem-8" />
+            <RadzenNumeric @bind-Value="_newThreshold.Threshold"
+                           @oninput="@(e => _newThreshold.Threshold =
+                               double.TryParse(e.Value?.ToString(),
+                                   System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture,
+                                   out var threshold) ? threshold : 0)"
+                           class="w-rem-8" />
         </RadzenStack>
         <RadzenButton Text="@L["AddThreshold"]" Icon="add" Click="@AddThresholdAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
     </RadzenStack>

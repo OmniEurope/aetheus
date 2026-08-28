@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Collections.Concurrent;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.VariableLibraries;
@@ -22,7 +16,8 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
         request ??= new PaginationRequest();
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetLibrariesPagedAsync(
-            request.Search, projectId, environmentId, projectServerId, page, pageSize, accessibleIds, ct).ConfigureAwait(false);
+            request.Search, projectId, environmentId, projectServerId, page, pageSize, accessibleIds, ct,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<VariableLibraryDto>
         {
@@ -183,15 +178,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
         {
             await repo.AddEntryAsync(entry, ct).ConfigureAwait(false);
 
-            var version = await repo.GetNextVersionAsync(entry.Id, ct).ConfigureAwait(false);
-            await repo.AddEntryVersionAsync(new VariableLibraryEntryVersion
-            {
-                VariableLibraryEntryId = entry.Id,
-                Key = entry.Key,
-                Value = entry.Value,
-                Version = version,
-                ChangeType = ChangeType.Created
-            }, ct).ConfigureAwait(false);
+            await AddEntryVersionAsync(entry, ChangeType.Created, ct).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         return new VariableEntryDto { Id = entry.Id, Key = entry.Key, Value = entry.Value };
@@ -209,15 +196,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
         {
             await repo.SaveChangesAsync(ct).ConfigureAwait(false);
 
-            var version = await repo.GetNextVersionAsync(entry.Id, ct).ConfigureAwait(false);
-            await repo.AddEntryVersionAsync(new VariableLibraryEntryVersion
-            {
-                VariableLibraryEntryId = entry.Id,
-                Key = entry.Key,
-                Value = entry.Value,
-                Version = version,
-                ChangeType = ChangeType.Updated
-            }, ct).ConfigureAwait(false);
+            await AddEntryVersionAsync(entry, ChangeType.Updated, ct).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         return new VariableEntryDto { Id = entry.Id, Key = entry.Key, Value = entry.Value };
@@ -230,15 +209,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
 
         await transaction.ExecuteInTransactionAsync(async () =>
         {
-            var version = await repo.GetNextVersionAsync(entry.Id, ct).ConfigureAwait(false);
-            await repo.AddEntryVersionAsync(new VariableLibraryEntryVersion
-            {
-                VariableLibraryEntryId = entry.Id,
-                Key = entry.Key,
-                Value = entry.Value,
-                Version = version,
-                ChangeType = ChangeType.Deleted
-            }, ct).ConfigureAwait(false);
+            await AddEntryVersionAsync(entry, ChangeType.Deleted, ct).ConfigureAwait(false);
 
             await repo.RemoveEntryAsync(entry, ct).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
@@ -277,17 +248,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
     {
         var libraries = await repo.FindByNamesAsync(names, projectId, ct).ConfigureAwait(false);
 
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var lib in libraries.Where(l => l.ProjectId == null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        foreach (var lib in libraries.Where(l => l.ProjectId != null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        return result;
+        return MergeByPrecedence(libraries, library => library.ProjectId is null, library => library.ProjectId is not null);
     }
 
     public async Task<Dictionary<string, string>> ResolveLibrariesWithCrossAccessAsync(List<string> names, int projectId, CancellationToken ct = default)
@@ -298,25 +259,12 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
 
     private static Dictionary<string, string> MergeWithPrecedence(List<Data.Entities.VariableLibrary> libraries)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var lib in libraries.Where(l => l.ProjectId == null && l.EnvironmentId == null && l.ProjectServerId == null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        foreach (var lib in libraries.Where(l => l.ProjectId != null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        foreach (var lib in libraries.Where(l => l.EnvironmentId != null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        foreach (var lib in libraries.Where(l => l.ProjectServerId != null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        return result;
+        return MergeByPrecedence(
+            libraries,
+            library => library.ProjectId is null && library.EnvironmentId is null && library.ProjectServerId is null,
+            library => library.ProjectId is not null,
+            library => library.EnvironmentId is not null,
+            library => library.ProjectServerId is not null);
     }
 
     public async Task<(Dictionary<string, string> Vars, HashSet<string> FoundNames)> ResolveLibrariesWithNamesAsync(List<string> names, int? projectId, CancellationToken ct = default)
@@ -324,15 +272,11 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
         var libraries = await repo.FindByNamesAsync(names, projectId, ct).ConfigureAwait(false);
         var foundNames = new HashSet<string>(libraries.Select(l => l.Name), StringComparer.OrdinalIgnoreCase);
 
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var lib in libraries.Where(l => l.ProjectId == null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-        foreach (var lib in libraries.Where(l => l.ProjectId != null))
-            foreach (var entry in lib.Entries)
-                result[entry.Key] = entry.Value;
-
-        return (result, foundNames);
+        var variables = MergeByPrecedence(
+            libraries,
+            library => library.ProjectId is null,
+            library => library.ProjectId is not null);
+        return (variables, foundNames);
     }
 
     public async Task<(Dictionary<string, string> Vars, HashSet<string> FoundNames)> ResolveLibrariesWithCrossAccessAndNamesAsync(List<string> names, int projectId, CancellationToken ct = default)
@@ -340,6 +284,37 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
         var libraries = await repo.FindByNamesWithCrossAccessAsync(names, projectId, ct).ConfigureAwait(false);
         var foundNames = new HashSet<string>(libraries.Select(l => l.Name), StringComparer.OrdinalIgnoreCase);
         return (MergeWithPrecedence(libraries), foundNames);
+    }
+
+    private async Task AddEntryVersionAsync(
+        VariableLibraryEntry entry,
+        ChangeType changeType,
+        CancellationToken ct)
+    {
+        var version = await repo.GetNextVersionAsync(entry.Id, ct).ConfigureAwait(false);
+        await repo.AddEntryVersionAsync(new VariableLibraryEntryVersion
+        {
+            VariableLibraryEntryId = entry.Id,
+            Key = entry.Key,
+            Value = entry.Value,
+            Version = version,
+            ChangeType = changeType
+        }, ct).ConfigureAwait(false);
+    }
+
+    private static Dictionary<string, string> MergeByPrecedence(
+        IReadOnlyCollection<Data.Entities.VariableLibrary> libraries,
+        params Func<Data.Entities.VariableLibrary, bool>[] scopes)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var scope in scopes)
+        {
+            foreach (var library in libraries.Where(scope))
+                foreach (var entry in library.Entries)
+                    result[entry.Key] = entry.Value;
+        }
+
+        return result;
     }
 
     public async Task<List<VariableEntryDto>> ExportEntriesAsync(int libraryId, CancellationToken ct = default)

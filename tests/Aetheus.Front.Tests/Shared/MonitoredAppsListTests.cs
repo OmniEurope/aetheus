@@ -59,4 +59,27 @@ public class MonitoredAppsListTests : BunitContext
 
         Assert.DoesNotContain("AddMonitoredApp", cut.Markup);
     }
+
+    [Fact]
+    public void UnknownStatus_AfterAProbe_DoesNotClaimItWasNeverProbed()
+    {
+        _handler.SetJsonResponse("api/appmonitoring/projects/1/apps", new List<MonitoredAppDto>
+        {
+            new()
+            {
+                Id = 1,
+                ProjectId = 1,
+                Name = "portfolio",
+                CurrentStatus = AppHealthStatus.Unknown,
+                LastCheckedAt = new DateTime(2026, 7, 23, 20, 0, 0, DateTimeKind.Utc)
+            }
+        });
+        _handler.SetJsonResponse("api/appmonitoring/apps/1/samples", new List<AppHealthSampleDto>());
+
+        var cut = Render<MonitoredAppsList>(p => p.Add(c => c.ProjectId, 1));
+        cut.WaitForState(() => cut.Markup.Contains("portfolio"), TimeSpan.FromSeconds(3));
+
+        Assert.Contains("AppHealthUnknown", cut.Markup);
+        Assert.DoesNotContain("AppHealthNeverProbed", cut.Markup);
+    }
 }

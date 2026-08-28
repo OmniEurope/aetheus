@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: EUPL-1.2
 namespace Aetheus.Agent.Core.Services;
 
-using Aetheus.Shared.DTOs;
 
 public interface IDockerStorageMaintenance
 {
     string BuilderName { get; }
     bool DeploymentOnly { get; }
     bool IsBuildCommand(string command);
-    Task PrepareBuildAsync(
+    /// <summary>
+    /// Returns false when <paramref name="waitBudget"/> elapses before the exclusive build lease frees.
+    /// A null budget waits indefinitely.
+    /// </summary>
+    Task<bool> PrepareBuildAsync(
         IDictionary<string, string> environmentVariables,
         CancellationToken ct,
-        bool runDockerMaintenance = true);
+        bool runDockerMaintenance = true,
+        TimeSpan? waitBudget = null);
+    Task ScheduleBuildCompletionAsync(bool runDockerMaintenance = true, CancellationToken ct = default);
     Task CompleteBuildAsync(CancellationToken ct, bool runDockerMaintenance = true);
     Task RunMaintenanceAsync(string reason, CancellationToken ct);
     Task<StorageDiagnosticsDto> CollectDiagnosticsAsync(CancellationToken ct);

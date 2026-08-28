@@ -13,6 +13,10 @@ RUN curl -fsSL "$DOTNET_INSTALLER_URL" -o /tmp/di.sh \
 ENV DOTNET_ROOT=/usr/lib/dotnet-10
 WORKDIR /src
 
+# Candidate E2E only uses Chromium. The CI artifact is exported as a flattened rootfs, so removing
+# the unused browser engines here actually removes their bytes instead of retaining deleted base layers.
+RUN rm -rf /ms-playwright/firefox-* /ms-playwright/webkit-*
+
 # The project and its restored outputs are required by `dotnet test --no-build --no-restore`.
 COPY Directory.Build.props Directory.Packages.props NuGet.config ./
 COPY tests/Aetheus.E2E/ tests/Aetheus.E2E/
@@ -21,4 +25,6 @@ COPY tests/Aetheus.E2E/ tests/Aetheus.E2E/
 RUN test -s tests/Aetheus.E2E/bin/Release/net10.0/Aetheus.E2E.dll \
     && test -s tests/Aetheus.E2E/bin/Release/net10.0/Aetheus.E2E.deps.json \
     && test -s tests/Aetheus.E2E/bin/Release/net10.0/Aetheus.E2E.runtimeconfig.json \
-    && test -s tests/Aetheus.E2E/obj/project.assets.json
+    && test -s tests/Aetheus.E2E/obj/project.assets.json \
+    && chown -R pwuser:pwuser /src
+USER pwuser

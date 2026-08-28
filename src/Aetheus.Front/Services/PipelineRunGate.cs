@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Resources;
-using Microsoft.Extensions.Localization;
-using Radzen;
+using Aetheus.Front.Pages.Pipelines;
 
 namespace Aetheus.Front.Services;
 
@@ -21,7 +19,7 @@ public sealed class PipelineRunGate(
     /// <summary>Returns <c>true</c> if the run may proceed, <c>false</c> to abort.</summary>
     public async Task<bool> ConfirmPreflightAsync(int pipelineId, string? sourceBranch = null)
     {
-        var pre = await api.PreflightPipelineAsync(pipelineId, sourceBranch);
+        var pre = await api.Pipelines.PreflightPipelineAsync(pipelineId, sourceBranch);
 
         if (pre.Error is not null)
         {
@@ -45,6 +43,15 @@ public sealed class PipelineRunGate(
             return false;
         }
 
+        var warnings = pre.Value?.Warnings ?? [];
+        if (warnings.Count > 0)
+        {
+            toast.Notify(
+                NotificationSeverity.Warning,
+                "Warnings",
+                string.Join("\n", warnings.Select(warning => $"• {warning}")));
+        }
+
         var stages = pre.Value?.Stages ?? [];
         var unresolved = stages.Where(s => !s.Resolved).ToList();
         if (unresolved.Count == 0)
@@ -60,21 +67,18 @@ public sealed class PipelineRunGate(
             return true;
         }
 
-        // Build a detailed message distinguishing blocking vs non-blocking
-        var details = string.Join("\n", unresolved.Select(s =>
-            $"• {s.StageName} → {s.Target}" + (s.Reason is not null ? $": {s.Reason}" : "")));
-        var messageTemplate = localizer["PreflightNoAgentBody"].Value;
-        var message = messageTemplate.Contains("{0}", StringComparison.Ordinal)
-            ? string.Format(messageTemplate, details)
-            : $"{messageTemplate}\n{details}";
-        var confirmed = await dialog.Confirm(
-            message,
+        // A plain Confirm repeated one full sentence per unresolved stage, so an eleven-stage pipeline
+        // rendered eleven copies of the same cause and the dialog became unreadable. The dedicated
+        // dialog groups the stages by cause and offers the action that actually fixes it.
+        var confirmed = await dialog.OpenAsync<PipelineRunPreflightDialog>(
             localizer["PreflightNoAgentTitle"].Value,
-            new ConfirmOptions
+            new Dictionary<string, object?> { [nameof(PipelineRunPreflightDialog.Unresolved)] = unresolved },
+            new DialogOptions
             {
-                OkButtonText = localizer["RunAnyway"].Value,
-                CancelButtonText = localizer["Cancel"].Value
+                Width = "min(42rem, 92vw)",
+                // claude-ui-patterns.md: the title must be announced before the first control.
+                AutoFocusFirstElement = false
             });
-        return confirmed == true;
+        return confirmed is true;
     }
 }

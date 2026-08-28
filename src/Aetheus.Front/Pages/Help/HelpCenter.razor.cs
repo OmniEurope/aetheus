@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Layout;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.Extensions.Localization;
 
 namespace Aetheus.Front.Pages.Help;
 
@@ -31,6 +26,12 @@ public partial class HelpCenter
     private async Task FilterAsync()
     {
         _filtered = await Help.SearchAsync(_search ?? "");
+    }
+
+    private async Task OnSearchInputAsync(ChangeEventArgs args)
+    {
+        _search = args.Value?.ToString();
+        await FilterAsync();
     }
 
     private void OnCardKeyDown(KeyboardEventArgs e, string articleKey)

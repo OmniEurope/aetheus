@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -35,7 +29,7 @@ public partial class AppErrorsView
         _loading = true;
         try
         {
-            var result = await Api.GetAppErrorsAsync(AppId, page: _page, pageSize: PageSize);
+            var result = await Api.Monitoring.GetAppErrorsAsync(AppId, page: _page, pageSize: PageSize);
             _errors = result.Items;
             _total = result.TotalCount;
         }

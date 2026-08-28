@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Pages.Servers.ServerDetailSections;
 
@@ -65,7 +57,7 @@ public partial class ServerPortsentrySection
         _blockedLoading = true;
         try
         {
-            var result = await Api.GetPortsentryBlockedIpsAsync(serverId, page, pageSize, sortBy: sortBy, sortDescending: descending);
+            var result = await Api.Security.GetPortsentryBlockedIpsAsync(serverId, page, pageSize, sortBy: sortBy, sortDescending: descending);
             if (serverId == ServerId && generation == _loadGeneration)
             {
                 _blockedIps = result.Items;
@@ -97,7 +89,7 @@ public partial class ServerPortsentrySection
         _whitelistLoading = true;
         try
         {
-            var result = await Api.GetPortsentryWhitelistPageAsync(serverId, page, pageSize, sortBy: sortBy, sortDescending: descending);
+            var result = await Api.Security.GetPortsentryWhitelistPageAsync(serverId, page, pageSize, sortBy: sortBy, sortDescending: descending);
             if (serverId == ServerId && generation == _loadGeneration)
             {
                 _whitelist = result.Items;
@@ -144,7 +136,7 @@ public partial class ServerPortsentrySection
         _actionRunning = true;
         try
         {
-            var success = await Api.ExecutePortsentryActionAsync(ServerId, new PortsentryActionRequest { Action = action });
+            var success = await Api.Security.ExecutePortsentryActionAsync(ServerId, new PortsentryActionRequest { Action = action });
             if (success)
             {
                 Toast.Success("TaskCreated");
@@ -171,7 +163,7 @@ public partial class ServerPortsentrySection
             TcpPorts = _setupTcpPorts,
             UdpPorts = _setupUdpPorts
         };
-        var success = await Api.SetupPortsentryAsync(ServerId, request);
+        var success = await Api.Security.SetupPortsentryAsync(ServerId, request);
         if (success)
         {
             Toast.Success("TaskCreated");
@@ -190,7 +182,7 @@ public partial class ServerPortsentrySection
                 { "Kind", ServerSetupKind.Portsentry },
                 { "Model", new ServerSetupDialogModel { Mode = _setupMode, TcpPorts = _setupTcpPorts, UdpPorts = _setupUdpPorts } }
             },
-            new DialogOptions { Width = "38rem" });
+            new DialogOptions { Width = "38rem", AutoFocusFirstElement = false });
         if (result is not ServerSetupDialogModel model) return;
         _setupMode = model.Mode;
         _setupTcpPorts = model.TcpPorts;
@@ -200,7 +192,7 @@ public partial class ServerPortsentrySection
 
     private async Task GetLogsAsync()
     {
-        var success = await Api.GetPortsentryLogsAsync(ServerId, new PortsentryLogRequest());
+        var success = await Api.Security.GetPortsentryLogsAsync(ServerId, new PortsentryLogRequest());
         if (success)
             Toast.Success("TaskCreated");
     }
@@ -213,7 +205,7 @@ public partial class ServerPortsentrySection
             new ConfirmOptions { OkButtonText = L["Unblock"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.UnblockPortsentryIpAsync(ServerId, new PortsentryUnblockRequest { IpAddress = ip });
+        var success = await Api.Security.UnblockPortsentryIpAsync(ServerId, new PortsentryUnblockRequest { IpAddress = ip });
         if (success)
         {
             Toast.Success("TaskCreated");
@@ -226,7 +218,7 @@ public partial class ServerPortsentrySection
     private async Task AddWhitelistIpAsync()
     {
         if (string.IsNullOrWhiteSpace(_whitelistIp)) return;
-        var result = await Api.AddPortsentryWhitelistIpAsync(ServerId, new AddPortsentryWhitelistRequest
+        var result = await Api.Security.AddPortsentryWhitelistIpAsync(ServerId, new AddPortsentryWhitelistRequest
         {
             IpAddress = _whitelistIp.Trim(),
             Description = _whitelistDesc.Trim()
@@ -250,7 +242,7 @@ public partial class ServerPortsentrySection
             new ConfirmOptions { OkButtonText = L["Delete"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var success = await Api.RemovePortsentryWhitelistIpAsync(ServerId, entry.Id);
+        var success = await Api.Security.RemovePortsentryWhitelistIpAsync(ServerId, entry.Id);
         if (success)
         {
             Toast.Success("Deleted");

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Monitoring;
 
 public class MonitoringService(IMonitoringRepository repo, TimeProvider timeProvider) : IMonitoringService
 {
+    private const int RecentRunFetchLimit = 100;
+
     public Task<DashboardOverviewDto> GetDashboardAsync(
         List<int>? accessibleServerIds = null,
         List<int>? accessibleProjectIds = null,
@@ -34,8 +33,8 @@ public class MonitoringService(IMonitoringRepository repo, TimeProvider timeProv
             ? await repo.CountRunningPipelinesAsync(accessibleProjectIds, accessiblePipelineIds, ct).ConfigureAwait(false)
             : await repo.CountRunningPipelinesAsync(accessibleProjectIds, ct).ConfigureAwait(false);
         var recentRuns = includeDirectPipelineAccess
-            ? await repo.GetRecentRunsAsync(10, accessibleProjectIds, accessiblePipelineIds, ct).ConfigureAwait(false)
-            : await repo.GetRecentRunsAsync(10, accessibleProjectIds, ct).ConfigureAwait(false);
+            ? await repo.GetRecentRunsAsync(RecentRunFetchLimit, accessibleProjectIds, accessiblePipelineIds, ct).ConfigureAwait(false)
+            : await repo.GetRecentRunsAsync(RecentRunFetchLimit, accessibleProjectIds, ct).ConfigureAwait(false);
         var recentProjects = await repo.GetRecentProjectsAsync(10, accessibleProjectIds, ct).ConfigureAwait(false);
 
         return new DashboardOverviewDto
@@ -58,7 +57,8 @@ public class MonitoringService(IMonitoringRepository repo, TimeProvider timeProv
                     Id = s.Id,
                     StepName = s.StepName,
                     StageName = s.StageName,
-                    Status = s.Status
+                    Status = s.Status,
+                    TriggeredRunId = s.TriggeredRunId
                 }).ToList()
             }).ToList(),
             // Dashboard ordering: online servers first, then most-recently-active (LastHeartbeat) first,
@@ -83,27 +83,25 @@ public class MonitoringService(IMonitoringRepository repo, TimeProvider timeProv
                     RequireContainerIsolation = s.RequireContainerIsolation,
                     InsecureTls = s.InsecureTls
                 }).ToList(),
-            Projects = recentProjects.Select(p => new ProjectDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                RepositoryUrl = p.RepositoryUrl,
-                DefaultBranch = p.DefaultBranch,
-                Status = p.Status,
-                Tags = TagsHelper.DeserializeTags(p.Tags),
-                PipelineCount = p.Pipelines.Count,
-                OrganizationId = p.OrganizationId,
-                CreatedAt = p.CreatedAt,
-                UpdatedAt = p.UpdatedAt
-            }).ToList()
+            Projects = recentProjects.Select(project =>
+                ProjectDtoMapper.ToDto(project, includePipelineSummary: true)).ToList()
         };
     }
 
-    public async Task<List<ServerMetricDto>> GetServerMetricsAsync(int serverId, int hours, CancellationToken ct = default)
+    public async Task<List<ServerMetricDto>> GetServerMetricsAsync(
+        int serverId,
+        int hours,
+        CancellationToken ct = default,
+        DateTime? afterUtc = null,
+        int take = 1_000)
     {
         var since = timeProvider.GetUtcNow().UtcDateTime.AddHours(-hours);
-        var metrics = await repo.GetServerMetricsSinceAsync(serverId, since, ct).ConfigureAwait(false);
+        var metrics = await repo.GetServerMetricsSinceAsync(
+            serverId,
+            since,
+            ct,
+            afterUtc,
+            take).ConfigureAwait(false);
 
         return metrics.Select(m => new ServerMetricDto
         {

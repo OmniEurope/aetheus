@@ -55,27 +55,88 @@ public sealed class PRM003_NoIncludeAfterOrderByAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        // Walk up the fluent chain to see if any ordering/pagination method precedes this Include
         ExpressionSyntax current = method.ReducedFrom is not null
             ? memberAccess.Expression
             : invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression ?? memberAccess.Expression;
-        while (current is InvocationExpressionSyntax parentInvocation &&
-               parentInvocation.Expression is MemberAccessExpressionSyntax parentMember)
+        if (TryFindOrderingMethod(
+                current,
+                invocation.SpanStart,
+                context,
+                new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default),
+                out var orderingMethod))
         {
-            var parentMethod = context.SemanticModel.GetSymbolInfo(parentInvocation, context.CancellationToken).Symbol
-                as IMethodSymbol;
-            var declaredParent = parentMethod?.ReducedFrom ?? parentMethod;
-            var parentName = declaredParent?.Name;
-            var containingType = declaredParent?.ContainingType.ToDisplayString();
-            if (parentName is not null
-                && OrderingMethods.Contains(parentName)
-                && containingType is "System.Linq.Queryable" or "System.Linq.Enumerable")
-            {
-                var diagnostic = Diagnostic.Create(Rule, memberAccess.Name.GetLocation(), parentName);
-                context.ReportDiagnostic(diagnostic);
-                return;
-            }
-            current = parentMember.Expression;
+            context.ReportDiagnostic(Diagnostic.Create(
+                Rule,
+                memberAccess.Name.GetLocation(),
+                orderingMethod));
         }
+    }
+
+    private static bool TryFindOrderingMethod(
+        ExpressionSyntax expression,
+        int beforePosition,
+        SyntaxNodeAnalysisContext context,
+        HashSet<ILocalSymbol> visited,
+        out string orderingMethod)
+    {
+        var current = expression;
+        while (current is InvocationExpressionSyntax invocation
+               && invocation.Expression is MemberAccessExpressionSyntax member)
+        {
+            var method = context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken).Symbol
+                as IMethodSymbol;
+            var declared = method?.ReducedFrom ?? method;
+            if (declared is not null
+                && OrderingMethods.Contains(declared.Name)
+                && declared.ContainingType.ToDisplayString()
+                    is "System.Linq.Queryable" or "System.Linq.Enumerable")
+            {
+                orderingMethod = declared.Name;
+                return true;
+            }
+            current = member.Expression;
+        }
+
+        if (current is IdentifierNameSyntax identifier
+            && context.SemanticModel.GetSymbolInfo(identifier, context.CancellationToken).Symbol
+                is ILocalSymbol local
+            && visited.Add(local))
+        {
+            var assignment = identifier.SyntaxTree.GetRoot(context.CancellationToken)
+                .DescendantNodes()
+                .OfType<AssignmentExpressionSyntax>()
+                .Where(candidate => candidate.SpanStart < beforePosition)
+                .Where(candidate => SymbolEqualityComparer.Default.Equals(
+                    context.SemanticModel.GetSymbolInfo(candidate.Left, context.CancellationToken).Symbol,
+                    local))
+                .OrderByDescending(candidate => candidate.SpanStart)
+                .FirstOrDefault();
+            if (assignment is not null)
+            {
+                return TryFindOrderingMethod(
+                    assignment.Right,
+                    assignment.SpanStart,
+                    context,
+                    visited,
+                    out orderingMethod);
+            }
+
+            var declarator = local.DeclaringSyntaxReferences
+                .Select(reference => reference.GetSyntax(context.CancellationToken))
+                .OfType<VariableDeclaratorSyntax>()
+                .FirstOrDefault();
+            if (declarator?.Initializer is not null)
+            {
+                return TryFindOrderingMethod(
+                    declarator.Initializer.Value,
+                    declarator.SpanStart,
+                    context,
+                    visited,
+                    out orderingMethod);
+            }
+        }
+
+        orderingMethod = string.Empty;
+        return false;
     }
 }

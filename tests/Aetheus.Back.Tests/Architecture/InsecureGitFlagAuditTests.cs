@@ -17,7 +17,7 @@ public class InsecureGitFlagAuditTests
 
         var offenders = new List<string>();
         var scanned = 0;
-        foreach (var file in Directory.EnumerateFiles(backDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(backDir, "*.cs"))
         {
             if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
                 file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
@@ -34,14 +34,5 @@ public class InsecureGitFlagAuditTests
             "gated on AllowInsecureCerts. Offenders: " + string.Join(", ", offenders));
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(InsecureGitFlagAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

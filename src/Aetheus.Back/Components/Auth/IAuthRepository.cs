@@ -20,6 +20,16 @@ public interface IAuthRepository
 
     void AddServerToken(ServerToken serverToken);
 
+    /// <summary>
+    /// Atomically consumes a one-use registration token, persists the server changes, revokes any
+    /// previous active bearer, and emits the replacement bearer record.
+    /// </summary>
+    Task<bool> TryPersistServerEnrollmentAsync(
+        int registrationTokenId,
+        Server server,
+        ServerToken serverToken,
+        CancellationToken ct = default);
+
     void AddRegistrationToken(RegistrationToken token);
 
     Task<List<RegistrationToken>> GetRegistrationTokensAsync(CancellationToken ct = default);
@@ -41,8 +51,6 @@ public interface IAuthRepository
     Task<bool> ServerHasActiveTokensAsync(int serverId, CancellationToken ct = default);
 
     Task<bool> ConsumeRegistrationTokenAsync(int tokenId, int? serverId, CancellationToken ct = default);
-
-    Task LinkServerToEnvironmentsByNameAsync(int serverId, IReadOnlyCollection<string> environmentNames, CancellationToken ct = default);
 
     Task<ExternalLogin?> FindExternalLoginAsync(string provider, string providerSubjectId, CancellationToken ct = default);
 

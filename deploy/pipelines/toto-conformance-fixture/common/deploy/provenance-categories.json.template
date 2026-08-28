@@ -1,0 +1,15 @@
+{
+  "dockerImages": [".pipeline-artifacts/toto-image.tar"],
+  "contracts": [
+    ".pipeline-artifacts/source-commit",
+    ".pipeline-artifacts/qa-rollback-contract",
+    ".pipeline-artifacts/integration-manifest.json",
+    ".pipeline-artifacts/delivery-contract.json"
+  ],
+  "injection": [
+    ".pipeline-artifacts/injection-lock.json",
+    ".pipeline-artifacts/packages.lock.json",
+    ".pipeline-artifacts/signature-verification.txt"
+  ],
+  "deployment": ["deploy/docker-compose.yml"]
+}

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -12,13 +11,14 @@ namespace Aetheus.Back.Components.Pipelines;
 internal static class PipelineDeploymentTargetGuard
 {
     internal const string TargetVariable = "AETHEUS_DEPLOY_TARGET";
+    internal const string LocalAgentVariable = "AETHEUS_LOCAL_AGENT";
     internal const string Production = "production";
     internal const string Local = "local";
 
     private static readonly string[] ForbiddenLocalTokens =
     [
-        "example.com",
-        "production-host",
+        "sonytumen.com",
+        "vps2577917",
         "aetheus-prod"
     ];
 
@@ -47,7 +47,14 @@ internal static class PipelineDeploymentTargetGuard
 
         if (!target.Equals(Local, StringComparison.OrdinalIgnoreCase))
             throw new BadRequestException($"Unsupported {TargetVariable} value '{target}'. Expected '{Production}' or '{Local}'.");
+        ValidateNoProductionValues(variables);
+        ValidateLocalEndpoints(variables);
+        ValidateLocalDomains(variables);
+        ValidateLocalRuntimeOptions(variables);
+    }
 
+    private static void ValidateNoProductionValues(IReadOnlyDictionary<string, string> variables)
+    {
         foreach (var (key, value) in variables)
         {
             var forbidden = ForbiddenLocalTokens.FirstOrDefault(token =>
@@ -55,7 +62,10 @@ internal static class PipelineDeploymentTargetGuard
             if (forbidden is not null)
                 throw new BadRequestException($"Local deployment target variable '{key}' contains forbidden production value '{forbidden}'.");
         }
+    }
 
+    private static void ValidateLocalEndpoints(IReadOnlyDictionary<string, string> variables)
+    {
         foreach (var key in EndpointKeys)
         {
             if (!variables.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value)) continue;
@@ -66,7 +76,10 @@ internal static class PipelineDeploymentTargetGuard
                 throw new BadRequestException($"Local deployment target variable '{key}' must be an HTTPS URL on a local-only host.");
             }
         }
+    }
 
+    private static void ValidateLocalDomains(IReadOnlyDictionary<string, string> variables)
+    {
         foreach (var key in DomainKeys)
         {
             if (variables.TryGetValue(key, out var value)
@@ -76,7 +89,10 @@ internal static class PipelineDeploymentTargetGuard
                 throw new BadRequestException($"Local deployment target variable '{key}' must use a local-only host name.");
             }
         }
+    }
 
+    private static void ValidateLocalRuntimeOptions(IReadOnlyDictionary<string, string> variables)
+    {
         if (variables.TryGetValue("CERTBOT_MODE", out var certbotMode)
             && !certbotMode.Equals(Local, StringComparison.OrdinalIgnoreCase))
             throw new BadRequestException("A local deployment target must set CERTBOT_MODE to 'local'.");
@@ -84,6 +100,11 @@ internal static class PipelineDeploymentTargetGuard
         if (variables.TryGetValue("TLS_CA_FILE", out var tlsCaFile)
             && string.IsNullOrWhiteSpace(tlsCaFile))
             throw new BadRequestException("A local deployment target must provide TLS_CA_FILE for explicit certificate trust.");
+
+        if (!variables.TryGetValue(LocalAgentVariable, out var localAgent)
+            || string.IsNullOrWhiteSpace(localAgent))
+            throw new BadRequestException(
+                $"A local deployment target requires an explicit runner selector in {LocalAgentVariable}.");
     }
 
     internal static string? ValidateServer(IReadOnlyDictionary<string, string> variables, Server server)
@@ -92,10 +113,14 @@ internal static class PipelineDeploymentTargetGuard
             || !target.Equals(Local, StringComparison.OrdinalIgnoreCase))
             return null;
 
-        return server.Name.Contains("vpssim", StringComparison.OrdinalIgnoreCase)
-            || server.Hostname.Contains("vpssim", StringComparison.OrdinalIgnoreCase)
+        if (!variables.TryGetValue(LocalAgentVariable, out var localAgent)
+            || string.IsNullOrWhiteSpace(localAgent))
+            return $"Local deployment target refused runner '{server.Name}' ({server.Hostname}); an explicit runner selector is required.";
+
+        return server.Name.Equals(localAgent, StringComparison.OrdinalIgnoreCase)
+               || server.Hostname.Equals(localAgent, StringComparison.OrdinalIgnoreCase)
             ? null
-            : $"Local deployment target refused runner '{server.Name}' ({server.Hostname}); a dedicated vpssim agent is required.";
+            : $"Local deployment target refused runner '{server.Name}' ({server.Hostname}); it does not match selector '{localAgent}'.";
     }
 
     private static bool IsLocalHost(string host)

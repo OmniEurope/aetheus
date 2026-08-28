@@ -1,7 +1,7 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @if (_loading)
 {
-    <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" />
+    <AetheusLoader />
 }
 else
 {
@@ -16,16 +16,16 @@ else
             Placeholder="@L["AllTypes"]" AllowClear="true" Data="@_policyOptions" TextProperty="Label" ValueProperty="Value" class="artifact-policy-filter" />
     </RadzenStack>
 
-    <RadzenDataGrid Data="@_artifacts" TItem="PipelineArtifactDto" Density="Density.Compact"
-        Count="@_totalCount" PageSize="@_pageSize" AllowPaging="true"
+    <RadzenDataGrid Responsive="false" Data="@_artifacts" TItem="PipelineArtifactDto" Density="Density.Compact"
+        Count="@_totalCount" PageSize="@_pageSize" AllowPaging="@(!AetheusGrid.Virtualization)"
         LoadData="@OnLoadData" EmptyText="@L["NoArtifactsFound"]" class="aetheus-clickable-rows"
-        RowClick="@OnRowClick" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+        RowClick="@OnRowClick" AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
         <Columns>
             <RadzenDataGridColumn TItem="PipelineArtifactDto" Title="" Width="50px" Sortable="false" Filterable="false">
                 <Template Context="a">
                     <span @onclick:stopPropagation="true">
                         <RadzenButton Icon="download" Size="ButtonSize.Small"
-                            Click="@(() => DownloadArtifact(a))" title="@L["Download"]" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                            Click="@(() => DownloadArtifact(a))" title="@L["Download"]" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
                     </span>
                 </Template>
             </RadzenDataGridColumn>

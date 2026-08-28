@@ -1,0 +1,16 @@
+import unittest
+
+from toto_math import completion_ratio
+
+
+class CompletionRatioTests(unittest.TestCase):
+    def test_returns_real_ratio(self) -> None:
+        self.assertEqual(completion_ratio(3, 4), 0.75)
+
+    def test_rejects_invalid_total(self) -> None:
+        with self.assertRaises(ValueError):
+            completion_ratio(0, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

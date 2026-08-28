@@ -10,11 +10,13 @@ ENV NUGET_PACKAGES=/root/.nuget/packages \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 COPY Directory.Build.props .
+COPY Directory.Build.targets .
 # Central Package Management: restore needs Directory.Packages.props to resolve every PackageReference
 # version (without it: NU1015), and NuGet.config pins the sole feed. The back Dockerfile copies both;
 # the front was missing them, so the QA/deploy front image build failed at restore.
 COPY Directory.Packages.props .
 COPY NuGet.config .
+COPY scanner-manifest.json /scanner-manifest.json
 COPY src/Aetheus.Shared/Aetheus.Shared.csproj Aetheus.Shared/
 COPY src/Aetheus.Analyzers/Aetheus.Analyzers.csproj Aetheus.Analyzers/
 COPY src/Aetheus.Front/Aetheus.Front.csproj Aetheus.Front/
@@ -35,24 +37,34 @@ RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
         -o /app/publish -p:StaticWebAssetsPublishFingerprint=false
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS server-build
-WORKDIR /server
+WORKDIR /src
 
 ENV NUGET_PACKAGES=/root/.nuget/packages \
     DOTNET_NOLOGO=1 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet new web --no-https --name StaticServer
-WORKDIR /server/StaticServer
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet add package Microsoft.AspNetCore.Components.WebAssembly.Server
+# The analytics RCL relies on the repository-wide nullable and implicit-using policy.
+COPY Directory.Build.props .
+COPY Directory.Build.targets .
+COPY Directory.Packages.props .
+COPY NuGet.config .
 
-COPY deploy/docker/StaticServer.Program.cs Program.cs
+# The production static host receives the short-lived analytics credentials injected by
+# the Aetheus deploy stage. Keep the browser secret-free: the RCL pseudonymizes and exports
+# events server-side through the same-origin /aetheus-analytics endpoint.
+COPY src/Aetheus.Analyzers/ src/Aetheus.Analyzers/
+COPY src/Aetheus.WebAnalytics/ src/Aetheus.WebAnalytics/
+COPY packages/aetheus-web-analytics/src/aetheus-web-analytics.js packages/aetheus-web-analytics/src/aetheus-web-analytics.js
+COPY deploy/docker/StaticServer.csproj deploy/docker/StaticServer.csproj
+COPY deploy/docker/packages.lock.json deploy/docker/packages.lock.json
+COPY deploy/docker/StaticServer.Program.cs deploy/docker/StaticServer.Program.cs
+WORKDIR /src/deploy/docker
 
 RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet publish -c Release -o /server/publish --nologo
+    dotnet restore StaticServer.csproj --locked-mode \
+    && dotnet publish StaticServer.csproj -c Release -o /server/publish --no-restore --nologo
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.10@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
 WORKDIR /app
 
 COPY --from=server-build /server/publish .

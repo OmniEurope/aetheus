@@ -9,23 +9,23 @@
         <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
             <RadzenButton Text="@L["PatchCheck"]" Icon="search" Size="ButtonSize.Small" Busy="@_busy" Click="@CheckAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
             <RadzenButton Text="@L["PatchApply"]" Icon="system_update_alt" Size="ButtonSize.Small"
-                Busy="@_busy" Disabled="@(!CanApply)" Click="@ApplyAsync" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" />
+                Busy="@_busy" Disabled="@(!CanApply)" Click="@ApplyAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
         </RadzenStack>
     </RadzenStack>
 
     @if (_loading)
     {
-        <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+        <AetheusLoader Size="AetheusLoaderSize.Small" />
     }
     else if (_status is null || !_status.PackageManagerPresent)
     {
-        <EmptyState Icon="help_outline" Title="@L["PatchNotApplicableTitle"]" Description="@L["PatchNotApplicableDescription"]" />
+        <EmptyState Icon="help" Title="@L["PatchNotApplicableTitle"]" Description="@L["PatchNotApplicableDescription"]" />
     }
     else if (!_status.Known)
     {
         <RadzenCard>
             <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
-                <RadzenIcon Icon="help_outline" />
+                <RadzenIcon Icon="help" />
                 <RadzenText>@L["PatchUnknown"]</RadzenText>
             </RadzenStack>
         </RadzenCard>
@@ -50,7 +50,7 @@
 
         @if (_status.Updates.Count > 0)
         {
-            <RadzenDataGrid Data="@_status.Updates" TItem="PendingUpdateDto" AllowSorting="true" Density="Density.Compact" PageSize="15" AllowPaging="true" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+            <RadzenDataGrid Responsive="false" Data="@_status.Updates" TItem="PendingUpdateDto" AllowSorting="true" Density="Density.Compact" PageSize="15" AllowPaging="@(!AetheusGrid.Virtualization)" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                 <Columns>
                     <RadzenDataGridColumn TItem="PendingUpdateDto" Property="Package" Title="@L["PatchPackage"]" />
                     <RadzenDataGridColumn TItem="PendingUpdateDto" Property="CurrentVersion" Title="@L["PatchCurrentVersion"]" Width="200px" />

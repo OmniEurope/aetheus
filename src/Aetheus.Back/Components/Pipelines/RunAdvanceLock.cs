@@ -11,6 +11,15 @@ namespace Aetheus.Back.Components.Pipelines;
 /// </summary>
 internal sealed class RunAdvanceLock
 {
+    /// <summary>
+    /// The one process-wide instance. Stage advancement and run cancellation must serialize against
+    /// each other, and they now live in two different classes - two Scoped instances each holding their
+    /// own dictionary would let a cancellation and an advancement run concurrently for the same run,
+    /// which is exactly the double-dispatch this lock exists to prevent. Static because the guarantee
+    /// is per-process, not per-request.
+    /// </summary>
+    public static readonly RunAdvanceLock Shared = new();
+
     private readonly Dictionary<int, Entry> _entries = new();
     private readonly object _gate = new();
 

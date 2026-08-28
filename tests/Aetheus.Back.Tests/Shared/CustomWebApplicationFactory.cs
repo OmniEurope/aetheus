@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Back.Tests;
 
@@ -14,6 +15,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        // The application defaults include synchronous file logging and, on Windows, the Event Log.
+        // Controller tests verify HTTP behavior rather than host logging, so retaining those providers
+        // adds serialized disk I/O and can require administrative Event Log access in local runners.
+        builder.ConfigureLogging(logging => logging.ClearProviders());
         // UseSetting is visible while Program.cs executes its top-level statements. A later
         // ConfigureAppConfiguration callback cannot satisfy the startup guards in a clean clone.
         builder.UseSetting(

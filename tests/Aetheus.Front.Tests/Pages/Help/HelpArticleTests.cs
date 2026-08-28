@@ -30,6 +30,24 @@ public class HelpArticleTests : BunitContext
     }
 
     [Fact]
+    public void Renders_Markdown_Without_Enabling_Raw_Html()
+    {
+        _handler.SetJsonResponse("help/help-", new List<HelpArticle>
+        {
+            new("servers", "Servers", "Manage servers", "rzi-server",
+            [
+                new HelpSection("Operations", "**Important**\n\n- First step\n- Second step\n\n<script>alert('unsafe')</script>")
+            ])
+        });
+
+        var cut = Render<HelpArticlePage>(p => p.Add(x => x.PageKey, "servers"));
+
+        Assert.Contains("<strong>Important</strong>", cut.Markup);
+        Assert.Contains("<li>First step</li>", cut.Markup);
+        Assert.DoesNotContain("<script>", cut.Markup, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Renders_HelpArticlePage_WithUnknownKey()
     {
         _handler.SetJsonResponse("help/help-", new List<HelpArticle>());

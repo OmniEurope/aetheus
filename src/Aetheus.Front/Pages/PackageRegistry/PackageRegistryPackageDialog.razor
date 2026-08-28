@@ -1,0 +1,39 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (_loading)
+{
+    <AetheusLoader Size="AetheusLoaderSize.Small" />
+}
+else if (_package is not null)
+{
+    <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-mb-3">
+        @_package.Kind · @_package.Name
+    </RadzenText>
+    <RadzenDataGrid Responsive="false" Data="@_package.Versions" TItem="PackageRegistryVersionDto"
+        Density="Density.Compact" AllowSorting="true" AllowFiltering="true"
+        FilterMode="FilterMode.Advanced" AllowColumnResize="true">
+        <Columns>
+            <RadzenDataGridColumn TItem="PackageRegistryVersionDto" Property="Version" Title="@L["Version"]">
+                <Template Context="v"><span class="text-mono">@v.Version</span></Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PackageRegistryVersionDto" Property="SizeBytes" Title="@L["Size"]" Width="100px">
+                <Template Context="v">@DisplayFormatting.BinarySize(v.SizeBytes)</Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PackageRegistryVersionDto" Property="PublishedBy" Title="@L["PublishedBy"]" Width="140px" />
+            <RadzenDataGridColumn TItem="PackageRegistryVersionDto" Property="CreatedAt" Title="@L["PublishedAt"]" Width="150px">
+                <Template Context="v">@v.CreatedAt.ToString("g")</Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn TItem="PackageRegistryVersionDto" Title="@L["Status"]" Width="130px">
+                <Template Context="v">
+                    <RadzenButton Text="@(v.IsListed ? L["Unlist"] : L["Relist"])"
+                        Icon="@(v.IsListed ? "visibility_off" : "visibility")"
+                        Size="ButtonSize.ExtraSmall" Click="@(() => ToggleListedAsync(v))"
+                        ButtonStyle="@(v.IsListed ? ButtonStyle.Warning : ButtonStyle.Success)"
+                        Variant="Variant.Filled" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+}
+
+<DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

@@ -5,7 +5,7 @@ using Aetheus.Shared.Enums;
 namespace Aetheus.Shared.DTOs;
 
 /// <summary>
-/// Metadata view of a Personal Access Token (PLAN-006 4.5). Never carries the plaintext token -
+/// Metadata view of a Personal Access Token (ADR-024 4.5). Never carries the plaintext token -
 /// only a short non-secret <see cref="TokenPrefix"/> for identification. The plaintext is returned
 /// exactly once, at creation, via <see cref="CreatedPersonalAccessTokenDto"/>.
 /// </summary>
@@ -47,7 +47,7 @@ public sealed record CreatePersonalAccessTokenRequest
 
     public PatScope Scope { get; init; } = PatScope.ReadOnly;
 
-    /// <summary>Lifetime in days (1-365). Bounded so a PAT is never effectively permanent.</summary>
-    [Range(1, 365)]
+    /// <summary>Lifetime in days (1-90). A replacement can overlap for at most seven days.</summary>
+    [Range(1, 90)]
     public int ExpirationDays { get; init; } = 30;
 }

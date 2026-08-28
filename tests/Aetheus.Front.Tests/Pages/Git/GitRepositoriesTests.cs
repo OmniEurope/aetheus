@@ -137,7 +137,7 @@ public class GitRepositoriesTests : BunitContext
     }
 
     [Fact]
-    public async Task ShowCreateDialog_WithoutProject_DoesNothing()
+    public async Task ShowCreateDialog_WithoutProject_LeavesTheStateUnchanged()
     {
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
         {

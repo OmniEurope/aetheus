@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Components.AgentPools;
 
@@ -37,6 +32,8 @@ public class AgentPoolsController(IAgentPoolService poolService, IResourceAuthor
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.AgentPool, null, Permission.Write, ct))
             return Forbid();
+        if (!await authz.CanAccessAllAsync(User, ResourceType.Server, Permission.Write, request.ServerIds, ct))
+            return Forbid();
         var pool = await poolService.CreatePoolAsync(request, ct);
         return CreatedAtAction(nameof(GetPool), new { id = pool.Id }, pool);
     }
@@ -46,6 +43,8 @@ public class AgentPoolsController(IAgentPoolService poolService, IResourceAuthor
         int id, [FromBody] UpdateAgentPoolRequest request, CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.AgentPool, id, Permission.Write, ct))
+            return Forbid();
+        if (!await authz.CanAccessAllAsync(User, ResourceType.Server, Permission.Write, request.ServerIds, ct))
             return Forbid();
         var pool = await poolService.UpdatePoolAsync(id, request, ct);
         if (pool is null) return NotFound();

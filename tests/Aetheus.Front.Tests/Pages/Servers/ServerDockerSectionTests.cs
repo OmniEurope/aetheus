@@ -80,6 +80,52 @@ public class ServerDockerSectionTests : BunitContext
             .Add(x => x.DockerInitialLoaded, true));
     }
 
+    /// <summary>
+    /// The images tab is a component in its own right now, so it is rendered on its own: the parent no
+    /// longer holds any of the state these tests read.
+    /// </summary>
+    private IRenderedComponent<DockerImagesTab> RenderImagesTab()
+    {
+        _handler.SetJsonResponse("api/servers/20/docker/images/pull", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/build", "{}");
+
+        return Render<DockerImagesTab>(p => p
+            .Add(x => x.ServerId, 20)
+            .Add(x => x.Images, MakeDockerServer().Docker.Images));
+    }
+
+    /// <summary>
+    /// The containers tab, rendered on its own. Tests that only need the tab render it directly; the
+    /// ones that go through the parent's SignalR entry point still render the section and fish it out.
+    /// </summary>
+    private IRenderedComponent<DockerContainersTab> RenderContainersTab()
+    {
+        var server = MakeDockerServer();
+        _handler.SetJsonResponse("api/servers/20/docker/action", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/containers/logs", "log output here");
+        _handler.SetJsonResponse("api/servers/20/docker/resource-limits", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/containers/abc123def456/inspect", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/exec", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/containers/abc123def456/env", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/containers/browse", "{}");
+
+        return Render<DockerContainersTab>(p => p
+            .Add(x => x.Server, server)
+            .Add(x => x.ServerId, 20)
+            .Add(x => x.InitialLoaded, true));
+    }
+
+    private IRenderedComponent<DockerComposeTab> RenderComposeTab()
+    {
+        _handler.SetJsonResponse("api/servers/20/docker/compose/action", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/compose/monitoring/file", "{}");
+        _handler.SetJsonResponse("api/servers/20/docker/compose/file", "{}");
+
+        return Render<DockerComposeTab>(p => p
+            .Add(x => x.ServerId, 20)
+            .Add(x => x.Stacks, MakeDockerServer().Docker.ComposeStacks));
+    }
+
     // === Static method tests ===
 
     [Theory]
@@ -89,10 +135,9 @@ public class ServerDockerSectionTests : BunitContext
     [InlineData("unknown", BadgeStyle.Light)]
     public void GetContainerBadge_ReturnsExpectedStyle(string state, BadgeStyle expected)
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetContainerBadge", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        var result = Assert.IsType<BadgeStyle>(method.Invoke(null, [state]));
-        Assert.Equal(expected, result);
+        // A360-10: called directly. These are pure functions, so reflection bought nothing except a
+        // test that keeps compiling after the method it targets is renamed or deleted.
+        Assert.Equal(expected, DockerContainersTab.GetContainerBadge(state));
     }
 
     [Theory]
@@ -102,20 +147,15 @@ public class ServerDockerSectionTests : BunitContext
     [InlineData(50, 0, "docker-mem-bar")]
     public void GetMemoryBarClass_ReturnsExpectedClass(double usage, double limit, string expected)
     {
-        var method = typeof(ServerDockerSection).GetMethod("GetMemoryBarClass", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
         var container = new DockerContainerDto { MemoryUsageMb = usage, MemoryLimitMb = limit };
-        var result = (string)method.Invoke(null, [container])!;
-        Assert.Equal(expected, result);
+
+        Assert.Equal(expected, DockerContainersTab.GetMemoryBarClass(container));
     }
 
     [Fact]
     public void ParseEnvVars_ParsesValidJson()
     {
-        var method = typeof(ServerDockerSection).GetMethod("ParseEnvVars", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        var input = "[\"PATH=/usr/bin\",\"HOME=/root\",\"DB_HOST=localhost\"]";
-        var result = (List<DockerEnvVarDto>)method.Invoke(null, [input])!;
+        var result = DockerContainersTab.ParseEnvVars("[\"PATH=/usr/bin\",\"HOME=/root\",\"DB_HOST=localhost\"]");
         Assert.Equal(3, result.Count);
         Assert.Equal("PATH", result[0].Key);
         Assert.Equal("/usr/bin", result[0].Value);
@@ -126,10 +166,7 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void ParseEnvVars_HandlesEmptyInput()
     {
-        var method = typeof(ServerDockerSection).GetMethod("ParseEnvVars", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        var result = (List<DockerEnvVarDto>)method.Invoke(null, ["[]"])!;
-        Assert.Empty(result);
+        Assert.Empty(DockerContainersTab.ParseEnvVars("[]"));
     }
 
     // === Instance method tests ===
@@ -147,21 +184,21 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task DockerActionAsync_SendsAction()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("DockerActionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("DockerActionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, ["abc123def456", DockerContainerAction.Stop])!;
 
-        var target = typeof(ServerDockerSection).GetField("_dockerActionTarget", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var target = typeof(DockerContainersTab).GetField("_dockerActionTarget", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Null(target);
     }
 
     [Fact]
     public async Task ConfirmRemoveContainerAsync_OpensDialogWithoutDeletingWhenCancelled()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("ConfirmRemoveContainerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!);
 
@@ -174,11 +211,11 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task ConfirmRemoveContainerAsync_ConfirmedSendsRemoveAction()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         dialog.ConfirmResult = true;
-        var method = typeof(ServerDockerSection).GetMethod("ConfirmRemoveContainerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!);
 
         Assert.Contains(_handler.Requests, request => request.Method == "POST" && request.Url.Contains("docker/action"));
@@ -187,27 +224,27 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task ToggleLogsAsync_ToglesLogState()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("ToggleLogsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("ToggleLogsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         // First toggle - open
         await (Task)method.Invoke(cut.Instance, ["abc123def456"])!;
-        var logsId = typeof(ServerDockerSection).GetField("_logsContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var logsId = typeof(DockerContainersTab).GetField("_logsContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Equal("abc123def456", logsId);
 
         // Second toggle - close
         await (Task)method.Invoke(cut.Instance, ["abc123def456"])!;
-        logsId = typeof(ServerDockerSection).GetField("_logsContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        logsId = typeof(DockerContainersTab).GetField("_logsContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Null(logsId);
     }
 
     [Fact]
-    public async Task PullImageAsync_WithEmptyName_DoesNothing()
+    public async Task PullImageAsync_WithEmptyName_MakesNoRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderImagesTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("PullImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerImagesTab).GetMethod("PullImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("docker/images/pull"));
@@ -216,11 +253,11 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task PullImageAsync_WithName_SendsRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderImagesTab();
 
-        typeof(ServerDockerSection).GetField("_pullImageName", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "nginx:latest");
+        typeof(DockerImagesTab).GetField("_pullImageName", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "nginx:latest");
 
-        var method = typeof(ServerDockerSection).GetMethod("PullImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerImagesTab).GetMethod("PullImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         Assert.Contains(_handler.Requests, r => r.Url.Contains("docker/images/pull"));
@@ -230,9 +267,9 @@ public class ServerDockerSectionTests : BunitContext
     public async Task RemoveImageAsync_SendsRequest()
     {
         _handler.SetJsonResponse("api/servers/20/docker/images/abc123def456", "{}");
-        var cut = RenderDockerSection();
+        var cut = RenderImagesTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("RemoveImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerImagesTab).GetMethod("RemoveImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, ["abc123def456"])!;
 
         // RemoveDockerImageAsync issues a DELETE to the image endpoint (image id in the path).
@@ -242,9 +279,9 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task ComposeActionAsync_SendsRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderComposeTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("ComposeActionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerComposeTab).GetMethod("ComposeActionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, ["monitoring", DockerComposeAction.Up])!;
 
         // ExecuteComposeActionAsync POSTs the compose action to the compose/action endpoint.
@@ -276,9 +313,9 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task OpenResourceLimitsDialog_PrefillsContainerLimits()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenResourceLimitsDialog", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456"])!);
 
@@ -289,11 +326,11 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task ApplyResourceLimitsAsync_SendsRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
         var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
         dialog.OpenResult = new DockerResourceLimitsDialogResult(1.5, 512);
-        var method = typeof(ServerDockerSection).GetMethod("OpenResourceLimitsDialog", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456"])!);
 
         Assert.Contains(_handler.Requests, r => r.Url.Contains("docker/resource-limits"));
@@ -302,9 +339,9 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void OnContainerRowRender_SetsClassForRunning()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var argsType = typeof(RowRenderEventArgs<DockerContainerDto>);
         var args = Activator.CreateInstance(argsType)!;
         argsType.GetProperty("Data")!.SetValue(args, new DockerContainerDto { State = "running" });
@@ -318,9 +355,9 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void OnContainerRowRender_SetsClassForExited()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var argsType = typeof(RowRenderEventArgs<DockerContainerDto>);
         var args = Activator.CreateInstance(argsType)!;
         argsType.GetProperty("Data")!.SetValue(args, new DockerContainerDto { State = "exited" });
@@ -334,9 +371,9 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void OnContainerRowRender_NullAttributes_DoesNothing()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var argsType = typeof(RowRenderEventArgs<DockerContainerDto>);
         var args = Activator.CreateInstance(argsType)!;
         method.Invoke(cut.Instance, [args]);
@@ -345,59 +382,59 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task RequestInspectAsync_TogglesInspect()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("RequestInspectAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("RequestInspectAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         // First call - open
         await (Task)method.Invoke(cut.Instance, ["abc123def456"])!;
-        var inspectId = typeof(ServerDockerSection).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var inspectId = typeof(DockerContainersTab).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Equal("abc123def456", inspectId);
 
         // Second call - close
         await (Task)method.Invoke(cut.Instance, ["abc123def456"])!;
-        inspectId = typeof(ServerDockerSection).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        inspectId = typeof(DockerContainersTab).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Null(inspectId);
     }
 
     [Fact]
     public async Task OpenComposeEditorAsync_SetsFields()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderComposeTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenComposeEditorAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerComposeTab).GetMethod("OpenComposeEditorAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, ["monitoring"])!;
 
-        var visible = (bool)typeof(ServerDockerSection).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var visible = (bool)typeof(DockerComposeTab).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.True(visible);
 
-        var stack = (string)typeof(ServerDockerSection).GetField("_composeEditorStack", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var stack = (string)typeof(DockerComposeTab).GetField("_composeEditorStack", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Equal("monitoring", stack);
     }
 
     [Fact]
     public void CloseComposeEditor_ResetsFields()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderComposeTab();
 
-        typeof(ServerDockerSection).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
-        typeof(ServerDockerSection).GetField("_composeEditorStack", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "monitoring");
+        typeof(DockerComposeTab).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
+        typeof(DockerComposeTab).GetField("_composeEditorStack", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "monitoring");
 
-        var method = typeof(ServerDockerSection).GetMethod("CloseComposeEditor", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerComposeTab).GetMethod("CloseComposeEditor", BindingFlags.NonPublic | BindingFlags.Instance)!;
         method.Invoke(cut.Instance, []);
 
-        var visible = (bool)typeof(ServerDockerSection).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var visible = (bool)typeof(DockerComposeTab).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.False(visible);
     }
 
     [Fact]
-    public async Task SaveComposeFileAsync_WithEmptyContent_DoesNothing()
+    public async Task SaveComposeFileAsync_WithEmptyContent_MakesNoRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderComposeTab();
 
-        typeof(ServerDockerSection).GetField("_composeEditorContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
+        typeof(DockerComposeTab).GetField("_composeEditorContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
 
-        var method = typeof(ServerDockerSection).GetMethod("SaveComposeFileAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerComposeTab).GetMethod("SaveComposeFileAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         // Empty content short-circuits before any HTTP: no compose-file PUT/POST is emitted.
@@ -407,13 +444,13 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task SaveComposeFileAsync_WithContent_SendsRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderComposeTab();
 
-        typeof(ServerDockerSection).GetField("_composeEditorStack", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "monitoring");
-        typeof(ServerDockerSection).GetField("_composeEditorContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "version: '3'");
-        typeof(ServerDockerSection).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
+        typeof(DockerComposeTab).GetField("_composeEditorStack", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "monitoring");
+        typeof(DockerComposeTab).GetField("_composeEditorContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "version: '3'");
+        typeof(DockerComposeTab).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
 
-        var method = typeof(ServerDockerSection).GetMethod("SaveComposeFileAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerComposeTab).GetMethod("SaveComposeFileAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         Assert.Contains(_handler.Requests, r => r.Url.Contains("docker/compose") && r.Url.Contains("/file"));
@@ -422,33 +459,33 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void OpenShell_TogglesShellState()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenShell", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OpenShell", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         // Open
         method.Invoke(cut.Instance, ["abc123def456", "nginx"]);
-        var shellId = typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var shellId = typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Equal("abc123def456", shellId);
 
         // Close (same container ID)
         method.Invoke(cut.Instance, ["abc123def456", "nginx"]);
-        shellId = typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        shellId = typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Null(shellId);
     }
 
     [Fact]
-    public async Task SendShellCommandAsync_WithEmptyCommand_DoesNothing()
+    public async Task SendShellCommandAsync_WithEmptyCommand_ProducesNothing()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
+        typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
 
-        var method = typeof(ServerDockerSection).GetMethod("SendShellCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("SendShellCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var output = (string)typeof(ServerDockerSection).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var output = (string)typeof(DockerContainersTab).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Empty(output);
         // An empty command must not reach the agent.
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("docker/exec"));
@@ -457,15 +494,15 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task SendShellCommandAsync_WithCommand_SendsRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "ls -la");
+        typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "ls -la");
 
-        var method = typeof(ServerDockerSection).GetMethod("SendShellCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("SendShellCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var output = (string)typeof(ServerDockerSection).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var output = (string)typeof(DockerContainersTab).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Contains("$ ls -la", output);
         // The command is dispatched to the agent via a POST to the docker/exec endpoint.
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/20/docker/exec"));
@@ -474,76 +511,76 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task RequestEnvVarsAsync_TogglesEnvVars()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("RequestEnvVarsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("RequestEnvVarsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         // Open
         await (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!;
-        var envId = typeof(ServerDockerSection).GetField("_envContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var envId = typeof(DockerContainersTab).GetField("_envContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Equal("abc123def456", envId);
 
         // Close
         await (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!;
-        envId = typeof(ServerDockerSection).GetField("_envContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        envId = typeof(DockerContainersTab).GetField("_envContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Null(envId);
     }
 
     [Fact]
     public async Task OpenFileBrowserAsync_TogglesFileBrowser()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        var method = typeof(ServerDockerSection).GetMethod("OpenFileBrowserAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OpenFileBrowserAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         // Open
         await (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!;
-        var browseId = typeof(ServerDockerSection).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var browseId = typeof(DockerContainersTab).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Equal("abc123def456", browseId);
 
         // Close
         await (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!;
-        browseId = typeof(ServerDockerSection).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        browseId = typeof(DockerContainersTab).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
         Assert.Null(browseId);
     }
 
     [Fact]
-    public async Task BrowseParentAsync_AtRoot_DoesNothing()
+    public async Task BrowseParentAsync_AtRoot_LeavesTheValueUnchanged()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "/");
+        typeof(DockerContainersTab).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "/");
 
-        var method = typeof(ServerDockerSection).GetMethod("BrowseParentAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("BrowseParentAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var path = (string)typeof(ServerDockerSection).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var path = (string)typeof(DockerContainersTab).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Equal("/", path);
     }
 
     [Fact]
     public async Task BrowseParentAsync_InSubDirectory_GoesUp()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "/var/log");
+        typeof(DockerContainersTab).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "/var/log");
 
-        var method = typeof(ServerDockerSection).GetMethod("BrowseParentAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("BrowseParentAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
-        var path = (string)typeof(ServerDockerSection).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var path = (string)typeof(DockerContainersTab).GetField("_browsePath", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Equal("/var", path);
     }
 
     [Fact]
-    public async Task BuildImageAsync_WithEmptyTag_DoesNothing()
+    public async Task BuildImageAsync_WithEmptyTag_MakesNoRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderImagesTab();
 
-        typeof(ServerDockerSection).GetField("_buildImageTag", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
+        typeof(DockerImagesTab).GetField("_buildImageTag", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, string.Empty);
 
-        var method = typeof(ServerDockerSection).GetMethod("BuildImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerImagesTab).GetMethod("BuildImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         // Empty tag short-circuits before the build request - nothing is posted to docker/build.
@@ -553,12 +590,12 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task BuildImageAsync_WithContent_SendsRequest()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderImagesTab();
 
-        typeof(ServerDockerSection).GetField("_buildImageTag", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "myapp:latest");
-        typeof(ServerDockerSection).GetField("_buildDockerfileContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "FROM alpine\nRUN echo hello");
+        typeof(DockerImagesTab).GetField("_buildImageTag", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "myapp:latest");
+        typeof(DockerImagesTab).GetField("_buildDockerfileContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "FROM alpine\nRUN echo hello");
 
-        var method = typeof(ServerDockerSection).GetMethod("BuildImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerImagesTab).GetMethod("BuildImageAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         Assert.Contains(_handler.Requests, r => r.Url.Contains("docker/build"));
@@ -577,13 +614,13 @@ public class ServerDockerSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task CopyInspectToClipboardAsync_WithNullContent_DoesNothing()
+    public async Task CopyInspectToClipboardAsync_WithNullContent_LeavesItOut()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, null);
+        typeof(DockerContainersTab).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, null);
 
-        var method = typeof(ServerDockerSection).GetMethod("CopyInspectToClipboardAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("CopyInspectToClipboardAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await (Task)method.Invoke(cut.Instance, [])!;
 
         // Null inspect content short-circuits before the JS copy - no clipboard interop fires.
@@ -610,13 +647,27 @@ public class ServerDockerSectionTests : BunitContext
     }
 
     [Fact]
+    public void AutoRefreshToggle_ThroughRenderedControl_StartsAndStopsLoop()
+    {
+        var cut = RenderDockerSection();
+        var toggle = cut.Find(".labeled-toggle-native-input");
+
+        toggle.Change(true);
+        Assert.True(cut.Instance.IsAutoRefreshRunning);
+
+        toggle.Change(false);
+        Assert.False(cut.Instance.IsAutoRefreshRunning);
+    }
+
+    [Fact]
     public async Task ServerChange_ResetsTransientStateAndIgnoresOldNotifications()
     {
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(cut.Instance, "abc123def456");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(tab.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(tab.Instance, "abc123def456");
 
         var nextServer = MakeDockerServer(21, "next-server");
         cut.Render(parameters => parameters
@@ -624,8 +675,11 @@ public class ServerDockerSectionTests : BunitContext
             .Add(component => component.ServerId, 21)
             .Add(component => component.DockerInitialLoaded, true));
 
-        Assert.Null(typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(cut.Instance));
+        // @key="ServerId" is what resets the tab: the old instance is discarded rather than cleaned up,
+        // so the state set above is gone from whatever component now occupies the slot.
+        var rebuiltTab = cut.FindComponent<DockerContainersTab>();
+        Assert.Null(typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(rebuiltTab.Instance));
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
             TaskId = 1,
@@ -634,8 +688,8 @@ public class ServerDockerSectionTests : BunitContext
             Status = TaskExecutionStatus.Success,
             Output = "old-server-output"
         }));
-        Assert.Null(typeof(ServerDockerSection).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(cut.Instance));
+        Assert.Null(typeof(DockerContainersTab).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(rebuiltTab.Instance));
     }
 
     [Fact]
@@ -652,16 +706,16 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task OnShellKeyDown_Enter_SendsCommand()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "pwd");
+        typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "pwd");
 
-        var method = typeof(ServerDockerSection).GetMethod("OnShellKeyDown", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OnShellKeyDown", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var args = new KeyboardEventArgs { Key = "Enter" };
         await (Task)method.Invoke(cut.Instance, [args])!;
 
-        var output = (string)typeof(ServerDockerSection).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var output = (string)typeof(DockerContainersTab).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Contains("$ pwd", output);
         // Enter dispatches the buffered command to the agent (POST docker/exec).
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/20/docker/exec"));
@@ -670,16 +724,16 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public async Task OnShellKeyDown_NonEnter_DoesNotSend()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "pwd");
+        typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_shellCommand", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "pwd");
 
-        var method = typeof(ServerDockerSection).GetMethod("OnShellKeyDown", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var method = typeof(DockerContainersTab).GetMethod("OnShellKeyDown", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var args = new KeyboardEventArgs { Key = "a" };
         await (Task)method.Invoke(cut.Instance, [args])!;
 
-        var output = (string)typeof(ServerDockerSection).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var output = (string)typeof(DockerContainersTab).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Empty(output);
         // A non-Enter keypress must not dispatch the command.
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("docker/exec"));
@@ -688,11 +742,11 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void FilteredContainers_WithSearch_FiltersCorrectly()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderContainersTab();
 
-        typeof(ServerDockerSection).GetField("_containerSearch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "nginx");
+        typeof(DockerContainersTab).GetField("_containerSearch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "nginx");
 
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredContainers", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var prop = typeof(DockerContainersTab).GetProperty("FilteredContainers", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var filtered = (List<DockerContainerDto>)prop.GetValue(cut.Instance)!;
 
         Assert.Single(filtered);
@@ -702,11 +756,11 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void FilteredImages_WithSearch_FiltersCorrectly()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderImagesTab();
 
-        typeof(ServerDockerSection).GetField("_imageSearch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "dotnet");
+        cut.Find("input.docker-search").Change("dotnet");
 
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredImages", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var prop = typeof(DockerImagesTab).GetProperty("FilteredImages", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var filtered = (List<DockerImageDto>)prop.GetValue(cut.Instance)!;
 
         Assert.Single(filtered);
@@ -716,40 +770,56 @@ public class ServerDockerSectionTests : BunitContext
     [Fact]
     public void FilteredCompose_WithSearch_FiltersCorrectly()
     {
-        var cut = RenderDockerSection();
+        var cut = RenderComposeTab();
 
-        typeof(ServerDockerSection).GetField("_composeSearch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "monitoring");
+        cut.Find("input.docker-search").Change("monitoring");
 
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredCompose", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var prop = typeof(DockerComposeTab).GetProperty("FilteredCompose", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var filtered = (List<DockerComposeStackDto>)prop.GetValue(cut.Instance)!;
 
         Assert.Single(filtered);
     }
 
+    /// <summary>
+    /// The filter moved into the extracted tab, so the test moved with it - and it now exercises the
+    /// rendered grid rather than a private field, which is what the tab actually promises.
+    /// </summary>
     [Fact]
-    public void FilteredNetworks_WithSearch_FiltersCorrectly()
+    public void NetworksTab_WithSearch_FiltersCorrectly()
     {
-        var cut = RenderDockerSection();
+        var cut = Render<DockerNetworksTab>(parameters => parameters
+            .Add(p => p.Networks, new List<DockerNetworkDto>
+            {
+                new() { NetworkId = "n1", Name = "bridge", Driver = "bridge", Scope = "local" },
+                new() { NetworkId = "n2", Name = "host", Driver = "host", Scope = "local" }
+            }));
 
-        typeof(ServerDockerSection).GetField("_networkSearch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "bridge");
+        cut.Find("input.docker-search").Change("bridge");
 
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredNetworks", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var filtered = (List<DockerNetworkDto>)prop.GetValue(cut.Instance)!;
-
+        var filtered = (List<DockerNetworkDto>)typeof(DockerNetworksTab)
+            .GetProperty("FilteredNetworks", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!;
         Assert.Single(filtered);
+        Assert.Equal("bridge", filtered[0].Name);
     }
 
     [Fact]
-    public void FilteredVolumes_WithSearch_FiltersCorrectly()
+    public void VolumesTab_WithSearch_FiltersCorrectly()
     {
-        var cut = RenderDockerSection();
+        var cut = Render<DockerVolumesTab>(parameters => parameters
+            .Add(p => p.Volumes, new List<DockerVolumeDto>
+            {
+                new() { Name = "pgdata", Driver = "local", Mountpoint = "/data" },
+                new() { Name = "logs", Driver = "local", Mountpoint = "/logs" }
+            }));
 
-        typeof(ServerDockerSection).GetField("_volumeSearch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "pgdata");
+        cut.Find("input.docker-search").Change("pgdata");
 
-        var prop = typeof(ServerDockerSection).GetProperty("FilteredVolumes", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var filtered = (List<DockerVolumeDto>)prop.GetValue(cut.Instance)!;
-
+        var filtered = (List<DockerVolumeDto>)typeof(DockerVolumesTab)
+            .GetProperty("FilteredVolumes", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!;
         Assert.Single(filtered);
+        Assert.Equal("pgdata", filtered[0].Name);
     }
 
     // === HandleTaskCompleted / DispatchTaskOutput ===
@@ -758,7 +828,8 @@ public class ServerDockerSectionTests : BunitContext
     public async Task HandleTaskCompleted_InspectOutput_SetsInspectContent()
     {
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(tab.Instance, "abc123def456");
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -769,16 +840,18 @@ public class ServerDockerSectionTests : BunitContext
             Output = "{\"Id\": \"abc123\"}"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
         Assert.Equal("{\"Id\": \"abc123\"}", content);
     }
 
     [Fact]
     public async Task HandleTaskCompleted_ComposeFileOutput_SetsComposeContent()
     {
+        // The editor state lives in the extracted tab now, so this also covers the parent's forwarding.
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
-        typeof(ServerDockerSection).GetField("_composeFileLoading", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
+        var composeTab = cut.FindComponent<DockerComposeTab>();
+        typeof(DockerComposeTab).GetField("_composeEditorVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(composeTab.Instance, true);
+        typeof(DockerComposeTab).GetField("_composeFileLoading", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(composeTab.Instance, true);
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -789,8 +862,8 @@ public class ServerDockerSectionTests : BunitContext
             Output = "version: '3'\nservices:\n  web:\n    image: nginx"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_composeEditorContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
-        var loading = (bool)typeof(ServerDockerSection).GetField("_composeFileLoading", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var content = (string?)typeof(DockerComposeTab).GetField("_composeEditorContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(composeTab.Instance);
+        var loading = (bool)typeof(DockerComposeTab).GetField("_composeFileLoading", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(composeTab.Instance)!;
         Assert.Contains("nginx", content!);
         Assert.False(loading);
     }
@@ -799,8 +872,9 @@ public class ServerDockerSectionTests : BunitContext
     public async Task HandleTaskCompleted_ExecOutput_AppendsToShellOutput()
     {
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
-        typeof(ServerDockerSection).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_shellContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(tab.Instance, "abc123def456");
+        typeof(DockerContainersTab).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(tab.Instance, "");
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -811,7 +885,7 @@ public class ServerDockerSectionTests : BunitContext
             Output = "/app"
         }));
 
-        var output = (string)typeof(ServerDockerSection).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        var output = (string)typeof(DockerContainersTab).GetField("_shellOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance)!;
         Assert.Contains("/app", output);
     }
 
@@ -819,7 +893,8 @@ public class ServerDockerSectionTests : BunitContext
     public async Task HandleTaskCompleted_EnvOutput_SetsEnvContent()
     {
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_envContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_envContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(tab.Instance, "abc123def456");
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -830,7 +905,7 @@ public class ServerDockerSectionTests : BunitContext
             Output = "[\"PATH=/usr/bin\",\"HOME=/root\"]"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_envContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_envContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
         Assert.Contains("PATH", content!);
     }
 
@@ -838,7 +913,8 @@ public class ServerDockerSectionTests : BunitContext
     public async Task HandleTaskCompleted_BrowseOutput_SetsBrowseContent()
     {
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_browseContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(tab.Instance, "abc123def456");
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -849,7 +925,7 @@ public class ServerDockerSectionTests : BunitContext
             Output = "bin  lib  src"
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_browseContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_browseContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
         Assert.Equal("bin  lib  src", content);
     }
 
@@ -857,7 +933,8 @@ public class ServerDockerSectionTests : BunitContext
     public async Task HandleTaskCompleted_NullOutput_DoesNotDispatch()
     {
         var cut = RenderDockerSection();
-        typeof(ServerDockerSection).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "abc123def456");
+        var tab = cut.FindComponent<DockerContainersTab>();
+        typeof(DockerContainersTab).GetField("_inspectContainerId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(tab.Instance, "abc123def456");
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -868,7 +945,7 @@ public class ServerDockerSectionTests : BunitContext
             Output = null
         }));
 
-        var content = (string?)typeof(ServerDockerSection).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var content = (string?)typeof(DockerContainersTab).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
         Assert.Null(content);
     }
 
@@ -876,6 +953,7 @@ public class ServerDockerSectionTests : BunitContext
     public async Task HandleTaskCompleted_UnmatchedTask_DoesNotSetAnyField()
     {
         var cut = RenderDockerSection();
+        var tab = cut.FindComponent<DockerContainersTab>();
 
         await cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -886,9 +964,9 @@ public class ServerDockerSectionTests : BunitContext
             Output = "some output"
         }));
 
-        var inspect = (string?)typeof(ServerDockerSection).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
-        var env = (string?)typeof(ServerDockerSection).GetField("_envContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
-        var browse = (string?)typeof(ServerDockerSection).GetField("_browseContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
+        var inspect = (string?)typeof(DockerContainersTab).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
+        var env = (string?)typeof(DockerContainersTab).GetField("_envContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
+        var browse = (string?)typeof(DockerContainersTab).GetField("_browseContent", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(tab.Instance);
         Assert.Null(inspect);
         Assert.Null(env);
         Assert.Null(browse);
@@ -902,7 +980,7 @@ public class ServerDockerSectionTests : BunitContext
     [InlineData("backend-api")]
     public void GetProjectAccentClass_NonEmptyProject_ReturnsAccentClass(string project)
     {
-        var result = ServerDockerSection.GetProjectAccentClass(project);
+        var result = DockerContainersTab.GetProjectAccentClass(project);
         Assert.StartsWith("docker-project-accent-", result);
         var index = int.Parse(result["docker-project-accent-".Length..]);
         Assert.InRange(index, 0, 7);
@@ -914,15 +992,15 @@ public class ServerDockerSectionTests : BunitContext
     [InlineData("   ")]
     public void GetProjectAccentClass_EmptyProject_ReturnsEmpty(string? project)
     {
-        Assert.Empty(ServerDockerSection.GetProjectAccentClass(project));
+        Assert.Empty(DockerContainersTab.GetProjectAccentClass(project));
     }
 
     [Fact]
     public void GetProjectAccentClass_SameProject_ReturnsSameClass()
     {
         Assert.Equal(
-            ServerDockerSection.GetProjectAccentClass("myapp"),
-            ServerDockerSection.GetProjectAccentClass("myapp"));
+            DockerContainersTab.GetProjectAccentClass("myapp"),
+            DockerContainersTab.GetProjectAccentClass("myapp"));
     }
 
     [Fact]
@@ -930,7 +1008,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var classes = new HashSet<string>();
         foreach (var p in new[] { "app1", "app2", "app3", "app4", "app5", "app6", "app7", "app8" })
-            classes.Add(ServerDockerSection.GetProjectAccentClass(p));
+            classes.Add(DockerContainersTab.GetProjectAccentClass(p));
         Assert.True(classes.Count > 1);
     }
 }

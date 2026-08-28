@@ -2,7 +2,7 @@
 namespace Aetheus.Shared.Constants;
 
 /// <summary>
-/// PLAN-006 4.1: the default blocklist of system-critical packages a fleet <c>apt-get upgrade</c> must
+/// ADR-024 4.1: the default blocklist of system-critical packages a fleet <c>apt-get upgrade</c> must
 /// not silently touch. A single source of truth shared by the backend (surfacing the policy) and the
 /// agent (last-line defence: the <c>SystemPackageUpgrade</c> executor runs the dry-run first and ABORTS
 /// honestly if any blocked package would be upgraded - never a fake success). Matching is by exact name

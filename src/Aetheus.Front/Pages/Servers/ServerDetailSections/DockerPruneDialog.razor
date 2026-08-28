@@ -8,5 +8,5 @@
         <LabeledToggle @bind-Value="_model.Volumes" Icon="storage" Text="@L["DockerPruneUnusedVolumes"]" />
         <RadzenText TextStyle="TextStyle.Caption" class="prune-summary">@string.Format(L["PruneSummary"], SelectedCount)</RadzenText>
     </RadzenStack>
-    <DialogFooter><Aetheus.Front.Shared.DialogCloseButton Text="@L["Cancel"]" /><RadzenButton ButtonType="ButtonType.Submit" Text="@L["DockerPrune"]" Icon="cleaning_services" Disabled="@(SelectedCount == 0)" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" /></DialogFooter>
+    <DialogFooter><Aetheus.Front.Shared.DialogCloseButton Text="@L["Cancel"]" /><RadzenButton ButtonType="ButtonType.Submit" Text="@L["DockerPrune"]" Icon="cleaning_services" Disabled="@(SelectedCount == 0)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" /></DialogFooter>
 </RadzenTemplateForm>

@@ -166,3 +166,4 @@ public class LogRepositoryTests : IAsyncLifetime
         Assert.Equal(1, await _db.TaskLogs.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 }
+

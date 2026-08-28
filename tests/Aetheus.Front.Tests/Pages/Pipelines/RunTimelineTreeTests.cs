@@ -111,6 +111,59 @@ public class RunTimelineTreeTests : BunitContext
     }
 
     [Fact]
+    public void FirstRender_RestoresExpandedChildFromLocalStorage()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", "run-tl-exp-12").SetResult("[99]");
+        JSInterop.SetupVoid("localStorage.setItem", _ => true).SetVoidResult();
+        _handler.SetJsonResponse("api/pipelines/runs/99", new PipelineRunDto
+        {
+            Id = 99,
+            Status = PipelineStatus.Success,
+            Steps = [Step(10, "childstage", "restored-child"), Step(11, "childstage", "second-child")]
+        });
+        var parent = new PipelineRunDto
+        {
+            Id = 12,
+            Status = PipelineStatus.Running,
+            Steps = [Step(1, "orchestrate", "trigger-child", triggeredRunId: 99)]
+        };
+
+        var cut = Render<RunTimelineTree>(p => p.Add(x => x.Run, parent));
+
+        cut.WaitForAssertion(() => Assert.Contains("restored-child", cut.Markup));
+        Assert.Contains(JSInterop.Invocations, invocation =>
+            invocation.Identifier == "localStorage.getItem"
+            && Equals(invocation.Arguments[0], "run-tl-exp-12"));
+    }
+
+    [Fact]
+    public void ToggleChild_PersistsExpandedChildIdsToLocalStorage()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", _ => true).SetResult(null);
+        JSInterop.SetupVoid("localStorage.setItem", _ => true).SetVoidResult();
+        _handler.SetJsonResponse("api/pipelines/runs/99", new PipelineRunDto
+        {
+            Id = 99,
+            Status = PipelineStatus.Success,
+            Steps = [Step(10, "childstage", "child-a")]
+        });
+        var parent = new PipelineRunDto
+        {
+            Id = 13,
+            Status = PipelineStatus.Running,
+            Steps = [Step(1, "orchestrate", "trigger-child", triggeredRunId: 99)]
+        };
+        var cut = Render<RunTimelineTree>(p => p.Add(x => x.Run, parent));
+
+        cut.Find(".run-tl-trigger").Click();
+
+        cut.WaitForAssertion(() => Assert.Contains(JSInterop.Invocations, invocation =>
+            invocation.Identifier == "localStorage.setItem"
+            && Equals(invocation.Arguments[0], "run-tl-exp-13")
+            && Convert.ToString(invocation.Arguments[1], System.Globalization.CultureInfo.InvariantCulture)!.Contains("99")));
+    }
+
+    [Fact]
     public void TriggerStep_Collapse_HidesChildren()
     {
         _handler.SetJsonResponse("api/pipelines/runs/99", new PipelineRunDto
@@ -236,7 +289,7 @@ public class RunTimelineTreeTests : BunitContext
             Steps =
             [
                 new PipelineStepRunDto { Id = 3, StageName = "build", StepName = "compile", Status = TaskExecutionStatus.Success, StartedAt = now.AddMinutes(-4), CompletedAt = now.AddMinutes(-3) },
-                new PipelineStepRunDto { Id = 4, StageName = "build", StepName = "test", Status = TaskExecutionStatus.Success, StartedAt = now.AddMinutes(-2), CompletedAt = now.AddSeconds(-30) }
+                new PipelineStepRunDto { Id = 4, StageName = "BUILD", StepName = "TEST", MatrixLeg = " ", Status = TaskExecutionStatus.Success, StartedAt = now.AddMinutes(-2), CompletedAt = now.AddSeconds(-30) }
             ]
         };
 
@@ -247,6 +300,15 @@ public class RunTimelineTreeTests : BunitContext
         var marker = Assert.Single(cut.FindAll(".run-tl-prev-dur"));
         Assert.Contains("PreviousRunDuration", marker.TextContent);
         Assert.Equal("test", marker.ParentElement!.QuerySelector(".run-tl-name")!.TextContent);
+        var liveDurations = cut.FindComponents<PipelineRunLiveDuration>()
+            .Where(component => component.Instance.IsRunning)
+            .ToList();
+        Assert.Equal(2, liveDurations.Count);
+        var initialRenderCounts = liveDurations.Select(component => component.RenderCount).ToArray();
+        cut.WaitForAssertion(() => Assert.All(
+            liveDurations.Select((component, index) => (component, index)),
+            item => Assert.True(item.component.RenderCount > initialRenderCounts[item.index])),
+            TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -268,5 +330,29 @@ public class RunTimelineTreeTests : BunitContext
         Assert.All(links, link => Assert.Equal("/pipelines/runs/99?projectId=8", link.GetAttribute("href")));
 
         Assert.All(links, link => Assert.Null(link.GetAttribute("onclick")));
+    }
+
+    [Fact]
+    public void TriggerStep_GroupsAllVariableTextInsideOneTruncatedLine()
+    {
+        var parent = new PipelineRunDto
+        {
+            Id = 1,
+            Status = PipelineStatus.Running,
+            Steps = [Step(1, "current-candidate", "Validate current V candidate (toto-candidate)", triggeredRunId: 99)]
+        };
+
+        var cut = Render<RunTimelineTree>(parameters => parameters
+            .Add(component => component.Run, parent)
+            .Add(component => component.ProjectId, 2));
+
+        var row = cut.Find(".run-tl-trigger");
+        var text = Assert.Single(row.QuerySelectorAll(":scope > .run-tl-trigger-text"));
+
+        Assert.Equal("current-candidate", text.QuerySelector(".run-tl-stage-label")!.TextContent);
+        Assert.EndsWith("toto-candidate", text.QuerySelector(".run-tl-chip")!.TextContent.Trim(), StringComparison.Ordinal);
+        Assert.Contains("Validate current V candidate", text.QuerySelector(".run-tl-desc")!.TextContent);
+        Assert.Null(row.QuerySelector(":scope > .run-tl-stage-label"));
+        Assert.Null(row.QuerySelector(":scope > .run-tl-desc"));
     }
 }

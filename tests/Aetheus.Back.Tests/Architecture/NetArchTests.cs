@@ -30,8 +30,9 @@ public class NetArchTests
     [
         // Extracted read-only collaborator of PipelineRepository (a repository split, instantiated
         // directly by PipelineRepository) - it IS repository-layer code, just not name-suffixed.
+        // PipelineCoreRepository used to be listed here too; it was redundant, since the guard already
+        // excludes every type whose name ends in Repository.
         "PipelineServerResolver",
-        "PipelineCoreRepository",
         // Dev-only controller for test data management (also whitelisted in ControllerRepoWhitelist).
         "DevController",
     ];

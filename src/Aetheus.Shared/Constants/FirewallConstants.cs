@@ -3,7 +3,7 @@ using Aetheus.Shared.Enums;
 
 namespace Aetheus.Shared.Constants;
 
-/// <summary>Env-var contract + bounds for the firewall operations (PLAN-006 4.2).</summary>
+/// <summary>Env-var contract + bounds for the firewall operations (ADR-024 4.2).</summary>
 public static class FirewallConstants
 {
     /// <summary>Protocol for an allow/deny rule (<c>tcp</c> or <c>udp</c>).</summary>
@@ -20,7 +20,7 @@ public static class FirewallConstants
 }
 
 /// <summary>
-/// Anti-lockout LOGIC guard (PLAN-006 4.2): the firewall must never lock the operator out of SSH. A deny
+/// Anti-lockout LOGIC guard (ADR-024 4.2): the firewall must never lock the operator out of SSH. A deny
 /// (or delete of an allow) on the administration port is refused; the admin port is auto-allowed before
 /// the firewall is enabled. Pure + shared so the backend AND the agent enforce the same rule.
 /// </summary>

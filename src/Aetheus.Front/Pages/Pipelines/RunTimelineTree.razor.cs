@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -121,7 +114,7 @@ public partial class RunTimelineTree
             if (validChildIds.Contains(childId) && !_expanded.Contains(childId))
                 await ToggleChild(childId);   // expand + lazy-fetch, exactly as a user click would
 
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
     }
 
     private bool IsExpanded(int childRunId) => _expanded.Contains(childRunId);
@@ -135,13 +128,16 @@ public partial class RunTimelineTree
             return null;
 
         var previousStep = previous.Steps.FirstOrDefault(candidate =>
-            candidate.StageName == step.StageName
-            && candidate.StepName == step.StepName
-            && candidate.MatrixLeg == step.MatrixLeg
+            string.Equals(candidate.StageName, step.StageName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(candidate.StepName, step.StepName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(NormalizeMatrixLeg(candidate.MatrixLeg), NormalizeMatrixLeg(step.MatrixLeg),
+                StringComparison.OrdinalIgnoreCase)
             && candidate.IsSystem == step.IsSystem);
         if (previousStep?.StartedAt is null || previousStep.CompletedAt is null) return null;
         return PipelineRunFormatting.FormatDuration(previousStep.StartedAt, previousStep.CompletedAt);
     }
+
+    private static string NormalizeMatrixLeg(string? matrixLeg) => matrixLeg?.Trim() ?? string.Empty;
 
     private async Task ToggleChild(int childRunId)
     {
@@ -158,7 +154,7 @@ public partial class RunTimelineTree
         _loading.Add(childRunId);
         // Null on any transport/shape failure → the "child run not found" note, never an unhandled crash
         // that would tear down the whole timeline (JsonException on a malformed body was previously uncaught).
-        try { _childRuns[childRunId] = await Api.GetPipelineRunAsync(childRunId); }
+        try { _childRuns[childRunId] = await Api.Pipelines.GetPipelineRunAsync(childRunId); }
         catch (Exception ex) when (ex is HttpRequestException or JsonException) { _childRuns[childRunId] = null; }
         finally { _loading.Remove(childRunId); }
     }

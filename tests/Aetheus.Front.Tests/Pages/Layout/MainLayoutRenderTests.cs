@@ -26,67 +26,67 @@ public class MainLayoutRenderTests : BunitContext
         BunitTestHelper.RegisterServices(this);
     }
 
+    private static void SetProperty(MainLayout instance, string name, object value) =>
+        typeof(MainLayout).GetProperty(name, Priv)!.SetValue(instance, value);
+
     private MainLayout CreateInstance(string path = "servers")
     {
         var instance = new MainLayout();
 
         // Use bUnit's registered NavigationManager (properly initialized)
         var nav = Services.GetRequiredService<NavigationManager>();
-        typeof(MainLayout).GetProperty("Nav", Priv)!.SetValue(instance, nav);
+        SetProperty(instance, "Nav", nav);
 
         // Wire JS
         var js = Substitute.For<IJSRuntime>();
-        typeof(MainLayout).GetProperty("JS", Priv)!.SetValue(instance, js);
+        SetProperty(instance, "JS", js);
 
         // Wire L (localizer)
-        typeof(MainLayout).GetProperty("L", Priv)!.SetValue(instance, new BunitTestHelper.StubLocalizer());
+        SetProperty(instance, "L", new BunitTestHelper.StubLocalizer());
 
         // Wire Logger
-        typeof(MainLayout).GetProperty("Logger", Priv)!
-            .SetValue(instance, NullLogger<MainLayout>.Instance);
+        SetProperty(instance, "Logger", NullLogger<MainLayout>.Instance);
 
         // Wire AuthStateProvider (unauthenticated stub)
         var authJs = Substitute.For<IJSRuntime>();
         var auth = new AuthStateProvider(authJs, NullLogger<AuthStateProvider>.Instance);
-        typeof(MainLayout).GetProperty("Auth", Priv)!.SetValue(instance, auth);
+        SetProperty(instance, "Auth", auth);
 
         // Wire PermissionService
         var perms = new PermissionService();
-        typeof(MainLayout).GetProperty("Permissions", Priv)!.SetValue(instance, perms);
-
-        // Wire BreadcrumbService
-        var breadcrumb = new BreadcrumbService(nav);
-        typeof(MainLayout).GetProperty("Breadcrumb", Priv)!.SetValue(instance, breadcrumb);
+        SetProperty(instance, "Permissions", perms);
 
         // Wire HelpService
         var http = new HttpClient { BaseAddress = new Uri("http://localhost/") };
         var help = new HelpService(http);
-        typeof(MainLayout).GetProperty("Help", Priv)!.SetValue(instance, help);
+        SetProperty(instance, "Help", help);
 
         // Wire ApiClient
         var testHandler = new BunitTestHelper.TestHandler();
         var apiHttp = new HttpClient(testHandler) { BaseAddress = new Uri("http://localhost/") };
         var api = new ApiClient(apiHttp);
-        typeof(MainLayout).GetProperty("Api", Priv)!.SetValue(instance, api);
+        SetProperty(instance, "Api", api);
 
         // Wire Configuration
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["App:Version"] = "1.0.0" })
             .Build();
-        typeof(MainLayout).GetProperty("Configuration", Priv)!.SetValue(instance, config);
+        SetProperty(instance, "Configuration", config);
 
         // Wire ActiveOrganizationService
         var orgJs = Substitute.For<IJSRuntime>();
         var orgs = new ActiveOrganizationService(api, orgJs);
-        typeof(MainLayout).GetProperty("Orgs", Priv)!.SetValue(instance, orgs);
+        SetProperty(instance, "Orgs", orgs);
 
         // Wire ListCacheService (cleared on sign-out / org switch)
-        typeof(MainLayout).GetProperty("Cache", Priv)!.SetValue(instance, new ListCacheService(TimeProvider.System));
+        SetProperty(instance, "Cache", new ListCacheService(TimeProvider.System));
 
         // Wire IHttpClientFactory
         var httpFactory = Substitute.For<IHttpClientFactory>();
         httpFactory.CreateClient(Arg.Any<string>()).Returns(new HttpClient { BaseAddress = new Uri("http://localhost/") });
-        typeof(MainLayout).GetProperty("HttpFactory", Priv)!.SetValue(instance, httpFactory);
+        SetProperty(instance, "HttpFactory", httpFactory);
+
+        SetProperty(instance, "RealtimeSession", Services.GetRequiredService<RealtimeSessionLifecycle>());
 
         return instance;
     }
@@ -245,7 +245,7 @@ public class MainLayoutRenderTests : BunitContext
     }
 
     [Fact]
-    public void RecoverError_WithNullBoundary_NoOps()
+    public void RecoverError_WithNullBoundary_LeavesItNull()
     {
         var instance = CreateInstance();
         // No ErrorBoundary has been captured yet - the `_errorBoundary?.Recover()`
@@ -257,20 +257,6 @@ public class MainLayoutRenderTests : BunitContext
 
         Assert.Null(ex);
         Assert.Null(typeof(MainLayout).GetField("_errorBoundary", Priv)!.GetValue(instance));
-    }
-
-    [Fact]
-    public void OnBreadcrumbChanged_OnBreadcrumbSet_ReRendersLayout()
-    {
-        // Render a real MainLayout so its OnInitializedAsync subscribes OnBreadcrumbChanged to
-        // Breadcrumb.OnChanged. Firing a breadcrumb change must drive a re-render (StateHasChanged).
-        var cut = Render<MainLayout>();
-        var before = cut.RenderCount;
-        var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
-
-        cut.InvokeAsync(() => breadcrumb.Set(new BreadcrumbItem("Home", "/")));
-
-        Assert.True(cut.RenderCount > before);
     }
 
     [Fact]

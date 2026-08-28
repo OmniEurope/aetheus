@@ -1,6 +1,38 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @using static Aetheus.Front.Pages.Pipelines.PipelineRunFormatting
 
+@if (Run.Artifacts.Count > 0)
+{
+    <RadzenTabsItem Text="@L["Artifacts"]" Icon="inventory_2" IconColor="var(--rz-info)">
+        <RadzenCard class="rz-mt-3 rz-p-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-mb-3">@L["Artifacts"] (@Run.Artifacts.Count)</RadzenText>
+            <RadzenDataGrid Responsive="false" Data="@Run.Artifacts" TItem="PipelineArtifactDto" Density="Density.Compact"
+                            AllowPaging="@(!AetheusGrid.Virtualization)" AllowSorting="true" AllowFiltering="true"
+                            FilterMode="FilterMode.Advanced" class="run-artifacts-grid" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
+                <Columns>
+                    <RadzenDataGridColumn TItem="PipelineArtifactDto" Property="Name" Title="@L["Name"]">
+                        <Template Context="artifact">
+                            <a href="/artifacts/@artifact.Id" class="pipeline-name-link">@artifact.Name</a>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="PipelineArtifactDto" Property="StageName" Title="@L["Stage"]" Width="11rem" />
+                    <RadzenDataGridColumn TItem="PipelineArtifactDto" Property="SizeBytes" Title="@L["Size"]" Width="8rem">
+                        <Template Context="artifact">@FormatSize(artifact.SizeBytes)</Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="PipelineArtifactDto" Title="@L["Actions"]" Width="5rem" Sortable="false" Filterable="false">
+                        <Template Context="artifact">
+                            <RadzenButton Icon="download" Size="ButtonSize.Small"
+                                          Click="@(() => ArtifactDownloadRequested.InvokeAsync(artifact))"
+                                          title="@L["Download"]" aria-label="@L["Download"]"
+                                          ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenCard>
+    </RadzenTabsItem>
+}
+
 @if (PipelineRunMetrics.HasCoverage(Run))
 {
     <RadzenTabsItem Text="@L["Coverage"]" Icon="bar_chart" IconColor="var(--rz-info)">
@@ -54,8 +86,8 @@
                 @if (coverage.Files.Count > 0)
                 {
                     <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-mb-2">@L["CoverageByFile"]</RadzenText>
-                    <RadzenDataGrid Data="@coverage.Files" AllowPaging="true" PageSize="12" AllowSorting="true" Density="Density.Compact"
-                        ExpandMode="DataGridExpandMode.Single" class="coverage-file-grid" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+                    <RadzenDataGrid Responsive="false" Data="@coverage.Files" AllowPaging="@(!AetheusGrid.Virtualization)" PageSize="12" AllowSorting="true" Density="Density.Compact"
+                        ExpandMode="DataGridExpandMode.Single" class="coverage-file-grid" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3">
                         <Template Context="file">
                             <RadzenStack Gap="0.5rem" class="rz-p-3 coverage-file-detail">
                                 <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">@file.File</RadzenText>
@@ -93,7 +125,7 @@
                     if (coverageStep.TaskId is { } coverageTaskId)
                     {
                         var logs = StepLogs.GetValueOrDefault(coverageTaskId);
-                        if (logs is null) { <RadzenButton Text="@L["Logs"]" Icon="terminal" Size="ButtonSize.Small" Click="@(() => CoverageLogsRequested.InvokeAsync(coverageTaskId))" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" /> }
+                        if (logs is null) { <RadzenButton Text="@L["Logs"]" Icon="terminal" Size="ButtonSize.Small" Click="@(() => CoverageLogsRequested.InvokeAsync(coverageTaskId))" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" /> }
                         else if (logs.Count > 0) { <PipelineRunLogLines Logs="@logs" Compact="true" /> }
                         else { <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@L["NoCoverageData"]</RadzenText> }
                     }
@@ -144,7 +176,7 @@
                 @if (lintStep.TaskId is { } lintTaskId)
                 {
                     var logs = StepLogs.GetValueOrDefault(lintTaskId);
-                    if (logs is null) { <RadzenButton Text="@L["Logs"]" Icon="terminal" Size="ButtonSize.Small" Click="@(() => LintLogsRequested.InvokeAsync(lintTaskId))" class="rz-mb-3" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Filled" /> }
+                    if (logs is null) { <RadzenButton Text="@L["Logs"]" Icon="terminal" Size="ButtonSize.Small" Click="@(() => LintLogsRequested.InvokeAsync(lintTaskId))" class="rz-mb-3" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" /> }
                     else if (logs.Count > 0) { <PipelineRunLogLines Logs="@logs" HighlightLintWarnings="true" /> }
                     else { <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary rz-mb-3">@L["NoLogs"]</RadzenText> }
                 }

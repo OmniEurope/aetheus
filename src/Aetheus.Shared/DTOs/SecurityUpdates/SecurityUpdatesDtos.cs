@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.ComponentModel.DataAnnotations;
+
 namespace Aetheus.Shared.DTOs;
 
-/// <summary>A single pending OS package update (PLAN-006 4.1).</summary>
+/// <summary>A single pending OS package update (ADR-024 4.1).</summary>
 public sealed record PendingUpdateDto
 {
+    [StringLength(255)]
     public string Package { get; init; } = string.Empty;
+    [StringLength(255)]
     public string CurrentVersion { get; init; } = string.Empty;
+    [StringLength(255)]
     public string CandidateVersion { get; init; } = string.Empty;
     public bool IsSecurity { get; init; }
 }
 
 /// <summary>
-/// Collector-&gt;heartbeat view of a server's pending OS updates (PLAN-006 4.1). No-fake contract:
+/// Collector-&gt;heartbeat view of a server's pending OS updates (ADR-024 4.1). No-fake contract:
 /// <see cref="PackageManagerPresent"/> false = not an apt box (feature N/A); present but
 /// <see cref="ProbeSucceeded"/> false = the dry-run failed, so counts are UNKNOWN, never reported as
 /// "0 = up to date". Only a successful probe yields trustworthy counts.
@@ -25,7 +30,7 @@ public sealed record SecurityUpdatesDataDto
     public List<PendingUpdateDto> Updates { get; init; } = [];
 }
 
-/// <summary>Backend-&gt;front read view of a server's patch status (PLAN-006 4.1).</summary>
+/// <summary>Backend-&gt;front read view of a server's patch status (ADR-024 4.1).</summary>
 public sealed record ServerSecurityUpdatesDto
 {
     /// <summary>False when the server has never reported a successful probe (state = UNKNOWN).</summary>
@@ -43,7 +48,7 @@ public sealed record ServerSecurityUpdatesDto
     public List<PendingUpdateDto> Updates { get; init; } = [];
 }
 
-/// <summary>Request to run a system package upgrade: dry-run preview or consented apply (PLAN-006 4.1).</summary>
+/// <summary>Request to run a system package upgrade: dry-run preview or consented apply (ADR-024 4.1).</summary>
 public sealed record SystemUpgradeRequest
 {
     public bool DryRun { get; init; }

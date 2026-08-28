@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using Aetheus.Back.Components.Artifacts;
-using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Logs;
-using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
-using Aetheus.Back.Services;
+using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Tasks;
 
-public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunService, ILogService logService, IHubContext<PipelineHub> pipelineHub, IHubContext<ServerHub> serverHub, IAuditService audit, TimeProvider timeProvider, IEncryptionService encryption, IArtifactService artifactService, ILogger<TaskService> logger, IDomainEventDispatcher? domainEvents = null) : ITaskService
+// IDomainEventDispatcher is REQUIRED, not optional. It used to default to null while an
+// IPipelineTaskCompletionPort carried the orchestration call; now the events ARE the orchestration
+// call, so a null dispatcher would silently strand every run mid-stage while every task reported
+// success.
+public class TaskService(ITaskRepository repo, ILogService logService, IHubContext<PipelineHub> pipelineHub, IHubContext<ServerHub> serverHub, IAuditService audit, TimeProvider timeProvider, IEncryptionService encryption, IArtifactService artifactService, ITaskQueueNotifier taskQueueNotifier, ILogger<TaskService> logger, IDomainEventDispatcher domainEvents) : ITaskService
 {
     public Task<PaginatedResult<ServerTaskDto>> GetTasksAsync(TaskPaginationRequest request, CancellationToken ct = default)
         => GetTasksAsync(request, null, ct);
@@ -25,7 +24,8 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetTasksPagedAsync(
-            request.Search, page, pageSize, request.Status, accessibleServerIds, request.ServerId, ct).ConfigureAwait(false);
+            request.Search, page, pageSize, request.Status, accessibleServerIds, request.ServerId, ct,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<ServerTaskDto>
         {
@@ -89,7 +89,7 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         task = await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "Task", task.Id, task.Name, ct).ConfigureAwait(false);
         var dto = MapToDto(task);
-        await BroadcastTaskQueuedAsync(dto, ct).ConfigureAwait(false);
+        await taskQueueNotifier.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
         return dto;
     }
 
@@ -113,7 +113,7 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         task = await repo.AddTaskAsync(task, ct).ConfigureAwait(false);
         await audit.LogAsync("CreatedOperation", "Task", task.Id, $"{request.Operation}:{request.Target}", ct).ConfigureAwait(false);
         var dto = MapToDto(task);
-        await BroadcastTaskQueuedAsync(dto, ct).ConfigureAwait(false);
+        await taskQueueNotifier.NotifyTaskQueuedAsync(task, ct: ct).ConfigureAwait(false);
         return dto;
     }
 
@@ -122,61 +122,49 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
     // reuses the same per-server/all-servers fan-out so the top-bar tracker treats them identically.
     // serverNameOverride: callers whose task entity has no Server navigation loaded (e.g. bulk
     // queuing from id/name pairs) pass the name explicitly so the tracker line stays readable.
-    public Task NotifyTaskQueuedAsync(ServerTask task, string? serverNameOverride = null, CancellationToken ct = default)
-    {
-        var dto = MapToDto(task);
-        if (!string.IsNullOrEmpty(serverNameOverride) && string.IsNullOrEmpty(dto.ServerName))
-            dto = dto with { ServerName = serverNameOverride };
-        return BroadcastTaskQueuedAsync(dto, ct);
-    }
+    public Task NotifyTaskQueuedAsync(
+        ServerTask task,
+        string? serverNameOverride = null,
+        CancellationToken ct = default) =>
+        taskQueueNotifier.NotifyTaskQueuedAsync(task, serverNameOverride, ct);
 
-    // Item #7: surface every newly-queued task to the top-bar widget. The server hub already
-    // filters by RBAC at JoinAllServers time, so we just broadcast on the per-server group -
-    // only users with Read access to the target server actually receive the event.
-    //
-    // The broadcast is best-effort: the task is already persisted by the time we get here, so a
-    // SignalR fan-out failure must NOT bubble up and fail the caller's request (it would leave the
-    // task in the DB but report an error to the user, orphaned from the UI's point of view). Swallow
-    // and log; the widget reconciles on its next poll / reconnect.
-    private async Task BroadcastTaskQueuedAsync(ServerTaskDto dto, CancellationToken ct)
+    public async Task<List<PendingTaskDto>> GetPendingTasksAsync(
+        int serverId,
+        int? take = null,
+        string? agentSessionId = null,
+        CancellationToken ct = default)
     {
-        try
-        {
-            await Task.WhenAll(
-                serverHub.Clients.Group(HubGroups.Server(dto.ServerId))
-                    .SendAsync("TaskQueued", dto, ct),
-                serverHub.Clients.Group(HubGroups.AllServers)
-                    .SendAsync("TaskQueued", dto, ct)
-            ).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "TaskQueued broadcast failed for task {TaskId} on server {ServerId}; the task is persisted and will reconcile on the next widget refresh.", dto.Id, dto.ServerId);
-        }
-    }
-
-    public async Task<List<PendingTaskDto>> GetPendingTasksAsync(int serverId, int? take = null, CancellationToken ct = default)
-    {
-        var tasks = await repo.ClaimPendingTasksAsync(serverId, take, ct).ConfigureAwait(false);
+        var tasks = await repo.ClaimPendingTasksAsync(serverId, take, agentSessionId, ct).ConfigureAwait(false);
 
         return tasks.Select(t => new PendingTaskDto
         {
             Id = t.Id,
+            AgentSessionId = t.AssignedAgentSessionId ?? string.Empty,
+            AgentSessionFencingToken = t.AssignedAgentSessionFencingToken ?? 0,
             PipelineRunId = t.PipelineRunId,
+            PurgeWorkspace = t.PipelineStepRun is
+            { IsSystem: true, StageName: PipelineSystemStages.Cleanup },
             Name = t.Name,
             Command = t.Command,
             Executor = t.Executor,
             Operation = t.Operation,
             TimeoutSeconds = t.TimeoutSeconds,
             EnvironmentVariables = DeserializeEnv(TaskEnvProtection.Unprotect(encryption, t.EnvironmentVariables)),
-            Container = t.ContainerImage is null ? null : new ContainerSpec
+            Container = t.ContainerImage is null && t.ContainerToolchain is null ? null : new ContainerSpec
             {
-                Image = t.ContainerImage,
+                Image = t.ContainerImage ?? string.Empty,
+                Toolchain = t.ContainerToolchain,
+                Shell = t.ContainerShell,
                 Runtime = t.ContainerRuntime,
                 Network = t.ContainerNetwork,
                 Memory = t.ContainerMemory,
                 Cpus = t.ContainerCpus,
                 WorkspaceKey = t.PipelineRunId ?? t.Id,
+                CacheTrustDomain = t.PipelineRun?.Pipeline.Project is { } project
+                    ? $"org-{project.OrganizationId}-project-{project.Id}"
+                    : t.PipelineRun is { } run
+                        ? $"pipeline-{run.PipelineId}"
+                        : $"task-{t.Id}",
                 // Only the run's system cleanup step purges the host workspace dir. IsSystem can't be
                 // set by user steps, so a user step named "Cleanup" can never trigger a mid-run purge.
                 PurgeWorkspace = t.PipelineStepRun is { IsSystem: true, StepName: "Cleanup" }
@@ -184,23 +172,69 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         }).ToList();
     }
 
-    public async Task<bool> StartTaskAsync(int id, CancellationToken ct = default)
+    /// <summary>
+    /// Returns an assigned-but-never-started task to the queue at the agent's own request. An agent that
+    /// claimed work it cannot begin right now (its local build lease is held by another task) would
+    /// otherwise sit in Assigned until <c>AssignedStartTimeout</c> kills it, which makes two build
+    /// pipelines on one runner mutually exclusive. Pending is the state the watchdog already treats as
+    /// legitimate queue time while the server is Online, so handing the task back is the honest move.
+    /// </summary>
+    public async Task<bool> ReleaseAssignedTaskAsync(
+        int id,
+        AgentTaskLeaseRequest lease,
+        CancellationToken ct = default)
+    {
+        var task = await repo.FindTaskAsync(id, ct).ConfigureAwait(false);
+        if (task is null || task.Status is not TaskExecutionStatus.Assigned || task.StartedAt is not null)
+            return false;
+
+        if (!await repo.TryReleaseAssignedTaskWithLeaseAsync(
+                task, lease.AgentSessionId, lease.AgentSessionFencingToken, ct).ConfigureAwait(false))
+            return false;
+
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        logger.LogInformation(
+            "Task {TaskId} on server {ServerId} was returned to the queue by its agent before starting",
+            task.Id,
+            task.ServerId);
+        return true;
+    }
+
+    public Task<bool> StartTaskAsync(int id, CancellationToken ct = default) =>
+        StartTaskCoreAsync(id, null, ct);
+
+    public Task<bool> StartTaskAsync(int id, AgentTaskLeaseRequest lease, CancellationToken ct = default) =>
+        StartTaskCoreAsync(id, lease, ct);
+
+    private async Task<bool> StartTaskCoreAsync(
+        int id,
+        AgentTaskLeaseRequest? lease,
+        CancellationToken ct)
     {
         var task = await repo.FindTaskAsync(id, ct).ConfigureAwait(false);
         if (task is null || task.Status is not (TaskExecutionStatus.Pending or TaskExecutionStatus.Assigned))
             return false;
 
-        task.Status = TaskExecutionStatus.Running;
-        task.StartedAt = timeProvider.GetUtcNow().UtcDateTime;
-
-        if (task.PipelineStepRunId.HasValue)
+        var startedAt = timeProvider.GetUtcNow().UtcDateTime;
+        if (lease is not null)
         {
-            var stepRun = await repo.FindPipelineStepRunAsync(task.PipelineStepRunId.Value, ct).ConfigureAwait(false);
-            if (stepRun is not null)
-            {
-                stepRun.StartedAt = task.StartedAt;
-                stepRun.Status = TaskExecutionStatus.Running;
-            }
+            if (!await repo.TryStartTaskWithLeaseAsync(
+                    task,
+                    lease.AgentSessionId,
+                    lease.AgentSessionFencingToken,
+                    startedAt,
+                    ct)
+                .ConfigureAwait(false))
+                return false;
+        }
+        else
+        {
+            if (!await repo.TryStartTaskAsync(task, startedAt, ct).ConfigureAwait(false))
+                return false;
+            logger.LogWarning(
+                "Task {TaskId} on server {ServerId} started through the temporary N-1 unfenced protocol",
+                task.Id,
+                task.ServerId);
         }
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -231,46 +265,50 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
             || (task.Status == TaskExecutionStatus.Assigned && result.Status != TaskExecutionStatus.Success);
         if (!canComplete) return false;
 
-        task.Status = result.Status;
-        task.ExitCode = result.ExitCode;
-        task.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
+        var selfUpdateHandoff = await SelfUpdateTaskHandoff.TryAcknowledgeAsync(
+            repo, timeProvider, task, result, ct).ConfigureAwait(false);
+        if (selfUpdateHandoff.HasValue) return selfUpdateHandoff.Value;
 
         // Capture the deploy artifact id BEFORE the env is scrubbed below - a successful PipelineDeploy
         // closes the loop (retention + ReleaseStatus.Deployed) once the task is persisted.
         var deployClosure = TryReadDeployClosure(task, result.Status);
-
-        task.EnvironmentVariables = TaskEnvProtection.EmptyEnv; // F-001: scrub secrets at terminal state
-
-        // Update pipeline step run if linked - keep a single fetch reused below for stage advance.
-        PipelineStepRun? stepRun = null;
-        if (task.PipelineStepRunId.HasValue)
+        var completedAt = timeProvider.GetUtcNow().UtcDateTime;
+        if (result.AgentSessionId is not null && result.AgentSessionFencingToken is { } fencingToken)
         {
-            stepRun = await repo.FindPipelineStepRunAsync(task.PipelineStepRunId.Value, ct).ConfigureAwait(false);
-            if (stepRun is not null)
-            {
-                stepRun.Status = result.Status;
-                stepRun.ExitCode = result.ExitCode;
-                stepRun.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
-
-                var logOutput = result.Output;
-                if (string.IsNullOrEmpty(logOutput))
-                {
-                    // The agent never sends result.Output: fetch ONLY the ##aetheus[
-                    // marker lines (SQL-side LIKE) instead of re-materialising up to 50k
-                    // log lines of a verbose build at every step completion.
-                    var markerLines = await logService.GetTaskOutputVariableLinesAsync(id, ct).ConfigureAwait(false);
-                    logOutput = markerLines.Count > 0 ? string.Join("\n", markerLines) : null;
-                }
-                if (!string.IsNullOrEmpty(logOutput))
-                {
-                    var outputVars = PipelineRunHelpers.ParseOutputVariablesFromLogs(logOutput);
-                    if (outputVars.Count > 0)
-                        stepRun.OutputVariablesJson = System.Text.Json.JsonSerializer.Serialize(outputVars);
-                }
-            }
+            if (!await repo.TryCompleteTaskWithLeaseAsync(
+                    task,
+                    result.AgentSessionId,
+                    fencingToken,
+                    result.Status,
+                    result.ExitCode,
+                    completedAt,
+                    TaskEnvProtection.EmptyEnv,
+                    ct)
+                .ConfigureAwait(false))
+                return false;
+        }
+        else
+        {
+            logger.LogWarning(
+                "Task {TaskId} on server {ServerId} completed through the temporary N-1 unfenced protocol",
+                task.Id,
+                task.ServerId);
+            task.Status = result.Status;
+            task.ExitCode = result.ExitCode;
+            task.CompletedAt = completedAt;
+            task.EnvironmentVariables = TaskEnvProtection.EmptyEnv; // F-001: scrub secrets at terminal state
         }
 
+        PipelineTaskFailureClassifier.ApplyReported(task, result, completedAt);
+
+        var completionFinalizer = new TaskCompletionFinalizer(
+            repo, logService, audit, timeProvider, artifactService, logger, domainEvents);
+        var stepRun = await completionFinalizer.UpdateStepRunAsync(task, result, id, ct).ConfigureAwait(false);
+
+        PipelineTaskFailureClassifier.ApplyIfMissing(task, stepRun, result, completedAt);
+
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await completionFinalizer.AuditDeferredCleanupAsync(task).ConfigureAwait(false);
         // From this point the agent result is durable and the encrypted retry context is scrubbed.
         // Finish the state machine even if the HTTP caller disconnects; otherwise a terminal task can
         // never be submitted again and its pipeline run remains permanently active.
@@ -280,45 +318,42 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         // failure must become a terminal failed step; otherwise the already-scrubbed terminal task could
         // never be retried and the pipeline would remain stuck forever.
         if (deployClosure is { } closure)
-        {
-            try
-            {
-                var marked = await artifactService.MarkDeployedAsync(
-                    closure.ArtifactId, closure.Cohort, closure.ReleaseId, completionCt).ConfigureAwait(false);
-                if (!marked)
-                    throw new InvalidOperationException($"Deployed artifact {closure.ArtifactId} no longer exists.");
-                if (closure.RollbackId is { } rollbackId && domainEvents is not null)
-                    await domainEvents.DispatchAsync(
-                        new RollbackDeploymentSucceededEvent(rollbackId), completionCt).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex,
-                    "Deploy closure failed for task {TaskId}, artifact {ArtifactId}, release {ReleaseId}",
-                    task.Id, closure.ArtifactId, closure.ReleaseId);
-                task.Status = TaskExecutionStatus.Failed;
-                task.ExitCode = -1;
-                if (stepRun is not null)
-                {
-                    stepRun.Status = TaskExecutionStatus.Failed;
-                    stepRun.ExitCode = -1;
-                }
-                await repo.SaveChangesAsync(completionCt).ConfigureAwait(false);
-            }
-        }
+            await completionFinalizer.CloseDeploymentAsync(
+                task, stepRun, closure, completionCt).ConfigureAwait(false);
 
         // Advance the authoritative state machine before best-effort UI notifications. A SignalR
         // outage must not strand a terminal task between stages.
-        if (task.PipelineRunId.HasValue && stepRun is not null)
-            await pipelineRunService.AdvanceStageAsync(
-                task.PipelineRunId.Value, stepRun.StageName, completionCt).ConfigureAwait(false);
-        // S-TECH-ARCR: a post-stage artifact-collection task carries the run id but no step run; its
-        // completion is the signal to advance to the next stage (which AdvanceStageAsync deferred).
-        else if (task.PipelineRunId.HasValue && task.Operation == OperationKind.PipelineCollectArtifacts)
-            await pipelineRunService.ContinueAfterArtifactCollectionAsync(
-                task.PipelineRunId.Value, task.Status, completionCt).ConfigureAwait(false);
+        await AdvancePipelineAfterCompletionAsync(task, stepRun, completionCt).ConfigureAwait(false);
+        await BroadcastTaskCompletionAsync(task, completionCt).ConfigureAwait(false);
+        return true;
+    }
 
-        // Broadcast task completion to server group + all-servers (admin widget).
+    private async Task AdvancePipelineAfterCompletionAsync(
+        ServerTask task, PipelineStepRun? stepRun, CancellationToken ct)
+    {
+        if (task.PipelineRunId is not { } runId) return;
+        if (stepRun is null && task.Operation != OperationKind.PipelineCollectArtifacts) return;
+
+        await RaiseStepTaskCompletedAsync(runId, stepRun, task, task.Status, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Announces a settled pipeline task instead of calling the orchestrator. Strict dispatch, so a
+    /// handler failure reaches this caller exactly as the direct call's exception did - a run left
+    /// mid-stage must not read as a task that completed cleanly.
+    /// </summary>
+    private Task RaiseStepTaskCompletedAsync(
+        int pipelineRunId, PipelineStepRun? stepRun, ServerTask task, TaskExecutionStatus status, CancellationToken ct) =>
+        domainEvents.DispatchStrictAsync(
+            new PipelineStepTaskCompletedEvent(
+                pipelineRunId,
+                stepRun?.StageName,
+                status,
+                task.Operation == OperationKind.PipelineCollectArtifacts),
+            ct);
+
+    private async Task BroadcastTaskCompletionAsync(ServerTask task, CancellationToken ct)
+    {
         var notification = new TaskCompletedNotification
         {
             TaskId = task.Id,
@@ -326,27 +361,50 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
             TaskName = task.Name,
             Status = task.Status,
             ExitCode = task.ExitCode,
-            Output = null
+            Output = null,
+            Operation = task.Operation
         };
         try
         {
             await Task.WhenAll(
                 serverHub.Clients.Group(HubGroups.Server(task.ServerId))
-                    .SendAsync("TaskCompleted", notification, completionCt),
+                    .SendAsync("TaskCompleted", notification, ct),
                 serverHub.Clients.Group(HubGroups.AllServers)
-                    .SendAsync("TaskCompleted", notification, completionCt)
+                    .SendAsync("TaskCompleted", notification, ct)
             ).ConfigureAwait(false);
 
             if (task.PipelineRunId.HasValue)
                 await pipelineHub.Clients.Group($"pipeline-run-{task.PipelineRunId}")
-                    .SendAsync("StepCompleted", task.PipelineStepRunId, task.Status, completionCt).ConfigureAwait(false);
+                    .SendAsync("StepCompleted", task.PipelineStepRunId, task.Status, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Task completion notification failed for task {TaskId}", task.Id);
         }
+    }
 
-        return true;
+    public async Task<bool> ReportDeploymentBuildRefusalAsync(
+        int id, DeploymentBuildRefusalReport report, CancellationToken ct = default)
+    {
+        if (report.TaskId != id
+            || report.IncidentId == Guid.Empty
+            || string.IsNullOrWhiteSpace(report.Reason))
+            return false;
+
+        var task = await repo.FindTaskAsync(id, ct).ConfigureAwait(false);
+        if (task is null) return false;
+        if (task.Status == TaskExecutionStatus.Failed) return true;
+        if (task.Status is not TaskExecutionStatus.Assigned and not TaskExecutionStatus.Running)
+            return false;
+
+        return await CompleteTaskAsync(id, new TaskResultDto
+        {
+            TaskId = id,
+            Status = TaskExecutionStatus.Failed,
+            ExitCode = -1,
+            FailureCode = "BuildOnDeploymentTarget",
+            FailureReason = report.Reason
+        }, ct).ConfigureAwait(false);
     }
 
     // A successful deploy task carries the artifact id + app name in its (still-encrypted) env; decode
@@ -386,7 +444,6 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
     // Cohort = the deployment cohort key (app name), NOT a promote environment. It is stored on the
     // artifact under RetentionPolicy.Deployed, which keeps it separate from promote environments even
     // when an app happens to be named like one.
-    private readonly record struct DeployClosure(int ArtifactId, string Cohort, int? RollbackId, int? ReleaseId);
 
     private static readonly TaskExecutionStatus[] TerminalTaskStatuses =
         [TaskExecutionStatus.Success, TaskExecutionStatus.Failed, TaskExecutionStatus.Cancelled, TaskExecutionStatus.Timeout];
@@ -431,7 +488,8 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
             TaskName = task.Name,
             Status = TaskExecutionStatus.Cancelled,
             ExitCode = task.ExitCode,
-            Output = null
+            Output = null,
+            Operation = task.Operation
         };
         await Task.WhenAll(
             serverHub.Clients.Group(HubGroups.Server(task.ServerId))
@@ -446,12 +504,13 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         {
             await pipelineHub.Clients.Group($"pipeline-run-{task.PipelineRunId}")
                 .SendAsync("StepCompleted", task.PipelineStepRunId, TaskExecutionStatus.Cancelled, ct).ConfigureAwait(false);
-            await pipelineRunService.AdvanceStageAsync(task.PipelineRunId.Value, stepRun!.StageName, ct).ConfigureAwait(false);
+            await RaiseStepTaskCompletedAsync(
+                task.PipelineRunId.Value, stepRun, task, TaskExecutionStatus.Cancelled, ct).ConfigureAwait(false);
         }
         else if (task.PipelineRunId.HasValue && stepRun is null && task.Operation == OperationKind.PipelineCollectArtifacts)
         {
-            await pipelineRunService.ContinueAfterArtifactCollectionAsync(
-                task.PipelineRunId.Value, TaskExecutionStatus.Cancelled, ct).ConfigureAwait(false);
+            await RaiseStepTaskCompletedAsync(
+                task.PipelineRunId.Value, null, task, TaskExecutionStatus.Cancelled, ct).ConfigureAwait(false);
         }
 
         return true;
@@ -463,8 +522,32 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         return task?.ServerId;
     }
 
+    public async Task<bool> AllowsLegacyUnfencedTaskProtocolAsync(
+        int serverId,
+        CancellationToken ct = default)
+    {
+        var agentVersion = await repo.GetServerAgentVersionAsync(serverId, ct).ConfigureAwait(false);
+        return AgentTaskProtocolCompatibility.AllowsLegacyUnfencedRequests(agentVersion);
+    }
+
     public Task<Dictionary<int, int>> GetServerIdsForTasksAsync(IReadOnlyCollection<int> taskIds, CancellationToken ct = default) =>
         repo.GetServerIdsForTasksAsync(taskIds, ct);
+
+    public Task<bool> HasCurrentAgentLeaseAsync(
+        int taskId,
+        int serverId,
+        string agentSessionId,
+        long fencingToken,
+        CancellationToken ct = default) =>
+        repo.HasCurrentAgentLeaseAsync(taskId, serverId, agentSessionId, fencingToken, ct);
+
+    public Task<bool> HaveCurrentAgentLeasesAsync(
+        IReadOnlyCollection<int> taskIds,
+        int serverId,
+        string agentSessionId,
+        long fencingToken,
+        CancellationToken ct = default) =>
+        repo.HaveCurrentAgentLeasesAsync(taskIds, serverId, agentSessionId, fencingToken, ct);
 
     public async Task<Dictionary<int, string>> GetTaskStatusesAsync(List<int> taskIds, int serverId, CancellationToken ct = default)
     {
@@ -472,24 +555,8 @@ public class TaskService(ITaskRepository repo, IPipelineRunService pipelineRunSe
         return await repo.GetTaskStatusesAsync(taskIds, serverId, ct).ConfigureAwait(false);
     }
 
-    private static ServerTaskDto MapToDto(ServerTask t) => new()
-    {
-        Id = t.Id,
-        ServerId = t.ServerId,
-        ServerName = t.Server?.Name ?? string.Empty,
-        ServerStatus = t.Server?.Status ?? ServerStatus.Online,
-        Name = t.Name,
-        Command = "[masked]",
-        Executor = t.Executor,
-        Status = t.Status,
-        PipelineRunId = t.PipelineRunId,
-        PipelineStepRunId = t.PipelineStepRunId,
-        CreatedAt = t.CreatedAt,
-        StartedAt = t.StartedAt,
-        CompletedAt = t.CompletedAt,
-        ExitCode = t.ExitCode,
-        TimeoutSeconds = t.TimeoutSeconds
-    };
+    private static ServerTaskDto MapToDto(ServerTask task) =>
+        TaskDtoMapper.ToMaskedDto(task);
 
     private static Dictionary<string, string> DeserializeEnv(string json)
     {

@@ -32,10 +32,10 @@ public class DefaultBranchResolutionTests
     }
 
     [Fact]
-    public void FallsBackToFirstBranch_WhenNoMainOrMaster()
+    public void PreservesStoredBranch_WhenItIsAbsentFromRepository()
     {
         var branches = new[] { "develop", "release" };
-        Assert.Equal("develop", ProjectEditSection.ResolveDefaultBranch(branches, current: "stale-gone"));
+        Assert.Equal("stale-gone", ProjectEditSection.ResolveDefaultBranch(branches, current: "stale-gone"));
     }
 
     [Fact]

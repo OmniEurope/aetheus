@@ -36,8 +36,8 @@ public class OrganizationDialogTests : BunitContext
     private static OrganizationDto MakeOrg(int id = 5) =>
         new(id, "Acme Corp", "acme", "The Acme organization", 3, 2, DateTime.UtcNow, DateTime.UtcNow);
 
-    private static CreateOrganizationRequest Model(IRenderedComponent<OrganizationDialog> cut) =>
-        (CreateOrganizationRequest)typeof(OrganizationDialog).GetField("_model", Priv)!.GetValue(cut.Instance)!;
+    private static OrganizationFormModel Model(IRenderedComponent<OrganizationDialog> cut) =>
+        (OrganizationFormModel)typeof(OrganizationDialog).GetField("_model", Priv)!.GetValue(cut.Instance)!;
 
     private static bool IsNew(IRenderedComponent<OrganizationDialog> cut) =>
         (bool)typeof(OrganizationDialog).GetProperty("_isNew", Priv)!.GetValue(cut.Instance)!;

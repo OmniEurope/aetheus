@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging;
 
 namespace Aetheus.Agent.Core.Services;
 
 /// <summary>
-/// PLAN-001 phase 1: black-box availability prober for apps hosted on this agent's server. Pulls its
+/// ADR-021 phase 1: black-box availability prober for apps hosted on this agent's server. Pulls its
 /// probe list from the backend, runs each probe at its interval against localhost/LAN (a plain outbound
 /// HttpClient, zero elevation), and reports results by batch with a bounded in-memory re-queue - dropped
 /// results on a prolonged backend outage are reported honestly, never silently.
@@ -174,17 +171,8 @@ public sealed class AppProbeWorker(
         {
             sw.Stop();
             var reason = timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested ? "Probe timed out" : ex.Message;
-            return new AppProbeResultDto
-            {
-                MonitoredAppId = config.MonitoredAppId,
-                Timestamp = timestamp,
-                IsUp = false,
-                ResponseTimeMs = (int)sw.ElapsedMilliseconds,
-                StatusCode = null,
-                Error = reason.Length > AppMonitoringDefaults.MaximumErrorLength
-                    ? reason[..AppMonitoringDefaults.MaximumErrorLength]
-                    : reason
-            };
+            return AppProbeResultDto.Failure(
+                config.MonitoredAppId, timestamp, (int)sw.ElapsedMilliseconds, reason);
         }
     }
 }

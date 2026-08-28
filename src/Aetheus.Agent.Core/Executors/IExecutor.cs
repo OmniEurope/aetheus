@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Agent.Core.Executors;
 
@@ -15,4 +14,8 @@ public interface IExecutor
         CancellationToken cancellationToken);
 }
 
-public sealed record ExecutorResult(int ExitCode, bool TimedOut);
+public sealed record ExecutorResult(
+    int ExitCode,
+    bool TimedOut,
+    string? FailureCode = null,
+    string? FailureReason = null);

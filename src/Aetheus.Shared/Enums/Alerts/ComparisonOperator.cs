@@ -3,8 +3,8 @@ namespace Aetheus.Shared.Enums;
 
 public enum ComparisonOperator
 {
-    GreaterThan,
-    LessThan,
-    GreaterThanOrEqual,
-    LessThanOrEqual
+    GreaterThan = 0,
+    LessThan = 1,
+    GreaterThanOrEqual = 2,
+    LessThanOrEqual = 3
 }

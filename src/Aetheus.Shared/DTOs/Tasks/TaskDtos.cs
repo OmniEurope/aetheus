@@ -27,6 +27,8 @@ public sealed record ServerTaskDto
     public DateTime? StartedAt { get; init; }
     public DateTime? CompletedAt { get; init; }
     public int? ExitCode { get; init; }
+    public string? FailureCode { get; init; }
+    public string? FailureReason { get; init; }
     public int TimeoutSeconds { get; init; }
 }
 
@@ -79,10 +81,26 @@ public sealed record TaskResultDto
     public int TaskId { get; init; }
     public TaskExecutionStatus Status { get; init; }
     public int ExitCode { get; init; }
+    [StringLength(64)]
+    public string? AgentSessionId { get; init; }
+    public long? AgentSessionFencingToken { get; init; }
     // #53: legacy field - full task output is streamed via LogsController/SignalR, not the
     // result body. Kept for wire-compat with older agents that may still populate it.
     [StringLength(1_000_000)]
     public string? Output { get; init; }
+    [StringLength(64)]
+    public string? FailureCode { get; init; }
+    [StringLength(512)]
+    public string? FailureReason { get; init; }
+}
+
+public sealed record DeploymentBuildRefusalReport
+{
+    public Guid IncidentId { get; init; }
+    public int TaskId { get; init; }
+    public DateTime OccurredAtUtc { get; init; }
+    [StringLength(512)]
+    public string Reason { get; init; } = string.Empty;
 }
 
 public sealed record TaskCompletedNotification
@@ -93,12 +111,20 @@ public sealed record TaskCompletedNotification
     public TaskExecutionStatus Status { get; init; }
     public int? ExitCode { get; init; }
     public string? Output { get; init; }
+    public OperationKind? Operation { get; init; }
 }
 
 public sealed record PendingTaskDto
 {
     public int Id { get; init; }
+    public string AgentSessionId { get; init; } = string.Empty;
+    public long AgentSessionFencingToken { get; init; }
     public int? PipelineRunId { get; init; }
+    /// <summary>
+    /// True only for the control plane's system cleanup task. The agent uses it to remove
+    /// daemon-visible container workspaces and per-run caches after the ordinary cleanup script.
+    /// </summary>
+    public bool PurgeWorkspace { get; init; }
     public string Name { get; init; } = string.Empty;
     public string Command { get; init; } = string.Empty;
     public ExecutorType Executor { get; init; }
@@ -121,6 +147,14 @@ public sealed record PendingTaskDto
     public ContainerSpec? Container { get; init; }
 }
 
+public sealed record AgentTaskLeaseRequest
+{
+    [StringLength(64)]
+    public string AgentSessionId { get; init; } = string.Empty;
+
+    public long AgentSessionFencingToken { get; init; }
+}
+
 /// <summary>
 /// Describes the ephemeral container a container-isolated step runs in. The workspace key (the
 /// pipeline run id) lets the agent place a stable host directory it bind-mounts at <c>/w</c>, so all
@@ -130,6 +164,12 @@ public sealed record ContainerSpec
 {
     [StringLength(300)]
     public string Image { get; init; } = string.Empty;
+    /// <summary>Optional key resolved from <c>.aetheus/toolchains.lock.yaml</c> after checkout.</summary>
+    [StringLength(64)]
+    public string? Toolchain { get; init; }
+    /// <summary><c>bash</c> (default) or <c>sh</c>.</summary>
+    [StringLength(20)]
+    public string? Shell { get; init; }
     /// <summary><c>runc</c> (default), <c>runsc</c> (gVisor), or <c>kata</c>.</summary>
     [StringLength(40)]
     public string? Runtime { get; init; }
@@ -143,6 +183,9 @@ public sealed record ContainerSpec
     [StringLength(20)]
     public string? Cpus { get; init; }
     public int WorkspaceKey { get; init; }
+    /// <summary>Backend-derived organization/project boundary used to isolate reusable toolchain caches.</summary>
+    [StringLength(128)]
+    public string? CacheTrustDomain { get; init; }
 
     /// <summary>
     /// When true (the run's system cleanup step), the agent removes the per-run host workspace

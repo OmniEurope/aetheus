@@ -36,7 +36,7 @@ public class MigrationOwnerFkBackfillAuditTests
 
         var offenders = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(migrationsDir, "*.cs"))
+        foreach (var file in RepositoryScan.Enumerate(migrationsDir, "*.cs", SearchOption.TopDirectoryOnly))
         {
             var name = Path.GetFileName(file);
             // Skip the designer/snapshot artefacts - only real migration classes have Up()/Down().
@@ -98,14 +98,5 @@ public class MigrationOwnerFkBackfillAuditTests
         return false;
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(MigrationOwnerFkBackfillAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

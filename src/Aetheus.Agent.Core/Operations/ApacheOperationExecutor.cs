@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -22,6 +17,12 @@ public sealed class ApacheOperationExecutor(
     internal Func<string, bool> HtaccessFileExists { get; init; } = File.Exists;
     internal Func<string, CancellationToken, Task<string>> ReadHtaccessAsync { get; init; } = File.ReadAllTextAsync;
     internal Func<string, byte[], CancellationToken, Task> WriteHtaccessAsync { get; init; } = File.WriteAllBytesAsync;
+    internal string SitesAvailablePath { get; init; } = "/etc/apache2/sites-available";
+    internal string SitesEnabledPath { get; init; } = "/etc/apache2/sites-enabled";
+    internal Func<string, string, FileSystemInfo> CreateSiteSymbolicLink { get; init; } = File.CreateSymbolicLink;
+    internal Func<OperationKind, int, Func<string, TaskLogLevel, Task>, CancellationToken, Task<ExecutorResult>>?
+        PrivilegedOperationRunner
+    { get; init; }
 
     public bool CanHandle(OperationKind kind) => kind is
         OperationKind.ApacheReload or
@@ -32,6 +33,7 @@ public sealed class ApacheOperationExecutor(
         OperationKind.ApacheRestart or
         OperationKind.ApacheSaveConfig or
         OperationKind.ApacheConfigureProxy or
+        OperationKind.ApacheApplyConfigSet or
         OperationKind.ApacheGetConfig or
         OperationKind.ApacheGetHtaccess or
         OperationKind.ApacheSaveHtaccess;
@@ -49,6 +51,8 @@ public sealed class ApacheOperationExecutor(
         // type: apache-proxy - composite: write the vhost, enable the site, reload Apache.
         if (kind == OperationKind.ApacheConfigureProxy)
             return ConfigureProxyAsync(target, envVars, timeoutSeconds, onOutput, cancellationToken);
+        if (kind == OperationKind.ApacheApplyConfigSet)
+            return ApplyConfigSetAsync(envVars, timeoutSeconds, onOutput, cancellationToken);
         // Typed read/write of vhost config and .htaccess (replace the dead cat/printf shell builders).
         // These are pure File read/writes (like SaveConfig) - routed here, not through the no-env overload
         // whose Linux guard would short-circuit them.
@@ -78,11 +82,8 @@ public sealed class ApacheOperationExecutor(
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken ct)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("Apache operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
+        if (await RejectUnsupportedPlatformAsync(onOutput).ConfigureAwait(false))
             return new ExecutorResult(-1, false);
-        }
 
         const string SitesAvailable = "/etc/apache2/sites-available";
         const string SitesEnabled = "/etc/apache2/sites-enabled";
@@ -143,6 +144,29 @@ public sealed class ApacheOperationExecutor(
         return reload;
     }
 
+    private async Task<ExecutorResult> ApplyConfigSetAsync(
+        IReadOnlyDictionary<string, string> envVars,
+        int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken ct)
+        => await new ApacheConfigSetApplier(
+                SitesAvailablePath,
+                SitesEnabledPath,
+                CreateSiteSymbolicLink,
+                RunPrivilegedOperationAsync,
+                PrivilegedOperationRunner is not null)
+            .ApplyAsync(envVars, timeoutSeconds, onOutput, ct)
+            .ConfigureAwait(false);
+
+    private Task<ExecutorResult> RunPrivilegedOperationAsync(
+        OperationKind kind,
+        int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken ct)
+        => PrivilegedOperationRunner is not null
+            ? PrivilegedOperationRunner(kind, timeoutSeconds, onOutput, ct)
+            : ExecuteAsync(kind, "-", timeoutSeconds, onOutput, ct);
+
     public async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
         string target,
@@ -150,11 +174,8 @@ public sealed class ApacheOperationExecutor(
         Func<string, TaskLogLevel, Task> onOutput,
         CancellationToken cancellationToken)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            await onOutput("Apache operations are only supported on Linux", TaskLogLevel.Error).ConfigureAwait(false);
+        if (await RejectUnsupportedPlatformAsync(onOutput).ConfigureAwait(false))
             return new ExecutorResult(-1, false);
-        }
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
@@ -168,11 +189,31 @@ public sealed class ApacheOperationExecutor(
         // recipe (sudoers file deposited by `install-agent-linux.sh --enable-apache-manage`).
         // Argv is EXACT and matches the Cmnd_Alias entries one-to-one - anything else is
         // refused by sudo at the OS level.
-        var psi = BuildPsi(kind);
-        if (psi is null)
-            return new ExecutorResult(-1, false);
+        return await RunProcessAsync(kind, timeoutSeconds, onOutput, cancellationToken).ConfigureAwait(false);
+    }
 
-        return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
+    private async Task<ExecutorResult> RunProcessAsync(
+        OperationKind kind,
+        int timeoutSeconds,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken cancellationToken)
+    {
+        var psi = BuildPsi(kind);
+        return psi is null
+            ? new ExecutorResult(-1, false)
+            : await ProcessRunner.RunAsync(
+                psi, timeoutSeconds, onOutput, logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> RejectUnsupportedPlatformAsync(
+        Func<string, TaskLogLevel, Task> onOutput)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return false;
+
+        await onOutput(
+            "Apache operations are only supported on Linux",
+            TaskLogLevel.Error).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>
@@ -183,14 +224,7 @@ public sealed class ApacheOperationExecutor(
     /// </summary>
     private static ProcessStartInfo? BuildPsi(OperationKind kind)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sudo",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var psi = SudoProcessStartInfo.Create();
         psi.ArgumentList.Add("-n"); // never prompt - NOPASSWD is required by the sudoers rule
 
         switch (kind)
@@ -206,8 +240,7 @@ public sealed class ApacheOperationExecutor(
                 psi.ArgumentList.Add("apache2.service");
                 return psi;
             case OperationKind.ApacheTestConfig:
-                psi.ArgumentList.Add("/usr/sbin/apache2ctl");
-                psi.ArgumentList.Add("configtest");
+                psi.ArgumentList.Add("/usr/local/lib/aetheus/aetheus-apache-configtest");
                 return psi;
             case OperationKind.ApacheStart:
                 psi.ArgumentList.Add("/bin/systemctl");
@@ -265,13 +298,8 @@ public sealed class ApacheOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        byte[] content;
-        try { content = Convert.FromBase64String(b64); }
-        catch (FormatException ex)
-        {
-            await onOutput($"Invalid base64 content: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var content = await DecodeBase64Async(b64, onOutput).ConfigureAwait(false);
+        if (content is null) return new ExecutorResult(-1, false);
 
         try
         {
@@ -318,17 +346,7 @@ public sealed class ApacheOperationExecutor(
             return new ExecutorResult(0, false); // empty success - nothing to show, not a failure
         }
 
-        try
-        {
-            var content = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
-            await onOutput(content, TaskLogLevel.Info).ConfigureAwait(false);
-            return new ExecutorResult(0, false);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            await onOutput($"Could not read {path}: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        return await ReadAndReportAsync(path, File.ReadAllTextAsync, onOutput, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -352,17 +370,7 @@ public sealed class ApacheOperationExecutor(
             await onOutput(string.Empty, TaskLogLevel.Info).ConfigureAwait(false); // absent = empty, honest
             return new ExecutorResult(0, false);
         }
-        try
-        {
-            var content = await ReadHtaccessAsync(path, ct).ConfigureAwait(false);
-            await onOutput(content, TaskLogLevel.Info).ConfigureAwait(false);
-            return new ExecutorResult(0, false);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            await onOutput($"Could not read {path}: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        return await ReadAndReportAsync(path, ReadHtaccessAsync, onOutput, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -387,13 +395,8 @@ public sealed class ApacheOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        byte[] content;
-        try { content = Convert.FromBase64String(b64); }
-        catch (FormatException ex)
-        {
-            await onOutput($"Invalid base64 content: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
-            return new ExecutorResult(-1, false);
-        }
+        var content = await DecodeBase64Async(b64, onOutput).ConfigureAwait(false);
+        if (content is null) return new ExecutorResult(-1, false);
 
         var path = Path.Combine(documentRoot, ".htaccess");
         try
@@ -405,6 +408,40 @@ public sealed class ApacheOperationExecutor(
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
         {
             await onOutput($"Could not write {path}: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
+    }
+
+    private static async Task<byte[]?> DecodeBase64Async(
+        string value,
+        Func<string, TaskLogLevel, Task> onOutput)
+    {
+        try
+        {
+            return Convert.FromBase64String(value);
+        }
+        catch (FormatException ex)
+        {
+            await onOutput($"Invalid base64 content: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    private static async Task<ExecutorResult> ReadAndReportAsync(
+        string path,
+        Func<string, CancellationToken, Task<string>> readAsync,
+        Func<string, TaskLogLevel, Task> onOutput,
+        CancellationToken ct)
+    {
+        try
+        {
+            var content = await readAsync(path, ct).ConfigureAwait(false);
+            await onOutput(content, TaskLogLevel.Info).ConfigureAwait(false);
+            return new ExecutorResult(0, false);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            await onOutput($"Could not read {path}: {ex.Message}", TaskLogLevel.Error).ConfigureAwait(false);
             return new ExecutorResult(-1, false);
         }
     }

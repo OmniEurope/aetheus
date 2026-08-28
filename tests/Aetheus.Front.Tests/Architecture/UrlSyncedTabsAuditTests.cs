@@ -22,9 +22,14 @@ public class UrlSyncedTabsAuditTests
             5,
             "transient project-details dialog with no route"),
         new(
+            Path.Combine("Pages", "Ai", "AiResultDialog.razor"),
+            0,
+            2,
+            "transient AI-result dialog with no route"),
+        new(
             Path.Combine("Shared", "AppTelemetryPanel.razor"),
             0,
-            4,
+            5,
             "nested telemetry tabs under the route-level monitoring section"),
     ];
 
@@ -42,7 +47,7 @@ public class UrlSyncedTabsAuditTests
         var matchedExceptions = new HashSet<AllowedContainer>();
         var containersScanned = 0;
 
-        foreach (var file in Directory.EnumerateFiles(frontDir, "*.razor", SearchOption.AllDirectories))
+        foreach (var file in RepositoryScan.Enumerate(frontDir, "*.razor"))
         {
             var raw = StripRazorComments(File.ReadAllText(file));
             var rel = Path.GetRelativePath(frontDir, file);
@@ -123,6 +128,8 @@ public class UrlSyncedTabsAuditTests
         Assert.Contains("scrollbar-gutter: stable", css, StringComparison.Ordinal);
         Assert.Contains(".url-synced-tabs > .rz-tabview-nav", css, StringComparison.Ordinal);
         Assert.Contains("flex: 1 1 0", css, StringComparison.Ordinal);
+        Assert.Contains(".rz-tabview > .rz-tabview-nav > li > button", css, StringComparison.Ordinal);
+        Assert.Contains("width: 100%", css, StringComparison.Ordinal);
         Assert.Contains("scrollbar-width: none", css, StringComparison.Ordinal);
     }
 
@@ -193,14 +200,5 @@ public class UrlSyncedTabsAuditTests
         public int TabCount { get; set; }
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(UrlSyncedTabsAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;
 }

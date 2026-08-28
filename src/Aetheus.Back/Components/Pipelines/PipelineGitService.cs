@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Text;
 using Aetheus.Back.Components.Git;
-using Aetheus.Shared.DTOs;
+using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -15,17 +14,47 @@ public sealed class PipelineGitService(
 {
     private const string PipelineDir = ".pipeline";
 
-    public async Task<string?> ReadProjectPipelineYamlAsync(int projectId, string pipelineName, CancellationToken ct = default, string? sourceBranch = null)
-        => await ReadProjectPipelineYamlCoreAsync(projectId, pipelineName, sourceBranch, ct).ConfigureAwait(false);
+    public async Task<string?> ReadProjectPipelineYamlAsync(
+        int projectId, string pipelineName, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null)
+        => await ReadProjectPipelineYamlCoreAsync(
+            projectId, pipelineName, sourceBranch, sourceRepositoryId, ct).ConfigureAwait(false);
 
     public async Task<string?> ReadProjectPipelineYamlAtRevisionAsync(
-        int projectId, string pipelineName, string revision, CancellationToken ct = default)
-        => await ReadProjectPipelineYamlCoreAsync(projectId, pipelineName, revision, ct).ConfigureAwait(false);
+        int projectId, string pipelineName, string revision, CancellationToken ct = default,
+        int? sourceRepositoryId = null)
+        => await ReadProjectPipelineYamlCoreAsync(
+            projectId, pipelineName, revision, sourceRepositoryId, ct).ConfigureAwait(false);
+
+    public async Task<string?> ReadProjectConfigAtRevisionAsync(
+        int projectId, string relativePath, string revision, CancellationToken ct = default,
+        int? sourceRepositoryId = null)
+    {
+        var normalized = relativePath.Replace('\\', '/').Trim();
+        if (!normalized.StartsWith(".pipeline/configs/", StringComparison.Ordinal)
+            || normalized.Length > 240
+            || normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Any(segment => segment is "." or ".."))
+            throw new BadRequestException(
+                "Configuration templates must use a safe path under .pipeline/configs/.");
+        if (!PipelineRunHelpers.IsGitCommitHash(revision))
+            throw new BadRequestException("Configuration templates require an immutable Git revision.");
+
+        var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
+        if (repo is null || repo.IsEmpty) return null;
+        var diskPath = SafeDiskPath(projectId, repo);
+        if (diskPath is null || !Directory.Exists(diskPath)) return null;
+        var blob = await cli.GetBlobAsync(diskPath, revision, normalized, ct).ConfigureAwait(false);
+        if (blob is null || blob.IsBinary || blob.Size > 256 * 1024)
+            return null;
+        return blob.Content;
+    }
 
     private async Task<string?> ReadProjectPipelineYamlCoreAsync(
-        int projectId, string pipelineName, string? revision, CancellationToken ct)
+        int projectId, string pipelineName, string? revision, int? sourceRepositoryId,
+        CancellationToken ct)
     {
-        var repo = await GetProjectRepoAsync(projectId, ct).ConfigureAwait(false);
+        var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
         if (repo is null || repo.IsEmpty) return null;
 
         var diskPath = SafeDiskPath(projectId, repo);
@@ -36,18 +65,16 @@ public sealed class PipelineGitService(
         var branch = string.IsNullOrWhiteSpace(revision)
             ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "HEAD" : repo.DefaultBranch
             : revision;
+        return await ReadPipelineYamlAsync(diskPath, branch, pipelineName, ct).ConfigureAwait(false);
+    }
 
+    private async Task<string?> ReadPipelineYamlAsync(
+        string diskPath, string branch, string pipelineName, CancellationToken ct)
+    {
         // F-019: fast path - the UI writes `.pipeline/{slug}.yaml`, so a single `git show` resolves
         // the common case without enumerating (and parsing) every YAML in the directory.
-        var directBlob = await cli.GetBlobAsync(diskPath, branch, $"{PipelineDir}/{Slugify(pipelineName)}.yaml", ct).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(directBlob?.Content))
-        {
-            var directDef = YamlParsingHelper.ParseAndValidate(directBlob.Content, logger);
-            var directName = string.IsNullOrWhiteSpace(directDef?.Name) ? Slugify(pipelineName) : directDef!.Name;
-            if (string.Equals(directName, pipelineName, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(directName, Slugify(pipelineName), StringComparison.OrdinalIgnoreCase))
-                return directBlob.Content;
-        }
+        var directBlob = await cli.GetBlobAsync(diskPath, branch, $"{PipelineDir}/{PipelineGitPathPolicy.Slugify(pipelineName)}.yaml", ct).ConfigureAwait(false);
+        if (MatchesDirectPipeline(directBlob?.Content, pipelineName)) return directBlob!.Content;
 
         var tree = await cli.GetTreeAsync(diskPath, branch, PipelineDir, ct).ConfigureAwait(false);
         foreach (var file in tree.Where(IsYaml))
@@ -66,11 +93,22 @@ public sealed class PipelineGitService(
         return null;
     }
 
-    public async Task<string?> GetHeadCommitShaAsync(int projectId, CancellationToken ct = default, string? sourceBranch = null)
+    private bool MatchesDirectPipeline(string? yaml, string pipelineName)
+    {
+        if (string.IsNullOrWhiteSpace(yaml)) return false;
+        var definition = YamlParsingHelper.ParseAndValidate(yaml, logger);
+        var name = string.IsNullOrWhiteSpace(definition?.Name) ? PipelineGitPathPolicy.Slugify(pipelineName) : definition!.Name;
+        return string.Equals(name, pipelineName, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(name, PipelineGitPathPolicy.Slugify(pipelineName), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<string?> GetHeadCommitShaAsync(
+        int projectId, CancellationToken ct = default, string? sourceBranch = null,
+        int? sourceRepositoryId = null)
     {
         try
         {
-            var repo = await GetProjectRepoAsync(projectId, ct).ConfigureAwait(false);
+            var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
             if (repo is null || repo.IsEmpty) return null;
 
             var diskPath = SafeDiskPath(projectId, repo);
@@ -88,35 +126,40 @@ public sealed class PipelineGitService(
         }
         catch (Exception ex)
         {
-            // Never let git context resolution break the run trigger - commit is informational.
+            // Return an observable unresolved source. Workspace pipelines fail closed on this null;
+            // pure orchestration pipelines can still run because they do not clone a repository.
             logger.LogWarning(ex, "Could not resolve head commit for project {ProjectId}", projectId);
             return null;
         }
     }
 
     public async Task<PipelineSourceDto?> GetPipelineSourceAsync(
-        int projectId, string pipelineName, CancellationToken ct = default, string? sourceBranch = null)
+        int projectId, string pipelineName, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null)
     {
-        var repo = await GetProjectRepoAsync(projectId, ct).ConfigureAwait(false);
+        var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
         if (repo is null) return null;
 
         var branch = string.IsNullOrWhiteSpace(sourceBranch)
             ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "main" : repo.DefaultBranch
             : sourceBranch;
-        var commit = await GetHeadCommitShaAsync(projectId, ct, sourceBranch).ConfigureAwait(false);
+        var commit = await GetHeadCommitShaAsync(
+            projectId, ct, sourceBranch, sourceRepositoryId).ConfigureAwait(false);
         return new PipelineSourceDto
         {
             RepositoryId = repo.Id,
-            Path = $"{PipelineDir}/{Slugify(pipelineName)}.yaml",
+            CloneUrl = repo.CloneUrl ?? string.Empty,
+            Path = $"{PipelineDir}/{PipelineGitPathPolicy.Slugify(pipelineName)}.yaml",
             Branch = branch,
             CommitHash = commit
         };
     }
 
     public async Task<(GitWriteOutcome Outcome, string? Error)> WriteProjectPipelineYamlAsync(
-        int projectId, string pipelineName, string yaml, string actor, CancellationToken ct = default, string? sourceBranch = null)
+        int projectId, string pipelineName, string yaml, string actor, CancellationToken ct = default,
+        string? sourceBranch = null, int? sourceRepositoryId = null)
     {
-        var repo = await GetProjectRepoAsync(projectId, ct).ConfigureAwait(false);
+        var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
         // No internal repo: the project is external/DB-only - a non-error fallback, not a git failure.
         if (repo is null) return (GitWriteOutcome.NoRepo, null);
 
@@ -128,7 +171,7 @@ public sealed class PipelineGitService(
         var branch = string.IsNullOrWhiteSpace(sourceBranch)
             ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "main" : repo.DefaultBranch
             : sourceBranch;
-        var relPath = $"{PipelineDir}/{Slugify(pipelineName)}.yaml";
+        var relPath = $"{PipelineDir}/{PipelineGitPathPolicy.Slugify(pipelineName)}.yaml";
         var (ok, _, error) = await cli.CommitFileAsync(
             diskPath, branch, relPath, yaml,
             $"chore(pipeline): update {pipelineName} via Aetheus",
@@ -153,21 +196,47 @@ public sealed class PipelineGitService(
         if (newError is not null) return (GitWriteOutcome.Failed, newError);
         if (oldTarget is null && newTarget is null) return (GitWriteOutcome.NoRepo, null);
 
-        if (oldTarget is not null && newTarget is not null
-            && string.Equals(oldTarget.DiskPath, newTarget.DiskPath, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(oldTarget.Branch, newTarget.Branch, StringComparison.Ordinal))
-        {
-            var deletions = string.Equals(oldTarget.RelativePath, newTarget.RelativePath, StringComparison.Ordinal)
-                ? Array.Empty<string>()
-                : [oldTarget.RelativePath];
-            var (ok, _, error) = await cli.CommitFileChangesAsync(
-                newTarget.DiskPath, newTarget.Branch,
-                [(newTarget.RelativePath, nextYaml!)], deletions,
-                $"chore(pipeline): update {next!.PipelineName} via Aetheus",
-                actor, $"{actor}@aetheus", ct).ConfigureAwait(false);
-            return (ok ? GitWriteOutcome.Committed : GitWriteOutcome.Failed, error);
-        }
+        if (TargetsSameBranch(oldTarget, newTarget))
+            return await UpdateSameTargetAsync(
+                oldTarget!, newTarget!, next!, nextYaml!, actor, ct).ConfigureAwait(false);
+        return await MoveTargetAsync(
+            previous, oldTarget, next, newTarget, nextYaml, actor, ct).ConfigureAwait(false);
+    }
 
+    private static bool TargetsSameBranch(PipelineWriteTarget? oldTarget, PipelineWriteTarget? newTarget) =>
+        oldTarget is not null
+        && newTarget is not null
+        && string.Equals(oldTarget.DiskPath, newTarget.DiskPath, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(oldTarget.Branch, newTarget.Branch, StringComparison.Ordinal);
+
+    private async Task<(GitWriteOutcome Outcome, string? Error)> UpdateSameTargetAsync(
+        PipelineWriteTarget oldTarget,
+        PipelineWriteTarget newTarget,
+        PipelineGitDefinitionLocation next,
+        string nextYaml,
+        string actor,
+        CancellationToken ct)
+    {
+        var deletions = string.Equals(oldTarget.RelativePath, newTarget.RelativePath, StringComparison.Ordinal)
+            ? Array.Empty<string>()
+            : [oldTarget.RelativePath];
+        var (ok, _, error) = await cli.CommitFileChangesAsync(
+            newTarget.DiskPath, newTarget.Branch,
+            [(newTarget.RelativePath, nextYaml)], deletions,
+            $"chore(pipeline): update {next.PipelineName} via Aetheus",
+            actor, $"{actor}@aetheus", ct).ConfigureAwait(false);
+        return (ok ? GitWriteOutcome.Committed : GitWriteOutcome.Failed, error);
+    }
+
+    private async Task<(GitWriteOutcome Outcome, string? Error)> MoveTargetAsync(
+        PipelineGitDefinitionLocation? previous,
+        PipelineWriteTarget? oldTarget,
+        PipelineGitDefinitionLocation? next,
+        PipelineWriteTarget? newTarget,
+        string? nextYaml,
+        string actor,
+        CancellationToken ct)
+    {
         if (newTarget is not null)
         {
             var (written, _, writeError) = await cli.CommitFileChangesAsync(
@@ -199,7 +268,6 @@ public sealed class PipelineGitService(
                 return (GitWriteOutcome.Failed, deleteError);
             }
         }
-
         return (GitWriteOutcome.Committed, null);
     }
 
@@ -207,7 +275,8 @@ public sealed class PipelineGitService(
         PipelineGitDefinitionLocation? location, CancellationToken ct)
     {
         if (location is null) return (null, null);
-        var repo = await GetProjectRepoAsync(location.ProjectId, ct).ConfigureAwait(false);
+        var repo = await GetProjectRepoAsync(
+            location.ProjectId, location.SourceRepositoryId, ct).ConfigureAwait(false);
         if (repo is null) return (null, null);
         var diskPath = SafeDiskPath(location.ProjectId, repo);
         if (diskPath is null || !Directory.Exists(diskPath))
@@ -216,7 +285,7 @@ public sealed class PipelineGitService(
             ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "main" : repo.DefaultBranch
             : location.SourceBranch;
         return (new PipelineWriteTarget(
-            diskPath, branch, $"{PipelineDir}/{Slugify(location.PipelineName)}.yaml"), null);
+            diskPath, branch, $"{PipelineDir}/{PipelineGitPathPolicy.Slugify(location.PipelineName)}.yaml"), null);
     }
 
     private sealed record PipelineWriteTarget(string DiskPath, string Branch, string RelativePath);
@@ -224,7 +293,7 @@ public sealed class PipelineGitService(
     public async Task<int> CopyEnvironmentPipelinesToProjectAsync(
         int environmentId, string environmentName, int projectId, string actor, CancellationToken ct = default)
     {
-        var repo = await GetProjectRepoAsync(projectId, ct).ConfigureAwait(false);
+        var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId: null, ct: ct).ConfigureAwait(false);
         if (repo is null) return 0; // external-repo projects: nothing to copy into
 
         var diskPath = SafeDiskPath(projectId, repo);
@@ -237,7 +306,7 @@ public sealed class PipelineGitService(
         // UpdateEnvironment request path and must not scale its latency with the pipeline count.
         var files = pipelines
             .Where(p => !string.IsNullOrWhiteSpace(p.YamlDefinition))
-            .Select(p => (RelativePath: $"{PipelineDir}/{Slugify(environmentName)}-{Slugify(p.Name)}.yaml", Content: p.YamlDefinition))
+            .Select(p => (RelativePath: $"{PipelineDir}/{PipelineGitPathPolicy.Slugify(environmentName)}-{PipelineGitPathPolicy.Slugify(p.Name)}.yaml", Content: p.YamlDefinition))
             .ToList();
         if (files.Count == 0) return 0;
 
@@ -253,12 +322,24 @@ public sealed class PipelineGitService(
         return files.Count;
     }
 
-    // The project's primary internal repo. A project may host several; the first by name owns
-    // `.pipeline/`. Null when the project is external-repo-only.
-    private async Task<GitLightRepoDto?> GetProjectRepoAsync(int projectId, CancellationToken ct)
+    // A project with several repositories must bind the pipeline to one repository explicitly.
+    // Falling back to the first alphabetical repository made the YAML source and checkout source
+    // diverge, which can run a valid pipeline against an empty or unrelated workspace.
+    private async Task<GitLightRepoDto?> GetProjectRepoAsync(
+        int projectId, int? sourceRepositoryId, CancellationToken ct)
     {
         var repos = await gitService.GetRepositoriesAsync(projectId, ct).ConfigureAwait(false);
-        return repos.FirstOrDefault();
+        if (sourceRepositoryId is { } repositoryId)
+            return repos.FirstOrDefault(repo => repo.Id == repositoryId)
+                ?? throw new BadRequestException(
+                    $"Source repository {repositoryId} does not belong to project {projectId}.");
+        return repos.Count switch
+        {
+            0 => null,
+            1 => repos[0],
+            _ => throw new BadRequestException(
+                $"Project {projectId} has multiple repositories; select an explicit pipeline source repository.")
+        };
     }
 
     private string? SafeDiskPath(int projectId, GitLightRepoDto repo)
@@ -272,14 +353,4 @@ public sealed class PipelineGitService(
            && (e.Name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
                || e.Name.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase));
 
-    private static string Slugify(string name)
-    {
-        var sb = new StringBuilder(name.Length);
-        foreach (var ch in name.Trim().ToLowerInvariant())
-            sb.Append(char.IsLetterOrDigit(ch) ? ch : '-');
-        var slug = sb.ToString().Trim('-');
-        while (slug.Contains("--", StringComparison.Ordinal))
-            slug = slug.Replace("--", "-", StringComparison.Ordinal);
-        return string.IsNullOrEmpty(slug) ? "pipeline" : slug;
-    }
 }

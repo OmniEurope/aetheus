@@ -1,0 +1,6 @@
+def completion_ratio(completed: int, total: int) -> float:
+    if total <= 0:
+        raise ValueError("total must be positive")
+    if completed < 0 or completed > total:
+        raise ValueError("completed must be between zero and total")
+    return completed / total

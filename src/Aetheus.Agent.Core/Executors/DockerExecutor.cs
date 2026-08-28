@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
-using Aetheus.Agent.Core.Configuration;
-using Aetheus.Shared.Enums;
-using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Executors;
 
 public sealed partial class DockerExecutor(
     ICommandValidator commandValidator,
     IOptions<AetheusAgentOptions> options,
+    ExecutorProcessRunner processRunner,
     ILogger<DockerExecutor> logger) : IExecutor
 {
     private static readonly Regex ContainerIdPattern = ContainerIdRegex();
@@ -44,58 +43,82 @@ public sealed partial class DockerExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        if (commandValidator.HasDangerousEnvironmentVariables(environmentVariables))
+        var dangerousEnvironmentVariables =
+            commandValidator.GetDangerousEnvironmentVariableNames(environmentVariables);
+        if (dangerousEnvironmentVariables.Count > 0)
         {
-            logger.LogWarning("Dangerous environment variables detected");
-            await onOutput("Blocked: dangerous environment variables detected", TaskLogLevel.Error).ConfigureAwait(false);
+            var names = string.Join(", ", dangerousEnvironmentVariables);
+            logger.LogWarning("Dangerous environment variables detected: {Names}", names);
+            await onOutput(
+                $"Blocked dangerous environment variable(s): {names}. Rename application settings to a scoped name such as DEPLOY_ENV.",
+                TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
+
+        var invalidEnvironmentVariables = environmentVariables.Keys
+            .Where(static key => !IsValidShellKey(key))
+            .ToArray();
+        if (invalidEnvironmentVariables.Length > 0)
+        {
+            var names = string.Join(", ", invalidEnvironmentVariables);
+            logger.LogWarning("Invalid environment variable names detected: {Names}", names);
+            await onOutput(
+                $"Blocked invalid environment variable name(s): {names}.",
+                TaskLogLevel.Error).ConfigureAwait(false);
             return new ExecutorResult(-1, false);
         }
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
+        var psi = BuildDockerExec(containerId);
+        var standardInputScript = BuildStandardInputScript(environmentVariables, innerCommand);
 
-        var psi = new ProcessStartInfo
+        logger.LogDebug("Docker exec: container={Container} (timeout={Timeout}s)", containerId, timeoutSeconds);
+        return await processRunner.RunAsync(
+            psi,
+            timeoutSeconds,
+            onOutput,
+            cancellationToken,
+            async (standardInput, inputCancellationToken) =>
+                await standardInput.WriteAsync(standardInputScript.AsMemory(), inputCancellationToken)
+                    .ConfigureAwait(false)).ConfigureAwait(false);
+    }
+
+    internal static ProcessStartInfo BuildDockerExec(string containerId)
+    {
+        var startInfo = new ProcessStartInfo
         {
             FileName = "docker",
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        psi.ArgumentList.Add("exec");
-        foreach (var (key, value) in environmentVariables)
-        {
-            psi.ArgumentList.Add("-e");
-            psi.ArgumentList.Add($"{key}={value}");
-        }
-        psi.ArgumentList.Add(containerId);
-        psi.ArgumentList.Add("/bin/sh");
-        psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add(innerCommand);
-
-        logger.LogDebug("Docker exec: container={Container} (timeout={Timeout}s)", containerId, timeoutSeconds);
-
-        using var process = new Process { StartInfo = psi };
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-        process.Start();
-
-        var stdoutTask = ExecutorHelper.StreamOutputAsync(process.StandardOutput, TaskLogLevel.Info, onOutput, timeoutCts.Token, logger);
-        var stderrTask = ExecutorHelper.StreamOutputAsync(process.StandardError, TaskLogLevel.Error, onOutput, timeoutCts.Token, logger);
-
-        try
-        {
-            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
-            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            return new ExecutorResult(process.ExitCode, false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning("Docker exec timed out after {Timeout}s, killing", timeoutSeconds);
-            try { process.Kill(entireProcessTree: true); } catch (Exception killEx) { logger.LogDebug(killEx, "Best-effort kill after timeout failed"); }
-            return new ExecutorResult(-1, true);
-        }
+        startInfo.ArgumentList.Add("exec");
+        startInfo.ArgumentList.Add("-i");
+        startInfo.ArgumentList.Add(containerId);
+        startInfo.ArgumentList.Add("/bin/sh");
+        return startInfo;
     }
+
+    internal static string BuildStandardInputScript(
+        IReadOnlyDictionary<string, string> environmentVariables,
+        string innerCommand)
+    {
+        var script = new StringBuilder();
+        foreach (var (key, value) in environmentVariables)
+            script.Append("export ").Append(key).Append('=').Append(ShellQuote(value)).Append('\n');
+        script.Append(innerCommand).Append('\n');
+        return script.ToString();
+    }
+
+    internal static bool IsValidShellKey(string key) =>
+        key.Length > 0
+        && (char.IsAsciiLetter(key[0]) || key[0] == '_')
+        && key.All(static character => char.IsAsciiLetterOrDigit(character) || character == '_');
+
+    private static string ShellQuote(string value) =>
+        $"'{value.Replace("'", "'\\''", StringComparison.Ordinal)}'";
 
     /// <summary>
     /// Pure parse of a docker-exec task payload ("&lt;containerId&gt; &lt;inner command&gt;") into its two

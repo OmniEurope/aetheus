@@ -6,12 +6,12 @@
 <Aetheus.Front.Shared.PageHeader Title="@L["HelpCenter"]" Icon="help" />
 
 <RadzenStack Gap="1.5rem">
-    <RadzenTextBox Placeholder="@L["SearchHelp"]" @bind-Value="_search" Change="@(async _ => await FilterAsync())"
+    <RadzenTextBox Placeholder="@L["SearchHelp"]" Value="@_search" @oninput="OnSearchInputAsync"
         class="help-search-box" />
 
     @if (_loading)
     {
-        <RadzenProgressBarCircular ShowValue="true" Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+        <AetheusLoader Size="AetheusLoaderSize.Large" />
     }
     else
     {
@@ -24,7 +24,7 @@
                         @onkeydown="@(e => OnCardKeyDown(e, article.Key))">
                         <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem" class="rz-mb-2">
                             <RadzenIcon Icon="@article.Icon" class="help-card-icon" />
-                            <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@article.Title</RadzenText>
+                            <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@article.Title</RadzenText>
                         </RadzenStack>
                         <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">@article.Description</RadzenText>
                     </RadzenCard>

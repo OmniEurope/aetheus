@@ -57,24 +57,62 @@ public class UsersTests : BunitContext
     }
 
     [Fact]
+    public void Renders_AtMostThreeRoleBadges_WithOverflowCount()
+    {
+        _handler.SetJsonResponse("api/users", new PaginatedResult<UserDto>
+        {
+            Items =
+            [
+                new UserDto
+                {
+                    Id = 1,
+                    Username = "many-roles",
+                    IsActive = true,
+                    Roles = ["Admin", "Contributor", "Reader", "Operator", "Auditor"]
+                }
+            ],
+            TotalCount = 1,
+            Page = 1,
+            PageSize = 50
+        });
+
+        var cut = Render<UsersPage>();
+        cut.WaitForState(() => cut.Markup.Contains("many-roles"), TimeSpan.FromSeconds(2));
+
+        Assert.Contains("Admin", cut.Markup);
+        Assert.Contains("Contributor", cut.Markup);
+        Assert.Contains("Reader", cut.Markup);
+        Assert.Contains("+2", cut.Markup);
+        Assert.Contains("Operator, Auditor", cut.Markup);
+    }
+
+    [Fact]
     public void Renders_UserEdit_NewUser()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "User" });
+        _handler.SetPaginatedJsonResponse("api/roles",
+        [
+            new RoleDto { Id = 1, Name = "Admin" },
+            new RoleDto { Id = 2, Name = "User" }
+        ]);
         var cut = Render<UserEdit>();
+        cut.WaitForState(() => cut.Markup.Contains("Admin"), TimeSpan.FromSeconds(2));
 
-        // New-user mode renders the empty create form: input fields, the available role labels, and a
-        // "Create" submit button (not "Save"). It loads the roles but never fetches a user's detail.
+        // New-user mode renders the empty create form and a server-paged role selector.
         Assert.NotEmpty(cut.FindAll("input"));
         Assert.Contains("Admin", cut.Markup);
         Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("Create"));
-        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/users/roles"));
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/roles"));
         Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("/effective-permissions"));
     }
 
     [Fact]
     public void Renders_UserEdit_ExistingUser()
     {
-        _handler.SetJsonResponse("api/users/roles", new List<string> { "Admin", "User" });
+        _handler.SetPaginatedJsonResponse("api/roles",
+        [
+            new RoleDto { Id = 1, Name = "Admin" },
+            new RoleDto { Id = 2, Name = "User" }
+        ]);
         _handler.SetJsonResponse("api/users/1", new UserDto
         {
             Id = 1,

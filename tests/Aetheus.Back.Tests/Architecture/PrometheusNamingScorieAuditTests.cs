@@ -36,7 +36,7 @@ public sealed class PrometheusNamingScorieAuditTests
         {
             if (!Directory.Exists(dir)) continue;
             foreach (var pattern in patterns)
-                foreach (var file in Directory.EnumerateFiles(dir, pattern, SearchOption.AllDirectories))
+                foreach (var file in RepositoryScan.Enumerate(dir, pattern))
                 {
                     if (IsGenerated(file)) continue;
                     var isShell = file.EndsWith(".sh", StringComparison.Ordinal);
@@ -113,14 +113,5 @@ public sealed class PrometheusNamingScorieAuditTests
         return -1;
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(Path.GetDirectoryName(typeof(PrometheusNamingScorieAuditTests).Assembly.Location)!);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Aetheus.slnx"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
-    }
+    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
 }

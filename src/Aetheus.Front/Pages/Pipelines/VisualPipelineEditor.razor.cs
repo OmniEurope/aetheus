@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.Extensions.Localization;
-using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Pipelines;
 
@@ -88,6 +81,7 @@ public partial class VisualPipelineEditor : IAsyncDisposable
             _lastParsedYaml = YamlDefinition;
             _lastBaseTemplateYaml = BaseTemplateYaml;
             _lastRenderedYaml = null;
+            _positionsLoaded = false;
             _nodePositions.Clear();
         }
         else if (!string.IsNullOrWhiteSpace(YamlDefinition))
@@ -183,9 +177,9 @@ public partial class VisualPipelineEditor : IAsyncDisposable
 
     private async Task LoadPersistedPositionsAsync()
     {
-        if (PipelineId is not { } id || _positionsLoaded) return;
+        if (_positionsLoaded) return;
+        if (PipelineId is { } id) await LayoutStore.LoadIntoAsync(id, StructureSignature(), _nodePositions);
         _positionsLoaded = true;
-        await LayoutStore.LoadIntoAsync(id, StructureSignature(), _nodePositions);
     }
 
     private Task SavePersistedPositionsAsync() =>
@@ -302,7 +296,7 @@ public partial class VisualPipelineEditor : IAsyncDisposable
 
     private async Task LoadStageTemplatesAsync()
     {
-        _stageTemplates = await Api.GetPipelineTemplatesAsync();
+        _stageTemplates = await Api.PipelineTemplates.GetPipelineTemplatesAsync();
         _stageTemplateItems = _stageTemplates
             .Select((t, i) => new StageTemplateItem(t.Name, i))
             .ToList();
@@ -328,7 +322,7 @@ public partial class VisualPipelineEditor : IAsyncDisposable
     {
         if (value is not int idx || idx < 0 || idx >= _stageTemplates.Count) return;
         var summary = _stageTemplates[idx];
-        var full = await Api.GetPipelineTemplateAsync(summary.Id);
+        var full = await Api.PipelineTemplates.GetPipelineTemplateAsync(summary.Id);
         if (full is null) return;
         var parsed = YamlService.Parse(full.YamlContent);
         if (parsed is null || parsed.Stages.Count == 0) return;
@@ -429,7 +423,7 @@ public partial class VisualPipelineEditor : IAsyncDisposable
         var result = await Dialog.OpenAsync<StepEditDialog>(
             L["AddStep"].Value,
             new Dictionary<string, object?> { { "Step", null } },
-            new DialogOptions { Width = "500px" });
+            new DialogOptions { Width = "500px", AutoFocusFirstElement = false });
 
         if (result is PipelineStepDefinition newStep)
         {
@@ -454,7 +448,7 @@ public partial class VisualPipelineEditor : IAsyncDisposable
         var result = await Dialog.OpenAsync<StepEditDialog>(
             L["EditStep"].Value,
             new Dictionary<string, object?> { { "Step", stage.Steps[stepIndex] } },
-            new DialogOptions { Width = "500px" });
+            new DialogOptions { Width = "500px", AutoFocusFirstElement = false });
 
         if (result is PipelineStepDefinition updated)
         {
@@ -518,8 +512,6 @@ public partial class VisualPipelineEditor : IAsyncDisposable
         _newPipelineVarValue = string.Empty;
         await EmitYamlChange();
     }
-
-    // --- Validation ---
 
     private List<string> GetStageWarnings(PipelineStageDefinition stage) =>
         new PipelineVisualValidator(L).GetStageWarnings(stage, EffectiveDefinition);

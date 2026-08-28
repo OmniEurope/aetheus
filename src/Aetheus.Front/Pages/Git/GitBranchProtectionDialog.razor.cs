@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Pages.Git;
 
@@ -38,7 +32,7 @@ public partial class GitBranchProtectionDialog
             RequirePullRequest = _requirePr
         };
 
-        var result = await Api.CreateGitBranchProtectionRuleAsync(RepoId, request);
+        var result = await Api.Git.CreateGitBranchProtectionRuleAsync(RepoId, request);
         if (result is not null)
         {
             Toast.Success(L["Saved"].Value, _pattern);

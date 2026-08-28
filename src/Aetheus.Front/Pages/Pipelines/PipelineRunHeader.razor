@@ -8,7 +8,7 @@
         <h1 class="rz-text-h4 rz-m-0">
             <a href="@PipelineHref" class="pipeline-name-link">@Run.PipelineName</a>
             <span class="rz-color-secondary"> / </span>
-            @L["Run"] #@Run.Id
+            @L["PipelineRun"] #@Run.Id
         </h1>
         <RadzenBadge BadgeStyle="@GetRunBadge(Run.Status)" Text="@L.Localize(Run.Status)" />
         @if (Run.ResolvedVariables.Count > 0)
@@ -16,12 +16,6 @@
             <a href="javascript:void(0)" class="pipeline-name-link" @onclick="VariablesRequested" @onclick:preventDefault>
                 <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@string.Format(L["VarsCount"], Run.ResolvedVariables.Count)" />
             </a>
-        }
-        @if (Run.Parameters.Count > 0)
-        {
-            <span title="@string.Join("\n", Run.Parameters.Select(p => $"{p.Key} = {p.Value}"))">
-                <RadzenBadge BadgeStyle="BadgeStyle.Secondary" Text="@string.Format(L["RunParametersCount"], Run.Parameters.Count)" />
-            </span>
         }
         @{ var upstreamPipeline = UpstreamPipeline(Run.ResolvedVariables); }
         @if (upstreamPipeline is not null)
@@ -60,14 +54,6 @@
             <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="@string.Format(L["WarningsCount"], InfoWarningCount)" />
         }
         <div class="pipeline-list-spacer"></div>
-        <RadzenText TextStyle="TextStyle.Body2" class="rz-color-secondary">
-            <span title="@Run.StartedAt.ToString("g")">@RelativeTime.FormatAgo(L, Run.StartedAt)</span>
-            @{ var duration = FormatDuration(Run.StartedAt, Run.CompletedAt); }
-            @if (!string.IsNullOrEmpty(duration))
-            {
-                <span> · @duration</span>
-            }
-        </RadzenText>
         <RadzenButton Icon="edit" Text="@L["Edit"]" Size="ButtonSize.Small" Click="EditRequested"
             aria-label="@L["Edit"]" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
         @if (RunInProgress)
@@ -82,6 +68,7 @@
                 <RadzenSplitButtonItem Text="@L["RerunCurrent"]" Value="current" Icon="replay" ButtonStyle="ButtonStyle.Success" Variant="Variant.Filled" />
                 <RadzenSplitButtonItem Text="@L["RerunSameCommit"]" Value="sameCommit" Icon="commit" />
                 <RadzenSplitButtonItem Text="@L["RerunBranchHead"]" Value="branchHead" Icon="account_tree" />
+                <RadzenSplitButtonItem Text="@L["ResumeCheckpoints"]" Value="resumeCheckpoints" Icon="resume" />
             </RadzenSplitButton>
             @if (HasFailedSteps)
             {

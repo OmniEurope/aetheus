@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -10,6 +9,7 @@ public interface IAppTelemetryService
 
     Task<List<string>> GetMetricNamesAsync(int appId, CancellationToken ct = default);
     Task<MetricSeriesDto> GetMetricSeriesAsync(int appId, string metricName, int hours, CancellationToken ct = default);
+    Task<AppVisitorSeriesDto> GetVisitorSeriesAsync(int appId, int days, CancellationToken ct = default);
 
     Task<List<AppMetricThresholdDto>> GetThresholdsAsync(int appId, CancellationToken ct = default);
     Task<AppMetricThresholdDto> CreateThresholdAsync(int appId, CreateMetricThresholdRequest request, CancellationToken ct = default);

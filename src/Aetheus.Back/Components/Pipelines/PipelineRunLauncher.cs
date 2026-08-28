@@ -1,0 +1,450 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
+using Aetheus.Back.Components.GitGraph;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Hubs;
+using Aetheus.Shared.Helpers;
+using Microsoft.AspNetCore.SignalR;
+using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
+
+namespace Aetheus.Back.Components.Pipelines;
+
+/// <summary>
+/// Starts runs. Everything from "this pipeline should run" to "the first stage has been dispatched and
+/// the run row exists": resolving the trigger's variables and parameters, persisting the run
+/// idempotently, and launching it - plus the automated (webhook/schedule) and rerun entry points.
+/// </summary>
+public interface IPipelineRunLauncher : IPipelineChildRunLauncher
+{
+    /// <inheritdoc cref="IPipelineRunService.TriggerRunAsync"/>
+    Task<PipelineRunDto?> TriggerResolvedRunAsync(
+        int id, Dictionary<string, string>? additionalVariables, Dictionary<string, string>? parameters,
+        string? yamlOverride, string? commitOverride, CancellationToken ct);
+
+    /// <inheritdoc cref="IPipelineRunService.TriggerAutomatedRunAsync"/>
+    Task<PipelineRunDto?> TriggerAutomatedRunAsync(
+        int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null,
+        CancellationToken ct = default);
+
+    /// <inheritdoc cref="IPipelineRunService.PrepareAutomatedRunAsync"/>
+    Task<PipelineRunPreparation?> PrepareAutomatedRunAsync(
+        int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null,
+        CancellationToken ct = default);
+
+    /// <inheritdoc cref="IPipelineRunService.RerunAsync"/>
+    Task<PipelineRunDto?> RerunAsync(int sourceRunId, RerunMode mode, CancellationToken ct = default);
+}
+
+/// <summary>
+/// The launch half of the engine, extracted from <see cref="PipelineRunService"/>. It is the real
+/// implementation of <see cref="IPipelineChildRunLauncher"/> - the edge the trigger coordinator calls to
+/// start a child run - which is what lets that recursion close through an interface instead of through
+/// the engine calling itself.
+///
+/// Launch failure is deliberately visible: anything thrown after the run row exists is caught, written
+/// to the run as a readable warning and the run is failed, never left Running with no task.
+/// </summary>
+public sealed class PipelineRunLauncher(
+    IPipelineRepository repo,
+    IHubContext<PipelineHub> pipelineHub,
+    IPipelineVariableResolver variableResolver,
+    IAuditService audit,
+    IResourceAuthorizationService authz,
+    IGitGraphRecorder gitGraph,
+    IConfiguration configuration,
+    IPipelineRunReader runReader,
+    IPipelineStageDispatchPlanner planner,
+    IPipelineRunParameterResolver parameterResolver,
+    IPipelineRunPreparationService preparations,
+    IPipelineRunPreflightService preflight,
+    TimeProvider timeProvider,
+    ILogger<PipelineRunLauncher> logger) : IPipelineRunLauncher
+{
+    public async Task<PipelineRunDto?> TriggerResolvedRunAsync(int id,
+        Dictionary<string, string>? additionalVariables, Dictionary<string, string>? parameters,
+        string? yamlOverride, string? commitOverride, CancellationToken ct)
+    {
+        var preparation = await preparations.PrepareRunAsync(
+            id, PipelineRunService.ResolveRunBranch(additionalVariables), yamlOverride, commitOverride, ct).ConfigureAwait(false);
+        return preparation is null
+            ? null
+            : await TriggerPreparedRunAsync(preparation, additionalVariables, parameters, ct).ConfigureAwait(false);
+    }
+
+    public async Task<PipelineRunDto?> TriggerPreparedRunAsync(PipelineRunPreparation preparation,
+        Dictionary<string, string>? additionalVariables = null,
+        Dictionary<string, string>? parameters = null, CancellationToken ct = default,
+        string? idempotencyKey = null)
+    {
+        ArgumentNullException.ThrowIfNull(preparation);
+        idempotencyKey = idempotencyKey?.Trim();
+        if (idempotencyKey?.Length > PipelineRunRequest.MaxIdempotencyKeyLength)
+            throw new BadRequestException(
+                $"Idempotency key cannot exceed {PipelineRunRequest.MaxIdempotencyKeyLength} characters.");
+        var definition = preparation.Definition;
+        var trigger = ResolveTriggerVariables(preparation, additionalVariables, parameters);
+        var variables = trigger.Variables;
+        var effectiveParams = trigger.EffectiveParameters;
+        var runtimePreparation = await ResolveRunParametersAsync(
+            preparation, effectiveParams, ct).ConfigureAwait(false);
+
+        var launchVars = new Dictionary<string, string>(variables, StringComparer.OrdinalIgnoreCase);
+        PipelineProjectVariables.Inject(
+            launchVars, preparation.Pipeline.Project, configuration,
+            preparation.BranchName ?? preparation.Pipeline.SourceBranch);
+        if (!string.IsNullOrWhiteSpace(preparation.RepositoryUrl))
+        {
+            launchVars["BUILD_REPOSITORY_URI"] = preparation.RepositoryUrl;
+            launchVars["REPOSITORY_URL"] = preparation.RepositoryUrl;
+        }
+        var (preLaunchVariables, _, _) = await variableResolver.ResolveVariablesWithWarningsAsync(
+            runtimePreparation.Definition, runtimePreparation.EffectiveProjectId, launchVars, ct,
+            pipelineId: preparation.PipelineId, pipelineName: preparation.Pipeline.Name)
+            .ConfigureAwait(false);
+        preflight.ValidateUniqueDeploymentTargets(runtimePreparation.Definition, preLaunchVariables);
+
+        // Ask for everything the run needs now, not an hour in. Deliberately placed before the run row
+        // exists: a requirement that cannot be met is a refused launch the caller sees immediately,
+        // not a run that dies at its fourth stage.
+        var preflightProblems = await preflight.FindBlockingProblemsAsync(
+            runtimePreparation.Definition, preLaunchVariables,
+            preparation.Pipeline.Project?.OrganizationId, runtimePreparation.EffectiveProjectId, ct)
+            .ConfigureAwait(false);
+        if (preflightProblems.Count > 0)
+        {
+            // A360-28: the refusal happens before the run row exists, so an interactive caller sees the
+            // 400 but a scheduler or a git push saw nothing at all - no run, no trace, no way to tell a
+            // refused launch from one that never fired. The audit trail is the only record those
+            // triggers can leave, so the refusal is written there before it is thrown.
+            var reason = string.Join(" ", preflightProblems);
+            logger.LogWarning(
+                "Preflight refused the launch of pipeline {PipelineId} ({PipelineName}): {Reason}",
+                preparation.PipelineId, preparation.Pipeline.Name, reason);
+            await audit.LogAsync(
+                "BlockedByPreflight", "Pipeline", preparation.PipelineId,
+                $"{preparation.Pipeline.Name} | {reason}", ct).ConfigureAwait(false);
+            throw new BadRequestException(
+                "This run cannot complete with the current configuration: " + reason);
+        }
+
+        var run = CreatePipelineRun(
+            preparation, runtimePreparation, variables, effectiveParams, idempotencyKey);
+        var existing = await PersistPipelineRunAsync(run, ct).ConfigureAwait(false);
+        if (existing is not null) return existing;
+        return await LaunchPreparedRunAsync(
+            run, preparation, runtimePreparation, variables, ct).ConfigureAwait(false);
+    }
+
+    private static ResolvedTriggerVariables ResolveTriggerVariables(
+        PipelineRunPreparation preparation,
+        Dictionary<string, string>? additionalVariables,
+        Dictionary<string, string>? parameters)
+    {
+        var variables = additionalVariables is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(additionalVariables, StringComparer.OrdinalIgnoreCase);
+        var reservedParameter = parameters?.Keys.FirstOrDefault(PipelineParameterResolver.IsReservedName);
+        if (reservedParameter is not null)
+            throw new BadRequestException($"Parameter '{reservedParameter}' uses a reserved system variable name.");
+        if (!PipelineParameterResolver.TryResolve(
+                preparation.Definition.Parameters, parameters, out var effective, out var errors))
+            throw new BadRequestException(string.Join(" ", errors));
+        if (parameters is not null)
+            foreach (var (key, value) in parameters) variables[key] = value;
+        foreach (var (key, value) in effective)
+            variables[PipelineCommandBuilder.ParameterKeyPrefix + key] = value;
+        if (!string.IsNullOrWhiteSpace(preparation.BranchName))
+            variables[PipelineRunService.SourceBranchVariable] = preparation.BranchName;
+        if (IsGitCommitHash(preparation.CommitHash))
+            variables[PipelineRunService.SourceCommitVariable] = preparation.CommitHash!;
+        return new ResolvedTriggerVariables(variables, effective);
+    }
+
+    private PipelineRun CreatePipelineRun(
+        PipelineRunPreparation preparation,
+        PipelineRunPreparation runtimePreparation,
+        Dictionary<string, string> variables,
+        IReadOnlyDictionary<string, string> effectiveParameters,
+        string? idempotencyKey) => new()
+        {
+            PipelineId = preparation.PipelineId,
+            Status = PipelineStatus.Running,
+            StartedAt = timeProvider.GetUtcNow().UtcDateTime,
+            YamlSnapshot = runtimePreparation.YamlSnapshot,
+            BranchName = preparation.BranchName,
+            CommitHash = preparation.CommitHash,
+            RepositoryUrl = preparation.RepositoryUrl,
+            IdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey,
+            AdditionalVariablesJson = variables.Count > 0 ? JsonSerializer.Serialize(variables) : "{}",
+            ParametersJson = effectiveParameters.Count > 0 ? JsonSerializer.Serialize(effectiveParameters) : "{}"
+        };
+
+    private async Task<PipelineRunDto?> PersistPipelineRunAsync(PipelineRun run, CancellationToken ct)
+    {
+        if (run.IdempotencyKey is null)
+        {
+            run.BuildNumber = await repo.ReserveNextBuildNumberAsync(run.PipelineId, ct).ConfigureAwait(false);
+            await repo.AddPipelineRunAsync(run, ct).ConfigureAwait(false);
+            await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+            return null;
+        }
+        // Reserve before the idempotent insert so a genuinely new run carries a number. A replayed
+        // launch returns the original row, and the number burnt here is simply skipped - build
+        // numbers must never repeat, they are not required to be gapless.
+        run.BuildNumber = await repo.ReserveNextBuildNumberAsync(run.PipelineId, ct).ConfigureAwait(false);
+        var persisted = await repo.GetOrAddPipelineRunAsync(run, ct).ConfigureAwait(false);
+        return persisted.Created ? null : await runReader.GetRunAsync(persisted.Run.Id, ct).ConfigureAwait(false);
+    }
+
+    private async Task<PipelineRunDto?> LaunchPreparedRunAsync(
+        PipelineRun run,
+        PipelineRunPreparation preparation,
+        PipelineRunPreparation runtimePreparation,
+        Dictionary<string, string> variables,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await LaunchRunAsync(run, runtimePreparation, variables, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // cancellation is not a launch failure - let it propagate
+        }
+        catch (Exception ex)
+        {
+            // Product requirement: a failed launch must remain VISIBLE in the run list with its reason,
+            // rather than a bare 500 with no row. Convert any setup failure (git read, invalid committed
+            // YAML, variable resolution, task dispatch) into a failed run carrying the message. This is one
+            // of the sanctioned try/catch cases - ErrorHandlingMiddleware cannot attach the failure to a
+            // run it never sees.
+            logger.LogError(ex, "Pipeline run {RunId} failed during launch setup", run.Id);
+            await repo.AppendRunWarningsAsync(run.Id, [BuildLaunchFailureReason(ex)], ct).ConfigureAwait(false);
+            await repo.UpdatePipelineRunStatusAsync(run.Id, PipelineStatus.Failed, ct).ConfigureAwait(false);
+            await pipelineHub.Clients
+                .Groups(HubGroups.PipelineRunUpdates(run.Id, preparation.PipelineId))
+                .SendAsync("PipelineRunCompleted", run.Id, PipelineStatus.Failed, ct).ConfigureAwait(false);
+            return await runReader.GetRunAsync(run.Id, ct).ConfigureAwait(false);
+        }
+    }
+
+    private sealed record ResolvedTriggerVariables(
+        Dictionary<string, string> Variables,
+        Dictionary<string, string> EffectiveParameters);
+
+    public Task<PipelineRunPreparation> ResolveRunParametersAsync(
+        PipelineRunPreparation preparation,
+        IReadOnlyDictionary<string, string>? parameters,
+        CancellationToken ct = default)
+        => parameterResolver.ResolveRunParametersAsync(preparation, parameters, ct);
+
+    // The user-facing reason persisted on a run that failed during launch setup (git read, invalid
+    // committed YAML, variable resolution, dispatch). Secret values are masked upstream, so an exception
+    // message here carries names/paths, not secrets.
+    private static string BuildLaunchFailureReason(Exception ex)
+        => $"The run could not be launched: {ex.Message}";
+
+    // Post-persist launch setup. Git is deliberately not read here: authorization and execution must use
+    // the same immutable preparation resolved before the run was created.
+    private async Task<PipelineRunDto?> LaunchRunAsync(
+        PipelineRun run, PipelineRunPreparation preparation,
+        Dictionary<string, string> additionalVariables, CancellationToken ct)
+    {
+        var pipeline = preparation.Pipeline;
+        var definition = preparation.Definition;
+        var effectiveStages = preparation.EffectiveStages;
+        var effectiveProjectId = preparation.EffectiveProjectId;
+
+        // Inject project-level system vars that require a DB lookup.
+        var projectVars = new Dictionary<string, string>(additionalVariables, StringComparer.OrdinalIgnoreCase);
+        // S-TECH-RPVI: single injection point shared with PipelineVariableResolver so the trigger-time
+        // snapshot and the per-run re-resolution can never diverge (which once froze the localhost mirror
+        // authority on the first-stage clone). The mirror URL is rehomed inside Inject.
+        PipelineProjectVariables.Inject(
+            projectVars, pipeline.Project, configuration, run.BranchName ?? pipeline.SourceBranch);
+        if (!string.IsNullOrWhiteSpace(preparation.RepositoryUrl))
+        {
+            projectVars["BUILD_REPOSITORY_URI"] = preparation.RepositoryUrl;
+            projectVars["REPOSITORY_URL"] = preparation.RepositoryUrl;
+        }
+        if (!string.IsNullOrWhiteSpace(run.CommitHash))
+            projectVars["BUILD_SOURCEVERSION"] = run.CommitHash;
+
+        var (resolvedVars, warnings, secretKeys) = await variableResolver.ResolveVariablesWithWarningsAsync(
+            definition, effectiveProjectId, projectVars, ct,
+            pipelineId: run.PipelineId, runId: run.Id, pipelineName: pipeline.Name,
+            buildNumber: run.BuildNumber).ConfigureAwait(false);
+        var publicVars = FilterSecretKeys(resolvedVars, secretKeys);
+        run.ResolvedVariablesJson = JsonSerializer.Serialize(publicVars);
+        run.WarningsJson = warnings.Count > 0 ? JsonSerializer.Serialize(warnings) : null;
+
+        // System:Prepare (clone/prepare workspace) and System:Cleanup only make sense when at least one
+        // step actually uses the workspace. A pure orchestration pipeline - every step is `type: trigger`,
+        // which merely launches and waits on a child run - needs neither, so skip both. Keeps the run view
+        // clean (no useless "Clone Repository"/"Cleanup") and lets the trigger steps stand on their own.
+        var requiresWorkspace = PipelineRunPreparationService.RequiresWorkspace(definition);
+        var hasRepo = !string.IsNullOrEmpty(preparation.RepositoryUrl);
+        var order = 0;
+        if (requiresWorkspace)
+        {
+            repo.TrackPipelineStepRun(new PipelineStepRun
+            {
+                PipelineRunId = run.Id,
+                StageName = PipelineRunService.SystemPrepareStage,
+                StepName = hasRepo ? "Clone Repository" : "Prepare Workspace",
+                Order = order++,
+                IsSystem = true
+            });
+        }
+
+        // Create step runs for each stage/step (with matrix expansion) - effectiveStages was
+        // flattened once above (shared with the matrix validation).
+        foreach (var stage in effectiveStages)
+        {
+            var matrixLegs = ExpandMatrix(stage.Matrix);
+
+            foreach (var leg in matrixLegs)
+            {
+                var legName = leg.Count > 0 ? string.Join("-", leg.Values) : null;
+
+                foreach (var step in stage.Steps)
+                {
+                    repo.TrackPipelineStepRun(new PipelineStepRun
+                    {
+                        PipelineRunId = run.Id,
+                        StageName = stage.Name,
+                        StepName = legName is not null ? $"{step.Name} [{legName}]" : step.Name,
+                        Order = order++,
+                        RetryCount = step.RetryCount,
+                        ContinueOnError = step.ContinueOnError,
+                        MatrixLeg = legName,
+                        GroupName = stage.Group
+                    });
+                }
+            }
+
+            // Artifact collection is dispatched post-stage (in AdvanceStageAsync),
+            // not as an injected step - avoids the task claim concurrency bug.
+        }
+
+        // Inject system cleanup step (always runs) - only when the workspace was prepared above.
+        if (requiresWorkspace)
+        {
+            repo.TrackPipelineStepRun(new PipelineStepRun
+            {
+                PipelineRunId = run.Id,
+                StageName = PipelineRunService.SystemCleanupStage,
+                StepName = "Cleanup",
+                Order = order++,
+                IsSystem = true,
+                ContinueOnError = true
+            });
+        }
+
+        await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await pipelineHub.Clients.Groups(HubGroups.PipelineRunUpdates(run.Id, run.PipelineId)).SendAsync("PipelineRunStarted", run.Id, run.PipelineId, ct).ConfigureAwait(false);
+
+        await planner.CreateTasksForNextStageAsync(run.Id, definition, resolvedVars, secretKeys, this, ct).ConfigureAwait(false);
+
+        await audit.LogAsync("Triggered", "PipelineRun", run.Id, pipeline.Name, ct).ConfigureAwait(false);
+
+        // Record git provenance so the run-detail view can resolve internal commit/branch pages and
+        // the cross-link graph stays current beyond the one-shot migration backfill (best-effort).
+        if (effectiveProjectId is { } recProjectId)
+            await gitGraph.RecordRunContextAsync(recProjectId, run.CommitHash, run.BranchName, ct).ConfigureAwait(false);
+
+        return await runReader.GetRunAsync(run.Id, ct).ConfigureAwait(false);
+    }
+
+    public async Task<PipelineRunDto?> TriggerAutomatedRunAsync(
+        int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default)
+    {
+        var preparation = await PrepareAutomatedRunAsync(
+            pipelineId, triggerSource, additionalVariables, ct).ConfigureAwait(false);
+        return preparation is null
+            ? null
+            : await TriggerPreparedRunAsync(preparation, additionalVariables, ct: ct).ConfigureAwait(false);
+    }
+
+    public async Task<PipelineRunPreparation?> PrepareAutomatedRunAsync(
+        int pipelineId,
+        string triggerSource,
+        Dictionary<string, string>? additionalVariables = null,
+        CancellationToken ct = default)
+    {
+        var pipeline = await repo.FindPipelineAsync(pipelineId, ct).ConfigureAwait(false);
+        if (pipeline is null) return null;
+
+        // F-EXEC-1b: a pipeline step is free-form shell (= RCE). Interactive runs authorize the
+        // live caller (F-EXEC-1); webhook/scheduler have no principal, so authorize the owner.
+        var owner = pipeline.CreatedByUsername;
+        if (string.IsNullOrEmpty(owner))
+        {
+            logger.LogWarning(
+                "{Trigger} run of pipeline {PipelineId} blocked (F-EXEC-1b): pipeline has no owner. " +
+                "Re-save it as an authorized user to enable automated triggers.", triggerSource, pipelineId);
+            await audit.LogAsync("BlockedUnownedAutomatedRun", "Pipeline", pipelineId, pipeline.Name, ct).ConfigureAwait(false);
+            return null;
+        }
+
+        var preparation = await preparations.PrepareRunAsync(pipelineId, PipelineRunService.ResolveRunBranch(additionalVariables),
+            yamlOverride: null, PipelineRunService.ResolveSourceCommit(additionalVariables), ct).ConfigureAwait(false);
+        if (preparation is null) return null;
+        var targetIds = preparation.TargetServerIds;
+        foreach (var serverId in targetIds)
+        {
+            if (!await authz.HasPermissionAsync(owner, ResourceType.Server, serverId, Permission.Admin, ct).ConfigureAwait(false))
+            {
+                logger.LogWarning(
+                    "{Trigger} run of pipeline {PipelineId} blocked (F-EXEC-1b): owner '{Owner}' lacks " +
+                    "Server.Admin on target server {ServerId}.", triggerSource, pipelineId, owner, serverId);
+                await audit.LogAsync("BlockedUnauthorizedAutomatedRun", "Pipeline", pipelineId,
+                    $"{pipeline.Name} | Servers: {string.Join(',', targetIds)}", ct).ConfigureAwait(false);
+                return null;
+            }
+        }
+
+        // F-026: log the resolved server list so automated-run audits are traceable.
+        await audit.LogAsync("AutomatedRunAuthorized", "Pipeline", pipelineId,
+            $"{pipeline.Name} | Servers: {string.Join(',', targetIds)}", ct).ConfigureAwait(false);
+
+        return preparation;
+    }
+
+    public async Task<PipelineRunDto?> RerunAsync(int sourceRunId, RerunMode mode, CancellationToken ct = default)
+    {
+        var source = await repo.GetRunDetailAsync(sourceRunId, ct).ConfigureAwait(false);
+        if (source is null) return null;
+
+        // Reproduce the original queue-time inputs (user-supplied additional variables).
+        var vars = DeserializeResolvedVariables(source.AdditionalVariablesJson);
+        Dictionary<string, string>? additional = vars.Count > 0 ? vars : null;
+
+        // P: replay the original run's queue-time parameters so the rerun's snapshot/precedence match
+        // (the user values are also carried in `additional`; re-passing them is idempotent).
+        var sourceParams = DeserializeResolvedVariables(source.ParametersJson);
+        var rerunParams = sourceParams.Count > 0 ? sourceParams : null;
+
+        // Snapshot modes need the captured YAML; a legacy run without one falls back to a fresh run
+        // from the live definition (honest degradation - never a silent no-op).
+        if (mode == RerunMode.ResumeCheckpoints)
+        {
+            if (string.IsNullOrWhiteSpace(source.YamlSnapshot) || !IsGitCommitHash(source.CommitHash))
+                return null;
+            additional ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            additional[PipelineRunService.ResumeSourceRunVariable] = sourceRunId.ToString();
+        }
+
+        return mode switch
+        {
+            RerunMode.SnapshotSameCommit when !string.IsNullOrWhiteSpace(source.YamlSnapshot) =>
+                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, source.CommitHash, ct).ConfigureAwait(false),
+            RerunMode.SnapshotBranchHead when !string.IsNullOrWhiteSpace(source.YamlSnapshot) =>
+                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, commitOverride: null, ct).ConfigureAwait(false),
+            RerunMode.ResumeCheckpoints =>
+                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, source.CommitHash, ct).ConfigureAwait(false),
+            _ => await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, yamlOverride: null, commitOverride: null, ct).ConfigureAwait(false)
+        };
+    }
+}

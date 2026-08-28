@@ -64,6 +64,21 @@ public class ListCacheServiceTests
     }
 
     [Fact]
+    public void InvalidatePrefix_RemovesEveryCachedPageForRealtimeEntityWithoutTouchingOthers()
+    {
+        var sut = NewSut();
+        sut.Set("servers:1:25", new List<int> { 1 });
+        sut.Set("servers:2:25", new List<int> { 2 });
+        sut.Set("users:1:50", new List<int> { 3 });
+
+        sut.InvalidatePrefix("servers:");
+
+        Assert.False(sut.TryGet<List<int>>("servers:1:25", out _));
+        Assert.False(sut.TryGet<List<int>>("servers:2:25", out _));
+        Assert.True(sut.TryGet<List<int>>("users:1:50", out _));
+    }
+
+    [Fact]
     public void Clear_EmptiesCache()
     {
         var sut = NewSut();
@@ -197,6 +212,51 @@ public class ListCacheServiceTests
         Assert.False(loadingStates[^1]); // loading cleared even when the fetch fails
         Assert.True(sut.TryGet<List<int>>("k", out var still));
         Assert.Same(cachedData, still); // stale entry left intact on failure
+    }
+
+    [Fact]
+    public async Task RevalidateAsync_NonAuthHttpFailure_NotifiesConsumerAndKeepsStaleValue()
+    {
+        var sut = NewSut();
+        var stale = new List<int> { 1 };
+        sut.Set("k", stale);
+        HttpRequestException? observed = null;
+
+        await sut.RevalidateAsync<List<int>>(
+            "k",
+            () => throw new HttpRequestException(
+                "backend unavailable",
+                null,
+                System.Net.HttpStatusCode.ServiceUnavailable),
+            _ => { },
+            _ => { },
+            () => Task.CompletedTask,
+            error => observed = error);
+
+        Assert.NotNull(observed);
+        Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, observed.StatusCode);
+        Assert.True(sut.TryGet<List<int>>("k", out var cached));
+        Assert.Same(stale, cached);
+    }
+
+    [Fact]
+    public async Task RevalidateAsync_Unauthorized_IsLeftToAuthProvider()
+    {
+        var sut = NewSut();
+        var errorCallbackCalled = false;
+
+        await sut.RevalidateAsync<List<int>>(
+            "k",
+            () => throw new HttpRequestException(
+                "expired",
+                null,
+                System.Net.HttpStatusCode.Unauthorized),
+            _ => { },
+            _ => { },
+            () => Task.CompletedTask,
+            _ => errorCallbackCalled = true);
+
+        Assert.False(errorCallbackCalled);
     }
 
     [Fact]

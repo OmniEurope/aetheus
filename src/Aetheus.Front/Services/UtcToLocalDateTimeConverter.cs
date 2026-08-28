@@ -6,7 +6,7 @@ namespace Aetheus.Front.Services;
 
 /// <summary>
 /// Reads UTC DateTimes from the wire (the backend timestamps everything in UTC,
-/// according to the frontend time convention) and surfaces them in the browser's
+/// per the CLAUDE.md TimeProvider convention) and surfaces them in the browser's
 /// LOCAL timezone, so DataGrid / ToString("g") show correct local clock time
 /// without each call site having to remember ToLocalTime(). Inverse on write:
 /// Local values are sent as UTC so round-trips stay UTC-canonical on the wire.

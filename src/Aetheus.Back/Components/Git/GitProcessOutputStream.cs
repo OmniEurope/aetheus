@@ -16,9 +16,15 @@ internal sealed class GitProcessOutputStream(
     Process process,
     CancellationTokenSource timeoutCts,
     ILogger logger,
-    string service) : Stream
+    string service,
+    TimeSpan? naturalExitGracePeriod = null) : Stream
 {
+    private static readonly TimeSpan DefaultNaturalExitGracePeriod = TimeSpan.FromSeconds(2);
     private readonly Stream _inner = process.StandardOutput.BaseStream;
+    private readonly Task<string> _standardError = process.StandardError.ReadToEndAsync();
+    private readonly TimeSpan _naturalExitGracePeriod =
+        naturalExitGracePeriod ?? DefaultNaturalExitGracePeriod;
+    private int _disposeStarted;
 
     public override bool CanRead => true;
     public override bool CanSeek => false;
@@ -38,22 +44,131 @@ internal sealed class GitProcessOutputStream(
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && Interlocked.Exchange(ref _disposeStarted, 1) == 0)
+        {
+            // Process.Kill(entireProcessTree: true) can itself block while the OS enumerates and
+            // terminates descendants. Synchronous Stream.Dispose runs on the ASP.NET response path,
+            // so transfer ownership of the complete teardown to a dedicated worker. A normal pool
+            // work item can be starved precisely when the server is saturated, leaving the owned git
+            // process alive after the response has gone away. The worker catches every expected
+            // signalling failure and always releases the process, streams and timeout source.
+            _ = Task.Factory.StartNew(
+                DisposeOwnedResources,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+        }
+        base.Dispose(disposing);
+    }
+
+    private void DisposeOwnedResources()
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            LogFailureIfAvailable();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Process already gone / could not be signalled - nothing to clean up.
+        }
+        finally
         {
             try
             {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-                else if (process.ExitCode != 0)
-                    logger.LogWarning("git {Service} exited with code {ExitCode} after streaming.", service, process.ExitCode);
+                _inner.Dispose();
             }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            finally
             {
-                // Process already gone / could not be signalled - nothing to clean up.
+                process.Dispose();
+                timeoutCts.Dispose();
             }
-            process.Dispose();
-            timeoutCts.Dispose();
         }
-        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+            return;
+
+        try
+        {
+            await WaitForNaturalExitOrKillAsync().ConfigureAwait(false);
+            if (process.HasExited && process.ExitCode != 0)
+            {
+                var error = (await _standardError.ConfigureAwait(false)).Trim();
+                logger.LogWarning(
+                    "git {Service} exited with code {ExitCode} after streaming: {Error}",
+                    service,
+                    process.ExitCode,
+                    error);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Process already gone / could not be signalled - nothing to clean up.
+        }
+        finally
+        {
+            try
+            {
+                await _inner.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                process.Dispose();
+                timeoutCts.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private async Task WaitForNaturalExitOrKillAsync()
+    {
+        if (process.HasExited)
+            return;
+
+        using var naturalExitTimeout = new CancellationTokenSource(_naturalExitGracePeriod);
+        try
+        {
+            await process.WaitForExitAsync(naturalExitTimeout.Token).ConfigureAwait(false);
+            return;
+        }
+        catch (OperationCanceledException) when (naturalExitTimeout.IsCancellationRequested)
+        {
+            // The bounded natural-exit window elapsed.
+        }
+
+        if (!process.HasExited)
+            process.Kill(entireProcessTree: true);
+
+        using var killTimeout = new CancellationTokenSource(_naturalExitGracePeriod);
+        try
+        {
+            await process.WaitForExitAsync(killTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (killTimeout.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "git {Service} did not exit within {GracePeriod} after process-tree termination",
+                service,
+                _naturalExitGracePeriod);
+        }
+    }
+
+    private void LogFailureIfAvailable()
+    {
+        if (!process.HasExited || process.ExitCode == 0)
+            return;
+        var error = _standardError.IsCompletedSuccessfully
+            ? _standardError.GetAwaiter().GetResult().Trim()
+            : string.Empty;
+        logger.LogWarning(
+            "git {Service} exited with code {ExitCode} after streaming: {Error}",
+            service,
+            process.ExitCode,
+            error);
     }
 }

@@ -1,19 +1,30 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
-@* PLAN-001 phase 1: monitored-apps (availability) list for a project. *@
+@* ADR-021 phase 1: monitored-apps (availability) list for a project. *@
 <RadzenRow AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-3">
-    <RadzenText TextStyle="TextStyle.H6" class="rz-mb-0">@L["MonitoredApps"]</RadzenText>
+    <RadzenText TextStyle="TextStyle.H5" class="rz-mb-0">@L["MonitoredApps"]</RadzenText>
     @if (_canWrite)
     {
         <RadzenButton Text="@L["AddMonitoredApp"]" Icon="add" Click="@OpenCreateDialogAsync" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
     }
 </RadzenRow>
 
-<RadzenDataGrid Data="@_apps" TItem="MonitoredAppDto" AllowSorting="true" Density="Density.Compact"
-                IsLoading="@_loading" EmptyText="@L["NoMonitoredApps"]" AllowFiltering="true" FilterMode="FilterMode.Advanced">
+<RadzenDataGrid Responsive="false" Data="@_apps" TItem="MonitoredAppDto" AllowSorting="true" Density="Density.Compact"
+                IsLoading="@_loading" EmptyText="@L["NoMonitoredApps"]" AllowFiltering="true" FilterMode="FilterMode.Advanced" AllowColumnResize="true" AllowVirtualization="@AetheusGrid.Virtualization" VirtualizationOverscanCount="3" AllowPaging="@(!AetheusGrid.Virtualization)">
+    <EmptyTemplate>
+        <EmptyState Icon="monitor_heart" Title="@L["NoMonitoredApps"]" Description="@L["EmptyMonitoredAppsHint"]">
+            <ActionContent>
+                @if (_canWrite)
+                {
+                    <RadzenButton Text="@L["AddMonitoredApp"]" Icon="add" Click="@OpenCreateDialogAsync"
+                        ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
+                }
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
     <Columns>
         <RadzenDataGridColumn TItem="MonitoredAppDto" Title="@L["Status"]" Width="160px" Sortable="false">
             <Template Context="app">
-                @if (app.CurrentStatus == AppHealthStatus.Unknown)
+                @if (app.CurrentStatus == AppHealthStatus.Unknown && app.LastCheckedAt is null)
                 {
                     <RadzenBadge BadgeStyle="BadgeStyle.Light" Variant="Variant.Outlined" Text="@L["AppHealthNeverProbed"]" />
                 }

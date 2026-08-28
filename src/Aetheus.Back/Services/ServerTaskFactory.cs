@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Services;
 

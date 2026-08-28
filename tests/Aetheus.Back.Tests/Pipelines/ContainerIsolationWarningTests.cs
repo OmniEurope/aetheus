@@ -11,10 +11,10 @@ namespace Aetheus.Back.Tests.Pipelines;
 public class ContainerIsolationWarningTests
 {
     [Theory]
-    [InlineData(true, null, false, false, "no image")]
-    [InlineData(true, "alpine:3.22", false, false, "no Docker")]
+    [InlineData(true, null, false, false, "exactly one")]
+    [InlineData(true, "alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false, false, "no Docker")]
     [InlineData(false, null, true, false, "containers-only")]
-    [InlineData(true, "alpine:3.22", false, true, null)]
+    [InlineData(true, "alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false, true, null)]
     public void CheckIsolationPolicy_FailsClosedForUnsafeStageRunnerCombinations(
         bool container,
         string? image,
@@ -46,10 +46,10 @@ public class ContainerIsolationWarningTests
     }
 
     [Theory]
-    [InlineData(true, null, false, false, "no image")]
-    [InlineData(true, "alpine:3.22", false, false, "no Docker")]
+    [InlineData(true, null, false, false, "exactly one")]
+    [InlineData(true, "alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false, false, "no Docker")]
     [InlineData(false, null, true, false, "containers-only")]
-    [InlineData(true, "alpine:3.22", false, true, null)]
+    [InlineData(true, "alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false, true, null)]
     public void CheckRunIsolationPolicy_FailsClosedForUnsafeRunnerCombinations(
         bool container,
         string? image,
@@ -81,7 +81,7 @@ public class ContainerIsolationWarningTests
     public void ApplyContainerIsolation_MalformedLimits_AreRejected()
     {
         var task = new ServerTask { Name = "s", Command = "echo" };
-        var iso = new PipelineIsolationDefinition { Mode = "container", Image = "alpine", Memory = "not-a-limit", Cpus = "??" };
+        var iso = new PipelineIsolationDefinition { Mode = "container", Image = "alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Memory = "not-a-limit", Cpus = "??" };
 
         var error = Assert.Throws<ArgumentException>(() => PipelineRunHelpers.ApplyContainerIsolation(task, iso));
 
@@ -95,7 +95,7 @@ public class ContainerIsolationWarningTests
     public void ApplyContainerIsolation_ValidLimits_AppliedWithoutWarnings()
     {
         var task = new ServerTask { Name = "s", Command = "echo" };
-        var iso = new PipelineIsolationDefinition { Mode = "container", Image = "alpine", Memory = "512m", Cpus = "1.5" };
+        var iso = new PipelineIsolationDefinition { Mode = "container", Image = "alpine:3.22@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Memory = "512m", Cpus = "1.5" };
 
         var warnings = PipelineRunHelpers.ApplyContainerIsolation(task, iso);
 
@@ -112,5 +112,57 @@ public class ContainerIsolationWarningTests
 
         Assert.Empty(warnings);
         Assert.NotEqual(ExecutorType.Container, task.Executor);
+    }
+
+    [Fact]
+    public void ValidateIsolationDefinitions_RejectsMutableImage()
+    {
+        var errors = PipelineRunHelpers.ValidateIsolationDefinitions(
+            null,
+            [new PipelineStageDefinition
+            {
+                Name = "Build",
+                Isolation = new PipelineIsolationDefinition
+                {
+                    Mode = PipelineIsolationDefinition.ModeContainer,
+                    Image = "node:24.4.1"
+                }
+            }]);
+
+        var error = Assert.Single(errors);
+        Assert.Contains("@sha256", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateIsolationDefinitions_RejectsRunLevelToolchainBeforeCheckout()
+    {
+        var errors = PipelineRunHelpers.ValidateIsolationDefinitions(
+            new PipelineIsolationDefinition
+            {
+                Mode = PipelineIsolationDefinition.ModeContainer,
+                Toolchain = "dotnet"
+            },
+            []);
+
+        Assert.Contains(errors, error =>
+            error.Contains("before", StringComparison.OrdinalIgnoreCase)
+            && error.Contains("checkout", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ApplyContainerIsolation_ToolchainContract_IsPersistedOnTask()
+    {
+        var task = new ServerTask { Name = "s", Command = "echo" };
+        var isolation = new PipelineIsolationDefinition
+        {
+            Mode = PipelineIsolationDefinition.ModeContainer,
+            Toolchain = "python"
+        };
+
+        PipelineRunHelpers.ApplyContainerIsolation(task, isolation);
+
+        Assert.Equal(ExecutorType.Container, task.Executor);
+        Assert.Equal("python", task.ContainerToolchain);
+        Assert.Null(task.ContainerImage);
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Pages.Organizations;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Aetheus.Shared.DTOs.Organizations;
 using Aetheus.Shared.Enums;
@@ -94,4 +95,62 @@ public class OrganizationDetailDirtyGuardTests : BunitContext
 
         Assert.True(InvokeDirtyCheck(cut.Instance, "IsProjectsTabDirty"));
     }
+
+    [Fact]
+    public async Task AdminEntityCallback_DirtyGeneralTab_DoesNotReload()
+    {
+        var cut = RenderLoaded();
+        SetGeneralName(cut.Instance, "Unsaved rename");
+        _handler.Requests.Clear();
+
+        await InvokeAdminEntityCallbackAsync(cut, AdminEntities.Organization, 1);
+
+        Assert.DoesNotContain(
+            _handler.Requests,
+            request => request.Method == "GET" && request.Url.Contains("api/organizations/1"));
+    }
+
+    [Fact]
+    public async Task AdminEntityCallback_CleanMatchingOrganization_Reloads()
+    {
+        var cut = RenderLoaded();
+        _handler.Requests.Clear();
+
+        await InvokeAdminEntityCallbackAsync(cut, AdminEntities.Organization, 1);
+
+        Assert.Contains(
+            _handler.Requests,
+            request => request.Method == "GET" && request.Url.Contains("api/organizations/1"));
+    }
+
+    [Fact]
+    public async Task AdminEntityCallback_CleanMatchingOrganization_RefreshesWithoutLoadingScreen()
+    {
+        var cut = RenderLoaded();
+        var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishRefresh = new TaskCompletionSource<OrganizationDetailDto>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(HttpMethod.Get, "api/organizations/1", async _ =>
+        {
+            refreshStarted.TrySetResult();
+            return await finishRefresh.Task;
+        });
+
+        var callback = InvokeAdminEntityCallbackAsync(cut, AdminEntities.Organization, 1);
+        await refreshStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Empty(cut.FindAll(".aetheus-loader"));
+        Assert.Contains("Acme Corp", cut.Markup, StringComparison.Ordinal);
+
+        finishRefresh.SetResult(Org);
+        await callback;
+    }
+
+    private static Task InvokeAdminEntityCallbackAsync(
+        IRenderedComponent<OrganizationDetail> cut,
+        string entity,
+        int id) =>
+        cut.InvokeAsync(() => cut.Instance.OnAdminEntityChangedAsync(entity, id, "updated"));
 }

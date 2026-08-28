@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Pages;
 using Bunit;
+using Radzen.Blazor;
 using SettingsPage = Aetheus.Front.Pages.Settings.Settings;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -59,16 +60,17 @@ public class SettingsTests : BunitContext
     }
 
     [Fact]
-    public async Task SaveAppearance_WritesToLocalStorage()
+    public async Task AppearanceSelectors_PersistImmediately()
     {
-        var cut = Render<SettingsPage>();
+        var cut = Render<SettingsPage>(p => p.Add(x => x.Tab, "appearance"));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        await cut.InvokeAsync(() => cut.Instance.GetType()
-            .GetMethod("SaveAppearance", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .Invoke(cut.Instance, null));
+        var selectors = cut.FindComponents<RadzenDropDown<string>>();
+        Assert.Equal(2, selectors.Count);
 
-        // SaveAppearance persists both the theme and language selections to localStorage.
+        await cut.InvokeAsync(() => selectors[0].Instance.Change.InvokeAsync("light"));
+        await cut.InvokeAsync(() => selectors[1].Instance.Change.InvokeAsync("fr-FR"));
+
         var keys = JSInterop.Invocations
             .Where(i => i.Identifier == "localStorage.setItem")
             .Select(i => (string?)i.Arguments[0])

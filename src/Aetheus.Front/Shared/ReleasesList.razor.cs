@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
 using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Shared;
 
@@ -50,24 +41,22 @@ public partial class ReleasesList : IAsyncDisposable
 
     private HubConnection? _hubConnection;
     private List<ReleaseDto> _releases = [];
-    private List<ReleaseDto> _serverAll = []; // server scope: full list held in memory, paged client-side
+
     private List<ProjectDto> _projects = [];
     private int _totalCount;
     private bool _loading;
     private bool _syncing;
     private bool _canWrite;
     private int? _projectFilter; // global scope only
-
-    private const int ChangelogPreviewLength = 120;
-    private readonly HashSet<int> _expandedChangelogs = [];
-
     private string CacheKey => IsServerScope ? $"releases:server:{ServerId}"
         : IsProjectScope ? $"releases:project:{ProjectId}"
         : "releases:global";
 
     // Server-paginated (global/project) scope cache key, distinct from the client-scope CacheKey above.
-    private string PagedCacheKey(int page, int pageSize, int? projectId) =>
-        $"releases:paged:{projectId}:{page}:{pageSize}";
+    // The sort is part of the key: two orders sharing one entry means the second is served the first
+    // one's rows, which is indistinguishable from a sort that does nothing.
+    private string PagedCacheKey(int page, int pageSize, int? projectId, string? sortBy = null, bool sortDescending = true) =>
+        $"releases:paged:{projectId}:{page}:{pageSize}:{sortBy}:{sortDescending}";
 
     private void ApplyReleasesPage(PaginatedResult<ReleaseDto> result)
     {
@@ -80,27 +69,21 @@ public partial class ReleasesList : IAsyncDisposable
         Permissions.OnPermissionsChanged += OnPermissionsChanged;
         RefreshCanWrite();
 
-        // Stale-while-revalidate: render the last known server-scope list immediately.
-        if (IsServerScope && Cache.TryGet<List<ReleaseDto>>(CacheKey, out var cached) && cached is not null)
-        {
-            _serverAll = cached;
-            _totalCount = cached.Count;
-        }
-        else if (!IsServerScope)
-        {
-            // Pre-seed the paginated view so the first paint is instant.
-            Cache.Seed<PaginatedResult<ReleaseDto>>(PagedCacheKey(1, 25, ProjectId ?? _projectFilter), ApplyReleasesPage);
-        }
+        // Pre-seed the paginated view so the first paint is instant. Both scopes are server-paged now,
+        // so they share the same stale-while-revalidate shape; only the cache key differs.
+        Cache.Seed<PaginatedResult<ReleaseDto>>(
+            IsServerScope
+                ? ServerPagedCacheKey(1, 25)
+                : PagedCacheKey(1, 25, ProjectId ?? _projectFilter),
+            ApplyReleasesPage);
 
         try
         {
             if (IsGlobal)
             {
-                var projectsResult = await Api.GetProjectsAsync(pageSize: 100);
+                var projectsResult = await Api.Projects.GetProjectsAsync(pageSize: 100);
                 _projects = projectsResult.Items;
             }
-            if (IsServerScope)
-                await LoadServerReleasesAsync();
         }
         catch (HttpRequestException) { _projects = []; }
 
@@ -116,12 +99,8 @@ public partial class ReleasesList : IAsyncDisposable
 
     private void OnProjectLoaderChanged() => InvokeAsync(ReloadGrid);
 
-    private async Task LoadServerReleasesAsync()
-    {
-        _serverAll = await Api.GetServerReleasesAsync(ServerId!.Value);
-        _totalCount = _serverAll.Count;
-        Cache.Set(CacheKey, _serverAll);
-    }
+    private string ServerPagedCacheKey(int page, int pageSize, string? sortBy = null, bool sortDescending = true) =>
+        $"releases:server:{ServerId}:{page}:{pageSize}:{sortBy}:{sortDescending}";
 
     private void OnPermissionsChanged()
     {
@@ -131,39 +110,36 @@ public partial class ReleasesList : IAsyncDisposable
 
     private void RefreshCanWrite() => _canWrite = Permissions.CanWrite(ResourceType.Release);
 
-    // Server scope pages the in-memory list; global/project scopes page server-side via the API.
+    // Every scope pages server-side. A360-18: the server scope used to hold the whole list in memory
+    // and page it in the browser, so opening a server's Releases tab transferred every release of every
+    // project that server had ever touched before showing the first twenty-five.
     private async Task OnLoadData(LoadDataArgs args)
     {
+        var (page, pageSize) = args.ToPageRequest();
+        var (sortBy, sortDescending) = args.ToSortRequest(nameof(ReleaseDto.PublishedAt), fallbackDescending: true);
         if (IsServerScope)
         {
-            // Server-detail scope: page the in-memory list (already cached via LoadServerReleasesAsync).
-            var skip = args.Skip ?? 0;
-            var top = args.Top ?? 25;
-            _releases = _serverAll.Skip(skip).Take(top).ToList();
-            _totalCount = _serverAll.Count;
+            await Cache.RevalidateAsync(
+                ServerPagedCacheKey(page, pageSize, sortBy, sortDescending),
+                () => Api.Servers.GetServerReleasesAsync(ServerId!.Value, page, pageSize, sortBy, sortDescending),
+                ApplyReleasesPage,
+                loading => _loading = loading,
+                () => InvokeAsync(StateHasChanged));
             return;
         }
 
-        var (page, pageSize) = args.ToPageRequest();
         var projectId = ProjectId ?? _projectFilter;
         await Cache.RevalidateAsync(
-            PagedCacheKey(page, pageSize, projectId),
-            () => Api.GetReleasesAsync(page: page, pageSize: pageSize, projectId: projectId),
+            PagedCacheKey(page, pageSize, projectId, sortBy, sortDescending),
+            () => Api.Projects.GetReleasesAsync(page: page, pageSize: pageSize, projectId: projectId,
+                sortBy: sortBy, sortDescending: sortDescending),
             ApplyReleasesPage,
             loading => _loading = loading,
             () => InvokeAsync(StateHasChanged));
     }
 
     // Manual refresh: re-fetch server scope from source, then reload the grid for paginated scopes.
-    private async Task RefreshAsync()
-    {
-        if (IsServerScope)
-        {
-            try { await LoadServerReleasesAsync(); }
-            catch (HttpRequestException) { }
-        }
-        await ReloadGrid();
-    }
+    private Task RefreshAsync() => ReloadGrid();
 
     private async Task OnProjectFilterChanged()
     {
@@ -183,7 +159,7 @@ public partial class ReleasesList : IAsyncDisposable
         if (!targetProject.HasValue) return;
 
         _syncing = true;
-        var synced = await Api.SyncReleasesAsync(targetProject.Value);
+        var synced = await Api.Projects.SyncReleasesAsync(targetProject.Value);
         if (synced.Count == 0)
             Toast.Info("Synced", "NoNewReleasesFound");
         else
@@ -194,7 +170,7 @@ public partial class ReleasesList : IAsyncDisposable
 
     private async Task TriggerBuild(ReleaseDto release)
     {
-        var pipelines = await Api.GetPipelinesAsync(pageSize: 100);
+        var pipelines = await Api.Pipelines.GetPipelinesAsync(pageSize: 100);
         if (pipelines.Items.Count == 0)
         {
             Toast.Warning("NoPipelinesFound", "NoPipelinesFound");
@@ -204,11 +180,11 @@ public partial class ReleasesList : IAsyncDisposable
         var selectedPipelineId = await Dialog.OpenAsync<PipelineSelectDialog>(
             L["SelectPipeline"].Value,
             new Dictionary<string, object?> { { "Pipelines", pipelines.Items } },
-            new DialogOptions { Width = "400px" });
+            new DialogOptions { Width = "400px", AutoFocusFirstElement = false });
 
         if (selectedPipelineId is int pipelineId)
         {
-            var result = await Api.TriggerReleaseBuildAsync(release.Id, new TriggerReleaseBuildRequest { PipelineId = pipelineId });
+            var result = await Api.Projects.TriggerReleaseBuildAsync(release.Id, new TriggerReleaseBuildRequest { PipelineId = pipelineId });
             if (result is not null)
             {
                 Toast.Success("BuildTriggered", release.Version);
@@ -219,14 +195,14 @@ public partial class ReleasesList : IAsyncDisposable
 
     private async Task RollbackRelease(ReleaseDto release)
     {
-        var preview = await Api.GetRollbackPreviewAsync(release.Id);
+        var preview = await Api.Projects.GetRollbackPreviewAsync(release.Id);
         if (preview is null || !preview.CanRollback || string.IsNullOrWhiteSpace(preview.TargetVersion))
         {
             Toast.Warning("Rollback", preview?.Reason ?? "RollbackUnavailable");
             return;
         }
 
-        var pipelines = await Api.GetPipelinesAsync(pageSize: 100, projectId: release.ProjectId);
+        var pipelines = await Api.Pipelines.GetPipelinesAsync(pageSize: 100, projectId: release.ProjectId);
         var request = await Dialog.OpenAsync<RollbackReleaseDialog>(
             L["Rollback"].Value,
             new Dictionary<string, object?>
@@ -237,10 +213,10 @@ public partial class ReleasesList : IAsyncDisposable
                 ["ProjectId"] = release.ProjectId,
                 ["Pipelines"] = pipelines.Items
             },
-            new DialogOptions { Width = "520px" });
+            new DialogOptions { Width = "520px", AutoFocusFirstElement = false });
         if (request is not RollbackReleaseRequest rollbackRequest) return;
 
-        var result = await Api.RollbackReleaseAsync(release.Id, rollbackRequest);
+        var result = await Api.Projects.RollbackReleaseAsync(release.Id, rollbackRequest);
         if (result is not null)
         {
             Toast.Success("RollbackQueued", release.Version);
@@ -256,7 +232,7 @@ public partial class ReleasesList : IAsyncDisposable
             new ConfirmOptions { OkButtonText = L["Promote"].Value, CancelButtonText = L["Cancel"].Value });
         if (confirmed != true) return;
 
-        var result = await Api.PromoteReleaseAsync(release.Id);
+        var result = await Api.Projects.PromoteReleaseAsync(release.Id);
         if (result is not null)
         {
             Toast.Success("Promoted", release.Version);
@@ -264,19 +240,15 @@ public partial class ReleasesList : IAsyncDisposable
         }
     }
 
-    // --- Changelog cell expand/collapse (ported from the project section) ---
-    private bool IsChangelogExpanded(int releaseId) => _expandedChangelogs.Contains(releaseId);
-
-    private void ToggleChangelog(int releaseId)
+    private string PipelineHref(ReleaseDto release)
     {
-        if (!_expandedChangelogs.Remove(releaseId))
-            _expandedChangelogs.Add(releaseId);
+        var pipelineId = release.SourcePipelineId!.Value;
+        if (IsProjectScope)
+            return $"/pipelines/{pipelineId}?projectId={ProjectId}";
+        if (IsServerScope)
+            return $"/pipelines/{pipelineId}?serverId={ServerId}";
+        return $"/pipelines/{pipelineId}";
     }
-
-    private static bool IsChangelogTruncatable(string changelog) => changelog.Length > ChangelogPreviewLength;
-
-    private static string ChangelogPreview(string changelog) =>
-        changelog.Length <= ChangelogPreviewLength ? changelog : changelog[..ChangelogPreviewLength] + "…";
 
     // --- Live refresh ---
     private bool _hubReloading;
@@ -312,14 +284,12 @@ public partial class ReleasesList : IAsyncDisposable
     private Task OnReleaseStatusChanged(ReleaseDto release)
     {
         var pageIdx = _releases.FindIndex(r => r.Id == release.Id);
-        var allIdx = IsServerScope ? _serverAll.FindIndex(r => r.Id == release.Id) : -1;
-        if (pageIdx < 0 && allIdx < 0)
+        if (pageIdx < 0)
             return HubReloadAsync();
 
         return InvokeAsync(() =>
         {
-            if (pageIdx >= 0) _releases[pageIdx] = release;
-            if (allIdx >= 0) _serverAll[allIdx] = release;
+            _releases[pageIdx] = release;
             StateHasChanged();
         });
     }
@@ -351,7 +321,6 @@ public partial class ReleasesList : IAsyncDisposable
         {
             try
             {
-                if (IsServerScope) await LoadServerReleasesAsync();
                 await ReloadGrid();
             }
             catch (HttpRequestException) { } // hub-triggered reload - silent on auth failure

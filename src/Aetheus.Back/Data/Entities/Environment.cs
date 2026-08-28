@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Data.Entities;
 
@@ -13,6 +12,10 @@ public class Environment
     public bool RequireApproval { get; set; }
     public int ApprovalTimeoutMinutes { get; set; } = 1440;
     public string? ApprovalInstructions { get; set; }
+    public bool DastEnabled { get; set; }
+    public bool DastIsEphemeral { get; set; }
+    public bool DastContainsRealData { get; set; }
+    public string DastAllowedHosts { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

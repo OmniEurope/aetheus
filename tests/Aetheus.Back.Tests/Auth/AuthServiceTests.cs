@@ -2,8 +2,10 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Organizations;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
+using Aetheus.Shared.Constants;
 using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -20,6 +22,7 @@ public class AuthServiceTests
     private readonly IConfiguration _config;
     private readonly AuthService _sut;
     private readonly ServerEnrollmentService _enrollment;
+    private readonly IAuditService _audit = Substitute.For<IAuditService>();
 
     public AuthServiceTests()
     {
@@ -43,19 +46,29 @@ public class AuthServiceTests
         var hubContext = Substitute.For<IHubContext<ServerHub>>();
         hubContext.Clients.Returns(hubClients);
 
-        _repo.When(r => r.AddServer(Arg.Any<Server>())).Do(ci => ci.Arg<Server>().Id = 1);
+        _repo.TryPersistServerEnrollmentAsync(
+                Arg.Any<int>(),
+                Arg.Any<Server>(),
+                Arg.Any<ServerToken>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var server = call.Arg<Server>();
+                if (server.Id == 0)
+                    server.Id = 1;
+                return true;
+            });
 
         var orgRepo = Substitute.For<IOrganizationService>();
         orgRepo.GetDefaultOrganizationIdAsync(Arg.Any<CancellationToken>())
             .Returns(1);
 
-        var audit = Substitute.For<IAuditService>();
         var jwtOptions = new JwtOptions { SigningKey = "aetheus-dev-key-minimum-32-bytes!!" };
 
         _sut = new AuthService(
             _repo,
             _config,
-            audit,
+            _audit,
             jwtOptions,
                 Substitute.For<IMemoryCache>(),
                 orgRepo,
@@ -65,7 +78,7 @@ public class AuthServiceTests
                 Substitute.For<Aetheus.Back.Services.IAdminChangeNotifier>(),
                 Substitute.For<ILogger<AuthService>>());
 
-        _enrollment = new ServerEnrollmentService(_repo, _config, audit, hubContext, Substitute.For<Aetheus.Back.Services.IAdminChangeNotifier>(), jwtOptions, TimeProvider.System);
+        _enrollment = new ServerEnrollmentService(_repo, _config, _audit, hubContext, Substitute.For<Aetheus.Back.Services.IAdminChangeNotifier>(), jwtOptions, TimeProvider.System);
     }
 
     // --- LoginAsync ---
@@ -81,10 +94,136 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task LoginAsync_RunScopedBootstrapIdentity_ReturnsTokenWithoutDatabaseMutation()
+    {
+        const string username = "deploy-smoke-0123456789abcdef";
+        const string password = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var expiresAt = TimeProvider.System.GetUtcNow().AddMinutes(5);
+        _config["Auth:DeploymentBootstrapUser"] = username;
+        _config["Auth:DeploymentBootstrapPassword"] = password;
+        _config["Auth:DeploymentBootstrapExpiresAtUtc"] = expiresAt.ToString("O");
+        _repo.AnyUsersExistAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.LoginAsync(
+            new LoginRequest { Username = username, Password = password },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.False(string.IsNullOrEmpty(result.Token));
+        Assert.True(result.ExpiresAt <= expiresAt.UtcDateTime);
+        await _repo.Received(1).FindUserWithRolesAsync(username, Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().AddUserAsync(Arg.Any<User>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// The deployment identity has its own keys precisely so it cannot become the persisted
+    /// administrator's password. DbInitializer hashes Auth:AdminPassword into the seeded `admin` on a
+    /// first run, so while the run-scoped secret arrived under that name, deploying to a new
+    /// environment left it with a permanent account whose password only that one run ever knew - and
+    /// the run masks it out of its own log by design. Nobody could log in afterwards.
+    /// </summary>
+    [Fact]
+    public async Task RunScopedBootstrapIdentity_DoesNotBecomeTheAdministratorPassword()
+    {
+        const string deployPassword = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        _config["Auth:DeploymentBootstrapUser"] = "deploy-smoke-separate";
+        _config["Auth:DeploymentBootstrapPassword"] = deployPassword;
+        _config["Auth:DeploymentBootstrapExpiresAtUtc"] =
+            TimeProvider.System.GetUtcNow().AddMinutes(5).ToString("O");
+        _repo.AnyUsersExistAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        // The persistent pair is untouched by the deployment identity, and still works while the
+        // database has no user - which is exactly when DbInitializer is about to seed it.
+        var admin = await _sut.LoginAsync(
+            new LoginRequest { Username = "admin", Password = "secret" },
+            ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(admin);
+
+        // And the administrator's name cannot be logged into with the deployment secret.
+        var crossed = await _sut.LoginAsync(
+            new LoginRequest { Username = "admin", Password = deployPassword },
+            ct: TestContext.Current.CancellationToken);
+        Assert.Null(crossed);
+    }
+
+    /// <summary>
+    /// The other direction: once the database holds a user, the persistent bootstrap pair closes as
+    /// it always did. Separating the two identities must not have reopened it.
+    /// </summary>
+    [Fact]
+    public async Task PersistentBootstrapPair_StillClosesOnceTheDatabaseHasAUser()
+    {
+        _repo.AnyUsersExistAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.LoginAsync(
+            new LoginRequest { Username = "admin", Password = "secret" },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task LoginAsync_ExpiredRunScopedBootstrapIdentity_IsRejectedWhenDatabaseHasUsers()
+    {
+        const string username = "deploy-smoke-expired";
+        _config["Auth:DeploymentBootstrapUser"] = username;
+        _config["Auth:DeploymentBootstrapPassword"] = "0123456789abcdef0123456789abcdef";
+        _config["Auth:DeploymentBootstrapExpiresAtUtc"] = TimeProvider.System.GetUtcNow().AddMinutes(-1).ToString("O");
+        _repo.AnyUsersExistAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.LoginAsync(
+            new LoginRequest { Username = username, Password = _config["Auth:DeploymentBootstrapPassword"]! },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task LoginAsync_OverlongRunScopedBootstrapIdentity_IsRejectedWhenDatabaseHasUsers()
+    {
+        const string username = "deploy-smoke-overlong";
+        _config["Auth:DeploymentBootstrapUser"] = username;
+        _config["Auth:DeploymentBootstrapPassword"] = "0123456789abcdef0123456789abcdef";
+        _config["Auth:DeploymentBootstrapExpiresAtUtc"] = TimeProvider.System.GetUtcNow().AddMinutes(16).ToString("O");
+        _repo.AnyUsersExistAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.LoginAsync(
+            new LoginRequest { Username = username, Password = _config["Auth:DeploymentBootstrapPassword"]! },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public async Task LoginAsync_InvalidUser_ReturnsNull()
     {
         var result = await _sut.LoginAsync(new LoginRequest { Username = "wrong", Password = "secret" }, ct: TestContext.Current.CancellationToken);
         Assert.Null(result);
+        await _audit.Received(1).LogAsync(
+            "LoginFailed.InvalidCredentials", "Authentication", null,
+            Arg.Is<string>(details => details.Contains("wrong", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task LoginAsync_InactiveUser_IsRejectedAndAuditedAgainstUser()
+    {
+        _repo.FindUserWithRolesAsync("disabled", Arg.Any<CancellationToken>()).Returns(new User
+        {
+            Id = 42,
+            Username = "disabled",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("secret"),
+            IsActive = false
+        });
+
+        var result = await _sut.LoginAsync(
+            new LoginRequest { Username = "disabled", Password = "secret" },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+        await _audit.Received(1).LogAsync(
+            "LoginFailed.Inactive", "User", 42,
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -184,6 +323,53 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task RegisterServerAsync_NewAgent_PersistsCompatibilityContractBeforeFirstHeartbeat()
+    {
+        var regToken = new RegistrationToken { Id = 1, Token = "valid-token" };
+        Server? captured = null;
+        _repo.FindValidRegistrationTokenAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(regToken);
+        _repo.FindServerByHostnameAsync("contract-host", Arg.Any<CancellationToken>())
+            .Returns((Server?)null);
+        _repo.TryPersistServerEnrollmentAsync(
+                regToken.Id,
+                Arg.Any<Server>(),
+                Arg.Any<ServerToken>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<Server>();
+                captured.Id = 1;
+                return true;
+            });
+
+        var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
+        {
+            RegistrationToken = "valid-token",
+            Hostname = "contract-host",
+            OsDescription = "Linux",
+            AgentVersion = "1.0.1294",
+            AgentProtocolVersion = AgentProtocol.CurrentVersion,
+            AgentCapabilities =
+            [
+                AgentCapabilities.PipelineBuild,
+                AgentCapabilities.SelfUpdate,
+                AgentCapabilities.PipelineBuild
+            ],
+            PipelineRunnerAvailable = true,
+            IpAddress = "10.0.0.1"
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.NotNull(captured);
+        Assert.Equal(AgentProtocol.CurrentVersion, captured.AgentProtocolVersion);
+        Assert.Equal(
+            "[\"agent.self-update\",\"pipeline.build\"]",
+            captured.AgentCapabilitiesJson);
+        Assert.True(captured.PipelineRunnerEnabled);
+    }
+
+    [Fact]
     public async Task RegisterServerAsync_NewServer_CreatesAndReturns()
     {
         var regToken = new RegistrationToken { Id = 1, Token = "valid-token" };
@@ -191,10 +377,6 @@ public class AuthServiceTests
             .Returns(regToken);
         _repo.FindServerByHostnameAsync("new-host", Arg.Any<CancellationToken>())
             .Returns((Server?)null);
-        _repo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repo.ConsumeRegistrationTokenAsync(regToken.Id, Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(true);
-
         var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
         {
             RegistrationToken = "valid-token",
@@ -206,8 +388,38 @@ public class AuthServiceTests
 
         Assert.NotNull(result);
         Assert.False(string.IsNullOrEmpty(result.BearerToken));
-        _repo.Received(1).AddServer(Arg.Any<Server>());
-        _repo.Received(1).AddServerToken(Arg.Any<ServerToken>());
+        await _repo.Received(1).TryPersistServerEnrollmentAsync(
+            regToken.Id,
+            Arg.Is<Server>(server => server.Hostname == "new-host"),
+            Arg.Is<ServerToken>(token => token.Server.Hostname == "new-host"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RegisterServerAsync_AtomicPersistenceLosesTokenRace_ReturnsNullWithoutNotifications()
+    {
+        var regToken = new RegistrationToken { Id = 7, Token = "valid-token", OrganizationId = 1 };
+        _repo.FindValidRegistrationTokenAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(regToken);
+        _repo.FindServerByHostnameAsync("race-loser", Arg.Any<CancellationToken>())
+            .Returns((Server?)null);
+        _repo.TryPersistServerEnrollmentAsync(
+                regToken.Id,
+                Arg.Any<Server>(),
+                Arg.Any<ServerToken>(),
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
+        {
+            RegistrationToken = "valid-token",
+            Hostname = "race-loser",
+            OsDescription = "Linux",
+            AgentVersion = "1.0",
+            IpAddress = "10.0.0.7"
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
     }
 
     [Fact]
@@ -221,10 +433,6 @@ public class AuthServiceTests
             .Returns(existingServer);
         _repo.ServerHasActiveTokensAsync(existingServer.Id, Arg.Any<CancellationToken>())
             .Returns(false);
-        _repo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repo.ConsumeRegistrationTokenAsync(regToken.Id, Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(true);
-
         var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
         {
             RegistrationToken = "valid-token",
@@ -237,7 +445,49 @@ public class AuthServiceTests
         Assert.NotNull(result);
         Assert.Equal(5, result.ServerId);
         Assert.Equal("Ubuntu 24.04", existingServer.OsDescription);
-        _repo.DidNotReceive().AddServer(Arg.Any<Server>());
+        await _repo.Received(1).TryPersistServerEnrollmentAsync(
+            regToken.Id,
+            existingServer,
+            Arg.Any<ServerToken>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RegisterServerAsync_ExistingServerOwnedByAnotherOrganization_IsRejected()
+    {
+        var regToken = new RegistrationToken
+        {
+            Id = 1,
+            Token = "valid-token",
+            OrganizationId = 2
+        };
+        var existingServer = new Server
+        {
+            Id = 5,
+            Name = "existing",
+            Hostname = "existing-host",
+            OrganizationId = 1
+        };
+        _repo.FindValidRegistrationTokenAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(regToken);
+        _repo.FindServerByHostnameAsync("existing-host", Arg.Any<CancellationToken>())
+            .Returns(existingServer);
+
+        var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
+        {
+            RegistrationToken = "valid-token",
+            Hostname = "existing-host",
+            OsDescription = "Ubuntu 24.04",
+            AgentVersion = "2.0",
+            IpAddress = "10.0.0.2"
+        }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+        await _repo.DidNotReceive().TryPersistServerEnrollmentAsync(
+            Arg.Any<int>(),
+            Arg.Any<Server>(),
+            Arg.Any<ServerToken>(),
+            Arg.Any<CancellationToken>());
     }
 
     // --- Enrollment: PipelineRunnerEnabled default (secure-by-default gate) ---
@@ -249,9 +499,17 @@ public class AuthServiceTests
         Server? captured = null;
         _repo.FindValidRegistrationTokenAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(regToken);
         _repo.FindServerByHostnameAsync("new-host", Arg.Any<CancellationToken>()).Returns((Server?)null);
-        _repo.When(r => r.AddServer(Arg.Any<Server>())).Do(ci => { captured = ci.Arg<Server>(); captured.Id = 1; });
-        _repo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repo.ConsumeRegistrationTokenAsync(regToken.Id, Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(true);
+        _repo.TryPersistServerEnrollmentAsync(
+                regToken.Id,
+                Arg.Any<Server>(),
+                Arg.Any<ServerToken>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<Server>();
+                captured.Id = 1;
+                return true;
+            });
 
         var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
         {
@@ -268,17 +526,27 @@ public class AuthServiceTests
         Assert.False(captured.PipelineRunnerEnabled);
     }
 
-    [Fact]
-    public async Task RegisterServerAsync_PipelineRunnerAvailableNull_EnablesRunnerByDefault()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    public async Task RegisterServerAsync_MissingCurrentContract_DisablesRunnerByDefault(
+        bool? pipelineRunnerAvailable)
     {
-        // A pre-feature agent omits the field (null) → keep the legacy enabled default.
         var regToken = new RegistrationToken { Id = 1, Token = "valid-token" };
         Server? captured = null;
         _repo.FindValidRegistrationTokenAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(regToken);
         _repo.FindServerByHostnameAsync("new-host", Arg.Any<CancellationToken>()).Returns((Server?)null);
-        _repo.When(r => r.AddServer(Arg.Any<Server>())).Do(ci => { captured = ci.Arg<Server>(); captured.Id = 1; });
-        _repo.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _repo.ConsumeRegistrationTokenAsync(regToken.Id, Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(true);
+        _repo.TryPersistServerEnrollmentAsync(
+                regToken.Id,
+                Arg.Any<Server>(),
+                Arg.Any<ServerToken>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<Server>();
+                captured.Id = 1;
+                return true;
+            });
 
         var result = await _enrollment.RegisterServerAsync(new ServerRegistrationRequest
         {
@@ -287,12 +555,12 @@ public class AuthServiceTests
             OsDescription = "Linux",
             AgentVersion = "1.0",
             IpAddress = "10.0.0.1",
-            PipelineRunnerAvailable = null
+            PipelineRunnerAvailable = pipelineRunnerAvailable
         }, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         Assert.NotNull(captured);
-        Assert.True(captured.PipelineRunnerEnabled);
+        Assert.False(captured.PipelineRunnerEnabled);
     }
 
     // --- RotateAgentTokenAsync ---
