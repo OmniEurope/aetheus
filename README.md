@@ -57,6 +57,23 @@ Licensed under the [European Union Public Licence v1.2](LICENSE).
 - Playwright browsers, only for E2E tests:
   `pwsh bin/Debug/net10.0/playwright.ps1 install` from `tests/Aetheus.E2E/`.
 
+### Configure
+
+The backend reads its local settings from a gitignored `appsettings.Development.json`. Copy the
+template and replace every `CHANGE_ME` value before the first run:
+
+```bash
+cp src/Aetheus.Back/appsettings.Development.json.example src/Aetheus.Back/appsettings.Development.json
+```
+
+`Auth:JwtKey` must be at least 32 UTF-8 bytes. You may leave it empty in development, in which case
+the backend generates an ephemeral signing key at startup and every token is invalidated on restart.
+The connection string in the template already matches the local database container, which the
+launchers start for you.
+
+Do the same for `src/Aetheus.Agent.Windows/appsettings.Development.json.example` when you run the
+Windows agent from source.
+
 ### Launch
 
 The repository ships one launcher per platform. They build the solution, start a local

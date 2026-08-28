@@ -42,6 +42,7 @@ Boundary last reviewed on 2026-08-28.
 | `scratch/`, `.local/`, `.worktrees/`, `.analysis-duplication-current/` | Local scratch space and analysis output |
 | `z*.prompt.md` | Private prompts, backlog and work notes |
 | `.github/workflows/release.yml` | Private release process coupled to the private changelog |
+| `src/**/appsettings.Development.json` | Local development settings carrying development credentials. Published as `.example` templates instead. |
 
 ## Adapted
 
@@ -54,6 +55,10 @@ Boundary last reviewed on 2026-08-28.
   default, and the E2E project needs a running application, so it is not part of CI.
 - `README.md` and `CONTRIBUTING.md` link to the public site and documentation rather than to
   internal documents.
+- Local development settings ship as `appsettings.Development.json.example` templates whose secrets
+  are `CHANGE_ME` placeholders. The database connection string is kept literal because
+  `deploy/compose/dev-db.compose.yml` already defines those same local credentials and binds the
+  container to `127.0.0.1` only.
 
 ## Rules
 

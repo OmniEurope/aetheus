@@ -1,0 +1,33 @@
+{
+  "_comment": "Copy this file to appsettings.Development.json, then replace every CHANGE_ME value. The copy is gitignored: it is your local configuration and must never be committed.",
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "ConnectionStrings": {
+    "_comment": "Matches deploy/compose/dev-db.compose.yml, which publishes the local database on 127.0.0.1:15432 only. Start it with: docker compose -f deploy/compose/dev-db.compose.yml up -d",
+    "Default": "Host=localhost;Port=15432;Database=aetheus;Username=postgres;Password=postgres"
+  },
+  "Auth": {
+    "_comment": "JwtKey must be at least 32 UTF-8 bytes for HS256. Leaving it empty in Development is allowed: the backend then generates an ephemeral signing key at startup, which invalidates every token on restart. Set it for stable dev sessions. AdminPassword seeds the persistent administrator on an empty database. EncryptionKey signs clone tokens and derives the deployment bootstrap identity.",
+    "JwtKey": "CHANGE_ME-at-least-32-utf8-bytes-long",
+    "AdminUser": "admin",
+    "AdminPassword": "CHANGE_ME",
+    "EncryptionKey": "CHANGE_ME"
+  },
+  "Aetheus": {
+    "_comment": "The URL the Add-Agent wizard bakes into the generated install command. Local dev: agents reach the backend over plain HTTP on :5300. Production sets its canonical API URL here instead.",
+    "PublicApiBaseUrl": "http://localhost:5300"
+  },
+  "GitLight": {
+    "_comment": "Agent-reachable base the pipeline mirror clone is re-homed onto at dispatch. The default targets a containerised agent reaching the host over plain HTTP on :5300 (host.docker.internal, not localhost, which also sidesteps the self-signed dev certificate). A bare-metal agent that cannot resolve host.docker.internal overrides this with the GitLight__CloneBaseUrl environment variable, for example http://localhost:5300, without editing this file. Production omits the key and falls back to Aetheus:PublicApiBaseUrl.",
+    "CloneBaseUrl": "http://host.docker.internal:5300"
+  },
+  "Seed": {
+    "_comment": "Seeds a dated demo dataset so the UI starts populated. The seeder is idempotent and reconciles missing rows on every startup. Production stays protected by the startup environment guard.",
+    "Demo": true,
+    "DemoDate": "2026-07-14"
+  }
+}

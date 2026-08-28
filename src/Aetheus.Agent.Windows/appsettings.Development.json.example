@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this file to appsettings.Development.json. The copy is gitignored: it is your local configuration and must never be committed.",
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  },
+  "Aetheus": {
+    "_comment": "ServerUrl points at the local backend. Leave RegistrationToken empty and paste the token issued by the Aetheus UI when you register this agent. AllowInsecureCerts accepts the self-signed development certificate and must stay false anywhere else.",
+    "ServerUrl": "https://localhost:5301",
+    "RegistrationToken": "",
+    "AllowInsecureCerts": true
+  }
+}
