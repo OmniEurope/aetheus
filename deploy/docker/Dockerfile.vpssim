@@ -20,7 +20,7 @@
 # --- Agent build stage: publish the Linux agent SELF-CONTAINED so the box needs
 #     no .NET runtime — the install script's systemd unit launches the native
 #     apphost directly. Bundled with install-agent-linux.sh into /agentpkg.
-FROM mcr.microsoft.com/dotnet/sdk:10.0.100@sha256:c7445f141c04f1a6b454181bd098dcfa606c61ba0bd213d0a702489e5bd4cd71 AS agent-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401@sha256:35d40304542c8689331f8cab17c65926cdf48fe711e289321d71924b230a7d29 AS agent-build
 WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props NuGet.config ./
 COPY scanner-manifest.json ./

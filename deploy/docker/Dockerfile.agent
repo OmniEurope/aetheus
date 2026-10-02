@@ -8,7 +8,7 @@
 # carry no Version=). The csproj files sit one level below these props (/src/<proj>), so MSBuild walks
 # up to /src and finds them there.
 # =============================================================================
-FROM mcr.microsoft.com/dotnet/sdk:10.0.100@sha256:c7445f141c04f1a6b454181bd098dcfa606c61ba0bd213d0a702489e5bd4cd71 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401@sha256:35d40304542c8689331f8cab17c65926cdf48fe711e289321d71924b230a7d29 AS build
 WORKDIR /src
 
 # CPM + build conventions — required for restore to resolve centrally-managed versions.
