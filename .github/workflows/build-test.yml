@@ -115,7 +115,9 @@ jobs:
           - name: back
             dockerfile: deploy/docker/Dockerfile.back
             image: aetheus-back:cve-scan
-            build_args: --build-arg BUILD_AGENTS=0
+            # The agent release manifest records the full commit the agents were built from and
+            # refuses to run without it (generate-agent-release-manifest.sh).
+            build_args: --build-arg SOURCE_COMMIT=${{ github.sha }}
           - name: front
             dockerfile: deploy/docker/Dockerfile.front
             image: aetheus-front:cve-scan
