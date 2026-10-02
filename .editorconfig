@@ -37,5 +37,8 @@ dotnet_diagnostic.PRM002.severity = warning
 dotnet_diagnostic.PRM003.severity = warning
 dotnet_diagnostic.PRM004.severity = suggestion
 
+# EF migrations are the raw output of `dotnet ef migrations add` (byte-order mark, block-scoped
+# namespace): generated code, which the format check and the analyzers leave alone.
 [**/Migrations/*.cs]
+generated_code = true
 dotnet_diagnostic.CA1861.severity = none

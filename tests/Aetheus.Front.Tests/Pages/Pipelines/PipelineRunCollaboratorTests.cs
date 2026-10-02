@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,6 +16,8 @@ public class PipelineRunCollaboratorTests : BunitContext
     public PipelineRunCollaboratorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        // Recette R-485: the gate figures come from the run findings route; none by default.
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/findings", new AnalysisRunFindingsPageDto());
     }
 
     [Fact]
@@ -49,9 +48,19 @@ public class PipelineRunCollaboratorTests : BunitContext
         Assert.Equal(4, result.Run.TestResultSummary?.TotalTests);
     }
 
+    /// <summary>Recette R-485: each run's summary lists a bounded number of findings, so the merged
+    /// figures are the database's over the whole tree (a finding seen by two runs counts once), read in
+    /// one request for every run of the tree, not a count of what the summaries list.</summary>
     [Fact]
-    public async Task GateState_MergeCountsTheDeduplicatedFindingsItMaterializes()
+    public async Task GateState_TakesItsCountsFromTheRunFindingsRoute_OverTheWholeTree()
     {
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/findings", new AnalysisRunFindingsPageDto
+        {
+            OpenCount = 2,
+            NewOpenCount = 1,
+            DecidedCount = 0
+        });
+
         _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/1/result", new AnalysisRunGateDto
         {
             PipelineRunId = 1,
@@ -85,9 +94,64 @@ public class PipelineRunCollaboratorTests : BunitContext
         Assert.NotNull(state.Result);
         Assert.Equal(2, state.Result.FindingCount);
         Assert.Equal(1, state.Result.NewFindingCount);
-        Assert.Equal(2, state.Result.Findings.Count);
-        Assert.True(state.Result.Findings.Single(finding => finding.FindingId == 10).IsNew);
+        Assert.Equal(0, state.Result.DecidedFindingCount);
+        Assert.Equal([1, 2], state.RunIds);
+        var countRequest = Assert.Single(_handler.Requests, request => request.Url.Contains("api/analysis/runs/findings", StringComparison.Ordinal)).Url;
+        Assert.Contains("runIds=1", countRequest, StringComparison.Ordinal);
+        Assert.Contains("runIds=2", countRequest, StringComparison.Ordinal);
         Assert.Equal(AnalysisGrade.F, state.Result.Grade?.OverallGrade);
+    }
+
+    /// <summary>Recette R-485: figures that could not be read are not shown as checked.</summary>
+    [Fact]
+    public async Task GateState_UnreadableCounts_LeaveTheGateIncomplete()
+    {
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/1/result", new AnalysisRunGateDto
+        {
+            PipelineRunId = 1,
+            Status = AnalysisGateStatus.Passed,
+            FindingCount = 3,
+            Grade = new AnalysisGradeSummaryDto { OverallGrade = AnalysisGrade.A }
+        });
+        _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/findings", System.Net.HttpStatusCode.InternalServerError);
+        var state = new PipelineRunGateState();
+
+        await state.LoadAsync(
+            Services.GetRequiredService<ApiClient>(),
+            new PipelineRunDto { Id = 1, Status = PipelineStatus.Success }, [],
+            ct: Xunit.TestContext.Current.CancellationToken);
+
+        Assert.True(state.IsIncomplete);
+        Assert.Equal(AnalysisGateStatus.Error, state.Result?.Status);
+        Assert.Null(state.Result?.Grade);
+    }
+
+    /// <summary>Recette R2-027 with R-485: a reverted decision reads the tree's figures again (the
+    /// finding is open once more) and drops the cached gates, without reading every run's result.</summary>
+    [Fact]
+    public async Task GateState_ReopenedFinding_ReadsTheCountsAgain_AndForgetsTheCachedGates()
+    {
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/1/result", new AnalysisRunGateDto
+        {
+            PipelineRunId = 1,
+            Status = AnalysisGateStatus.Warning,
+            FindingCount = 1,
+            DecidedFindingCount = 1
+        });
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/findings", new AnalysisRunFindingsPageDto { OpenCount = 1, DecidedCount = 1 });
+        var api = Services.GetRequiredService<ApiClient>();
+        var cache = new PipelineRunPageCache();
+        var run = new PipelineRunDto { Id = 1, Status = PipelineStatus.Success };
+        var state = new PipelineRunGateState();
+        await state.LoadAsync(api, run, [], cache, Xunit.TestContext.Current.CancellationToken);
+        Assert.True(cache.TryGetGate(1, out _));
+
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/findings", new AnalysisRunFindingsPageDto { OpenCount = 2, NewOpenCount = 1, DecidedCount = 0 });
+        await state.ReopenFindingAsync(api, cache, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Equal((2, 1, 0), (state.Result!.FindingCount, state.Result.NewFindingCount, state.Result.DecidedFindingCount));
+        Assert.False(cache.TryGetGate(1, out _));
+        Assert.Single(_handler.Requests, request => request.Url.Contains("api/analysis/runs/1/result", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -337,26 +401,33 @@ public class PipelineRunCollaboratorTests : BunitContext
     {
         var childRunIds = new List<int>();
         var reloadCount = 0;
+        // The reload runs on the connection's own thread while the test reads its effects on another,
+        // so the completion is signalled AFTER the work rather than polled on a counter: waiting on the
+        // counter could observe the increment before the child id it publishes, and the assertion then
+        // failed with [1] instead of [1, 10] under a loaded suite run.
+        var reloaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var connection = new PipelineRunLiveConnection(
             Services.GetRequiredService<HubConnectionFactory>(),
             NullLogger.Instance,
             1,
-            () => childRunIds,
+            () => { lock (childRunIds) return [.. childRunIds]; },
             () =>
             {
-                reloadCount++;
-                childRunIds.Add(10);
+                lock (childRunIds)
+                {
+                    reloadCount++;
+                    childRunIds.Add(10);
+                }
+                reloaded.TrySetResult();
                 return Task.CompletedTask;
             },
             () => Task.CompletedTask,
             callback => callback());
 
         await connection.HandleStepStartedAsync(stepId: 99);
-        var deadline = DateTime.UtcNow.AddSeconds(2);
-        while (reloadCount == 0 && DateTime.UtcNow < deadline)
-            await Task.Delay(20, Xunit.TestContext.Current.CancellationToken);
+        await reloaded.Task.WaitAsync(TimeSpan.FromSeconds(5), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, reloadCount);
+        lock (childRunIds) Assert.Equal(1, reloadCount);
         Assert.Equal([1, 10], connection.DesiredRunIds().Order().ToArray());
         await connection.DisposeAsync();
     }

@@ -1,0 +1,8 @@
+# Aetheus Agent - cross-agent deployment. The helper is the security boundary: root-owned,
+# agent-non-writable, re-validates <app>, and can only restart aetheus-app@<app>.service.
+# noexec is intentionally omitted (the helper is a vetted script that must exec systemctl).
+Cmnd_Alias AETHEUS_DEPLOY = #{DEPLOY_RESTART_HELPER_PATH}#
+Defaults!AETHEUS_DEPLOY timestamp_timeout=0
+Defaults!AETHEUS_DEPLOY env_reset
+Defaults!AETHEUS_DEPLOY secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_DEPLOY

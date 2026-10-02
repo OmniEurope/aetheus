@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Services.DomainEvents;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 
 namespace Aetheus.Back.Components.Environments;
@@ -9,14 +9,14 @@ public class EnvironmentService(
     IEnvironmentRepository repo,
     IAuditService audit,
     IEntityChangeNotifier notifier,
-    IServiceScopeFactory scopeFactory) : IEnvironmentService
+    IDomainEventDispatcher domainEvents) : IEnvironmentService
 {
     public async Task<PaginatedResult<EnvironmentDto>> GetEnvironmentsAsync(int? projectId, PaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetEnvironmentsPagedAsync(
             request.Search, projectId, page, pageSize, accessibleIds, ct,
-            request.SortBy, request.SortDescending).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, request.Filters).ConfigureAwait(false);
 
         return new PaginatedResult<EnvironmentDto>
         {
@@ -98,34 +98,14 @@ public class EnvironmentService(
         await audit.LogAsync("Updated", "Environment", env.Id, env.Name, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Environment, env.Id, EntityChangeOps.Updated, ct).ConfigureAwait(false);
 
-        // F-007: pipeline copy is best-effort and can involve a git clone - dispatched in the
-        // background so the HTTP response returns immediately regardless of repo size/count.
+        // F-007: pipeline copy is best-effort and can involve a git clone - published in the background
+        // so the HTTP response returns immediately regardless of repo size/count. Pipelines handles it
+        // (EnvironmentPipelinesCopyHandler): this module sits below Pipelines and never calls it.
         if (env.ProjectId is { } linkedProjectId)
-            DispatchPipelineCopyInBackground(env.Id, env.Name, linkedProjectId);
+            domainEvents.Publish(new EnvironmentLinkedToProjectEvent(env.Id, env.Name, linkedProjectId));
 
         var result = await repo.GetEnvironmentWithServersAsync(id, ct).ConfigureAwait(false);
         return MapToDto(result!);
-    }
-
-    private void DispatchPipelineCopyInBackground(int environmentId, string environmentName, int projectId)
-    {
-        _ = Task.Run(async () =>
-        {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var git = scope.ServiceProvider.GetRequiredService<IPipelineGitService>();
-            var log = scope.ServiceProvider.GetRequiredService<ILogger<EnvironmentService>>();
-            try
-            {
-                var copied = await git.CopyEnvironmentPipelinesToProjectAsync(
-                    environmentId, environmentName, projectId, "system").ConfigureAwait(false);
-                if (copied > 0)
-                    log.LogInformation("Copied {Count} environment '{Env}' pipeline(s) into project {ProjectId} git.", copied, environmentName, projectId);
-            }
-            catch (Exception ex)
-            {
-                log.LogWarning(ex, "Background pipeline copy failed for env '{Env}' → project {ProjectId}.", environmentName, projectId);
-            }
-        });
     }
 
     public async Task<bool> DeleteEnvironmentAsync(int id, CancellationToken ct = default)

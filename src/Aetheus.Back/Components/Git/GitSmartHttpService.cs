@@ -2,11 +2,11 @@
 using System.Diagnostics;
 using System.Text;
 using Aetheus.Back.Components.Auth;
-using Aetheus.Back.Services.DomainEvents;
 using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
+using Aetheus.Back.Services.DomainEvents;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -215,6 +215,7 @@ public class GitSmartHttpService(
         if (advertiseRefs)
             psi.ArgumentList.Add("--advertise-refs");
         psi.ArgumentList.Add(diskPath);
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(psi);
         return psi;
     }
 

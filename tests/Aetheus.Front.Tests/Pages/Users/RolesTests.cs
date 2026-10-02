@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests.Pages;
 

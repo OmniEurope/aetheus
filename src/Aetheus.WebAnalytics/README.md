@@ -21,6 +21,13 @@ HTTPS ingestion endpoint, ingestion key, 32-character pseudonymization key, appl
 and the controller/contact/purpose/legal-basis/hosting text displayed on
 `/privacy/audience-measurement`.
 
+A host that does not authenticate its visitors (a static server in front of a single-page application)
+sets `AcceptDeclaredUserId=true`: the browser event may then carry the contract's `authenticatedUserId`, an
+opaque identifier (`^[A-Za-z0-9_-]+$`, never an account name or an e-mail address) that only feeds the
+pseudonym derivation. Off by default, and the host's own authentication wins when it has one. Behind a
+reverse proxy the host must also call `UseForwardedHeaders`, or every anonymous visitor shares the
+proxy's address.
+
 The Razor information page is embedded but remains off until `EnablePrivacyPage=true` is explicitly set.
 Enabling it without the controller, contact, purpose, legal basis, and hosting fields fails startup rather
 than displaying incomplete legal information.

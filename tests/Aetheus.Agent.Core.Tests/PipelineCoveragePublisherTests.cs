@@ -60,4 +60,35 @@ public sealed class PipelineCoveragePublisherTests
         Assert.Equal(49, covered);
         Assert.Equal(182, lines);
     }
+
+    /// <summary>
+    /// A literal pattern from the pipeline YAML that leaves the workspace (absolute or ../) must not
+    /// turn the "candidate missing" diagnostic into an existence probe of the agent host.
+    /// </summary>
+    [Fact]
+    public async Task FindCoverageFile_DoesNotProbeAPatternOutsideTheWorkspace()
+    {
+        var root = Directory.CreateTempSubdirectory("coverage-probe-");
+        try
+        {
+            var workspace = Directory.CreateDirectory(Path.Combine(root.FullName, "ws")).FullName;
+            var secret = Path.Combine(root.FullName, "host-secret.txt");
+            await File.WriteAllTextAsync(secret, "x", TestContext.Current.CancellationToken);
+            var output = new List<string>();
+
+            var found = await PipelineCoveragePublisher.FindCoverageFileAsync(
+                workspace, [secret, "../host-secret.txt", "missing/coverage.xml"],
+                (line, _) => { output.Add(line); return Task.CompletedTask; });
+
+            Assert.Null(found);
+            Assert.DoesNotContain(output, line => line.Contains("file=True", StringComparison.Ordinal));
+            Assert.Equal(2, output.Count(line => line.Contains("points outside the workspace", StringComparison.Ordinal)));
+            Assert.Contains(output, line => line.Contains("Coverage candidate missing", StringComparison.Ordinal)
+                && line.Contains("coverage.xml", StringComparison.Ordinal));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
 }

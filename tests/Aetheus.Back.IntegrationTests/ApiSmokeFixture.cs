@@ -5,8 +5,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -49,6 +47,9 @@ public sealed class ApiSmokeFixture(SharedPostgresContainer shared) : IAsyncLife
 
     /// <summary>Id of a project seeded directly in the DB, for project-scoped read endpoints.</summary>
     public int ProjectId { get; private set; }
+
+    /// <summary>Id of the pipeline that owns <see cref="PipelineRunId"/>, for pipeline-and-run-scoped reads.</summary>
+    public int PipelineId { get; private set; }
 
     /// <summary>Id of a pipeline run seeded directly in the DB, for run-scoped read endpoints.</summary>
     public int PipelineRunId { get; private set; }
@@ -104,6 +105,7 @@ public sealed class ApiSmokeFixture(SharedPostgresContainer shared) : IAsyncLife
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         ServerId = server.Id;
         ProjectId = project.Id;
+        PipelineId = pipeline.Id;
         PipelineRunId = run.Id;
     }
 

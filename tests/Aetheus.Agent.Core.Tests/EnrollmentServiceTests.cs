@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -126,7 +124,10 @@ public class EnrollmentServiceTests
                     && request.AgentCapabilities.Contains(AgentCapabilities.SelfUpdate)
                     && request.AgentCapabilities.Contains(AgentCapabilities.PipelineBuild)
                     && request.AgentCapabilities.SequenceEqual(
-                        request.AgentCapabilities.Order(StringComparer.Ordinal))),
+                        request.AgentCapabilities.Order(StringComparer.Ordinal))
+                    // PLAN-004 R-11: the host's keyed machine identity rides along (null on a host
+                    // that exposes none), so a reinstall revives the same server.
+                    && request.MachineIdHash == MachineIdentity.ReadHash()),
                 Arg.Any<CancellationToken>());
         }
         finally

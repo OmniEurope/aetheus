@@ -3,8 +3,6 @@ using System.Security.Claims;
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -14,6 +12,8 @@ namespace Aetheus.Back.Tests.Analysis;
 public sealed class AnalysisControllerTests
 {
     private readonly IAnalysisService _service = Substitute.For<IAnalysisService>();
+    private readonly IAnalysisFindingDecisionService _decisions = Substitute.For<IAnalysisFindingDecisionService>();
+    private readonly IAnalysisRunResultService _runResults = Substitute.For<IAnalysisRunResultService>();
     private readonly IPipelineRunService _runs = Substitute.For<IPipelineRunService>();
     private readonly IResourceAuthorizationService _authz = Substitute.For<IResourceAuthorizationService>();
     private readonly AnalysisController _controller;
@@ -27,7 +27,7 @@ public sealed class AnalysisControllerTests
                 Arg.Any<Permission>(),
                 Arg.Any<CancellationToken>())
             .Returns(true);
-        _controller = new AnalysisController(_service, _runs, _authz)
+        _controller = new AnalysisController(_service, _decisions, _runResults, _runs, _authz)
         {
             ControllerContext = new ControllerContext
             {
@@ -100,8 +100,27 @@ public sealed class AnalysisControllerTests
         _authz.HasPermissionAsync(
                 Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, 4, Permission.Read, ct)
             .Returns(true);
-        _service.GetRunGateAsync(12, ct).Returns(new AnalysisRunGateDto { PipelineRunId = 12 });
+        _runResults.GetRunResultAsync(12, ct).Returns(new AnalysisRunGateDto { PipelineRunId = 12 });
         Assert.IsType<OkObjectResult>((await _controller.GetRunGateResult(12, ct)).Result);
+    }
+
+    /// <summary>Recette R-485: a findings page of several runs needs every one of them readable.</summary>
+    [Fact]
+    public async Task R485_RunFindings_ForbidsWhenOneRunOfTheSetIsUnreadable()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var request = new AnalysisRunFindingsRequest { RunIds = [12, 13] };
+        _runs.GetPipelineIdForRunAsync(12, ct).Returns(4);
+        _runs.GetPipelineIdForRunAsync(13, ct).Returns(5);
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, 4, Permission.Read, ct).Returns(true);
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, 5, Permission.Read, ct).Returns(false);
+
+        Assert.IsType<ForbidResult>((await _controller.GetRunFindings(request, ct)).Result);
+        await _runResults.DidNotReceiveWithAnyArgs().GetRunFindingsAsync(request, ct);
+
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, 5, Permission.Read, ct).Returns(true);
+        _runResults.GetRunFindingsAsync(request, ct).Returns(new AnalysisRunFindingsPageDto { OpenCount = 3 });
+        Assert.IsType<OkObjectResult>((await _controller.GetRunFindings(request, ct)).Result);
     }
 
     [Fact]
@@ -181,10 +200,28 @@ public sealed class AnalysisControllerTests
         _service.GetFindingProjectIdAsync(13, ct).Returns(4);
         _service.GetFindingAsync(13, ct).Returns(new AnalysisFindingDto { Id = 13, ProjectId = 4 });
         _service.GetFindingOccurrencesAsync(13, 25, ct).Returns([new AnalysisFindingOccurrenceDto { Id = 1 }]);
-        _service.GetFindingDecisionsAsync(13, ct).Returns([new AnalysisFindingDecisionDto { Id = 1 }]);
+        _decisions.GetFindingDecisionsAsync(13, ct).Returns([new AnalysisFindingDecisionDto { Id = 1 }]);
         Assert.IsType<OkObjectResult>((await _controller.GetFinding(13, ct)).Result);
         Assert.IsType<OkObjectResult>((await _controller.GetFindingOccurrences(13, 25, ct)).Result);
         Assert.IsType<OkObjectResult>((await _controller.GetFindingDecisions(13, ct)).Result);
+    }
+
+    [Fact]
+    public async Task R2_027_RevokeFindingDecision_IsRefusedLikeADecision_AndPassesTheActor()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _service.GetFindingProjectIdAsync(11, ct).Returns((int?)null);
+        Assert.IsType<NotFoundResult>(await _controller.RevokeFindingDecision(11, ct));
+
+        _service.GetFindingProjectIdAsync(12, ct).Returns(3);
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Project, 3, Permission.Admin, ct)
+            .Returns(false);
+        Assert.IsType<ForbidResult>(await _controller.RevokeFindingDecision(12, ct));
+
+        _service.GetFindingProjectIdAsync(13, ct).Returns(4);
+        Assert.IsType<NoContentResult>(await _controller.RevokeFindingDecision(13, ct));
+        await _decisions.Received(1).RevokeActiveFindingDecisionAsync(13, "analyst", ct);
+        await _decisions.DidNotReceive().RevokeActiveFindingDecisionAsync(12, Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -199,7 +236,7 @@ public sealed class AnalysisControllerTests
         _service.CreateExceptionAsync(3, exceptionRequest, "analyst", ct)
             .Returns(new AnalysisPolicyExceptionDto { Id = 2 });
         _service.GetFindingProjectIdAsync(13, ct).Returns(3);
-        _service.CreateFindingDecisionAsync(13, decisionRequest, "analyst", ct)
+        _decisions.CreateFindingDecisionAsync(13, decisionRequest, "analyst", ct)
             .Returns(new AnalysisFindingDecisionDto { Id = 3 });
 
         Assert.IsType<CreatedAtActionResult>((await _controller.CreatePolicy(3, policyRequest, ct)).Result);
@@ -210,7 +247,7 @@ public sealed class AnalysisControllerTests
 
         await _service.Received(1).CreateExceptionAsync(3, exceptionRequest, "analyst", ct);
         await _service.Received(1).RevokeExceptionAsync(3, 2, "analyst", ct);
-        await _service.Received(1).CreateFindingDecisionAsync(13, decisionRequest, "analyst", ct);
+        await _decisions.Received(1).CreateFindingDecisionAsync(13, decisionRequest, "analyst", ct);
     }
 
     [Fact]

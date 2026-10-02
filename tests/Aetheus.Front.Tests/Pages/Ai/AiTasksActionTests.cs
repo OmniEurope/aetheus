@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Net.Http;
-using Aetheus.Front.Pages.Ai;
+using Aetheus.Front.Components.AiTasks;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Ai;
 
@@ -26,8 +23,9 @@ public sealed class AiTasksActionTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this, isAdmin: true);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         _handler.SetJsonResponse("api/ai/consumption", new AiConsumptionDto());
+        _handler.SetJsonResponse("api/ai/profile-options", new List<AiRunnerProfileDto>());
         _handler.SetJsonResponse("api/ai/tasks", new PaginatedResult<AiTaskDefinitionDto>
         {
             Items = [new AiTaskDefinitionDto { Id = 7, Name = "nightly review", ServerId = 20, ServerName = "runner" }],

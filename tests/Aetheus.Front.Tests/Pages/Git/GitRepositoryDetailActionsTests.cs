@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Pages.Git;
+using Aetheus.Front.Components.Git;
 using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Git;
 
@@ -27,10 +24,11 @@ public sealed class GitRepositoryDetailActionsTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         _handler.SetJsonResponse("api/git/repos/1/branches", new PaginatedResult<GitLightBranchDto>
         {
-            Items = [new GitLightBranchDto { Name = "main" }], TotalCount = 1
+            Items = [new GitLightBranchDto { Name = "main" }],
+            TotalCount = 1
         });
     }
 
@@ -96,7 +94,7 @@ public sealed class GitRepositoryDetailActionsTests : BunitContext
     [Fact]
     public async Task ADismissedConfirmation_CountsAsDeclined_NotAsApproval()
     {
-        // Radzen returns null when the dialog is dismissed rather than answered. Treating null as
+        // The dialog service returns null when the dialog is dismissed rather than answered. Treating null as
         // anything but "no" would delete on an Escape key press.
         _dialog.ConfirmResult = null;
 

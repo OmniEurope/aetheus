@@ -2,9 +2,6 @@
 using Aetheus.Agent.Core.Collectors;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Analysis;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -27,6 +24,7 @@ public class HeartbeatServiceTests
     private readonly IRkhunterCollector _rkhunterCollectorMock = Substitute.For<IRkhunterCollector>();
     private readonly ISecurityUpdatesCollector _securityUpdatesCollectorMock = Substitute.For<ISecurityUpdatesCollector>();
     private readonly IFirewallCollector _firewallCollectorMock = Substitute.For<IFirewallCollector>();
+    private readonly IListeningPortsCollector _listeningPortsCollectorMock = Substitute.For<IListeningPortsCollector>();
     private readonly ISudoersHashCollector _sudoersHashCollectorMock = Substitute.For<ISudoersHashCollector>();
     private readonly IDockerStorageMaintenance _dockerStorageMaintenanceMock = Substitute.For<IDockerStorageMaintenance>();
     private readonly IShellRunner _shellRunnerMock = Substitute.For<IShellRunner>();
@@ -90,6 +88,9 @@ public class HeartbeatServiceTests
         _firewallCollectorMock.CollectAsync(Arg.Any<CancellationToken>())
             .Returns(new FirewallDataDto());
 
+        _listeningPortsCollectorMock.CollectAsync(Arg.Any<CancellationToken>())
+            .Returns(new List<ObservedPortDto>());
+
         _sudoersHashCollectorMock.CollectAsync(Arg.Any<CancellationToken>())
             .Returns(new Dictionary<string, string>());
 
@@ -121,7 +122,6 @@ public class HeartbeatServiceTests
                 h.CpuPercent == 25.0
                 && h.MemoryUsedMb == 2048
                 && h.MemoryTotalMb == 8192
-                && h.StorageDiagnostics.BuildCacheBytes == 1234
                 && h.SudoersInventoryAvailable == true
                 && !string.IsNullOrEmpty(h.AgentVersion)
                 && h.AgentProtocolVersion == AgentProtocol.CurrentVersion
@@ -210,6 +210,34 @@ public class HeartbeatServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ARequestedHeartbeat_IsSentWithoutWaitingForTheTick()
+    {
+        // Recette R-508: the clock never advances, so only the request can explain the second beat.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.Zero));
+        var health = new AgentRuntimeHealth(time);
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var beats = 0;
+        _apiClientMock.SendHeartbeatAsync(1, Arg.Any<ServerHeartbeatDto>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                (Interlocked.Increment(ref beats) == 1 ? first : second).TrySetResult();
+                return (ServerHeartbeatResponseDto?)null;
+            });
+        var service = CreateService(time, health);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await first.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        health.RequestHeartbeat();
+        await second.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        // The tick wait that the request cut short is still the one the loop waits on.
+        time.Advance(TimeSpan.FromSeconds(1));
+        await service.StopAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(Volatile.Read(ref beats) >= 2);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ApiFailure_RetriesOnNextTimeProviderTick()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero));
@@ -261,6 +289,7 @@ public class HeartbeatServiceTests
             _rkhunterCollectorMock,
             _securityUpdatesCollectorMock,
             _firewallCollectorMock,
+            _listeningPortsCollectorMock,
             _sudoersHashCollectorMock,
             _dockerStorageMaintenanceMock,
             Substitute.For<IShellRunner>(),
@@ -330,6 +359,76 @@ public class HeartbeatServiceTests
         hungCollector.TrySetCanceled(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// Recette R2-015: a storage measurement that runs for minutes (`docker system df` during a build) is
+    /// off the beat. The beat is neither delayed nor degraded by it, reports no timeout nor quarantine,
+    /// starts it only once, and still carries the live build state the deployment-only alert reads.
+    /// </summary>
+    [Fact]
+    public async Task CollectAndSendHeartbeatAsync_HungStorageMeasurement_DoesNotDegradeTheBeat()
+    {
+        var hungMeasurement = new TaskCompletionSource<StorageDiagnosticsDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _dockerStorageMaintenanceMock.CollectDiagnosticsAsync(Arg.Any<CancellationToken>()).Returns(hungMeasurement.Task);
+        var buildAttempt = new DateTime(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        _dockerStorageMaintenanceMock.BuildActive.Returns(true);
+        _dockerStorageMaintenanceMock.DeploymentOnly.Returns(true);
+        _dockerStorageMaintenanceMock.LastBuildAttemptAtUtc.Returns(buildAttempt);
+        var service = CreateService();
+
+        await service.CollectAndSendHeartbeatAsync(TestContext.Current.CancellationToken);
+        await service.CollectAndSendHeartbeatAsync(TestContext.Current.CancellationToken);
+
+        await _dockerStorageMaintenanceMock.Received(1).CollectDiagnosticsAsync(Arg.Any<CancellationToken>());
+        await _apiClientMock.Received(2).SendHeartbeatAsync(1, Arg.Is<ServerHeartbeatDto>(heartbeat =>
+                !heartbeat.CapabilityDiagnostics.Any(HeartbeatCollectionDiagnostics.IsCollectionDiagnostic)
+                && heartbeat.StorageDiagnostics.BuildActive
+                && heartbeat.StorageDiagnostics.DeploymentOnly
+                && heartbeat.StorageDiagnostics.LastBuildAttemptAtUtc == buildAttempt
+                && heartbeat.StorageDiagnostics.CollectedAtUtc == default),
+            Arg.Any<CancellationToken>());
+        hungMeasurement.TrySetCanceled(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Recette R2-015: once the background measurement completes, the next beat reports it, and it is not
+    /// started again before <see cref="AgentRuntimeDefaults.StorageDiagnosticsTtl"/> has passed.
+    /// </summary>
+    [Fact]
+    public async Task CollectAndSendHeartbeatAsync_CompletedStorageMeasurement_IsReportedAndKeptForItsTtl()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero));
+        _dockerStorageMaintenanceMock.CollectDiagnosticsAsync(Arg.Any<CancellationToken>())
+            .Returns(new StorageDiagnosticsDto { BuildCacheBytes = 1234 });
+        var service = CreateService(time);
+
+        // The beat does not wait for the measurement it starts (see the hung case above); a later beat reports it.
+        await service.CollectAndSendHeartbeatAsync(ct);
+        for (var beat = 0; beat < 100 && LastSentHeartbeat().StorageDiagnostics.BuildCacheBytes != 1234; beat++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), ct);
+            await service.CollectAndSendHeartbeatAsync(ct);
+        }
+        Assert.Equal(1234, LastSentHeartbeat().StorageDiagnostics.BuildCacheBytes);
+
+        time.Advance(AgentRuntimeDefaults.StorageDiagnosticsTtl - TimeSpan.FromMinutes(1));
+        await service.CollectAndSendHeartbeatAsync(ct);
+        Assert.Equal(1234, LastSentHeartbeat().StorageDiagnostics.BuildCacheBytes);
+        Assert.Equal(1, StorageMeasurementCount());
+
+        time.Advance(TimeSpan.FromMinutes(1));
+        await service.CollectAndSendHeartbeatAsync(ct);
+        Assert.True(SpinWait.SpinUntil(() => StorageMeasurementCount() == 2, TimeSpan.FromSeconds(10)));
+    }
+
+    private ServerHeartbeatDto LastSentHeartbeat() => _apiClientMock.ReceivedCalls()
+        .Where(call => call.GetMethodInfo().Name == nameof(IServerApiClient.SendHeartbeatAsync))
+        .Select(call => (ServerHeartbeatDto)call.GetArguments()[1]!)
+        .Last();
+
+    private int StorageMeasurementCount() => _dockerStorageMaintenanceMock.ReceivedCalls()
+        .Count(call => call.GetMethodInfo().Name == nameof(IDockerStorageMaintenance.CollectDiagnosticsAsync));
+
     [Fact]
     public async Task CollectAndSendHeartbeatAsync_HungScannerProbe_StillReportsEmbeddedManifestIdentity()
     {
@@ -371,6 +470,7 @@ public class HeartbeatServiceTests
         _rkhunterCollectorMock,
         _securityUpdatesCollectorMock,
         _firewallCollectorMock,
+        _listeningPortsCollectorMock,
         _sudoersHashCollectorMock,
         _dockerStorageMaintenanceMock,
         _shellRunnerMock,

@@ -1,0 +1,56 @@
+# Managed by Aetheus - deploy unit TEMPLATE (anti-injection: posed at install, never YAML-generated).
+# %i is the validated app instance name. The 'run' launcher ships inside the deployed artifact.
+[Unit]
+Description=Aetheus deployed app %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# S-FEAT-DPU2 (v2 isolation): each deployed app runs under a TRANSIENT, per-app system identity
+# (systemd DynamicUser) instead of the shared agent user - so a third-party build shares no uid,
+# no $HOME, and no process/file surface with the agent or with sibling deployed apps. No account
+# management is needed (the uid is allocated per start), which keeps this module's anti-injection
+# model intact (the app name never spawns a useradd).
+DynamicUser=yes
+# The transient uid joins the dedicated read-only group that owns the deploy trees (setgid below), so
+# it can read its agent-written, secret-bearing release payload WITHOUT that payload being world-readable
+# and WITHOUT joining the agent's own group (no agent-surface sharing).
+SupplementaryGroups=#{DEPLOY_READ_GROUP}#
+WorkingDirectory=#{DEPLOY_BASE_DIR}#/%i/current
+ExecStart=#{DEPLOY_BASE_DIR}#/%i/current/run
+Restart=always
+RestartSec=5
+# Writable state lives on a systemd-managed StateDirectory - /var/lib/aetheus-app-<app>, created
+# and chowned to the transient uid on every start and PERSISTED across restarts/redeploys (not wiped
+# like RuntimeDirectory). HOME points here so the ASP.NET Core Data Protection key ring
+# (~/.aspnet/DataProtection-Keys) and any $HOME cache survive - without the app ever writing into the
+# agent-owned deploy tree. This is the ownership split that makes DynamicUser compatible with the
+# agent-manages-releases / app-reads-releases model.
+StateDirectory=aetheus-app-%i
+Environment=HOME=/var/lib/aetheus-app-%i
+# ADR-021 phase 2 (zero-config OTLP): the deploy executor may drop a .aetheus-env (OTEL endpoint +
+# ingestion key) into the flipped release. The leading '-' makes it OPTIONAL, so a deploy that injects
+# nothing (feature off / no linked MonitoredApp) leaves the unit unchanged.
+EnvironmentFile=-#{DEPLOY_BASE_DIR}#/%i/current/.aetheus-env
+
+# Hardening - the DEPLOYED app is a third-party build; it must NOT inherit the agent user's sudo
+# surface (the agent unit runs NoNewPrivileges=false to use deploy-restart, but the app never needs
+# it). ProtectSystem=full keeps /usr,/boot,/etc read-only. The read-only payload
+# (#{DEPLOY_BASE_DIR}#/%i/current -> releases/) is agent-owned and GROUP-readable by #{DEPLOY_READ_GROUP}#
+# (mode 0750, NEVER world - it carries pipeline-substituted secrets in cleartext): the deploy executor
+# chmods each release 0750 and the setgid base dir stamps the group, so the transient uid reads via its
+# SupplementaryGroups membership while other host users cannot. No ReadWritePaths into the deploy tree:
+# the app's only writable area is its StateDirectory above.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

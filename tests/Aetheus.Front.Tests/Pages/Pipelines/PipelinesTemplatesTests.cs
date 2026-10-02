@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -27,7 +25,7 @@ public class PipelinesTemplatesTests : BunitContext
         _handler.SetJsonResponse("api/pipelines/fleet", new PaginatedResult<PipelineFleetItemDto>());
         _handler.SetJsonResponse("api/pipelines/templates", new List<PipelineTemplateSummaryDto>());
 
-        var cut = Render<Aetheus.Front.Pages.Pipelines.Pipelines>();
+        var cut = Render<Aetheus.Front.Components.Pipelines.Pipelines>();
 
         Assert.Contains("UsedPipelines", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("Templates", cut.Markup, StringComparison.Ordinal);
@@ -38,12 +36,24 @@ public class PipelinesTemplatesTests : BunitContext
     [InlineData("pipelines/fleet", "/pipelines")]
     public void LegacyCatalogRoutes_RedirectToUnifiedHub(string legacyPath, string expectedPath)
     {
+        _handler.SetJsonResponse("api/pipelines/dependencies", new PipelineDependencyGroupsDto());
+        _handler.SetJsonResponse("api/pipelines/runs/recent", new List<PipelineRunDto>());
+        _handler.SetJsonResponse("api/pipelines/favorites", new PipelineFavoritesDto());
+        _handler.SetJsonResponse("api/pipelines/fleet", new PaginatedResult<PipelineFleetItemDto>());
+        _handler.SetJsonResponse("api/pipelines/templates", new List<PipelineTemplateSummaryDto>());
+
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         nav.NavigateTo(legacyPath);
 
-        Render<Aetheus.Front.Pages.Pipelines.Pipelines>();
+        var cut = Render<Aetheus.Front.Components.Pipelines.Pipelines>();
 
         Assert.EndsWith(expectedPath, nav.Uri, StringComparison.Ordinal);
+
+        // The alias routes are served by this very component, so the router reuses the running
+        // instance and OnInitialized never runs a second time. Redirecting before initializing left
+        // the hub with no permissions and therefore no tabs at all, which is what this asserts.
+        Assert.Contains("UsedPipelines", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("Templates", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,8 +141,8 @@ public class PipelinesTemplatesTests : BunitContext
         });
         var cut = Render<PipelineTemplateEdit>();
 
-        cut.Find("input[name='Name']").Input("Reusable validation");
-        cut.Find("input[name='Category']").Input("Validation");
+        cut.Find("input#Name").Input("Reusable validation");
+        cut.Find("input#Category").Input("Validation");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(

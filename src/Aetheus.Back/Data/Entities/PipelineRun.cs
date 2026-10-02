@@ -49,6 +49,33 @@ public class PipelineRun
     /// </summary>
     public int BuildNumber { get; set; }
 
+    /// <summary>
+    /// Why the last scheduling pass dispatched nothing, in one human sentence per blocked stage
+    /// (group throttle, runner or deployment target offline, artifact collection in flight). Null
+    /// while the run is progressing. Without it a run sits in <c>Running</c> with no task moving and
+    /// the reason exists only inside the planner's local state, which is exactly the case that sends
+    /// someone to the server logs.
+    /// </summary>
+    public string? WaitingReason { get; set; }
+
+    /// <summary>When the current <see cref="WaitingReason"/> started. Reset only when the reason text
+    /// changes, so "waiting since" measures this wait and not the last scheduling pass.</summary>
+    public DateTime? WaitingSince { get; set; }
+
+    /// <summary>
+    /// What the blocking preflight verified at launch (runners, environments, referenced pipelines,
+    /// ports, and each pipeline of the triggered chain), as a JSON list of
+    /// <c>PreflightCheckDto</c>. Null for runs created before it was recorded, and for runs created
+    /// on a path that does not run the preflight.
+    ///
+    /// A refusal never reaches this column: a refused interactive launch creates no run, and the failed
+    /// run that records a refused automated launch carries its reason in <see cref="WarningsJson"/>. What
+    /// it answers is the opposite question, the one that had no answer: a run that died four stages in on an
+    /// environment gave no way to tell whether the preflight had checked that environment and found
+    /// it fine, or had never looked at it.
+    /// </summary>
+    public string? PreflightJson { get; set; }
+
     // Navigation
     public Pipeline Pipeline { get; set; } = null!;
     public List<PipelineStepRun> StepRuns { get; set; } = [];

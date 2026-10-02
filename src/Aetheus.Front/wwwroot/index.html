@@ -7,23 +7,44 @@
     <title>Aetheus</title>
     <base href="/" />
     <link rel="preload" id="webassembly" />
-    <link rel="stylesheet" href="_content/Radzen.Blazor/css/material-dark-base.css?v=11.1.6" id="radzen-theme" />
+    <!-- PLAN-008 (ADR-046): the OmniEurope.Blazor stylesheet, applied as shipped, before app.css so the
+         application's explicit overrides keep the last word (one theme, recette R-054). -->
+    <link rel="stylesheet" href="_content/OmniEurope.Blazor/omnieurope.blazor.css" />
     <link rel="stylesheet" href="css/app#[.{fingerprint}].css" />
     <link rel="icon" type="image/svg+xml" href="aetheus-icon.svg" />
     <script type="importmap"></script>
     <script>
         (function() {
             var t = localStorage.getItem('aetheus_theme');
-            if (t === 'light') {
-                var link = document.getElementById('radzen-theme');
-                if (link) link.href = '_content/Radzen.Blazor/css/material-base.css?v=11.1.6';
-            }
+            // PLAN-008 (D17, lot 11): the OmniEurope.Blazor tokens follow the same preference, dark by
+            // default, before the first paint (the separate Aetheus look was removed, recette R-054). 'system' reads
+            // the OS preference here too, so the first paint is already the right one.
+            var light = t === 'light'
+                || (t === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+            document.documentElement.setAttribute('data-omni-theme', light ? 'light' : 'dark');
             // Align <html lang> with the effective boot culture: the saved preference if any,
             // otherwise the browser's own language (which is what Blazor.start falls back to).
             // Without this, a French-browser user with no saved preference kept lang="en",
             // mislabelling the document for screen readers and SEO.
             var lang = localStorage.getItem('aetheus_lang') || navigator.language || 'en';
             if (lang) document.documentElement.lang = lang.substring(0, 2);
+            // Recette R-232: the chosen theme, palette and density, painted before the first frame too
+            // (layout.js repaints them on each change; same keys, same rule).
+            var density = localStorage.getItem('aetheus_density');
+            if (density === 'compact' || density === 'spacious') {
+                document.documentElement.setAttribute('data-aetheus-density', density);
+                document.documentElement.setAttribute('data-omni-density', density);
+            }
+            // Recette R-390: the text size and control size levels (1-10, 5 as drawn, no attribute).
+            [['aetheus_text_size', 'data-oe-text-size'], ['aetheus_control_size', 'data-oe-control-size']].forEach(function (scale) {
+                var level = parseInt(localStorage.getItem(scale[0]), 10);
+                if (level >= 1 && level <= 10 && level !== 5) document.documentElement.setAttribute(scale[1], String(level));
+            });
+            try {
+                var tokens = JSON.parse(localStorage.getItem('aetheus_theme_tokens') || 'null');
+                var half = tokens && (light ? tokens.light : tokens.dark);
+                if (half) Object.keys(half).forEach(function (name) { document.documentElement.style.setProperty(name, half[name]); });
+            } catch (e) { /* a malformed entry leaves the shipped look */ }
         })();
     </script>
 </head>
@@ -49,8 +70,8 @@
                                 <path d="M0,-44 L0,14" stroke="#93C5FD" stroke-width="5" stroke-linecap="round" fill="none"/>
                                 <g stroke="#60A5FA" stroke-width="5" stroke-linecap="round" fill="none">
                                     <line class="p-jet" x1="0" y1="36" x2="0" y2="100"/>
-                                    <line class="p-jet" style="animation-delay:-0.35s" x1="-31" y1="48" x2="-44" y2="88"/>
-                                    <line class="p-jet" style="animation-delay:-0.7s" x1="31" y1="48" x2="44" y2="88"/>
+                                    <line class="p-jet p-jet-left" x1="-31" y1="48" x2="-44" y2="88"/>
+                                    <line class="p-jet p-jet-right" x1="31" y1="48" x2="44" y2="88"/>
                                 </g>
                             </g>
                         </g>
@@ -60,24 +81,29 @@
         </svg>
     </div>
 
+    <div id="app-start-error" class="app-start-error" role="alert" hidden>
+        <div class="app-start-error__content">
+            <p id="app-start-error-message"></p>
+            <button id="app-start-retry" type="button"></button>
+        </div>
+    </div>
+
     <div id="blazor-error-ui">
         An unhandled error has occurred.
         <a href="." class="reload">Reload</a>
         <span class="dismiss">🗙</span>
     </div>
-    <script src="_content/Radzen.Blazor/Radzen.Blazor.js?v=11.1.6"></script>
     <!-- Cache-bust the hand-written scripts: they are NOT fingerprinted like the WASM assets, so a
          changed layout.js would otherwise stay stale in the browser (a new function like
          Aetheus.scrollToBottom would be "undefined" and its buttons silently no-op). Bump ?v= on any
          edit to these files. -->
-    <script src="js/layout.js?v=4"></script>
-    <script src="js/button-stable-width.js?v=3"></script>
-    <script src="js/docker-interop.js?v=2"></script>
-    <script src="js/monaco-yaml.js?v=2"></script>
+    <script src="js/layout.js?v=13"></script>
+    <script src="js/offline-registration.js?v=1"></script>
+    <script src="js/docker-interop.js?v=3"></script>
+    <script src="js/monaco-frame-host.js?v=1"></script>
     <script src="lib/dagre/dagre.min.js"></script>
-    <script src="js/visual-pipeline.js?v=2"></script>
-    <script src="js/a11y-radzen.js?v=3"></script>
-    <script type="module" src="js/aetheus-analytics-bootstrap.js?v=1"></script>
+    <script src="js/visual-pipeline.js?v=3"></script>
+    <script type="module" src="js/aetheus-analytics-bootstrap.js?v=3"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js" autostart="false"></script>
     <script>
         // Boot the runtime with the saved UI culture so its satellite resource assembly
@@ -92,14 +118,45 @@
             // localStorage value must never reach Blazor.start, or it could fail the whole boot
             // (white screen). An unknown-but-well-formed culture is handled gracefully by .NET.
             var valid = lang && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(lang);
-            Blazor.start(valid ? { applicationCulture: lang } : {}).then(function () {
-                // Boot-splash start-jank fix: the plane's loops are held paused on their neutral start
-                // frame (see #app-splash svg) while the WASM runtime instantiates and stalls the main
-                // thread. Un-pause now that the runtime is up, so the animation begins on a free main
-                // thread, from exactly the frame the static plane was showing - clean start, no jump.
+            // Nothing saved: boot in one of the two languages the app ships, as Settings already reads
+            // it (any "fr*" is French). The bare browser culture "fr" found no Aetheus resources (only
+            // fr-FR exists) and showed English, while OmniEurope, French by default, showed French:
+            // one screen in two languages ("Autres actions" beside "More actions").
+            var browser = navigator.language || 'en';
+            var culture = valid ? lang : (/^fr/i.test(browser) ? 'fr-FR' : 'en');
+            function showStartError() {
                 var splash = document.getElementById('app-splash');
-                if (splash) splash.classList.remove('is-paused');
+                var panel = document.getElementById('app-start-error');
+                if (!splash || !panel || !panel.hidden) return;
+                splash.remove();
+                var french = /^fr/i.test(culture);
+                document.getElementById('app-start-error-message').textContent = french
+                    ? 'L’application n’a pas pu démarrer. Certains fichiers nécessaires sont indisponibles.'
+                    : 'The application could not start. Some required files are unavailable.';
+                var retry = document.getElementById('app-start-retry');
+                retry.textContent = french ? 'Réessayer' : 'Retry';
+                retry.addEventListener('click', function () { window.location.reload(); });
+                panel.hidden = false;
+            }
+            window.addEventListener('error', function (event) {
+                if (/\/_framework\//.test(event.filename || '')) showStartError();
             });
+            window.addEventListener('unhandledrejection', function (event) {
+                if (/\/_framework\//.test(String(event.reason))) showStartError();
+            });
+            if (typeof Blazor === 'undefined') {
+                showStartError();
+                return;
+            }
+            try {
+                Blazor.start({ applicationCulture: culture }).then(function () {
+                    // Un-pause the plane only after the runtime has left the main thread free.
+                    var splash = document.getElementById('app-splash');
+                    if (splash) splash.classList.remove('is-paused');
+                }).catch(showStartError);
+            } catch (error) {
+                showStartError();
+            }
         })();
     </script>
 </body>

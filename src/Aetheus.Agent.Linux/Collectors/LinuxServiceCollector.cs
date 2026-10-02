@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Collectors;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Agent.Linux.Collectors;
 
@@ -17,7 +15,33 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
         services.AddRange(await CollectSystemdServicesAsync(ct).ConfigureAwait(false));
         services.AddRange(await CollectDockerContainersAsync(ct).ConfigureAwait(false));
         await AddBinaryDetectedServicesAsync(services, ct).ConfigureAwait(false);
+        await RemoveServicesOfUninstalledPackagesAsync(services, ct).ConfigureAwait(false);
         return services;
+    }
+
+    // Recette R2-031: services whose Debian package alone provides both the unit and the program. When
+    // dpkg says that package is not installed (purged, or `rc` after `apt-get remove`), the service is
+    // not installed, whatever unit or init script it left behind - otherwise it stays under "Installed"
+    // where Start fails ("Unit not found") and Uninstall has nothing left to do. Services that another
+    // package can legitimately provide stay out (docker-ce for docker.io, snap for certbot, nginx-core
+    // for the nginx metapackage on older releases, the version-suffixed database packages): for them a
+    // missing catalogue package proves nothing, and the unit/binary evidence decides alone.
+    private static readonly string[] PackageDecidedServices = ["apache2", "postfix", "dovecot", "portsentry", "rkhunter"];
+
+    private async Task RemoveServicesOfUninstalledPackagesAsync(List<ServiceInfoDto> services, CancellationToken ct)
+    {
+        if (!services.Any(s => s.Type == ServiceType.Systemd && PackageDecidedServices.Contains(s.Name, StringComparer.OrdinalIgnoreCase)))
+            return;
+
+        var installed = await DpkgInstalledPackages.ReadAsync(shellRunner, logger, ct).ConfigureAwait(false);
+        if (installed is null) return;
+
+        foreach (var service in PackageDecidedServices)
+        {
+            var package = ManageablePackages.AptPackageFor(service);
+            if (package is null || installed.Contains(package)) continue;
+            services.RemoveAll(s => s.Type == ServiceType.Systemd && s.Name.Equals(service, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     // Some "modules" don't ship a systemd unit on every distro:
@@ -49,10 +73,13 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
             "ls -d /opt/teamspeak* /opt/ts3server* /usr/local/teamspeak* 2>/dev/null | head -n1 | grep -q ."),
         ("apache2",    new[] { "apache2", "httpd" },
             "command -v apache2 >/dev/null 2>&1 || command -v httpd >/dev/null 2>&1"),
+        // Recette R-506: the binary, never the configuration directory. `apt-get remove` leaves
+        // /etc/postfix and /etc/dovecot in place, so a removed mail server stayed listed as installed
+        // and every action on it failed ("Unit dovecot.service not found").
         ("postfix",    new[] { "postfix" },
-            "command -v postfix >/dev/null 2>&1 || test -d /etc/postfix"),
+            "command -v postfix >/dev/null 2>&1 || test -x /usr/sbin/postfix"),
         ("dovecot",    new[] { "dovecot" },
-            "command -v dovecot >/dev/null 2>&1 || test -d /etc/dovecot"),
+            "command -v dovecot >/dev/null 2>&1 || test -x /usr/sbin/dovecot"),
         ("portsentry", new[] { "portsentry" },
             "command -v portsentry >/dev/null 2>&1 || test -x /usr/sbin/portsentry"),
         ("rkhunter",   new[] { "rkhunter" },
@@ -131,14 +158,65 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
     private async Task<List<ServiceInfoDto>> CollectSystemdServicesAsync(CancellationToken ct)
     {
         var byName = new Dictionary<string, ServiceInfoDto>(StringComparer.OrdinalIgnoreCase);
-        await CollectInstalledSystemdServicesAsync(byName, ct).ConfigureAwait(false);
+        var generated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await CollectInstalledSystemdServicesAsync(byName, generated, ct).ConfigureAwait(false);
         await OverlaySystemdRuntimeStatusAsync(byName, ct).ConfigureAwait(false);
+        await RemoveGeneratedUnitsWithoutProgramAsync(byName, generated, ct).ConfigureAwait(false);
         await ReclassifyIdleSystemdServicesAsync(byName, ct).ConfigureAwait(false);
         return byName.Values.ToList();
     }
 
+    // Recette R2-031: the program a manageable service's init script starts. `apt-get remove` keeps
+    // /etc/init.d/<name> (a conffile) and systemd-sysv-generator turns it into a "generated" unit that
+    // loads fine but starts nothing. A generated unit is kept only when its program is still there;
+    // generated units outside this table (unknown programs) are left as they are.
+    private static readonly Dictionary<string, string[]> GeneratedUnitPrograms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["nginx"] = ["/usr/sbin/nginx"],
+        ["apache2"] = ["/usr/sbin/apache2"],
+        ["postfix"] = ["/usr/sbin/postfix"],
+        ["dovecot"] = ["/usr/sbin/dovecot"],
+        ["portsentry"] = ["/usr/sbin/portsentry"],
+        ["fail2ban"] = ["/usr/bin/fail2ban-server"],
+        ["redis-server"] = ["/usr/bin/redis-server"],
+        ["mysql"] = ["/usr/sbin/mysqld"],
+        ["mariadb"] = ["/usr/sbin/mariadbd", "/usr/sbin/mysqld"],
+        ["mongod"] = ["/usr/bin/mongod"],
+    };
+
+    private async Task RemoveGeneratedUnitsWithoutProgramAsync(
+        IDictionary<string, ServiceInfoDto> byName, HashSet<string> generated, CancellationToken ct)
+    {
+        foreach (var name in generated)
+        {
+            if (!GeneratedUnitPrograms.TryGetValue(name, out var programs)) continue;
+            if (await AnyProgramPresentAsync(name, programs, ct).ConfigureAwait(false)) continue;
+            byName.Remove(name);
+        }
+    }
+
+    private async Task<bool> AnyProgramPresentAsync(string name, string[] programs, CancellationToken ct)
+    {
+        foreach (var program in programs)
+        {
+            try
+            {
+                // argv-pure: `test -x <constant path>`, no shell.
+                var res = await shellRunner.RunExecAsync("/usr/bin/test", ["-x", program], ct, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                if (res.ExitCode == 0) return true;
+            }
+            catch (Exception ex)
+            {
+                // The probe itself failed: nothing is known, so the unit is kept as reported.
+                logger.LogDebug(ex, "Program probe failed for generated unit {Service}", name);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private async Task CollectInstalledSystemdServicesAsync(
-        IDictionary<string, ServiceInfoDto> byName, CancellationToken ct)
+        IDictionary<string, ServiceInfoDto> byName, HashSet<string> generated, CancellationToken ct)
     {
         try
         {
@@ -150,6 +228,8 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
 
                 var name = parts[0].Replace(".service", string.Empty);
                 if (string.IsNullOrWhiteSpace(name)) continue;
+                if (parts.Length > 1 && parts[1].Equals("generated", StringComparison.OrdinalIgnoreCase))
+                    generated.Add(name);
 
                 byName[name] = new ServiceInfoDto
                 {
@@ -177,10 +257,17 @@ public sealed class LinuxServiceCollector(ILogger<LinuxServiceCollector> logger,
             foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                // Some systemd versions flag a failed or missing unit with a leading bullet column.
+                if (parts.Length > 0 && parts[0] == "●") parts = parts[1..];
                 if (parts.Length < 4) continue;
 
                 var name = parts[0].Replace(".service", string.Empty);
                 if (string.IsNullOrWhiteSpace(name)) continue;
+
+                // Recette R2-031: columns are UNIT LOAD ACTIVE SUB. A `not-found` unit has no unit file
+                // left (its package is gone): systemd lists it only because something still refers to it.
+                // Counting it made a removed dovecot "installed" again, with every action failing.
+                if (parts[1].Equals("not-found", StringComparison.OrdinalIgnoreCase)) continue;
 
                 var status = parts[3];
                 var running = status.Equals("running", StringComparison.OrdinalIgnoreCase);

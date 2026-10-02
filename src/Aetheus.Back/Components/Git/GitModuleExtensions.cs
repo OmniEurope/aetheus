@@ -13,13 +13,20 @@ public static class GitModuleExtensions
         // Git Light (internal repos)
         services.Configure<GitLightOptions>(configuration.GetSection("GitLight"));
         services.AddScoped<IGitLightRepository, GitLightRepository>();
+        // Mirrors of external repositories: the credentialed fetch and its on-demand refresh.
+        services.AddSingleton<CreditedGitRunner>();
+        services.AddScoped<IExternalRepoMirrorService, ExternalRepoMirrorService>();
+        services.AddScoped<IExternalMirrorRefresher, ExternalMirrorRefresher>();
         services.AddScoped<GitProcessRunner>();
         services.AddScoped<GitLightCliWriter>();
         services.AddScoped<IGitLightCliService, GitLightCliService>();
         services.AddScoped<GitBranchProtectionService>();
         services.AddScoped<GitAiPatchService>();
         services.AddScoped<IGitLightService, GitLightService>();
+        services.AddScoped<GitFilterValuesService>();
+        services.AddScoped<GitArchiveService>();
         services.AddScoped<IGitSmartHttpService, GitSmartHttpService>();
+        services.AddScoped<IGitBranchAdvanceService, GitBranchAdvanceService>();
         services.AddHostedService<GitLightMaintenanceService>();
 
         return services;

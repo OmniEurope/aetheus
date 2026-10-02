@@ -27,6 +27,8 @@ public interface IServerHeartbeatRepository
         int serverId, ApacheState? state, List<ApacheModule> modules, List<ApacheVirtualHost> vhosts,
         CancellationToken ct = default);
     Task ReplaceCertbotCertificatesAsync(int serverId, List<CertbotCertificate> certificates, CancellationToken ct = default);
+    Task<DateTime?> GetCertbotRenewalCheckedAtAsync(int serverId, CancellationToken ct = default);
+    Task ReplaceCertbotStateAsync(int serverId, CertbotState? state, CancellationToken ct = default);
     Task ReplaceMailDataAsync(int serverId, MailState? state, CancellationToken ct = default);
     Task ReplaceTeamspeakDataAsync(
         int serverId, TeamspeakState? state, List<TeamspeakChannel> channels,
@@ -37,6 +39,8 @@ public interface IServerHeartbeatRepository
     Task ReplaceRkhunterDataAsync(
         int serverId, RkhunterState? state, List<RkhunterWarning> warnings, CancellationToken ct = default);
     Task ReplaceSecurityUpdatesDataAsync(int serverId, SecurityUpdatesState? state, CancellationToken ct = default);
+    /// <summary>Moves only the check stamp of an unchanged security-updates report (no-op without a row).</summary>
+    Task TouchSecurityUpdatesCheckedAtAsync(int serverId, DateTime checkedAt, CancellationToken ct = default);
     Task ReplaceFirewallDataAsync(int serverId, FirewallState? state, CancellationToken ct = default);
 
     /// <summary>Previous counters, read BEFORE a replacement so a beat can report what changed.</summary>

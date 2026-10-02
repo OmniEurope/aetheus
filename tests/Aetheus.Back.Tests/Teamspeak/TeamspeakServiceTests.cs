@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Teamspeak;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -197,8 +195,8 @@ public class TeamspeakServiceTests
 
         Assert.NotNull(captured);
         Assert.Contains("logs", captured.Name);
-        Assert.Equal(Aetheus.Shared.Enums.ExecutorType.Operation, captured.Executor);
-        Assert.Equal(Aetheus.Shared.Enums.OperationKind.TeamspeakGetLogs, captured.Operation);
+        Assert.Equal(Aetheus.Shared.Components.Tasks.ExecutorType.Operation, captured.Executor);
+        Assert.Equal(Aetheus.Shared.Components.Tasks.OperationKind.TeamspeakGetLogs, captured.Operation);
         Assert.Equal("/opt/teamspeak", captured.Command);
     }
 
@@ -213,7 +211,7 @@ public class TeamspeakServiceTests
         await _sut.GetLogsAsync(1, new TeamspeakLogRequest { Lines = 50 }, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.Equal(Aetheus.Shared.Enums.OperationKind.TeamspeakGetLogs, captured.Operation);
+        Assert.Equal(Aetheus.Shared.Components.Tasks.OperationKind.TeamspeakGetLogs, captured.Operation);
         Assert.Equal(string.Empty, captured.Command);
     }
 
@@ -228,8 +226,8 @@ public class TeamspeakServiceTests
         await _sut.GracefulRestartAsync(1, new TeamspeakGracefulRestartRequest { WarningSeconds = 30, WarningMessage = "Restart in {0}s" }, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.Equal(Aetheus.Shared.Enums.ExecutorType.Operation, captured.Executor);
-        Assert.Equal(Aetheus.Shared.Enums.OperationKind.TeamspeakGracefulRestart, captured.Operation);
+        Assert.Equal(Aetheus.Shared.Components.Tasks.ExecutorType.Operation, captured.Executor);
+        Assert.Equal(Aetheus.Shared.Components.Tasks.OperationKind.TeamspeakGracefulRestart, captured.Operation);
         // Warning seconds/message + the live query port travel in env (no shell chain).
         Assert.Contains("10011", captured.EnvironmentVariables);
         Assert.Contains("30", captured.EnvironmentVariables);

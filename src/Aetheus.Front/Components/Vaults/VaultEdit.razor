@@ -1,0 +1,153 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/vaults/new"
+@page "/vaults/{Id:int}"
+
+<PageTitle>@(_isNew ? L["NewVault"] : _detail?.Name ?? L["Vault"]) - Aetheus</PageTitle>
+
+@* Recette R-288: no secret-count badge; R-287 (as R-284): Edit and Delete of the vault live in the ⋮ menu.
+   Recette R-275: no header body at all, an empty one showed a phone toggle that opened nothing. *@
+<OmniPageHeader Title="@(_isNew ? L["NewVault"] : _detail?.Name ?? "")" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("lock")" /></Icon>
+</OmniPageHeader>
+
+@if (!_isNew && _detail is null)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else
+{
+    @if (_isNew || _editingProperties)
+    {
+    <OmniTemplateForm TModel="VaultModel" Model="@_model" OnValidSubmit="@OnSubmit">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+                    <OmniFormField For="vault-name">
+                        <LabelContent>@L["Name"]</LabelContent>
+                        <ChildContent>
+                            <OmniTextBox Id="vault-name" @bind-Value="_model.Name" />
+                            <ValidationMessage For="@(() => _model.Name)" />
+                        </ChildContent>
+                    </OmniFormField>
+                    <OmniFormField For="vault-description">
+                        <LabelContent>@L["Description"]</LabelContent>
+                        <ChildContent>
+                            <OmniTextArea Id="vault-description" @bind-Value="_model.Description" Rows="3" />
+                        </ChildContent>
+                    </OmniFormField>
+                </OmniStack>
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="6">
+                <OwnerTypeSelector Projects="@_projects"
+                    @bind-ProjectId="_model.ProjectId"
+                    @bind-EnvironmentId="_model.EnvironmentId"
+                    @bind-ProjectServerId="_model.ProjectServerId" />
+            </OmniColumn>
+        </OmniRow>
+
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="@MaterialIconMap.Resolve((_isNew ? "add" : "save"))" /> <span>@(_isNew ? L["Create"] : L["Save"])</span></OmniButton>
+            @if (!_isNew)
+            {
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CancelPropertiesEdit"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+            }
+        </OmniStack>
+    </OmniTemplateForm>
+    }
+
+    @if (!_isNew && _detail is not null)
+    {
+        <OmniHeading Level="OmniHeadingLevel.H5" Class="@(_editingProperties ? "omni-u-mt-2xl omni-u-mb-sm" : "omni-u-mb-sm")">@L["Secrets"]</OmniHeading>
+
+        <OmniTemplateForm TModel="NewSecretModel" Model="@_newSecret" OnValidSubmit="@((EditContext context) => AddSecret((NewSecretModel)context.Model))">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        @* Recette R-289: one aligned line (key, value, expiry, add, ⋮), the validation messages under it
+           rather than wedged between the fields. R-290: the value is a masked text field, not a password
+           field, so the browser neither offers to save it nor fills the login around it. *@
+        <div class="vault-add-row">
+            <OmniTextBox @bind-Value="_newSecret.Key" Placeholder="@L["Key"]" Autocomplete="off"
+                         aria-label="@L["Key"]" Class="vault-add-row__key" />
+            <OmniPassword Id="vault-new-secret-value" @bind-Value="_newSecret.Value" Placeholder="@L["Value"]" IgnorePasswordManagers="true"
+                          RevealLabel="@L["ShowValue"]" HideLabel="@L["HideValue"]" aria-label="@L["Value"]" />
+            @* STD-BTN exception chosen by the user (recette R-436, 2026-09-28): Generate, the field's helper, is
+               blue beside Add, the zone's main action. Recette R-437: a text button with a menu, like Run:
+               the click applies the key's recipe, the menu the other ways to generate. *@
+            <OmniSplitButton Text="@L["Generate"]" Variant="OmniButtonVariant.Primary"
+                             OnClick="@GenerateNewSecretValue" MenuLabel="@L["SecretGenerateOptions"]" title="@GenerateHint(_newSecret.Key)"><Icon><OmniIcon Name="OmniIconName.Sparkle" /></Icon><ChildContent>
+                @foreach (var choice in SecretGenerationChoices.All)
+                {
+                    <OmniMenuItem OnClick="@(() => GenerateNewSecretValueWith(choice))">@L[choice.LabelKey]</OmniMenuItem>
+                }
+            </ChildContent></OmniSplitButton>
+            <OmniDatePicker @bind-Value="NewSecretExpiryDate" aria-label="@L["ExpiresAt"]" Placeholder="@L["ExpiresAt"]" />
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+            <div class="pipeline-list-spacer"></div>
+            <OmniOverflowMenu Label="@L["Tools"]">
+                <OmniMenuItem OnClick="@EditProperties"><Icon><OmniIcon Name="OmniIconName.Edit" /></Icon><ChildContent>@L["Edit"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@OnDelete"><Icon><OmniIcon Name="OmniIconName.Delete" /></Icon><ChildContent>@L["Delete"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@ExportKeys"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["ExportKeys"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@ImportSecrets"><Icon><OmniIcon Name="OmniIconName.Upload" /></Icon><ChildContent>@L["Import"]</ChildContent></OmniMenuItem>
+            </OmniOverflowMenu>
+        </div>
+        <div class="vault-add-row__messages omni-u-mb-md">
+            <ValidationMessage For="@(() => _newSecret.Key)" />
+            <ValidationMessage For="@(() => _newSecret.Value)" />
+        </div>
+        </OmniTemplateForm>
+
+        <OmniDataGrid FillAvailableHeight="true" Items="@_detail.Secrets" TItem="VaultSecretDto" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="VaultSecretDto" Property="Key" Title="@L["Key"]" Filterable="true">
+                    <Template Context="secret">
+                        @* Recette R-292: a copy button beside the key, blue on every row (STD-BTN exception, R-436). *@
+                        <span class="library-cell">
+                            <span class="clickable-cell" role="button" tabindex="0"
+                                  @onclick="@(() => UpdateSecret(secret))"
+                                  @onkeydown="@(e => OnSecretCellKeyDown(e, secret))">@secret.Key</span>
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyKey(secret.Key))" Class="library-copy-btn"
+                                        title="@L["CopyKey"]" Label="@L["CopyKey"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                        </span>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VaultSecretDto" Title="@L["Value"]" Width="12.5rem" Sortable="false">
+                    <Template Context="secret">
+                        <span class="clickable-cell" role="button" tabindex="0"
+                              @onclick="@(() => UpdateSecret(secret))"
+                              @onkeydown="@(e => OnSecretCellKeyDown(e, secret))">••••••••</span>
+                        @* Recette R-292: copies the value without ever showing it (audited server side); blue on every
+                           row (STD-BTN exception chosen by the user, R-436, 2026-09-28). *@
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopySecretValue(secret))" Class="library-copy-btn"
+                                    title="@L["CopyValue"]" Label="@L["CopyValue"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VaultSecretDto" Property="UpdatedAt" Title="@L["Updated"]" FormatString="{0:g}" Width="10rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+                <OmniDataGridColumn TItem="VaultSecretDto" Property="ExpiresAt" Title="@L["ExpiresAt"]" Width="10rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange">
+                    <Template Context="secret">
+                        @if (secret.ExpiresAt.HasValue)
+                        {
+                            var badge = GetExpiryBadge(secret.ExpiresAt.Value);
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@badge">@secret.ExpiresAt.Value.ToString("yyyy-MM-dd")</OmniBadge>
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VaultSecretDto" Title="@L["Versions"]" Width="5.625rem" TextAlign="OmniDataGridTextAlign.Center" Sortable="false">
+                    <Template Context="secret">
+                        <CountBadge Value="@secret.VersionCount" Variant="OmniTone.Neutral" />
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VaultSecretDto" Title="" Width="15rem" Sortable="false" TextAlign="OmniDataGridTextAlign.End">
+                    <Template Context="secret">
+                        @* Recette R-293: every action filled: copy blue (R-436), history and edit secondary, rotate
+                           orange (both STD-BTN exceptions chosen by the user). *@
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyKeyReference(secret.Key))" title="@L["CopyKeyReference"]" Label="@L["CopyKeyReference"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowVersions(secret))" title="@L["History"]" Label="@L["History"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => UpdateSecret(secret))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Warning" OnClick="@(() => RotateSecret(secret))" title="@L["Rotate"]" Label="@L["Rotate"]"><OmniIcon Name="OmniIconName.Sync" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteSecret(secret.Id))" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+        </OmniDataGrid>
+    }
+}

@@ -21,11 +21,14 @@ public static class AppMonitoringModuleExtensions
         services.AddScoped<IAppWebAnalyticsRepository, AppWebAnalyticsRepository>();
         services.AddScoped<IAppWebAnalyticsService, AppWebAnalyticsService>();
         services.AddScoped<IAppWebAnalyticsConfigurationService, AppWebAnalyticsConfigurationService>();
+        services.AddScoped<IAppTelemetryChangePublisher, AppTelemetryChangePublisher>();
         services.AddScoped<IIngestService, IngestService>();
         services.AddScoped<IVisitorIngestService, VisitorIngestService>();
         services.AddScoped<IAppTelemetryService, AppTelemetryService>();
         services.AddScoped<IAppDeployEnvProvider, AppDeployEnvProvider>();
         services.AddSingleton<IngestKeyHasher>();
+        // Singleton so a refused key is reported once per period across request scopes (recette R2-013).
+        services.AddSingleton<IngestKeyRejectionLog>();
         services.AddSingleton<AppAnalyticsSiteRateLimiter>();
         // Singleton so the per-app metric-ingest lock is shared across request scopes.
         services.AddSingleton<AppIngestGate>();

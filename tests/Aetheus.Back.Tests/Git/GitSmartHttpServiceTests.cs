@@ -2,13 +2,11 @@
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Git.Events;
-using Aetheus.Back.Services.DomainEvents;
 using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Back.Services.DomainEvents;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
@@ -184,7 +182,7 @@ public class GitSmartHttpServiceTests : IDisposable
         };
         _lightRepoMock.FindBySlugAsync(1, "my-repo", Arg.Any<CancellationToken>()).Returns(repo);
         _cliMock.GetTreeAsync(Arg.Any<string>(), "HEAD", ".pipeline", Arg.Any<CancellationToken>())
-            .Returns(new List<Shared.DTOs.GitLightTreeEntryDto>());
+            .Returns(new List<Aetheus.Shared.Components.Git.GitLightTreeEntryDto>());
 
         await _sut.MarkPushedAsync(1, "my-repo", [], ct: TestContext.Current.CancellationToken);
 

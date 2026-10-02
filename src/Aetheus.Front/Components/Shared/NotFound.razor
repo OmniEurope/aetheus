@@ -1,0 +1,25 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@page "/not-found"
+@layout MainLayout
+@inject IStringLocalizer<AppStrings> L
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+@inject NavigationManager Nav
+
+<PageTitle>@L["NotFound"] - Aetheus</PageTitle>
+<OmniPageHeader Title="@L["NotFound"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("search_off")" /></Icon>
+</OmniPageHeader>
+
+<div class="not-found-container">
+    <svg class="not-found-illustration" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="200" cy="150" r="120" fill="var(--omni-u-text-accent)" opacity="0.08" />
+        <text x="200" y="140" text-anchor="middle" font-size="96" font-weight="800" fill="var(--omni-u-text-accent)" opacity="0.6">404</text>
+        <circle cx="160" cy="200" r="6" fill="var(--omni-u-text-accent)" opacity="0.25" />
+        <circle cx="240" cy="200" r="6" fill="var(--omni-u-text-accent)" opacity="0.25" />
+        <path d="M170 220 Q200 235 230 220" stroke="var(--omni-u-text-accent)" stroke-width="3" fill="none" opacity="0.25" stroke-linecap="round" />
+        <rect x="125" y="250" width="150" height="8" rx="4" fill="var(--omni-u-text-accent)" opacity="0.12" />
+    </svg>
+    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mb-2xl">@L["NotFoundMessage"]</OmniText>
+    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Nav.NavigateTo("/"))" title="@L["BackToHome"]"><OmniIcon Name="OmniIconName.Home" /> <span>@L["Home"]</span></OmniButton>
+</div>

@@ -1,0 +1,23 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@*
+    PLAN-005 lot 2 / D32: the detail of a toast, never more than four lines. The title stays whole
+    (the toast renders it apart); only this text is clamped, and "Show more" appears only when the
+    clamp actually hides something, opening the full text with its correlation id.
+*@
+<div class="notification-body">
+    <div @ref="_text" class="notification-body-text" data-testid="notification-body-text">@Detail</div>
+    @if (_clamped)
+    {
+        <span @onclick:stopPropagation="true">
+            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="OpenAsync"
+                        Class="notification-body-more">
+                <OmniIcon Name="OmniIconName.ChevronDown" /> @L["ShowMore"]
+            </OmniButton>
+        </span>
+    }
+    @if (LogsHref is not null)
+    {
+        <a href="@LogsHref" class="notification-log-link" @onclick:stopPropagation="true">@L["Logs"]</a>
+    }
+</div>

@@ -7,7 +7,6 @@ using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

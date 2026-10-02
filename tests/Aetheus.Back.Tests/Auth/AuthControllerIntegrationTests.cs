@@ -4,7 +4,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.Tests;

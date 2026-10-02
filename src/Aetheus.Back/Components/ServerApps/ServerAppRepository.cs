@@ -16,7 +16,8 @@ public class ServerAppRepository(AppDbContext db) : IServerAppRepository
 
     public async Task<(List<ServerApp> Items, int TotalCount)> GetPageAsync(
         int serverId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.ServerApps.Where(app => app.ServerId == serverId).AsNoTracking();
         if (!string.IsNullOrWhiteSpace(search))
@@ -26,6 +27,9 @@ public class ServerAppRepository(AppDbContext db) : IServerAppRepository
                 || (app.Version ?? string.Empty).ToLower().Contains(normalized)
                 || app.Source.ToLower().Contains(normalized));
         }
+
+        // Recette R-210: the header filters, after the server scope and before the count.
+        query = ServerAppListQuery.Columns.ApplyFilters(query, filters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy, sortDescending) switch
@@ -44,6 +48,19 @@ public class ServerAppRepository(AppDbContext db) : IServerAppRepository
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, totalCount);
+    }
+
+    public async Task<List<string>> GetSourcesAsync(int serverId, CancellationToken ct = default)
+    {
+        var sources = await db.ServerApps
+            .Where(app => app.ServerId == serverId)
+            .Select(app => app.Source)
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. sources
+            .Where(source => !string.IsNullOrWhiteSpace(source))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
     }
 
     public async Task<ServerApp?> GetByIdAsync(int id, CancellationToken ct = default)

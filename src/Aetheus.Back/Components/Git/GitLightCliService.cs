@@ -10,10 +10,14 @@ public class GitLightCliService(
     GitProcessRunner git, GitLightCliWriter writer,
     ILogger<GitLightCliService> logger, TimeProvider timeProvider) : IGitLightCliService
 {
-    internal const int MaximumCommitPatchChars = 512 * 1024;
-    private static readonly System.Diagnostics.Metrics.Meter s_meter = new("Aetheus.Git");
-    private static readonly System.Diagnostics.Metrics.Counter<long> s_deepSkipCounter = s_meter.CreateCounter<long>(
-        "git_deep_skip_total", description: "Count of git --skip calls past the deep threshold");
+    internal const int MaximumCommitPatchChars = GitDiffReader.MaximumCommitPatchChars;
+
+    // "What changed between two revisions" is its own question with its own bound; it lives in its
+    // own reader, and this facade forwards to it.
+    private readonly GitDiffReader _diffs = new(git);
+
+    // Walking the history (the commits grid, its total, its filters) is its own reader too.
+    private readonly GitCommitLogReader _log = new(git, logger, timeProvider);
     // M-git-2: refs/paths flow from the query string into git argv. Argv is shell-safe (ArgumentList),
     // but a value starting with '-' can still be parsed by git as an OPTION (argument injection, e.g.
     // "--output=..."). git-check-ref-format forbids a leading '-' anyway, so rejecting it here is a
@@ -68,108 +72,19 @@ public class GitLightCliService(
     public Task SetHeadAsync(string diskPath, string branch, CancellationToken ct = default)
         => writer.SetHeadAsync(diskPath, branch, ct);
 
-    // Above this many positions, `--skip=N` starts to noticeably wait on git's
-    // O(N) revision walk. Today the repos we host are well under it, but we log
-    // a Warning past the threshold so the trigger to plumb a cursor through the
-    // grid is loud rather than silent.
-    private const int DeepSkipWarningThreshold = 1000;
-
-    public async Task<List<GitLightCommitDto>> GetCommitsAsync(string diskPath, string? refName, int skip, int take, string? search = null, string? afterSha = null, CancellationToken ct = default)
-    {
-        EnsureRefArgsSafe(refName);
-        var args = BuildCommitLogArgs(refName, skip, take, search, afterSha);
-
-        var (exitCode, output, _) = await RunGitAsync(diskPath, args, ct).ConfigureAwait(false);
-        if (exitCode != 0 || string.IsNullOrWhiteSpace(output)) return [];
-
-        var commits = new List<GitLightCommitDto>();
-        var entries = output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var entry in entries)
-        {
-            var lines = entry.Split('\n', StringSplitOptions.None);
-            if (lines.Length < 6) continue;
-            commits.Add(new GitLightCommitDto
-            {
-                Sha = lines[0],
-                ShortSha = lines[1],
-                Message = lines[2],
-                AuthorName = lines[3],
-                AuthorEmail = lines[4],
-                AuthorDate = DateTime.TryParse(lines[5], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var d) ? d : timeProvider.GetUtcNow().UtcDateTime,
-                ParentShas = lines.Length > 6 && !string.IsNullOrWhiteSpace(lines[6])
-                    ? [.. lines[6].Split(' ', StringSplitOptions.RemoveEmptyEntries)]
-                    : [],
-                RefNames = lines.Length > 7 ? ParseRefNames(lines[7]) : []
-            });
-        }
-        return commits;
-    }
+    // --- History walks (delegated to GitCommitLogReader) ---
+    public Task<List<GitLightCommitDto>> GetCommitsAsync(string diskPath, string? refName, int skip, int take, string? search = null, string? afterSha = null, CancellationToken ct = default, GitCommitLogFilter? filter = null)
+        => _log.GetCommitsAsync(diskPath, refName, skip, take, search, afterSha, filter, ct);
 
     public Task<Dictionary<string, string>> GetCommitMessagesAsync(
         string diskPath, IReadOnlyCollection<string> shas, CancellationToken ct = default) =>
         GitCommitMessageReader.ReadAsync(git, diskPath, shas, ct);
 
-    // Builds the `git log` argv for GetCommitsAsync. Cursor pagination (afterSha) skips git's O(N)
-    // prologue; otherwise fall back to --skip and warn past the deep threshold. Extracted to keep the
-    // caller's complexity low (audit CCN 13).
-    private List<string> BuildCommitLogArgs(string? refName, int skip, int take, string? search, string? afterSha)
-    {
-        // S-FEAT-G6T9: trailing %D yields the ref decorations (branches/tags) for graph annotations.
-        var args = new List<string> { "log", "--format=%H%n%h%n%s%n%an%n%ae%n%aI%n%P%n%D", "-z" };
-        args.Add($"--max-count={take}");
-        if (!string.IsNullOrEmpty(search)) { args.Add($"--grep={search}"); args.Add("-i"); }
+    public Task<int> GetCommitCountAsync(string diskPath, string? refName, string? search = null, CancellationToken ct = default, GitCommitLogFilter? filter = null)
+        => _log.GetCommitCountAsync(diskPath, refName, search, filter, ct);
 
-        if (!string.IsNullOrEmpty(afterSha) && IsHexString(afterSha.AsSpan()))
-        {
-            // Cursor pagination: walk from the parent of the cursor. The afterSha hex check is
-            // defence-in-depth against argument injection (ArgumentList already blocks shell interp).
-            args.Add($"{afterSha}^");
-            return args;
-        }
-
-        if (skip >= DeepSkipWarningThreshold)
-        {
-            s_deepSkipCounter.Add(1);
-            logger.LogWarning(
-                "GetCommitsAsync skip={Skip} is past the {Threshold}-deep threshold - git --skip is O(N). " +
-                "Plumb a cursor (afterSha = last commit of previous page) through the controller to switch to keyset pagination.",
-                skip, DeepSkipWarningThreshold);
-        }
-        args.Add($"--skip={skip}");
-        args.Add(string.IsNullOrEmpty(refName) ? "--all" : refName);
-        return args;
-    }
-
-    // S-FEAT-G6T9: turn a `%D` decoration string ("HEAD -> main, origin/main, tag: v1.0") into clean
-    // ref labels. The "HEAD -> " pointer prefix is dropped; "tag: " is kept so the UI can style tags.
-    private static List<string> ParseRefNames(string decoration)
-    {
-        if (string.IsNullOrWhiteSpace(decoration)) return [];
-        var refs = new List<string>();
-        foreach (var raw in decoration.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var name = raw.StartsWith("HEAD -> ", StringComparison.Ordinal) ? raw["HEAD -> ".Length..] : raw;
-            if (name == "HEAD") continue; // detached HEAD pointer with no branch - nothing to badge
-            refs.Add(name);
-        }
-        return refs;
-    }
-
-    public async Task<int> GetCommitCountAsync(string diskPath, string? refName, string? search = null, CancellationToken ct = default)
-    {
-        if (!string.IsNullOrEmpty(search))
-        {
-            var searchArgs = new List<string> { "log", "--oneline", $"--grep={search}", "-i" };
-            searchArgs.Add(string.IsNullOrEmpty(refName) ? "--all" : refName);
-            var (sc, so, _) = await RunGitAsync(diskPath, searchArgs, ct).ConfigureAwait(false);
-            return sc == 0 ? so.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length : 0;
-        }
-
-        var args = new List<string> { "rev-list", "--count" };
-        args.Add(string.IsNullOrEmpty(refName) ? "--all" : refName);
-        var (exitCode, output, _) = await RunGitAsync(diskPath, args, ct).ConfigureAwait(false);
-        return exitCode == 0 && int.TryParse(output.Trim(), out var count) ? count : 0;
-    }
+    public Task<List<string>> GetCommitAuthorsAsync(string diskPath, CancellationToken ct = default)
+        => _log.GetCommitAuthorsAsync(diskPath, ct);
 
     public async Task<List<GitLightBranchDto>> GetBranchesAsync(string diskPath, string defaultBranch, CancellationToken ct = default)
     {
@@ -325,6 +240,33 @@ public class GitLightCliService(
     public Task<Stream?> GetBlobStreamAsync(string diskPath, string refName, string path, CancellationToken ct = default)
     {
         EnsureRefArgsSafe(refName, path);
+        var process = StartStreamingGit(diskPath, ["show", $"{refName}:{path}"]);
+        if (process is null) return Task.FromResult<Stream?>(null);
+
+        // Hardening (#50): wrap stdout in a Stream that owns the Process so the caller's
+        // `using` ensures the git child is killed/disposed even on early stream abandonment.
+        return Task.FromResult<Stream?>(new ProcessOwnedStream(process, process.StandardOutput.BaseStream));
+    }
+
+    public async Task<Stream?> GetArchiveStreamAsync(string diskPath, string refName, string prefix, CancellationToken ct = default)
+    {
+        // R2-003: the ref reaches git as argv like every other read route, so it gets the same guard.
+        EnsureRefArgsSafe(refName);
+        // Resolve the tree first: once the zip streams, the 200 is on the wire and a git failure could
+        // only truncate it. An unknown ref is a 404 instead.
+        var (exitCode, _, _) = await RunGitAsync(
+            diskPath, ["rev-parse", "--verify", "--quiet", $"{refName}^{{tree}}"], ct, ignoreExitCode: true).ConfigureAwait(false);
+        if (exitCode != 0) return null;
+
+        var process = StartStreamingGit(diskPath, ["archive", "--format=zip", $"--prefix={prefix}/", refName]);
+        if (process is null) return null;
+        // Drain stderr so a chatty git can never block on a full pipe while the response streams.
+        _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        return new ProcessOwnedStream(process, process.StandardOutput.BaseStream);
+    }
+
+    private static Process? StartStreamingGit(string diskPath, IReadOnlyList<string> args)
+    {
         var psi = new ProcessStartInfo
         {
             FileName = "git",
@@ -334,15 +276,9 @@ public class GitLightCliService(
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        psi.ArgumentList.Add("show");
-        psi.ArgumentList.Add($"{refName}:{path}");
-
-        var process = Process.Start(psi);
-        if (process is null) return Task.FromResult<Stream?>(null);
-
-        // Hardening (#50): wrap stdout in a Stream that owns the Process so the caller's
-        // `using` ensures the git child is killed/disposed even on early stream abandonment.
-        return Task.FromResult<Stream?>(new ProcessOwnedStream(process, process.StandardOutput.BaseStream));
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(psi);
+        return Process.Start(psi);
     }
 
     public async Task<(bool Success, string? MergeCommitSha, string? Error)> MergeBranchesAsync(
@@ -396,75 +332,26 @@ public class GitLightCliService(
         }
     }
 
-    public async Task<PullRequestDiffDto> GetDiffAsync(string diskPath, string fromRef, string toRef, CancellationToken ct = default)
-    {
-        EnsureRefArgsSafe(fromRef, toRef);
-        var (exitCode, output, _) = await RunGitAsync(diskPath, ["diff", "--numstat", fromRef, toRef], ct).ConfigureAwait(false);
-        if (exitCode != 0) return new PullRequestDiffDto();
 
-        var fileDiffs = new List<FileDiffDto>();
-        int totalAdd = 0, totalDel = 0;
-        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var parts = line.Split('\t');
-            if (parts.Length < 3) continue;
-            int.TryParse(parts[0], out var additions);
-            int.TryParse(parts[1], out var deletions);
-            totalAdd += additions;
-            totalDel += deletions;
-            fileDiffs.Add(new FileDiffDto
-            {
-                Path = parts[2],
-                Status = "modified",
-                Additions = additions,
-                Deletions = deletions
-            });
-        }
+    public Task<PullRequestDiffDto> GetDiffAsync(
+        string diskPath, string fromRef, string toRef, CancellationToken ct = default)
+        => _diffs.GetDiffAsync(diskPath, fromRef, toRef, ct);
 
-        return new PullRequestDiffDto
-        {
-            FileDiffs = fileDiffs,
-            Stats = new DiffStatsDto
-            {
-                Additions = totalAdd,
-                Deletions = totalDel,
-                FilesChanged = fileDiffs.Count
-            }
-        };
-    }
+    public Task<GitPatchResult> GetCommitPatchAsync(
+        string diskPath, string fromRef, string toRef, CancellationToken ct = default)
+        => _diffs.GetCommitPatchAsync(diskPath, fromRef, toRef, ct);
 
-    public async Task<GitPatchResult> GetCommitPatchAsync(
-        string diskPath,
-        string fromRef,
-        string toRef,
-        CancellationToken ct = default)
-    {
-        EnsureRefArgsSafe(fromRef, toRef);
-        var (exitCode, output, _, truncated) = await git.RunGitBoundedAsync(
-            diskPath,
-            ["diff", "--patch", fromRef, toRef],
-            MaximumCommitPatchChars,
-            ct).ConfigureAwait(false);
-        return exitCode == 0
-            ? new GitPatchResult(output, truncated)
-            : new GitPatchResult(string.Empty, false);
-    }
+    public Task<IReadOnlyList<string>?> GetChangedPathsAsync(
+        string diskPath, string fromRef, string toRef, CancellationToken ct = default)
+        => _diffs.GetChangedPathsAsync(diskPath, fromRef, toRef, ct);
 
-    public async Task<GitPatchResult> GetRootCommitPatchAsync(
-        string diskPath,
-        string commitRef,
-        CancellationToken ct = default)
-    {
-        EnsureRefArgsSafe(commitRef);
-        var (exitCode, output, _, truncated) = await git.RunGitBoundedAsync(
-            diskPath,
-            ["show", "--format=", "--no-ext-diff", "--patch", commitRef],
-            MaximumCommitPatchChars,
-            ct).ConfigureAwait(false);
-        return exitCode == 0
-            ? new GitPatchResult(output, truncated)
-            : new GitPatchResult(string.Empty, false);
-    }
+    public Task<IReadOnlyDictionary<string, string>?> GetTreeBlobsAsync(
+        string diskPath, string revision, CancellationToken ct = default)
+        => _diffs.GetTreeBlobsAsync(diskPath, revision, ct);
+
+    public Task<GitPatchResult> GetRootCommitPatchAsync(
+        string diskPath, string commitRef, CancellationToken ct = default)
+        => _diffs.GetRootCommitPatchAsync(diskPath, commitRef, ct);
 
     public async Task RunGcAsync(string diskPath, CancellationToken ct = default)
     {
@@ -585,12 +472,4 @@ public class GitLightCliService(
         => git.RunGitAsync(workDir, args, ct, timeout, ignoreExitCode);
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
-
-    private static bool IsHexString(ReadOnlySpan<char> s)
-    {
-        foreach (var c in s)
-            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-                return false;
-        return true;
-    }
 }

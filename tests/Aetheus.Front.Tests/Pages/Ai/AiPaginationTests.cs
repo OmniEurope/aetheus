@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Ai;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.AiTasks;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Ai;
 
@@ -15,6 +12,12 @@ public sealed class AiPaginationTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this, isAdmin: true);
         _handler.SetJsonResponse("api/ai/consumption", new AiConsumptionDto());
+        // Recette R-224: the profile and binary lists the header filters offer.
+        _handler.SetJsonResponse("api/ai/profile-options", new List<AiRunnerProfileDto>
+        {
+            new() { Id = 1, Name = "reviewer", Binary = "claude" },
+            new() { Id = 2, Name = "auditor", Binary = "claude" }
+        });
         _handler.SetJsonResponse("api/ai/tasks", new PaginatedResult<AiTaskDefinitionDto>
         {
             Items = [],
@@ -53,12 +56,82 @@ public sealed class AiPaginationTests : BunitContext
         var cut = Render<AiTasks>();
 
         await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(
-            new LoadDataArgs { Skip = 100, Top = 25 }));
+            new GridLoadArgs { Skip = 100, Top = 25 }));
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("api/ai/tasks", StringComparison.Ordinal)
             && request.Url.Contains("page=5", StringComparison.Ordinal)
             && request.Url.Contains("pageSize=25", StringComparison.Ordinal));
+    }
+
+    /// <summary>Recette R-224: a header filter of the tasks grid reaches the API as a column filter.</summary>
+    [Fact]
+    public async Task TasksGrid_HeaderFilter_ReachesTheApi()
+    {
+        var cut = Render<AiTasks>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(new GridLoadArgs
+        {
+            Skip = 0,
+            Top = 25,
+            Filters = [new GridFilterDescriptor("Enabled", "False", OmniDataGridFilterOperator.Equals)]
+        }));
+
+        Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("api/ai/tasks", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Enabled", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=False", StringComparison.Ordinal));
+    }
+
+    /// <summary>Recette R-224: a header filter of the profiles grid reaches the API as a column filter.</summary>
+    [Fact]
+    public async Task ProfilesGrid_HeaderFilter_ReachesTheApi()
+    {
+        var cut = Render<AiRunnerProfiles>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(new GridLoadArgs
+        {
+            Skip = 0,
+            Top = 25,
+            Filters = [new GridFilterDescriptor("Binary", "claude", OmniDataGridFilterOperator.Equals)]
+        }));
+
+        Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("api/ai/profiles", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Binary", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=claude", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true, "api/ai/tasks", "Enabled desc")]
+    [InlineData(false, "api/ai/profiles", "Binary desc")]
+    public async Task GridSort_ReachesTheApi(bool tasks, string route, string orderBy)
+    {
+        if (tasks)
+        {
+            var cut = Render<AiTasks>();
+            await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(new GridLoadArgs
+            {
+                Skip = 0,
+                Top = 25,
+                OrderBy = orderBy
+            }));
+        }
+        else
+        {
+            var cut = Render<AiRunnerProfiles>();
+            await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(new GridLoadArgs
+            {
+                Skip = 0,
+                Top = 25,
+                OrderBy = orderBy
+            }));
+        }
+
+        Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains(route, StringComparison.Ordinal)
+            && request.Url.Contains($"sortBy={orderBy.Split(' ')[0]}", StringComparison.Ordinal)
+            && request.Url.Contains("sortDescending=true", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -102,7 +175,7 @@ public sealed class AiPaginationTests : BunitContext
         var cut = Render<AiRunnerProfiles>();
 
         await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(
-            new LoadDataArgs { Skip = 100, Top = 25 }));
+            new GridLoadArgs { Skip = 100, Top = 25 }));
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("api/ai/profiles", StringComparison.Ordinal)
@@ -116,8 +189,7 @@ public sealed class AiPaginationTests : BunitContext
         var cut = Render<AiResultDialog>(
             parameters => parameters.Add(component => component.DefinitionId, 7));
 
-        await cut.InvokeAsync(() => cut.Instance.OnPageChangedAsync(
-            new PagerEventArgs { Skip = 100 }));
+        await cut.InvokeAsync(() => cut.Instance.OnPageChangedAsync(5));
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("api/ai/results", StringComparison.Ordinal)

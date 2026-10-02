@@ -1,0 +1,119 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/dashboards/{Id:int}"
+
+<PageTitle>@L["EditDashboard"] - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else if (_dashboard is not null)
+{
+    <OmniPageHeader Title="@($"{L["EditDashboard"]} - {_dashboard.Name}")" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("space_dashboard")" /></Icon>
+    </OmniPageHeader>
+
+    <OmniCard Class="omni-u-p-lg omni-u-mb-lg">
+        <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.End">
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniFormField Label="@L["DashboardName"]" Class="omni-u-w-100" For="oe-formfield-pages-dashboard-dashboardedit-1">
+                    <OmniTextBox Id="oe-formfield-pages-dashboard-dashboardedit-1" @bind-Value="_name" />
+                </OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniSwitch @bind-Value="_isDefault">@L["IsDefault"]</OmniSwitch>
+            </OmniColumn>
+            <OmniColumn Span="12" SmallSpan="12">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@AddWidget" title="@L["AddWidget"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SaveDashboard" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["SaveDashboard"]</span></OmniButton>
+                </OmniStack>
+            </OmniColumn>
+        </OmniRow>
+    </OmniCard>
+
+    @if (_widgets.Count == 0)
+    {
+        @* B-bis: no blue Info banner - use the shared empty state. *@
+        <EmptyState Icon="widgets" Title="@L["NoRecords"]" />
+    }
+    else
+    {
+        <div role="list" aria-label="@L["Widgets"]">
+        @for (var i = 0; i < _widgets.Count; i++)
+        {
+            var index = i;
+            var widget = _widgets[index];
+            <div role="listitem" draggable="true"
+                @ondragstart="@(() => OnDragStart(index))"
+                @ondragend="OnDragEnd"
+                @ondragover:preventDefault="true" @ondrop="@(() => OnDrop(index))" @ondrop:preventDefault="true">
+            <OmniCard Class="@($"omni-u-p-md omni-u-mb-sm{(_dragIndex == index ? " omni-u-border-accent" : "")}")">
+                <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <OmniColumn Span="1" SmallSpan="1">
+                        <OmniIcon Name="OmniIconName.DotsThreeVertical" Class="omni-u-text-muted" />
+                    </OmniColumn>
+                    <OmniColumn Span="1" SmallSpan="1">
+                        <OmniIcon Name="@MaterialIconMap.Resolve(GetWidgetIcon(widget.WidgetType))" />
+                    </OmniColumn>
+                    <OmniColumn Span="12" SmallSpan="6">
+                        <OmniTextBox aria-label="@L["WidgetTitle"]" @bind-Value="widget.Title" Placeholder="@L["WidgetTitle"]" Class="omni-u-w-100" />
+                    </OmniColumn>
+                    <OmniColumn Span="12" SmallSpan="6">
+                        <OmniDropDown aria-label="@L["Type"]" @bind-Value="widget.WidgetType" Options="@WidgetTypeOptions" Class="omni-u-w-100" />
+                    </OmniColumn>
+                    <OmniColumn Span="6" SmallSpan="3">
+                        <OmniNumeric @bind-Value="widget.Column" Minimum="0" Maximum="11" Class="omni-u-w-100" aria-label="@L["Column"]" />
+                    </OmniColumn>
+                    <OmniColumn Span="6" SmallSpan="3">
+                        <OmniNumeric @bind-Value="widget.Width" Minimum="1" Maximum="12" Class="omni-u-w-100" aria-label="@L["Width"]" />
+                    </OmniColumn>
+                    <OmniColumn Span="6" SmallSpan="3">
+                        <OmniNumeric @bind-Value="widget.Height" Minimum="1" Maximum="4" Class="omni-u-w-100" aria-label="@L["Height"]" />
+                    </OmniColumn>
+                    <OmniColumn Span="6" SmallSpan="3">
+                        <OmniSwitch TValue="bool" Value="@widget.IsVisible" ValueExpression="@(() => widget.IsVisible)" ValueChanged="@(value => widget.IsVisible = value)">@L["Visible"]</OmniSwitch>
+                    </OmniColumn>
+                    <OmniColumn Span="12" SmallSpan="12">
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall">
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => MoveUp(widget))" Disabled="@(index == 0)"><OmniIcon Name="OmniIconName.Upgrade" /> <span>@L["MoveUp"]</span></OmniButton>
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => MoveDown(widget))" Disabled="@(index == _widgets.Count - 1)"><OmniIcon Name="OmniIconName.ArrowDown" /> <span>@L["MoveDown"]</span></OmniButton>
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => ToggleConfig(widget))"><OmniIcon Name="OmniIconName.Settings" /> <span>@L["Settings"]</span></OmniButton>
+                            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RemoveWidget(widget))"><OmniIcon Name="OmniIconName.Delete" /> <span>@L["Delete"]</span></OmniButton>
+                        </OmniStack>
+                    </OmniColumn>
+                </OmniRow>
+                @if (widget.ShowConfig)
+                {
+                    <OmniRow Gap="OmniSpacing.Large" Class="omni-u-mt-sm">
+                        <OmniColumn Span="12">
+                            <OmniFormField Label="@L["Configuration"]" Class="omni-u-w-100" For="oe-formfield-pages-dashboard-dashboardedit-2">
+                                <OmniTextArea Id="oe-formfield-pages-dashboard-dashboardedit-2" @bind-Value="widget.ConfigurationJson" Rows="4" Class="omni-u-w-100" Placeholder="{}" />
+                            </OmniFormField>
+                        </OmniColumn>
+                    </OmniRow>
+                }
+            </OmniCard>
+            </div>
+        }
+        </div>
+    }
+
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mt-2xl omni-u-mb-md">@L["Preview"]</OmniHeading>
+    <OmniRow Gap="OmniSpacing.Small">
+        @foreach (var widget in _widgets.Where(w => w.IsVisible).OrderBy(w => w.Row).ThenBy(w => w.Column))
+        {
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniCard Class="@($"omni-u-p-md dashboard-widget-preview dashboard-widget-height-{Math.Clamp(widget.Height, 1, 4)}")">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                        <OmniIcon Name="@MaterialIconMap.Resolve(GetWidgetIcon(widget.WidgetType))" />
+                        <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@widget.Title</OmniText>
+                    </OmniStack>
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-mt-sm">
+                        @widget.WidgetType - @widget.Width×@widget.Height
+                    </OmniText>
+                </OmniCard>
+            </OmniColumn>
+        }
+    </OmniRow>
+}

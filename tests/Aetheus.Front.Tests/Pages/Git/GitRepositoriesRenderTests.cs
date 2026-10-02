@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Git;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Git;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests.Pages.Git;
 
@@ -36,28 +32,34 @@ public class GitRepositoriesRenderTests : BunitContext
 
         // The page renders its toolbar (New Repository action) and the project filter dropdown,
         // and OnInitializedAsync loads the project list that populates the filter.
-        Assert.Contains("NewRepository", cut.Markup);
+        // PLAN-003 lot 5: the button says "Create"; the page title carries the context.
+        Assert.Contains("GitRepositories", cut.Markup);
+        Assert.Contains(">Create<", cut.Markup);
         Assert.Contains("SelectProject", cut.Markup);
         Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("api/projects"));
     }
 
     [Fact]
-    public void ProjectScopedPage_ContainsExternalRepositoryManagement()
+    public void ProjectScopedPage_ContainsExternalRepositoryManagement_InItsTab()
     {
-        _handler.SetJsonResponse("api/external-repos/enabled", true);
         _handler.SetResponse("api/external-repos/project/1", System.Net.HttpStatusCode.NotFound);
         var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
         navigation.NavigateTo(navigation.GetUriWithQueryParameter("projectId", 1));
 
         var cut = Render<GitRepositories>();
 
+        // Recette R-318: the internal repositories first; the external repository is the second tab.
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".git-repository-tabs [role='tab']").Count));
+        Assert.DoesNotContain("id=\"external-repository\"", cut.Markup, StringComparison.Ordinal);
+        cut.FindAll(".git-repository-tabs [role='tab']")[1].Click();
+
         cut.WaitForAssertion(() =>
         {
             Assert.Contains("id=\"external-repository\"", cut.Markup);
             Assert.Single(cut.FindComponents<
-                Aetheus.Front.Pages.Projects.ProjectDetailSections.ProjectExternalRepoSection>());
+                Aetheus.Front.Components.Projects.ProjectDetailSections.ProjectExternalRepoSection>());
             Assert.Contains(_handler.Requests, request =>
-                request.Url.Contains("api/external-repos/enabled", StringComparison.Ordinal));
+                request.Url.Contains("api/external-repos/project/1", StringComparison.Ordinal));
         });
     }
 
@@ -77,21 +79,22 @@ public class GitRepositoriesRenderTests : BunitContext
     }
 
     [Fact]
-    public void ExternalRepositoryFragment_WithOneInternalRepository_KeepsManagementSection()
+    public void ExternalRepositoryTab_WithOneInternalRepository_KeepsManagementSection()
     {
         _handler.SetPaginatedJsonResponse("api/git/repos", new List<GitLightRepoDto>
         {
             new() { Id = 31, ProjectId = 1, Name = "only-repo", DefaultBranch = "main" }
         });
-        _handler.SetJsonResponse("api/external-repos/enabled", true);
         _handler.SetResponse("api/external-repos/project/1", System.Net.HttpStatusCode.NotFound);
         var navigation = Services.GetRequiredService<NavigationManager>();
-        navigation.NavigateTo("git-repositories?projectId=1#external-repository");
+        // Recette R-318: the external repository is the project's second tab.
+        navigation.NavigateTo("git-repositories?projectId=1&tab=external");
 
         var cut = Render<GitRepositories>();
 
         cut.WaitForAssertion(() => Assert.Contains("id=\"external-repository\"", cut.Markup));
-        Assert.EndsWith("/git-repositories?projectId=1#external-repository", navigation.Uri, StringComparison.Ordinal);
+        Assert.EndsWith("/git-repositories?projectId=1&tab=external", navigation.Uri, StringComparison.Ordinal);
+        Assert.Equal(2, cut.FindAll(".git-repository-tabs [role='tab']").Count);
     }
 
     [Fact]
@@ -121,6 +124,11 @@ public class GitRepositoriesRenderTests : BunitContext
             HttpMethod.Get,
             "api/git/repos",
             _ => response.Task);
+        // Recette R-224: the default-branch values of the column filter answer at once.
+        _handler.SetAsyncJsonResponse(
+            HttpMethod.Get,
+            "api/git/repos/filter-values",
+            _ => Task.FromResult(new GitRepositoryFilterValuesDto()));
 
         var cut = Render<GitRepositories>();
         cut.WaitForState(
@@ -128,22 +136,24 @@ public class GitRepositoriesRenderTests : BunitContext
                 && request.Url.Contains("api/git/repos", StringComparison.Ordinal)),
             TimeSpan.FromSeconds(2));
 
-        Assert.Single(cut.FindComponents<Aetheus.Front.Shared.AetheusDataGrid<GitLightRepoDto>>());
-        Assert.Empty(cut.FindComponents<RadzenProgressBarCircular>());
+        Assert.Single(cut.FindComponents<Aetheus.Front.Components.Shared.AetheusDataGrid<GitLightRepoDto>>());
 
         // Complete the pending HTTP operation on bUnit's renderer so the component continuation
         // cannot be starved by an unrelated full-suite worker repeatedly scheduling renders.
         await cut.InvokeAsync(() => response.SetResult(new PaginatedResult<GitLightRepoDto>()));
         cut.WaitForState(
-            () => !cut.FindComponent<Aetheus.Front.Shared.AetheusDataGrid<GitLightRepoDto>>()
+            () => !cut.FindComponent<Aetheus.Front.Components.Shared.AetheusDataGrid<GitLightRepoDto>>()
                 .Instance.IsLoading,
             TimeSpan.FromSeconds(5));
         Assert.Contains("NoRepositoriesFound", cut.Markup);
 
         var repositoryRequests = _handler.Requests.Count(request =>
             request.Method == "GET"
-            && request.Url.Contains("api/git/repos", StringComparison.Ordinal));
-        Assert.InRange(repositoryRequests, 1, 2);
+            && request.Url.Contains("api/git/repos", StringComparison.Ordinal)
+            && !request.Url.Contains("filter-values", StringComparison.Ordinal));
+        // The page's own first load, the grid's, and the reload the page asks of the grid so a
+        // virtualized grid shows that first result (recette R-185): bounded, never a loop.
+        Assert.InRange(repositoryRequests, 1, 3);
     }
 
     [Fact]
@@ -211,7 +221,7 @@ public class GitRepositoriesRenderTests : BunitContext
         await cut.InvokeAsync(() => Task.CompletedTask);
         _handler.Requests.Clear();
         await cut.InvokeAsync(() => cut.Instance.OnLoadDataAsync(
-            new Radzen.LoadDataArgs { Skip = 25, Top = 25, OrderBy = "Name" }));
+            new GridLoadArgs { Skip = 25, Top = 25, OrderBy = "Name" }));
 
         var request = Assert.Single(_handler.Requests, item =>
             item.Method == "GET"

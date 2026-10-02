@@ -13,62 +13,96 @@ public sealed class OperationalRealtimeSurfaceAuditTests
     private static readonly IReadOnlyDictionary<string, string[]> RequiredContracts =
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            ["Pages/Dashboard/Home.razor.cs"] =
+            ["Components/Dashboards/Home.razor.cs"] =
                 ["ServerHeartbeat", "PipelineRunStarted", "EntityChanged", "RejoinOnReconnect"],
-            ["Pages/Servers/Servers.razor.cs"] =
+            ["Components/Servers/Servers.razor.cs"] =
                 ["ServerHeartbeat", "ServerOffline", "RejoinOnReconnect"],
-            ["Services/ServerDetailLoader.cs"] =
+            ["Components/Shared/ServerDetailLoader.cs"] =
                 ["Heartbeat", "TaskCompleted", "RejoinOnReconnect"],
-            ["Shared/PipelinesList.razor.cs"] =
+            ["Components/Shared/PipelinesList.razor.cs"] =
                 ["PipelineRunStarted", "PipelineRunCompleted", "EntityChanged", "RejoinOnReconnect"],
-            ["Pages/Pipelines/PipelineRunLiveConnection.cs"] =
+            ["Components/Pipelines/PipelineRunLiveConnection.cs"] =
                 ["PipelineRunCompleted", "StepCompleted", "RejoinOnReconnect"],
-            ["Pages/Tasks/TaskListView.razor.cs"] =
+            ["Components/Tasks/TaskListView.razor.cs"] =
                 ["TaskQueued", "TaskCompleted", "RejoinOnReconnect"],
-            ["Pages/Alerts/Alerts.razor.cs"] =
+            ["Components/Alerts/Alerts.razor.cs"] =
                 ["AlertRuleChanged", "RejoinOnReconnect"],
-            ["Shared/ReleasesList.razor.cs"] =
+            ["Components/Shared/ReleasesList.razor.cs"] =
                 ["ReleaseCreated", "ReleaseStatusChanged", "RejoinOnReconnect"],
-            ["Pages/Git/GitRepositoryRealtimeSubscription.cs"] =
+            ["Components/Shared/PendingApprovalsService.cs"] =
+                ["ApprovalRequired", "ApprovalResolved", "PipelineRunCompleted", "RejoinOnReconnect"],
+            ["Components/Git/GitRepositoryRealtimeSubscription.cs"] =
                 ["BranchesChanged", "CommitsChanged", "RejoinOnReconnect"],
-            ["Shared/MonitoredAppsList.razor.cs"] =
+            ["Components/Projects/MonitoredAppsList.razor.cs"] =
                 ["EntityChanged", "ResourceType.Project", "RejoinOnReconnect"],
-            ["Pages/Analysis/AnalysisPortfolio.razor.cs"] =
+            ["Components/Analysis/AnalysisPortfolio.razor.cs"] =
                 ["EntityChanged", "ResourceType.Project", "RejoinOnReconnect"],
-            ["Pages/ServiceConnections/ServiceConnections.razor.cs"] =
+            ["Components/ServiceConnections/ServiceConnections.razor.cs"] =
                 ["EntityChanged", "ResourceType.ServiceConnection", "RejoinOnReconnect"],
-            ["Pages/Pipelines/PipelineTemplates.razor.cs"] =
+            ["Components/Pipelines/PipelineTemplates.razor.cs"] =
                 ["EntityChanged", "ResourceType.PipelineTemplate", "RejoinOnReconnect"],
-            ["Pages/Ai/AiTasks.razor.cs"] =
+            ["Components/AiTasks/AiTasks.razor.cs"] =
                 ["TaskTracker.OnTaskCompleted", "OperationKind.AiRun", "FindRunResultAsync"],
-            ["Pages/Backups/Backups.razor.cs"] =
+            ["Components/AppBackups/Backups.razor.cs"] =
                 ["OperationalRealtimeEvents.BackupChanged", "RejoinOnReconnect", "TrailingReloadCoalescer"],
-            ["Shared/RealtimeAdminGridPageBase.cs"] =
+            ["Components/Shared/RealtimeAdminGridPageBase.cs"] =
                 ["AdminEntitySubscription", "TrailingReloadCoalescer"],
-            ["Pages/PackageFeeds/PackageFeedsAdmin.razor.cs"] =
+            ["Components/PackageFeeds/PackageFeedsAdmin.razor.cs"] =
                 ["RealtimeAdminGridPageBase", "AdminEntities.PackageFeed"],
-            ["Pages/PackageFeeds/PackageFeedPackagesDialog.razor.cs"] =
+            ["Components/PackageFeeds/PackageFeedPackagesDialog.razor.cs"] =
                 ["AdminEntitySubscription", "AdminEntities.PackageFeed", "TrailingReloadCoalescer"],
-            ["Pages/PackageRegistry/PackageRegistryAdmin.razor.cs"] =
+            ["Components/PackageRegistry/PackageRegistryAdmin.razor.cs"] =
                 ["RealtimeAdminGridPageBase", "AdminEntities.PackageRegistry"],
-            ["Pages/PackageRegistry/PackageRegistryPackageDialog.razor.cs"] =
+            ["Components/PackageRegistry/PackageRegistryPackageDialog.razor.cs"] =
                 ["AdminEntitySubscription", "AdminEntities.PackageRegistry", "TrailingReloadCoalescer"],
-            ["Pages/Projects/Projects.razor.cs"] =
+            ["Components/Projects/Projects.razor.cs"] =
                 ["EntityChanged", "PipelineRunStarted", "ResourceType.Project", "RejoinOnReconnect"],
-            ["Pages/Projects/ProjectDetailSections/ProjectOverviewSection.razor.cs"] =
+            ["Components/Projects/ProjectDetailSections/ProjectOverviewSection.razor.cs"] =
                 ["PipelineRunStarted", "PipelineRunCompleted", "RejoinOnReconnect"],
-            ["Pages/Releases/ReleaseDetail.razor.cs"] =
+            ["Components/Releases/ReleaseDetail.razor.cs"] =
                 ["ReleaseStatusChanged", "RejoinOnReconnect"],
-            ["Pages/Logs/Logs.razor.cs"] =
+            ["Components/Logs/Logs.razor.cs"] =
                 ["LogReceived", "LogsReceived", "RejoinOnReconnect"],
-            ["Pages/Logs/SystemLogs.razor.cs"] =
-                ["PeriodicTimer", "AutoRefreshIntervalMs"],
-            ["Shared/EnvironmentsList.razor.cs"] =
+            // Recette R-181: pushed over the admin hub now, no polling loop.
+            ["Components/Logs/SystemLogs.razor.cs"] =
+                ["AdminEntitySubscription", "AdminEntities.SystemLog", "TrailingReloadCoalescer"],
+            ["Components/Projects/ProjectDetailSections/ProjectQualitySection.razor.cs"] =
+                ["EntityChanged", "ResourceType.Project", "RejoinOnReconnect"],
+            ["Components/Audit/AuditLogs.razor.cs"] =
+                ["AdminEntitySubscription", "AdminEntities.AuditLog", "TrailingReloadCoalescer"],
+            ["Components/Users/UserEdit.razor.cs"] =
+                ["AdminEntitySubscription", "AdminEntities.Role"],
+            ["Components/Shared/EntityLiveListBase.cs"] =
+                ["EntityChanged", "JoinEntityUpdates", "RejoinOnReconnect"],
+            ["Components/Pipelines/PipelineFleet.razor.cs"] =
+                ["FollowEntitiesAsync", "ResourceType.PipelineTemplate", "TrailingReloadCoalescer"],
+            ["Components/Projects/ProjectDetailSections/ProjectArtifactsSection.razor.cs"] =
+                ["PipelineRunCompleted"],
+            ["Components/Environments/EnvironmentsList.razor.cs"] =
                 ["EntityChanged", "ResourceType.Environment", "RejoinOnReconnect"],
-            ["Shared/VariableLibrariesList.razor.cs"] =
+            ["Components/Shared/VariableLibrariesList.razor.cs"] =
                 ["EntityChanged", "ResourceType.VariableLibrary", "RejoinOnReconnect"],
-            ["Shared/VaultsList.razor.cs"] =
-                ["EntityChanged", "ResourceType.Vault", "RejoinOnReconnect"]
+            ["Components/Shared/VaultsList.razor.cs"] =
+                ["FollowEntitiesAsync", "ResourceType.Vault"],
+            // R-181: the views whose Refresh button was replaced by server-pushed events.
+            ["Components/Shared/ServerLiveFeed.cs"] =
+                ["ServerHeartbeat", "TaskCompleted", "JoinServerGroup", "RejoinOnReconnect", "TrailingReloadCoalescer"],
+            ["Components/Shared/EntityOperationalFeed.cs"] =
+                ["JoinEntityUpdates", "RejoinOnReconnect", "TrailingReloadCoalescer"],
+            ["Components/Servers/ServerDetailSections/ServerMailDiagnosticsTab.razor.cs"] =
+                ["ServerLiveFeed", "ServerLiveFeedTriggers.HeartbeatAndTasks"],
+            ["Components/Servers/ServerDetailSections/ServerRkhunterSection.razor.cs"] =
+                ["ServerLiveFeed", "ServerLiveFeedTriggers.Heartbeat"],
+            ["Components/Servers/ServerDetailSections/ServerTeamspeakSection.razor.cs"] =
+                ["ServerLiveFeed", "ServerLiveFeedTriggers.Heartbeat"],
+            ["Components/Servers/ServerDetailSections/ServerServicesSection.razor.cs"] =
+                ["ServiceLogAutoRefresh", "LogReceived", "RejoinOnReconnect"],
+            ["Components/Shared/AppErrorsView.razor.cs"] =
+                ["EntityOperationalFeed", "OperationalRealtimeEvents.AppTelemetryChanged"],
+            ["Components/Shared/AppLogsView.razor.cs"] =
+                ["EntityOperationalFeed", "OperationalRealtimeEvents.AppTelemetryChanged"],
+            ["Components/Logs/Performance.razor.cs"] =
+                ["AdminEntitySubscription", "AdminEntities.ApiPerformance", "TrailingReloadCoalescer"]
         };
 
     [Fact]

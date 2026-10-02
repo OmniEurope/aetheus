@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Aetheus.Front.Tests.Architecture;
 
 /// <summary>
-/// Guards the UrlSyncedTabs convention per individual RadzenTabs container. Exceptions
+/// Guards the UrlSyncedTabs convention per individual OmniTabs container. Exceptions
 /// identify one exact container and expected tab count, never an entire file.
 /// </summary>
 public class UrlSyncedTabsAuditTests
@@ -12,29 +12,29 @@ public class UrlSyncedTabsAuditTests
     private static readonly AllowedContainer[] Allowlist =
     [
         new(
-            Path.Combine("Pages", "Settings", "Settings.razor"),
+            Path.Combine("Components", "Settings", "Settings.razor"),
             0,
-            6,
+            5,
             "route-based tabs (/settings/{tab})"),
         new(
-            Path.Combine("Pages", "Servers", "ServerDetailSections", "DockerProjectDialog.razor"),
+            Path.Combine("Components", "Servers", "ServerDetailSections", "DockerProjectDialog.razor"),
             0,
             5,
             "transient project-details dialog with no route"),
         new(
-            Path.Combine("Pages", "Ai", "AiResultDialog.razor"),
+            Path.Combine("Components", "AiTasks", "AiResultDialog.razor"),
             0,
             2,
             "transient AI-result dialog with no route"),
         new(
-            Path.Combine("Shared", "AppTelemetryPanel.razor"),
+            Path.Combine("Components", "Projects", "AppTelemetryPanel.razor"),
             0,
-            5,
-            "nested telemetry tabs under the route-level monitoring section"),
+            6,
+            "telemetry sub-tabs scoped to the application picked in the panel, not deep-linked"),
     ];
 
     private static readonly Regex TabsTokenRegex = new(
-        @"</RadzenTabs>|<RadzenTabs(?=[\s>])|<RadzenTabsItem(?=[\s>])",
+        @"</OmniTabs>|<OmniTabs(?=[\s>])|<OmniTabsItem(?=[\s>])",
         RegexOptions.Compiled);
 
     [Fact]
@@ -74,7 +74,7 @@ public class UrlSyncedTabsAuditTests
                 if (container.TabCount >= 2)
                 {
                     violations.Add(
-                        $"{rel}:{container.Line} bare <RadzenTabs> #{container.Ordinal} has "
+                        $"{rel}:{container.Line} bare <OmniTabs> #{container.Ordinal} has "
                         + $"{container.TabCount} tabs - use <UrlSyncedTabs> or add an exact exception");
                 }
             }
@@ -84,21 +84,86 @@ public class UrlSyncedTabsAuditTests
             violations.Add($"{stale.Path}: stale exception for container #{stale.Ordinal} ({stale.Reason})");
 
         Assert.True(containersScanned >= Allowlist.Length,
-            $"Scanner found only {containersScanned} bare RadzenTabs containers.");
+            $"Scanner found only {containersScanned} bare OmniTabs containers.");
         Assert.Empty(violations);
+    }
+
+    /// <summary>
+    /// OE selects a tab by its key, and UrlSyncedTabs hands it the slug of the tab in the address. A tab
+    /// placed in a UrlSyncedTabs without <c>Key</c> falls back to its (localized) title, never matches a
+    /// slug, and can then never be shown selected. Where the slugs are written inline, the keys must be
+    /// exactly those slugs, in order.
+    /// </summary>
+    [Fact]
+    public void Every_Tab_In_UrlSyncedTabs_Is_Keyed_By_Its_Slug()
+    {
+        var frontDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
+        var violations = new List<string>();
+        var scanned = 0;
+
+        foreach (var file in RepositoryScan.Enumerate(frontDir, "*.razor"))
+        {
+            var raw = StripRazorComments(File.ReadAllText(file));
+            var rel = Path.GetRelativePath(frontDir, file);
+            foreach (Match wrapper in WrapperRegex.Matches(raw))
+            {
+                var keys = new List<string>();
+                foreach (Match item in TopLevelItems(wrapper.Groups["body"].Value))
+                {
+                    scanned++;
+                    var key = KeyRegex.Match(item.Value);
+                    if (key.Success) keys.Add(key.Groups["key"].Value);
+                    else violations.Add($"{rel}:{LineNumberAt(raw, wrapper.Index)} OmniTabsItem without a literal Key");
+                }
+
+                var inlineSlugs = InlineSlugsRegex.Match(wrapper.Groups["open"].Value);
+                if (!inlineSlugs.Success) continue;
+                var slugs = Regex.Matches(inlineSlugs.Groups["list"].Value, "\"(?<slug>[^\"]+)\"")
+                    .Select(slug => slug.Groups["slug"].Value)
+                    .ToList();
+                if (!slugs.SequenceEqual(keys))
+                    violations.Add($"{rel}:{LineNumberAt(raw, wrapper.Index)} keys [{string.Join(", ", keys)}] "
+                        + $"differ from slugs [{string.Join(", ", slugs)}]");
+            }
+        }
+
+        Assert.True(scanned > 0, "No tab found in a UrlSyncedTabs. A guard that scans nothing passes vacuously.");
+        Assert.Empty(violations);
+    }
+
+    private static readonly Regex WrapperRegex = new(
+        @"(?<open><UrlSyncedTabs\b[^>]*>)(?<body>.*?)</UrlSyncedTabs>",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+
+    private static readonly Regex KeyRegex = new(@"^<OmniTabsItem\s+Key=""(?<key>[^""@]+)""", RegexOptions.Compiled);
+
+    private static readonly Regex InlineSlugsRegex = new(
+        @"Slugs=""@\(new\[\]\s*\{(?<list>[^}]*)\}\)""",
+        RegexOptions.Compiled);
+
+    /// <summary>The opening tags of the OmniTabsItems of this tab set, not those of a tab set nested in a tab.</summary>
+    private static IEnumerable<Match> TopLevelItems(string body)
+    {
+        var depth = 0;
+        foreach (Match token in Regex.Matches(body, @"</OmniTabsItem>|<OmniTabsItem\b[^>]*?/?>"))
+        {
+            if (token.Value.StartsWith("</", StringComparison.Ordinal)) { depth--; continue; }
+            if (depth == 0) yield return token;
+            if (!token.Value.EndsWith("/>", StringComparison.Ordinal)) depth++;
+        }
     }
 
     [Fact]
     public void Scanner_Counts_Each_Container_Independently()
     {
         const string markup = """
-            <RadzenTabs><Tabs><RadzenTabsItem /></Tabs></RadzenTabs>
-            <RadzenTabs>
+            <OmniTabs><Tabs><OmniTabsItem /></Tabs></OmniTabs>
+            <OmniTabs>
                 <Tabs>
-                    <RadzenTabsItem />
-                    <RadzenTabsItem />
+                    <OmniTabsItem />
+                    <OmniTabsItem />
                 </Tabs>
-            </RadzenTabs>
+            </OmniTabs>
             """;
 
         var containers = EnumerateContainers(markup);
@@ -121,14 +186,14 @@ public class UrlSyncedTabsAuditTests
     public void SharedTabs_ReserveStableGeometry()
     {
         var frontDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
-        var wrapper = File.ReadAllText(Path.Combine(frontDir, "Shared", "UrlSyncedTabs.razor"));
+        var wrapper = File.ReadAllText(Path.Combine(frontDir, "Components", "Shared", "UrlSyncedTabs.razor"));
         var css = File.ReadAllText(Path.Combine(frontDir, "wwwroot", "css", "app.css"));
 
-        Assert.Contains("class=\"@CssClass\"", wrapper, StringComparison.Ordinal);
+        Assert.Contains("Class=\"@CssClass\"", wrapper, StringComparison.Ordinal);
         Assert.Contains("scrollbar-gutter: stable", css, StringComparison.Ordinal);
-        Assert.Contains(".url-synced-tabs > .rz-tabview-nav", css, StringComparison.Ordinal);
+        Assert.Contains(".url-synced-tabs > .omni-tabs__strip .omni-tabs__viewport", css, StringComparison.Ordinal);
         Assert.Contains("flex: 1 1 0", css, StringComparison.Ordinal);
-        Assert.Contains(".rz-tabview > .rz-tabview-nav > li > button", css, StringComparison.Ordinal);
+        Assert.Contains(".omni-tabs > .omni-tabs__strip .omni-tabs__viewport .omni-tabs__tab", css, StringComparison.Ordinal);
         Assert.Contains("width: 100%", css, StringComparison.Ordinal);
         Assert.Contains("scrollbar-width: none", css, StringComparison.Ordinal);
     }
@@ -141,7 +206,7 @@ public class UrlSyncedTabsAuditTests
 
         foreach (var token in TabsTokenRegex.Matches(source).Cast<Match>())
         {
-            if (token.Value.StartsWith("<RadzenTabsItem", StringComparison.Ordinal))
+            if (token.Value.StartsWith("<OmniTabsItem", StringComparison.Ordinal))
             {
                 if (stack.TryPeek(out var current)) current.TabCount++;
                 continue;

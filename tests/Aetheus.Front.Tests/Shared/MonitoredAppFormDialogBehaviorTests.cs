@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Shared;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Shared;
 
@@ -18,7 +16,7 @@ public sealed class MonitoredAppFormDialogBehaviorTests : BunitContext
     public MonitoredAppFormDialogBehaviorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
     }
@@ -51,8 +49,8 @@ public sealed class MonitoredAppFormDialogBehaviorTests : BunitContext
             new MonitoredAppDto { Id = 11, ProjectId = 7, Name = "PortfolioTest public" });
         var cut = Render<MonitoredAppFormDialog>(p => p.Add(x => x.ProjectId, 7));
 
-        cut.Find("input[name='Name']").Input("PortfolioTest public");
-        cut.Find("input[name='ProbeUrl']").Input("https://sonytumen.com/");
+        cut.Find("input#Name").Input("PortfolioTest public");
+        cut.Find("input#ProbeUrl").Input("https://sonytumen.com/");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(
@@ -107,8 +105,8 @@ public sealed class MonitoredAppFormDialogBehaviorTests : BunitContext
         await InvokeSubmitAsync(cut);
 
         Assert.DoesNotContain(_handler.Requests, r => r.Method is "POST" or "PUT");
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Warning);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Warning);
     }
 
     [Fact]
@@ -217,7 +215,7 @@ public sealed class MonitoredAppFormDialogBehaviorTests : BunitContext
         });
     }
 
-    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
     private static UpdateMonitoredAppRequest Model(MonitoredAppFormDialog instance) => (UpdateMonitoredAppRequest)
         typeof(MonitoredAppFormDialog).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
     private static Task InvokeSubmitAsync(IRenderedComponent<MonitoredAppFormDialog> cut) => cut.InvokeAsync(() =>

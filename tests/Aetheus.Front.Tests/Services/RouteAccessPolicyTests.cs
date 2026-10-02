@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Tests.Services;
 
@@ -34,6 +31,7 @@ public class RouteAccessPolicyTests
     [InlineData("help/rbac")]
     [InlineData("account/change-password")]
     [InlineData("not-found")]
+    [InlineData("notifications")]
     public void AuthenticatedUser_CanAccessPersonalRoutes(string route)
     {
         Assert.True(RouteAccessPolicy.CanAccess(route, true, false, Loaded()));

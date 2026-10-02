@@ -6,7 +6,24 @@ namespace Aetheus.Back.Services;
 
 public static class YamlParsingHelper
 {
+    /// <summary>
+    /// The pipeline deserializer is forward compatible (recette R2-041): a key the running backend does
+    /// not know yet is skipped instead of refusing the whole definition, because the production backend
+    /// reads the delivery YAML from the branch that brings the code for that key. The skipped key is not
+    /// silent: <c>PipelineYamlDiagnostics.AppendUnknownPropertyWarnings</c> names it in the editor's
+    /// validation result and in the run's warnings. A real shape error (a scalar where a list is expected,
+    /// a value that does not convert to the property type, broken YAML) still throws.
+    /// </summary>
     public static readonly IDeserializer Deserializer = new DeserializerBuilder()
+        .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        .IgnoreUnmatchedProperties()
+        .Build();
+
+    /// <summary>
+    /// Server configuration YAML keeps the strict contract: it is written by hand for one server and
+    /// applied as a whole, so a misspelled key must be refused rather than skipped.
+    /// </summary>
+    public static readonly IDeserializer ServerConfigDeserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .Build();
 
@@ -14,6 +31,11 @@ public static class YamlParsingHelper
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .WithAttributeOverride<PipelineIsolationDefinition>(
             isolation => isolation.IsContainer,
+            new YamlIgnoreAttribute())
+        // A computed property: written out, it would come back as an unknown `is_empty` key reported
+        // as a warning on every resolved pipeline carrying a template's requires:.
+        .WithAttributeOverride<PipelineRequiresDefinition>(
+            requires => requires.IsEmpty,
             new YamlIgnoreAttribute())
         .Build();
 
@@ -110,6 +132,7 @@ public static class YamlParsingHelper
             Group = stage.Name,
             ExecutionRole = job.ExecutionRole ?? stage.ExecutionRole,
             Environment = job.Environment ?? stage.Environment,
+            ApprovalTimeoutMinutes = stage.ApprovalTimeoutMinutes,
             Pool = job.Pool ?? stage.Pool,
             Condition = job.Condition ?? stage.Condition,
             DependsOn = dependencies,

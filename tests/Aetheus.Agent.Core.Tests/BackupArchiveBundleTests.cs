@@ -3,7 +3,6 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Nodes;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Constants;
 
 namespace Aetheus.Agent.Core.Tests;
 

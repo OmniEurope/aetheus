@@ -1,0 +1,43 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2
+# Aetheus Agent cron helper - root-owned, invoked via /etc/sudoers.d/aetheus-cron (NOPASSWD).
+# Writes/removes /etc/cron.d/aetheus-<id> ONLY. Re-validates every argument; never evals input.
+set -eu
+CRON_DIR="/etc/cron.d"
+die() { echo "$1" >&2; exit 1; }
+valid_id()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]{1,64}$'; }
+valid_user()  { printf '%s' "$1" | grep -Eiq '^[a-z_][a-z0-9_-]{0,31}$'; }
+valid_sched() { printf '%s' "$1" | grep -Eq '^[0-9* /,-]+$'; }
+valid_cmd()   { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9 _/.:@=,-]+$'; }
+
+action="${1:-}"
+id="${2:-}"
+valid_id "$id" || die "invalid id"
+target="$CRON_DIR/aetheus-$id"
+
+case "$action" in
+    save)
+        user="${3:-}"; sched="${4:-}"; cmd="${5:-}"
+        valid_user "$user"  || die "invalid user"
+        # A root cron job turns agent compromise into a root-cron escalation - refuse it here too
+        # (the backend + agent already reject it; this is the last line).
+        [ "$user" != root ] || die "root user not permitted"
+        valid_sched "$sched" || die "invalid schedule"
+        # /etc/cron.d is strictly 5-field - a 6th field would be read as the run-as user, corrupting
+        # the entry. Reject anything that is not exactly 5 whitespace-separated fields.
+        [ "$(printf '%s' "$sched" | wc -w)" -eq 5 ] || die "schedule must be 5 fields"
+        valid_cmd "$cmd"    || die "invalid command"
+        umask 022
+        printf '# Managed by Aetheus (job %s)\n%s %s %s\n' "$id" "$sched" "$user" "$cmd" > "$target"
+        chown root:root "$target"
+        chmod 644 "$target"
+        echo "wrote $target"
+        ;;
+    delete)
+        rm -f "$target"
+        echo "removed $target"
+        ;;
+    *)
+        die "unknown action"
+        ;;
+esac

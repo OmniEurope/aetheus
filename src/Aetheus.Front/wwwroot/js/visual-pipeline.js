@@ -323,3 +323,44 @@ window.visualPipeline = {
         delete this._canvases[elementId];
     }
 };
+
+// PLAN-008 lot 44: a node carries its coordinates as data attributes and they are applied here,
+// through the CSSOM. A style attribute in markup would need style-src-attr 'unsafe-inline' in the
+// production policy; setProperty does not, and it is the same path the drag handler already used.
+// Only a change of the data attributes re-applies, so a dragged node keeps the position the drag
+// wrote and is not snapped back by an unrelated re-render.
+(function applyNodePositions() {
+    function apply(node) {
+        if (!node || !node.dataset) return;
+        const x = node.dataset.nodeX;
+        const y = node.dataset.nodeY;
+        if (x !== undefined) node.style.setProperty('--node-x', x + 'px');
+        if (y !== undefined) node.style.setProperty('--node-y', y + 'px');
+    }
+
+    function applyAll(root) {
+        if (!root || !root.querySelectorAll) return;
+        if (root.matches && root.matches('.stage-node-positioned')) apply(root);
+        root.querySelectorAll('.stage-node-positioned').forEach(apply);
+    }
+
+    const observer = new MutationObserver(function (mutations) {
+        mutations.forEach(function (mutation) {
+            if (mutation.type === 'attributes') { apply(mutation.target); return; }
+            mutation.addedNodes.forEach(applyAll);
+        });
+    });
+
+    function start() {
+        applyAll(document.body);
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['data-node-x', 'data-node-y']
+        });
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+})();

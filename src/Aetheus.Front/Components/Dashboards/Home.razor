@@ -1,0 +1,229 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/"
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+<PageTitle>@L["Dashboard"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Dashboard"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("space_dashboard")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="dashboard" />
+    </Badges>
+    <Actions>
+        @if (Auth.IsAdmin)
+        {
+            @* The page's main action, so it carries the primary colour (recette R-013). *@
+            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Nav.NavigateTo("/dashboards"))" title="@L["ManageDashboards"]" Label="@L["ManageDashboards"]"><OmniIcon Name="OmniIconName.Settings" /> <span>@L["Manage"]</span></OmniButton>
+        }
+    </Actions>
+</OmniPageHeader>
+
+@if (Permissions.IsLoaded && !CanViewDashboard)
+{
+    <EmptyState Icon="lock" Title="@L["AccessDenied"]" />
+}
+else
+{
+<InstanceWelcomeWizard Projects="@_dashboard?.Projects" ServerCount="@(_dashboard?.TotalServers ?? 0)" />
+<PendingApprovalsPanel />
+@if (_dashboardLoadFailed || _appSummaryLoadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">@L["GridLoadFailed"]</OmniAlert>
+}
+
+<OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.Stretch" Class="dashboard-tile-row omni-u-mb-lg">
+    <OmniColumn Span="12" MediumSpan="6">
+        <OmniCard Class="dashboard-tile">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-sm" Gap="OmniSpacing.Large">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="dashboard-tile-title">
+                    <OmniIcon Name="OmniIconName.Database" />
+                    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@L["Servers"]</OmniHeading>
+                </OmniStack>
+                @* Recette R-066 to R-069: the tile summary, one badge per non-zero count, like Monitored applications. *@
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    @if (_dashboard?.OnlineServers > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@($"{_dashboard.OnlineServers} {L.Localize(ServerStatus.Online)}")</OmniBadge>
+                    }
+                    @if (_dashboard?.OfflineServers > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@($"{_dashboard.OfflineServers} {L.Localize(ServerStatus.Offline)}")</OmniBadge>
+                    }
+                </OmniStack>
+            </OmniStack>
+            <AetheusDataGrid @ref="_serversGrid" Data="@(_dashboard?.Servers)" TItem="ServerDto" PageSize="20" Virtualize="@((_dashboard?.Servers.Count ?? 0) > 20)"
+                IsLoading="@_dashboardLoading"
+                EmptyText="@L["NoRecords"]" RowClick="@(server => Nav.NavigateTo($"/servers/{server.Id}/overview"))"
+                class="dashboard-clickable-grid">
+                <EmptyTemplate>
+                    <EmptyState Icon="dns" Title="@L["EmptyDashboardServers"]" />
+                </EmptyTemplate>
+                <Columns>
+                    <OmniDataGridColumn Frozen="true" TItem="ServerDto" Property="Hostname" Title="@L["Hostname"]" MinWidth="11rem" Filterable="true" >
+                        <Template Context="server">
+                            <span @onclick:stopPropagation="true">
+                                <OmniLink Href="@($"/servers/{server.Id}/overview")">@server.Hostname</OmniLink>
+                            </span>
+                        </Template>
+                    </OmniDataGridColumn>
+                    <OmniDataGridColumn TItem="ServerDto" Property="LastHeartbeat" Title="@L["LastHeartbeat"]" MinWidth="9rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+                        <Template Context="server">
+                            @* Year < 2000 = never reported (front DateTime.MinValue shifts by local offset on the wire). *@
+                            @(server.LastHeartbeat.Year < 2000 ? "-" : server.LastHeartbeat.ToString("g"))
+                        </Template>
+                    </OmniDataGridColumn>
+                    @* Status = last column: online/offline icon + one icon per pipeline capability the
+                       server has (build/deploy/management). Capability icons are omitted when absent, so a
+                       server with no known capabilities shows only the online/offline icon. *@
+                    <OmniDataGridColumn TItem="ServerDto" Property="Status" Title="@L["Status"]" Width="9rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ServerStatusText" >
+                        <Template Context="server">
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                                @if (server.Status == ServerStatus.Online)
+                                {
+                                    <OmniIcon Name="OmniIconName.WifiHigh" Class="omni-u-text-success" title="@L.Localize(server.Status)" Label="@L.Localize(server.Status)" />
+                                }
+                                else
+                                {
+                                    <OmniIcon Name="OmniIconName.WifiSlash" Class="omni-u-text-danger" title="@L.Localize(server.Status)" Label="@L.Localize(server.Status)" />
+                                }
+                                @if (server.PipelineRunnerEnabled == true)
+                                {
+                                    <span class="clickable-cell" role="button" tabindex="0" title="@L["CapBuild"]" aria-label="@L["CapBuild"]"
+                                          @onclick="@(() => NavToSection(server.Id, "pipelines"))" @onkeydown="@(e => OnCapKey(e, server.Id, "pipelines"))">
+                                        <OmniIcon Name="OmniIconName.Wrench" Class="omni-u-text-accent" />
+                                    </span>
+                                }
+                                @if (server.DeploymentTargetAvailable == true)
+                                {
+                                    <span class="clickable-cell" role="button" tabindex="0" title="@L["CapDeploy"]" aria-label="@L["CapDeploy"]"
+                                          @onclick="@(() => NavToSection(server.Id, "apps"))" @onkeydown="@(e => OnCapKey(e, server.Id, "apps"))">
+                                        <OmniIcon Name="OmniIconName.RocketLaunch" Class="omni-u-text-accent" />
+                                    </span>
+                                }
+                                @if (server.PackageManagementAvailable == true)
+                                {
+                                    <span class="clickable-cell" role="button" tabindex="0" title="@L["CapManage"]" aria-label="@L["CapManage"]"
+                                          @onclick="@(() => NavToSection(server.Id, "modules"))" @onkeydown="@(e => OnCapKey(e, server.Id, "modules"))">
+                                        <OmniIcon Name="OmniIconName.Settings" Class="omni-u-text-accent" />
+                                    </span>
+                                }
+                                @* S-TECH-CUNK: a server that has never phoned home has UNKNOWN capabilities (all null),
+                                   shown as a muted marker - distinct from a reported "no capabilities" (all false = no icons). *@
+                                @if (server.PipelineRunnerEnabled is null && server.DeploymentTargetAvailable is null && server.PackageManagementAvailable is null)
+                                {
+                                    <OmniIcon Name="OmniIconName.Question" Class="omni-u-text-muted" title="@L["CapUnknown"]" Label="@L["CapUnknown"]" />
+                                }
+                                @* S-UX-CDTT: when the agent reported capability diagnostics (a drop-in unreadable,
+                                   sudo blocked), surface them in a rich tooltip so the operator sees WHY a capability
+                                   is OFF without SSHing. *@
+                                @if (server.CapabilityDiagnostics.Count > 0)
+                                {
+                                    <OmniIcon Name="OmniIconName.Info" Class="omni-u-text-warning" Label="@L["CapabilityDiagnosticsHint"]"
+                                                title="@($"{L["CapabilityDiagnosticsHint"]}\n- {string.Join("\n- ", server.CapabilityDiagnostics)}")" />
+                                }
+                            </OmniStack>
+                        </Template>
+                    </OmniDataGridColumn>
+                </Columns>
+            </AetheusDataGrid>
+        </OmniCard>
+    </OmniColumn>
+    <OmniColumn Span="12" MediumSpan="6">
+        <OmniCard Class="dashboard-tile">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-sm" Gap="OmniSpacing.Large">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="dashboard-tile-title">
+                    <OmniIcon Name="OmniIconName.Reset" />
+                    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@L["RecentRuns"]</OmniHeading>
+                </OmniStack>
+                @* Recette R-066 to R-069: the tile summary, one badge per non-zero count, like Monitored applications. *@
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    @if (RecentRunCount(PipelineStatus.Success) > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@($"{RecentRunCount(PipelineStatus.Success)} {L.Localize(PipelineStatus.Success)}")</OmniBadge>
+                    }
+                    @if (RecentRunCount(PipelineStatus.Failed) > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@($"{RecentRunCount(PipelineStatus.Failed)} {L.Localize(PipelineStatus.Failed)}")</OmniBadge>
+                    }
+                    @if (RecentRunCount(PipelineStatus.Running) > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Info">@($"{RecentRunCount(PipelineStatus.Running)} {L.Localize(PipelineStatus.Running)}")</OmniBadge>
+                    }
+                </OmniStack>
+            </OmniStack>
+            @* The dashboard lists runs from every project, so the project is part of reading a row:
+               without it two runs of same-named pipelines in different projects are indistinguishable.
+               (GroupByProject only controls the column's visibility here, it groups nothing.) *@
+            <PipelineRunsGrid Items="@(_dashboard?.RecentRuns ?? [])" Compact="true" ShowDurationInCompact="true" GroupByProject="true"
+                IsLoading="@_dashboardLoading" MaxGroups="10" CssClass="dashboard-clickable-grid"
+                EmptyTitleKey="EmptyDashboardRuns" EmptyDescriptionKey="EmptyDashboardRuns" />
+        </OmniCard>
+    </OmniColumn>
+    <OmniColumn Span="12" MediumSpan="6">
+        <OmniCard Class="dashboard-tile">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-sm" Gap="OmniSpacing.Large">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="dashboard-tile-title">
+                    <OmniIcon Name="OmniIconName.Folder" />
+                    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@L["Projects"]</OmniHeading>
+                </OmniStack>
+                @* Recette R-066 to R-069: the tile summary, one badge per non-zero count, like Monitored applications. *@
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    @if (_dashboard?.TotalProjects > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@(string.Format(L["Total"], _dashboard.TotalProjects))</OmniBadge>
+                    }
+                </OmniStack>
+            </OmniStack>
+            <AetheusDataGrid @ref="_projectsGrid" Data="@(_dashboard?.Projects)" TItem="ProjectDto" PageSize="20" Virtualize="@((_dashboard?.Projects.Count ?? 0) > 20)"
+                IsLoading="@_dashboardLoading"
+                EmptyText="@L["NoRecords"]" RowClick="@(project => Nav.NavigateTo($"/projects/{project.Id}"))"
+                class="dashboard-clickable-grid">
+                <EmptyTemplate>
+                    <EmptyState Icon="folder" Title="@L["EmptyDashboardProjects"]" />
+                </EmptyTemplate>
+                <Columns>
+                    <OmniDataGridColumn Frozen="true" TItem="ProjectDto" Property="Name" Title="@L["Name"]" MinWidth="6rem" Filterable="true" >
+                        <Template Context="project">
+                            <span @onclick:stopPropagation="true">
+                                <OmniLink Href="@($"/projects/{project.Id}")">@project.Name</OmniLink>
+                            </span>
+                        </Template>
+                    </OmniDataGridColumn>
+                    <OmniDataGridColumn TItem="ProjectDto" Property="Description" Title="@L["Description"]" MinWidth="6rem" Filterable="true" />
+                    <OmniDataGridColumn TItem="ProjectDto" Property="PipelineCount" Title="@L["Pipelines"]" Width="6.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+                    <OmniDataGridColumn TItem="ProjectDto" Property="UpdatedAt" Title="@L["Updated"]" FormatString="{0:g}" Width="8rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+                </Columns>
+            </AetheusDataGrid>
+        </OmniCard>
+    </OmniColumn>
+    <OmniColumn Span="12" MediumSpan="6">
+        <OmniCard Class="dashboard-tile">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-sm" Gap="OmniSpacing.Large">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="dashboard-tile-title">
+                    <OmniIcon Name="OmniIconName.Heartbeat" />
+                    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-0">@L["MonitoredApps"]</OmniHeading>
+                </OmniStack>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    @if (_appSummary?.UpCount > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@($"{_appSummary.UpCount} {L["AppHealthUp"]}")</OmniBadge>
+                    }
+                    @if (_appSummary?.DownCount > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@($"{_appSummary.DownCount} {L["AppHealthDown"]}")</OmniBadge>
+                    }
+                    @if (_appSummary?.DegradedCount > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@($"{_appSummary.DegradedCount} {L["AppHealthDegraded"]}")</OmniBadge>
+                    }
+                    @if (_appSummary?.UnknownCount > 0)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@($"{_appSummary.UnknownCount} {L["AppHealthUnknown"]}")</OmniBadge>
+                    }
+                </OmniStack>
+            </OmniStack>
+            <MonitoredAppsStatusGrid Applications="@(_appSummary?.Applications)" IsLoading="@_appSummaryLoading" />
+        </OmniCard>
+    </OmniColumn>
+</OmniRow>
+}

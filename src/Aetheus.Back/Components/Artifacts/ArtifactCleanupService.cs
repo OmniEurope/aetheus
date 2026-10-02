@@ -8,9 +8,17 @@ public sealed class ArtifactCleanupService(
     IServiceScopeFactory scopeFactory,
     ILogger<ArtifactCleanupService> logger,
     TimeProvider timeProvider,
-    IPostgresLeaderLease operationLock) : BackgroundService
+    IPostgresLeaderLease operationLock,
+    IChunkedArtifactUploadService chunkedUploads) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <summary>R-463: one backend cleans at a time; both blue-green colours used to select and delete
+    /// the same expired artifacts.</summary>
+    internal const string LeaseName = "aetheus:artifact-cleanup";
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        operationLock.RunAsLeaderAsync(LeaseName, RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(BackendRuntimeDefaults.MaintenanceInterval);
 
@@ -31,12 +39,19 @@ public sealed class ArtifactCleanupService(
         }
     }
 
+    /// <summary>How long an unfinished chunked upload keeps its parts on disk. A transfer of a
+    /// gigabyte-scale artifact can legitimately span a long run, so the window is generous; what it
+    /// bounds is the abandoned session, whose parts nothing else would ever delete.</summary>
+    internal static readonly TimeSpan UnfinishedUploadLifetime = TimeSpan.FromHours(24);
+
     internal async Task CleanupExpiredArtifactsAsync(CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var repo = scope.ServiceProvider.GetRequiredService<IArtifactRepository>();
         var storage = scope.ServiceProvider.GetRequiredService<IArtifactStorageService>();
         var now = timeProvider.GetUtcNow().UtcDateTime;
+
+        PurgeAbandonedUploads();
 
         var expired = await repo.GetExpiredAsync(now, 100, ct).ConfigureAwait(false);
         if (expired.Count == 0) return;
@@ -63,13 +78,31 @@ public sealed class ArtifactCleanupService(
                         logger.LogWarning(ex, "Failed to delete artifact file {Path}, skipping DB removal", artifact.FilePath);
                         return;
                     }
-                    await repo.RemoveAsync(artifact, lockToken).ConfigureAwait(false);
-                    deletedCount++;
+                    if (await repo.RemoveAsync(artifact, lockToken).ConfigureAwait(false))
+                        deletedCount++;
                 },
                 ct).ConfigureAwait(false);
         }
 
         logger.LogInformation("Artifact cleanup: deleted {Count} expired artifacts", deletedCount);
+    }
+
+    /// <summary>
+    /// Parts of uploads that were begun and never completed. Best-effort and never fatal: an
+    /// unreadable session directory must not stop the artifact cleanup that runs beside it.
+    /// </summary>
+    private void PurgeAbandonedUploads()
+    {
+        try
+        {
+            var purged = chunkedUploads.PurgeExpired(UnfinishedUploadLifetime);
+            if (purged > 0)
+                logger.LogInformation("Artifact cleanup: removed {Count} abandoned chunked uploads", purged);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Failed to purge abandoned chunked uploads");
+        }
     }
 }
 

@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Certbot;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Repositories;

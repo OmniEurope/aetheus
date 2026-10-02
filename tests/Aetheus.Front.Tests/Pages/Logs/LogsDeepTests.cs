@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using LogsPage = Aetheus.Front.Pages.Logs.Logs;
+using LogsPage = Aetheus.Front.Components.Logs.Logs;
 
 namespace Aetheus.Front.Tests.Pages.Logs;
 

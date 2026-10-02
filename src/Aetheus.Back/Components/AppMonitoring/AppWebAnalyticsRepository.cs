@@ -9,12 +9,7 @@ namespace Aetheus.Back.Components.AppMonitoring;
 
 public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalyticsRepository
 {
-    private const int EventEstimatedBytes = 480;
-    private const int SessionEstimatedBytes = 320;
-    private const int IdentityEstimatedBytes = 240;
-    private const int AggregateEstimatedBytes = 192;
-    private const int PageEstimatedBytes = 256;
-    private const int RejectionEstimatedBytes = 128;
+    private readonly AppWebAnalyticsStorageRepository _storage = new(db);
 
     public async Task<(int Accepted, int Replayed)> RecordAsync(
         int appId,
@@ -72,12 +67,17 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
         var existingIdSet = existingIds.ToHashSet();
         ordered.RemoveAll(item => existingIdSet.Contains(item.EventId));
 
-        var pageViews = ordered.Where(item => item.Kind == "page_view").ToList();
-        var sessionPseudonyms = pageViews.Select(item => item.SessionPseudonym).Distinct().ToList();
-        var keyVersions = pageViews.Select(item => item.KeyVersion).Distinct().ToList();
-        var earliestSessionFloor = pageViews.Count == 0
+        var pageViewEvents = ordered.Where(item => item.Kind == "page_view").ToList();
+        // Heartbeats keep AppAnalyticsSession.LastSeenAtUtc fresh for the 5-minute "online" window
+        // without counting as page views, so they share session/period preload with page views.
+        var sessionEvents = ordered
+            .Where(item => item.Kind is "page_view" or "heartbeat")
+            .ToList();
+        var sessionPseudonyms = sessionEvents.Select(item => item.SessionPseudonym).Distinct().ToList();
+        var keyVersions = sessionEvents.Select(item => item.KeyVersion).Distinct().ToList();
+        var earliestSessionFloor = sessionEvents.Count == 0
             ? receivedAtUtc
-            : pageViews.Min(item => item.OccurredAtUtc).AddMinutes(-sessionTimeoutMinutes);
+            : sessionEvents.Min(item => item.OccurredAtUtc).AddMinutes(-sessionTimeoutMinutes);
         await db.AppAnalyticsSessions
             .Where(item => item.MonitoredAppId == appId
                            && sessionPseudonyms.Contains(item.SessionPseudonym)
@@ -95,10 +95,12 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
             .Select(item => (item.SessionPseudonym, item.KeyVersion))
             .ToHashSet();
 
-        var periodStarts = pageViews.SelectMany(Periods)
+        var periodStarts = sessionEvents.SelectMany(Periods)
             .Select(item => item.Start).Distinct().ToList();
-        var periodPseudonyms = pageViews.SelectMany(Periods)
-            .Select(item => item.Pseudonym).Distinct().ToList();
+        var periodPseudonyms = sessionEvents.SelectMany(Periods)
+            .Select(item => item.Pseudonym)
+            .Concat(sessionEvents.SelectMany(AuthenticatedPeriods).Select(item => item.Pseudonym))
+            .Distinct().ToList();
         await db.AppAnalyticsPeriodIdentities
             .Where(item => item.MonitoredAppId == appId
                            && periodStarts.Contains(item.PeriodStartUtc)
@@ -108,8 +110,8 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
             .Where(item => item.MonitoredAppId == appId
                            && periodStarts.Contains(item.PeriodStartUtc))
             .LoadAsync(ct).ConfigureAwait(false);
-        var days = pageViews.Select(item => DateOnly.FromDateTime(item.OccurredAtUtc)).Distinct().ToList();
-        var routes = pageViews.Select(item => item.Route).Distinct().ToList();
+        var days = pageViewEvents.Select(item => DateOnly.FromDateTime(item.OccurredAtUtc)).Distinct().ToList();
+        var routes = pageViewEvents.Select(item => item.Route).Distinct().ToList();
         await db.AppAnalyticsPageAggregates
             .Where(item => item.MonitoredAppId == appId
                            && days.Contains(item.DayUtc)
@@ -128,22 +130,54 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
         DateTime receivedAtUtc,
         HashSet<(string SessionPseudonym, int KeyVersion)> returningPseudonyms)
     {
-        db.AppAnalyticsEvents.Add(new AppAnalyticsEvent
+        var isHeartbeat = string.Equals(analyticsEvent.Kind, "heartbeat", StringComparison.Ordinal);
+        // Recette R2-007: a heartbeat only refreshes its session (LastSeenAtUtc and the period
+        // identities, below). Nothing reads it back as a row: the summary reads page views from the
+        // aggregates and the browser signals by their own kinds. Stored, one open tab wrote a row every
+        // 75 s and filled the storage budget with rows nobody reads. A replayed heartbeat is therefore
+        // not detected as a replay, which is harmless: it sets the same LastSeenAtUtc again.
+        if (!isHeartbeat)
         {
-            MonitoredAppId = appId,
-            EventId = analyticsEvent.EventId,
-            OccurredAtUtc = analyticsEvent.OccurredAtUtc,
-            Kind = analyticsEvent.Kind,
-            Route = analyticsEvent.Route,
-            DurationMs = analyticsEvent.DurationMs,
-            ErrorType = analyticsEvent.ErrorType,
-            SessionPseudonym = analyticsEvent.SessionPseudonym,
-            Authenticated = analyticsEvent.AuthenticatedPseudonym is not null,
-            KeyVersion = analyticsEvent.KeyVersion
-        });
-        if (!string.Equals(analyticsEvent.Kind, "page_view", StringComparison.Ordinal))
+            db.AppAnalyticsEvents.Add(new AppAnalyticsEvent
+            {
+                MonitoredAppId = appId,
+                EventId = analyticsEvent.EventId,
+                OccurredAtUtc = analyticsEvent.OccurredAtUtc,
+                Kind = analyticsEvent.Kind,
+                Route = analyticsEvent.Route,
+                DurationMs = analyticsEvent.DurationMs,
+                ErrorType = analyticsEvent.ErrorType,
+                SessionPseudonym = analyticsEvent.SessionPseudonym,
+                Authenticated = analyticsEvent.AuthenticatedPseudonym is not null,
+                KeyVersion = analyticsEvent.KeyVersion
+            });
+        }
+        var isPageView = string.Equals(analyticsEvent.Kind, "page_view", StringComparison.Ordinal);
+        if (!isPageView && !isHeartbeat)
             return;
 
+        var session = ResolveSession(appId, analyticsEvent, sessionTimeoutMinutes, returningPseudonyms,
+            out var newSession);
+        if (analyticsEvent.OccurredAtUtc < session.StartedAtUtc)
+            session.StartedAtUtc = analyticsEvent.OccurredAtUtc;
+        if (analyticsEvent.OccurredAtUtc > session.LastSeenAtUtc)
+            session.LastSeenAtUtc = analyticsEvent.OccurredAtUtc;
+        if (isPageView)
+            session.PageViewCount++;
+
+        ApplyToPeriodAggregates(appId, analyticsEvent, receivedAtUtc, isPageView, newSession, session);
+
+        if (isPageView)
+            ApplyToPageAggregate(appId, analyticsEvent);
+    }
+
+    private AppAnalyticsSession ResolveSession(
+        int appId,
+        AppWebAnalyticsIngestEvent analyticsEvent,
+        int sessionTimeoutMinutes,
+        HashSet<(string SessionPseudonym, int KeyVersion)> returningPseudonyms,
+        out bool newSession)
+    {
         var floor = analyticsEvent.OccurredAtUtc.AddMinutes(-sessionTimeoutMinutes);
         var ceiling = analyticsEvent.OccurredAtUtc.AddMinutes(sessionTimeoutMinutes);
         var session = db.AppAnalyticsSessions.Local
@@ -154,58 +188,48 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
                            && item.StartedAtUtc <= ceiling)
             .OrderByDescending(item => item.LastSeenAtUtc)
             .FirstOrDefault();
-        var newSession = session is null;
-        if (session is null)
-        {
-            var returning = analyticsEvent.AuthenticatedPseudonym is not null
-                            && (returningPseudonyms.Contains((
-                                    analyticsEvent.SessionPseudonym,
-                                    analyticsEvent.KeyVersion))
-                                || db.AppAnalyticsSessions.Local.Any(item =>
-                                    item.MonitoredAppId == appId
-                                    && item.SessionPseudonym == analyticsEvent.SessionPseudonym
-                                    && item.KeyVersion == analyticsEvent.KeyVersion
-                                    && item.LastSeenAtUtc < floor));
-            session = new AppAnalyticsSession
-            {
-                MonitoredAppId = appId,
-                SessionPseudonym = analyticsEvent.SessionPseudonym,
-                StartedAtUtc = analyticsEvent.OccurredAtUtc,
-                LastSeenAtUtc = analyticsEvent.OccurredAtUtc,
-                Authenticated = analyticsEvent.AuthenticatedPseudonym is not null,
-                ReturningVisitor = returning,
-                KeyVersion = analyticsEvent.KeyVersion
-            };
-            db.AppAnalyticsSessions.Add(session);
-        }
-        if (analyticsEvent.OccurredAtUtc < session.StartedAtUtc)
-            session.StartedAtUtc = analyticsEvent.OccurredAtUtc;
-        if (analyticsEvent.OccurredAtUtc > session.LastSeenAtUtc)
-            session.LastSeenAtUtc = analyticsEvent.OccurredAtUtc;
-        session.PageViewCount++;
+        newSession = session is null;
+        if (session is not null) return session;
 
+        var returning = analyticsEvent.AuthenticatedPseudonym is not null
+                        && (returningPseudonyms.Contains((
+                                analyticsEvent.SessionPseudonym,
+                                analyticsEvent.KeyVersion))
+                            || db.AppAnalyticsSessions.Local.Any(item =>
+                                item.MonitoredAppId == appId
+                                && item.SessionPseudonym == analyticsEvent.SessionPseudonym
+                                && item.KeyVersion == analyticsEvent.KeyVersion
+                                && item.LastSeenAtUtc < floor));
+        session = new AppAnalyticsSession
+        {
+            MonitoredAppId = appId,
+            SessionPseudonym = analyticsEvent.SessionPseudonym,
+            StartedAtUtc = analyticsEvent.OccurredAtUtc,
+            LastSeenAtUtc = analyticsEvent.OccurredAtUtc,
+            Authenticated = analyticsEvent.AuthenticatedPseudonym is not null,
+            ReturningVisitor = returning,
+            KeyVersion = analyticsEvent.KeyVersion
+        };
+        db.AppAnalyticsSessions.Add(session);
+        return session;
+    }
+
+    private void ApplyToPeriodAggregates(
+        int appId,
+        AppWebAnalyticsIngestEvent analyticsEvent,
+        DateTime receivedAtUtc,
+        bool isPageView,
+        bool newSession,
+        AppAnalyticsSession session)
+    {
         foreach (var (kind, start, pseudonym) in Periods(analyticsEvent))
         {
-            var identity = db.AppAnalyticsPeriodIdentities.Local.FirstOrDefault(item =>
-                item.MonitoredAppId == appId
-                && item.PeriodKind == kind
-                && item.PeriodStartUtc == start
-                && item.Pseudonym == pseudonym);
-            var newIdentity = identity is null;
-            if (identity is null)
-            {
-                identity = new AppAnalyticsPeriodIdentity
-                {
-                    MonitoredAppId = appId,
-                    PeriodKind = kind,
-                    PeriodStartUtc = start,
-                    Pseudonym = pseudonym,
-                    FirstSeenAtUtc = analyticsEvent.OccurredAtUtc,
-                    KeyVersion = analyticsEvent.KeyVersion
-                };
-                db.AppAnalyticsPeriodIdentities.Add(identity);
-            }
-            identity.LastSeenAtUtc = analyticsEvent.OccurredAtUtc;
+            var newIdentity = TrackPeriodIdentity(appId, kind, start, pseudonym, analyticsEvent);
+            // Recette R-351: a signed-in visitor shares the period identity of the anonymous events
+            // that precede sign-in (same network, same period), so "first time this period" must be
+            // decided on the authenticated pseudonym's own identity, not on the visitor identity.
+            var newAuthenticatedIdentity = analyticsEvent.AuthenticatedPseudonym is { } authenticated
+                && TrackPeriodIdentity(appId, AuthenticatedKindOf(kind), start, authenticated, analyticsEvent);
 
             var aggregate = db.AppAnalyticsAggregates.Local.FirstOrDefault(item =>
                 item.MonitoredAppId == appId
@@ -221,13 +245,12 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
                 };
                 db.AppAnalyticsAggregates.Add(aggregate);
             }
-            aggregate.PageViews++;
+            if (isPageView)
+                aggregate.PageViews++;
             if (newIdentity)
-            {
                 aggregate.UniqueVisitors++;
-                if (analyticsEvent.AuthenticatedPseudonym is not null)
-                    aggregate.AuthenticatedUniqueVisitors++;
-            }
+            if (newAuthenticatedIdentity)
+                aggregate.AuthenticatedUniqueVisitors++;
             if (newSession)
             {
                 aggregate.Sessions++;
@@ -236,7 +259,10 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
             }
             aggregate.UpdatedAtUtc = receivedAtUtc;
         }
+    }
 
+    private void ApplyToPageAggregate(int appId, AppWebAnalyticsIngestEvent analyticsEvent)
+    {
         var day = DateOnly.FromDateTime(analyticsEvent.OccurredAtUtc);
         var page = db.AppAnalyticsPageAggregates.Local.FirstOrDefault(item =>
             item.MonitoredAppId == appId && item.DayUtc == day && item.Route == analyticsEvent.Route);
@@ -263,6 +289,59 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
             analyticsEvent.MonthlyPseudonym);
     }
 
+    /// <summary>Records the identity as seen at the event's time; true when it is new for its period.</summary>
+    private bool TrackPeriodIdentity(
+        int appId,
+        AnalyticsPeriodKind kind,
+        DateOnly start,
+        string pseudonym,
+        AppWebAnalyticsIngestEvent analyticsEvent)
+    {
+        var identity = db.AppAnalyticsPeriodIdentities.Local.FirstOrDefault(item =>
+            item.MonitoredAppId == appId
+            && item.PeriodKind == kind
+            && item.PeriodStartUtc == start
+            && item.Pseudonym == pseudonym);
+        var newIdentity = identity is null;
+        if (identity is null)
+        {
+            identity = new AppAnalyticsPeriodIdentity
+            {
+                MonitoredAppId = appId,
+                PeriodKind = kind,
+                PeriodStartUtc = start,
+                Pseudonym = pseudonym,
+                FirstSeenAtUtc = analyticsEvent.OccurredAtUtc,
+                KeyVersion = analyticsEvent.KeyVersion
+            };
+            db.AppAnalyticsPeriodIdentities.Add(identity);
+        }
+        identity.LastSeenAtUtc = analyticsEvent.OccurredAtUtc;
+        return newIdentity;
+    }
+
+    private static AnalyticsPeriodKind AuthenticatedKindOf(AnalyticsPeriodKind kind) => kind switch
+    {
+        AnalyticsPeriodKind.Day => AnalyticsPeriodKind.AuthenticatedDay,
+        AnalyticsPeriodKind.Week => AnalyticsPeriodKind.AuthenticatedWeek,
+        AnalyticsPeriodKind.Month => AnalyticsPeriodKind.AuthenticatedMonth,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a visitor period kind.")
+    };
+
+    /// <summary>
+    /// The authenticated identities of an event (preloaded with the visitor ones), keyed on its
+    /// authenticated pseudonym with the same period starts as <see cref="Periods"/>. They only decide
+    /// AuthenticatedUniqueVisitors.
+    /// </summary>
+    private static IEnumerable<(AnalyticsPeriodKind Kind, DateOnly Start, string Pseudonym)> AuthenticatedPeriods(
+        AppWebAnalyticsIngestEvent analyticsEvent)
+    {
+        if (analyticsEvent.AuthenticatedPseudonym is not { } pseudonym)
+            yield break;
+        foreach (var (kind, start, _) in Periods(analyticsEvent))
+            yield return (AuthenticatedKindOf(kind), start, pseudonym);
+    }
+
     private static bool IsConcurrencyConflict(Exception exception)
     {
         for (var current = exception; current is not null; current = current.InnerException!)
@@ -276,27 +355,14 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
         return false;
     }
 
-    public async Task<long> EstimateStorageBytesAsync(int appId, CancellationToken ct = default)
-    {
-        var events = await db.AppAnalyticsEvents.CountAsync(item => item.MonitoredAppId == appId, ct)
-            .ConfigureAwait(false);
-        var sessions = await db.AppAnalyticsSessions.CountAsync(item => item.MonitoredAppId == appId, ct)
-            .ConfigureAwait(false);
-        var identities = await db.AppAnalyticsPeriodIdentities.CountAsync(item => item.MonitoredAppId == appId, ct)
-            .ConfigureAwait(false);
-        var aggregates = await db.AppAnalyticsAggregates.CountAsync(item => item.MonitoredAppId == appId, ct)
-            .ConfigureAwait(false);
-        var pages = await db.AppAnalyticsPageAggregates.CountAsync(item => item.MonitoredAppId == appId, ct)
-            .ConfigureAwait(false);
-        var rejections = await db.AppAnalyticsRejections.CountAsync(item => item.MonitoredAppId == appId, ct)
-            .ConfigureAwait(false);
-        return (long)events * EventEstimatedBytes
-               + (long)sessions * SessionEstimatedBytes
-               + (long)identities * IdentityEstimatedBytes
-               + (long)aggregates * AggregateEstimatedBytes
-               + (long)pages * PageEstimatedBytes
-               + (long)rejections * RejectionEstimatedBytes;
-    }
+    public Task<long> EstimateStorageBytesAsync(int appId, CancellationToken ct = default) =>
+        _storage.EstimateStorageBytesAsync(appId, ct);
+
+    public Task<WebAnalyticsTrimResult> TrimToAsync(int appId, long targetBytes, CancellationToken ct = default) =>
+        _storage.TrimToAsync(appId, targetBytes, ct);
+
+    public Task<IReadOnlyList<WebAnalyticsStorageBudget>> GetStorageBudgetsAsync(CancellationToken ct = default) =>
+        _storage.GetStorageBudgetsAsync(ct);
 
     public async Task<HashSet<string>> GetRouteNamesAsync(int appId, CancellationToken ct = default)
     {
@@ -351,7 +417,9 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
                 PageViews = group.Sum(item => item.PageViews)
             })
             .OrderByDescending(item => item.PageViews)
-            .Take(20)
+            // Recette R-443: every route of the month, for the virtualized top pages list. Ingestion
+            // already refuses routes past this per-app limit, so the list stays bounded.
+            .Take(AppMonitoringDefaults.MaximumAnalyticsRoutesPerApp)
             .ToListAsync(ct).ConfigureAwait(false);
         var historyStartInstantUtc = historyStartUtc.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var browserSignals = await db.AppAnalyticsEvents.AsNoTracking()
@@ -376,17 +444,25 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
             item.PeriodKind == AnalyticsPeriodKind.Week && item.PeriodStartUtc == weekStartUtc);
         var month = aggregateRows.FirstOrDefault(item =>
             item.PeriodKind == AnalyticsPeriodKind.Month && item.PeriodStartUtc == monthStartUtc);
-        var daily = aggregateRows
+        // A day with zero events never gets an aggregate row, so filling only the present days would leave
+        // a collection outage visually indistinguishable from "adjacent to the next day" - fill the gap
+        // to zero instead, same as GetVisitorSeriesAsync already does for the visitor chart.
+        var byDay = aggregateRows
             .Where(item => item.PeriodKind == AnalyticsPeriodKind.Day && item.PeriodStartUtc >= historyStartUtc)
-            .OrderBy(item => item.PeriodStartUtc)
-            .Select(item => new AppWebAnalyticsPointDto
-            {
-                DayUtc = item.PeriodStartUtc,
-                UniqueVisitors = item.UniqueVisitors,
-                Sessions = item.Sessions,
-                ReturningVisitors = item.ReturningVisitors,
-                PageViews = item.PageViews
-            })
+            .ToDictionary(item => item.PeriodStartUtc);
+        var dayCount = todayUtc.DayNumber - historyStartUtc.DayNumber + 1;
+        var daily = Enumerable.Range(0, Math.Max(0, dayCount))
+            .Select(offset => historyStartUtc.AddDays(offset))
+            .Select(day => byDay.TryGetValue(day, out var item)
+                ? new AppWebAnalyticsPointDto
+                {
+                    DayUtc = day,
+                    UniqueVisitors = item.UniqueVisitors,
+                    Sessions = item.Sessions,
+                    ReturningVisitors = item.ReturningVisitors,
+                    PageViews = item.PageViews
+                }
+                : new AppWebAnalyticsPointDto { DayUtc = day })
             .ToList();
 
         return new AppWebAnalyticsSummaryDto
@@ -416,43 +492,13 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
         };
     }
 
-    public async Task<WebAnalyticsPurgeResult> PurgeAsync(
+    public Task<WebAnalyticsPurgeResult> PurgeAsync(
         DateTime eventCutoffUtc,
         DateTime sessionCutoffUtc,
         DateOnly aggregateCutoffUtc,
         DateTime rejectionCutoffUtc,
-        CancellationToken ct = default)
-    {
-        var events = await DeleteAsync(db.AppAnalyticsEvents.Where(item => item.OccurredAtUtc < eventCutoffUtc), ct)
-            .ConfigureAwait(false);
-        var sessions = await DeleteAsync(db.AppAnalyticsSessions.Where(item => item.LastSeenAtUtc < sessionCutoffUtc), ct)
-            .ConfigureAwait(false);
-        var identities = await DeleteAsync(
-            db.AppAnalyticsPeriodIdentities.Where(item => item.LastSeenAtUtc < sessionCutoffUtc),
-            ct).ConfigureAwait(false);
-        var aggregates = await DeleteAsync(
-            db.AppAnalyticsAggregates.Where(item => item.PeriodStartUtc < aggregateCutoffUtc),
-            ct).ConfigureAwait(false);
-        var pages = await DeleteAsync(
-            db.AppAnalyticsPageAggregates.Where(item => item.DayUtc < aggregateCutoffUtc),
-            ct).ConfigureAwait(false);
-        var rejections = await DeleteAsync(
-            db.AppAnalyticsRejections.Where(item => item.OccurredAtUtc < rejectionCutoffUtc),
-            ct).ConfigureAwait(false);
-        return new WebAnalyticsPurgeResult(events, sessions, identities, aggregates, pages, rejections);
-    }
-
-    private async Task<int> DeleteAsync<TEntity>(IQueryable<TEntity> query, CancellationToken ct)
-        where TEntity : class
-    {
-        if (db.Database.IsRelational())
-            return await query.ExecuteDeleteAsync(ct).ConfigureAwait(false);
-
-        var rows = await query.ToListAsync(ct).ConfigureAwait(false);
-        db.RemoveRange(rows);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return rows.Count;
-    }
+        CancellationToken ct = default) =>
+        _storage.PurgeAsync(eventCutoffUtc, sessionCutoffUtc, aggregateCutoffUtc, rejectionCutoffUtc, ct);
 
     internal static DateOnly WeekStart(DateTime instant)
     {

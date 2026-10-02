@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
 
 namespace Aetheus.Back.Components.Servers;
 
@@ -34,6 +33,13 @@ internal static class ServerHeartbeatCapabilityProjector
             server.PatchManagementAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-patch");
             server.FirewallManagementAvailable = heartbeat.SudoersHashes.ContainsKey("aetheus-firewall");
         }
+
+        // Not gated on the sudoers inventory: the scan needs no grant, only an agent recent enough to
+        // publish the capability, so the flag must self-heal from the capability list alone.
+        var portObservation = heartbeat.AgentCapabilities?.Contains(
+            AgentCapabilities.PortObservation, StringComparer.Ordinal) == true;
+        if (server.PortObservationAvailable != portObservation)
+            server.PortObservationAvailable = portObservation;
 
         if (server.DockerAvailable != heartbeat.DockerAvailable)
             server.DockerAvailable = heartbeat.DockerAvailable;

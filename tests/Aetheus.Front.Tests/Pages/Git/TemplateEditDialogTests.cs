@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -34,7 +31,7 @@ public class TemplateEditDialogTests : BunitContext
         var cut = Render<TemplateEditDialog>();
 
         Assert.Contains("Save", cut.Markup);
-        Assert.Contains("Cancel", cut.Markup);
+        Assert.Contains("GoBack", cut.Markup);
     }
 
     [Fact]
@@ -130,7 +127,7 @@ public class TemplateEditDialogTests : BunitContext
         await cut.InvokeAsync(() => (Task)submit.Invoke(cut.Instance, [])!);
 
         // A new template POSTs to the templates endpoint. (The dialog-close-with-true on success is a
-        // DialogService.Close a standalone bUnit render cannot observe.)
+        // OmniDialogService.Close a standalone bUnit render cannot observe.)
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/pipelines/templates"));
     }
 }

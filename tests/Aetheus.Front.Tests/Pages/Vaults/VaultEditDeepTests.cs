@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.VaultsDeepCoverage;
 
@@ -228,14 +227,14 @@ public class VaultEditDeepTests : BunitContext
         var cut = Render<VaultEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         SetFormValue(cut.Instance, "_newSecret", "Key", "");
         SetFormValue(cut.Instance, "_newSecret", "Value", "v");
         await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddSecret", "_newSecret"));
 
         // Whitespace/empty key → guard returns: value preserved, no toast.
         Assert.Equal("v", GetFormValue<string>(cut.Instance, "_newSecret", "Value"));
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
     }
 
     // ── AddSecret - with key, calls API ─────────────────────────────────────
@@ -249,15 +248,15 @@ public class VaultEditDeepTests : BunitContext
         var cut = Render<VaultEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         SetFormValue(cut.Instance, "_newSecret", "Key", "API_KEY");
         SetFormValue(cut.Instance, "_newSecret", "Value", "secret123");
         await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddSecret", "_newSecret"));
 
         // Secret created → input fields reset and a success toast surfaces.
         Assert.Equal(string.Empty, GetFormValue<string>(cut.Instance, "_newSecret", "Key"));
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
     }
 
     // ── GetExpiryBadge - static method ──────────────────────────────────────
@@ -267,8 +266,8 @@ public class VaultEditDeepTests : BunitContext
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(-1)])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(-1)])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
@@ -276,8 +275,8 @@ public class VaultEditDeepTests : BunitContext
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(7)])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(7)])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
@@ -285,8 +284,8 @@ public class VaultEditDeepTests : BunitContext
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(30)])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(30)])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── ReloadDetail ─────────────────────────────────────────────────────────

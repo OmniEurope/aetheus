@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Help;
+using Aetheus.Front.Components.Help;
 using Bunit;
-using HelpArticle = Aetheus.Front.Services.HelpArticle;
-using HelpSection = Aetheus.Front.Services.HelpSection;
+using HelpArticle = Aetheus.Front.Components.Shared.HelpArticle;
+using HelpSection = Aetheus.Front.Components.Shared.HelpSection;
 
 namespace Aetheus.Front.Tests.Pages.Help;
 

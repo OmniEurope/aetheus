@@ -1,0 +1,63 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplateVersionHistoryBase
+@page "/templates/{TemplateId:int}/versions"
+
+<PageTitle>@L["VersionHistoryTitle"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@string.Format(L["VersionHistory"], _templateName)" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("history")" /></Icon>
+</OmniPageHeader>
+
+@if (_templateLoading)
+{
+    <AetheusLoader />
+}
+else if (_templateLoadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">@L["LoadFailed"]</OmniAlert>
+}
+else
+{
+    <AetheusDataGrid @ref="_versionsGrid" Data="@_versions" Count="@_versionCount"
+        TItem="PipelineTemplateVersionSummaryDto" IsLoading="@_versionsLoading"
+        LoadData="@LoadVersionsAsync" PageSize="10"
+        Virtualize="@AetheusGrid.RemoteVirtualization"
+        VirtualData="@(() => new OmniDataGridResult<PipelineTemplateVersionSummaryDto>(_versions, _versionCount))">
+        <EmptyTemplate>
+            <EmptyState Icon="history" Title="@L["NoRecords"]" />
+        </EmptyTemplate>
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="PipelineTemplateVersionSummaryDto" Property="Version" Title="@L["Version"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                <Template Context="version">v@version.Version</Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateVersionSummaryDto" Property="ChangelogEntry" Title="@L["Changelog"]" Filterable="true" />
+            <OmniDataGridColumn TItem="PipelineTemplateVersionSummaryDto" Property="CreatedByUsername" Title="@L["CreatedBy"]" Width="12rem" Filterable="true" />
+            <OmniDataGridColumn TItem="PipelineTemplateVersionSummaryDto" Property="CreatedAt" Title="@L["Date"]" Width="12rem" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+        </Columns>
+    </AetheusDataGrid>
+
+    @if (_latestVersion > 1)
+    {
+        <OmniCard Class="omni-u-mt-lg">
+            <OmniRow Gap="OmniSpacing.Medium" Class="omni-u-mb-md">
+                <OmniFormField For="oe-pages-pipelines-pipelinetemplatehistory-numeric-1"><LabelContent>@L["OriginalVersion"]</LabelContent><ChildContent><OmniNumeric TValue="int" Value="@_originalVersion" ValueChanged="@OnOriginalVersionChanged" Minimum="1" Maximum="@_latestVersion" Id="oe-pages-pipelines-pipelinetemplatehistory-numeric-1"  ValueExpression="@(() => _originalVersion)"/></ChildContent></OmniFormField>
+                <OmniFormField For="oe-pages-pipelines-pipelinetemplatehistory-numeric-2"><LabelContent>@L["ModifiedVersion"]</LabelContent><ChildContent><OmniNumeric TValue="int" Value="@_modifiedVersion" ValueChanged="@OnModifiedVersionChanged" Minimum="1" Maximum="@_latestVersion" Id="oe-pages-pipelines-pipelinetemplatehistory-numeric-2"  ValueExpression="@(() => _modifiedVersion)"/></ChildContent></OmniFormField>
+            </OmniRow>
+            @if (_yamlLoadFailed)
+            {
+                <OmniAlert Severity="OmniSeverity.Danger">
+                    @L["LoadFailed"]
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadSelectedYamlAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                </OmniAlert>
+            }
+            else if (_yamlLoading)
+            {
+                <AetheusLoader Size="OmniControlSize.Small" />
+            }
+            else
+            {
+                <MonacoDiffViewer OriginalValue="@_originalYaml" ModifiedValue="@_modifiedYaml" />
+            }
+        </OmniCard>
+    }
+}

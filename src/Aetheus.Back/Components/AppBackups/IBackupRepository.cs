@@ -10,7 +10,8 @@ public interface IBackupRepository
     /// <summary>Paginated policies for the given projects, or all policies when <paramref name="projectIds"/> is null.</summary>
     Task<(List<BackupPolicy> Items, int TotalCount)> GetPoliciesPagedAsync(
         IReadOnlyCollection<int>? projectIds, string? search, string? sortBy,
-        bool sortDescending, int page, int pageSize, CancellationToken ct = default);
+        bool sortDescending, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null);
     Task<BackupPolicy?> FindPolicyAsync(int id, CancellationToken ct = default);
     Task<int?> GetProjectOrganizationIdAsync(int projectId, CancellationToken ct = default);
     Task<List<BackupPolicy>> GetEnabledPoliciesAsync(CancellationToken ct = default);
@@ -23,7 +24,8 @@ public interface IBackupRepository
     Task<BackupRun?> FindRunWithPolicyAsync(int id, CancellationToken ct = default);
     Task<(List<BackupRun> Items, int TotalCount)> GetRunsForPolicyPagedAsync(
         int policyId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default);
+        int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null);
 
     /// <summary>Most recent successful run of a policy (candidate for a restore-check), or null.</summary>
     Task<BackupRun?> GetLatestSuccessfulRunAsync(int policyId, CancellationToken ct = default);

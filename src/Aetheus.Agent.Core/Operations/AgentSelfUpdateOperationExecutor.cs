@@ -226,7 +226,7 @@ public sealed class AgentSelfUpdateOperationExecutor(
         const string diagnostic = "Linux integration posture upgrade supervisor is missing or obsolete.";
         await SafeReportAsync(AgentUpdatePhase.Failed, 80, diagnostic).ConfigureAwait(false);
         return new ExecutorResult(-1, false,
-            Aetheus.Shared.Constants.TaskFailureCodes.InfrastructureMismatch, diagnostic);
+            Aetheus.Shared.Components.Shared.TaskFailureCodes.InfrastructureMismatch, diagnostic);
     }
 
     private void LaunchWindowsUpdater(string stagingRoot, string extractDir, string installDir)

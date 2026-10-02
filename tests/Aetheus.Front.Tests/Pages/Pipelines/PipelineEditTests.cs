@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Components.Pipelines;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Pages;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -79,6 +75,47 @@ public class PipelineEditTests : BunitContext
     }
 
     [Fact]
+    public void Header_ShowsRunAlone_AndEditIsTheFirstEntryOfTheMoreActionsMenu()
+    {
+        // Recette R-421 (standard): Run is the page's one visible action; Edit moved into the menu.
+        SetupNewPipelineMocks(); // the edit tab the menu entry opens loads the editor's name lists
+        SetupEditPipelineMocks();
+        var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, 5));
+        var trigger = cut.WaitForElement(".omni-page-header__menu .omni-overflow-menu__trigger", TimeSpan.FromSeconds(2));
+
+        var headerButtons = cut.FindAll(".omni-page-header__actions > .omni-button");
+        Assert.DoesNotContain(headerButtons, button => button.TextContent.Contains("Edit", StringComparison.Ordinal));
+        Assert.Single(cut.FindAll(".omni-page-header__actions .omni-split-button"));
+
+        trigger.Click();
+        var items = cut.FindAll(".omni-overflow-menu__popup .omni-menu__item");
+        Assert.Contains("Edit", items[0].TextContent, StringComparison.Ordinal);
+
+        items[0].Click();
+        Assert.Equal(1, (int)typeof(PipelineEdit).GetField("_selectedTab", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(cut.Instance)!);
+        Assert.Empty(cut.FindAll(".omni-overflow-menu__popup"));
+    }
+
+    [Fact]
+    public void RunsTab_EachSummaryTileHasItsLabelLineThenItsValueLine()
+    {
+        // Recette R-417: the grade badge sat glued to its label; every tile now has a label line and a
+        // value line of its own.
+        SetupEditPipelineMocks();
+        var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, 5));
+        cut.WaitForState(() => cut.FindAll(".pipeline-runs-summary-card").Count == 4, TimeSpan.FromSeconds(2));
+
+        Assert.All(cut.FindAll(".pipeline-runs-summary-card .omni-card__body"), body =>
+        {
+            var children = body.Children;
+            Assert.Equal(2, children.Length);
+            Assert.Contains("pipeline-runs-summary-label", children[0].ClassName, StringComparison.Ordinal);
+            Assert.Contains("pipeline-runs-summary-value", children[1].ClassName, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void ProjectPipeline_Breadcrumb_Includes_Project_And_ProjectSection()
     {
         SetupEditPipelineMocks();
@@ -122,9 +159,19 @@ public class PipelineEditTests : BunitContext
         });
 
         var cut = Render<PipelineEdit>(parameters => parameters.Add(component => component.Id, 5));
-        cut.WaitForState(() => cut.Markup.Contains("UpdatePipelineTemplate", StringComparison.Ordinal), TimeSpan.FromSeconds(2));
+        var overflowTrigger = cut.WaitForElement(".omni-overflow-menu__trigger", TimeSpan.FromSeconds(2));
 
-        Assert.Contains("UpdatePipelineTemplate", cut.Markup, StringComparison.Ordinal);
+        // The secondary header actions now live in the overflow menu, which renders its items only
+        // while it is open - so the action must be absent before the trigger is clicked.
+        Assert.DoesNotContain("UpdatePipelineTemplate", cut.Markup, StringComparison.Ordinal);
+        overflowTrigger.Click();
+
+        cut.WaitForAssertion(
+            () => Assert.Contains(
+                "UpdatePipelineTemplate",
+                cut.Find(".omni-overflow-menu__popup").InnerHtml,
+                StringComparison.Ordinal),
+            TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -145,15 +192,16 @@ public class PipelineEditTests : BunitContext
                 stages: []
                 """
         });
-        _handler.SetJsonResponse(
-            "api/pipelines/templates/7/resolve?version=3",
-            "name: dotnet-ci\nparameters:\n  - name: environment\n    type: choice\n    required: true\nstages: []");
         var coordinator = new PipelineTemplateEditorCoordinator(
             Services.GetRequiredService<ApiClient>());
 
         var selection = await coordinator.SelectAsync(7, "toto-ci");
         Assert.NotNull(selection);
         Assert.Single(selection.Parameters);
+        // R-490: "environment" is required and has no value yet, so nothing is sent to the resolver (it
+        // answered 400 and the template could not be selected); the base is the template as written.
+        Assert.DoesNotContain(_handler.Requests, request =>
+            request.Url.Contains("/resolve", StringComparison.Ordinal));
 
         var yaml = PipelineTemplateEditorCoordinator.ApplyParameters(
             selection, new Dictionary<string, string> { ["environment"] = "production" });
@@ -164,9 +212,59 @@ public class PipelineEditTests : BunitContext
         var parameter = Assert.Single(definition.Parameters);
         Assert.Equal("production", parameter.Default);
         Assert.True(parameter.Required);
-        Assert.Contains(_handler.Requests, request =>
-            request.Url.Contains("api/pipelines/templates/7/resolve?version=3", StringComparison.Ordinal));
         Assert.Equal(["qa", "production"], parameter.AllowedValues);
+    }
+
+    [Fact]
+    public void R490_TheValuesATemplateIsResolvedWith_AreItsDefaultsOverriddenByThePipeline()
+    {
+        const string template = """
+            name: host-bluegreen-deploy
+            parameters:
+              - name: revision
+                required: true
+              - name: colour
+                default: blue
+            stages: []
+            """;
+        const string pipeline = """
+            name: aetheus-deploy-prod
+            extends: host-bluegreen-deploy@6
+            parameters:
+              - name: revision
+                default: candidate
+            stages: []
+            """;
+
+        var values = PipelineTemplateEditorCoordinator.ParameterValues(template, pipeline);
+
+        Assert.NotNull(values);
+        Assert.Equal("candidate", values["revision"]);
+        Assert.Equal("blue", values["colour"]);
+        // Without the pipeline's default the required parameter has no value: nothing to resolve.
+        Assert.Null(PipelineTemplateEditorCoordinator.ParameterValues(template, null));
+    }
+
+    [Fact]
+    public async Task R490_OpeningAPipelineThatDefaultsARequiredTemplateParameter_ResolvesItsBase()
+    {
+        _handler.SetJsonResponse("api/pipelines/templates/7", new PipelineTemplateDto
+        {
+            Id = 7,
+            Name = "host-bluegreen-deploy",
+            Version = 6,
+            YamlContent = "name: host-bluegreen-deploy\nparameters:\n  - name: revision\n    required: true\nstages: []"
+        });
+        _handler.SetJsonResponse("api/pipelines/templates/7/resolve?version=6", "name: host-bluegreen-deploy\nstages: []");
+        var coordinator = new PipelineTemplateEditorCoordinator(Services.GetRequiredService<ApiClient>());
+
+        var baseYaml = await coordinator.LoadBaseYamlAsync(
+            "name: aetheus-deploy-prod\nextends: host-bluegreen-deploy@6\nparameters:\n  - name: revision\n    default: candidate\nstages: []",
+            [new PipelineTemplateSummaryDto { Id = 7, Name = "host-bluegreen-deploy", Version = 6 }]);
+
+        Assert.NotNull(baseYaml);
+        Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains("api/pipelines/templates/7/resolve?version=6", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -196,7 +294,7 @@ public class PipelineEditTests : BunitContext
             .Add(component => component.SubmitIcon, "check"));
 
         Assert.Contains("ApplyTemplateParameters", cut.Markup, StringComparison.Ordinal);
-        Assert.Contains("check", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Check);
     }
 
     [Fact]
@@ -256,7 +354,8 @@ public class PipelineEditTests : BunitContext
 
         var model = typeof(PipelineEdit).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Equal("release/2026.07", model.GetType().GetProperty("SourceBranch")!.GetValue(model));
-        Assert.Contains("release/2026.07", cut.Markup);
+        // The header badge that used to echo the branch was removed (PLAN-003 lot 16); the model
+        // assertion above is what proves the selected branch is kept.
     }
 
     [Fact]
@@ -326,7 +425,7 @@ public class PipelineEditTests : BunitContext
             BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         await cut.InvokeAsync(async () => await (Task)load.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25 }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25 }])!);
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("api/pipelines/5/runs?page=2&pageSize=25", StringComparison.Ordinal));
@@ -506,11 +605,14 @@ public class PipelineEditTests : BunitContext
     }
 
     [Theory]
-    [InlineData(PipelineStatus.Success, BadgeStyle.Success)]
-    [InlineData(PipelineStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(PipelineStatus.Running, BadgeStyle.Info)]
-    [InlineData(PipelineStatus.Cancelled, BadgeStyle.Warning)]
-    public void GetRunBadge_ReturnsValue(PipelineStatus status, BadgeStyle expected)
+    [InlineData(PipelineStatus.Success, OmniTone.Success)]
+    [InlineData(PipelineStatus.Failed, OmniTone.Danger)]
+    [InlineData(PipelineStatus.Running, OmniTone.Accent)]
+    // PLAN-003 D13: amber is now Partial (finished with a swallowed failure); a cancelled run is a
+    // non-event, so it takes the neutral grey.
+    [InlineData(PipelineStatus.Cancelled, OmniTone.Info)]
+    [InlineData(PipelineStatus.Partial, OmniTone.Warning)]
+    public void GetRunBadge_ReturnsValue(PipelineStatus status, OmniTone expected)
     {
         var result = PipelineRunPresentation.Badge(status);
         Assert.Equal(expected, result);
@@ -526,9 +628,9 @@ public class PipelineEditTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("Deploy Prod"), TimeSpan.FromSeconds(2));
 
         var method = typeof(PipelineEdit).GetMethod("OnSubmit", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var submit = cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
-        await cut.InvokeAsync(() => dialog.Close(new Aetheus.Front.Pages.Pipelines.PipelineSaveDecision("main")));
+        await cut.InvokeAsync(() => dialog.Close(new Aetheus.Front.Components.Pipelines.PipelineSaveDecision("main")));
         await submit;
 
         var saving = (bool)typeof(PipelineEdit).GetField("_saving", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
@@ -557,29 +659,43 @@ public class PipelineEditTests : BunitContext
     }
 
     [Fact]
-    public async Task OnRun_PreservesTriggeredRunWhenBestEffortReloadsFail()
+    public async Task R2_038_OnRun_StaysOnThePipeline_AndReloadsTheRunsGrid()
     {
         SetupEditPipelineMocks();
         _handler.SetJsonResponse("api/pipelines/5/preflight", new PipelinePreflightDto());
         _handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>());
         var cut = Render<PipelineEdit>(parameters => parameters.Add(component => component.Id, 5));
         cut.WaitForState(() => cut.Markup.Contains("Deploy Prod"), TimeSpan.FromSeconds(2));
-        _handler.SetResponse(HttpMethod.Get, "api/pipelines/5/runs", System.Net.HttpStatusCode.ServiceUnavailable);
-        _handler.SetResponse(HttpMethod.Get, "api/pipelines/5", System.Net.HttpStatusCode.ServiceUnavailable);
-        _handler.SetJsonResponse(
-            HttpMethod.Get,
-            "api/pipelines/5/parameters",
-            new List<PipelineRunParameterDto>());
+        var navigation = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+        var uriBefore = navigation.Uri;
+        var runLoadsBefore = _handler.Requests.Count(request => request.Method == "GET"
+            && request.Url.Contains("api/pipelines/5/runs", StringComparison.Ordinal));
 
         var method = typeof(PipelineEdit).GetMethod(
             "OnRun", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
 
-        var runs = (List<PipelineRunDto>)typeof(PipelineEdit).GetField(
-            "_runs", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        Assert.Contains(runs, run => run.Id == 1);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            notification => notification.Severity == NotificationSeverity.Info);
+        // The launched run is read back into this page's grid; the page is not left for the run's.
+        Assert.Equal(uriBefore, navigation.Uri);
+        Assert.True(_handler.Requests.Count(request => request.Method == "GET"
+            && request.Url.Contains("api/pipelines/5/runs", StringComparison.Ordinal)) > runLoadsBefore);
+        Assert.Contains(Services.Toasts(),
+            notification => notification.Severity == OmniSeverity.Info);
+    }
+
+    [Fact]
+    public void R2_038_WhileLaunching_TheRunButtonIsBusy_AndNoPageLoaderShows()
+    {
+        SetupEditPipelineMocks();
+        var cut = Render<PipelineEdit>(parameters => parameters.Add(component => component.Id, 5));
+        cut.WaitForState(() => cut.Markup.Contains("Deploy Prod"), TimeSpan.FromSeconds(2));
+        var loadersBefore = cut.FindAll("[role=status]").Count;
+
+        typeof(PipelineEdit).GetField("_running", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
+        cut.Render();
+
+        Assert.NotEmpty(cut.FindAll("[aria-busy=true]"));
+        Assert.Equal(loadersBefore, cut.FindAll("[role=status]").Count);
     }
 
     [Fact]
@@ -608,7 +724,7 @@ public class PipelineEditTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("Deploy Prod"), TimeSpan.FromSeconds(2));
 
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
-        var dialog = Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
 
         // OnDelete awaits a confirmation dialog that never resolves on its own: start it un-awaited,
         // confirm it (Close(true)), then await. The confirmed path deletes the pipeline and routes back.

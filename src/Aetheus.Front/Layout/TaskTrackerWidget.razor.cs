@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: EUPL-1.2
 
+using OmniEurope.Blazor.Components;
+
 namespace Aetheus.Front.Layout;
 
 public partial class TaskTrackerWidget : IDisposable
 {
     [Inject] private TaskTrackerService Tracker { get; set; } = default!;
     [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    private void GoTo(string href)
+    {
+        _popoverOpen = false;
+        Nav.NavigateTo(href);
+    }
 
     private bool _popoverOpen;
     private int _count;
@@ -22,7 +31,6 @@ public partial class TaskTrackerWidget : IDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    private void TogglePopover() => _popoverOpen = !_popoverOpen;
 
     // A Pending/Assigned task whose server agent is offline cannot progress on its own - surface that
     // instead of an opaque "Pending". Mirrors Tasks.IsStalledOnOfflineAgent.
@@ -30,12 +38,12 @@ public partial class TaskTrackerWidget : IDisposable
         task.ServerStatus == ServerStatus.Offline
         && task.Status is TaskExecutionStatus.Pending or TaskExecutionStatus.Assigned;
 
-    private static string StatusIcon(TaskExecutionStatus status) => status switch
+    private static OmniIconName StatusIcon(TaskExecutionStatus status) => status switch
     {
-        TaskExecutionStatus.Running => "play_arrow",
-        TaskExecutionStatus.Assigned => "schedule",
-        TaskExecutionStatus.Pending => "hourglass_top",
-        _ => "task_alt"
+        TaskExecutionStatus.Running => OmniIconName.Play,
+        TaskExecutionStatus.Assigned => OmniIconName.Timer,
+        TaskExecutionStatus.Pending => OmniIconName.Hourglass,
+        _ => OmniIconName.CheckCircle
     };
 
     private static string StatusIconClass(TaskExecutionStatus status) => status switch

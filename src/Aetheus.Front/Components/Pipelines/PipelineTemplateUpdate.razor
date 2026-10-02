@@ -1,0 +1,53 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineFleetUpdateBase
+@page "/pipelines/{PipelineId:int}/template/update/{TargetVersion:int}"
+
+<PageTitle>@L["UpdatePipelineTemplate"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["UpdatePipelineTemplate"]" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("system_update_alt")" /></Icon>
+</OmniPageHeader>
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_forbidden)
+{
+    <OmniAlert Severity="OmniSeverity.Warning">@L["AccessDenied"]</OmniAlert>
+}
+else if (_notAvailable)
+{
+    <OmniAlert Severity="OmniSeverity.Warning">@L["FleetUpdateUnavailable"]</OmniAlert>
+}
+else if (_loadFailed || _preview is null)
+{
+    <OmniAlert Severity="OmniSeverity.Danger"><Icon><OmniIcon Name="OmniIconName.Error" /></Icon><ChildContent>
+        @L["LoadError"]
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadPreviewAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </ChildContent></OmniAlert>
+}
+else
+{
+    <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-md">
+        @string.Format(L["TemplateVersionTransition"], _preview.TemplateName, _preview.CurrentVersion, _preview.TargetVersion)
+    </OmniText>
+    @if (_preview.OrphanOverrides.Count > 0)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning"><Icon><OmniIcon Name="OmniIconName.Warning" /></Icon><ChildContent>
+            <OmniText Element="OmniTextElement.Paragraph">@L["OrphanOverridesWarning"]</OmniText>
+            <ul>
+                @foreach (var orphan in _preview.OrphanOverrides)
+                {
+                    <li><code>@orphan</code></li>
+                }
+            </ul>
+        </ChildContent></OmniAlert>
+        <OmniCheckBox @bind-Value="_acknowledged" Class="omni-u-mb-md">@L["AcknowledgeOrphanOverrides"]</OmniCheckBox>
+    }
+    <MonacoDiffViewer OriginalValue="@_preview.CurrentResolvedYaml" ModifiedValue="@_preview.TargetResolvedYaml" />
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Justify="OmniJustification.End" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@Cancel"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ConfirmAsync" Disabled="@(_preview.RequiresOrphanAcknowledgement && !_acknowledged)" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Download" /> <span>@L["ConfirmUpdate"]</span></OmniButton>
+    </OmniStack>
+}

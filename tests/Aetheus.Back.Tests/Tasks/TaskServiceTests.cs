@@ -7,9 +7,6 @@ using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -489,6 +486,74 @@ public class TaskServiceTests
         Assert.Equal(TaskEnvProtection.EmptyEnv, task.EnvironmentVariables); // secrets still scrubbed
     }
 
+    [Fact]
+    public async Task CompleteTaskAsync_SuccessfulDeploy_AnnouncesTheReleaseIsLive()
+    {
+        var env = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["AETHEUS_DEPLOY_ARTIFACT_ID"] = "42",
+            ["AETHEUS_DEPLOY_APP"] = "toto",
+            ["AETHEUS_DEPLOY_RELEASE_ID"] = "7"
+        });
+        var task = new ServerTask
+        {
+            Id = 1,
+            ServerId = 1,
+            Name = "Deploy toto",
+            Command = "toto",
+            Status = TaskExecutionStatus.Running,
+            Operation = OperationKind.PipelineDeploy,
+            EnvironmentVariables = env,
+            PipelineRunId = 12,
+            PipelineStepRunId = 13
+        };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+        _repo.FindPipelineStepRunAsync(13, Arg.Any<CancellationToken>())
+            .Returns(new PipelineStepRun { Id = 13, PipelineRunId = 12, StageName = "Deploy" });
+        _logService.GetTaskOutputVariableLinesAsync(1, Arg.Any<CancellationToken>()).Returns([]);
+        _artifactService.MarkDeployedAsync(42, "toto", 7, Arg.Any<CancellationToken>()).Returns(true);
+
+        await _sut.CompleteTaskAsync(
+            1, new TaskResultDto { Status = TaskExecutionStatus.Success, ExitCode = 0 },
+            ct: TestContext.Current.CancellationToken);
+
+        // Carries the stage name because that is what names the target environment in the run's YAML,
+        // and is dispatched non-strictly so a post-deployment observer can never fail a live deploy.
+        await _domainEvents.Received(1).DispatchAsync(
+            Arg.Is<Aetheus.Back.Components.Tasks.ReleaseDeployedEvent>(e =>
+                e.ReleaseId == 7 && e.PipelineRunId == 12 && e.StageName == "Deploy" && !e.IsRollback),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_DeployWithoutARelease_AnnouncesNothing()
+    {
+        var env = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["AETHEUS_DEPLOY_ARTIFACT_ID"] = "42",
+            ["AETHEUS_DEPLOY_APP"] = "toto"
+        });
+        var task = new ServerTask
+        {
+            Id = 1,
+            ServerId = 1,
+            Name = "Deploy toto",
+            Command = "toto",
+            Status = TaskExecutionStatus.Running,
+            Operation = OperationKind.PipelineDeploy,
+            EnvironmentVariables = env
+        };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+        _artifactService.MarkDeployedAsync(42, "toto", null, Arg.Any<CancellationToken>()).Returns(true);
+
+        await _sut.CompleteTaskAsync(
+            1, new TaskResultDto { Status = TaskExecutionStatus.Success, ExitCode = 0 },
+            ct: TestContext.Current.CancellationToken);
+
+        await _domainEvents.DidNotReceive().DispatchAsync(
+            Arg.Any<Aetheus.Back.Components.Tasks.ReleaseDeployedEvent>(), Arg.Any<CancellationToken>());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -600,6 +665,32 @@ public class TaskServiceTests
         Assert.True(completed);
         Assert.Equal(expectedCode, task.FailureCode);
         Assert.Contains(task.Logs, log => log.Message.Contains($"[incident:{expectedCode}]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_AFailedActionOutsideAnyPipeline_IsNotAnIncident()
+    {
+        // Recette R-515: three failed attempts to start dovecot were three incidents of the server.
+        var task = new ServerTask
+        {
+            Id = 1,
+            ServerId = 1,
+            Name = "Service Start - dovecot",
+            Status = TaskExecutionStatus.Running
+        };
+        _repo.FindTaskAsync(1, Arg.Any<CancellationToken>()).Returns(task);
+        _logService.GetTaskOutputVariableLinesAsync(1, Arg.Any<CancellationToken>()).Returns([]);
+
+        var completed = await _sut.CompleteTaskAsync(
+            1,
+            new TaskResultDto { Status = TaskExecutionStatus.Failed, ExitCode = 5 },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.True(completed);
+        Assert.Equal(TaskExecutionStatus.Failed, task.Status);
+        Assert.Equal(5, task.ExitCode);
+        Assert.Null(task.FailureCode);
+        Assert.DoesNotContain(task.Logs, log => log.Message.Contains("[incident:", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Microsoft.Playwright;
+
 namespace Aetheus.E2E;
 
 [Category("E2E")]
@@ -18,30 +20,33 @@ public class PipelinesTests : E2ETestBase
         await Expect(Page.GetByText("Pipelines").First).ToBeVisibleAsync(new() { Timeout = 10000 });
         await Expect(Page).ToHaveTitleAsync(new System.Text.RegularExpressions.Regex("Pipelines"));
 
-        // Scope to the toolbar - the empty-state also renders a "New Pipeline" CTA when the grid is empty.
-        var newButton = Page.Locator(".pipeline-list-toolbar").GetByText("New Pipeline");
+        // Recette R-124: the list's New button sits in the one-line page header. Scoped to the header
+        // because the empty state also renders a "New Pipeline" CTA when the grid is empty.
+        var newButton = Page.Locator(".omni-page-header__actions").GetByRole(AriaRole.Button, new() { Name = "New Pipeline" });
         await Expect(newButton).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         await WaitForNoSpinnerAsync();
-        var parentsTab = Page.GetByRole(AriaRole.Tab, new() { NameRegex = new("Pipelines with children") });
-        var leavesTab = Page.GetByRole(AriaRole.Tab, new() { NameRegex = new("Pipelines without children") });
-        await Expect(parentsTab).ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(leavesTab).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // Recette R-120/R-121/R-215: two views, Catalog (n) and Runs (n), switched from the page header;
+        // parents and leaves share one grid.
+        var views = Page.Locator(".omni-page-header__actions .pipeline-view-switch");
+        await Expect(views.Locator(".omni-select-bar__item", new() { HasTextRegex = new(@"Catalog \(\d+\)") }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(views.Locator(".omni-select-bar__item", new() { HasTextRegex = new(@"Runs \(\d+\)") }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(Page.GetByRole(AriaRole.Tab, new() { NameRegex = new(@"Catalog \(\d+\)") })).ToHaveCountAsync(0);
 
         var grids = Page.Locator(".pipeline-dependency-grid");
-        // Radzen renders only the selected catalog tab's panel. The two catalog groups are
-        // represented by the tabs above, while exactly one dependency grid is active at a time.
         await Expect(grids).ToHaveCountAsync(1, new() { Timeout = 10000 });
         var grid = grids.First;
         await Expect(grid).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         var searchBox = Page.Locator(".pipeline-list-search");
         await Expect(searchBox).ToBeVisibleAsync();
-        var dropdown = Page.Locator(".rz-dropdown").First;
-        await Expect(dropdown).ToBeVisibleAsync(new() { Timeout = 10000 });
-        // The Pipelines refresh button only carries an aria-label (no title attribute).
-        var refreshButton = Page.GetByRole(AriaRole.Button, new() { Name = "Refresh" });
-        await Expect(refreshButton.First).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // Recette R-167: triggers filter through a compact multi-select.
+        var triggerFilter = Page.GetByRole(AriaRole.Group, new() { Name = "All Triggers" });
+        await Expect(triggerFilter).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // Recette R-181: no Refresh button, the list follows the pipelines and entities hubs.
+        await Expect(Page.GetByRole(AriaRole.Button, new() { Name = "Refresh", Exact = true })).ToHaveCountAsync(0);
 
         await Expect(grid.Locator(".pipeline-name-link").First).ToBeVisibleAsync(new() { Timeout = 10000 });
 
@@ -51,12 +56,13 @@ public class PipelinesTests : E2ETestBase
         await Expect(grid.GetByText("Pipeline", new() { Exact = true })).ToBeVisibleAsync();
         await Expect(grid.GetByText("Trigger", new() { Exact = true })).ToBeVisibleAsync();
 
-        await grid.GetByRole(AriaRole.Button, new() { Name = "Expand child item" }).First.ClickAsync();
+        // OE 1.2.0 names the row toggle with its own localized "Expand row" (GridExpandRow).
+        await grid.GetByRole(AriaRole.Button, new() { Name = "Expand row", Exact = true }).First.ClickAsync();
         await Expect(grid.Locator(".pipeline-relation-list-execution")).ToBeVisibleAsync();
         await Expect(grid.Locator(".pipeline-relation-card").First).ToBeVisibleAsync();
 
-        var badge = Page.Locator(".rz-badge").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex(@"\d+\s*total", System.Text.RegularExpressions.RegexOptions.IgnoreCase) });
-        await Expect(badge.First).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // The pipeline count is the catalogue tab's "(n)" now, checked above; R-122 adds the summary strip.
+        await Expect(Page.Locator(".pipeline-status-summary .pipeline-status-chip").First).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         // Search is a real client-side filter over the loaded dependency graph.
         await searchBox.FillAsync("toto-ci");
@@ -65,38 +71,24 @@ public class PipelinesTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(grids.GetByText("API CI", new() { Exact = true })).ToHaveCountAsync(0);
 
-        var clearFilters = Page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" });
+        // PLAN-003 D10 shortened the button to "Clear": the filters row it sits in names the context.
+        // A dropdown holding a value draws its own clear icon, also a button named "Clear", so the
+        // filters button is the button of that row with that name.
+        var clearFilters = Page.Locator(".pipeline-catalog-filters")
+            .GetByRole(AriaRole.Button, new() { Name = "Clear", Exact = true });
         await clearFilters.ClickAsync();
-        await leavesTab.ClickAsync();
         await Expect(grids.GetByText("API CI", new() { Exact = true }).First)
             .ToBeVisibleAsync(new() { Timeout = 5000 });
 
         // Select the seeded Webhook trigger and prove that manual pipelines disappear.
-        await dropdown.ClickAsync();
-        await Page.Locator(".rz-dropdown-panel:visible .rz-dropdown-item")
-            .Filter(new() { HasText = "Webhook" }).ClickAsync();
+        await triggerFilter.Locator("summary").ClickAsync();
+        await triggerFilter.GetByRole(AriaRole.Checkbox, new() { Name = "Webhook" }).CheckAsync();
         await Expect(Page.GetByText("toto-ci", new() { Exact = true }).First)
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(grids.GetByText("API CI", new() { Exact = true })).ToHaveCountAsync(0);
 
-        await Page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" }).ClickAsync();
+        await clearFilters.ClickAsync();
         await Expect(grids.GetByText("API CI", new() { Exact = true }).First)
-            .ToBeVisibleAsync(new() { Timeout = 5000 });
-
-        // Refresh must complete both HTTP branches successfully and keep the seeded content rendered.
-        var dependenciesResponse = Page.WaitForResponseAsync(response =>
-            response.Request.Method == "GET"
-            && response.Url.EndsWith("/api/pipelines/dependencies", StringComparison.OrdinalIgnoreCase));
-        var recentRunsResponse = Page.WaitForResponseAsync(response =>
-            response.Request.Method == "GET"
-            && response.Url.EndsWith("/api/pipelines/runs/recent", StringComparison.OrdinalIgnoreCase));
-        await refreshButton.First.ClickAsync();
-        var refreshResponses = await Task.WhenAll(
-            dependenciesResponse.WaitAsync(TimeSpan.FromSeconds(10)),
-            recentRunsResponse.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.That(refreshResponses.All(response => response.Ok), Is.True,
-            $"Pipeline refresh returned HTTP {string.Join(", ", refreshResponses.Select(response => response.Status))}.");
-        await Expect(Page.GetByText("toto-ci", new() { Exact = true }).First)
             .ToBeVisibleAsync(new() { Timeout = 5000 });
     }
 
@@ -104,13 +96,13 @@ public class PipelinesTests : E2ETestBase
     public async Task Pipelines_NewPipeline_NavigatesToSetupWizard()
     {
         await NavigateToAsync("pipelines");
-        await Page.Locator(".pipeline-list-toolbar").GetByText("New Pipeline").ClickAsync();
+        await Page.Locator(".omni-page-header__actions").GetByRole(AriaRole.Button, new() { Name = "New Pipeline" }).ClickAsync();
 
         await Expect(Page).ToHaveURLAsync(
             new System.Text.RegularExpressions.Regex("/pipelines/setup"), new() { Timeout = 5000 });
         await Expect(Page.GetByRole(AriaRole.Heading, new() { Name = "Pipeline setup wizard" }))
             .ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(Page.GetByRole(AriaRole.Tab, new() { Name = "1 Project" }))
+        await Expect(Page.GetByRole(AriaRole.Button, new() { Name = "1 Project" }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(Page.GetByText("Select the project that will own the generated pipelines."))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
@@ -145,7 +137,11 @@ public class PipelinesTests : E2ETestBase
 
         await NavigateToAsync("pipelines/runs/1");
 
-        await Expect(Page.GetByText("Analysis gate incomplete", new() { Exact = true }))
+        // PLAN-003 D15: the incomplete gate is a badge in the run header, and its full detail an
+        // alert in the overview. Both carry the title, so each is asserted where it belongs.
+        await Expect(Page.Locator(".pipeline-run-page-header").GetByText("Analysis gate incomplete", new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(Page.Locator(".omni-alert").GetByText("Analysis gate incomplete", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10000 });
         await Expect(Page.GetByText(
                 new System.Text.RegularExpressions.Regex(

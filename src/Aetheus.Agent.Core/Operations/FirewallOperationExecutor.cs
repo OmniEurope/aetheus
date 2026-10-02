@@ -11,22 +11,17 @@ namespace Aetheus.Agent.Core.Operations;
 /// depth: it re-validates port/protocol/source and refuses an anti-lockout deny BEFORE calling the helper.
 /// Everything argv-only (<c>ProcessStartInfo.ArgumentList</c>) - no shell, no interpolation.
 /// </summary>
-public sealed class FirewallOperationExecutor(ILogger<FirewallOperationExecutor> logger) : IOperationExecutor
+public sealed class FirewallOperationExecutor(ILogger<FirewallOperationExecutor> logger) : EnvironmentOperationExecutor
 {
     public const string HelperPath = "/usr/local/lib/aetheus/aetheus-firewall";
 
-    public bool CanHandle(OperationKind kind) => kind is
+    public override bool CanHandle(OperationKind kind) => kind is
         OperationKind.FirewallAllow or
         OperationKind.FirewallDeny or
         OperationKind.FirewallDeleteRule or
         OperationKind.FirewallSetEnabled;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
-        => ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {

@@ -5,7 +5,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Pipelines;
 

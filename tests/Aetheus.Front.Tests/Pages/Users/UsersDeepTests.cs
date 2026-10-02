@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
-using UsersPage = Aetheus.Front.Pages.Users.Users;
+using UsersPage = Aetheus.Front.Components.Users.Users;
 
 namespace Aetheus.Front.Tests.Pages.Users;
 
@@ -50,7 +48,7 @@ public class UsersDeepTests : BunitContext
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"));
 
         var method = typeof(UsersPage).GetMethod("OnLoadData", Priv)!;
-        var args = new LoadDataArgs { Skip = 0, Top = 20 };
+        var args = new GridLoadArgs { Skip = 0, Top = 20 };
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [args])!);
 
         var users = (List<UserDto>)typeof(UsersPage).GetField("_users", Priv)!.GetValue(cut.Instance)!;
@@ -58,18 +56,26 @@ public class UsersDeepTests : BunitContext
     }
 
     [Fact]
-    public async Task ClearFilters_ResetsSearch()
+    public async Task SharedSearch_FiltersTheUsers()
     {
+        // Recette R-316: the search of the section bar, shared with Organizations and Roles, filters
+        // this grid; the page has no search box of its own any more.
         SetupDefaults();
         var cut = Render<UsersPage>();
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"));
+        Assert.Empty(cut.FindAll(".iam-page-header input"));
 
-        typeof(UsersPage).GetField("_search", Priv)!.SetValue(cut.Instance, "alice");
-        var method = typeof(UsersPage).GetMethod("ClearFilters", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        _handler.SetJsonResponse("api/organizations?", new PaginatedResult<OrganizationDto>());
+        _handler.SetJsonResponse("api/roles?", new PaginatedResult<RoleDto>());
+        var search = Services.GetRequiredService<Aetheus.Front.Components.Users.AdminIdentitySearch>();
+        await cut.InvokeAsync(() => search.SetAsync("alice", "users"));
 
-        var search = (string?)typeof(UsersPage).GetField("_search", Priv)!.GetValue(cut.Instance);
-        Assert.Null(search);
+        // The grid's own page request (pageSize 20), not the section count (pageSize 1): a GoToPage(0)
+        // on a grid already at page 0 reloaded nothing and only the count carried the term.
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains("api/users?", StringComparison.Ordinal)
+            && request.Url.Contains("pageSize=20", StringComparison.Ordinal)
+            && request.Url.Contains("search=alice", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -79,8 +85,8 @@ public class UsersDeepTests : BunitContext
         var cut = Render<UsersPage>();
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"));
 
-        // OnCreate opens the UserCreateDialog via the DialogService rather than navigating.
-        var dialog = Services.GetRequiredService<DialogService>();
+        // OnCreate opens the UserCreateDialog via the OmniDialogService rather than navigating.
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         Type? openedDialog = null;
         dialog.OnOpen += (_, type, _, _) => openedDialog = type;
 
@@ -91,14 +97,14 @@ public class UsersDeepTests : BunitContext
     }
 
     [Theory]
-    [InlineData("Admin", BadgeStyle.Danger)]
-    [InlineData("Contributor", BadgeStyle.Primary)]
-    [InlineData("Reader", BadgeStyle.Info)]
-    [InlineData("Custom", BadgeStyle.Light)]
-    public void GetRoleBadgeStyle_ReturnsExpected(string role, BadgeStyle expected)
+    [InlineData("Admin", OmniTone.Danger)]
+    [InlineData("Contributor", OmniTone.Accent)]
+    [InlineData("Reader", OmniTone.Accent)]
+    [InlineData("Custom", OmniTone.Neutral)]
+    public void GetRoleBadgeStyle_ReturnsExpected(string role, OmniTone expected)
     {
         var method = typeof(UsersPage).GetMethod("GetRoleBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [role])!;
+        var result = (OmniTone)method.Invoke(null, [role])!;
         Assert.Equal(expected, result);
     }
 

@@ -30,23 +30,24 @@ const fingerprint = migrations => ({
 
 const BEFORE = ["20260420134123_InitialCreate", "20260611124145_AddPipelineRunYamlSnapshot"];
 const AFTER = [...BEFORE, "20260815060150_AddPipelineBuildNumber"];
+const NEXT = [...AFTER, "20260910000000_AddReleaseWindow"];
 const SOURCE = "a".repeat(40);
 
 /** Seals a contract exactly as generate-delivery-contract.mjs does, so candidateId verifies. */
-const seal = baseline => {
+const seal = (baseline, source = SOURCE) => {
   const identity = canonicalize({
     schema: 2,
-    sourceSha: SOURCE,
+    sourceSha: source,
     adapter: { name: "test", version: "1" },
     baseline,
     injection: { manifestSha256: sha256("{}"), packages: [] },
     artifacts: {}
   });
   const candidateId = sha256(JSON.stringify(identity));
-  return canonicalize({ ...identity, candidateId, candidateVersion: `c-${SOURCE}` });
+  return canonicalize({ ...identity, candidateId, candidateVersion: `c-${source}` });
 };
 
-const run = (contract, schemaLines) => {
+const run = (contract, schemaLines, liveContract = null) => {
   const dir = mkdtempSync(join(tmpdir(), "promotion-"));
   try {
     const contractPath = join(dir, "delivery-contract.json");
@@ -56,7 +57,13 @@ const run = (contract, schemaLines) => {
       schemaArg = join(dir, "schema");
       writeFileSync(schemaArg, schemaLines.join("\n") + "\n");
     }
-    const result = spawnSync(process.execPath, [script, contractPath, schemaArg, dir], {
+    const args = [script, contractPath, schemaArg, dir];
+    if (liveContract !== null) {
+      const livePath = join(dir, "live-contract.json");
+      writeFileSync(livePath, JSON.stringify(liveContract, null, 2));
+      args.push(livePath);
+    }
+    const result = spawnSync(process.execPath, args, {
       encoding: "utf8"
     });
     return { code: result.status, out: result.stdout ?? "", err: result.stderr ?? "" };
@@ -139,4 +146,53 @@ test("still refuses a tampered contract identity", () => {
   const { code, err } = run(tampered, BEFORE);
   assert.notEqual(code, 0);
   assert.match(err, /identity is invalid/);
+});
+
+// PLAN-007 lot 5: redeploying the release deployed before the live one. Production runs N, which
+// migrated from the candidate's schemaAfter; N's QA exercised the candidate (its V-1) on that schema.
+const LIVE_SOURCE = "d".repeat(40);
+const live = seal({ bootstrap: false, schemaBefore: fingerprint(AFTER), schemaAfter: fingerprint(NEXT) }, LIVE_SOURCE);
+
+test("accepts the previous release when the live release migrated from its schema", () => {
+  const { code, out } = run(migrating, NEXT, live);
+  assert.equal(code, 0, out);
+  assert.match(out, /Previously deployed release/);
+  assert.match(out, new RegExp(`c-${LIVE_SOURCE}`));
+  assert.match(out, /Verified immutable candidate/);
+});
+
+test("still refuses that schema without the live release contract", () => {
+  const { code, err } = run(migrating, NEXT);
+  assert.notEqual(code, 0);
+  assert.match(err, /neither state this candidate was proven against/);
+});
+
+test("refuses an older release the live release did not migrate from", () => {
+  // N migrated from AFTER, not from BEFORE: a release whose schemaAfter is BEFORE sits two migrations
+  // back, a path no QA exercised, even though BEFORE is a prefix of the live history.
+  const older = seal({ bootstrap: false, schemaBefore: fingerprint([BEFORE[0]]), schemaAfter: fingerprint(BEFORE) }, "e".repeat(40));
+  const { code, err } = run(older, NEXT, live);
+  assert.notEqual(code, 0);
+  assert.match(err, /neither state this candidate was proven against/);
+});
+
+test("refuses when production is not on the live release's proven schema", () => {
+  const drifted = [...NEXT, "20261001000000_HandAppliedFix"];
+  const { code, err } = run(migrating, drifted, live);
+  assert.notEqual(code, 0);
+  assert.match(err, /neither state this candidate was proven against/);
+});
+
+test("refuses a tampered live release contract", () => {
+  const tampered = { ...live, baseline: { ...live.baseline, schemaBefore: fingerprint(BEFORE) } };
+  const { code, err } = run(migrating, NEXT, tampered);
+  assert.notEqual(code, 0);
+  assert.match(err, /release production runs is invalid/);
+});
+
+test("ignores a bootstrap live release, which proves no predecessor", () => {
+  const bootstrapLive = seal({ bootstrap: true, schemaAfter: fingerprint(NEXT) }, LIVE_SOURCE);
+  const { code, err } = run(migrating, NEXT, bootstrapLive);
+  assert.notEqual(code, 0);
+  assert.match(err, /neither state this candidate was proven against/);
 });

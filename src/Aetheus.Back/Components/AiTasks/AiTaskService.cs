@@ -31,7 +31,8 @@ public sealed partial class AiTaskService(
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetProfilesPageAsync(
-            request.Search, page, pageSize, ct).ConfigureAwait(false);
+            request.Search, page, pageSize, ct, request.Filters,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
         return new PaginatedResult<AiRunnerProfileDto>
         {
             Items = items.Select(MapProfile).ToList(),
@@ -118,7 +119,8 @@ public sealed partial class AiTaskService(
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetDefinitionsPageAsync(
             request.Search, page, pageSize, projectId, serverId,
-            accessibleProjectIds, accessibleServerIds, ct).ConfigureAwait(false);
+            accessibleProjectIds, accessibleServerIds, ct, request.Filters,
+            request.SortBy, request.SortDescending).ConfigureAwait(false);
         return new PaginatedResult<AiTaskDefinitionDto>
         {
             Items = items.Select(MapDefinition).ToList(),

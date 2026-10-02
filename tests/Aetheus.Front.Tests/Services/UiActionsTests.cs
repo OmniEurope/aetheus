@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
 using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Services;
 
 public class UiActionsTests
 {
-    private readonly NotificationService _notification = new();
+    private readonly OmniOverlayService _overlay = new(new FakeTimeProvider());
     private readonly NotifyHelper _toast;
     private readonly UiActions _sut;
 
@@ -18,7 +18,7 @@ public class UiActionsTests
         var localizer = Substitute.For<IStringLocalizer<AppStrings>>();
         localizer[Arg.Any<string>()]
             .Returns(ci => new LocalizedString((string)ci[0], (string)ci[0]));
-        _toast = new NotifyHelper(_notification, localizer);
+        _toast = new NotifyHelper(_overlay, localizer);
         _sut = new UiActions(_toast);
     }
 
@@ -32,7 +32,7 @@ public class UiActionsTests
             "Saved");
 
         Assert.True(result);
-        AssertToast(NotificationSeverity.Success, "Saved", "Saved");
+        AssertToast(OmniSeverity.Success, "Saved", "Saved");
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class UiActionsTests
             onSuccess: _ => { called = true; return Task.CompletedTask; });
 
         Assert.True(called);
-        AssertToast(NotificationSeverity.Success, "Saved", "Saved");
+        AssertToast(OmniSeverity.Success, "Saved", "Saved");
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class UiActionsTests
             "Saved");
 
         Assert.False(result);
-        AssertToast(NotificationSeverity.Error, "Error", "SaveFailed");
+        AssertToast(OmniSeverity.Danger, "Error", "SaveFailed");
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class UiActionsTests
             onSuccess: _ => { called = true; return Task.CompletedTask; });
 
         Assert.False(called);
-        AssertToast(NotificationSeverity.Error, "Error", "SaveFailed");
+        AssertToast(OmniSeverity.Danger, "Error", "SaveFailed");
     }
 
     // --- RunAsync (bool result) ---
@@ -84,7 +84,7 @@ public class UiActionsTests
             "Deleted");
 
         Assert.True(result);
-        AssertToast(NotificationSeverity.Success, "Saved", "Deleted");
+        AssertToast(OmniSeverity.Success, "Saved", "Deleted");
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class UiActionsTests
             onSuccess: () => { called = true; return Task.CompletedTask; });
 
         Assert.True(called);
-        AssertToast(NotificationSeverity.Success, "Saved", "Deleted");
+        AssertToast(OmniSeverity.Success, "Saved", "Deleted");
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class UiActionsTests
             "Deleted");
 
         Assert.False(result);
-        AssertToast(NotificationSeverity.Error, "Error", "SaveFailed");
+        AssertToast(OmniSeverity.Danger, "Error", "SaveFailed");
     }
 
     [Fact]
@@ -123,12 +123,12 @@ public class UiActionsTests
             onSuccess: () => { called = true; return Task.CompletedTask; });
 
         Assert.False(called);
-        AssertToast(NotificationSeverity.Error, "Error", "SaveFailed");
+        AssertToast(OmniSeverity.Danger, "Error", "SaveFailed");
     }
 
-    private void AssertToast(NotificationSeverity severity, string summary, string detail)
+    private void AssertToast(OmniSeverity severity, string summary, string detail)
     {
-        var message = Assert.Single(_notification.Messages);
+        var message = Assert.Single(_overlay.Toasts());
         Assert.Equal(severity, message.Severity);
         Assert.Equal(summary, message.Summary);
         Assert.Equal(detail, message.Detail);

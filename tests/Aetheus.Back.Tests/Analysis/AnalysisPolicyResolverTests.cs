@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.Analysis;
 
@@ -60,7 +59,7 @@ public sealed class AnalysisPolicyResolverTests
     {
         var resolved = AnalysisPolicyResolver.Resolve(null, null, []);
 
-        Assert.Equal(17, resolved.Count);
+        Assert.Equal(18, resolved.Count); // PLAN-003 2.4 added the accessibility default.
         Assert.All(resolved, item =>
         {
             Assert.Equal(AnalysisPolicyScope.System, item.Scope);

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
+using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 
@@ -46,6 +45,36 @@ public class ProjectRepositoryTests : IDisposable
         Assert.Equal(3, total);
         Assert.Equal(2, items.Count);
         Assert.Equal("Alpha", items[0].Name);
+    }
+
+    [Fact]
+    public async Task GetProjectsPagedAsync_GivesThePipelineCountAndTheLastRun_WithoutThePipelineYaml()
+    {
+        // Recette R-481: the tile needs a count and the latest run, not the pipelines' definitions.
+        var project = new Project { Name = "Aetheus", Description = "d" };
+        var older = new DateTime(2026, 9, 29, 8, 0, 0, DateTimeKind.Utc);
+        project.Pipelines.Add(new Pipeline
+        {
+            Name = "candidate",
+            YamlDefinition = "name: candidate",
+            Runs =
+            [
+                new PipelineRun { Status = PipelineStatus.Failed, StartedAt = older },
+                new PipelineRun { Status = PipelineStatus.Success, StartedAt = older.AddHours(2) }
+            ]
+        });
+        project.Pipelines.Add(new Pipeline { Name = "nightly", YamlDefinition = "name: nightly" });
+        _db.Projects.AddRange(project, new Project { Name = "Empty", Description = "d" });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, _) = await _repo.GetProjectsPagedAsync(null, null, false, 1, 10, ct: TestContext.Current.CancellationToken);
+
+        var dto = Aetheus.Back.Components.Shared.ProjectDtoMapper.ToDto(items.Single(p => p.Name == "Aetheus"), includePipelineSummary: true);
+        Assert.Equal(2, dto.PipelineCount);
+        Assert.Equal(PipelineStatus.Success, dto.LastRunStatus);
+        Assert.Equal(older.AddHours(2), dto.LastRunAt);
+        Assert.All(items.SelectMany(p => p.Pipelines), pipeline => Assert.Equal(string.Empty, pipeline.YamlDefinition));
+        Assert.Empty(items.Single(p => p.Name == "Empty").Pipelines);
     }
 
     [Fact]
@@ -299,6 +328,30 @@ public class ProjectRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetTasksPagedAsync_AppliesColumnFilters_AndFilterValuesListTheServers()
+    {
+        // Recette R-212: the project tasks section sends real column filters, applied before the count.
+        var (project, _, run, server) = await SetupProjectWithPipelineRunAsync();
+        _db.Tasks.AddRange(
+            new ServerTask { ServerId = server.Id, Name = "build", Command = "echo", Status = TaskExecutionStatus.Failed, PipelineRunId = run.Id },
+            new ServerTask { ServerId = server.Id, Name = "test", Command = "echo", Status = TaskExecutionStatus.Success, PipelineRunId = run.Id });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetTasksPagedAsync(project.Id, null, null, false, 1, 10,
+            ct: TestContext.Current.CancellationToken,
+            columnFilters:
+            [
+                new GridFilter { Field = "ServerName", Operator = GridFilterOperator.In, Value = server.Name },
+                new GridFilter { Field = "Status", Operator = GridFilterOperator.In, Value = "Failed" }
+            ]);
+        var values = await _repo.GetTaskFilterValuesAsync(project.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, total);
+        Assert.Equal("build", Assert.Single(items).Name);
+        Assert.Equal([server.Name], values.ServerNames);
+    }
+
+    [Fact]
     public async Task GetTasksPagedAsync_ReturnsRequestedSecondPage()
     {
         var (project, _, run, server) = await SetupProjectWithPipelineRunAsync();
@@ -374,6 +427,79 @@ public class ProjectRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetLogsPagedAsync_AppliesColumnFilters_BeforeTheCount()
+    {
+        // Recette R-212: the project logs section sends the Level list, the Time range and the Message
+        // text as real column filters, applied inside the project's scope and before the count.
+        var (project, _, run, server) = await SetupProjectWithPipelineRunAsync();
+        var task = new ServerTask { ServerId = server.Id, Name = "t", Command = "echo", Executor = ExecutorType.Shell, Status = TaskExecutionStatus.Pending, PipelineRunId = run.Id };
+        _db.Tasks.Add(task);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var at = new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc);
+        var logs = new[]
+        {
+            new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Error, Message = "Deploy FAILED" },
+            new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Error, Message = "Deploy failed" },
+            new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Info, Message = "Deploy failed" },
+            new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Warning, Message = "Disk low" }
+        };
+        _db.TaskLogs.AddRange(logs);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        // The context stamps Timestamp on insert; the times under test are set by an update.
+        logs[0].Timestamp = at.AddMinutes(30);
+        logs[1].Timestamp = at.AddHours(5);
+        logs[2].Timestamp = at.AddMinutes(40);
+        logs[3].Timestamp = at.AddMinutes(50);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetLogsPagedAsync(project.Id, null, null, false, 1, 10,
+            ct: TestContext.Current.CancellationToken,
+            columnFilters:
+            [
+                new GridFilter { Field = "Level", Operator = GridFilterOperator.In, Value = $"Error{GridFilter.ListSeparator}Warning" },
+                new GridFilter
+                {
+                    Field = "Timestamp", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-01T08:00:00Z",
+                    SecondOperator = GridFilterOperator.LessThan, SecondValue = "2026-09-01T12:00:00Z"
+                },
+                new GridFilter { Field = "Message", Operator = GridFilterOperator.Contains, Value = "failed" }
+            ]);
+
+        Assert.Equal(1, total);
+        Assert.Equal("Deploy FAILED", Assert.Single(items).Message);
+    }
+
+    [Fact]
+    public async Task GetProjectServersPageAsync_AppliesColumnFilters_BeforeTheCount()
+    {
+        // Recette R-212: the project servers section sends the Type list, the Name and Host texts and the
+        // Port number as real column filters; another project's server never leaks in.
+        var project = new Project { Name = "Filtered", Description = "d" };
+        var other = new Project { Name = "Other", Description = "d" };
+        _db.Projects.AddRange(project, other);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.ProjectServers.AddRange(
+            new ProjectServer { ProjectId = project.Id, Type = ProjectServerType.ExternalHost, DisplayName = "Web front", Host = "10.0.0.1", Port = 22 },
+            new ProjectServer { ProjectId = project.Id, Type = ProjectServerType.ExternalHost, DisplayName = "Web back", Host = "10.0.0.2", Port = 2222 },
+            new ProjectServer { ProjectId = project.Id, Type = ProjectServerType.AgentServer, DisplayName = "Web agent", Host = "10.0.0.3", Port = 22 },
+            new ProjectServer { ProjectId = other.Id, Type = ProjectServerType.ExternalHost, DisplayName = "Web other", Host = "10.0.0.4", Port = 22 });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, totalCount) = await _repo.GetProjectServersPageAsync(
+            project.Id, null, null, false, 1, 10, ct: TestContext.Current.CancellationToken,
+            columnFilters:
+            [
+                new GridFilter { Field = "Type", Operator = GridFilterOperator.In, Value = "ExternalHost" },
+                new GridFilter { Field = "DisplayName", Operator = GridFilterOperator.Contains, Value = "WEB" },
+                new GridFilter { Field = "Host", Operator = GridFilterOperator.StartsWith, Value = "10.0" },
+                new GridFilter { Field = "Port", Operator = GridFilterOperator.Equals, Value = "22" }
+            ]);
+
+        Assert.Equal(1, totalCount);
+        Assert.Equal("Web front", Assert.Single(items).DisplayName);
+    }
+
+    [Fact]
     public async Task GetRecentTasksAsync_ReturnsLimited()
     {
         var (project, _, run, server) = await SetupProjectWithPipelineRunAsync();
@@ -400,7 +526,7 @@ public class ProjectRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetProjectListInsightsAsync_ReturnsCommitRunParentProductionAndOnlineUsers()
+    public async Task GetProjectListInsightsAsync_NamesTheRootRunNotItsNewestChild_WithCommitProductionAndUsers()
     {
         var now = new DateTime(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc);
         var project = new Project { Name = "Portfolio", Description = "d" };
@@ -602,11 +728,157 @@ public class ProjectRepositoryTests : IDisposable
 
         var insight = Assert.Single(result).Value;
         Assert.Equal("0123456789abcdef", insight.LastCommitSha);
-        Assert.Equal(childRun.Id, insight.LastRunId);
-        Assert.Equal(parentRun.Id, insight.ParentRunId);
+        // PLAN-003 lot 8 / D24: the child run is the newest one, and the tile still names the parent,
+        // the run a person launched. Before, it named the child and explained it with "child of #N".
+        Assert.Equal(parentRun.Id, insight.LastRunId);
+        Assert.NotEqual(childRun.Id, insight.LastRunId);
+        // And its status is the parent's: a green child under a parent still running is not "done".
+        Assert.Equal(PipelineStatus.Running, insight.LastRunStatus);
         Assert.Equal(AnalysisGrade.F, insight.LatestGateGrade);
         Assert.Equal(ProjectProductionStatus.Online, insight.ProductionStatus);
         Assert.Equal(1, insight.OnlineUserCount);
+    }
+
+
+    [Fact]
+    public async Task GetProjectSectionCountsAsync_CountsAServerCarriedByAnEnvironment_ApartFromDirectAttachments()
+    {
+        // PLAN-003 lot 29 / D23: attaching a server to an environment of the project is a way of
+        // giving the project somewhere to run, so the count has to see it. It stays a separate
+        // number: the Servers section lists direct attachments only, and its tile must not claim
+        // rows it does not show.
+        var project = new Project { Name = "API", Description = "d" };
+        _db.Projects.Add(project);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var environment = new Aetheus.Back.Data.Entities.Environment { Name = "qa", ProjectId = project.Id };
+        var other = new Aetheus.Back.Data.Entities.Environment { Name = "prod", ProjectId = project.Id };
+        var foreign = new Aetheus.Back.Data.Entities.Environment { Name = "elsewhere", ProjectId = null };
+        _db.Environments.AddRange(environment, other, foreign);
+        var server = new Server { Name = "vps1", Hostname = "vps1" };
+        var unrelated = new Server { Name = "vps2", Hostname = "vps2" };
+        _db.Servers.AddRange(server, unrelated);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.EnvironmentServers.AddRange(
+            // The same server on two environments of the project is still one server.
+            new EnvironmentServer { EnvironmentId = environment.Id, ServerId = server.Id },
+            new EnvironmentServer { EnvironmentId = other.Id, ServerId = server.Id },
+            // A server reached through an environment of no project must not be counted here.
+            new EnvironmentServer { EnvironmentId = foreign.Id, ServerId = unrelated.Id });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var counts = await _repo.GetProjectSectionCountsAsync(project.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, counts.Servers);
+        Assert.Equal(1, counts.EnvironmentServers);
+    }
+
+    private static readonly DateTime TileNow = new(2026, 9, 11, 10, 0, 0, DateTimeKind.Utc);
+
+    private static PipelineRun TileRun(Pipeline pipeline, PipelineStatus status, int minutesAgo, params PipelineStepRun[] steps)
+    {
+        var run = new PipelineRun { Pipeline = pipeline, Status = status, StartedAt = TileNow.AddMinutes(-minutesAgo) };
+        foreach (var step in steps) step.PipelineRun = run;
+        run.StepRuns = [.. steps];
+        return run;
+    }
+
+    private static PipelineStepRun TileStep(string stage, string step, TaskExecutionStatus status, int order, bool system = false) =>
+        new() { StageName = stage, StepName = step, Status = status, Order = order, IsSystem = system };
+
+    private async Task<ProjectListInsight> TileInsightAsync(Project project) =>
+        (await _repo.GetProjectListInsightsAsync([project.Id], TileNow.AddMinutes(-5), TestContext.Current.CancellationToken))[project.Id];
+
+    /// <summary>
+    /// PLAN-005 lot 7 / D45: a root run still Running is named even when a finished root run started
+    /// after it, with the step it is on. Before, the newest start always won and the tile said "last
+    /// run: success" in the middle of a deployment.
+    /// </summary>
+    [Fact]
+    public async Task GetProjectListInsightsAsync_AnOlderRunningRootWinsOverANewerFinishedOne_WithItsStep()
+    {
+        var project = new Project { Name = "App", Description = "d" };
+        var deploy = new Pipeline { Name = "Deploy", Project = project };
+        var lint = new Pipeline { Name = "Lint", Project = project };
+        var active = TileRun(deploy, PipelineStatus.Running, 30,
+            TileStep("Build", "compile", TaskExecutionStatus.Success, 1),
+            TileStep("Deploy", "push", TaskExecutionStatus.Running, 2),
+            TileStep("Deploy", "smoke", TaskExecutionStatus.Pending, 3));
+        var finished = TileRun(lint, PipelineStatus.Success, 5);
+        _db.PipelineRuns.AddRange(active, finished);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var insight = await TileInsightAsync(project);
+
+        Assert.Equal(active.Id, insight.LastRunId);
+        Assert.Equal("Deploy", insight.LastRunName);
+        Assert.True(insight.LastRunIsActive);
+        Assert.Equal("Deploy · push", insight.LastRunCurrentStep);
+    }
+
+    /// <summary>With two independent roots running, the most recently started; its next pending
+    /// non-system step names it when nothing runs yet.</summary>
+    [Fact]
+    public async Task GetProjectListInsightsAsync_TwoRunningRoots_NameTheNewestAndItsNextPendingStep()
+    {
+        var project = new Project { Name = "App", Description = "d" };
+        var first = new Pipeline { Name = "First", Project = project };
+        var second = new Pipeline { Name = "Second", Project = project };
+        var older = TileRun(first, PipelineStatus.Running, 20, TileStep("A", "a", TaskExecutionStatus.Running, 1));
+        var newer = TileRun(second, PipelineStatus.Running, 10,
+            TileStep("System", "checkout", TaskExecutionStatus.Pending, 1, system: true),
+            TileStep("Test", "unit", TaskExecutionStatus.Pending, 2));
+        _db.PipelineRuns.AddRange(older, newer);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var insight = await TileInsightAsync(project);
+
+        Assert.Equal(newer.Id, insight.LastRunId);
+        Assert.Equal("Test · unit", insight.LastRunCurrentStep);
+    }
+
+    /// <summary>A running child under a finished root does not make the tile "in progress": the tile
+    /// names the root (D24), which has ended.</summary>
+    [Fact]
+    public async Task GetProjectListInsightsAsync_ARunningChildUnderAFinishedRoot_NamesTheRootAsEnded()
+    {
+        var project = new Project { Name = "App", Description = "d" };
+        var pipeline = new Pipeline { Name = "Release", Project = project };
+        var trigger = TileStep("Deploy", "child", TaskExecutionStatus.Success, 1);
+        var root = TileRun(pipeline, PipelineStatus.Success, 30, trigger);
+        var child = TileRun(pipeline, PipelineStatus.Running, 20, TileStep("X", "x", TaskExecutionStatus.Running, 1));
+        _db.PipelineRuns.AddRange(root, child);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        trigger.TriggeredRunId = child.Id;
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var insight = await TileInsightAsync(project);
+
+        Assert.Equal(root.Id, insight.LastRunId);
+        Assert.False(insight.LastRunIsActive);
+        Assert.Null(insight.LastRunCurrentStep);
+    }
+
+    /// <summary>Without a Running root, the newest root, whatever its status: Pending and
+    /// WaitingForApproval are not "in progress" (D45), they show as the last run with their badge.</summary>
+    [Fact]
+    public async Task GetProjectListInsightsAsync_NoRunningRoot_NamesTheNewestAsTheLastRun()
+    {
+        var project = new Project { Name = "App", Description = "d" };
+        var pipeline = new Pipeline { Name = "Deploy", Project = project };
+        var failed = TileRun(pipeline, PipelineStatus.Failed, 30);
+        var waiting = TileRun(pipeline, PipelineStatus.WaitingForApproval, 10,
+            TileStep("Approve", "gate", TaskExecutionStatus.Pending, 1));
+        _db.PipelineRuns.AddRange(failed, waiting);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var insight = await TileInsightAsync(project);
+
+        Assert.Equal(waiting.Id, insight.LastRunId);
+        Assert.Equal(PipelineStatus.WaitingForApproval, insight.LastRunStatus);
+        Assert.False(insight.LastRunIsActive);
+        Assert.Null(insight.LastRunCurrentStep);
     }
 
     public void Dispose() => _db.Dispose();

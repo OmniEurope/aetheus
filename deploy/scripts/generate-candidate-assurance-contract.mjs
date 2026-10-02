@@ -3,9 +3,14 @@ import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const [outputPath, evidenceDirectory, sourceSha, qualityDirectory, securityDirectory, qaDirectory, provenancePath] = process.argv.slice(2);
-if (!outputPath || !evidenceDirectory || !sourceSha || !qualityDirectory || !securityDirectory || !qaDirectory || !provenancePath) {
-  throw new Error("Usage: generate-candidate-assurance-contract.mjs <output> <evidence-directory> <source-sha> <quality-directory> <security-directory> <qa-directory> <artifact-provenance>");
+// The two trailing directories are the nightly extensions (PLAN-007 lot 2): aetheus-security-history
+// and aetheus-qa-extended each grade their own run, and a `full` qualification seals both grades
+// beside the three every contract carries. They come together or not at all.
+const [outputPath, evidenceDirectory, sourceSha, qualityDirectory, securityDirectory, qaDirectory, provenancePath,
+  securityHistoryDirectory, extendedQaDirectory] = process.argv.slice(2);
+if (!outputPath || !evidenceDirectory || !sourceSha || !qualityDirectory || !securityDirectory || !qaDirectory || !provenancePath
+    || (securityHistoryDirectory === undefined) !== (extendedQaDirectory === undefined)) {
+  throw new Error("Usage: generate-candidate-assurance-contract.mjs <output> <evidence-directory> <source-sha> <quality-directory> <security-directory> <qa-directory> <artifact-provenance> [<security-history-directory> <extended-qa-directory>]");
 }
 if (!/^[0-9a-f]{40}$|^[0-9a-f]{64}$/i.test(sourceSha)) {
   throw new Error("The candidate source SHA must be a full hexadecimal commit identifier.");
@@ -135,6 +140,28 @@ function declared(name, build) {
   return { required: false, status: "NotRun", effectiveGrade: null, reason: "not-applicable-to-project" };
 }
 
+// Qualification profile (PLAN-006 lot 9). `light` is what every push runs; it does not run the full
+// V-1 suites nor the retained-agent contract, so those three are recorded NotRun and unrequired
+// rather than read from output variables the run never published. The rollback is still proved, by
+// previousSmoke below, which is required in BOTH profiles: a profile may remove depth, never the
+// proof itself. The image analyses stay required in both, because they judge the very images this
+// candidate packages.
+const profile = process.env.AETHEUS_ASSURANCE_PROFILE ?? "full";
+if (profile !== "light" && profile !== "full") {
+  throw new Error(`AETHEUS_ASSURANCE_PROFILE must be 'light' or 'full', not '${profile}'.`);
+}
+// previousIntegration and previousE2E are NOT here, deliberately. They were, and that quietly moved
+// the rollback proof off the commit being packaged onto whatever develop happened to be at 2 a.m.
+// A candidate is what a deployment stands on, so it proves its own rollback. What the light profile
+// still leaves to the nightly is the retained-agent contract: it exercises the AGENT protocol across
+// versions, which is a property of the fleet rather than of the package.
+const nightlyOnlyTests = profile === "light" ? new Set(["agentCompatibility"]) : new Set();
+
+function profiled(name, build) {
+  if (!nightlyOnlyTests.has(name)) return build();
+  return { required: false, status: "NotRun", effectiveGrade: null, reason: "nightly-profile" };
+}
+
 const performanceSetting = process.env.AETHEUS_ASSURANCE_PERFORMANCE_ENABLED;
 const performance = performanceSetting === "false"
   ? { required: false, status: "NotRun", effectiveGrade: null }
@@ -149,18 +176,31 @@ const analyses = {
   security: captureAnalysis("security", securityDirectory, "security-summary.json"),
   dynamicSecurity: captureAnalysis("dynamic-security", qaDirectory, "security-summary.json")
 };
+if (securityHistoryDirectory !== undefined) {
+  // A light contract carrying them would claim depth its profile excuses; the verifier refuses the
+  // same combination, so refusing it here keeps the generator from producing what cannot be read.
+  if (profile !== "full") throw new Error("The nightly extension analyses belong to a full qualification only.");
+  analyses.securityHistory = captureAnalysis("security-history", securityHistoryDirectory, "security-summary.json");
+  analyses.extendedDynamicSecurity = captureAnalysis(
+    "extended-dynamic-security", extendedQaDirectory, "security-summary.json");
+}
 const tests = {
   unit: declared("unit", () => ({ required: true, ...outcome("UNIT_TEST_GATE_STATUS") })),
   analyzers: declared("analyzers", () => ({ required: true, ...outcome("ANALYZER_TEST_GATE_STATUS") })),
   currentIntegration: declared("currentIntegration",
     () => ({ required: true, ...outcome("QA_CURRENT_INTEGRATION_GATE_STATUS") })),
   currentE2E: declared("currentE2E", () => ({ required: true, ...outcome("QA_CURRENT_E2E_GATE_STATUS") })),
-  agentCompatibility: declared("agentCompatibility", () => ({ required: true, ...compatibilityOutcome(
-    "QA_AGENT_COMPATIBILITY_GATE_STATUS", "AgentCompatibilityMode", "PreviousAgentTested") })),
-  previousIntegration: declared("previousIntegration", () => ({ required: true, ...compatibilityOutcome(
-    "QA_PREVIOUS_INTEGRATION_GATE_STATUS", "CompatibilityMode", "PreviousVersionTested") })),
-  previousE2E: declared("previousE2E", () => ({ required: true, ...compatibilityOutcome(
-    "QA_PREVIOUS_E2E_GATE_STATUS", "CompatibilityMode", "PreviousVersionTested") })),
+  previousSmoke: declared("previousSmoke", () => ({ required: true, ...compatibilityOutcome(
+    "QA_PREVIOUS_SMOKE_GATE_STATUS", "CompatibilityMode", "PreviousVersionTested") })),
+  agentCompatibility: declared("agentCompatibility", () => profiled("agentCompatibility",
+    () => ({ required: true, ...compatibilityOutcome(
+      "QA_AGENT_COMPATIBILITY_GATE_STATUS", "AgentCompatibilityMode", "PreviousAgentTested") }))),
+  previousIntegration: declared("previousIntegration", () => profiled("previousIntegration",
+    () => ({ required: true, ...compatibilityOutcome(
+      "QA_PREVIOUS_INTEGRATION_GATE_STATUS", "CompatibilityMode", "PreviousVersionTested") }))),
+  previousE2E: declared("previousE2E", () => profiled("previousE2E",
+    () => ({ required: true, ...compatibilityOutcome(
+      "QA_PREVIOUS_E2E_GATE_STATUS", "CompatibilityMode", "PreviousVersionTested") }))),
   performance
 };
 const provenanceBytes = readFileSync(provenancePath);
@@ -178,8 +218,9 @@ const overallGrade = effectiveGrades.reduce(
   "A");
 
 const contract = {
-  schema: 1,
+  schema: 2,
   sourceSha: sourceSha.toLowerCase(),
+  profile,
   gradingScale,
   overallGrade,
   bootstrapAuthorized: process.env.AETHEUS_ASSURANCE_ALLOW_BOOTSTRAP === "true",

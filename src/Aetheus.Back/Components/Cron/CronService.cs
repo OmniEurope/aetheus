@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Validation;
 using Cronos;
 
 namespace Aetheus.Back.Components.Cron;

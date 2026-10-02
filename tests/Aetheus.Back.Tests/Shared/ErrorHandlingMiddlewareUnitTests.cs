@@ -2,7 +2,6 @@
 using System.Text.Json;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Middleware;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using NSubstitute;

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Apache virtual hosts (PLAN-006 lot 6), the front door of every deployed application. Tests:
+# tests/security-rules/aetheus-apache.conf.
+rules:
+  - id: aetheus.apache.encoded-slashes-without-nocanon
+    languages: [generic]
+    paths:
+      include:
+        - "*.conf"
+    severity: WARNING
+    message: >-
+      AllowEncodedSlashes NoDecode keeps %2F encoded, but a ProxyPass without nocanon re-canonicalises
+      the URL before forwarding it: the backend then sees a path the front never checked.
+    metadata:
+      cwe: CWE-172
+      category: security
+    # Within one virtual host; \K starts the reported match at the offending ProxyPass line.
+    pattern-regex: (?ms)AllowEncodedSlashes[ \t]+NoDecode(?:(?!</VirtualHost>).)*?^[ \t]*\KProxyPass[ \t]+(?![^\n]*\bnocanon\b)[^\n]*
+
+  - id: aetheus.apache.https-vhost-without-hsts
+    languages: [generic]
+    paths:
+      include:
+        - "*.conf"
+    severity: WARNING
+    message: >-
+      This HTTPS virtual host does not set Strict-Transport-Security with `Header always set`. The
+      application may send it on its own responses, but the pages Apache produces itself (a 502 while
+      the backend restarts, a 403) go out without it.
+    metadata:
+      cwe: CWE-319
+      category: security
+    # Any `Header always set` used to be enough, and a vhost setting only Cache-Control passed. A
+    # catch-all vhost that denies every request serves nothing worth protecting and is left out.
+    pattern-regex: (?s)<VirtualHost[^>]*:443>(?:(?!Strict-Transport-Security|Require[ \t]+all[ \t]+denied).)*?</VirtualHost>

@@ -2,6 +2,12 @@
 
 namespace Aetheus.Back.Components.Auth;
 
+/// <summary>A refresh: the new tokens, or the reason it was refused (exactly one of the two).</summary>
+public sealed record RefreshTokenOutcome(LoginResponse? Response, string? RejectionCode)
+{
+    public static RefreshTokenOutcome Rejected(string code) => new(null, code);
+}
+
 public interface IAuthService
 {
     Task<bool> IsRegistrationTokenValidAsync(string token, CancellationToken ct = default);
@@ -25,6 +31,9 @@ public interface IAuthService
 
     // --- Refresh Token Rotation (F-012) ---
     Task<LoginResponse?> RefreshTokenAsync(string refreshToken, CancellationToken ct = default);
+
+    /// <summary>The refresh, with the <c>RefreshRejectionCodes</c> reason when it is refused (PLAN-005 lot 9 / D48).</summary>
+    Task<RefreshTokenOutcome> RefreshTokenWithReasonAsync(string refreshToken, CancellationToken ct = default);
 
     // --- TOTP 2FA (F-010) ---
     Task<TotpSetupResponse> SetupTotpAsync(int userId, CancellationToken ct = default);

@@ -3,8 +3,6 @@ using System.CommandLine;
 using System.Globalization;
 using System.Net.Http.Json;
 using Aetheus.Cli;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 
 Option<string> serverOption = new("--server")
 {

@@ -1,0 +1,69 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<div>
+    @* Server-verified hash-chain integrity for this entry (never an optimistic default). *@
+    <OmniCard Class="omni-u-mb-md">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+            @if (_verifying)
+            {
+                <AetheusLoader Size="OmniControlSize.Small" Centered="false" />
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["AuditVerifying"]</OmniText>
+            }
+            else if (_verification is null)
+            {
+                <OmniIcon Name="OmniIconName.Question" Class="omni-u-text-muted" />
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["AuditIntegrityUnavailable"]</OmniText>
+            }
+            else if (_verification.IsValid)
+            {
+                <OmniIcon Name="OmniIconName.ShieldCheck" Class="omni-u-text-success" />
+                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@L["AuditChainIntact"]</OmniBadge>
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">
+                    @string.Format(L["AuditVerifiedThrough"], _verification.TotalEntries)
+                </OmniText>
+            }
+            else
+            {
+                <OmniIcon Name="OmniIconName.ShieldSlash" Class="omni-u-text-danger" />
+                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@L["AuditChainBroken"]</OmniBadge>
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">
+                    @string.Format(L["AuditBreakAt"], _verification.FirstInvalidId)
+                </OmniText>
+            }
+        </OmniStack>
+    </OmniCard>
+
+    @* Structured facts: actor, action, target, time. *@
+    <OmniStack Gap="OmniSpacing.Small">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.User" Class="run-tile-icon" /> @L["Actor"]</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph">@Log.Username</OmniText>
+        </OmniStack>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Lightning" Class="run-tile-icon" /> @L["Action"]</OmniText>
+            <OmniBadge Fill="OmniFill.Solid" Tone="@ActionBadge">@ActionLabel</OmniBadge>
+        </OmniStack>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Target" Class="run-tile-icon" /> @L["Target"]</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph" Class="text-mono">@Log.EntityType@(Log.EntityId.HasValue ? $" #{Log.EntityId}" : string.Empty)</OmniText>
+        </OmniStack>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Timer" Class="run-tile-icon" /> @L["Timestamp"]</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph">@Log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</OmniText>
+        </OmniStack>
+    </OmniStack>
+
+    @if (!string.IsNullOrWhiteSpace(Log.Details))
+    {
+        <OmniCodeBlock Code="@FormattedDetails" Title="@L["Details"]" Wrap="true" Class="omni-u-mt-md code-block-bounded code-block-tall" />
+    }
+
+    <DialogFooter CancelText="@L["Close"]" OnCancel="Close">
+        <SecondaryContent>
+            @if (!string.IsNullOrWhiteSpace(Log.Details))
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="CopyAsync"><OmniIcon Name="OmniIconName.Copy" /> <span>@L["Copy"]</span></OmniButton>
+            }
+        </SecondaryContent>
+    </DialogFooter>
+</div>

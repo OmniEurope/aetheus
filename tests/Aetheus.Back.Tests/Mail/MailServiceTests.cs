@@ -5,9 +5,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -205,8 +202,8 @@ public class MailServiceTests
         // Typed op via mail-manage (not the old dead sed/postconf shell): kind MailRemoveDomain, domain in Command.
         await _repo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
             t.ServerId == 1
-            && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.MailRemoveDomain
+            && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.MailRemoveDomain
             && t.Command == "test.com"), TestContext.Current.CancellationToken);
         await _audit.Received(1).LogAsync("MailRemoveDomain", "Mail", 1, "test.com", TestContext.Current.CancellationToken);
     }
@@ -349,8 +346,8 @@ public class MailServiceTests
         await _repo.Received(1).DeleteAccountAsync(Arg.Any<MailAccount>(), TestContext.Current.CancellationToken);
         // Typed op via mail-manage: kind MailDeleteAccount, email in Command, parent domain in env.
         await _repo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
-            t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.MailDeleteAccount
+            t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.MailDeleteAccount
             && t.Command == "user@test.com"
             && t.EnvironmentVariables.Contains("test.com")), TestContext.Current.CancellationToken);
         await _audit.Received(1).LogAsync("MailDeleteAccount", "Mail", 1, "user@test.com", TestContext.Current.CancellationToken);
@@ -377,10 +374,11 @@ public class MailServiceTests
     [Fact]
     public async Task GetLogsAsync_CreatesOperationTask()
     {
-        await _sut.GetLogsAsync(1, new MailLogRequest { LogType = "postfix", Lines = 50000 }, ct: TestContext.Current.CancellationToken);
+        await _sut.GetLogsAsync(1, new MailLogRequest { LogType = "postfix", Lines = 200, Filter = "4F2A1B3C9D" }, ct: TestContext.Current.CancellationToken);
 
         await _repo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
-            t.Operation == OperationKind.MailGetLogs && t.Command == "postfix" && t.ServerId == 1), TestContext.Current.CancellationToken);
+            t.Operation == OperationKind.MailGetLogs && t.Command == "postfix" && t.ServerId == 1
+            && t.EnvironmentVariables.Contains("\"200\"") && t.EnvironmentVariables.Contains("4F2A1B3C9D")), TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -454,7 +452,8 @@ public class MailServiceTests
             t.Executor == ExecutorType.Operation
             && t.Operation == OperationKind.MailSetup
             && t.Command == "example.com"
-            && t.TimeoutSeconds == 300
+            && t.TimeoutSeconds == 900
+            && t.EnvironmentVariables.Contains(MailSetupEnv.SpamFilter)
             && t.EnvironmentVariables.Contains("mail.example.com")
             && t.EnvironmentVariables.Contains(MailSetupEnv.AdminPassword)), TestContext.Current.CancellationToken);
         await _repo.Received(1).AddDomainAsync(Arg.Is<MailDomain>(d =>
@@ -509,11 +508,12 @@ public class MailServiceTests
         Assert.Contains("spf1", result.SpfRecord);
         Assert.Contains("DMARC1", result.DmarcRecord);
         Assert.Contains("example.com", result.MxRecord);
-        // Typed op via mail-manage dkim-read: kind MailDkimRead, DKIM selector in Command.
+        // Key still unknown: typed mail-manage dkim-read, domain in Command, selector in env.
         await _repo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
-            t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.MailDkimRead
-            && t.Command == "mail"), TestContext.Current.CancellationToken);
+            t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.MailDkimRead
+            && t.Command == "example.com"
+            && t.EnvironmentVariables.Contains("\"mail\"")), TestContext.Current.CancellationToken);
     }
 
     // --- DeleteAliasAsync ---
@@ -538,8 +538,8 @@ public class MailServiceTests
         await _repo.Received(1).DeleteAliasAsync(Arg.Any<MailAlias>(), TestContext.Current.CancellationToken);
         // Typed op via mail-manage: kind MailRemoveAlias, alias source email in Command.
         await _repo.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
-            t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.MailRemoveAlias
+            t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.MailRemoveAlias
             && t.Command == "alias@test.com"), TestContext.Current.CancellationToken);
     }
 }

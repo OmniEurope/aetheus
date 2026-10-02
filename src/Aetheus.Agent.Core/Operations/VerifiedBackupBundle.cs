@@ -13,7 +13,7 @@ internal sealed class VerifiedBackupBundle(
     public void Dispose()
     {
         try { if (Directory.Exists(ExtractionRoot)) Directory.Delete(ExtractionRoot, recursive: true); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException) { } // best-effort cleanup: a leftover directory must not replace the outcome being reported
+        catch (UnauthorizedAccessException) { } // same: best-effort cleanup
     }
 }

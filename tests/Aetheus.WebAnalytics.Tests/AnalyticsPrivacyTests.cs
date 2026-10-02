@@ -77,6 +77,89 @@ public sealed class AnalyticsPrivacyTests
     }
 
     [Fact]
+    public void R471_TwoDeclaredAccountsBehindOneNetwork_AreTwoVisitors_WhenTheHostAcceptsTheIdentifier()
+    {
+        // The static front server sees neither the session nor, behind its proxy, more than one
+        // address: two people signed in from one network were one visitor and one authenticated visitor.
+        var options = Options(1);
+        options.AcceptDeclaredUserId = true;
+        var pseudonymizer = new AnalyticsPseudonymizer(options);
+        var source = new AnalyticsBrowserEvent
+        {
+            SchemaVersion = 1,
+            EventId = Guid.NewGuid(),
+            OccurredAtUtc = new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.Zero),
+            Kind = "page_view",
+            Route = "/"
+        };
+
+        var first = pseudonymizer.Create(Context("203.0.113.10", "ExampleBrowser/1"), source with { AuthenticatedUserId = "account-first" }, "/");
+        var second = pseudonymizer.Create(Context("203.0.113.10", "ExampleBrowser/1"), source with { AuthenticatedUserId = "account-second" }, "/");
+        // The same account from another network (a phone) is the same visitor.
+        var firstElsewhere = pseudonymizer.Create(Context("198.51.100.7", "ExampleBrowser/1"), source with { AuthenticatedUserId = "account-first" }, "/");
+
+        Assert.NotEqual(first.MonthlyPseudonym, second.MonthlyPseudonym);
+        Assert.NotEqual(first.AuthenticatedPseudonym, second.AuthenticatedPseudonym);
+        Assert.Equal(first.MonthlyPseudonym, firstElsewhere.MonthlyPseudonym);
+        Assert.Equal(first.AuthenticatedPseudonym, firstElsewhere.AuthenticatedPseudonym);
+        // The identifier is never exported: only pseudonyms derived from it are.
+        Assert.DoesNotContain("account-first", System.Text.Json.JsonSerializer.Serialize(first), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void R471_ADeclaredIdentifier_IsIgnored_UnlessTheHostTurnsItOn()
+    {
+        var pseudonymizer = new AnalyticsPseudonymizer(Options(1));
+        var source = new AnalyticsBrowserEvent
+        {
+            SchemaVersion = 1,
+            EventId = Guid.NewGuid(),
+            OccurredAtUtc = new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.Zero),
+            Kind = "page_view",
+            Route = "/"
+        };
+        var context = Context("203.0.113.10", "ExampleBrowser/1");
+
+        var anonymous = pseudonymizer.Create(context, source, "/");
+        var declared = pseudonymizer.Create(context, source with { AuthenticatedUserId = "account-first" }, "/");
+
+        Assert.Equal(anonymous.MonthlyPseudonym, declared.MonthlyPseudonym);
+        Assert.Null(declared.AuthenticatedPseudonym);
+    }
+
+    [Fact]
+    public void Pseudonymizer_CountsADeclaredSignInPerMonthWithoutAnAccount()
+    {
+        // The static front server never sees who is signed in, so "authenticated visitors" stayed at 0
+        // in production. The app now only says yes or no; the count is keyed on the network prefix and
+        // on the month, never on a stable identity that would follow a network across months.
+        var pseudonymizer = new AnalyticsPseudonymizer(Options(1));
+        var source = new AnalyticsBrowserEvent
+        {
+            SchemaVersion = 1,
+            EventId = Guid.NewGuid(),
+            OccurredAtUtc = new DateTimeOffset(2026, 7, 23, 12, 0, 0, TimeSpan.Zero),
+            Kind = "page_view",
+            Route = "/",
+            SignedIn = true
+        };
+        var context = Context("203.0.113.10", "ExampleBrowser/1");
+
+        var signedIn = pseudonymizer.Create(context, source, "/");
+        var laterSameMonth = pseudonymizer.Create(context, source with { OccurredAtUtc = source.OccurredAtUtc.AddDays(3) }, "/");
+        var nextMonth = pseudonymizer.Create(context, source with { OccurredAtUtc = source.OccurredAtUtc.AddMonths(1) }, "/");
+        var anonymous = pseudonymizer.Create(context, source with { SignedIn = null }, "/");
+
+        Assert.NotNull(signedIn.AuthenticatedPseudonym);
+        Assert.Equal(signedIn.AuthenticatedPseudonym, laterSameMonth.AuthenticatedPseudonym);
+        Assert.NotEqual(signedIn.AuthenticatedPseudonym, nextMonth.AuthenticatedPseudonym);
+        Assert.Null(anonymous.AuthenticatedPseudonym);
+        // The declaration changes nothing else: same visitor pseudonyms as the anonymous event.
+        Assert.Equal(anonymous.DailyPseudonym, signedIn.DailyPseudonym);
+        Assert.Equal(anonymous.SessionPseudonym, signedIn.SessionPseudonym);
+    }
+
+    [Fact]
     public void PrivacySignals_OptOutWithoutAnalyticsStorage()
     {
         var context = Context("203.0.113.10", "ExampleBrowser/1");

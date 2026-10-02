@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Text.Json;
-using Aetheus.Front.Pages.Pipelines;
+using Aetheus.Front.Components.Pipelines;
 using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Localization;
 using NSubstitute;
 

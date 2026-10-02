@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
+using Aetheus.Front.Components.Servers;
 using Aetheus.Front.Resources;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using NSubstitute;
-using Radzen;
-using ServersPage = Aetheus.Front.Pages.Servers.Servers;
+using ServersPage = Aetheus.Front.Components.Servers.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -173,58 +170,33 @@ public class ServersRenderTests : BunitContext
         Assert.True(cut.Instance.IsColumnVisible("Tags"));
     }
 
-    // ── ClearFilters ──────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task ClearFilters_ResetsAllFilters()
-    {
-        _handler.SetJsonResponse("api/servers", TwoServers());
-        var cut = Render<ServersPage>();
-
-        cut.Instance._search = "prod";
-        cut.Instance._typeFilter = ServerType.Docker;
-        cut.Instance._statusFilter = ServerStatus.Online;
-
-        await cut.Instance.ClearFilters();
-
-        Assert.Null(cut.Instance._search);
-        Assert.Null(cut.Instance._typeFilter);
-        Assert.Null(cut.Instance._statusFilter);
-    }
-
-    [Fact]
-    public async Task ClearFilters_WhenAlreadyClear_DoesNotThrow()
-    {
-        _handler.SetJsonResponse("api/servers", EmptyPage());
-        var cut = Render<ServersPage>();
-
-        var ex = await Record.ExceptionAsync(() => cut.Instance.ClearFilters());
-        Assert.Null(ex);
-    }
-
     // ── FilterByTag ───────────────────────────────────────────────────────────
 
+    /// <summary>Recette R-211: a tag clicked in a row becomes the Tags column's own filter, sent to the API.</summary>
     [Fact]
-    public async Task FilterByTag_SetsSearchToTag()
+    public async Task FilterByTag_SetsTheTagsColumnFilter()
     {
         _handler.SetJsonResponse("api/servers", TwoServers());
         var cut = Render<ServersPage>();
 
-        await cut.Instance.FilterByTag("prod");
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("prod"));
 
-        Assert.Equal("prod", cut.Instance._search);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Tags", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=prod", StringComparison.Ordinal)));
     }
 
     [Fact]
-    public async Task FilterByTag_OverwritesPreviousSearch()
+    public async Task FilterByTag_ReplacesThePreviousTag()
     {
         _handler.SetJsonResponse("api/servers", TwoServers());
         var cut = Render<ServersPage>();
 
-        await cut.Instance.FilterByTag("first");
-        await cut.Instance.FilterByTag("second");
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("first"));
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("second"));
 
-        Assert.Equal("second", cut.Instance._search);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=second", StringComparison.Ordinal)));
     }
 
     // ── OnLoadData ────────────────────────────────────────────────────────────
@@ -236,7 +208,7 @@ public class ServersRenderTests : BunitContext
         var cut = Render<ServersPage>();
 
         var method = typeof(ServersPage).GetMethod("OnLoadData", InstPriv)!;
-        var args = new LoadDataArgs { Skip = 0, Top = 25 };
+        var args = new GridLoadArgs { Skip = 0, Top = 25 };
         await cut.InvokeAsync(async () =>
             await (Task)method.Invoke(cut.Instance, [args])!);
 
@@ -259,11 +231,11 @@ public class ServersRenderTests : BunitContext
         var cut = Render<ServersPage>();
 
         var method = typeof(ServersPage).GetMethod("OnLoadData", InstPriv)!;
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 25,
-            Sorts = [new SortDescriptor { Property = "Name", SortOrder = SortOrder.Ascending }]
+            Sorts = [new GridSortDescriptor("Name", GridSortOrder.Ascending)]
         };
 
         var ex = await Record.ExceptionAsync(async () =>
@@ -280,11 +252,11 @@ public class ServersRenderTests : BunitContext
         var cut = Render<ServersPage>();
 
         var method = typeof(ServersPage).GetMethod("OnLoadData", InstPriv)!;
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 10,
-            Sorts = [new SortDescriptor { Property = "Status", SortOrder = SortOrder.Descending }]
+            Sorts = [new GridSortDescriptor("Status", GridSortOrder.Descending)]
         };
 
         var ex = await Record.ExceptionAsync(async () =>

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Agent.Core.Tests;
 
@@ -128,6 +127,33 @@ public sealed class GitleaksHistoryModeResolverTests
             var baseline = Git(repository, "rev-parse", "HEAD");
             Write(repository, "scanner-manifest.json", "{}");
             Commit(repository, "rules update");
+            var head = Git(repository, "rev-parse", "HEAD");
+
+            var selection = await GitleaksHistoryModeResolver.ResolveAsync(
+                repository,
+                Environment("release-range", baseline, head),
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal("full", selection.Mode);
+            Assert.Equal("scanner-contract-changed", selection.Reason);
+        }
+        finally
+        {
+            DeleteRepository(repository);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_SecurityHistoryDefinitionChangeForcesFullMode()
+    {
+        var repository = CreateRepository();
+        try
+        {
+            Write(repository, "safe.txt", "safe");
+            Commit(repository, "baseline");
+            var baseline = Git(repository, "rev-parse", "HEAD");
+            Write(repository, ".pipeline/aetheus-security-history.yaml", "name: aetheus-security-history");
+            Commit(repository, "history scan definition update");
             var head = Git(repository, "rev-parse", "HEAD");
 
             var selection = await GitleaksHistoryModeResolver.ResolveAsync(
@@ -296,6 +322,9 @@ public sealed class GitleaksHistoryModeResolverTests
             CreateNoWindow = true
         };
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        // WHY: pre-push hook env inheritance incidents - any repository-local git variable (GIT_DIR,
+        // GIT_COMMON_DIR, ...) would redirect this fixture git call to the real repository.
+        GitRepositoryEnvironment.Neutralize(startInfo.Environment);
         using var process = System.Diagnostics.Process.Start(startInfo)!;
         var output = process.StandardOutput.ReadToEnd();
         var error = process.StandardError.ReadToEnd();

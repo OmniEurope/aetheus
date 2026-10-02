@@ -8,7 +8,8 @@ public interface IPackageFeedRepository
     // Projected list view: summary columns + a package COUNT subquery (no Package entities loaded).
     Task<(List<PackageFeedDto> Items, int Total)> GetPagedFeedsAsync(
         int? projectId, string? search, int page, int pageSize,
-        string? sortBy, bool sortDescending, CancellationToken ct = default);
+        string? sortBy, bool sortDescending, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null);
     Task<PackageFeed?> GetFeedDetailAsync(int id, CancellationToken ct = default);
     Task<PackageFeed?> FindFeedAsync(int id, CancellationToken ct = default);
     Task AddFeedAsync(PackageFeed feed, CancellationToken ct = default);

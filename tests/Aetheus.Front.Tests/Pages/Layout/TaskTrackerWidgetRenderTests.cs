@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Layout;
 
@@ -26,56 +24,77 @@ public class TaskTrackerWidgetRenderTests : BunitContext
     }
 
     [Fact]
-    public void Renders_WithZeroCount_ShowsTaskAltIcon()
+    public void Renders_WithZeroCount_ShowsCheckIcon_AndNoNumber()
     {
         var cut = Render<TaskTrackerWidget>();
-        // icon should be task_alt when count == 0
-        Assert.Contains("task_alt", cut.Markup);
+
+        Assert.Single(cut.FindAll(".task-tracker-btn svg.header-icon"));
+        Assert.Empty(cut.FindAll(".task-tracker-count"));
     }
 
-    [Fact]
-    public void Renders_WithNonZeroCount_ShowsBadge()
+    [Theory]
+    [InlineData(3, "3")]
+    [InlineData(120, "99+")]
+    public void Renders_WithNonZeroCount_TheIconThenTheNumber_InAWiderButton(int count, string shown)
     {
+        // Recette R-170 (replaces PLAN-005 D31): the icon stays and the number follows it, the button
+        // doubles its width; still no badge. Above 99 it reads "99+".
         var cut = Render<TaskTrackerWidget>();
-        // Inject tasks into tracker to set count > 0
         var tracker = Services.GetRequiredService<TaskTrackerService>();
         var byId = typeof(TaskTrackerService)
             .GetField("_byId", Priv)!.GetValue(tracker) as Dictionary<int, ServerTaskDto>;
-        byId![1] = new ServerTaskDto { Id = 1, ServerId = 10, ServerName = "srv1", Name = "Deploy", Status = TaskExecutionStatus.Running, CreatedAt = DateTime.UtcNow, Command = "cmd", TimeoutSeconds = 60 };
+        for (var id = 1; id <= count; id++)
+            byId![id] = new ServerTaskDto { Id = id, ServerId = 10, ServerName = "srv1", Name = "Deploy", Status = TaskExecutionStatus.Running, CreatedAt = DateTime.UtcNow, Command = "cmd", TimeoutSeconds = 60 };
 
-        var onChanged = typeof(TaskTrackerService).GetEvent("OnChanged")!;
-        var tracker_changed = WidgetType.GetMethod("OnTrackerChanged", Priv)!;
-        tracker_changed.Invoke(cut.Instance, []);
-
+        WidgetType.GetMethod("OnTrackerChanged", Priv)!.Invoke(cut.Instance, []);
         cut.Render();
-        Assert.Contains("task-tracker-badge", cut.Markup);
+
+        var button = cut.Find(".task-tracker-btn");
+        Assert.Equal(shown, button.QuerySelector(".task-tracker-count")!.TextContent.Trim());
+        Assert.NotNull(button.QuerySelector("svg.header-icon"));
+        Assert.Contains("task-tracker-btn-wide", button.ClassList);
+        Assert.DoesNotContain("task-tracker-badge", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("TaskTrackerTooltip", button.GetAttribute("title"), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TogglePopover_OpensAndClosesPopover()
+    public void TriggerClick_OpensThenSecondClickClosesPanel()
     {
         var cut = Render<TaskTrackerWidget>();
-        var toggle = WidgetType.GetMethod("TogglePopover", Priv)!;
 
         // Open
-        toggle.Invoke(cut.Instance, null);
-        cut.Render();
-        Assert.Single(cut.FindAll("#task-tracker-popover"));
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
+        Assert.Single(cut.FindAll("#task-tracker-panel"));
+        Assert.Equal("true", cut.Find("button#task-tracker.task-tracker-btn").GetAttribute("aria-expanded"));
 
         // Close
-        toggle.Invoke(cut.Instance, null);
-        cut.Render();
-        Assert.Empty(cut.FindAll("#task-tracker-popover"));
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
+        Assert.Empty(cut.FindAll("#task-tracker-panel"));
+        Assert.Equal("false", cut.Find("button#task-tracker.task-tracker-btn").GetAttribute("aria-expanded"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DismissRequest_EscapeOrOutsideClick_ClosesPanel(bool fromKeyboard)
+    {
+        var cut = Render<TaskTrackerWidget>();
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
+        Assert.Single(cut.FindAll("#task-tracker-panel"));
+
+        var popover = cut.FindComponent<OmniPopover>();
+        await cut.InvokeAsync(() => popover.Instance.OnDismissRequestedAsync(fromKeyboard));
+
+        Assert.Empty(cut.FindAll("#task-tracker-panel"));
     }
 
     [Fact]
     public void PopoverOpen_ShowsEmptyState_WhenNoTasks()
     {
         var cut = Render<TaskTrackerWidget>();
-        var toggle = WidgetType.GetMethod("TogglePopover", Priv)!;
-        toggle.Invoke(cut.Instance, null);
-        cut.Render();
-        Assert.Contains("task-tracker-empty", cut.Markup);
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
+        Assert.Single(cut.FindAll("#task-tracker-panel .task-tracker-empty"));
+        Assert.Empty(cut.FindAll("#task-tracker-panel .task-tracker-row"));
     }
 
     [Fact]
@@ -90,10 +109,9 @@ public class TaskTrackerWidgetRenderTests : BunitContext
 
         // Force count update
         WidgetType.GetField("_count", Priv)!.SetValue(cut.Instance, 3);
-        var toggle = WidgetType.GetMethod("TogglePopover", Priv)!;
-        toggle.Invoke(cut.Instance, null);
-        cut.Render();
-        Assert.Contains("task-tracker-row", cut.Markup);
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
+        Assert.Equal(3, cut.FindAll("#task-tracker-panel .task-tracker-row").Count);
+        Assert.Empty(cut.FindAll("#task-tracker-panel .task-tracker-group-header"));
     }
 
     [Fact]
@@ -107,10 +125,9 @@ public class TaskTrackerWidgetRenderTests : BunitContext
             byId![i] = new ServerTaskDto { Id = i, ServerId = i % 2 == 0 ? 10 : 20, ServerName = i % 2 == 0 ? "srv-a" : "srv-b", Name = $"Task{i}", Status = TaskExecutionStatus.Running, CreatedAt = DateTime.UtcNow, Command = "cmd", TimeoutSeconds = 60 };
         }
         WidgetType.GetField("_count", Priv)!.SetValue(cut.Instance, 6);
-        var toggle = WidgetType.GetMethod("TogglePopover", Priv)!;
-        toggle.Invoke(cut.Instance, null);
-        cut.Render();
-        Assert.Contains("task-tracker-group-header", cut.Markup);
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
+        Assert.Equal(2, cut.FindAll("#task-tracker-panel .task-tracker-group-header").Count);
+        Assert.Equal(6, cut.FindAll("#task-tracker-panel .task-tracker-row-grouped").Count);
     }
 
     [Fact]

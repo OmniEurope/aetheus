@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 internal static class PipelineAnalysisGateOrderingValidator
 {
     private static readonly HashSet<string> QualityStepTypes =
-        new(["coverage", "complexity", "lint"], StringComparer.OrdinalIgnoreCase);
+        new(["coverage", "complexity", "lint", "mutation"], StringComparer.OrdinalIgnoreCase);
 
     private static readonly HashSet<string> ProtectedStepTypes =
         new(["artifacts", "release", "deploy"], StringComparer.OrdinalIgnoreCase);

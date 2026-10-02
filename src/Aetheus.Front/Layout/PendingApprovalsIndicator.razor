@@ -1,0 +1,50 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-007 lot 7: an approval waiting for a decision is an alert in the top bar, not something found
+   by opening the run. Absent when nothing waits, so the bar does not carry a permanent zero.
+   It is the task tracker's twin beside it: the same square that doubles its width once it carries a
+   count, the same pulse, and a click opens the list of waiting approvals instead of leaving the page. *@
+
+@if (Approvals.Items.Count > 0)
+{
+    var count = Approvals.Items.Count;
+    var label = string.Format(L["PendingApprovalsTooltip"].Value, count);
+    <div class="task-tracker-container omni-task-tracker pending-approvals-container">
+        @* User exception (2026-09-28): a waiting approval is red in the top bar, where the rule would make it grey. *@
+        <OmniPopover Id="pending-approvals" Class="header-popover"
+                     Open="@_popoverOpen" OpenChanged="@(open => _popoverOpen = open)"
+                     TriggerVariant="OmniButtonVariant.Danger"
+                     TriggerClass="header-action-btn task-tracker-btn task-tracker-btn-wide task-tracker-btn-busy pending-approvals-btn"
+                     TriggerTitle="@label"
+                     Label="@label"
+                     PopupLabel="@L["PendingApprovalsTitle"]">
+            <TriggerContent>
+                <OmniIcon Name="OmniIconName.Stamp" Class="header-icon" />
+                <span class="task-tracker-count">@(count > 99 ? "99+" : count.ToString(System.Globalization.CultureInfo.CurrentCulture))</span>
+            </TriggerContent>
+            <ChildContent>
+                <div class="task-tracker-popover">
+                    <div class="task-tracker-header">
+                        <OmniHeading Level="OmniHeadingLevel.H5">@L["PendingApprovalsTitle"]</OmniHeading>
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@count.ToString(System.Globalization.CultureInfo.CurrentCulture)</OmniBadge>
+                    </div>
+                    <div class="task-tracker-list">
+                        @foreach (var approval in Approvals.Items)
+                        {
+                            <a href="@($"/pipelines/runs/{approval.PipelineRunId}")" class="task-tracker-row pending-approvals-row" @onclick="@(() => _popoverOpen = false)">
+                                <OmniIcon Name="OmniIconName.Stamp" Class="task-tracker-icon-assigned" />
+                                <div class="task-tracker-row-body">
+                                    <div class="task-tracker-row-name">@($"{approval.PipelineName} #{approval.PipelineRunId}")</div>
+                                    <div class="task-tracker-row-meta">
+                                        @(approval.Scope == ApprovalScope.Pipeline
+                                            ? string.Format(L["PendingPipelineApprovalLine"].Value, approval.StageName, approval.RequestedAt.ToLocalTime().ToString("g"))
+                                            : string.Format(L["PendingApprovalLine"].Value, approval.StageName, approval.EnvironmentName, approval.RequestedAt.ToLocalTime().ToString("g")))
+                                    </div>
+                                </div>
+                            </a>
+                        }
+                    </div>
+                </div>
+            </ChildContent>
+        </OmniPopover>
+    </div>
+}

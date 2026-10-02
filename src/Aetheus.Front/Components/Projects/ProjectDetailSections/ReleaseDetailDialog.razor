@@ -1,0 +1,68 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Version"]" For="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-1">
+                <OmniTextBox Id="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-1" Value="@Release.Version" ReadOnly="true"  ValueExpression="@(() => Release.Version)"/>
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniText Element="OmniTextElement.Strong">@L["Status"]</OmniText>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Class="omni-u-p-sm" Gap="OmniSpacing.Large">
+                    <ReleaseStatusBadge Status="@Release.Status" />
+                </OmniStack>
+            </OmniStack>
+        </OmniColumn>
+    </OmniRow>
+
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Branch"]" For="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-3">
+                <OmniTextBox Id="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-3" Value="@Release.BranchName" ReadOnly="true"  ValueExpression="@(() => Release.BranchName)"/>
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="#" For="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-4">
+                <OmniTextBox Id="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-4" Value="@BuildNumberDisplay" ReadOnly="true" ValueExpression="@(() => BuildNumberDisplay)" />
+            </OmniFormField>
+        </OmniColumn>
+    </OmniRow>
+
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Detected"]" For="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-5">
+                <OmniTextBox Id="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-5" Value="@DetectedAtDisplay" ReadOnly="true" ValueExpression="@(() => DetectedAtDisplay)" />
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            @if (Release.PublishedAt.HasValue)
+            {
+                <OmniFormField Label="@L["Published"]" For="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-6">
+                    <OmniTextBox Id="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-6" Value="@PublishedAtDisplay" ReadOnly="true" ValueExpression="@(() => PublishedAtDisplay)" />
+                </OmniFormField>
+            }
+        </OmniColumn>
+    </OmniRow>
+
+    @if (!string.IsNullOrEmpty(Release.Changelog))
+    {
+        <OmniFormField Label="@L["Changelog"]" For="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-7">
+            <OmniTextArea Id="oe-formfield-pages-projects-projectdetailsections-releasedetaildialog-7" Value="@Release.Changelog" ReadOnly="true" Rows="6" Class="omni-u-w-100"  ValueExpression="@(() => Release.Changelog)"/>
+        </OmniFormField>
+    }
+
+    <DialogFooter CancelText="@L["Close"]" OnCancel="@(() => Dialog.Close())">
+        <SecondaryContent>
+            @if (Release.Artifacts.Count > 0)
+            {
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => Nav.NavigateTo($"/projects/{Release.ProjectId}/artifacts"))"><OmniIcon Name="OmniIconName.Archive" /> <span>@L["Artifact"]</span></OmniButton>
+            }
+            @if (Release.PipelineRunId.HasValue)
+            {
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => Nav.NavigateTo($"/pipelines/runs/{Release.PipelineRunId}"))" title="@L["PipelineRun"]"><OmniIcon Name="OmniIconName.Eye" /> <span>@L["Execution"]</span></OmniButton>
+            }
+        </SecondaryContent>
+    </DialogFooter>
+</OmniStack>

@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using ServersPage = Aetheus.Front.Pages.Servers.Servers;
+using OmniEurope.Blazor.Components;
+using ServersPage = Aetheus.Front.Components.Servers.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -84,54 +82,39 @@ public class ServersPageExtendedTests : BunitContext
         Assert.False(showChooser);
     }
 
-    // ── ClearFilters ─────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task ClearFilters_ResetsAllFilters()
-    {
-        _handler.SetJsonResponse("api/servers", TwoServers());
-        var cut = Render<ServersPage>();
-
-        cut.Instance._search = "prod";
-        cut.Instance._typeFilter = ServerType.Docker;
-        cut.Instance._statusFilter = ServerStatus.Online;
-
-        await cut.Instance.ClearFilters();
-
-        Assert.Null(cut.Instance._search);
-        Assert.Null(cut.Instance._typeFilter);
-        Assert.Null(cut.Instance._statusFilter);
-    }
-
     // ── FilterByTag ───────────────────────────────────────────────────────────
 
+    /// <summary>Recette R-211: a tag clicked in a row becomes the Tags column's own filter, sent to the API.</summary>
     [Fact]
-    public async Task FilterByTag_SetsSearchToTag()
+    public async Task FilterByTag_SetsTheTagsColumnFilter()
     {
         _handler.SetJsonResponse("api/servers", TwoServers());
         var cut = Render<ServersPage>();
 
-        await cut.Instance.FilterByTag("prod");
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("prod"));
 
-        Assert.Equal("prod", cut.Instance._search);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Tags", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=prod", StringComparison.Ordinal)));
     }
 
     [Fact]
-    public async Task FilterByTag_OverwritesPreviousSearch()
+    public async Task FilterByTag_ReplacesThePreviousTag()
     {
         _handler.SetJsonResponse("api/servers", TwoServers());
         var cut = Render<ServersPage>();
 
-        await cut.Instance.FilterByTag("first");
-        await cut.Instance.FilterByTag("second");
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("first"));
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("second"));
 
-        Assert.Equal("second", cut.Instance._search);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=second", StringComparison.Ordinal)));
     }
 
-    // ── OnDeleteServer ────────────────────────────────────────────────────────
+    // ── OnRetireServer ────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task OnDeleteServer_HidesRowBeforeDeleteCompletes()
+    public async Task OnRetireServer_HidesRowBeforeRetireCompletes()
     {
         var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _handler.SetJsonResponse(HttpMethod.Get, "api/servers", TwoServers());
@@ -143,7 +126,7 @@ public class ServersPageExtendedTests : BunitContext
         var cut = Render<ServersPage>();
         cut.WaitForAssertion(() => Assert.Contains("web-01", cut.Markup));
 
-        var deletion = cut.InvokeAsync(() => cut.Instance.DeleteServerConfirmedAsync(TwoServers().Items[0]));
+        var deletion = cut.InvokeAsync(() => cut.Instance.RetireServerConfirmedAsync(TwoServers().Items[0]));
 
         cut.WaitForAssertion(() =>
         {
@@ -158,7 +141,7 @@ public class ServersPageExtendedTests : BunitContext
     }
 
     [Fact]
-    public async Task OnDeleteServer_InFlightReloadDoesNotRestorePendingRowOrCount()
+    public async Task OnRetireServer_InFlightReloadDoesNotRestorePendingRowOrCount()
     {
         var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _handler.SetJsonResponse(HttpMethod.Get, "api/servers", TwoServers());
@@ -170,7 +153,7 @@ public class ServersPageExtendedTests : BunitContext
         var cut = Render<ServersPage>();
         cut.WaitForAssertion(() => Assert.Contains("web-01", cut.Markup));
 
-        var deletion = cut.InvokeAsync(() => cut.Instance.DeleteServerConfirmedAsync(TwoServers().Items[0]));
+        var deletion = cut.InvokeAsync(() => cut.Instance.RetireServerConfirmedAsync(TwoServers().Items[0]));
         var reload = typeof(ServersPage).GetMethod("ReloadGridAsync", InstPriv)!;
         await cut.InvokeAsync(async () => await (Task)reload.Invoke(cut.Instance, [])!);
 
@@ -185,7 +168,7 @@ public class ServersPageExtendedTests : BunitContext
     }
 
     [Fact]
-    public async Task OnDeleteServer_FailedDeleteRestoresRow()
+    public async Task OnRetireServer_FailedRetireRestoresRow()
     {
         _handler.SetJsonResponse(HttpMethod.Get, "api/servers", TwoServers());
         _handler.SetResponse(HttpMethod.Delete, "api/servers/1", System.Net.HttpStatusCode.BadRequest);
@@ -193,15 +176,39 @@ public class ServersPageExtendedTests : BunitContext
         cut.WaitForAssertion(() => Assert.Contains("web-01", cut.Markup));
         _handler.SetResponse(HttpMethod.Get, "api/servers", System.Net.HttpStatusCode.ServiceUnavailable);
 
-        await cut.InvokeAsync(() => cut.Instance.DeleteServerConfirmedAsync(TwoServers().Items[0]));
+        await cut.InvokeAsync(() => cut.Instance.RetireServerConfirmedAsync(TwoServers().Items[0]));
 
         cut.WaitForAssertion(() =>
         {
             Assert.Contains("web-01", cut.Markup);
             Assert.Equal(2, cut.FindComponent<AetheusDataGrid<ServerDto>>().Instance.Count);
         });
-        var notification = Assert.Single(Services.GetRequiredService<Radzen.NotificationService>().Messages);
-        Assert.Equal(Radzen.NotificationSeverity.Error, notification.Severity);
+        var notification = Assert.Single(Services.Toasts());
+        Assert.Equal(OmniSeverity.Danger, notification.Severity);
+    }
+
+    // ── Empty state only after the load ───────────────────────────────────────
+
+    [Fact]
+    public void EmptyState_IsNotShownWhileTheFirstLoadIsInFlight()
+    {
+        var releaseList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(HttpMethod.Get, "api/servers", async ct =>
+        {
+            await releaseList.Task.WaitAsync(ct);
+            return new PaginatedResult<ServerDto> { Items = [], TotalCount = 0 };
+        });
+
+        var cut = Render<ServersPage>();
+
+        // The fleet has not arrived: "no servers registered" would be a claim about data nobody read.
+        Assert.DoesNotContain("EmptyServersTitle", cut.Markup);
+        Assert.DoesNotContain("NoRecords", cut.Markup);
+
+        releaseList.SetResult();
+        // Generous: the whole suite runs in parallel and the grid renders the settled state a few
+        // dispatches after the response.
+        cut.WaitForAssertion(() => Assert.Contains("EmptyServersTitle", cut.Markup), TimeSpan.FromSeconds(10));
     }
 
     // ── Render coverage ───────────────────────────────────────────────────────

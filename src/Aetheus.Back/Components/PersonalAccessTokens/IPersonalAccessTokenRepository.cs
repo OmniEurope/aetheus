@@ -15,7 +15,7 @@ public interface IPersonalAccessTokenRepository
 
     Task<(List<PersonalAccessToken> Items, int Total)> GetForUserPagedAsync(
         int userId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default);
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
 
     Task<PersonalAccessToken?> FindByIdForUserAsync(int id, int userId, CancellationToken ct = default);
 

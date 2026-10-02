@@ -1,0 +1,11 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Pipelines is null)
+{
+    <AetheusLoader />
+}
+else
+{
+    @* Recette R-124: the New button lives in the project header now (the pipelines list adds it to
+       the layout's actions), so the section no longer spends a row of its own on it. *@
+    <PipelinesList ProjectId="ProjectId" />
+}

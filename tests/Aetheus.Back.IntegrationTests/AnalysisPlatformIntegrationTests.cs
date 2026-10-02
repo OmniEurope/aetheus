@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -463,6 +461,7 @@ public sealed class AnalysisPlatformIntegrationTests(PostgresFixture fixture) : 
     private sealed class CoordinatedTransactionScope(IDbTransactionScope inner, AsyncArrivalGate gate) : IDbTransactionScope
     {
         public bool IsRelational => inner.IsRelational;
+        public bool InTransaction => inner.InTransaction;
         public async Task BeginTransactionAsync(CancellationToken ct = default)
         {
             await inner.BeginTransactionAsync(ct);

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
@@ -21,6 +20,14 @@ public interface IPipelineRunControlService
 
     /// <summary>Moves a run out of WaitingForApproval and re-dispatches it.</summary>
     Task<bool> ResumeAfterApprovalAsync(
+        int runId, IPipelineRunScheduler scheduler, IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>
+    /// Applies a refused or expired approval: the run fails. A stage's own confirmation (PLAN-003 2.7)
+    /// fails that stage instead, so its failure handlers run first. Returns the run's status after,
+    /// or null when it could not leave WaitingForApproval.
+    /// </summary>
+    Task<PipelineStatus?> ApplyRefusalAsync(
         int runId, IPipelineRunScheduler scheduler, IPipelineChildRunLauncher launcher, CancellationToken ct);
 
     /// <summary>Re-opens a terminal run, resets its failed steps and re-dispatches.</summary>
@@ -118,19 +125,52 @@ public sealed class PipelineRunControlService(
         return true;
     }
 
+    public async Task<PipelineStatus?> ApplyRefusalAsync(
+        int runId, IPipelineRunScheduler scheduler, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        var refused = (await repo.GetApprovalsAsync(runId, ct).ConfigureAwait(false))
+            .Where(approval => approval.Status is ApprovalStatus.Rejected or ApprovalStatus.TimedOut)
+            .OrderByDescending(approval => approval.ResolvedAt)
+            .FirstOrDefault();
+        // Only a stage's own confirmation carries its own delay. An environment approval refuses the
+        // run before anything it guards has run, so there is nothing to compensate.
+        if (refused?.TimeoutMinutes is > 0
+            && await scheduler.FailUnconfirmedStageAsync(runId, refused.StageName, launcher, ct).ConfigureAwait(false))
+        {
+            await repo.AppendRunWarningsAsync(runId,
+                [$"Stage '{refused.StageName}' was not confirmed ({refused.Status}); the run fails and its failure handlers run."],
+                ct).ConfigureAwait(false);
+            return PipelineStatus.Running;
+        }
+        return await repo.TryTransitionPipelineRunStatusAsync(
+                runId, PipelineStatus.WaitingForApproval, PipelineStatus.Failed, ct).ConfigureAwait(false)
+            ? PipelineStatus.Failed
+            : null;
+    }
+
     public async Task<bool> RetryFailedStepsAsync(
         int runId, IPipelineRunScheduler scheduler, IPipelineChildRunLauncher launcher, CancellationToken ct)
     {
         var run = await repo.GetPipelineRunWithPipelineAsync(runId, ct).ConfigureAwait(false);
-        if (run?.Pipeline is null
-            || run.Status is not (PipelineStatus.Failed or PipelineStatus.Cancelled))
-            return false;
+        if (run?.Pipeline is null) return false;
+
+        // Every refusal below used to be the same silent false, which the API turned into a bare 404 and
+        // the page into one generic "run failed" toast: clicking Retry failed on a run that cannot be
+        // retried looked exactly like a retry that had been attempted and failed again. Each reason now
+        // says itself, and reaches the user through the error toast the front already raises on non-2xx.
+        if (run.Status is not (PipelineStatus.Failed or PipelineStatus.Cancelled))
+            throw new ConflictException(
+                $"Only a failed or cancelled run can be retried; this one is {run.Status}.");
 
         // Repository re-opens the run (Status → Running, CompletedAt → null) and resets the
         // failed step runs plus the downstream tail cancelled during failure finalization to
         // Pending atomically. Zero reset → nothing to retry.
         var reset = await repo.ResetFailedStepRunsAsync(runId, ct).ConfigureAwait(false);
-        if (reset == 0) return false;
+        if (reset == 0)
+            throw new ConflictException(
+                "This run has no failed step to retry. If you fixed the pipeline definition, use Re-run: "
+                + "a run executes the YAML captured when it was triggered (ADR-015), so retrying replays "
+                + "the old definition, never the edited one.");
 
         var definition = definitions.Parse(run);
         if (definition is not null)
@@ -146,5 +186,5 @@ public sealed class PipelineRunControlService(
     }
 
     private static bool IsTerminal(PipelineStatus status) =>
-        status is PipelineStatus.Success or PipelineStatus.Failed or PipelineStatus.Cancelled;
+        status.IsTerminal();
 }

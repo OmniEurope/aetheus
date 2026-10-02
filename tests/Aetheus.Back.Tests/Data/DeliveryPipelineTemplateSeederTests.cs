@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 
@@ -83,10 +82,19 @@ public sealed class DeliveryPipelineTemplateSeederTests
         // inputs; v2 then handed that one list to every blue-green step including the identity only
         // the starting step receives, so v3 separates the cutover's list; v3 still handed the cutover
         // list to the rollback, which fires on runs that never produced those tags, so v4 gives the
-        // rollback its own. All four stay published: a version, once seeded, is immutable.
+        // rollback its own; v5 goes back to one list now that the control plane decides per step what
+        // it can forward (D-01); v6 lets a consumer arm a host-side confirmation window (PLAN-003 2.7).
+        // All six stay published: a version, once seeded, is immutable.
         var blueGreen = Assert.Single(templates, template => template.Name == "host-bluegreen-deploy");
-        Assert.Equal(4, blueGreen.LatestVersion);
-        Assert.Equal([1, 2, 3, 4], blueGreen.Versions.OrderBy(version => version.Version).Select(version => version.Version));
+        Assert.Equal(6, blueGreen.LatestVersion);
+        Assert.Equal([1, 2, 3, 4, 5, 6], blueGreen.Versions.OrderBy(version => version.Version).Select(version => version.Version));
+        var v5 = Assert.Single(blueGreen.Versions, version => version.Version == 5);
+        Assert.Contains("one Compose variable list", v5.ChangelogEntry, StringComparison.Ordinal);
+        var v6 = Assert.Single(blueGreen.Versions, version => version.Version == 6);
+        Assert.Contains("confirm_minutes: \"$(BG_CONFIRM_MINUTES)\"", v6.YamlContent, StringComparison.Ordinal);
+        // "Revenir à N-1" is its own template: nothing is built or migrated on the way back.
+        var revert = Assert.Single(templates, template => template.Name == "host-bluegreen-revert");
+        Assert.Contains("type: bluegreen-revert", Assert.Single(revert.Versions).YamlContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -366,6 +374,10 @@ public sealed class DeliveryPipelineTemplateSeederTests
         Assert.Equal("name: application-ci\nstages: []", template.Versions.Single(item => item.Version == 1).YamlContent);
         Assert.Contains("Run project CI adapter", template.Versions.Single(item => item.Version == 2).YamlContent,
             StringComparison.Ordinal);
+        Assert.Contains("name: Application payload", template.Versions.Single(item => item.Version == 2).YamlContent,
+            StringComparison.Ordinal);
+        Assert.Contains("artifact_name: ApplicationPayload-artifacts",
+            template.Versions.Single(item => item.Version == 2).YamlContent, StringComparison.Ordinal);
     }
 
     private static PipelineTemplate CreateHistoricalCandidate(int organizationId, string yamlContent) =>

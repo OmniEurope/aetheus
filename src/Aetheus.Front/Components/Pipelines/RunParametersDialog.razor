@@ -1,0 +1,16 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniTemplateForm TModel="object" Model="@_formModel" OnValidSubmit="@OnSubmit">
+    <div class="run-params-dialog">
+        <RunParameterFields @ref="_fields" Parameters="@Parameters" Prefill="@Prefill" AvailableReleases="@AvailableReleases" AvailableReleaseTotal="@AvailableReleaseTotal" />
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">@_error</OmniAlert>
+        }
+
+        <DialogFooter OnCancel="@OnCancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit"><OmniIcon Name="@MaterialIconMap.Resolve(SubmitIcon)" /> <span>@(SubmitText ?? L["Run"])</span></OmniButton>
+        </DialogFooter>
+    </div>
+</OmniTemplateForm>

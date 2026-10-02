@@ -1,0 +1,42 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@using Aetheus.Front.Resources
+@using Microsoft.Extensions.Localization
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else if (_loadFailed)
+{
+    <OmniStack Gap="OmniSpacing.Medium" Align="OmniAlignment.Start">
+        <OmniAlert Severity="OmniSeverity.Danger">@L["LoadFailed"]</OmniAlert>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniStack>
+}
+else
+{
+    <OmniStack Gap="OmniSpacing.Large">
+        <OmniCard>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted">@L["UniqueVisitorsToday"]</OmniText>
+            <OmniHeading Level="OmniHeadingLevel.H3">@_today</OmniHeading>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                @L["CookieLessDailyVisitorsHint"]
+            </OmniText>
+        </OmniCard>
+
+        @if (_points.Any(point => point.UniqueVisitors > 0))
+        {
+            <OmniChart Title="@L["UniqueVisitors"]">
+                <OmniColumnSeries Data="@VisitorPoints"
+                                    Title="@L["DailyUniqueVisitors"]" />
+                <OmniAxisTitle Text="@L["UniqueVisitors"]" />
+                <OmniCategoryAxis Labels="@OmniChartData.Labels(VisitorPoints)" />
+            </OmniChart>
+        }
+        else
+        {
+            <EmptyState Icon="groups" Title="@L["NoVisitorDataYet"]" />
+        }
+    </OmniStack>
+}

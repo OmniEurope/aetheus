@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.AppMonitoring.Ingest;
 using Aetheus.Back.Components.Vaults;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -13,19 +12,25 @@ public sealed class AppDeployEnvProvider(
     IAuditService audit,
     IVaultService vaults,
     IConfiguration configuration,
-    IMemoryCache cache,
     TimeProvider timeProvider) : IAppDeployEnvProvider
 {
     private static readonly IReadOnlyDictionary<string, string> None = new Dictionary<string, string>();
 
     /// <summary>
-    /// How long an issued key stays reusable within its run. Comfortably longer than a deployment,
-    /// short enough that a plaintext does not linger in memory once the run is over.
+    /// Every name this provider can emit. The control plane derives them for the step that starts a
+    /// colour and for no other, so the blue-green binding drops them from <c>compose_env</c> on every
+    /// other step rather than refusing a name that step was never meant to receive (D-01).
     /// </summary>
-    private static readonly TimeSpan RunKeyLifetime = TimeSpan.FromHours(6);
-
-    private static string RunKeyCacheKey(int appId, int pipelineRunId) =>
-        $"deploy-ingest-key:{appId}:{pipelineRunId}";
+    internal static readonly string[] DerivedNames =
+    [
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_HEADERS", "OTEL_SERVICE_NAME",
+        "AETHEUS_VISITOR_ENDPOINT", "AETHEUS_INGEST_KEY",
+        "AETHEUS_TELEMETRY_ENABLED", "AETHEUS_TELEMETRY_LOGS_ENABLED", "AETHEUS_TELEMETRY_APPLICATION_ID",
+        "AETHEUS_WEB_ANALYTICS_ENABLED", "AETHEUS_WEB_ANALYTICS_APPLICATION_ID", "AETHEUS_WEB_ANALYTICS_SITE_ID",
+        "AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT", "AETHEUS_WEB_ANALYTICS_INGEST_KEY",
+        "AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY", "AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION"
+    ];
 
     public async Task<IReadOnlyDictionary<string, string>> GetDeployEnvAsync(
         int projectId, int? environmentId, int pipelineRunId, CancellationToken ct = default)
@@ -40,9 +45,6 @@ public sealed class AppDeployEnvProvider(
         if (app is null)
             return None;
 
-        // The stored key is a one-way hash - a previously issued plaintext cannot be recovered, so the
-        // one issued for this run is kept in memory and reused by every later stage of the same run.
-        //
         // Rotating per call looked right when only one stage deployed, but this method runs once per
         // stage carrying execution_role: deploy - about ten times in a production deployment. The
         // container starts at the Up stage holding the key of that moment, and rotation keeps exactly
@@ -50,24 +52,26 @@ public sealed class AppDeployEnvProvider(
         // current nor previous. Every OTLP export then came back 401, which is why no application had
         // ever recorded a single data point.
         //
-        // One key per run, not per stage: the container keeps a key that stays valid for the whole
-        // deployment and beyond.
-        if (!cache.TryGetValue(RunKeyCacheKey(app.Id, pipelineRunId), out string? plaintext)
-            || string.IsNullOrEmpty(plaintext))
+        // One key per run, not per stage, and derived from the run rather than remembered: an
+        // in-memory copy did not survive the backend restart a production deployment performs, and
+        // the same run rotated again from the new colour.
+        //
+        // Recette R2-013: the deployment rotation keeps the key before the previous one as well, because
+        // the idle blue-green colour still holds it until this run replaces that colour.
+        var plaintext = hasher.DeriveForRun(app.Id, pipelineRunId);
+        if (!string.Equals(app.IngestKeyHash, hasher.Hash(plaintext), StringComparison.Ordinal))
         {
-            plaintext = hasher.Generate();
-            var (previousHash, newHash, _) = IngestKeyRotation.Apply(
+            var rotation = IngestKeyRotation.ApplyForDeploy(
                 app, plaintext, hasher, configuration, timeProvider);
             await appRepo.SaveChangesAsync(ct).ConfigureAwait(false);
-            if (previousHash is not null)
-                ingestService.InvalidateKeyCache(previousHash);
-            ingestService.InvalidateKeyCache(newHash);
-            cache.Set(RunKeyCacheKey(app.Id, pipelineRunId), plaintext, RunKeyLifetime);
+            foreach (var hash in rotation.AffectedHashes)
+                ingestService.InvalidateKeyCache(hash);
             await audit.LogAsync(
-                previousHash is null ? "CreatedIngestKeyForDeploy" : "RotatedIngestKeyForDeploy",
+                rotation.PreviousHash is null ? "CreatedIngestKeyForDeploy" : "RotatedIngestKeyForDeploy",
                 "MonitoredApp",
                 app.Id,
-                $"Version {app.IngestKeyVersion}; pipeline run {pipelineRunId}; previous valid until {app.PreviousIngestKeyValidUntil:O}",
+                $"Version {app.IngestKeyVersion}; pipeline run {pipelineRunId}; previous valid until {app.PreviousIngestKeyValidUntil:O}; "
+                + $"second previous valid until {app.SecondPreviousIngestKeyValidUntil:O}",
                 ct).ConfigureAwait(false);
         }
 
@@ -109,7 +113,7 @@ public sealed class AppDeployEnvProvider(
                 [app.AnalyticsVaultName],
                 app.ProjectId,
                 ct).ConfigureAwait(false);
-            if (secrets.TryGetValue(AppWebAnalyticsConfigurationService.SecretKey, out var pseudonymizationKey))
+            if (AppWebAnalyticsConfigurationService.ReadKey(secrets, app.Id) is { } pseudonymizationKey)
             {
                 masking.RegisterRuntimeSecret(pipelineRunId, pseudonymizationKey);
                 analyticsPseudonymizationKey = pseudonymizationKey;

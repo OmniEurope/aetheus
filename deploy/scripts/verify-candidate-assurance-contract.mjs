@@ -25,7 +25,14 @@ try {
 }
 const sourceSha = readFileSync(sourceCommitPath, "utf8").trim().toLowerCase();
 if (!/^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(sourceSha)) throw new Error("Artifact source commit is invalid.");
-if (contract.schema !== 1) throw new Error("Unsupported assurance contract schema.");
+// Schema 2 adds the qualification profile and the previousSmoke test (PLAN-006 lot 9). Schema 1 is
+// still accepted because candidates published before this change are retained and remain deployable:
+// they ran the full V-1 suites unconditionally, which is exactly what a schema-2 `full` records.
+if (contract.schema !== 1 && contract.schema !== 2) throw new Error("Unsupported assurance contract schema.");
+const profile = contract.schema === 1 ? "full" : contract.profile;
+if (profile !== "light" && profile !== "full") {
+  throw new Error(`Assurance contract qualification profile is missing or invalid ('${contract.profile}').`);
+}
 if (contract.sourceSha?.toLowerCase() !== sourceSha) throw new Error("Assurance contract source SHA does not match the candidate artifact.");
 if (JSON.stringify(contract.gradingScale) !== JSON.stringify([...gradeRank.keys()])) throw new Error("Unsupported assurance grading scale.");
 
@@ -84,19 +91,33 @@ for (const [name, analysis] of Object.entries(contract.analyses ?? {})) {
   if (actualHash !== analysis.sha256) throw new Error(`${name} evidence hash does not match the contract.`);
   effectiveGrades.push(analysis.effectiveGrade);
 }
-if (Object.keys(contract.analyses ?? {}).sort().join(",") !== "dynamicSecurity,quality,security") {
+// Every contract carries the three analyses a candidate produces. A `full` qualification (the
+// nightly, PLAN-007 lot 2) may add exactly the two extension grades, both or neither; each counts in
+// the overall grade through the loop above. The three-key form stays the only one a light contract
+// may have, so every contract sealed before this change reads exactly as before.
+const analysisKeys = Object.keys(contract.analyses ?? {}).sort().join(",");
+const extendedAnalysisKeys = "dynamicSecurity,extendedDynamicSecurity,quality,security,securityHistory";
+if (analysisKeys !== "dynamicSecurity,quality,security"
+    && !(profile === "full" && analysisKeys === extendedAnalysisKeys)) {
   throw new Error("Assurance contract does not contain the three required analysis grades.");
 }
 
-const requiredTests = [
+const declaredTests = [
   "unit", "analyzers", "currentIntegration", "currentE2E",
-  "agentCompatibility", "previousIntegration", "previousE2E", "performance"
+  "agentCompatibility", "previousIntegration", "previousE2E", "performance",
+  // Schema 2 only: the rollback proof both profiles pay for. Required in a light candidate exactly
+  // as in a full one, so lightening the profile can never remove the proof that V-1 still works on
+  // schema V - it only removes the depth of that proof.
+  ...(contract.schema >= 2 ? ["previousSmoke"] : [])
 ];
-for (const name of requiredTests) {
+for (const name of declaredTests) {
   const test = contract.tests?.[name];
   if (!test) throw new Error(`${name} test assurance is missing.`);
+  if (name === "previousSmoke" && test.required !== true) {
+    throw new Error("previousSmoke must be required in every qualification profile.");
+  }
   if (test.required === true) {
-    if (["agentCompatibility", "previousIntegration", "previousE2E"].includes(name)) {
+    if (["agentCompatibility", "previousIntegration", "previousE2E", "previousSmoke"].includes(name)) {
       if (test.mode !== "NMinusOne" && test.mode !== "Bootstrap") {
         throw new Error(`${name} compatibility mode is missing or invalid.`);
       }
@@ -126,6 +147,23 @@ for (const name of requiredTests) {
   }
   if (test.required === false && (test.status !== "NotRun" || test.effectiveGrade !== null)) {
     throw new Error(`${name} optional test assurance has an invalid status.`);
+  }
+  // A light candidate may leave exactly ONE test unrequired, and only for that declared reason.
+  // previousIntegration and previousE2E were briefly on this list, which moved the rollback proof
+  // off the commit being packaged; they are required in every profile again, and a contract that
+  // claims the exemption for them is refused here rather than accepted quietly.
+  if (test.required === false
+      && test.reason === "nightly-profile"
+      && (profile !== "light" || name !== "agentCompatibility")) {
+    throw new Error(`${name} claims the nightly profile exemption outside a light qualification.`);
+  }
+}
+if (profile === "light") {
+  const agent = contract.tests?.agentCompatibility;
+  if (agent?.required === false
+      && agent.reason !== "nightly-profile"
+      && agent.reason !== "not-applicable-to-project") {
+    throw new Error("agentCompatibility is unrequired in a light candidate without a declared reason.");
   }
 }
 

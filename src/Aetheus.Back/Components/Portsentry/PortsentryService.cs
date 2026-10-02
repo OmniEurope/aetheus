@@ -95,7 +95,7 @@ public class PortsentryService(IPortsentryRepository repo, IAuditService audit, 
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetBlockedIpsPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PortsentryBlockedIpDto>
         {
             Items = items.Select(MapBlockedIp).ToList(),
@@ -110,7 +110,7 @@ public class PortsentryService(IPortsentryRepository repo, IAuditService audit, 
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetWhitelistPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PortsentryWhitelistIpDto>
         {
             Items = items.Select(MapWhitelistIp).ToList(),
@@ -119,6 +119,10 @@ public class PortsentryService(IPortsentryRepository repo, IAuditService audit, 
             PageSize = pageSize
         };
     }
+
+    /// <summary>Recette R-210: what the blocked IPs grid's checkable Protocol filter offers.</summary>
+    public async Task<PortsentryFilterValuesDto> GetFilterValuesAsync(int serverId, CancellationToken ct = default) =>
+        new() { Protocols = await repo.GetBlockedProtocolsAsync(serverId, ct).ConfigureAwait(false) };
 
     public async Task<PortsentryWhitelistIpDto> AddWhitelistIpAsync(int serverId, AddPortsentryWhitelistRequest request, CancellationToken ct = default)
     {

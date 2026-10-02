@@ -1,0 +1,35 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits EntityEditDialogBase
+
+<OmniTemplateForm TModel="EditModel" Model="@_model" OnValidSubmit="@SubmitAsync">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12">
+            <OmniFormField Label="@L["NotificationChannel"]" Class="omni-u-w-100" For="oe-formfield-pages-notifications-notificationruleeditdialog-1">
+                <OmniDropDown Id="oe-formfield-pages-notifications-notificationruleeditdialog-1" @bind-Value="_model.NotificationChannelId" Options="@(Channels.ToOptions(item => item.Id, item => item.Name))" Disabled="@IsEdit" />
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12">
+            <OmniFormField For="oe-pages-notifications-notificationruleeditdialog-2" Class="omni-u-w-100"><LabelContent>@L["EventType"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="_model.EventType" Placeholder="@L["PlaceholderEventType"]" Id="oe-pages-notifications-notificationruleeditdialog-2" />
+            </ChildContent></OmniFormField>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["NotificationEventTypeHint"]</OmniText>
+            <ValidationMessage For="@(() => _model.EventType)" />
+        </OmniColumn>
+        @if (IsEdit)
+        {
+            <OmniColumn Span="12">
+                <OmniSwitch @bind-Value="_model.IsEnabled">@L["Active"]</OmniSwitch>
+            </OmniColumn>
+        }
+        <OmniColumn Span="12">
+            <OmniFormField For="oe-pages-notifications-notificationruleeditdialog-3" Class="omni-u-w-100"><LabelContent>@L["NotificationFilter"]</LabelContent><ChildContent>
+                <OmniTextArea @bind-Value="_model.FilterJson" Rows="3" Class="text-mono" Id="oe-pages-notifications-notificationruleeditdialog-3" />
+            </ChildContent></OmniFormField>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["NotificationFilterHint"]</OmniText>
+        </OmniColumn>
+    </OmniRow>
+    <DialogFooter OnCancel="@Cancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="@MaterialIconMap.Resolve((IsEdit ? "save" : "add"))" /> <span>@(IsEdit ? L["Save"] : L["Create"])</span></OmniButton>
+    </DialogFooter>
+</OmniTemplateForm>

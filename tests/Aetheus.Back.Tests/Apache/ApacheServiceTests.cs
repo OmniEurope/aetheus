@@ -3,8 +3,6 @@ using Aetheus.Back.Components.Apache;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -225,8 +223,8 @@ public class ApacheServiceTests
         // Typed read op (not the old dead shell): kind ApacheGetConfig, site in Command, config root in env.
         await _repoMock.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
             t.ServerId == 1
-            && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.ApacheGetConfig
+            && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.ApacheGetConfig
             && t.Command == "example.conf"
             && t.EnvironmentVariables.Contains("/etc/apache2")), Arg.Any<CancellationToken>());
     }
@@ -274,8 +272,8 @@ public class ApacheServiceTests
         await _sut.GetHtaccessAsync(1, "/var/www/html", ct: TestContext.Current.CancellationToken);
         await _repoMock.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
             t.ServerId == 1
-            && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.ApacheGetHtaccess
+            && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.ApacheGetHtaccess
             && t.Command == "/var/www/html"), Arg.Any<CancellationToken>());
     }
 
@@ -294,8 +292,8 @@ public class ApacheServiceTests
         // Typed write op: kind ApacheSaveHtaccess, doc root in Command, base64 content in env.
         var expectedB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("RewriteEngine On"));
         await _repoMock.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
-            t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-            && t.Operation == Aetheus.Shared.Enums.OperationKind.ApacheSaveHtaccess
+            t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+            && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.ApacheSaveHtaccess
             && t.Command == "/var/www/html"
             && t.EnvironmentVariables.Contains(expectedB64)), Arg.Any<CancellationToken>());
         await _auditMock.Received(1).LogAsync("ApacheSaveHtaccess", "Apache", 1, "/var/www/html", Arg.Any<CancellationToken>());

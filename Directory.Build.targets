@@ -1,8 +1,4 @@
 <Project>
-  <!-- PRM002 consumes Razor source as AdditionalFiles. Centralising this input prevents a project
-       from silently disabling the convention by omitting a project-local item group. -->
-  <ItemGroup>
-    <AdditionalFiles Include="$(MSBuildProjectDirectory)\**\*.razor"
-                     Exclude="$(MSBuildProjectDirectory)\bin\**;$(MSBuildProjectDirectory)\obj\**" />
-  </ItemGroup>
+  <!-- The Razor SDK supplies component files as AdditionalFiles to PRM002. Adding them here
+       duplicates the inputs in the dotnet watch workspace. -->
 </Project>

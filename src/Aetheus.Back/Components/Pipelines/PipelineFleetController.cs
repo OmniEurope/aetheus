@@ -24,6 +24,20 @@ public sealed class PipelineFleetController(
             request, organizationIds, accessiblePipelineIds, ct));
     }
 
+    /// <summary>Recette R-224: the template names the fleet's Template column filter offers, in the fleet's scope.</summary>
+    [HttpGet("fleet/filter-values")]
+    public async Task<ActionResult<PipelineFleetFilterValuesDto>> GetFleetFilterValues(CancellationToken ct)
+    {
+        var accessiblePipelineIds = await authz.GetAccessibleResourceIdsAsync(
+            User, ResourceType.Pipeline, Permission.Read, ct);
+        if (accessiblePipelineIds is { Count: 0 })
+            return Ok(new PipelineFleetFilterValuesDto());
+        var organizationIds = User.IsInRole("Admin")
+            ? null
+            : await authz.GetUserOrganizationIdsAsync(User, ct);
+        return Ok(await fleetService.GetFilterValuesAsync(organizationIds, accessiblePipelineIds, ct));
+    }
+
     [HttpGet("{id:int}/fleet-item")]
     public async Task<ActionResult<PipelineFleetItemDto>> GetFleetItem(int id, CancellationToken ct)
     {

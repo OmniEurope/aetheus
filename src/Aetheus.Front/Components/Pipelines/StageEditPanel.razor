@@ -1,0 +1,79 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<div class="vp-edit-panel">
+    <div class="vp-edit-panel-header">
+        <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">
+            <OmniIcon Name="OmniIconName.Edit" Class="icon-md-app" /> @L["EditStage"]
+        </OmniText>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnCloseClicked" title="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+    </div>
+
+    <OmniStack Gap="OmniSpacing.Medium">
+        <OmniFormField Label="@L["StageName"]" For="oe-formfield-pages-pipelines-stageeditpanel-1">
+            <OmniTextBox Id="oe-formfield-pages-pipelines-stageeditpanel-1" Value="@Stage.Name" ValueChanged="@OnNameChanged"  ValueExpression="@(() => Stage.Name)"/>
+        </OmniFormField>
+
+        <OmniFormField Label="@L["Agent"]" For="oe-formfield-pages-pipelines-stageeditpanel-2">
+            <OmniDropDown Id="oe-formfield-pages-pipelines-stageeditpanel-2" TValue="string" Value="@Stage.Agent" ValueExpression="@(() => Stage.Agent)" Options="@(AvailableServers.ToOptions(item => (string)item, item => item))"
+                            AllowEmpty="true" Filterable="true"
+                            Placeholder="@L["SelectAgent"]" ValueChanged="@(val => OnAgentChanged((string?)val))" />
+        </OmniFormField>
+
+        <OmniFormField Label="@L["OperatingSystem"]" For="oe-formfield-pages-pipelines-stageeditpanel-3">
+            <OmniDropDown Id="oe-formfield-pages-pipelines-stageeditpanel-3" TValue="string" Value="@Stage.Os" ValueExpression="@(() => Stage.Os)" Options="@(OsOptions.ToOptions(item => (string)item, item => item))"
+                            AllowEmpty="true" Placeholder="@L["OsAny"]"
+                            ValueChanged="@(val => OnOsChanged((string?)val))" />
+        </OmniFormField>
+
+        <OmniFormField Label="@L["DependsOn"]" For="oe-formfield-pages-pipelines-stageeditpanel-4">
+            <OmniMultiSelect Id="oe-formfield-pages-pipelines-stageeditpanel-4" TValue="string" Value="@Stage.DependsOn"
+                             ValueChanged="OnDependsOnChanged"
+                             ValueExpression="@(() => Stage.DependsOn)"
+                             Options="@OtherStageNames.Select(name => new OmniOption<string>(name, name)).ToArray()"
+                             Filterable="true"
+                             Placeholder="@L["SelectDependencies"]" />
+        </OmniFormField>
+
+        @* Stage-level variables *@
+        <OmniFieldset Collapsible="true" Expanded="false"><Legend>@L["StageVariables"]</Legend><ChildContent>
+            <div class="vp-var-grid">
+                @foreach (var kvp in _variables)
+                {
+                    var key = kvp.Key;
+                    var value = kvp.Value;
+                    <OmniTextBox aria-label="@L["Key"]" Value="@key" Placeholder="@L["Key"]" Disabled="true"
+                                   Class="icon-input-sm"  ValueExpression="@(() => key)"/>
+                    <OmniTextBox aria-label="@L["Value"]" Value="@value" Placeholder="@L["Value"]"
+                                   ValueChanged="@(val => OnVariableValueChanged(key, val))"
+                                   Class="icon-input-sm" ValueExpression="@(() => value)" />
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnRemoveVariable(key))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                }
+            </div>
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Class="omni-u-mt-sm">
+                <OmniTextBox aria-label="@L["Key"]" @bind-Value="_newVarKey" Placeholder="@L["Key"]" Class="text-input-flex" />
+                <OmniTextBox aria-label="@L["Value"]" @bind-Value="_newVarValue" Placeholder="@L["Value"]" Class="text-input-flex" />
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnAddVariable" Disabled="@string.IsNullOrWhiteSpace(_newVarKey)" title="@L["Add"]"><OmniIcon Name="OmniIconName.Add" /></OmniButton>
+            </OmniStack>
+        </ChildContent></OmniFieldset>
+
+        @* Steps list *@
+        <OmniFieldset><Legend>@L["Steps"]</Legend><ChildContent>
+            @for (var i = 0; i < Stage.Steps.Count; i++)
+            {
+                var step = Stage.Steps[i];
+                var index = i;
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center" Class="omni-u-mb-xs">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0 text-num-cell">@(index + 1).</OmniText>
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0 flex-1">@step.Name</OmniText>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OnMoveStep(index, -1))" title="@L["MoveUp"]" Disabled="@(index == 0)"><OmniIcon Name="OmniIconName.Upgrade" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OnMoveStep(index, 1))" title="@L["MoveDown"]" Disabled="@(index == Stage.Steps.Count - 1)"><OmniIcon Name="OmniIconName.ArrowDown" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => EditStep.InvokeAsync(index))" title="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnRemoveStep(index))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </OmniStack>
+            }
+            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => AddStep.InvokeAsync())" Class="omni-u-mt-sm" title="@L["AddStep"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+        </ChildContent></OmniFieldset>
+
+        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@OnDeleteClicked" title="@L["DeleteStage"]"><OmniIcon Name="OmniIconName.Delete" /> <span>@L["Delete"]</span></OmniButton>
+    </OmniStack>
+</div>

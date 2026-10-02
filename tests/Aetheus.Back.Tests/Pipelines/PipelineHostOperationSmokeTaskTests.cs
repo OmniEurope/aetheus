@@ -3,8 +3,6 @@ using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -233,5 +231,41 @@ public class PipelineHostOperationSmokeTaskTests
 
         Assert.Equal(TaskExecutionStatus.Failed, step.Status);
         _repo.DidNotReceive().TrackTask(Arg.Any<ServerTask>());
+    }
+
+    /// <summary>
+    /// D-01: a rollback after a failure that came before the image tags were published still runs,
+    /// and the names it could not forward are written to the run's warnings rather than dropped.
+    /// </summary>
+    [Fact]
+    public async Task ARollbackMissingPublishedTags_IsDispatchedAndNamesWhatItSkipped()
+    {
+        var definition = new PipelineStepDefinition
+        {
+            Name = "bg",
+            Project = "toto",
+            StateDir = "/var/lib/toto",
+            EnvFile = "/var/lib/toto/.env",
+            ComposeFiles = "deploy/compose/base.yml",
+            Ports = "10029,10030,10031,10032",
+            ReloadHelper = "/usr/local/lib/aetheus/apache-reload",
+            UpstreamConf = "/etc/apache2/sites-available/toto.conf",
+            ComposeEnv = "AETHEUS_BACK_IMAGE,APP_VERSION",
+            TimeoutSeconds = 300
+        };
+
+        var step = await RunBlueGreenAsync(
+            "bluegreen-rollback",
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["APP_VERSION"] = "1.1.7" },
+            definition);
+
+        Assert.NotEqual(TaskExecutionStatus.Failed, step.Status);
+        Assert.NotNull(TrackedTask());
+        await _repo.Received(1).AppendRunWarningsAsync(
+            1,
+            Arg.Is<IReadOnlyCollection<string>>(warnings =>
+                warnings.Single().Contains("AETHEUS_BACK_IMAGE", StringComparison.Ordinal)
+                && !warnings.Single().Contains("APP_VERSION", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 }

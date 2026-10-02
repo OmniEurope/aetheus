@@ -26,6 +26,15 @@ public class TeamspeakController(ITeamspeakService teamspeakService, IResourceAu
         return Ok(await teamspeakService.GetClientsAsync(serverId, request, ct));
     }
 
+    // Recette R-210: the platforms the clients grid's checkable Platform filter offers.
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<TeamspeakFilterValuesDto>> GetFilterValues(int serverId, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Read, ct))
+            return Forbid();
+        return Ok(await teamspeakService.GetFilterValuesAsync(serverId, ct));
+    }
+
     [HttpGet("channels")]
     public async Task<ActionResult<PaginatedResult<TeamspeakChannelDto>>> GetChannels(
         int serverId, [FromQuery] PaginationRequest request, CancellationToken ct)

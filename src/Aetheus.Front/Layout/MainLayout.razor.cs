@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.Configuration;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Layout;
 
@@ -21,10 +22,12 @@ public partial class MainLayout : IAsyncDisposable
     [Inject] private ActiveOrganizationService Orgs { get; set; } = default!;
     [Inject] private ListCacheService Cache { get; set; } = default!;
     [Inject] private IHttpClientFactory HttpFactory { get; set; } = default!;
+    [Inject] private ApplicationVersionState VersionState { get; set; } = default!;
     [Inject] private TaskTrackerService TaskTracker { get; set; } = default!;
     [Inject] private RealtimeSessionLifecycle RealtimeSession { get; set; } = default!;
     [Inject] private IWebAssemblyHostEnvironment HostEnv { get; set; } = default!;
     [Inject] private NotifyHelper Notify { get; set; } = default!;
+    [Inject] private HubConnectionFactory HubFactory { get; set; } = default!;
 
     private bool _sidebarExpanded;
     private bool _initialized;
@@ -47,8 +50,25 @@ public partial class MainLayout : IAsyncDisposable
         Auth.IsAuthenticated,
         Auth.IsAdmin,
         Permissions);
-    internal bool _darkMode = true;
-    private string _currentLangLabel = "FR";
+    /// <summary>The look the application menu shows and changes (mode, theme): one source with the
+    /// appearance window and the settings page.</summary>
+    [Inject] private Aetheus.Front.Components.Settings.SiteAppearanceState Appearance { get; set; } = default!;
+
+    /// <summary>STD-SHELL: the sidebar floats over the page below 64rem (phones and tablets, ASTRAIA parity)
+    /// and is pushed beside it above; both toggles follow it for their glyph.</summary>
+    internal OmniSidebarReveal SidebarReveal => _isMobile ? OmniSidebarReveal.Overlay : OmniSidebarReveal.Push;
+
+    /// <summary>The languages of the application menu; the code is the value stored for the next start.</summary>
+    private IReadOnlyList<OmniAppMenuLanguage> Languages =>
+        [new(FrenchLanguage, L["LanguageFrench"]), new(EnglishLanguage, L["LanguageEnglish"])];
+
+    private const string FrenchLanguage = "fr-FR";
+    private const string EnglishLanguage = "en";
+
+    internal static string CurrentLanguage =>
+        System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("fr", StringComparison.OrdinalIgnoreCase)
+            ? FrenchLanguage
+            : EnglishLanguage;
 
     private bool _isProduction = true;
     private string _envName = "Production";
@@ -56,6 +76,9 @@ public partial class MainLayout : IAsyncDisposable
     private string? _devLabel;
     private LoggedErrorBoundary? _errorBoundary;
     private bool _userMenuOpen;
+    private int ActiveOrganizationId => Orgs.Active?.Id ?? 0;
+    private IReadOnlyList<OmniOption<int>> ActiveOrganizationOptions =>
+        Orgs.Available.Select(organization => new OmniOption<int>(organization.Id, organization.Name)).ToArray();
     private string _version = "dev";
     internal bool _newVersionAvailable;
     private ApplicationVersionMonitor? _versionMonitor;
@@ -66,13 +89,13 @@ public partial class MainLayout : IAsyncDisposable
         || _backendLive == true;
 
     private bool _showOfflineDialog;
-    private int _reconnectCountdown;
+    private readonly ReconnectCountdownTicker _countdown = new(TimeProvider.System);
     private bool _manualReconnecting;
     private bool _wasConnectedOnce;
     private bool _connectAttempted;
     private bool _disposed;
     private CancellationTokenSource? _offlineDelayCts;
-    private CancellationTokenSource? _countdownCts;
+
 
     protected override async Task OnInitializedAsync()
     {
@@ -81,10 +104,11 @@ public partial class MainLayout : IAsyncDisposable
         _devBranch = Configuration["DevBanner:Branch"];
         _devLabel = Configuration["DevBanner:Label"];
 
+        Appearance.Changed += OnAppearanceChanged;
         try
         {
-            var theme = await JS.InvokeAsync<string?>("localStorage.getItem", StorageKeys.Theme);
-            _darkMode = theme != "light";
+            // The stored mode (light, dark or system, PLAN-008 lot 11) and theme the menu shows.
+            await Appearance.LoadAsync();
         }
         catch (Exception ex)
         {
@@ -93,7 +117,11 @@ public partial class MainLayout : IAsyncDisposable
         }
 
         await Auth.InitializeAsync();
+        await Auth.WatchStorageAsync();
         _initialized = true;
+        // D48: a session that could not survive the start-up (expired, nothing to renew it with).
+        if (Auth.LastSessionEndReason is not null)
+            AnnounceSessionEnd();
         Auth.OnAuthStateChanged += OnAuthStateChanged;
         Auth.OnNeedsLogin += OnNeedsLogin;
         Nav.LocationChanged += OnLocationChanged;
@@ -102,51 +130,33 @@ public partial class MainLayout : IAsyncDisposable
         _signalRState = TaskTracker.ConnectionState;
         _wasConnectedOnce = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
 
-        var bootstrap = new List<Task>(2);
-        if (Auth.IsAuthenticated && !Permissions.IsLoaded)
-            bootstrap.Add(LoadPermissionsAsync());
         if (Auth.IsAuthenticated)
         {
+            // Same start as after a later login: permissions and organizations, then the realtime hub.
             Orgs.Changed += OnOrgsChanged;
-            if (!Orgs.IsLoaded)
-                bootstrap.Add(LoadOrganizationsAsync());
-        }
-        if (bootstrap.Count > 0)
-            await Task.WhenAll(bootstrap);
-
-        if (Auth.IsAuthenticated)
-        {
             _connectAttempted = true;
-            try { await TaskTracker.StartAsync(); }
-            catch (Exception ex) { Logger.LogWarning(ex, "[MainLayout] TaskTracker start failed"); }
-            _signalRState = TaskTracker.ConnectionState;
-            _wasConnectedOnce = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
-            if (_wasConnectedOnce)
-                _backendLive = true;
-            else
-                _backendLive = await Api.Auth.IsBackendLiveAsync();
+            var session = await MainLayoutBootstrapLoader.StartAuthenticatedSessionAsync(
+                Api, Permissions, Auth, Orgs, TaskTracker, Logger);
+            _signalRState = session.SignalRState;
+            _wasConnectedOnce = session.WasConnected;
+            _backendLive = session.BackendLive;
         }
         _authenticatedSessionReady = Auth.IsAuthenticated;
-
-        _currentLangLabel = System.Globalization.CultureInfo.CurrentUICulture.Name
-            .StartsWith("fr", StringComparison.OrdinalIgnoreCase) ? "FR" : "EN";
 
         RedirectIfUnauthenticated();
         _appReady = true;
     }
 
-    private Task LoadPermissionsAsync() =>
-        MainLayoutBootstrapLoader.LoadPermissionsAsync(Api, Permissions, Auth, Logger);
-
-    private Task LoadOrganizationsAsync() =>
-        MainLayoutBootstrapLoader.LoadOrganizationsAsync(Orgs, Logger);
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            var css = _darkMode ? RadzenAssetUrls.DarkTheme : RadzenAssetUrls.LightTheme;
-            await JS.InvokeVoidAsync("Aetheus.setTheme", css);
+            // The stored preference, read again here: the first render can run before OnInitializedAsync
+            // has read it, and repainting from the dark default then overrode a saved light theme while
+            // the menu said "Light mode" (seen 2026-09-21).
+            await Appearance.LoadAsync();
+            await JS.InvokeAsync<string?>("Aetheus.setOmniTheme",
+                Aetheus.Front.Components.Settings.SiteAppearanceState.StoredAppearance(Appearance.Appearance));
             _version = Configuration["App:Version"] ?? "dev";
             await JS.InvokeVoidAsync("Aetheus.lockTitle", $"Aetheus v{_version}");
             if (!string.IsNullOrWhiteSpace(_devLabel))
@@ -154,6 +164,7 @@ public partial class MainLayout : IAsyncDisposable
             await JS.InvokeVoidAsync("Aetheus.initFormShortcuts");
             _selfRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("Aetheus.watchViewport", _selfRef);
+            await JS.InvokeVoidAsync("Aetheus.watchConnectivity", _selfRef);
             _versionMonitor = new ApplicationVersionMonitor(
                 HttpFactory, new Uri(Nav.BaseUri), _version, OnNewVersionAvailableAsync);
             _versionMonitor.Start();
@@ -172,7 +183,12 @@ public partial class MainLayout : IAsyncDisposable
     private Task OnNewVersionAvailableAsync()
     {
         _newVersionAvailable = true;
+        VersionState.MarkNewVersionAvailable();
         Cache.Invalidate(ListCacheService.ApiReferenceKey);
+        // The sockets already open are still on the previous colour: move the realtime owners that
+        // follow it (approvals, run page) to the backend that is now routed. The task tracker, which
+        // drives the offline overlay, is deliberately not among them, so nothing flashes here.
+        HubFactory.AnnounceBackendReplaced();
         return InvokeAsync(StateHasChanged);
     }
 
@@ -232,25 +248,21 @@ public partial class MainLayout : IAsyncDisposable
             ClearSessionState();
             ResetConnectionLostState();
 
+            // S5TK: say why the user was bounced. Before the page check: the logout's OnAuthStateChanged
+            // has usually redirected to /login already, which silenced the toast when tied to it.
+            AnnounceSessionEnd();
             var uri = Nav.ToBaseRelativePath(Nav.Uri);
             if (!uri.StartsWith("login", StringComparison.OrdinalIgnoreCase))
-            {
-                // S5TK: the redirect used to be silent (a flash of the empty dashboard, then /login).
-                // Tell the user why they were bounced so an expired session doesn't read as a glitch.
-                Notify.Warning("SessionExpired", "SessionExpiredDetail");
-                Nav.NavigateTo("/login");
-            }
+                Nav.NavigateTo(LoginRedirect.ToLogin(Nav));
         });
     }
+
+    private void AnnounceSessionEnd() => SessionEndAnnouncement.Announce(Auth, Notify, L, Api, Logger);
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         _errorBoundary?.Recover();
         _userMenuOpen = false;
-        // Mobile drawer: tapping a menu link navigates, so close the overlay so it doesn't cover the
-        // page the user just opened (Astraia parity). No-op on desktop where the rail stays open.
-        if (_isMobile)
-            _sidebarExpanded = false;
         RedirectIfUnauthenticated();
         _ = InvokeAsync(StateHasChanged);
     }
@@ -269,17 +281,19 @@ public partial class MainLayout : IAsyncDisposable
         await InvokeAsync(StateHasChanged);
     }
 
-    private void ToggleSidebar()
-    {
-        _sidebarExpanded = !_sidebarExpanded;
-        if (!_isMobile)
-            _desktopSidebarExpanded = _sidebarExpanded;
-    }
+    /// <summary>
+    /// Called by Aetheus.watchConnectivity when the browser reports the network is back, or when the
+    /// tab becomes visible again after the machine woke up. Both are the moment a scheduled backoff
+    /// step became pointless: it was scheduled for a network that no longer applies.
+    /// </summary>
+    [JSInvokable]
+    public void OnConnectivityWake() => TaskTracker.RequestImmediateReconnect();
 
-    private void OnSidebarNavigationRequested()
+    private void OnSidebarOpenChanged(bool open)
     {
-        if (_isMobile)
-            _sidebarExpanded = false;
+        _sidebarExpanded = open;
+        if (!_isMobile)
+            _desktopSidebarExpanded = open;
     }
 
     private void RedirectIfUnauthenticated()
@@ -288,7 +302,7 @@ public partial class MainLayout : IAsyncDisposable
         if (!Auth.IsAuthenticated)
         {
             if (!uri.StartsWith("login", StringComparison.OrdinalIgnoreCase))
-                Nav.NavigateTo("/login");
+                Nav.NavigateTo(LoginRedirect.ToLogin(Nav));
             return;
         }
 
@@ -296,80 +310,32 @@ public partial class MainLayout : IAsyncDisposable
         // mandatory change-password screen until a fresh token (without the claim) is issued.
         if (Auth.MustChangePassword
             && !uri.StartsWith("account/change-password", StringComparison.OrdinalIgnoreCase))
-            Nav.NavigateTo("/account/change-password");
+            Nav.NavigateTo(LoginRedirect.ToChangePassword(Nav));
     }
 
-    internal async Task ToggleDarkMode()
+    private Aetheus.Front.Components.Settings.SiteAppearanceWindow? _appearanceWindow;
+
+    /// <summary>Recette R-390: the menu's Theme row (OE closes the menu first) opens the appearance window.</summary>
+    private async Task OnThemeMenuClick()
     {
-        _userMenuOpen = false;
-        _darkMode = !_darkMode;
-        var theme = _darkMode ? "dark" : "light";
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.Theme, theme);
-        var css = _darkMode ? RadzenAssetUrls.DarkTheme : RadzenAssetUrls.LightTheme;
-        await JS.InvokeVoidAsync("Aetheus.setTheme", css);
+        if (_appearanceWindow is not null)
+        {
+            await _appearanceWindow.OpenAsync();
+        }
     }
 
-    private async Task ToggleLanguage()
+    /// <summary>The language picked in the menu is stored for the next start, then the page reloads in it.</summary>
+    internal async Task OnLanguageChanged(string language)
     {
-        _userMenuOpen = false;
-        var current = System.Globalization.CultureInfo.CurrentUICulture.Name;
-        var next = current.StartsWith("fr", StringComparison.OrdinalIgnoreCase) ? "en" : "fr-FR";
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.Lang, next);
-        await JS.InvokeVoidAsync("Aetheus.setLang", next);
+        if (string.Equals(language, CurrentLanguage, StringComparison.Ordinal)) return;
+        await JS.InvokeVoidAsync("localStorage.setItem", StorageKeys.Lang, language);
+        await JS.InvokeVoidAsync("Aetheus.setLang", language);
         Nav.NavigateTo(Nav.Uri, forceLoad: true);
     }
 
-    private void ToggleUserMenu()
-    {
-        _userMenuOpen = !_userMenuOpen;
-        if (_userMenuOpen)
-            _ = FocusUserMenuAsync();
-    }
+    private void OnSettingsMenuClick() => Nav.NavigateTo("/settings");
 
-    private async Task FocusUserMenuAsync()
-    {
-        await Task.Yield();
-        await JS.InvokeVoidAsync("Aetheus.trapFocus", ".user-menu-card");
-    }
-
-    private void HandleUserMenuKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-            _userMenuOpen = false;
-    }
-
-    // A11y: user-menu items are <div role="button">; Enter/Space must activate them
-    // like a native button does, otherwise they are focusable but not keyboard-operable.
-    private static bool IsActivationKey(KeyboardEventArgs e) => e.Key is "Enter" or " ";
-
-    private async Task ActivateOnKey(KeyboardEventArgs e, Func<Task> action)
-    {
-        if (IsActivationKey(e))
-            await action();
-    }
-
-    private void ActivateOnKey(KeyboardEventArgs e, Action action)
-    {
-        if (IsActivationKey(e))
-            action();
-    }
-
-    private void CloseUserMenu()
-    {
-        _userMenuOpen = false;
-    }
-
-    private void OnSettingsMenuClick()
-    {
-        _userMenuOpen = false;
-        Nav.NavigateTo("/settings");
-    }
-
-    private async Task OnLogoutMenuClick()
-    {
-        _userMenuOpen = false;
-        await OnLogout();
-    }
+    private void OnAppearanceChanged() => InvokeAsync(StateHasChanged);
 
     internal void RecoverError()
     {
@@ -405,13 +371,10 @@ public partial class MainLayout : IAsyncDisposable
         _offlineDelayCts?.Cancel();
         _offlineDelayCts?.Dispose();
         _offlineDelayCts = null;
-        _countdownCts?.Cancel();
-        _countdownCts?.Dispose();
-        _countdownCts = null;
+        _countdown.Stop();
         _signalRState = Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Disconnected;
         _backendLive = null;
         _showOfflineDialog = false;
-        _reconnectCountdown = 0;
         _manualReconnecting = false;
         _wasConnectedOnce = false;
         _connectAttempted = false;
@@ -453,10 +416,7 @@ public partial class MainLayout : IAsyncDisposable
                 _offlineDelayCts?.Cancel();
                 _offlineDelayCts?.Dispose();
                 _offlineDelayCts = null;
-                _countdownCts?.Cancel();
-                _countdownCts?.Dispose();
-                _countdownCts = null;
-                _reconnectCountdown = 0;
+                _countdown.Stop();
 
                 if (_showOfflineDialog)
                 {
@@ -480,7 +440,10 @@ public partial class MainLayout : IAsyncDisposable
                     await Task.Delay(TimeSpan.FromSeconds(2), TimeProvider, token);
                     if (!token.IsCancellationRequested && !_disposed)
                     {
-                        if (await RefreshBackendLivenessAsync(token))
+                        // A reconnect during the probe cancels it, and a cancelled probe answers "not
+                        // live": without the second check the overlay opened on a page that was
+                        // connected again, and stayed (QA 2448, SignalRDrop E2E).
+                        if (await RefreshBackendLivenessAsync(token) || token.IsCancellationRequested || _disposed)
                             return;
                         _showOfflineDialog = true;
                         StateHasChanged();
@@ -497,38 +460,30 @@ public partial class MainLayout : IAsyncDisposable
     private void OnReconnectAttempt(int delaySeconds)
     {
         _ = RefreshBackendLivenessAsync();
-        _ = InvokeAsync(async () =>
+        _ = InvokeAsync(() => _countdown.RunAsync(delaySeconds, () =>
         {
-            _countdownCts?.Cancel();
-            _countdownCts?.Dispose();
-            _countdownCts = new CancellationTokenSource();
-            var token = _countdownCts.Token;
-            _reconnectCountdown = delaySeconds;
-            StateHasChanged();
-            try
-            {
-                while (_reconnectCountdown > 0 && !token.IsCancellationRequested && !_disposed)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(1), TimeProvider, token);
-                    _reconnectCountdown--;
-                    StateHasChanged();
-                }
-            }
-            catch (OperationCanceledException) { }
-        });
+            if (!_disposed) StateHasChanged();
+            return Task.CompletedTask;
+        }));
     }
 
     private async Task OnManualReconnect()
     {
-        _countdownCts?.Cancel();
-        _countdownCts?.Dispose();
-        _countdownCts = null;
-        _reconnectCountdown = 0;
+        _countdown.Stop();
         _manualReconnecting = true;
         StateHasChanged();
 
-        await TaskTracker.ReconnectAsync();
+        var outcome = await TaskTracker.ReconnectAsync();
         _manualReconnecting = false;
+
+        // A session that expired during a machine sleep used to make this button a silent no-op:
+        // StartAsync returned on its authentication check and the user clicked a button that did
+        // nothing, forever. Send them where the problem can actually be fixed.
+        if (outcome == TaskTrackerService.ReconnectOutcome.SessionExpired)
+        {
+            RedirectIfUnauthenticated();
+            return;
+        }
 
         if (TaskTracker.ConnectionState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected)
             _showOfflineDialog = false;
@@ -546,6 +501,7 @@ public partial class MainLayout : IAsyncDisposable
         Auth.OnNeedsLogin -= OnNeedsLogin;
         Nav.LocationChanged -= OnLocationChanged;
         Orgs.Changed -= OnOrgsChanged;
+        Appearance.Changed -= OnAppearanceChanged;
         if (TaskTracker is not null)
         {
             TaskTracker.OnConnectionStateChanged -= OnSignalRStateChanged;
@@ -553,8 +509,7 @@ public partial class MainLayout : IAsyncDisposable
         }
         _offlineDelayCts?.Cancel();
         _offlineDelayCts?.Dispose();
-        _countdownCts?.Cancel();
-        _countdownCts?.Dispose();
+        _countdown.Dispose();
         _versionMonitor?.Dispose();
     }
 
@@ -571,6 +526,7 @@ public partial class MainLayout : IAsyncDisposable
         try
         {
             await JS.InvokeVoidAsync("Aetheus.disposeViewportWatcher");
+            await JS.InvokeVoidAsync("Aetheus.disposeConnectivityWatcher");
         }
         catch (JSDisconnectedException)
         {

@@ -181,6 +181,26 @@ public sealed class ServerHeartbeatRepository(AppDbContext db) : IServerHeartbea
             db.CertbotCertificates.AddRange(certificates);
     }
 
+    public Task<DateTime?> GetCertbotRenewalCheckedAtAsync(int serverId, CancellationToken ct = default) =>
+        db.CertbotStates.AsNoTracking()
+            .Where(s => s.ServerId == serverId)
+            .Select(s => s.RenewalCheckedAt)
+            .FirstOrDefaultAsync(ct);
+
+    public async Task ReplaceCertbotStateAsync(int serverId, CertbotState? state, CancellationToken ct = default)
+    {
+        if (db.Database.IsRelational())
+            await db.CertbotStates.Where(s => s.ServerId == serverId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        else
+        {
+            var old = await db.CertbotStates.Where(s => s.ServerId == serverId).ToListAsync(ct).ConfigureAwait(false);
+            db.CertbotStates.RemoveRange(old);
+        }
+
+        if (state is not null)
+            db.CertbotStates.Add(state);
+    }
+
     public async Task ReplaceMailDataAsync(int serverId, MailState? state, CancellationToken ct = default)
     {
         if (db.Database.IsRelational())
@@ -250,23 +270,38 @@ public sealed class ServerHeartbeatRepository(AppDbContext db) : IServerHeartbea
             db.PortsentryBlockedIps.AddRange(blockedIps);
     }
 
+    /// <summary>
+    /// Updates the reported RKHunter state IN PLACE rather than deleting and reinserting it: the row also
+    /// carries the operator's scan schedule (<see cref="RkhunterState.ScanScheduleCron"/>) and the
+    /// scheduler's <see cref="RkhunterState.LastScheduledScanAt"/>, which no heartbeat reports and which a
+    /// delete-and-reinsert used to wipe on every beat. A report without RKHunter still removes the row.
+    /// </summary>
     public async Task ReplaceRkhunterDataAsync(int serverId, RkhunterState? state, List<RkhunterWarning> warnings, CancellationToken ct = default)
     {
-        if (db.Database.IsRelational())
+        var existing = await db.RkhunterStates
+            .Where(s => s.ServerId == serverId)
+            .ToListAsync(ct).ConfigureAwait(false);
+        var kept = state is null ? null : existing.FirstOrDefault();
+        db.RkhunterStates.RemoveRange(existing.Where(row => !ReferenceEquals(row, kept)));
+        if (state is not null && kept is null)
+            db.RkhunterStates.Add(state);
+        else if (state is not null && kept is not null)
         {
-            await db.RkhunterStates.Where(s => s.ServerId == serverId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.RkhunterWarnings.Where(w => w.ServerId == serverId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            kept.Version = state.Version;
+            kept.DatabaseVersion = state.DatabaseVersion;
+            kept.LastScanTime = state.LastScanTime;
+            kept.LastScanStatus = state.LastScanStatus;
+            kept.WarningCount = state.WarningCount;
+            kept.DatabaseLastUpdated = state.DatabaseLastUpdated;
         }
+
+        if (db.Database.IsRelational())
+            await db.RkhunterWarnings.Where(w => w.ServerId == serverId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         else
         {
-            var oldStates = await db.RkhunterStates.Where(s => s.ServerId == serverId).ToListAsync(ct).ConfigureAwait(false);
-            db.RkhunterStates.RemoveRange(oldStates);
             var oldWarnings = await db.RkhunterWarnings.Where(w => w.ServerId == serverId).ToListAsync(ct).ConfigureAwait(false);
             db.RkhunterWarnings.RemoveRange(oldWarnings);
         }
-
-        if (state is not null)
-            db.RkhunterStates.Add(state);
         if (warnings.Count > 0)
             db.RkhunterWarnings.AddRange(warnings);
     }
@@ -285,6 +320,30 @@ public sealed class ServerHeartbeatRepository(AppDbContext db) : IServerHeartbea
 
         if (state is not null)
             db.SecurityUpdatesStates.Add(state);
+    }
+
+    /// <summary>
+    /// Recette R-479: a beat whose security-updates report did not change still proves a fresh check, so
+    /// it moves <see cref="SecurityUpdatesState.CheckedAt"/> alone (one UPDATE, no delete and reinsert).
+    /// No-op when the server keeps no security-updates row.
+    /// </summary>
+    public async Task TouchSecurityUpdatesCheckedAtAsync(int serverId, DateTime checkedAt, CancellationToken ct = default)
+    {
+        if (db.Database.IsRelational())
+        {
+            await db.SecurityUpdatesStates
+                .Where(s => s.ServerId == serverId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.CheckedAt, checkedAt)
+                    .SetProperty(s => s.LastUpdated, checkedAt), ct)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            var rows = await db.SecurityUpdatesStates.Where(s => s.ServerId == serverId).ToListAsync(ct).ConfigureAwait(false);
+            foreach (var row in rows)
+                row.CheckedAt = checkedAt;
+        }
     }
 
     public async Task<SecurityUpdatesState?> GetSecurityUpdatesStateAsync(int serverId, CancellationToken ct = default)

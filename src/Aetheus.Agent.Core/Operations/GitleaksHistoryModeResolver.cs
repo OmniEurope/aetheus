@@ -18,7 +18,9 @@ internal static class GitleaksHistoryModeResolver
         "scanner-manifest.json",
         ".aetheus/security-rules/",
         "src/Aetheus.Agent.Core/AnalysisRules/",
-        ".pipeline/aetheus-security.yaml"
+        ".pipeline/aetheus-security.yaml",
+        // The Git-history scan itself lives here since PLAN-007 lot 2.
+        ".pipeline/aetheus-security-history.yaml"
     ];
 
     internal static async Task<GitleaksHistorySelection> ResolveAsync(
@@ -141,6 +143,7 @@ internal static class GitleaksHistoryModeResolver
             CreateNoWindow = true
         };
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        GitRepositoryEnvironment.Neutralize(startInfo.Environment);
         using var process = Process.Start(startInfo)
             ?? throw new IOException("Git could not be started for Gitleaks history validation.");
         var output = await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);

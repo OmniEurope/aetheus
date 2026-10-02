@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics.CodeAnalysis;
 using Aetheus.Back.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -34,6 +35,11 @@ internal static class PostgresDatabaseTemplate
             $"DROP DATABASE IF EXISTS {database} WITH (FORCE); CREATE DATABASE {database} TEMPLATE {TemplateDatabase};");
     }
 
+    // CA2100 sees an interpolated database name in DDL. PostgreSQL does not accept a parameter for
+    // an identifier, so this cannot be bound; EnsureSafeDatabaseName above is the guard instead, and
+    // it refuses anything outside [A-Za-z0-9_] before the name reaches the statement.
+    [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "DDL identifier cannot be a parameter; EnsureSafeDatabaseName restricts it to [A-Za-z0-9_].")]
     public static void Reset(string connectionString)
     {
         NpgsqlConnection.ClearAllPools();
@@ -47,6 +53,8 @@ internal static class PostgresDatabaseTemplate
         command.ExecuteNonQuery();
     }
 
+    [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "Test-only admin helper; every caller in this file passes a literal statement.")]
     private static async Task ExecuteAdminAsync(string connectionString, string sql)
     {
         await using var connection = new NpgsqlConnection(WithDatabase(connectionString, "postgres"));

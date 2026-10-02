@@ -1,0 +1,165 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* ADR-021 phase 2: OTLP ingestion key management + per-metric alert thresholds. *@
+<OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["IngestionKey"]</OmniHeading>
+
+<OmniCard Class="omni-u-mb-md">
+    @if (App?.HasIngestKey == true)
+    {
+        <OmniText Element="OmniTextElement.Paragraph">
+            @L["IngestKeyConfigured"] @(App.IngestKeyCreatedAt?.ToString("g"))
+        </OmniText>
+        @if (App.IngestDroppedCount > 0)
+        {
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-danger">
+                @string.Format(L["IngestDroppedCount"], App.IngestDroppedCount)
+            </OmniText>
+        }
+    }
+    else
+    {
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["NoIngestKey"]</OmniText>
+    }
+
+    @if (_generatedKey is not null)
+    {
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-mt-sm omni-u-text-warning">@L["IngestKeyShownOnce"]</OmniText>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mt-xs">
+            <OmniTextBox aria-label="@L["IngestionKey"]" Value="@_generatedKey" ReadOnly="true" Class="omni-u-w-100"  ValueExpression="@(() => _generatedKey)"/>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CopyKeyAsync" title="@L["Copy"]" Label="@L["Copy"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+        </OmniStack>
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-mt-sm">
+            <code>OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=@MetricsEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=@LogsEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=@TracesEndpoint</code><br />
+            <code>OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf</code><br />
+            <code>OTEL_EXPORTER_OTLP_HEADERS=x-aetheus-ingest-key=&lt;key&gt;</code>
+        </OmniText>
+    }
+
+    @if (CanWrite)
+    {
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-md">
+            @* Recette R-445 (user decision 2026-09-28): regenerating the key is red, since the old key stops
+               working; the first generation is the zone's main action, blue. *@
+            <OmniButton Variant="@(App?.HasIngestKey == true ? OmniButtonVariant.Danger : OmniButtonVariant.Primary)" OnClick="@GenerateKeyAsync" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Key" /> <span>@(App?.HasIngestKey == true ? L["RegenerateKey"] : L["GenerateKey"])</span></OmniButton>
+            @if (App?.HasIngestKey == true)
+            {
+                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@RevokeKeyAsync" title="@L["RevokeIngestKey"]"><OmniIcon Name="OmniIconName.LockOpen" /> <span>@L["Revoke"]</span></OmniButton>
+            }
+        </OmniStack>
+    }
+</OmniCard>
+
+<OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["WebAnalyticsConfiguration"]</OmniHeading>
+
+<OmniCard Class="omni-u-mb-md">
+    @if (_analyticsLoading)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+    }
+    else
+    {
+        <OmniStack Gap="OmniSpacing.Medium">
+            <OmniSwitch @bind-Value="_analyticsEnabled" Disabled="@(!CanWrite)">@L["EnableWebAnalytics"]</OmniSwitch>
+            <OmniSwitch @bind-Value="_analyticsPublicIngestEnabled" Disabled="@(!CanWrite)">@L["EnablePublicWebAnalyticsIngest"]</OmniSwitch>
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniLabel For="analytics-site-id">@L["AnalyticsSiteId"]</OmniLabel>
+                <OmniTextBox Id="analytics-site-id" @bind-Value="_analyticsSiteId"
+
+                               Disabled="@(!CanWrite)" Class="w-rem-20" />
+            </OmniStack>
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniLabel For="analytics-allowed-origins">@L["AnalyticsAllowedOrigins"]</OmniLabel>
+                <OmniTextArea Id="analytics-allowed-origins" @bind-Value="_analyticsOrigins"
+
+                                Rows="3" Disabled="@(!CanWrite)"
+                                Placeholder="@L["AnalyticsAllowedOriginsPlaceholder"]" Class="omni-u-w-100" />
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                    @L["AnalyticsAllowedOriginsHint"]
+                </OmniText>
+            </OmniStack>
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniLabel For="analytics-storage-budget">@L["AnalyticsStorageBudgetBytes"]</OmniLabel>
+                <OmniNumeric Id="analytics-storage-budget" TValue="long" @bind-Value="_analyticsStorageBudgetBytes"
+                               Minimum="1048576" Maximum="10737418240" Disabled="@(!CanWrite)" Class="w-rem-20" />
+                @* Recette R2-007: what the audience data weighs against this budget, on one line (the card of
+                   the Visitors tab went). At the budget the oldest raw rows roll off instead of new events being refused. *@
+                @if (StorageUsageText is { } storageUsage)
+                {
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted web-analytics-storage-usage">@storageUsage</OmniText>
+                }
+            </OmniStack>
+            @if (_analyticsConfiguration is not null)
+            {
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                    @string.Format(L["AnalyticsKeyVersion"], _analyticsConfiguration.PseudonymKeyVersion,
+                        _analyticsConfiguration.PseudonymKeyCreatedAt?.ToString("g") ?? "-")
+                </OmniText>
+                @if (_analyticsConfiguration.PublicIngestEnabled)
+                {
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted">
+                        <code>@PublicAnalyticsEndpoint</code>
+                    </OmniText>
+                }
+            }
+            @if (CanWrite)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SaveAnalyticsConfigurationAsync" Class="@(_analyticsBusy ? "btn-busy" : null)" Busy="@(_analyticsBusy)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                    @if ((_analyticsConfiguration?.PseudonymKeyVersion ?? 0) > 0)
+                    {
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RotateAnalyticsKeyAsync" Class="@(_analyticsBusy ? "btn-busy" : null)" Busy="@(_analyticsBusy)" title="@L["RotateAnalyticsKey"]"><OmniIcon Name="OmniIconName.Key" /> <span>@L["Renew"]</span></OmniButton>
+                    }
+                </OmniStack>
+            }
+        </OmniStack>
+    }
+</OmniCard>
+
+<OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["MetricThresholds"]</OmniHeading>
+
+<OmniDataGrid Items="@_thresholds" TItem="AppMetricThresholdDto" EmptyText="@L["NoThresholds"]" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="AppMetricThresholdDto" Property="MetricName" Title="@L["Metric"]" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true" />
+        <OmniDataGridColumn TItem="AppMetricThresholdDto" Property="Operator" Title="@L["Operator"]" Width="9rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@OperatorText">
+            <Template Context="t">@L.Localize(t.Operator)</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="AppMetricThresholdDto" Property="Threshold" Title="@L["Threshold"]" Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+        @* Recette R-210: the status column reads IsBreached, so it filters on breached / OK. *@
+        <OmniDataGridColumn TItem="AppMetricThresholdDto" Property="IsBreached" Title="@L["Status"]" Width="7.5rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@BreachedText">
+            <Template Context="t">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@(t.IsBreached ? OmniTone.Danger : OmniTone.Success)">@(t.IsBreached ? L["Breached"] : L["OK"])</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        @if (CanWrite)
+        {
+            <OmniDataGridColumn TItem="AppMetricThresholdDto" Title="" Width="3.75rem" Sortable="false" Filterable="false">
+                <Template Context="t">
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteThresholdAsync(t.Id))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </Template>
+            </OmniDataGridColumn>
+        }
+    </Columns>
+</OmniDataGrid>
+
+@if (CanWrite)
+{
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.End">
+        <OmniStack Gap="OmniSpacing.XSmall">
+            <OmniLabel For="analytics-threshold-metric">@L["Metric"]</OmniLabel>
+            <OmniTextBox Id="analytics-threshold-metric" @bind-Value="_newThreshold.MetricName"
+
+                           Class="w-rem-16" />
+        </OmniStack>
+        <OmniStack Gap="OmniSpacing.XSmall">
+            <OmniLabel For="analytics-threshold-operator">@L["Operator"]</OmniLabel>
+            <OmniDropDown Id="analytics-threshold-operator" name="analytics-threshold-operator" @bind-Value="_newThreshold.Operator" Options="@(_operators.ToOptions(item => item, item => item))" Class="w-rem-12" />
+        </OmniStack>
+        <OmniStack Gap="OmniSpacing.XSmall">
+            <OmniLabel For="analytics-threshold-value">@L["Threshold"]</OmniLabel>
+            <OmniNumeric Id="analytics-threshold-value" @bind-Value="_newThreshold.Threshold" Class="w-rem-8" />
+        </OmniStack>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@AddThresholdAsync" title="@L["AddThreshold"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+    </OmniStack>
+}

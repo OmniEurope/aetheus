@@ -41,4 +41,37 @@ internal static class RepositoryScan
                 + "passes vacuously, so this is reported as a failure rather than a green run.");
         return files;
     }
+
+    /// <summary>
+    /// The folders holding the maintained pages, their dialogs and the shared components: since
+    /// PLAN-009 lot 2, <c>Components/{Module}</c> and <c>Components/Shared</c>, which replaced the
+    /// former <c>Pages/</c>, <c>Shared/</c>, <c>Services/</c> and <c>Helpers/</c> folders.
+    /// </summary>
+    internal static IReadOnlyList<string> PageRoots =>
+    [
+        Path.Combine(Root, "src", "Aetheus.Front", "Components")
+    ];
+
+    /// <summary>
+    /// Enumerates several folders as one scan and fails loudly when the union is empty (a single
+    /// folder may be absent or empty while the others carry the files). Each file comes with the
+    /// folder it was found under, for relative paths.
+    /// </summary>
+    internal static IReadOnlyList<(string Root, string File)> EnumerateUnion(
+        IEnumerable<string> directories,
+        string pattern)
+    {
+        var roots = directories.ToList();
+        var files = roots
+            .Where(Directory.Exists)
+            .SelectMany(directory => Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
+                .Select(file => (Root: directory, File: file)))
+            .ToList();
+        if (files.Count == 0)
+            throw new InvalidOperationException(
+                $"Scanning '{string.Join("', '", roots)}' for '{pattern}' returned no file. A guard that scans "
+                + "nothing passes vacuously, so this is reported as a failure rather than a green run.");
+        return files;
+    }
+
 }

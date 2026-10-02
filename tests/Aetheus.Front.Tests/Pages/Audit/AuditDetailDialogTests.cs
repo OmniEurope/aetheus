@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Pages.Audit;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Audit;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Audit;

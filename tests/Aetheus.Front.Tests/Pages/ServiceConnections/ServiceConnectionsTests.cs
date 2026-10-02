@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.ServiceConnections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.ServiceConnections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.ServiceConnections;
@@ -23,7 +21,7 @@ public class ServiceConnectionsTests : BunitContext
     {
         SeedList();
 
-        var cut = Render<Aetheus.Front.Pages.ServiceConnections.ServiceConnections>();
+        var cut = Render<Aetheus.Front.Components.ServiceConnections.ServiceConnections>();
 
         cut.WaitForState(() => cut.Markup.Contains("GitHub prod"), TimeSpan.FromSeconds(3));
         Assert.Contains("GitHub prod", cut.Markup);
@@ -37,10 +35,10 @@ public class ServiceConnectionsTests : BunitContext
         _handler.SetJsonResponse("api/service-connections/1/test",
             new ServiceConnectionTestResultDto { Status = ServiceConnectionTestStatus.Valid, Message = "ok" });
 
-        var cut = Render<Aetheus.Front.Pages.ServiceConnections.ServiceConnections>();
+        var cut = Render<Aetheus.Front.Components.ServiceConnections.ServiceConnections>();
         cut.WaitForState(() => cut.Markup.Contains("GitHub prod"), TimeSpan.FromSeconds(3));
 
-        var testButton = cut.FindAll("button").First(b => b.TextContent.Contains("TestConnection"));
+        var testButton = cut.FindAll("button").First(b => b.Names().Contains("TestConnection", StringComparison.Ordinal));
         testButton.Click();
 
         // The localized valid status (Enum key) renders in a badge - never fabricated.
@@ -55,10 +53,10 @@ public class ServiceConnectionsTests : BunitContext
         _handler.SetJsonResponse("api/service-connections/1/test",
             new ServiceConnectionTestResultDto { Status = ServiceConnectionTestStatus.Unsupported });
 
-        var cut = Render<Aetheus.Front.Pages.ServiceConnections.ServiceConnections>();
+        var cut = Render<Aetheus.Front.Components.ServiceConnections.ServiceConnections>();
         cut.WaitForState(() => cut.Markup.Contains("GitHub prod"), TimeSpan.FromSeconds(3));
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("TestConnection")).Click();
+        cut.FindAll("button").First(b => b.Names().Contains("TestConnection", StringComparison.Ordinal)).Click();
 
         cut.WaitForState(() => cut.Markup.Contains("Enum_ServiceConnectionTestStatus_Unsupported"), TimeSpan.FromSeconds(3));
         Assert.DoesNotContain("Enum_ServiceConnectionTestStatus_Valid", cut.Markup);

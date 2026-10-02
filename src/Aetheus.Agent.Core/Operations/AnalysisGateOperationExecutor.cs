@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace Aetheus.Agent.Core.Operations;
 
-public sealed class AnalysisGateOperationExecutor(IServerApiClient apiClient) : IOperationExecutor
+public sealed class AnalysisGateOperationExecutor(IServerApiClient apiClient) : EnvironmentOperationExecutor
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -13,17 +13,9 @@ public sealed class AnalysisGateOperationExecutor(IServerApiClient apiClient) : 
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineEvaluateAnalysisGate;
+    public override bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineEvaluateAnalysisGate;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
         string target,
         IReadOnlyDictionary<string, string> envVars,
@@ -49,10 +41,16 @@ public sealed class AnalysisGateOperationExecutor(IServerApiClient apiClient) : 
         var stageName = envVars.GetValueOrDefault("AETHEUS_STAGE_NAME");
         var machine = JsonSerializer.Serialize(gate, JsonOptions);
         var human = BuildMarkdown(target, gate);
+        // aetheus-candidate restores these summaries to seal the assurance contract, so they travel
+        // with the same provenance as any other artifact; the workspace holds it from the CI restore
+        // every grading pipeline performs first.
+        var workspace = envVars.GetValueOrDefault("WORKSPACE");
         await AnalysisArtifactUploader.UploadTextAsync(apiClient, runId,
-            $"analysis-{target}-summary-json", stageName, $"{target}-summary.json", machine, cancellationToken).ConfigureAwait(false);
+            $"analysis-{target}-summary-json", stageName, $"{target}-summary.json", machine, cancellationToken,
+            workspace).ConfigureAwait(false);
         await AnalysisArtifactUploader.UploadTextAsync(apiClient, runId,
-            $"analysis-{target}-summary", stageName, $"{target}-summary.md", human, cancellationToken).ConfigureAwait(false);
+            $"analysis-{target}-summary", stageName, $"{target}-summary.md", human, cancellationToken,
+            workspace).ConfigureAwait(false);
 
         var level = gate.Status == AnalysisGateStatus.Error
             ? TaskLogLevel.Error

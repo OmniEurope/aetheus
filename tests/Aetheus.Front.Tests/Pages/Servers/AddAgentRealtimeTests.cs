@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
-using Aetheus.Front.Pages.Servers.AgentWizard;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers;
+using Aetheus.Front.Components.Servers.AgentWizard;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

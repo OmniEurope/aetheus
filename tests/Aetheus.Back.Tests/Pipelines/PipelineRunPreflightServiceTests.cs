@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Environment = Aetheus.Back.Data.Entities.Environment;
@@ -26,6 +24,12 @@ public sealed class PipelineRunPreflightServiceTests
             _repo,
             new PipelineDispatchServerResolver(_repo),
             checks ?? Admits(true),
+            SilentPortGuard(),
+            new PipelineChildPipelineResolver(
+                Substitute.For<IPipelineTemplateResolver>(), Substitute.For<IPipelineVariableResolver>()),
+            Substitute.For<IPipelineRequirementsChecker>(),
+            new PipelineScannerManifestPreflight(_repo, new PipelineDispatchServerResolver(_repo)),
+            new PipelineReleaseArtifactPreflight(Substitute.For<Aetheus.Back.Components.Artifacts.IArtifactRepository>()),
             Substitute.For<ILogger<PipelineRunPreflightService>>());
 
     private static IPipelineEnvironmentCheckGuard Admits(bool verdict)
@@ -56,9 +60,21 @@ public sealed class PipelineRunPreflightServiceTests
             Steps = steps.Length > 0 ? [.. steps] : [new() { Name = "run", Shell = "make" }]
         };
 
-    private Task<IReadOnlyList<string>> RunAsync(PipelineYamlDefinition definition, int? projectId = 7)
-        => BuildSut().FindBlockingProblemsAsync(
-            definition, new Dictionary<string, string>(), organizationId: 3, projectId, CancellationToken.None);
+    private async Task<IReadOnlyList<string>> RunAsync(PipelineYamlDefinition definition, int? projectId = 7)
+        => (await BuildSut().FindBlockingProblemsAsync(
+            definition, new Dictionary<string, string>(), organizationId: 3, projectId, CancellationToken.None)).Problems;
+
+    /// <summary>A registry with nothing to say: these tests are about the OTHER preflight checks, and an
+    /// unconfigured substitute would return a null report instead of an empty one.</summary>
+    private static IPipelinePortRegistryGuard SilentPortGuard()
+    {
+        var guard = Substitute.For<IPipelinePortRegistryGuard>();
+        guard.FindPortConflictsAsync(
+                Arg.Any<PipelineYamlDefinition>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(PortConflictReport.Empty);
+        return guard;
+    }
 
     [Fact]
     public async Task SelectorNoServerIsConfiguredFor_RefusesTheLaunchAndNamesTheSelector()
@@ -104,11 +120,11 @@ public sealed class PipelineRunPreflightServiceTests
         ConfiguredTargets(42);
         var sut = BuildSut(Admits(false));
 
-        var problems = await sut.FindBlockingProblemsAsync(
+        var outcome = await sut.FindBlockingProblemsAsync(
             Definition(Stage("QA", agent: "linux-01", environment: "qa")),
             new Dictionary<string, string>(), organizationId: 3, projectId: 7, CancellationToken.None);
 
-        var problem = Assert.Single(problems);
+        var problem = Assert.Single(outcome.Problems);
         Assert.Contains("qa", problem, StringComparison.Ordinal);
     }
 
@@ -138,10 +154,154 @@ public sealed class PipelineRunPreflightServiceTests
             "Restore", agent: "linux-01", environment: null,
             new PipelineStepDefinition
             {
-                Name = "restore", Type = "restore-artifacts", ArtifactSourcePipeline = "aetheus-ci"
+                Name = "restore",
+                Type = "restore-artifacts",
+                ArtifactSourcePipeline = "aetheus-ci"
             })));
 
         Assert.Empty(problems);
+    }
+
+    private Task<PipelinePreflightOutcomeDto> RunWithVariablesAsync(
+        PipelineYamlDefinition definition, params (string Key, string Value)[] variables)
+        => BuildSut().FindBlockingProblemsAsync(
+            definition,
+            variables.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase),
+            organizationId: 3, projectId: 7, CancellationToken.None);
+
+    private static PipelineStageDefinition CandidateStage(
+        string artifactSourcePipeline, Dictionary<string, string>? stageVariables = null) => new()
+        {
+            Name = "Candidate",
+            Agent = "linux-01",
+            Variables = stageVariables ?? [],
+            Steps =
+        [
+            new PipelineStepDefinition
+            {
+                Name = "Publish immutable undeployed candidate", Type = "release",
+                ArtifactSourcePipeline = artifactSourcePipeline
+            }
+        ]
+        };
+
+    /// <summary>
+    /// PLAN-004 R-02, the refusal of 2026-09-13: application-candidate-v1 names its CI pipeline as
+    /// "$(APPLICATION_CI_PIPELINE)" and the extending pipeline sets it to aetheus-ci. The dispatcher
+    /// substitutes it before its lookup; the preflight looked up the raw text and refused the launch.
+    /// </summary>
+    [Fact]
+    public async Task TemplateVariableNamingTheArtifactSource_IsJudgedOnTheExpandedName()
+    {
+        ConfiguredTargets(42);
+        _repo.FindPipelineByNameAndProjectAsync("aetheus-ci", 7, Arg.Any<CancellationToken>())
+            .Returns(new Pipeline { Id = 1, Name = "aetheus-ci" });
+
+        var outcome = await RunWithVariablesAsync(
+            Definition(CandidateStage("$(APPLICATION_CI_PIPELINE)")),
+            ("APPLICATION_CI_PIPELINE", "aetheus-ci"));
+
+        Assert.Empty(outcome.Problems);
+        Assert.Contains(outcome.Checks, check =>
+            check.Kind == "pipeline-reference" && check.Subject == "aetheus-ci" && check.Satisfied);
+    }
+
+    [Fact]
+    public async Task TemplateVariableExpandingToAMissingPipeline_IsRefusedNamingTheExpandedName()
+    {
+        ConfiguredTargets(42);
+
+        var outcome = await RunWithVariablesAsync(
+            Definition(CandidateStage("$(APPLICATION_CI_PIPELINE)")),
+            ("APPLICATION_CI_PIPELINE", "aetheus-cii"));
+
+        var problem = Assert.Single(outcome.Problems);
+        Assert.Contains("names pipeline 'aetheus-cii', which does not exist", problem, StringComparison.Ordinal);
+        Assert.DoesNotContain("$(", problem, StringComparison.Ordinal);
+    }
+
+    /// <summary>Non-regression, not the bug: a literal name involves no expansion, and a typo in it
+    /// must stay a refused launch.</summary>
+    [Fact]
+    public async Task LiteralPipelineNameWithATypo_IsStillRefused()
+    {
+        ConfiguredTargets(42);
+        _repo.FindPipelineByNameAndProjectAsync("aetheus-ci", 7, Arg.Any<CancellationToken>())
+            .Returns(new Pipeline { Id = 1, Name = "aetheus-ci" });
+
+        var outcome = await RunWithVariablesAsync(
+            Definition(CandidateStage("aetheus-cii")),
+            ("APPLICATION_CI_PIPELINE", "aetheus-ci"));
+
+        var problem = Assert.Single(outcome.Problems);
+        Assert.Contains("names pipeline 'aetheus-cii', which does not exist", problem, StringComparison.Ordinal);
+    }
+
+    /// <summary>The stage's own `variables:` override the run's at dispatch, so they do here too.</summary>
+    [Fact]
+    public async Task StageVariableOverridingTheRunValue_IsTheNameJudged()
+    {
+        ConfiguredTargets(42);
+        _repo.FindPipelineByNameAndProjectAsync("aetheus-ci", 7, Arg.Any<CancellationToken>())
+            .Returns(new Pipeline { Id = 1, Name = "aetheus-ci" });
+
+        var outcome = await RunWithVariablesAsync(
+            Definition(CandidateStage(
+                "$(APPLICATION_CI_PIPELINE)",
+                new Dictionary<string, string> { ["APPLICATION_CI_PIPELINE"] = "aetheus-ci" })),
+            ("APPLICATION_CI_PIPELINE", "application-ci"));
+
+        Assert.Empty(outcome.Problems);
+    }
+
+    /// <summary>
+    /// A name a previous step publishes has no value at launch. It is not "a pipeline that does not
+    /// exist": the launch goes on, with a warning saying the check happens when the step runs. Whether
+    /// the name can be provided at all is the unresolved-variable guard's refusal, taken earlier.
+    /// </summary>
+    [Fact]
+    public async Task NameOnlyKnownFromAStepOutput_IsNotedInsteadOfRefused()
+    {
+        ConfiguredTargets(42);
+        var definition = Definition(
+            new PipelineStageDefinition
+            {
+                Name = "Pick",
+                Agent = "linux-01",
+                Steps = [new PipelineStepDefinition { Name = "pick", Shell = "sh pick.sh", Outputs = ["SOURCE_PIPELINE"] }]
+            },
+            CandidateStage("$(SOURCE_PIPELINE)"));
+
+        var outcome = await RunWithVariablesAsync(definition);
+
+        Assert.Empty(outcome.Problems);
+        var warning = Assert.Single(outcome.Warnings);
+        Assert.Contains("$(SOURCE_PIPELINE)", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain(outcome.Checks, check => check.Kind == "pipeline-reference");
+        await _repo.DidNotReceive().FindPipelineByNameAndProjectAsync(
+            Arg.Is<string>(name => name.Contains("$(")), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>A default must not stand in for a value the run has yet to produce: at dispatch the
+    /// output may name another pipeline. Without an output to wait for, the default is the name.</summary>
+    [Fact]
+    public async Task DefaultOnANameStillToCome_IsNotTakenAtLaunch()
+    {
+        ConfiguredTargets(42);
+        var pick = new PipelineStageDefinition
+        {
+            Name = "Pick",
+            Agent = "linux-01",
+            Steps = [new PipelineStepDefinition { Name = "pick", Shell = "sh pick.sh", Outputs = ["SOURCE_PIPELINE"] }]
+        };
+
+        var waiting = await RunWithVariablesAsync(Definition(pick, CandidateStage("$(SOURCE_PIPELINE:-aetheus-cii)")));
+        var defaulted = await RunWithVariablesAsync(Definition(CandidateStage("$(SOURCE_PIPELINE:-aetheus-cii)")));
+
+        Assert.Empty(waiting.Problems);
+        Assert.Single(waiting.Warnings);
+        var problem = Assert.Single(defaulted.Problems);
+        Assert.Contains("names pipeline 'aetheus-cii'", problem, StringComparison.Ordinal);
     }
 
     [Fact]

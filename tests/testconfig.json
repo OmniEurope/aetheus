@@ -1,0 +1,11 @@
+{
+  "platformOptions": {
+    "Coverlet": {
+      "format": "cobertura",
+      "include": "[Aetheus.Back]*,[Aetheus.Front]*,[Aetheus.Agent.Core]*",
+      "exclude": "[*]Microsoft.AspNetCore.OpenApi.Generated.*,[*]Aetheus.Back.Data.Migrations.*,[*]System.Runtime.CompilerServices.*",
+      "excludeByFile": "**/*.g.cs,**/Migrations/*.cs,**/obj/**/*.cs",
+      "excludeAssembliesWithoutSources": "MissingAll"
+    }
+  }
+}

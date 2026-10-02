@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -145,7 +143,7 @@ public class ServerTeamspeakSectionRenderTests : BunitContext
         var load = typeof(ServerTeamspeakSection).GetMethod(
             "LoadChannelsDataAsync", Priv)!;
         await cut.InvokeAsync(() => (Task)load.Invoke(
-            cut.Instance, [new Radzen.LoadDataArgs { Skip = 0, Top = 25 }])!);
+            cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
         cut.WaitForAssertion(() => Assert.Contains("General", cut.Markup));
     }
 
@@ -279,5 +277,53 @@ public class ServerTeamspeakSectionRenderTests : BunitContext
         var ex = await Record.ExceptionAsync(() => cut.Instance.HandleTaskCompletedAsync(
             new TaskCompletedNotification { ServerId = 5, TaskName = "TeamSpeak - refresh" }));
         Assert.Null(ex);
+    }
+
+    [Fact]
+    public async Task R181_NoRefreshBansButton_AHeartbeatReloadsTheStateAndTheGridsOnScreen()
+    {
+        var cut = RenderSection();
+        Assert.DoesNotContain(cut.FindAll("button"), b => b.TextContent.Contains("RefreshBans", StringComparison.Ordinal));
+        _handler.SetJsonResponse("api/servers/5/teamspeak",
+            new TeamspeakDataDto { IsInstalled = true, IsRunning = true, ServerName = "Pushed name" });
+        var stateReads = _handler.Requests.Count(r => r.Url.EndsWith("api/servers/5/teamspeak", StringComparison.Ordinal));
+
+        await cut.Instance.LiveFeed!.OnHeartbeatAsync(5);
+
+        Assert.Equal(stateReads + 1,
+            _handler.Requests.Count(r => r.Url.EndsWith("api/servers/5/teamspeak", StringComparison.Ordinal)));
+        cut.WaitForAssertion(() => Assert.Contains("Pushed name", cut.Markup, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task R210_R226_AClientsHeaderFilterReachesTheApi_AndAHeartbeatRefreshKeepsIt()
+    {
+        var cut = RenderSection();
+        var grid = cut.FindComponent<AetheusDataGrid<TeamspeakClientDto>>().Instance;
+
+        await cut.InvokeAsync(() => grid.Grid!.SetFiltersAsync(new Dictionary<string, string?> { ["Nickname"] = "Play" }));
+
+        static bool Filtered((string Method, string Url) request) =>
+            Uri.UnescapeDataString(request.Url).Contains("teamspeak/clients", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Nickname", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=Play", StringComparison.Ordinal);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, Filtered));
+        var filteredReads = _handler.Requests.Count(Filtered);
+
+        await cut.InvokeAsync(() => cut.Instance.LiveFeed!.OnHeartbeatAsync(5));
+
+        // The heartbeat refreshes the clients grid through its own LoadData: the filter is still sent.
+        cut.WaitForAssertion(() => Assert.True(_handler.Requests.Count(Filtered) > filteredReads));
+    }
+
+    [Fact]
+    public async Task R181_AnotherServersHeartbeat_ReloadsNothing()
+    {
+        var cut = RenderSection();
+        var requests = _handler.Requests.Count;
+
+        await cut.Instance.LiveFeed!.OnHeartbeatAsync(6);
+
+        Assert.Equal(requests, _handler.Requests.Count);
     }
 }

@@ -48,6 +48,7 @@ internal sealed class AgentUpdateCoordinatorService(
         var repository = scope.ServiceProvider.GetRequiredService<IAgentUpdateRepository>();
         var taskService = scope.ServiceProvider.GetRequiredService<ITaskService>();
         var audit = scope.ServiceProvider.GetRequiredService<IAuditService>();
+        var notifications = scope.ServiceProvider.GetRequiredService<AgentUpdateNotificationPublisher>();
 
         var waiting = await repository.GetWaitingRequestIdsAsync(ct).ConfigureAwait(false);
         foreach (var requestId in waiting)
@@ -87,6 +88,7 @@ internal sealed class AgentUpdateCoordinatorService(
                 request.ServerId,
                 $"{request.FailureCode}: {request.FailureDiagnostic}",
                 ct).ConfigureAwait(false);
+            await notifications.PublishOutcomeAsync(request, ct).ConfigureAwait(false);
         }
     }
 }

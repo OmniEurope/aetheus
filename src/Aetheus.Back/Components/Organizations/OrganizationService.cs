@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs.Organizations;
-
+using Aetheus.Shared.Components.Organizations;
 namespace Aetheus.Back.Components.Organizations;
 
 public class OrganizationService(IOrganizationRepository repo, IResourceAuthorizationService authz, TimeProvider timeProvider, IAdminChangeNotifier notifier, IUserChangeNotifier userNotifier, IAuditService audit) : IOrganizationService
@@ -12,7 +11,7 @@ public class OrganizationService(IOrganizationRepository repo, IResourceAuthoriz
         var page = Math.Max(1, request.Page);
         var pageSize = PaginationDefaults.Clamp(request.PageSize);
         var (items, total) = await repo.GetPagedAsync(
-            search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<OrganizationDto>
         {
             Items = items.Select(MapToListDto).ToList(),

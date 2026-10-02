@@ -1,0 +1,88 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Users
+<div class="role-assignment-picker">
+    <OmniRow Gap="OmniSpacing.Medium" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="role-assignment-heading">
+        <div>
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["Roles"]</OmniText>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                @L["RoleAssignmentHint"]
+            </OmniText>
+        </div>
+        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@string.Format(L["SelectedRolesCount"], SelectedRoles.Count)</OmniBadge>
+    </OmniRow>
+
+    @if (SelectedRoles.Count > 0)
+    {
+        <div class="role-assignment-selected" aria-label="@L["SelectedRoles"]">
+            @foreach (var role in SelectedRoles.Take(6))
+            {
+                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@role</OmniBadge>
+            }
+            @if (SelectedRoles.Count > 6)
+            {
+                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@($"+{SelectedRoles.Count - 6}")</OmniBadge>
+            }
+        </div>
+    }
+
+    <div class="role-assignment-toolbar">
+        <OmniTextBox Value="@_search" ValueChanged="OnSearchInputAsync"
+            Placeholder="@L["SearchRoles"]" aria-label="@L["SearchRoles"]"
+            Class="role-assignment-search"  ValueExpression="@(() => _search)"/>
+        <OmniSwitch TValue="bool" Value="@_assignedOnly" ValueExpression="@(() => _assignedOnly)" ValueChanged="@OnAssignedOnlyChanged" Class="role-assignment-filter">@L["AssignedRolesOnly"]</OmniSwitch>
+        @if (!string.IsNullOrWhiteSpace(_search))
+        {
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ClearSearchAsync"><OmniIcon Name="OmniIconName.Close" /> <span>@L["ClearFilters"]</span></OmniButton>
+        }
+    </div>
+
+    <div class="role-assignment-grid">
+        <AetheusDataGrid @ref="_grid" TItem="RoleDto" Data="@_roles" Count="@_totalCount"
+            PageSize="25" IsLoading="@_loading" LoadData="@LoadDataAsync"
+            Density="OmniDensity.Compact" AllowSorting="true" AllowFiltering="true"
+            FilterMode="OmniDataGridFilterMode.Simple" EmptyText="@L["NoRecords"]"
+            Virtualize="@AetheusGrid.RemoteVirtualization"
+            VirtualData="@(() => new OmniDataGridResult<RoleDto>(_roles, _totalCount))">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="RoleDto" Property="Name" Title="@L["Role"]" MinWidth="240px" Filterable="true" >
+                    <Template Context="role">
+                        @{ var isSelected = IsSelected(role.Name); }
+                        <OmniCheckBox TValue="bool" Value="isSelected" ValueExpression="@(() => isSelected)" ValueChanged="@(selected => OnRoleToggledAsync(role.Name, selected))" Class="role-assignment-toggle" Disabled="@Disabled">@role.Name</OmniCheckBox>
+                        @if (!string.IsNullOrWhiteSpace(role.Description))
+                        {
+                            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted role-assignment-description">
+                                @role.Description
+                            </OmniText>
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="RoleDto" Property="PermissionCount"
+                    Title="@L["Permissions"]" Width="145px" Filterable="false">
+                    <Template Context="role">
+                        @if (_assignedOnly || InitialRoles.Count > 0)
+                        {
+                            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">-</OmniText>
+                        }
+                        else
+                        {
+                            <CountBadge Value="@role.PermissionCount" Variant="OmniTone.Neutral" />
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="RoleDto" Property="UserCount"
+                    Title="@L["Users"]" Width="120px" Filterable="false">
+                    <Template Context="role">
+                        @if (_assignedOnly || InitialRoles.Count > 0)
+                        {
+                            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">-</OmniText>
+                        }
+                        else
+                        {
+                            @role.UserCount
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+        </AetheusDataGrid>
+    </div>
+</div>

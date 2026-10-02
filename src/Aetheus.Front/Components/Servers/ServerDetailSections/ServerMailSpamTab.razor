@@ -1,0 +1,40 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniStack Gap="OmniSpacing.Medium">
+    @if (!Spam.IsInstalled)
+    {
+        <OmniAlert Severity="OmniSeverity.Info">@L["MailSpamNotInstalled"]</OmniAlert>
+        @if (CanManage)
+        {
+            <div>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@InstallAsync" Disabled="@_busy"><OmniIcon Name="OmniIconName.Monitor" /> <span>@L["MailInstallSpamFilter"]</span></OmniButton>
+            </div>
+        }
+    }
+    else
+    {
+        <OmniRow Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+            <OmniBadge Fill="OmniFill.Solid" Tone="@(Spam.IsRunning ? OmniTone.Success : OmniTone.Danger)">@($"{Spam.Name} {Spam.Version} {(Spam.IsRunning ? L["Running"] : L["Stopped"])}".Trim())</OmniBadge>
+            <div class="blade-content-spacer"></div>
+            @if (CanManage)
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => RunAsync(MailAction.StartSpamFilter))" Disabled="@_busy"><OmniIcon Name="OmniIconName.Play" /> <span>@L["Start"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RunAsync(MailAction.StopSpamFilter))" Disabled="@_busy"><OmniIcon Name="OmniIconName.Stop" /> <span>@L["Stop"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => RunAsync(MailAction.RestartSpamFilter))" Disabled="@_busy"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Restart"]</span></OmniButton>
+            }
+        </OmniRow>
+
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["MailGreylistScore"] : @Score(Spam.GreylistScore)</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["MailAddHeaderScore"] : @Score(Spam.AddHeaderScore)</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["MailRejectScore"] : @Score(Spam.RejectScore)</OmniText>
+        </OmniRow>
+
+        @if (CanManage)
+        {
+            <OmniRow Gap="OmniSpacing.Small">
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@EditThresholdsAsync" Disabled="@_busy"><OmniIcon Name="OmniIconName.Sliders" /> <span>@L["MailSpamThresholds"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@LearnAsync" Disabled="@_busy"><OmniIcon Name="OmniIconName.Flask" /> <span>@L["MailLearn"]</span></OmniButton>
+            </OmniRow>
+        }
+    }
+</OmniStack>

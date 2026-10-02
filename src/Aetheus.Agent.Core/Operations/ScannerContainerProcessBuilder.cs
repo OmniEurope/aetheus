@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace Aetheus.Agent.Core.Operations;
 
@@ -16,16 +15,10 @@ internal static class ScannerContainerProcessBuilder
     private const string ZapActiveHarnessContainerPath =
         "/aetheus/harness/zap-active-automation.sh";
 
-    [DllImport("libc", SetLastError = false)]
-    private static extern uint getuid();
-
-    [DllImport("libc", SetLastError = false)]
-    private static extern uint getgid();
-
     internal static void AddCurrentUser(ICollection<string> arguments)
     {
         arguments.Add("--user");
-        arguments.Add($"{getuid()}:{getgid()}");
+        arguments.Add($"{AgentUserIdentity.Uid}:{AgentUserIdentity.Gid}");
     }
 
     internal static ProcessStartInfo Build(
@@ -35,7 +28,8 @@ internal static class ScannerContainerProcessBuilder
         string? cacheDirectory,
         string? trustedHarnessPath,
         IReadOnlyDictionary<string, string> envVars,
-        RestrictedScannerEgress? egress)
+        RestrictedScannerEgress? egress,
+        bool skipDatabaseUpdate = false)
     {
         if (string.IsNullOrWhiteSpace(scanner.Image) || !scanner.Image.Contains("@sha256:", StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(scanner.EntryPoint))
@@ -52,6 +46,9 @@ internal static class ScannerContainerProcessBuilder
         AddMounts(args, sourceDirectory, outputDirectory, containerOutputDirectory, trustedHarnessPath, cacheDirectory);
         var resolvedArguments = ResolveScannerArguments(scanner, envVars, containerOutputDirectory);
         ZapEgressConfigurator.Configure(scanner, resolvedArguments, egress);
+        // Right after the subcommand (`fs`, `image`): a Trivy flag, decided by TrivyDatabaseFreshness.
+        if (skipDatabaseUpdate && TrivyDatabaseFreshness.Applies(scanner) && resolvedArguments.Count > 0)
+            resolvedArguments.Insert(1, TrivyDatabaseFreshness.SkipUpdateArgument);
         AddEntrypoint(args, scanner);
         foreach (var argument in resolvedArguments) args.Add(argument);
         return psi;

@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using NSubstitute;

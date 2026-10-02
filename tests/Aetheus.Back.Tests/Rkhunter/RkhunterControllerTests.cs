@@ -2,8 +2,6 @@
 using System.Security.Claims;
 using Aetheus.Back.Components.Rkhunter;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;

@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -34,7 +31,7 @@ public class GitBranchProtectionDialogTests : BunitContext
         var cut = Render<GitBranchProtectionDialog>(p => p.Add(x => x.RepoId, 1));
 
         Assert.Contains("Save", cut.Markup);
-        Assert.Contains("Cancel", cut.Markup);
+        Assert.Contains("GoBack", cut.Markup);
     }
 
     [Fact]
@@ -74,7 +71,7 @@ public class GitBranchProtectionDialogTests : BunitContext
         await cut.InvokeAsync(() => (Task)save.Invoke(cut.Instance, [])!);
 
         // Save POSTs the rule to the branch-protection endpoint. (The dialog-close-with-true on success is
-        // a DialogService.Close a standalone bUnit render cannot observe.)
+        // a OmniDialogService.Close a standalone bUnit render cannot observe.)
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/git/repos/1/branch-protection"));
     }
 }

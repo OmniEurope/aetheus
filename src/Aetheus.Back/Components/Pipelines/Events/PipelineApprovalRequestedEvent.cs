@@ -10,4 +10,4 @@ namespace Aetheus.Back.Components.Pipelines.Events;
 public sealed record PipelineApprovalRequestedEvent(
     int PipelineRunId,
     string StageName,
-    string EnvironmentName) : IDomainEvent;
+    string? EnvironmentName) : IDomainEvent;

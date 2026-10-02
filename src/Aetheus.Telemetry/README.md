@@ -24,6 +24,30 @@ three-second timeout, sampling, and never blocks a request on network I/O.
 | .NET 8 LTS | 1.17.x | tested minimum |
 | .NET 10 | 1.17.x | tested current |
 
+## Request performance (0.2.0, window and lower-case routes in 1.0.0)
+
+When telemetry is enabled, the package also measures, in process, how long each route takes to answer.
+It listens to the ASP.NET Core `http.server.request.duration` instrument, keeps the last 24 hours of
+requests in memory (50,000 at most, grouped by route template: no concrete path, identifier or query
+value, in lower case so one route is one line whatever the case of its source), and exports five gauges
+on the meter `Aetheus.Telemetry.Performance`, one series per `http.route` and `http.request.method`:
+
+| Metric | Unit | Value |
+| --- | --- | --- |
+| `aetheus.http.server.request.count` | `{request}` | requests of the window |
+| `aetheus.http.server.request.duration.p50` | `ms` | median (nearest rank) |
+| `aetheus.http.server.request.duration.p95` | `ms` | 95th percentile (nearest rank) |
+| `aetheus.http.server.request.duration.p99` | `ms` | 99th percentile (nearest rank) |
+| `aetheus.http.server.request.duration.max` | `ms` | slowest request |
+
+A sixth gauge, `aetheus.http.server.request.window` (`s`, no attribute), says how many seconds the kept
+requests span: 24 hours at most, less after a restart. A percentile is a request that happened (nearest
+rank, no interpolation), so below 20 requests the 95th percentile is the maximum, and below 100 the 99th.
+
+Aetheus shows them in the Performance tab of the application's Supervision. The window restarts with
+the process. Health probes and static assets are not measured. A host that wants the figures without
+the export calls `AddAetheusRequestPerformance()` and reads `RequestPerformanceRecorder` itself.
+
 The package composes with additional official instrumentations configured by the host. Both registration
 paths use the same `OpenTelemetryBuilder`, so an application may call `AddOpenTelemetry()` before or after
 the Aetheus helper without creating a proprietary provider. Calling `AddAetheusTelemetry` more than once

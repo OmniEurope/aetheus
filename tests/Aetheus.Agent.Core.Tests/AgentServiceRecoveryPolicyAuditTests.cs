@@ -6,11 +6,16 @@ public sealed class AgentServiceRecoveryPolicyAuditTests
     [Fact]
     public void LinuxInstaller_RestartsAgentAfterWatchdogExit()
     {
-        var script = ReadScript("install-agent-linux.sh").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var script = ReadScript("install-agent-linux.sh");
 
+        // R-249: the unit is the agent/aetheus-agent.service template the installer renders.
         Assert.Contains(
-            "ExecStart=$EXEC_START\nRestart=always\nRestartSec=10",
+            "render_host_config agent/aetheus-agent.service \"$SYSTEMD_UNIT_PATH\"",
             script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ExecStart=#{EXEC_START}#\nRestart=always\nRestartSec=10",
+            LinuxHostConfigTemplates.Read("agent/aetheus-agent.service"),
             StringComparison.Ordinal);
     }
 

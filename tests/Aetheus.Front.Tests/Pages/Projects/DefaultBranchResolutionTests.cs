@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 namespace Aetheus.Front.Tests.Pages;
 
 /// <summary>

@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: EUPL-1.2
 # Runtime image for the QA E2E suite. CI already compiled tests/Aetheus.E2E and transfers its
 # bin/obj tree; this Dockerfile deliberately contains no `dotnet build` so QA executes that exact output.
-ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/dotnet:v1.61.0-noble@sha256:0a91cab78ba1057c0d72291e3b3abf9524282514542e29a8eff4daab6cc16a15
+ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/dotnet:v1.63.0-noble@sha256:aa3eaf29a65df8c93fc32ab20cf9359f4d8ecc53e6e89f79378647ace87b46b3
 FROM ${PLAYWRIGHT_IMAGE}
 
 ARG DOTNET_INSTALLER_URL=https://raw.githubusercontent.com/dotnet/install-scripts/da3ce11ba63f3dbb0fb835d41bda2665d5c48e84/src/dotnet-install.sh
 ARG DOTNET_INSTALLER_SHA256=082f7685e156738a1b2e2ed8381a621870d4ce8e8c59278034556f05c186eb2e
 RUN curl -fsSL "$DOTNET_INSTALLER_URL" -o /tmp/di.sh \
     && echo "$DOTNET_INSTALLER_SHA256  /tmp/di.sh" | sha256sum -c - \
-    && bash /tmp/di.sh --version 10.0.202 --install-dir /usr/lib/dotnet-10 \
+    && bash /tmp/di.sh --version 10.0.100 --install-dir /usr/lib/dotnet-10 \
     && ln -sf /usr/lib/dotnet-10/dotnet /usr/local/bin/dotnet
 ENV DOTNET_ROOT=/usr/lib/dotnet-10
 WORKDIR /src

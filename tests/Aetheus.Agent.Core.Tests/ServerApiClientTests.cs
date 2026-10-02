@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
 using NSubstitute;
 
 namespace Aetheus.Agent.Core.Tests;
@@ -119,7 +118,7 @@ public class ServerApiClientTests
 
         await _sut.CompleteTaskAsync(
             7,
-            new TaskResultDto { TaskId = 7, Status = Aetheus.Shared.Enums.TaskExecutionStatus.Success },
+            new TaskResultDto { TaskId = 7, Status = Aetheus.Shared.Components.Tasks.TaskExecutionStatus.Success },
             TestContext.Current.CancellationToken);
         var result = DeserializeBody<TaskResultDto>();
         Assert.Equal(_agentState.SessionId, result.AgentSessionId);

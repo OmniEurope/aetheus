@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -23,7 +21,7 @@ public sealed class ServerMailSectionActionTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
     }
 
     private void StubReads()
@@ -39,6 +37,7 @@ public sealed class ServerMailSectionActionTests : BunitContext
             TotalCount = 1
         });
         _handler.SetJsonResponse("api/servers/10/mail/aliases", new PaginatedResult<MailAliasDto>());
+        _handler.SetJsonResponse("api/servers/10/mail/diagnostics", new MailDiagnosticsDto());
     }
 
     private IRenderedComponent<ServerMailSection> RenderSection(bool installed = true)
@@ -51,7 +50,7 @@ public sealed class ServerMailSectionActionTests : BunitContext
     }
 
     private static IElement? TryButton(IRenderedComponent<ServerMailSection> cut, string label) =>
-        cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains(label, StringComparison.Ordinal));
+        cut.FindAll("button").FirstOrDefault(b => b.Names().Contains(label, StringComparison.Ordinal));
 
     private static MailDialogModel Filled(MailDialogMode mode) => new()
     {
@@ -73,7 +72,7 @@ public sealed class ServerMailSectionActionTests : BunitContext
         var cut = RenderSection();
 
         Assert.NotNull(TryButton(cut, "AddDomain"));
-        Assert.NotNull(TryButton(cut, "TestConfig"));
+        Assert.NotNull(TryButton(cut, "Postfix"));
     }
 
     [Fact]
@@ -122,23 +121,6 @@ public sealed class ServerMailSectionActionTests : BunitContext
         cut.WaitForAssertion(
             () => Assert.True(_handler.Requests.Count(r => r.Method == "GET") > readsBefore),
             TimeSpan.FromSeconds(3));
-    }
-
-    [Fact]
-    public void TestingTheConfiguration_PostsToTheActionEndpoint_NotToDomains()
-    {
-        // Queue and config actions share a section with domain writes but not an endpoint.
-        _handler.SetJsonResponse(HttpMethod.Post, "api/servers/10/mail/action", new { success = true });
-        var cut = RenderSection();
-
-        TryButton(cut, "TestConfig")!.Click();
-
-        cut.WaitForAssertion(
-            () => Assert.Contains(_handler.Requests, r =>
-                r.Method == "POST" && r.Url.EndsWith("servers/10/mail/action", StringComparison.Ordinal)),
-            TimeSpan.FromSeconds(3));
-        Assert.DoesNotContain(_handler.Requests, r =>
-            r.Method == "POST" && r.Url.EndsWith("mail/domains", StringComparison.Ordinal));
     }
 
     [Fact]

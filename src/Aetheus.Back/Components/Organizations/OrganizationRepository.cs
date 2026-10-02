@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.Organizations;
 public class OrganizationRepository(AppDbContext db) : IOrganizationRepository
 {
     public async Task<(List<Organization> Items, int Total)> GetPagedAsync(
-        string? search, int page, int pageSize, string? sortBy, bool sortDescending, CancellationToken ct)
+        string? search, int page, int pageSize, string? sortBy, bool sortDescending, CancellationToken ct,
+        IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.Organizations.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(search))
@@ -14,6 +15,8 @@ public class OrganizationRepository(AppDbContext db) : IOrganizationRepository
             var pattern = $"%{search.Trim()}%";
             query = query.Where(o => EF.Functions.ILike(o.Name, pattern) || EF.Functions.ILike(o.Slug, pattern));
         }
+        // Recette R-210: the header filters, before the count.
+        query = OrganizationListQuery.Columns.ApplyFilters(query, filters);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         // Two collection includes → split query avoids the orgs×members×projects
         // cartesian blow-up (matches GetWithMembersAndProjectsAsync). OrderBy
@@ -36,6 +39,8 @@ public class OrganizationRepository(AppDbContext db) : IOrganizationRepository
         {
             ("slug", false) => query.OrderBy(o => o.Slug).ThenBy(o => o.Id),
             ("slug", true) => query.OrderByDescending(o => o.Slug).ThenBy(o => o.Id),
+            ("description", false) => query.OrderBy(o => o.Description).ThenBy(o => o.Name).ThenBy(o => o.Id),
+            ("description", true) => query.OrderByDescending(o => o.Description).ThenBy(o => o.Name).ThenBy(o => o.Id),
             ("membercount", false) => query.OrderBy(o => o.Members.Count).ThenBy(o => o.Name).ThenBy(o => o.Id),
             ("membercount", true) => query.OrderByDescending(o => o.Members.Count).ThenBy(o => o.Name).ThenBy(o => o.Id),
             ("projectcount", false) => query.OrderBy(o => o.Projects.Count).ThenBy(o => o.Name).ThenBy(o => o.Id),
@@ -135,7 +140,7 @@ public class OrganizationRepository(AppDbContext db) : IOrganizationRepository
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-    public async Task<List<(Organization Organization, Aetheus.Shared.Enums.OrganizationRole Role)>> GetOrganizationsForUsernameAsync(string username, CancellationToken ct)
+    public async Task<List<(Organization Organization, Aetheus.Shared.Components.Shared.OrganizationRole Role)>> GetOrganizationsForUsernameAsync(string username, CancellationToken ct)
     {
         var rows = await db.OrganizationMembers
             .AsNoTracking()
@@ -155,7 +160,7 @@ public class OrganizationRepository(AppDbContext db) : IOrganizationRepository
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-    public async Task<List<(Organization Organization, Aetheus.Shared.Enums.OrganizationRole Role, int MemberId)>> GetOrganizationsForUserIdAsync(int userId, CancellationToken ct)
+    public async Task<List<(Organization Organization, Aetheus.Shared.Components.Shared.OrganizationRole Role, int MemberId)>> GetOrganizationsForUserIdAsync(int userId, CancellationToken ct)
     {
         var rows = await db.OrganizationMembers
             .AsNoTracking()

@@ -5,7 +5,6 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -329,7 +328,7 @@ public class GitLightIntegrationTests
         _lightRepoMock.FindBranchProtectionRuleAsync(99, TestContext.Current.CancellationToken)
             .Returns((BranchProtectionRule?)null);
 
-        var result = await _service.DeleteBranchProtectionRuleAsync(99, ct: TestContext.Current.CancellationToken);
+        var result = await _service.DeleteBranchProtectionRuleAsync(1, 99, ct: TestContext.Current.CancellationToken);
 
         Assert.False(result);
     }
@@ -341,7 +340,7 @@ public class GitLightIntegrationTests
         _lightRepoMock.FindBranchProtectionRuleAsync(1, TestContext.Current.CancellationToken).Returns(rule);
         _lightRepoMock.RemoveBranchProtectionRuleAsync(rule, TestContext.Current.CancellationToken).Returns(Task.CompletedTask);
 
-        var result = await _service.DeleteBranchProtectionRuleAsync(1, ct: TestContext.Current.CancellationToken);
+        var result = await _service.DeleteBranchProtectionRuleAsync(1, 1, ct: TestContext.Current.CancellationToken);
 
         Assert.True(result);
         await _lightRepoMock.Received(1).RemoveBranchProtectionRuleAsync(rule, TestContext.Current.CancellationToken);

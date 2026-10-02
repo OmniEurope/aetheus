@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Reflection;
-using Aetheus.Front.Shared;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Aetheus.Front.Tests.Shared;
 
+/// <summary>
+/// WizardDialog hands Aetheus' steps to OE's OmniWizard (recette R-396): the steps in a list at the top,
+/// only the current step in the body, and OE's navigation at the foot.
+/// </summary>
 public class WizardDialogTests : BunitContext
 {
     public WizardDialogTests()
@@ -24,353 +26,249 @@ public class WizardDialogTests : BunitContext
             steps.Add(new WizardStep
             {
                 Title = $"Step {index + 1}",
-                Icon = "star",
                 Content = (RenderTreeBuilder b) => b.AddContent(0, $"Content of step {index + 1}")
             });
         }
         return steps;
     }
 
-    [Fact]
-    public void Renders_AllSteps()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+    private static AngleSharp.Dom.IElement Button(IRenderedComponent<WizardDialog> cut, string cssClass) =>
+        cut.Find($".omni-wizard__actions button.{cssClass}");
 
-        Assert.Contains("Step 1", cut.Markup);
-        Assert.Contains("Content of step 1", cut.Markup);
+    [Fact]
+    public void Renders_OmniWizard_WithStepListAboveTheBody()
+    {
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(3)));
+
+        var wizard = cut.Find(".omni-wizard");
+        var titles = wizard.QuerySelectorAll(".omni-steps__button").Select(b => b.TextContent).ToList();
+        Assert.Equal(3, titles.Count);
+        Assert.Contains(titles, t => t.Contains("Step 1"));
+        Assert.Contains(titles, t => t.Contains("Step 3"));
+
+        // R-396: the step content is in the wizard body, not inside a step of the list (the old column).
+        var body = cut.Find(".omni-wizard__body");
+        Assert.Contains("Content of step 1", body.TextContent);
+        Assert.DoesNotContain("Content of step 2", cut.Markup);
+        Assert.DoesNotContain(cut.FindAll(".omni-steps__panel"), panel => panel.TextContent.Contains("Content of step"));
     }
 
     [Fact]
-    public void Renders_ProgressBar()
+    public void Renders_NoAetheusActionBarOrProgressTrackOverride()
     {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(3)));
 
-        Assert.Contains("wizard-progress-bar", cut.Markup);
+        // R-397: the white action bar belonged to Aetheus' own `.wizard-actions` row.
+        Assert.Empty(cut.FindAll(".wizard-actions"));
+        Assert.Empty(cut.FindAll(".wizard-progress"));
+        Assert.NotNull(cut.Find(".omni-wizard__actions"));
     }
 
     [Fact]
-    public void Renders_CancelButton()
+    public async Task Progress_StartsAtZero_AndReachesOneHundredOnLastStep()
     {
-        var steps = CreateSteps(2);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(3)));
 
-        Assert.Contains("Cancel", cut.Markup);
+        Assert.Equal("0", cut.Find(".omni-wizard [role='progressbar']").GetAttribute("aria-valuenow"));
+
+        await cut.InvokeAsync(cut.Instance.NextStep);
+        await cut.InvokeAsync(cut.Instance.NextStep);
+
+        Assert.Equal("100", cut.Find(".omni-wizard [role='progressbar']").GetAttribute("aria-valuenow"));
     }
 
     [Fact]
-    public void Renders_NextButton_OnFirstStep()
+    public void FirstStep_ShowsNextAndCancel_NoPrevious()
     {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(3)));
 
-        Assert.Contains("WizardNext", cut.Markup);
-        Assert.DoesNotContain("WizardPrevious", cut.Markup);
+        Assert.NotNull(Button(cut, "omni-wizard__next"));
+        Assert.NotNull(Button(cut, "omni-wizard__cancel"));
+        Assert.Empty(cut.FindAll(".omni-wizard__previous"));
+        Assert.Empty(cut.FindAll(".omni-wizard__finish"));
     }
 
     [Fact]
-    public void Renders_FinishButton_OnLastStep_WithCustomText()
+    public void FinishButton_OnLastStep_UsesCustomText_AndIsPrimary()
     {
-        var steps = CreateSteps(1);
         var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
+            .Add(x => x.Steps, CreateSteps(1))
             .Add(x => x.FinishText, "Done!"));
 
-        Assert.Contains("Done!", cut.Markup);
+        var finish = Button(cut, "omni-wizard__finish");
+        Assert.Contains("Done!", finish.TextContent);
+        // R-402: the last step's main action is blue, never green.
+        Assert.Contains("omni-button--primary", finish.ClassList);
     }
 
     [Fact]
-    public void Renders_FinishButton_OnLastStep_DefaultText()
+    public void FinishButton_OnLastStep_DefaultsToTheAetheusFinishText()
     {
-        var steps = CreateSteps(1);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(1)));
 
-        Assert.Contains("WizardFinish", cut.Markup);
+        Assert.Contains("WizardFinish", Button(cut, "omni-wizard__finish").TextContent);
     }
 
     [Fact]
-    public void Renders_StepIcons()
+    public void CanAdvance_False_DisablesNext()
     {
-        var steps = CreateSteps(2);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(3))
+            .Add(x => x.CanAdvance, false));
 
-        Assert.Contains("star", cut.Markup);
+        Assert.True(Button(cut, "omni-wizard__next").HasAttribute("disabled"));
     }
 
     [Fact]
-    public void CurrentStep_StartsAtZero()
+    public void CanAdvance_True_LeavesNextEnabled()
     {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(3)));
+
+        Assert.False(Button(cut, "omni-wizard__next").HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public async Task ClickingNext_MovesToTheNextStep_AndReportsIt()
+    {
+        var fired = -1;
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(3))
+            .Add(x => x.StepChanged, EventCallback.Factory.Create<int>(this, s => fired = s)));
+
+        await cut.InvokeAsync(() => Button(cut, "omni-wizard__next").Click());
+
+        Assert.Equal(1, cut.Instance.CurrentStep);
+        Assert.Equal(1, fired);
+        Assert.Contains("Content of step 2", cut.Find(".omni-wizard__body").TextContent);
+    }
+
+    [Fact]
+    public async Task ClickingPrevious_GoesBack_AndReportsIt()
+    {
+        var fired = -1;
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(3))
+            .Add(x => x.StepChanged, EventCallback.Factory.Create<int>(this, s => fired = s)));
+        await cut.InvokeAsync(cut.Instance.NextStep);
+
+        await cut.InvokeAsync(() => Button(cut, "omni-wizard__previous").Click());
+
+        Assert.Equal(0, cut.Instance.CurrentStep);
+        Assert.Equal(0, fired);
+        Assert.Contains("Content of step 1", cut.Find(".omni-wizard__body").TextContent);
+    }
+
+    [Fact]
+    public async Task ValidateBeforeNext_False_KeepsTheStep()
+    {
+        var asked = -1;
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(3))
+            .Add(x => x.ValidateBeforeNext, step => { asked = step; return Task.FromResult(false); }));
+
+        await cut.InvokeAsync(() => Button(cut, "omni-wizard__next").Click());
+
+        Assert.Equal(0, asked);
+        Assert.Equal(0, cut.Instance.CurrentStep);
+        Assert.False(Button(cut, "omni-wizard__next").HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public async Task NextStep_FromCode_AsksTheValidator()
+    {
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(3))
+            .Add(x => x.ValidateBeforeNext, _ => Task.FromResult(false)));
+
+        await cut.InvokeAsync(cut.Instance.NextStep);
 
         Assert.Equal(0, cut.Instance.CurrentStep);
     }
 
     [Fact]
-    public void CanAdvance_DisablesNextButton_WhenFalse()
+    public async Task NextStep_FromCode_MovesTheWizard_AndReportsIt()
     {
-        var steps = CreateSteps(3);
+        var fired = -1;
         var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
-            .Add(x => x.CanAdvance, false));
+            .Add(x => x.Steps, CreateSteps(3))
+            .Add(x => x.StepChanged, EventCallback.Factory.Create<int>(this, s => fired = s)));
 
-        var nextBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("WizardNext"));
-        Assert.NotNull(nextBtn);
-        Assert.True(nextBtn.HasAttribute("disabled"));
-    }
-
-    [Fact]
-    public void Renders_StepContent_WithoutIcon()
-    {
-        var steps = new List<WizardStep>
-        {
-            new()
-            {
-                Title = "NoIcon",
-                Content = (RenderTreeBuilder b) => b.AddContent(0, "No icon step")
-            }
-        };
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        Assert.Contains("No icon step", cut.Markup);
-        Assert.DoesNotContain("wizard-step-icon", cut.Markup);
-    }
-
-    [Fact]
-    public async Task OnCancelClicked_InvokesCallback()
-    {
-        var cancelled = false;
-        var steps = CreateSteps(2);
-        var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
-            .Add(x => x.OnCancelClicked, () => { cancelled = true; }));
-
-        var cancelBtn = cut.FindAll("button").First(b => b.TextContent.Contains("Cancel"));
-        await cut.InvokeAsync(() => cancelBtn.Click());
-
-        Assert.True(cancelled);
-    }
-
-    [Fact]
-    public async Task OnFinishClicked_InvokesCallback()
-    {
-        var finished = false;
-        var steps = CreateSteps(1);
-        var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
-            .Add(x => x.OnFinishClicked, () => { finished = true; }));
-
-        var finishBtn = cut.FindAll("button").First(b => b.TextContent.Contains("WizardFinish"));
-        await cut.InvokeAsync(() => finishBtn.Click());
-
-        Assert.True(finished);
-    }
-
-    [Fact]
-    public void NextButton_IsRendered_WhenMultipleSteps()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps));
-
-        var nextBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("WizardNext"));
-        Assert.NotNull(nextBtn);
-        Assert.False(nextBtn.HasAttribute("disabled"));
-    }
-
-    // === Additional coverage: NextStep, PreviousStep, OnStepChanged, OnKeyDown, progress ===
-
-    [Fact]
-    public async Task NextStep_AdvancesCurrentStep()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        await cut.InvokeAsync(() => cut.Instance.NextStep());
+        await cut.InvokeAsync(cut.Instance.NextStep);
 
         Assert.Equal(1, cut.Instance.CurrentStep);
+        Assert.Equal(1, fired);
+        Assert.Contains("Content of step 2", cut.Find(".omni-wizard__body").TextContent);
+        Assert.NotNull(Button(cut, "omni-wizard__previous"));
     }
 
     [Fact]
     public async Task NextStep_AtLastStep_DoesNotAdvance()
     {
-        var steps = CreateSteps(1);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        await cut.InvokeAsync(() => cut.Instance.NextStep());
-
-        Assert.Equal(0, cut.Instance.CurrentStep);
-    }
-
-    [Fact]
-    public async Task PreviousStep_FromStep1_GoesBackToStep0()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        // Advance first
-        await cut.InvokeAsync(() => cut.Instance.NextStep());
-        Assert.Equal(1, cut.Instance.CurrentStep);
-
-        // Go back
-        var prevMethod = typeof(WizardDialog)
-            .GetMethod("PreviousStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)prevMethod.Invoke(cut.Instance, [])!);
-
-        Assert.Equal(0, cut.Instance.CurrentStep);
-    }
-
-    [Fact]
-    public async Task PreviousStep_AtStep0_DoesNotGoNegative()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        var prevMethod = typeof(WizardDialog)
-            .GetMethod("PreviousStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)prevMethod.Invoke(cut.Instance, [])!);
-
-        Assert.Equal(0, cut.Instance.CurrentStep);
-    }
-
-    [Fact]
-    public async Task OnStepChanged_UpdatesCurrentStep()
-    {
-        var steps = CreateSteps(3);
-        // Set _highestStep to 2 so step 2 is accessible
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-        typeof(WizardDialog).GetField("_highestStep", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(cut.Instance, 2);
-
-        var method = typeof(WizardDialog)
-            .GetMethod("OnStepChanged", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [2])!);
-
-        Assert.Equal(2, cut.Instance.CurrentStep);
-    }
-
-    [Fact]
-    public async Task OnStepChanged_SameStep_DoesNotAnimate()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        var method = typeof(WizardDialog)
-            .GetMethod("OnStepChanged", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        // Set same step (0 → 0) - should be a no-op for animation
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [0])!);
-
-        Assert.Equal(0, cut.Instance.CurrentStep);
-    }
-
-    [Fact]
-    public async Task NextStep_FiresStepChangedCallback()
-    {
-        var firedStep = -1;
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
-            .Add(x => x.StepChanged, EventCallback.Factory.Create<int>(this, s => firedStep = s)));
-
-        await cut.InvokeAsync(() => cut.Instance.NextStep());
-
-        Assert.Equal(1, firedStep);
-    }
-
-    [Fact]
-    public void Progress_SingleStep_IsComplete()
-    {
-        var steps = CreateSteps(1);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        var field = typeof(WizardDialog)
-            .GetField("_progress", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var pct = (double)field.GetValue(cut.Instance)!;
-        Assert.Equal(100, pct);
-    }
-
-    [Fact]
-    public void Progress_MultiStep_IsZeroAtStart()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        var field = typeof(WizardDialog)
-            .GetField("_progress", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var pct = (double)field.GetValue(cut.Instance)!;
-        Assert.Equal(0, pct);
-    }
-
-    [Fact]
-    public async Task Progress_MultiStep_ReachesOneHundredOnLastStep()
-    {
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(3)));
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(1)));
 
         await cut.InvokeAsync(cut.Instance.NextStep);
-        await cut.InvokeAsync(cut.Instance.NextStep);
 
-        var field = typeof(WizardDialog)
-            .GetField("_progress", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        Assert.Equal(100, (double)field.GetValue(cut.Instance)!);
+        Assert.Equal(0, cut.Instance.CurrentStep);
     }
 
     [Fact]
-    public void IsStepAccessible_Step0_AlwaysTrue()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        var method = typeof(WizardDialog)
-            .GetMethod("IsStepAccessible", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var result = (bool)method.Invoke(cut.Instance, [0])!;
-        Assert.True(result);
-    }
-
-    [Fact]
-    public void IsStepAccessible_UnvisitedStep_ReturnsFalse()
-    {
-        var steps = CreateSteps(3);
-        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, steps));
-
-        var method = typeof(WizardDialog)
-            .GetMethod("IsStepAccessible", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        // Step 2 not visited yet, _highestStep == 0
-        var result = (bool)method.Invoke(cut.Instance, [2])!;
-        Assert.False(result);
-    }
-
-    [Fact]
-    public async Task OnKeyDown_Escape_InvokesCancelCallback()
+    public async Task Cancel_InvokesCallback()
     {
         var cancelled = false;
-        var steps = CreateSteps(2);
         var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
+            .Add(x => x.Steps, CreateSteps(2))
             .Add(x => x.OnCancelClicked, () => { cancelled = true; }));
 
-        var method = typeof(WizardDialog)
-            .GetMethod("OnKeyDown", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var keyArgs = new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" };
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [keyArgs])!);
+        await cut.InvokeAsync(() => Button(cut, "omni-wizard__cancel").Click());
 
         Assert.True(cancelled);
     }
 
     [Fact]
-    public async Task OnKeyDown_NonEscape_LeavesTheFlagOff()
+    public async Task Finish_InvokesCallback()
+    {
+        var finished = false;
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(1))
+            .Add(x => x.OnFinishClicked, () => { finished = true; }));
+
+        await cut.InvokeAsync(() => Button(cut, "omni-wizard__finish").Click());
+
+        Assert.True(finished);
+    }
+
+    [Fact]
+    public async Task Escape_InvokesCancel()
     {
         var cancelled = false;
-        var steps = CreateSteps(2);
         var cut = Render<WizardDialog>(p => p
-            .Add(x => x.Steps, steps)
+            .Add(x => x.Steps, CreateSteps(2))
             .Add(x => x.OnCancelClicked, () => { cancelled = true; }));
 
-        var method = typeof(WizardDialog)
-            .GetMethod("OnKeyDown", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var keyArgs = new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" };
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [keyArgs])!);
+        await cut.InvokeAsync(() => cut.Find(".wizard-dialog").KeyDown(new KeyboardEventArgs { Key = "Escape" }));
+
+        Assert.True(cancelled);
+    }
+
+    [Fact]
+    public async Task OtherKey_DoesNotCancel()
+    {
+        var cancelled = false;
+        var cut = Render<WizardDialog>(p => p
+            .Add(x => x.Steps, CreateSteps(2))
+            .Add(x => x.OnCancelClicked, () => { cancelled = true; }));
+
+        await cut.InvokeAsync(() => cut.Find(".wizard-dialog").KeyDown(new KeyboardEventArgs { Key = "Enter" }));
 
         Assert.False(cancelled);
+    }
+
+    [Fact]
+    public void Wrapper_TakesNoFocusStopOfItsOwn()
+    {
+        var cut = Render<WizardDialog>(p => p.Add(x => x.Steps, CreateSteps(2)));
+
+        // STD-FOCUS: nothing is focused on render, so the wrapper is no longer a tab stop.
+        Assert.False(cut.Find(".wizard-dialog").HasAttribute("tabindex"));
     }
 }

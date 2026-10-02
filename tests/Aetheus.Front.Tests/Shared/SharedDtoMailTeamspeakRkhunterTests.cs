@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Tests;
 
@@ -24,10 +22,10 @@ public class SharedDtoMailTeamspeakRkhunterTests
     public void MailCertificateDto_Defaults()
     {
         var dto = new MailCertificateDto();
-        Assert.Equal(string.Empty, dto.Domain);
+        Assert.Equal(string.Empty, dto.Hostname);
         Assert.Equal(string.Empty, dto.Issuer);
-        Assert.False(dto.IsValid);
-        Assert.True(dto.AutoRenew);
+        Assert.Null(dto.ExpiresAt);
+        Assert.False(dto.UsesLetsEncryptLineage);
     }
 
     [Fact]
@@ -59,20 +57,18 @@ public class SharedDtoMailTeamspeakRkhunterTests
         var dto = new SpamFilterConfigDto();
         Assert.False(dto.IsInstalled);
         Assert.False(dto.IsRunning);
-        Assert.Equal(5.0, dto.RequiredScore);
-        Assert.True(dto.RewriteHeader);
-        Assert.Empty(dto.WhitelistedAddresses);
-        Assert.Empty(dto.BlacklistedAddresses);
+        Assert.Null(dto.RejectScore);
+        Assert.Null(dto.AddHeaderScore);
+        Assert.Null(dto.GreylistScore);
     }
 
     [Fact]
     public void UpdateSpamFilterRequest_Defaults()
     {
         var req = new UpdateSpamFilterRequest();
-        Assert.Null(req.RequiredScore);
-        Assert.Null(req.RewriteHeader);
-        Assert.Null(req.WhitelistedAddresses);
-        Assert.Null(req.BlacklistedAddresses);
+        Assert.Equal(15, req.RejectScore);
+        Assert.Equal(6, req.AddHeaderScore);
+        Assert.Equal(4, req.GreylistScore);
     }
 
     [Fact]
@@ -95,7 +91,7 @@ public class SharedDtoMailTeamspeakRkhunterTests
     [Fact]
     public void RequestMailCertificateRequest_Valid()
     {
-        var req = new RequestMailCertificateRequest { Domain = "example.com", Email = "a@example.com" };
+        var req = new RequestMailCertificateRequest { Email = "a@example.com" };
         Assert.Empty(ValidateModel(req));
     }
 

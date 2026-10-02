@@ -32,7 +32,7 @@ public sealed class SmokeOperationExecutor(
     IShellRunner shell,
     IOptions<AetheusAgentOptions> options,
     IHttpClientFactory httpClientFactory,
-    ILogger<SmokeOperationExecutor> logger) : IOperationExecutor
+    ILogger<SmokeOperationExecutor> logger) : EnvironmentOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
 
@@ -43,14 +43,9 @@ public sealed class SmokeOperationExecutor(
     /// </summary>
     public const string DeploymentProbeHttpClientName = "AetheusDeploymentProbe";
 
-    public bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineSmoke;
+    public override bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineSmoke;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct)
     {

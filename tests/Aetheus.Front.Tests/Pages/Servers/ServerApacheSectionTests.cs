@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -72,9 +69,9 @@ public class ServerApacheSectionTests : BunitContext
     }
 
     [Theory]
-    [InlineData(true, BadgeStyle.Success)]
-    [InlineData(false, BadgeStyle.Danger)]
-    public void GetStatusBadge_ReturnsExpected(bool isRunning, BadgeStyle expected)
+    [InlineData(true, OmniTone.Success)]
+    [InlineData(false, OmniTone.Danger)]
+    public void GetStatusBadge_ReturnsExpected(bool isRunning, OmniTone expected)
     {
         var result = ServerApacheSection.GetStatusBadge(isRunning);
         Assert.Equal(expected, result);
@@ -133,8 +130,8 @@ public class ServerApacheSectionTests : BunitContext
     }
 
     // Hardened rule #2/#3: OpenConfigEditorAsync now opens an ApacheConfigEditorDialog via
-    // DialogService. The dialog content lives in a separate host (never in cut.Markup) - assert
-    // ONLY that DialogService.OnOpen fires, then close immediately. Never await OpenAsync first.
+    // OmniDialogService. The dialog content lives in a separate host (never in cut.Markup) - assert
+    // ONLY that OmniDialogService.OnOpen fires, then close immediately. Never await OpenAsync first.
     [Fact]
     public async Task OpenConfigEditorAsync_OpensDialog()
     {
@@ -143,7 +140,7 @@ public class ServerApacheSectionTests : BunitContext
             new ApacheVirtualHostDto { ServerName = "example.com", DocumentRoot = "/var/www", Port = 80, IsEnabled = true }
         ]);
         var cut = RenderSection(server);
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 
@@ -164,40 +161,6 @@ public class ServerApacheSectionTests : BunitContext
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [request])!);
         // SaveApacheVHostConfigAsync PUTs the config to the vhost config endpoint (site name in path).
         Assert.Contains(_handler.Requests, r => r.Method == "PUT" && r.Url.Contains("api/servers/1/apache/vhosts/site/config"));
-    }
-
-    [Fact]
-    public void ShowConfirm_SetsDialogProperties()
-    {
-        var cut = RenderSection();
-        var method = typeof(ServerApacheSection).GetMethod("ShowConfirm", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        Func<Task> action = () => Task.CompletedTask;
-        method.Invoke(cut.Instance, ["Title", "Message", action]);
-        var visible = (bool)typeof(ServerApacheSection).GetField("_confirmVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        Assert.True(visible);
-    }
-
-    [Fact]
-    public async Task ConfirmAccepted_ExecutesAction()
-    {
-        var cut = RenderSection();
-        var executed = false;
-        typeof(ServerApacheSection).GetField("_confirmVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
-        typeof(ServerApacheSection).GetField("_confirmAction", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, (Func<Task>)(() => { executed = true; return Task.CompletedTask; }));
-        var method = typeof(ServerApacheSection).GetMethod("ConfirmAccepted", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        Assert.True(executed);
-    }
-
-    [Fact]
-    public void ConfirmCancelled_HidesDialog()
-    {
-        var cut = RenderSection();
-        typeof(ServerApacheSection).GetField("_confirmVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, true);
-        var method = typeof(ServerApacheSection).GetMethod("ConfirmCancelled", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, []);
-        var visible = (bool)typeof(ServerApacheSection).GetField("_confirmVisible", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        Assert.False(visible);
     }
 
     // Item #5.4 - .htaccess editor removed from the UI; the back endpoints + API client

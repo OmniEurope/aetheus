@@ -80,6 +80,37 @@ public sealed class AetheusTelemetryBuilderExtensionsTests : IDisposable
             descriptor.ServiceType.FullName?.Contains("TracerProvider", StringComparison.Ordinal) == true);
     }
 
+    [Fact]
+    public void AddAetheusTelemetry_Enabled_RegistersTheRequestRecorderAndItsGaugesOnce()
+    {
+        Environment.SetEnvironmentVariable("AETHEUS_TELEMETRY_ENABLED", "true");
+        var services = new ServiceCollection();
+
+        services.AddAetheusRequestPerformance(options => options.QuietRoutes.Add("api/report"));
+        services.AddAetheusTelemetry(ValidConfiguration());
+
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(RequestPerformanceRecorder));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(RequestPerformanceMetrics));
+        // Not resolving the hosted services keeps the OTLP providers unbuilt: nothing is exported here.
+        using var provider = services.BuildServiceProvider();
+        Assert.NotNull(provider.GetRequiredService<RequestPerformanceMetrics>());
+        // The host's configuration survives the package's own registration of the recorder.
+        Assert.Contains("api/report", provider
+            .GetRequiredService<Microsoft.Extensions.Options.IOptions<RequestPerformanceOptions>>().Value.QuietRoutes);
+    }
+
+    [Fact]
+    public void AddAetheusTelemetry_Disabled_MeasuresNoRequest()
+    {
+        Environment.SetEnvironmentVariable("AETHEUS_TELEMETRY_ENABLED", "false");
+        var services = new ServiceCollection();
+
+        services.AddAetheusTelemetry(ValidConfiguration());
+
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(RequestPerformanceRecorder));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(RequestPerformanceMetrics));
+    }
+
     public void Dispose() =>
         Environment.SetEnvironmentVariable("AETHEUS_TELEMETRY_ENABLED", _originalEnabled);
 

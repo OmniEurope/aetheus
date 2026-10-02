@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2
+# Aetheus Agent portsentry unblock helper - root-owned, invoked via
+# /etc/sudoers.d/aetheus-portsentry (NOPASSWD). Removes ONE validated IP from iptables/ip6tables
+# INPUT DROP rules and /etc/hosts.deny. Never evals input.
+set -u
+ip="${1:-}"
+# IPv4 or IPv6: hex digits, dots, colons only - no shell metachars, no spaces.
+printf '%s' "$ip" | grep -Eq '^[0-9a-fA-F.:]{2,45}$' || { echo "invalid ip" >&2; exit 1; }
+
+# Firewall removal is best-effort (the rule may not exist). secure_path resolves the binaries.
+iptables  -D INPUT -s "$ip" -j DROP 2>/dev/null || true
+ip6tables -D INPUT -s "$ip" -j DROP 2>/dev/null || true
+
+# Drop matching lines from /etc/hosts.deny (anchored token-boundary filter to a temp, then replace).
+# We only ever DELETE lines - never interpret the file - so no 'spawn' directive can be triggered here.
+# Anchored (dots escaped) so unblocking 10.0.0.1 cannot also strip a deny rule for 10.0.0.10 / 110.0.0.1.
+if [ -f /etc/hosts.deny ]; then
+    tmp="$(mktemp)"
+    esc_ip="$(printf '%s' "$ip" | sed 's/[.]/\\./g')"
+    grep -vE "(^|[^0-9A-Fa-f.:])${esc_ip}([^0-9A-Fa-f.:]|\$)" /etc/hosts.deny > "$tmp" 2>/dev/null || true
+    cat "$tmp" > /etc/hosts.deny
+    rm -f "$tmp"
+fi
+echo "unblocked $ip"

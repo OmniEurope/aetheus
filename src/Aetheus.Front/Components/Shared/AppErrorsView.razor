@@ -1,0 +1,45 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* ADR-021 phase 4: grouped errors for a monitored app (fingerprint / type / message / count / seen).
+   R-181: no Refresh button, the grid reloads on the AppTelemetryChanged push of the app's project.
+   The grid is full height and remotely virtualized, like the Logs tab (recette R-358): it reads the
+   groups from the API block by block as it scrolls, and its column sorts and header filters travel
+   with each request, so they apply to every error group of the app and not to the loaded rows.
+   Recette R2-011: the export is the grid's own bar under the table (Markdown and CSV), which reads every
+   group the column filters select through ExportLoad; the button above the grid went. *@
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["LoadFailed"]</OmniText>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+        </OmniStack>
+    </OmniAlert>
+}
+@* A failed call is not "no errors yet": the alert above says so and the grid stays empty. *@
+<AetheusDataGrid @ref="_grid" TItem="AppErrorEventDto" Data="@_errors" Count="@_total" IsLoading="@_loading"
+                 LoadData="@LoadDataAsync" PageSize="@PageSize" Virtualize="@AetheusGrid.RemoteVirtualization"
+                 VirtualData="@(() => new OmniDataGridResult<AppErrorEventDto>(_errors, _total))"
+                 FullHeight="true" RowClick="@OpenErrorAsync"
+                 EmptyText="@(_loadFailed ? string.Empty : L["NoErrorsYet"].Value)"
+                 ExportFormats="@ExportFormats" ExportPosition="OmniDataGridPosition.Bottom" ExportTitle="@ExportTitle"
+                 ExportFields="@ExportFields" ExportFileName="@ExportFileName" ExportLoad="@LoadExportPageAsync"
+                 OnExportError="@OnExportFailed">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="AppErrorEventDto" Property="ExceptionType" Title="@L["ErrorType"]" Width="220px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_exceptionTypes" FilterSearchable="true" />
+        <OmniDataGridColumn TItem="AppErrorEventDto" Property="Message" Title="@L["Message"]" Filterable="true" ExportValue="@MessageExport">
+            <Template Context="e">
+                <span title="@e.Message">@e.Message</span>
+                @if (!string.IsNullOrEmpty(e.TopFrame))
+                {
+                    <div class="omni-u-text-muted app-error-top-frame">@e.TopFrame</div>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="AppErrorEventDto" Property="OccurrenceCount" Title="@L["Occurrences"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+            <Template Context="e"><CountBadge Value="@e.OccurrenceCount" Variant="OmniTone.Danger" /></Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="AppErrorEventDto" Property="FirstSeenAt" Title="@L["FirstSeen"]" Width="150px" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+        <OmniDataGridColumn TItem="AppErrorEventDto" Property="LastSeenAt" Title="@L["LastSeen"]" Width="150px" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+    </Columns>
+</AetheusDataGrid>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.ExternalRepos;
+using Aetheus.Back.Components.Git;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.ExternalRepos;
 

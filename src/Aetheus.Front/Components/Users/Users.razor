@@ -1,0 +1,71 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/users"
+@page "/users"
+
+<PageTitle>@L["Users"] - Aetheus</PageTitle>
+
+<div class="iam-page iam-list-page">
+    <OmniPageHeader Title="@L["Users"]"
+        Class="iam-page-header" Subtitle="@Breadcrumb.Subtitle(L["UserManagement"])">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("group")" /></Icon>
+        <Badges>
+        <HelpLink PageKey="users" />
+        </Badges>
+        <Actions>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnCreate" title="@L["NewUser"]"><OmniIcon Name="OmniIconName.UserPlus" /> <span>@L["Create"]</span></OmniButton>
+        </Actions>
+    </OmniPageHeader>
+
+    <AdminIdentityNav ActiveSection="users" />
+
+    @if (_loadFailed)
+    {
+        <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-md">
+            @L["LoadFailed"]
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryLoadAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+        </OmniAlert>
+    }
+
+    <div class="iam-grid-surface">
+        <AetheusDataGrid @ref="_grid" Data="@_users" TItem="UserDto"
+            Count="@_totalCount" PageSize="20" IsLoading="@_loading" LoadData="@OnLoadData" Density="OmniDensity.Compact"
+            Virtualize="@AetheusGrid.RemoteVirtualization"
+            VirtualData="@(() => new OmniDataGridResult<UserDto>(_users, _totalCount))"
+            FullHeight="true" RowClick="@(user => Nav.NavigateTo($"/users/{user.Id}"))">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="UserDto" Property="Username" Title="@L["Username"]" MinWidth="170px" Filterable="true" >
+                    <Template Context="user">
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XLarge" Align="OmniAlignment.Center">
+                            <a href="/users/@user.Id" class="server-name-link" @onclick:stopPropagation="true">@user.Username</a>
+                        </OmniStack>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="UserDto" Property="Email" Title="@L["Email"]" MinWidth="180px" Filterable="true" />
+                <OmniDataGridColumn TItem="UserDto" Key="Roles" Title="@L["Roles"]" Width="220px" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_roleNames" FilterSearchable="true" >
+                    <Template Context="user">
+                        <OmniRow Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                            @foreach (var role in user.Roles.Take(3))
+                            {
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@GetRoleBadgeStyle(role)">@role</OmniBadge>
+                            }
+                            @if (user.Roles.Count > 3)
+                            {
+                                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral"
+                                    title="@string.Join(", ", user.Roles.Skip(3))">@($"+{user.Roles.Count - 3}")</OmniBadge>
+                            }
+                            <span @onclick:stopPropagation="true">
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => Nav.NavigateTo($"/users/{user.Id}"))" title="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                            </span>
+                        </OmniRow>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="UserDto" Property="IsActive" Title="@L["Active"]" Width="130px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@YesNoText" >
+                    <Template Context="user">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@(user.IsActive ? OmniTone.Success : OmniTone.Danger)">@(user.IsActive ? L["Yes"] : L["No"])</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="UserDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+            </Columns>
+        </AetheusDataGrid>
+    </div>
+</div>

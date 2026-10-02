@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Aetheus.Front.Tests.Architecture;
@@ -31,14 +30,16 @@ public class OnInitApiCallGuardTests
     [Fact]
     public void OnInitializedAsync_ApiCalls_Are_GuardedByHttpRequestCatch()
     {
-        var pagesDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front", "Pages");
-        Assert.True(Directory.Exists(pagesDir), $"Pages dir not found: {pagesDir}");
-
         var violations = new List<string>();
         var callsScanned = 0;
 
-        foreach (var file in RepositoryScan.Enumerate(pagesDir, "*.razor.cs"))
+        foreach (var (pagesDir, file) in RepositoryScan.EnumerateUnion(RepositoryScan.PageRoots, "*.razor.cs"))
         {
+            // The guard covers the page area: the module folders, not Components/Shared, which holds
+            // the cross-module pieces. It used to be told apart by the Aetheus.Front.Pages namespace;
+            // PLAN-008 lot 43 aligned the namespaces on the folders, so the folder is the criterion.
+            if (IsSharedComponent(file))
+                continue;
             var source = File.ReadAllText(file);
             var unguardedCalls = FindUnguardedApiCalls(source, out var scannedInFile);
             callsScanned += scannedInFile;
@@ -118,9 +119,15 @@ public class OnInitApiCallGuardTests
             violations.Select(violation => violation.Expression));
     }
 
+    /// <summary>A file of <c>Components/Shared</c>, which is not part of the page area.</summary>
+    private static bool IsSharedComponent(string file) =>
+        file.Contains(
+            $"{Path.DirectorySeparatorChar}Components{Path.DirectorySeparatorChar}Shared{Path.DirectorySeparatorChar}",
+            StringComparison.OrdinalIgnoreCase);
+
     private static List<UnguardedCall> FindUnguardedApiCalls(string source, out int callsScanned)
     {
-        var masked = MaskCommentsAndStrings(source);
+        var masked = SourceMasker.MaskCommentsAndStrings(source);
         var violations = new List<UnguardedCall>();
         callsScanned = 0;
 
@@ -220,57 +227,6 @@ public class OnInitApiCallGuardTests
 
     private static int LineNumberAt(string source, int index) =>
         1 + source.AsSpan(0, index).Count('\n');
-
-    private static string MaskCommentsAndStrings(string source)
-    {
-        var masked = new StringBuilder(source);
-        for (var i = 0; i < source.Length; i++)
-        {
-            if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '/')
-            {
-                var end = source.IndexOf('\n', i + 2);
-                Mask(masked, i, end < 0 ? source.Length : end);
-                i = (end < 0 ? source.Length : end) - 1;
-            }
-            else if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '*')
-            {
-                var end = source.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                var exclusiveEnd = end < 0 ? source.Length : end + 2;
-                Mask(masked, i, exclusiveEnd);
-                i = exclusiveEnd - 1;
-            }
-            else if (source[i] is '"' or '\'')
-            {
-                var delimiter = source[i];
-                var verbatim = delimiter == '"' && i > 0 && source[i - 1] == '@';
-                var end = i + 1;
-                while (end < source.Length)
-                {
-                    if (source[end] == delimiter)
-                    {
-                        if (verbatim && end + 1 < source.Length && source[end + 1] == '"')
-                        {
-                            end += 2;
-                            continue;
-                        }
-                        end++;
-                        break;
-                    }
-                    if (!verbatim && source[end] == '\\' && end + 1 < source.Length) end += 2;
-                    else end++;
-                }
-                Mask(masked, i, end);
-                i = end - 1;
-            }
-        }
-        return masked.ToString();
-    }
-
-    private static void Mask(StringBuilder source, int start, int exclusiveEnd)
-    {
-        for (var i = start; i < exclusiveEnd; i++)
-            if (source[i] is not ('\r' or '\n')) source[i] = ' ';
-    }
 
     private sealed record SourceRange(int Start, int End);
     private sealed record UnguardedCall(int Line, string Expression);

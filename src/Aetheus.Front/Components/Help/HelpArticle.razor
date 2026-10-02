@@ -1,0 +1,34 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/help/{PageKey}"
+
+<PageTitle>@(_article?.Title ?? L["HelpCenter"]) - Aetheus</PageTitle>
+
+@if (_article is null)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else
+{
+    <OmniPageHeader Title="@_article.Title" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()" Icon="@MaterialIconMap.HeaderIcon(_article.Icon)">
+    </OmniPageHeader>
+
+    <OmniStack Gap="OmniSpacing.XLarge">
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@_article.Description</OmniText>
+
+        @foreach (var helpSection in _article.Sections)
+        {
+            <OmniCard>
+                <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@helpSection.Title</OmniHeading>
+                <div class="markdown-content help-section-content">@((MarkupString)RenderContent(helpSection.Content))</div>
+            </OmniCard>
+        }
+
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+            <Aetheus.Front.Components.Shared.BrowserBackButton Text="@L["BackToHelp"]" Title="@L["GoBack"]" />
+            @if (_pageRoute is not null)
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Nav.NavigateTo(_pageRoute))" title="@L["GoToPage"]"><OmniIcon Name="OmniIconName.OpenExternal" /> <span>@L["Open"]</span></OmniButton>
+            }
+        </OmniStack>
+    </OmniStack>
+}

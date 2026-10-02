@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Net;
 
 namespace Aetheus.Cli;
 
@@ -11,6 +12,8 @@ internal sealed class AetheusApiClient : IDisposable
     private readonly HttpClient _http;
     internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
+    [SuppressMessage("Aetheus.Security", "SEC006",
+        Justification = "A CLI process runs one command and builds one client for it (CliInvocation.CreateClient, the health command); there is no DI container, and one client per process exhausts nothing.")]
     internal AetheusApiClient(Uri server, string? token)
     {
         var insecureOverride = Environment.GetEnvironmentVariable("AETHEUS_INSECURE") == "1";

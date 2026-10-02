@@ -16,7 +16,10 @@ internal static class PublicWebAnalyticsPseudonymizer
         string address)
     {
         var master = SHA256.HashData(Encoding.UTF8.GetBytes(secret));
-        var identity = "network-prefix:" + NetworkPrefix(address);
+        var authenticated = !string.IsNullOrWhiteSpace(source.AuthenticatedUserId);
+        var identity = authenticated
+            ? $"account:{source.AuthenticatedUserId}"
+            : "network-prefix:" + NetworkPrefix(address);
         var instant = source.OccurredAtUtc;
         return new AppWebAnalyticsIngestEvent
         {
@@ -37,14 +40,29 @@ internal static class PublicWebAnalyticsPseudonymizer
                 $"{ISOWeek.GetYear(instant):0000}-W{ISOWeek.GetWeekOfYear(instant):00}",
                 identity),
             MonthlyPseudonym = Period(master, app.Id, "month", $"{instant:yyyy-MM}", identity),
-            SessionPseudonym = Period(
-                master,
-                app.Id,
-                "session-day",
-                $"{instant:yyyy-MM-dd}",
-                identity),
+            SessionPseudonym = authenticated
+                ? Stable(master, app.Id, app.AnalyticsPseudonymKeyVersion, "session", identity)
+                : Period(master, app.Id, "session-day", $"{instant:yyyy-MM-dd}", identity),
+            AuthenticatedPseudonym = authenticated
+                ? Stable(master, app.Id, app.AnalyticsPseudonymKeyVersion, "authenticated", identity)
+                : null,
             KeyVersion = app.AnalyticsPseudonymKeyVersion
         };
+    }
+
+    private static string Stable(
+        byte[] master,
+        int appId,
+        int keyVersion,
+        string purpose,
+        string identity)
+    {
+        var key = HMACSHA256.HashData(
+            master,
+            Encoding.UTF8.GetBytes(
+                $"aetheus:webanalytics:v1:app:{appId}:generation:{keyVersion}:{purpose}"));
+        return Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(identity)))
+            .ToLowerInvariant();
     }
 
     private static string Period(

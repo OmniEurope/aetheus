@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -134,15 +131,15 @@ public class ServerDockerSectionFinalTests : BunitContext
     // === GetContainerBadge ===
 
     [Theory]
-    [InlineData("running", BadgeStyle.Success)]
-    [InlineData("exited", BadgeStyle.Danger)]
-    [InlineData("paused", BadgeStyle.Warning)]
-    [InlineData("restarting", BadgeStyle.Info)]
-    [InlineData("created", BadgeStyle.Light)]
-    public void GetContainerBadge_ReturnsExpected(string state, BadgeStyle expected)
+    [InlineData("running", OmniTone.Success)]
+    [InlineData("exited", OmniTone.Danger)]
+    [InlineData("paused", OmniTone.Warning)]
+    [InlineData("restarting", OmniTone.Accent)]
+    [InlineData("created", OmniTone.Neutral)]
+    public void GetContainerBadge_ReturnsExpected(string state, OmniTone expected)
     {
         var method = typeof(DockerContainersTab).GetMethod("GetContainerBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [state])!;
+        var result = (OmniTone)method.Invoke(null, [state])!;
         Assert.Equal(expected, result);
     }
 
@@ -307,7 +304,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     {
         var cut = Render<DockerPruneDialog>();
 
-        cut.Find(".labeled-toggle-native-input").Change(false);
+        cut.Find("input.omni-checkbox").Change(false);
 
         var model = cut.Instance.Model;
         Assert.False(model.Containers);
@@ -323,7 +320,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     {
         var cut = RenderSection();
         var tab = cut.FindComponent<DockerContainersTab>();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["webapp"])!);
 
@@ -336,7 +333,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     {
         var cut = RenderSection();
         var tab = cut.FindComponent<DockerContainersTab>();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = DockerContainerAction.Restart;
         var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["webapp"])!);
@@ -436,7 +433,7 @@ public class ServerDockerSectionFinalTests : BunitContext
     {
         var cut = RenderSection();
         var tab = cut.FindComponent<DockerContainersTab>();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["aaaaaaaaaaaa1111"])!);
 
@@ -448,17 +445,14 @@ public class ServerDockerSectionFinalTests : BunitContext
     // === Dispose ===
 
     [Fact]
-    public async Task DisposeAsync_NoThrow()
+    public async Task DisposeAsync_NoThrow_AndIsSafeTwice()
     {
         var cut = RenderSection();
-        // Enable auto-refresh so a live loop exists, then verify asynchronous disposal completes.
-        typeof(ServerDockerSection).GetMethod("OnAutoRefreshChanged", Priv)!.Invoke(cut.Instance, [true]);
-        var task = (Task?)typeof(ServerDockerSection)
-            .GetField("_autoRefreshTask", Priv)!.GetValue(cut.Instance);
-        Assert.NotNull(task);
 
         await cut.Instance.DisposeAsync();
-        Assert.True(task!.IsCompleted);
+        var second = await Record.ExceptionAsync(async () => await cut.Instance.DisposeAsync());
+
+        Assert.Null(second);
     }
 
     // === ConfirmRemoveContainerAsync ===
@@ -471,7 +465,7 @@ public class ServerDockerSectionFinalTests : BunitContext
         var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(tab.Instance, ["cccccccccccc3333", "redis"])!);
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         Assert.Equal("RemoveContainer", dialog.LastTitle);
         Assert.Equal("RemoveContainerConfirm", dialog.LastConfirmMessage);
     }
@@ -483,7 +477,7 @@ public class ServerDockerSectionFinalTests : BunitContext
         var cut = Render<DockerImagesTab>(p => p
             .Add(x => x.ServerId, server.Id)
             .Add(x => x.Images, server.Docker.Images));
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.ConfirmResult = false;
         var image = server.Docker.Images[0];
         var method = typeof(DockerImagesTab).GetMethod("ConfirmRemoveImageAsync", Priv)!;

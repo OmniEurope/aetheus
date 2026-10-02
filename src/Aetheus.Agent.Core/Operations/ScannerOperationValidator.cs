@@ -26,25 +26,52 @@ internal static class ScannerOperationValidator
                || TryValidateApiSpecification(envVars, endpoint.Uri, endpoint.AllowedHost, out error);
     }
 
-    public static async Task<bool> ValidateImageAssociationAsync(
+    /// <summary>
+    /// Proves that the image archive a built-artifact scanner is about to read was produced by THIS
+    /// run's source commit. Returns the precise reason on refusal rather than a bare false: the single
+    /// "revision does not match" message used to be reported for an archive that was merely absent,
+    /// which named a cause that was not the real one and sent the reader hunting a provenance problem
+    /// that did not exist.
+    /// </summary>
+    public static async Task<ImageAssociationResult> ValidateImageAssociationAsync(
         ScannerManifestEntry scanner,
         string sourceDirectory,
         IReadOnlyDictionary<string, string> envVars,
         CancellationToken ct)
     {
-        var archiveName = ResolveImageArchiveName(scanner.Key);
-        if (archiveName is null) return true;
+        var role = ScannerImageArchiveResolver.ResolveRole(scanner.Key);
+        if (role == ScannerImageRole.None) return ImageAssociationResult.Valid;
+
         var expected = Value(envVars, "BUILD_SOURCEVERSION") ?? Value(envVars, "AETHEUS_SOURCE_VERSION");
-        if (!IsValidRevision(expected)) return false;
+        if (!IsValidRevision(expected))
+            return ImageAssociationResult.Refused(
+                "the run provides no usable source commit (BUILD_SOURCEVERSION / AETHEUS_SOURCE_VERSION)");
+
         var imageDirectory = Path.Combine(sourceDirectory, ".analysis-image");
+        var archive = ScannerImageArchiveResolver.Resolve(role, imageDirectory, envVars);
+        if (archive.Outcome != ImageArchiveOutcome.Resolved)
+            return ImageAssociationResult.Refused(archive.Detail ?? "the image archive could not be resolved");
+
         var markerPath = Path.Combine(imageDirectory, "source-commit");
-        var archivePath = Path.Combine(imageDirectory, archiveName);
-        if (!File.Exists(markerPath) || !File.Exists(archivePath)) return false;
+        if (!File.Exists(markerPath))
+            return ImageAssociationResult.Refused(
+                "the run's provenance marker .analysis-image/source-commit is missing");
+
         var marker = (await File.ReadAllTextAsync(markerPath, ct).ConfigureAwait(false)).Trim();
-        if (!string.Equals(marker, expected, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.Equals(marker, expected, StringComparison.OrdinalIgnoreCase))
+            return ImageAssociationResult.Refused(
+                $"the images were built at {marker}, this run is at {expected}");
+
+        var archivePath = Path.Combine(imageDirectory, archive.FileName!);
         var configPath = await FindImageConfigPathAsync(archivePath, ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(configPath) || configPath.Contains("..", StringComparison.Ordinal)) return false;
-        return await ImageConfigMatchesRevisionAsync(archivePath, configPath, expected!, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(configPath) || configPath.Contains("..", StringComparison.Ordinal))
+            return ImageAssociationResult.Refused(
+                $"'{archive.FileName}' carries no readable image configuration");
+
+        return await ImageConfigMatchesRevisionAsync(archivePath, configPath, expected!, ct).ConfigureAwait(false)
+            ? ImageAssociationResult.Valid
+            : ImageAssociationResult.Refused(
+                $"'{archive.FileName}' does not carry org.opencontainers.image.revision {expected}");
     }
 
     private static bool TryValidateDastEndpoint(
@@ -119,13 +146,6 @@ internal static class ScannerOperationValidator
         error = message;
         return false;
     }
-
-    private static string? ResolveImageArchiveName(string scannerKey) => scannerKey.ToLowerInvariant() switch
-    {
-        "trivy-image" or "syft" => "aetheus-back.tar",
-        "trivy-image-front" or "syft-front" => "aetheus-front.tar",
-        _ => null
-    };
 
     private static bool IsValidRevision(string? revision) =>
         !string.IsNullOrWhiteSpace(revision)

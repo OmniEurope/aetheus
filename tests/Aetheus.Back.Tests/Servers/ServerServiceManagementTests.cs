@@ -6,8 +6,6 @@ using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -205,8 +203,8 @@ public class ServerServiceManagementTests
         // Typed op (no shell interpolation): unit in the target, line count / follow in env, timeout 60 (follow).
         await _repo.Received(1).AddTaskAsync(
             Arg.Is<ServerTask>(t => t.ServerId == 1
-                && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-                && t.Operation == Aetheus.Shared.Enums.OperationKind.ServiceGetLogs
+                && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+                && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.ServiceGetLogs
                 && t.Command == "nginx"
                 && t.TimeoutSeconds == 60
                 && t.EnvironmentVariables.Contains("50")

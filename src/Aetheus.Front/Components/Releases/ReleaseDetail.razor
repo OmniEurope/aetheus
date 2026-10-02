@@ -1,0 +1,185 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/releases/{ReleaseId:int}"
+
+<PageTitle>@(_release?.Version ?? L["Release"]) - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else if (_release is null)
+{
+    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["ReleaseNotFound"]</OmniText>
+}
+else
+{
+    @* PLAN-005 D39: the short form as the title; the full name once, below it, to read and copy. *@
+    <OmniPageHeader Title="@ReleaseHelper.ShortVersion(_release.Version)"
+        ShowBack="true" Subtitle="@Breadcrumb.Subtitle(ReleaseHelper.ShortVersion(_release.Version) == _release.Version ? null : _release.Version)">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("new_releases")" /></Icon>
+        <Badges>
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@_release.ProjectName</OmniBadge>
+            <ReleaseStatusBadge Status="@_release.Status" />
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@($"#{_release.BuildNumber}")</OmniBadge>
+        </Badges>
+        <Actions>
+            @* Recette R-283: no rollback possible, no button (it used to sit there disabled). *@
+            @if (CanRollback)
+            {
+                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@RollbackAsync" Disabled="@(!_canWrite)" title="@RollbackDisabledReason"><OmniIcon Name="OmniIconName.ArrowUUpLeft" /> <span>@L["Rollback"]</span></OmniButton>
+            }
+        </Actions>
+    </OmniPageHeader>
+
+    @* Source (where it comes from) vs Deliverables (what it ships / where it targets) *@
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniCard>
+                <div class="detail-panel-title">
+                    <OmniIcon Name="OmniIconName.Graph" Class="run-tile-icon omni-u-text-accent" />
+                    <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["Source"]</OmniText>
+                </div>
+                @if (_release.Branches.Count > 0)
+                {
+                    @foreach (var branch in _release.Branches)
+                    {
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.GitFork" Class="run-tile-icon" /> @L["Branch"]</OmniText>
+                            <a href="/git-repositories/branches/@branch.Id" class="detail-value-link">@branch.Name</a>
+                        </OmniStack>
+                    }
+                }
+                else if (!string.IsNullOrEmpty(_release.BranchName))
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.GitFork" Class="run-tile-icon" /> @L["Branch"]</OmniText>
+                        <a href="@($"/git-repositories?projectId={_release.ProjectId}")" class="detail-value-link">@_release.BranchName</a>
+                    </OmniStack>
+                }
+                @if (_release.Commits.Count > 0)
+                {
+                    @foreach (var commit in _release.Commits)
+                    {
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.GitCommit" Class="run-tile-icon" /> @L["Commit"]</OmniText>
+                            <ShortId Value="@commit.Sha" Href="@($"/git-repositories/commits/{commit.Id}")" Copyable="false" Class="text-mono" />
+                        </OmniStack>
+                    }
+                }
+                else if (!string.IsNullOrEmpty(_release.CommitHash))
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.GitCommit" Class="run-tile-icon" /> @L["Commit"]</OmniText>
+                        <ShortId Value="@_release.CommitHash" Href="@BareCommitHref" Copyable="false" Class="text-mono" />
+                    </OmniStack>
+                }
+                @if (!string.IsNullOrEmpty(_release.TagName))
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Tag" Class="run-tile-icon" /> @L["Tag"]</OmniText>
+                        <OmniText Element="OmniTextElement.Paragraph"><ShortId Value="@_release.TagName" Href="@TagHref" /></OmniText>
+                    </OmniStack>
+                }
+                @* Recette R-366: the run that CREATED the release, never the last run that recorded it. *@
+                <ReleaseCreatorRows Release="@_release" Provenance="@_provenance" />
+
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Folder" Class="run-tile-icon" /> @L["Project"]</OmniText>
+                    <a href="/projects/@_release.ProjectId" class="detail-value-link">@_release.ProjectName</a>
+                </OmniStack>
+            </OmniCard>
+        </OmniColumn>
+
+        @* Recette R-283: the dates sit in one card beside the source instead of lone tiles above it,
+           and the deliverables under them, so the two columns read as one block. *@
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+            <OmniCard>
+                <div class="detail-panel-title">
+                    <OmniIcon Name="OmniIconName.CalendarBlank" Class="run-tile-icon omni-u-text-accent" />
+                    <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["Lifecycle"]</OmniText>
+                </div>
+                @if (_release.DetectedAt.Year > 2000)
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Search" Class="run-tile-icon" /> @L["Detected"]</OmniText>
+                        <OmniText Element="OmniTextElement.Paragraph">@_release.DetectedAt.ToString("g")</OmniText>
+                    </OmniStack>
+                }
+                @if (_release.PublishedAt.HasValue)
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Upload" Class="run-tile-icon" /> @L["Published"]</OmniText>
+                        <OmniText Element="OmniTextElement.Paragraph">@_release.PublishedAt.Value.ToString("g")</OmniText>
+                    </OmniStack>
+                }
+                @if (_release.PromotedAt.HasValue)
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.RocketLaunch" Class="run-tile-icon" /> @L["Promoted"]</OmniText>
+                        <OmniText Element="OmniTextElement.Paragraph">@_release.PromotedAt.Value.ToString("g")</OmniText>
+                    </OmniStack>
+                }
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Info" Class="run-tile-icon" /> @L["Status"]</OmniText>
+                        <ReleaseStatusBadge Status="@_release.Status" />
+                    </OmniStack>
+            </OmniCard>
+        @if (HasDeliverables)
+        {
+                <OmniCard>
+                    <div class="detail-panel-title">
+                        <OmniIcon Name="OmniIconName.Archive" Class="run-tile-icon omni-u-text-accent" />
+                        <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["Deliverables"]</OmniText>
+                    </div>
+                    @foreach (var artifact in _release.Artifacts)
+                    {
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                            <a href="/artifacts/@artifact.Id" class="detail-value-link"><OmniIcon Name="OmniIconName.Archive" Class="run-tile-icon omni-u-text-accent" /> @artifact.Name</a>
+                            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@DisplayFormatting.Size(artifact.SizeBytes)</OmniText>
+                        </OmniStack>
+                    }
+                    @if (!string.IsNullOrEmpty(_release.EnvironmentName))
+                    {
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+                            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Cloud" Class="run-tile-icon omni-u-text-warning" /> @L["Environment"]</OmniText>
+                            <OmniText Element="OmniTextElement.Paragraph">@_release.EnvironmentName</OmniText>
+                        </OmniStack>
+                    }
+                </OmniCard>
+        }
+            </OmniStack>
+        </OmniColumn>
+    </OmniRow>
+
+    @* Recette R-366/R-367: later uses, and what the build consumed (apart from the deliverables). *@
+    @if (_provenance is not null)
+    {
+        <ReleaseProvenancePanel Provenance="@_provenance" />
+    }
+
+    @* Changelog as Timeline *@
+    @if (VisibleChangelogEntries.Count > 0)
+    {
+        <OmniCard Class="omni-u-mt-lg omni-u-p-lg">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-md">
+                <OmniIcon Name="OmniIconName.Reset" />
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["Changelog"]</OmniText>
+            </OmniStack>
+            <OmniTimeline Class="release-changelog-timeline" Label="@L["Changelog"]">
+                    @foreach (var entry in VisibleChangelogEntries)
+                    {
+                        <OmniTimelineItem>
+                                <div class="release-cl-content">
+                                    @if (!string.IsNullOrEmpty(entry.Type))
+                                    {
+                                        <OmniBadge Fill="OmniFill.Solid" Tone="@GetChangelogBadge(entry.Type)" Class="release-cl-badge">@entry.Type</OmniBadge>
+                                    }
+                                    <span class="release-cl-text">@entry.Text</span>
+                                </div>
+                        </OmniTimelineItem>
+                    }
+            </OmniTimeline>
+        </OmniCard>
+    }
+}

@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.Artifacts;
 public interface IArtifactRepository
 {
     Task<PipelineArtifact?> FindAsync(int id, CancellationToken ct = default);
-    Task<(List<PipelineArtifact> Items, int TotalCount)> GetByProjectPagedAsync(int projectId, ArtifactRetentionPolicy? policy, int? pipelineId, int page, int pageSize, CancellationToken ct = default);
+    Task<(List<PipelineArtifact> Items, int TotalCount)> GetByProjectPagedAsync(int projectId, ArtifactRetentionPolicy? policy, int? pipelineId, int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null, string? sortBy = null, bool sortDescending = true);
+    Task<ProjectArtifactFilterValuesDto> GetProjectFilterValuesAsync(int projectId, CancellationToken ct = default);
     Task<List<PipelineArtifact>> GetByPipelineAndProjectAsync(int pipelineId, int projectId, ArtifactRetentionPolicy policy, CancellationToken ct = default);
     Task<List<PipelineArtifact>> GetByRunAsync(int pipelineRunId, CancellationToken ct = default);
     Task<List<PipelineArtifact>> GetByEnvironmentAsync(int pipelineId, int projectId, string environmentName, CancellationToken ct = default);
@@ -16,7 +17,9 @@ public interface IArtifactRepository
     Task<List<PipelineArtifact>> GetProjectBuildArtifactsAsync(int projectId, CancellationToken ct = default);
     Task AddAsync(PipelineArtifact artifact, CancellationToken ct = default);
     Task LinkReleaseAsync(PipelineArtifact artifact, int releaseId, CancellationToken ct = default);
-    Task RemoveAsync(PipelineArtifact artifact, CancellationToken ct = default);
+    /// <summary>R-463: deletes the artifact row by identifier; false when another path (the other
+    /// colour, a quota eviction, a run purge) had already removed it, instead of a concurrency failure.</summary>
+    Task<bool> RemoveAsync(PipelineArtifact artifact, CancellationToken ct = default);
     Task<int> GetNextBuildNumberAsync(int projectId, int pipelineId, CancellationToken ct = default);
     // Aggregate on-record size of all artifacts of a project (for the storage quota guard).
     Task<long> GetProjectTotalSizeBytesAsync(int projectId, CancellationToken ct = default);
@@ -32,6 +35,13 @@ public interface IArtifactRepository
     Task<PipelineArtifact?> FindRunArtifactByNameAsync(int runId, string name, CancellationToken ct = default);
     Task<PipelineArtifact?> FindSuccessfulPipelineArtifactByCommitAsync(
         int projectId, string pipelineName, string commitHash, string name, CancellationToken ct = default);
+    // The newest successful production of <name> by <pipelineName>, whatever commit it ran on. Only
+    // reached by a step that explicitly asks for `artifact_source_selector: latest-successful`,
+    // because ignoring the commit is exactly what provenance must never do for a deployed payload.
+    // It exists for evidence about ANOTHER commit - a nightly qualification a deployment reads - and
+    // the caller is then responsible for deciding whether that evidence describes it.
+    Task<PipelineArtifact?> FindLatestSuccessfulPipelineArtifactAsync(
+        int projectId, string pipelineName, string name, CancellationToken ct = default);
     Task<PipelineArtifact?> FindReleaseArtifactAsync(
         int projectId, string releaseSelector, string? artifactName = null, CancellationToken ct = default);
     Task<ReleaseArtifactSelection?> FindReleaseArtifactSelectionAsync(
@@ -54,6 +64,18 @@ public interface IArtifactRepository
     // injecting those modules' services is what put Artifacts inside a module cycle, for reads that
     // change no ownership: the writes stay where they were.
     Task<(int PipelineId, int? ProjectId)?> GetRunPipelineContextAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The project that owns an artifact, resolved TRANSITIVELY through its pipeline's
+    /// exactly-one-owner triple (Project / Environment / ProjectServer). The artifact's own
+    /// <c>ProjectId</c> column is null by design for the last two, so authorizing on that column
+    /// alone leaves those artifacts unguarded. Null means no owner could be resolved, which callers
+    /// must treat as a refusal, never as "no restriction".
+    /// </summary>
+    Task<int?> GetArtifactOwningProjectIdAsync(int artifactId, CancellationToken ct = default);
+
+    /// <summary>Project a release belongs to; null when the release does not exist.</summary>
+    Task<int?> GetReleaseProjectIdAsync(int releaseId, CancellationToken ct = default);
     Task<bool> IsServerAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default);
     Task<Release?> FindReleaseForRunAsync(int pipelineRunId, CancellationToken ct = default);
     Task<List<Release>> GetDeployedProjectReleasesAsync(int projectId, CancellationToken ct = default);

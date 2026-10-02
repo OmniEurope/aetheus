@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using static Aetheus.Front.Components.Pipelines.PipelineRunFormatting
+
+@if (_files.Count > 0)
+{
+    @* Recette R-428: the per-file table read as a flat list of thousands of paths. The
+       files are a tree instead, each project with its figures, opened on its files. *@
+    <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">@L["CoverageByProject"]</OmniText>
+    <OmniTree TValue="string" Label="@L["CoverageByProject"]" Class="coverage-project-tree">
+        @foreach (var project in _projects)
+        {
+            <OmniTreeItem @key="project.Name" TValue="string" Value="@project.Name"
+                          Text="@CoverageTreeText(project.Name, project.LineRate, project.LinesCovered, project.LinesValid)">
+                @foreach (var file in project.Files)
+                {
+                    <OmniTreeItem @key="file.File" TValue="string" Value="@file.File" title="@file.File"
+                                  Text="@CoverageTreeText(ShortPath(file.File), file.LineRate, file.LinesCovered, file.LinesValid)" />
+                }
+            </OmniTreeItem>
+        }
+    </OmniTree>
+}
+else if (_loading)
+{
+    <AetheusLoader />
+}

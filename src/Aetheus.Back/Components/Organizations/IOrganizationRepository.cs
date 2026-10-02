@@ -6,7 +6,8 @@ namespace Aetheus.Back.Components.Organizations;
 public interface IOrganizationRepository
 {
     Task<(List<Organization> Items, int Total)> GetPagedAsync(
-        string? search, int page, int pageSize, string? sortBy, bool sortDescending, CancellationToken ct);
+        string? search, int page, int pageSize, string? sortBy, bool sortDescending, CancellationToken ct,
+        IReadOnlyList<GridFilter>? filters = null);
     Task<Organization?> GetByIdAsync(int id, CancellationToken ct);
     Task<Organization?> GetWithMembersAndProjectsAsync(int id, CancellationToken ct);
     Task<bool> NameExistsAsync(string name, int? excludeId, CancellationToken ct);
@@ -31,13 +32,13 @@ public interface IOrganizationRepository
     /// Returns every organization the given user is a direct member of, with the membership
     /// role attached. Used by the header organization picker via <c>/api/organizations/me</c>.
     /// </summary>
-    Task<List<(Organization Organization, Aetheus.Shared.Enums.OrganizationRole Role)>> GetOrganizationsForUsernameAsync(string username, CancellationToken ct);
+    Task<List<(Organization Organization, Aetheus.Shared.Components.Shared.OrganizationRole Role)>> GetOrganizationsForUsernameAsync(string username, CancellationToken ct);
 
     /// <summary>
     /// Returns the organizations a user (by id) is a member of, with the membership role and the
     /// member row id. Drives the user detail "Organizations" tab (admin view of another user).
     /// </summary>
-    Task<List<(Organization Organization, Aetheus.Shared.Enums.OrganizationRole Role, int MemberId)>> GetOrganizationsForUserIdAsync(int userId, CancellationToken ct);
+    Task<List<(Organization Organization, Aetheus.Shared.Components.Shared.OrganizationRole Role, int MemberId)>> GetOrganizationsForUserIdAsync(int userId, CancellationToken ct);
 
     /// <summary>
     /// Returns (user id, username) for every member of an organization. Used to invalidate the

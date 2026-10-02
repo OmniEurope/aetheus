@@ -1,0 +1,97 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* R-455 / R-444: the Performance tab of a supervised application. The overview first (how many routes and
+   requests, the slowest route), then every route's timings as the application's Aetheus.Telemetry
+   package measured them, then, on demand only, the metric explorer. *@
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else if (_loadFailed)
+{
+    <EmptyState Icon="error" Title="@L["LoadFailed"]" />
+}
+else if (_report is null || _report.MeasuredAt is null)
+{
+    <EmptyState Icon="speed" Title="@L["AppPerformanceNoData"]" Description="@L["AppPerformanceNoDataHint"]" />
+}
+else
+{
+    @* The same tiles as the audience summary (R-356, R-472): the OE key-figure tile, half the row from the
+       small breakpoint, a quarter from the large one, one per line on a phone; each fills its column,
+       which the row stretches, so the four share one height. Recette R2-010: when the application last
+       sent its figures is the fourth tile (the date as its value, the window the figures cover as its
+       detail), like the "Last event" tile of the Visitors tab, instead of a sentence above the tiles. *@
+    <OmniRow Gap="OmniSpacing.Medium" Class="omni-u-mb-md">
+        <OmniColumn Span="12" SmallSpan="6" LargeSpan="3">
+            <OmniStatTile Class="app-performance-tile" Value="@LastSentText" Label="@L["AppPerformanceLastSent"]" Detail="@WindowText" data-testid="app-performance-window" />
+        </OmniColumn>
+        <OmniColumn Span="12" SmallSpan="6" LargeSpan="3">
+            <OmniStatTile Class="app-performance-tile" Value="@RoutesCountText" Label="@L["AppPerformanceRoutes"]" />
+        </OmniColumn>
+        <OmniColumn Span="12" SmallSpan="6" LargeSpan="3">
+            <OmniStatTile Class="app-performance-tile" Value="@TotalRequestsText" Label="@L["AppPerformanceRequests"]" />
+        </OmniColumn>
+        <OmniColumn Span="12" SmallSpan="6" LargeSpan="3">
+            <OmniStatTile Class="app-performance-tile" Value="@SlowestP95Text" Label="@L["AppPerformanceSlowestRoute"]" Detail="@SlowestRouteText" />
+        </OmniColumn>
+    </OmniRow>
+
+    @* Recette R-474, then R2-009 and R2-011: everything the tab shows (the window and the figures as the
+       header, every route the column filters keep) exported by the grid's own bar under the table, in
+       Markdown and CSV, each button with its file icon; Markdown blue, the user's choice (R2-009), set
+       for every export bar by AetheusDataGrid. *@
+    <AetheusDataGrid Data="@_report.Routes" TItem="AppRouteTimingDto" KeyProperty="Route" Virtualize="true" EmptyText="@L["PerformanceNoSamples"]" class="omni-u-mb-lg"
+                     ExportFormats="@ExportFormats" ExportPosition="OmniDataGridPosition.Bottom" ExportTitle="@ExportTitle"
+                     ExportFields="@ExportFields" ExportFileName="@ExportFileName">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="AppRouteTimingDto" Property="Method" Title="@L["Method"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+            <OmniDataGridColumn TItem="AppRouteTimingDto" Property="Route" Title="@L["Route"]" MinWidth="16rem" Filterable="true" >
+                <Template Context="route"><code>@route.Route</code></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AppRouteTimingDto" Property="Count" Title="@L["PerformanceCalls"]" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+            <OmniDataGridColumn TItem="AppRouteTimingDto" Property="P50Ms" Title="@L["PerformanceP50"]" ExportValue="@P50Export" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                <Template Context="route">@Milliseconds(route.P50Ms)</Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AppRouteTimingDto" Property="P95Ms" Title="@L["PerformanceP95"]" ExportValue="@P95Export" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                <Template Context="route">
+                    @* R-476: a percentile taken on too few calls is the maximum; it reads as an order of magnitude. *@
+                    @if (IsOrderOfMagnitude(route, P95MinimumCalls))
+                    {
+                        <OmniText Tone="OmniTextTone.Muted" title="@FewCallsHint(P95MinimumCalls)" data-testid="app-performance-few-calls">@Milliseconds(route.P95Ms)</OmniText>
+                    }
+                    else
+                    {
+                        @Milliseconds(route.P95Ms)
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AppRouteTimingDto" Property="P99Ms" Title="@L["PerformanceP99"]" ExportValue="@P99Export" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                <Template Context="route">
+                    @if (IsOrderOfMagnitude(route, P99MinimumCalls))
+                    {
+                        <OmniText Tone="OmniTextTone.Muted" title="@FewCallsHint(P99MinimumCalls)" data-testid="app-performance-few-calls">@Milliseconds(route.P99Ms)</OmniText>
+                    }
+                    else
+                    {
+                        @Milliseconds(route.P99Ms)
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AppRouteTimingDto" Property="MaxMs" Title="@L["Maximum"]" ExportValue="@MaxExport" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                <Template Context="route">@Milliseconds(route.MaxMs)</Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+}
+
+@* The explorer is rendered only once opened: its metric list is not read for a reader who never asks. *@
+<OmniFieldset Collapsible="true" @bind-Expanded="_explorerExpanded" Class="omni-u-mt-md">
+    <Legend>@L["AppPerformanceExplore"]</Legend>
+    <ChildContent>
+        @if (_explorerExpanded)
+        {
+            <AppMetricsView AppId="AppId" />
+        }
+    </ChildContent>
+</OmniFieldset>

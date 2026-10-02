@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
@@ -16,7 +15,8 @@ internal sealed class AgentUpdateService(
     IAgentUpdateRepository updateRepo,
     IAgentReleaseCatalog releases,
     IAgentCompatibilityPolicy compatibilityPolicy,
-    ILogger<AgentUpdateService> logger) : IAgentUpdateService
+    ILogger<AgentUpdateService> logger,
+    AgentUpdateNotificationPublisher notifications) : IAgentUpdateService
 {
     public async Task<AgentUpdateResponse> QueueUpdateAsync(
         int serverId,
@@ -29,25 +29,12 @@ internal sealed class AgentUpdateService(
         if (server is null)
             throw new NotFoundException($"Server {serverId} not found.");
 
-        var compatibility = compatibilityPolicy.Evaluate(ServerDataMapper.MapToDto(server));
-        if (compatibility.Status == AgentCompatibilityStatus.UpToDate)
-        {
-            await audit.LogAsync(
-                "AgentUpdateSkipped",
-                "Server",
-                serverId,
-                $"Agent is already on target version {releases.Current.SoftwareVersion}",
-                ct).ConfigureAwait(false);
-            return new AgentUpdateResponse
-            {
-                ServerId = serverId,
-                SourceVersion = server.AgentVersion,
-                TargetVersion = releases.Current.SoftwareVersion,
-                Status = AgentUpdateRequestStatus.Confirmed,
-                Outcome = AgentUpdateQueueOutcome.AlreadyUpToDate
-            };
-        }
-
+        // Deliberately no "already up to date, nothing to do" short-circuit. This method has exactly one
+        // caller, the per-server Update agent action, which someone chose on one named server: they want
+        // that agent reinstalled, and an agent reporting the target version is one of the reasons to want
+        // it, not a reason to refuse. Skipping made the click do nothing on precisely the server the
+        // operator was trying to repair. The fleet-wide sweep below still skips current agents, because
+        // there nobody named the server.
         var (request, created) = await updateRepo
             .ReserveAsync(server, releases.Current, requestedBy, ct)
             .ConfigureAwait(false);
@@ -244,6 +231,7 @@ internal sealed class AgentUpdateService(
                 request.ServerId,
                 request.FailureDiagnostic ?? "No diagnostic reported.",
                 LogCorrelationIds.AgentUpdate(request.Id));
+            await notifications.PublishOutcomeAsync(request, ct).ConfigureAwait(false);
         }
         await Task.WhenAll(
             serverHub.Clients.Group(HubGroups.Server(dto.ServerId))

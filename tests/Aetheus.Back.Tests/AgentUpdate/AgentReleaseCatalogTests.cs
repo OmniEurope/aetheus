@@ -3,8 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Aetheus.Back.Components.AgentUpdate;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;

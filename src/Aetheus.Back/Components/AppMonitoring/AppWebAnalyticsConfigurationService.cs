@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Aetheus.Back.Components.Vaults;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
-public sealed class AppWebAnalyticsConfigurationService(
+public sealed partial class AppWebAnalyticsConfigurationService(
     IAppMonitoringRepository apps,
     IVaultService vaults,
     IAuditService audit,
@@ -46,24 +47,14 @@ public sealed class AppWebAnalyticsConfigurationService(
             throw new InvalidOperationException("This analytics site id is already assigned.");
 
         var origins = NormalizeOrigins(request.AllowedOrigins);
-        int? provisionedVaultId = null;
+        ProvisionedKey? provisioned = null;
         try
         {
             if (app.AnalyticsVaultName is null)
             {
-                var vaultName = $"aetheus-web-analytics-{app.Id}";
-                var vault = await vaults.CreateVaultAsync(new CreateVaultRequest
-                {
-                    Name = vaultName,
-                    Description = "Aetheus-managed pseudonymization keys for no-banner web analytics.",
-                    ProjectId = app.ProjectId
-                }, ct).ConfigureAwait(false);
-                provisionedVaultId = vault.Id;
-                await vaults.CreateSecretAsync(vault.Id, new CreateVaultSecretRequest
-                {
-                    Key = SecretKey,
-                    Value = GenerateKey()
-                }, ct).ConfigureAwait(false);
+                var projectName = (await apps.GetAppAsync(appId, ct).ConfigureAwait(false))?.Project?.Name ?? string.Empty;
+                var vaultName = VaultNameFor(projectName, app.ProjectId);
+                provisioned = await ProvisionKeyAsync(app.Id, app.ProjectId, vaultName, ct).ConfigureAwait(false);
                 app.AnalyticsVaultName = vaultName;
                 app.AnalyticsPseudonymKeyVersion = 1;
                 app.AnalyticsPseudonymKeyCreatedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -75,12 +66,15 @@ public sealed class AppWebAnalyticsConfigurationService(
             app.AnalyticsPublicIngestEnabled = request.PublicIngestEnabled;
             app.AnalyticsStorageBudgetBytes = request.StorageBudgetBytes;
             await apps.SaveChangesAsync(ct).ConfigureAwait(false);
-            provisionedVaultId = null;
+            provisioned = null;
         }
         catch
         {
-            if (provisionedVaultId is { } vaultId)
-                await vaults.DeleteVaultAsync(vaultId, CancellationToken.None).ConfigureAwait(false);
+            // Undo only what this call created: the project vault may already hold other apps' keys.
+            if (provisioned is { CreatedVault: true } created)
+                await vaults.DeleteVaultAsync(created.VaultId, CancellationToken.None).ConfigureAwait(false);
+            else if (provisioned is { SecretId: { } secretId } added)
+                await vaults.DeleteSecretAsync(added.VaultId, secretId, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
         InvalidatePublicKey(app.Id);
@@ -112,8 +106,7 @@ public sealed class AppWebAnalyticsConfigurationService(
             throw new InvalidOperationException("The analytics key vault no longer exists.");
         var detail = await vaults.GetVaultDetailAsync(vault.Id, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The analytics key vault no longer exists.");
-        var secret = detail.Secrets.SingleOrDefault(item =>
-            string.Equals(item.Key, SecretKey, StringComparison.Ordinal))
+        var secret = FindKey(detail.Secrets, app.Id)
             ?? throw new InvalidOperationException("The analytics pseudonymization key no longer exists.");
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
@@ -167,7 +160,7 @@ public sealed class AppWebAnalyticsConfigurationService(
                 [app.AnalyticsVaultName],
                 app.ProjectId,
                 ct).ConfigureAwait(false);
-            if (!secrets.TryGetValue(SecretKey, out var resolvedKey))
+            if (ReadKey(secrets, app.Id) is not { } resolvedKey)
                 return null;
             cached = new CachedPublicKey(app.AnalyticsPseudonymKeyVersion, resolvedKey);
             cache.Set(cacheKey, cached, PublicKeyCacheLifetime);
@@ -225,32 +218,7 @@ public sealed class AppWebAnalyticsConfigurationService(
                 afterId = configuredApp.Id;
                 visited++;
                 cache.Set(MaintenanceCursorCacheKey, afterId);
-                if (configuredApp.AnalyticsVaultName is null)
-                    continue;
-                var vaultPage = await vaults.GetVaultsAsync(
-                    configuredApp.ProjectId,
-                    request: new PaginationRequest
-                    {
-                        Search = configuredApp.AnalyticsVaultName,
-                        PageSize = 20
-                    },
-                    ct: ct).ConfigureAwait(false);
-                var vault = vaultPage.Items.SingleOrDefault(item =>
-                    string.Equals(item.Name, configuredApp.AnalyticsVaultName, StringComparison.Ordinal));
-                if (vault is null)
-                    continue;
-                var detail = await vaults.GetVaultDetailAsync(vault.Id, ct).ConfigureAwait(false);
-                var secret = detail?.Secrets.SingleOrDefault(item =>
-                    string.Equals(item.Key, SecretKey, StringComparison.Ordinal));
-                if (secret is not null)
-                {
-                    purged += await vaults.PurgeHistoricalSecretVersionsAsync(
-                        vault.Id,
-                        secret.Id,
-                        nowUtc.AddDays(-31),
-                        MaximumPurgedVersionsPerSecret,
-                        ct).ConfigureAwait(false);
-                }
+                purged += await PurgeKeyHistoryAsync(configuredApp, nowUtc, ct).ConfigureAwait(false);
             }
             if (!timeBudgetReached && configuredApps.Count < pageSize)
             {
@@ -261,6 +229,102 @@ public sealed class AppWebAnalyticsConfigurationService(
                 break;
         }
         return (rotated, purged);
+    }
+
+    /// <summary>
+    /// PLAN-003 2.1: one vault per project, <c>&lt;project&gt;.analytics</c>, holding one key per app.
+    /// The slug must stay identical to the one the <c>AnalyticsVaultPerProject</c> migration computes in
+    /// SQL: lower-case, every run of other characters turned into one hyphen, trimmed, 90 at most.
+    /// </summary>
+    internal static string VaultNameFor(string projectName, int projectId)
+    {
+        var slug = NonSlugCharacters().Replace(projectName.ToLowerInvariant(), "-").Trim('-');
+        if (slug.Length > 90) slug = slug[..90].Trim('-');
+        return (slug.Length == 0 ? $"project-{projectId}" : slug) + ".analytics";
+    }
+
+    /// <summary>The key of one app inside its project's vault.</summary>
+    internal static string SecretKeyFor(int appId) => $"{SecretKey}_{appId}";
+
+    /// <summary>
+    /// The app's own key, or the unsuffixed key of a one-app vault that predates PLAN-003 2.1 (an app
+    /// configured by the previous release, still readable after a return to it).
+    /// </summary>
+    internal static string? ReadKey(IReadOnlyDictionary<string, string> secrets, int appId) =>
+        secrets.TryGetValue(SecretKeyFor(appId), out var own) ? own
+        : secrets.TryGetValue(SecretKey, out var legacy) ? legacy
+        : null;
+
+    private static VaultSecretDto? FindKey(IEnumerable<VaultSecretDto> secrets, int appId)
+    {
+        var list = secrets as IReadOnlyCollection<VaultSecretDto> ?? secrets.ToList();
+        return list.SingleOrDefault(item => string.Equals(item.Key, SecretKeyFor(appId), StringComparison.Ordinal))
+            ?? list.SingleOrDefault(item => string.Equals(item.Key, SecretKey, StringComparison.Ordinal));
+    }
+
+    /// <summary>Creates the project vault when it does not exist yet, then this app's key in it,
+    /// and says what it created so a failed configuration can undo exactly that.</summary>
+    private async Task<ProvisionedKey> ProvisionKeyAsync(int appId, int projectId, string vaultName, CancellationToken ct)
+    {
+        var page = await vaults.GetVaultsAsync(
+            projectId,
+            request: new PaginationRequest { Search = vaultName, PageSize = 20 },
+            ct: ct).ConfigureAwait(false);
+        var existing = page.Items.SingleOrDefault(item => string.Equals(item.Name, vaultName, StringComparison.Ordinal));
+        var createdVault = existing is null;
+        var vaultId = existing?.Id ?? (await vaults.CreateVaultAsync(new CreateVaultRequest
+        {
+            Name = vaultName,
+            Description = "Aetheus-managed pseudonymization keys for no-banner web analytics, one per app.",
+            ProjectId = projectId
+        }, ct).ConfigureAwait(false)).Id;
+
+        if (!createdVault)
+        {
+            var detail = await vaults.GetVaultDetailAsync(vaultId, ct).ConfigureAwait(false);
+            if (detail?.Secrets.Any(item => string.Equals(item.Key, SecretKeyFor(appId), StringComparison.Ordinal)) == true)
+                return new ProvisionedKey(vaultId, CreatedVault: false, SecretId: null);
+        }
+
+        try
+        {
+            var secret = await vaults.CreateSecretAsync(vaultId, new CreateVaultSecretRequest
+            {
+                Key = SecretKeyFor(appId),
+                Value = GenerateKey()
+            }, ct).ConfigureAwait(false);
+            return new ProvisionedKey(vaultId, createdVault, secret.Id);
+        }
+        catch when (createdVault)
+        {
+            await vaults.DeleteVaultAsync(vaultId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private sealed record ProvisionedKey(int VaultId, bool CreatedVault, int? SecretId);
+
+    [GeneratedRegex("[^a-z0-9]+")]
+    private static partial Regex NonSlugCharacters();
+
+    /// <summary>Drops the key versions older than 31 days for one app; 0 when its vault or key is gone.</summary>
+    private async Task<int> PurgeKeyHistoryAsync(
+        Aetheus.Back.Data.Entities.MonitoredApp configuredApp, DateTime nowUtc, CancellationToken ct)
+    {
+        if (configuredApp.AnalyticsVaultName is null) return 0;
+        var vaultPage = await vaults.GetVaultsAsync(
+            configuredApp.ProjectId,
+            request: new PaginationRequest { Search = configuredApp.AnalyticsVaultName, PageSize = 20 },
+            ct: ct).ConfigureAwait(false);
+        var vault = vaultPage.Items.SingleOrDefault(item =>
+            string.Equals(item.Name, configuredApp.AnalyticsVaultName, StringComparison.Ordinal));
+        if (vault is null) return 0;
+        var detail = await vaults.GetVaultDetailAsync(vault.Id, ct).ConfigureAwait(false);
+        var secret = detail is null ? null : FindKey(detail.Secrets, configuredApp.Id);
+        return secret is null
+            ? 0
+            : await vaults.PurgeHistoricalSecretVersionsAsync(
+                vault.Id, secret.Id, nowUtc.AddDays(-31), MaximumPurgedVersionsPerSecret, ct).ConfigureAwait(false);
     }
 
     private static string PublicKeyCacheKey(int appId) => $"web-analytics-public-key:{appId}";

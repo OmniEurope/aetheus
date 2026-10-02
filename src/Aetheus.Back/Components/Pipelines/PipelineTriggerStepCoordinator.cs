@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -104,9 +103,7 @@ public sealed class PipelineTriggerStepCoordinator(
         var vars = BuildSubstitutedValues(stepDef.Variables, legVars);
         var parameters = BuildSubstitutedValues(stepDef.Parameters, legVars);
         PropagateLocalDeploymentContext(legVars, vars);
-        vars["UPSTREAM_RUN_ID"] = runId.ToString();
-        vars["UPSTREAM_PIPELINE"] = run.Pipeline!.Name;
-        vars["UPSTREAM_CHAIN"] = string.Join(",", chain);
+        ApplyUpstreamContext(vars, run.Pipeline!.Name, runId, chain);
         var sourceError = ApplyTriggerSourceContext(stepDef, run, legVars, vars);
         if (sourceError is not null)
         {
@@ -240,11 +237,14 @@ public sealed class PipelineTriggerStepCoordinator(
     private async Task<Pipeline?> MaterializeMissingTriggerTargetAsync(
         PipelineRun parentRun, int projectId, string targetName, CancellationToken ct)
     {
-        if (!IsGitCommitHash(parentRun.CommitHash) || parentRun.Pipeline is null)
+        // The definition's revision: with a source: block the run's own commit is the workspace's, in
+        // another repository, where the target's definition does not exist.
+        var definitionCommit = PipelineRunService.ResolveDefinitionCommit(parentRun);
+        if (!IsGitCommitHash(definitionCommit) || parentRun.Pipeline is null)
             return null;
 
         var yaml = await pipelineGit.ReadProjectPipelineYamlAtRevisionAsync(
-            projectId, targetName, parentRun.CommitHash!, ct,
+            projectId, targetName, definitionCommit!, ct,
             parentRun.Pipeline.SourceRepositoryId).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(yaml))
             return null;
@@ -275,8 +275,21 @@ public sealed class PipelineTriggerStepCoordinator(
         await repo.AddPipelineAsync(target, ct).ConfigureAwait(false);
         logger.LogInformation(
             "Materialized missing trigger pipeline '{Pipeline}' for project {ProjectId} from immutable commit {Commit}.",
-            targetName, projectId, parentRun.CommitHash);
+            targetName, projectId, definitionCommit);
         return target;
+    }
+
+    /// <summary>The parent context a trigger-step child receives. Written after the step's own
+    /// variables, so a definition cannot claim another parent or another origin. BUILD_TRIGGEREDBY
+    /// otherwise reads the child definition's static `trigger:`, "manual" for every chained child
+    /// (PLAN-007 lot 7).</summary>
+    internal static void ApplyUpstreamContext(
+        Dictionary<string, string> vars, string parentPipelineName, int parentRunId, IReadOnlyCollection<int> chain)
+    {
+        vars["UPSTREAM_RUN_ID"] = parentRunId.ToString();
+        vars["UPSTREAM_PIPELINE"] = parentPipelineName;
+        vars["UPSTREAM_CHAIN"] = string.Join(",", chain);
+        vars["BUILD_TRIGGEREDBY"] = $"trigger:{parentPipelineName}#{parentRunId}";
     }
 
     internal static string? ApplyTriggerSourceContext(
@@ -287,10 +300,14 @@ public sealed class PipelineTriggerStepCoordinator(
     {
         if (step.InheritSource)
         {
-            if (IsGitCommitHash(parentRun.CommitHash))
-                childVariables[PipelineRunService.SourceCommitVariable] = parentRun.CommitHash!;
-            if (!string.IsNullOrWhiteSpace(parentRun.BranchName))
-                childVariables[PipelineRunService.SourceBranchVariable] = parentRun.BranchName;
+            // A parent whose workspace comes from another repository (source: block) hands down the
+            // revision of its definition: that is the commit a pipeline of the same project exists at.
+            var commit = PipelineRunService.ResolveDefinitionCommit(parentRun);
+            var branch = PipelineRunService.ResolveDefinitionBranch(parentRun);
+            if (IsGitCommitHash(commit))
+                childVariables[PipelineRunService.SourceCommitVariable] = commit!;
+            if (!string.IsNullOrWhiteSpace(branch))
+                childVariables[PipelineRunService.SourceBranchVariable] = branch;
             return null;
         }
 
@@ -346,6 +363,18 @@ public sealed class PipelineTriggerStepCoordinator(
         if (preparation is null
             || !await ChainedRunAuthorizedAsync(preparation, child.Name, child.CreatedByUsername, ct).ConfigureAwait(false))
             return null;
-        return await launcher.TriggerPreparedRunAsync(preparation, upstreamVariables, parameters: null, ct).ConfigureAwait(false);
+        // F3: a chained target that declares a `candidateVersion` parameter (aetheus-deploy-prod, when
+        // triggered by aetheus-candidate's on_success) receives it automatically from the upstream
+        // release the trigger carried, so the queue-time manual entry stays optional rather than
+        // required. Gated on the target actually declaring that parameter -
+        // PipelineParameterResolver.TryResolve rejects any supplied key the target does not declare, so
+        // seeding it unconditionally would break every OTHER chained target with an "Unknown parameter"
+        // refusal.
+        Dictionary<string, string>? parameters = null;
+        if (upstreamVariables?.TryGetValue("UPSTREAM_RELEASE", out var upstreamRelease) == true
+            && !string.IsNullOrWhiteSpace(upstreamRelease)
+            && preparation.Definition.Parameters.Any(p => string.Equals(p.Name, "candidateVersion", StringComparison.OrdinalIgnoreCase)))
+            parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["candidateVersion"] = upstreamRelease };
+        return await launcher.TriggerPreparedRunAsync(preparation, upstreamVariables, parameters, ct).ConfigureAwait(false);
     }
 }

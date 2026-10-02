@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -27,7 +28,7 @@ public sealed class DeployOperationExecutor(
     IServerApiClient apiClient,
     IShellRunner shell,
     IOptions<AetheusAgentOptions> options,
-    ILogger<DeployOperationExecutor> logger) : IOperationExecutor
+    ILogger<DeployOperationExecutor> logger) : EnvironmentOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
 
@@ -45,14 +46,9 @@ public sealed class DeployOperationExecutor(
     private const int PollSeconds = 2;
     private const int RequiredStableSamples = 4;
 
-    public bool CanHandle(OperationKind kind) => kind is OperationKind.PipelineDeploy;
+    public override bool CanHandle(OperationKind kind) => kind is OperationKind.PipelineDeploy;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct)
     {
@@ -343,6 +339,8 @@ public sealed class DeployOperationExecutor(
         return false;
     }
 
+    [SuppressMessage("Aetheus.Security", "SEC006",
+        Justification = "Readiness probe of a just-restarted unit: at most one client per PollSeconds sample inside the health window, disposed with its no-redirect, no-proxy handler. Moving it to IHttpClientFactory means injecting the factory into this executor and registering a named client; not done here.")]
     private static async Task<bool> ProbeFunctionalReadinessAsync(string healthUrl, CancellationToken ct)
     {
         using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false };

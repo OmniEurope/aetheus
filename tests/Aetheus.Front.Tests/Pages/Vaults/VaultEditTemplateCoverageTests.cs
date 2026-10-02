@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -31,8 +28,8 @@ public class VaultEditTemplateCoverageTests : BunitContext
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var past = DateTime.UtcNow.AddDays(-1);
-        var result = (BadgeStyle)method.Invoke(null, [past])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [past])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
@@ -41,8 +38,8 @@ public class VaultEditTemplateCoverageTests : BunitContext
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var soon = DateTime.UtcNow.AddDays(7);
-        var result = (BadgeStyle)method.Invoke(null, [soon])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [soon])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
@@ -51,8 +48,8 @@ public class VaultEditTemplateCoverageTests : BunitContext
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var later = DateTime.UtcNow.AddDays(30);
-        var result = (BadgeStyle)method.Invoke(null, [later])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [later])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── Template: new vault ───────────────────────────────────────────────────
@@ -249,8 +246,8 @@ public class VaultEditTemplateCoverageTests : BunitContext
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var exactlyFourteen = DateTime.UtcNow.AddDays(14);
-        var result = (BadgeStyle)method.Invoke(null, [exactlyFourteen])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [exactlyFourteen])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     /// <summary>

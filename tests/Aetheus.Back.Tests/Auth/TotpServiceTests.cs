@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;

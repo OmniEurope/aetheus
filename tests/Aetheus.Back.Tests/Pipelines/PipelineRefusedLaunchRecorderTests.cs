@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Components.Notifications;
+using Aetheus.Back.Components.Pipelines;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Hubs;
+using Aetheus.Back.Services;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+
+namespace Aetheus.Back.Tests.Pipelines;
+
+/// <summary>
+/// Recette R-522, audit of 2026-09-30: a refused automated launch becomes a failed run carrying the
+/// reason. Never inside a caller's transaction, whose rollback would erase it after its events went
+/// out; and a side effect that fails never takes the place of the refusal the caller rethrows.
+/// </summary>
+public sealed class PipelineRefusedLaunchRecorderTests
+{
+    private readonly IPipelineRepository _repo = Substitute.For<IPipelineRepository>();
+    private readonly IHubContext<PipelineHub> _hub = Substitute.For<IHubContext<PipelineHub>>();
+    private readonly IAuditService _audit = Substitute.For<IAuditService>();
+    private readonly IUserNotificationService _notifications = Substitute.For<IUserNotificationService>();
+    private readonly IDbTransactionScope _transaction = Substitute.For<IDbTransactionScope>();
+    private readonly Pipeline _pipeline = new() { Id = 1, Name = "aetheus-nightly", Runs = [] };
+
+    private PipelineRefusedLaunchRecorder Build() => new(
+        _repo, _hub, _audit, new PipelineRunNotificationPublisher(_repo, _notifications), TimeProvider.System,
+        Substitute.For<ILogger<PipelineRefusedLaunchRecorder>>(), _transaction);
+
+    [Fact]
+    public async Task InsideACallersTransaction_NothingIsRecorded()
+    {
+        _transaction.InTransaction.Returns(true);
+
+        await Build().RecordAsync(_pipeline, null, "Webhook", "refused", null, TestContext.Current.CancellationToken);
+
+        await _repo.DidNotReceive().AddPipelineRunAsync(Arg.Any<PipelineRun>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().LogAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        await _notifications.DidNotReceive().RecordProjectEventAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AFailingSideEffect_LeavesTheRunSaved_AndTheOtherEffectsSent()
+    {
+        _hub.Clients.Groups(Arg.Any<IReadOnlyList<string>>()).Throws(new InvalidOperationException("hub down"));
+        _repo.GetPipelineProjectIdAsync(_pipeline, Arg.Any<CancellationToken>()).Returns(7);
+
+        await Build().RecordAsync(_pipeline, null, "Scheduler", "refused", null, TestContext.Current.CancellationToken);
+
+        await _repo.Received(1).AddPipelineRunAsync(
+            Arg.Is<PipelineRun>(run => run.Status == PipelineStatus.Failed && run.WarningsJson!.Contains("refused")),
+            Arg.Any<CancellationToken>());
+        await _repo.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _audit.Received(1).LogAsync("LaunchRefused", "PipelineRun", Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _notifications.Received(1).RecordProjectEventAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+}

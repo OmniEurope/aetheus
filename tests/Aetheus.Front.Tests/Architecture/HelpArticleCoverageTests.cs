@@ -2,8 +2,7 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Aetheus.Front.Services;
-using HelpArticlePage = Aetheus.Front.Pages.Help.HelpArticle;
+using HelpArticlePage = Aetheus.Front.Components.Help.HelpArticle;
 
 namespace Aetheus.Front.Tests.Architecture;
 
@@ -34,13 +33,11 @@ public class HelpArticleCoverageTests
     [Fact]
     public void Every_Relevant_Razor_Route_Resolves_To_A_Bilingual_Help_Article()
     {
-        var root = FindRepoRoot();
-        var pages = Path.Combine(root, "src", "Aetheus.Front", "Pages");
         var help = new HelpService(new HttpClient { BaseAddress = new Uri("http://localhost/") });
         var (en, fr) = ReadCatalogs();
         var failures = new List<string>();
 
-        foreach (var file in RepositoryScan.Enumerate(pages, "*.razor"))
+        foreach (var (pages, file) in RepositoryScan.EnumerateUnion(RepositoryScan.PageRoots, "*.razor"))
         {
             var relative = Path.GetRelativePath(pages, file).Replace('\\', '/');
             if (IsContextualHelpExempt(relative))
@@ -96,8 +93,8 @@ public class HelpArticleCoverageTests
         Assert.NotNull(field);
         var routes = (Dictionary<string, string>)field!.GetValue(null)!;
         var (en, _) = ReadCatalogs();
-        var pages = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front", "Pages");
-        var staticRoutes = RepositoryScan.Enumerate(pages, "*.razor")
+        var staticRoutes = RepositoryScan.EnumerateUnion(RepositoryScan.PageRoots, "*.razor")
+            .Select(entry => entry.File)
             .SelectMany(file => Regex.Matches(File.ReadAllText(file), "@page\\s+\"([^\"]+)\"")
                 .Select(match => match.Groups[1].Value))
             .Where(route => !route.Contains('{', StringComparison.Ordinal))
@@ -240,7 +237,7 @@ public class HelpArticleCoverageTests
             ["artifacts"] = ["checksum", "Provenance", "Retention"],
             ["tasks"] = ["assigned", "not automatically redistributed", "real-time"],
             ["logs"] = ["numeric identifier", "masked", "does not offer global"],
-            ["alerts"] = ["sustained", "Mark all read", "Notification rules"],
+            ["alerts"] = ["sustained", "Clear recent alerts", "Notification rules"],
             ["analysis"] = ["SBOM", "Decisions", "AI prompt", "Pipeline gates"],
             ["backups"] = ["cron", "Restore check", "retention"],
             ["service-connections"] = ["credentials", "Test connection", "permissions"],
@@ -278,7 +275,7 @@ public class HelpArticleCoverageTests
             ["artifacts"] = ["checksum", "Provenance", "rétention"],
             ["tasks"] = ["assignée", "n’est pas redistribuée automatiquement", "temps réel"],
             ["logs"] = ["identifiant numérique", "masqué", "ne fournit pas de filtres globaux"],
-            ["alerts"] = ["durée soutenue", "Tout marquer comme lu", "Règles de notification"],
+            ["alerts"] = ["durée soutenue", "Effacer les alertes récentes", "Règles de notification"],
             ["analysis"] = ["SBOM", "Décisions", "prompt IA", "Gates de pipeline"],
             ["backups"] = ["cron", "Contrôle de restauration", "rétention"],
             ["service-connections"] = ["identifiants", "Tester la connexion", "permissions"],

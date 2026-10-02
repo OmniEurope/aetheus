@@ -1,0 +1,164 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2
+# Aetheus Agent mail-setup helper - root-owned, invoked via /etc/sudoers.d/aetheus-mail (NOPASSWD).
+# Installs + configures a working postfix/dovecot/opendkim stack for ONE domain: virtual mailboxes
+# delivered over Dovecot LMTP, SMTP AUTH through the Dovecot auth socket, submission on 587, DKIM
+# signing through the OpenDKIM milter and, optionally, the rspamd spam filter milter. Re-validates every
+# argument; reads the admin password from stdin (never argv). Never evals input.
+set -eu
+
+die() { echo "$1" >&2; exit 1; }
+valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; }
+valid_email()  { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'; }
+valid_sel()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]+$'; }
+valid_quota()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,7}$'; }
+
+hostname="${1:-}"
+domain="${2:-}"
+selector="${3:-}"
+email="${4:-}"
+quota="${5:-}"
+spam="${6:-none}"
+
+valid_domain "$hostname" || die "invalid hostname"
+valid_domain "$domain"   || die "invalid domain"
+valid_sel    "$selector" || die "invalid selector"
+valid_email  "$email"    || die "invalid email"
+valid_quota  "$quota"    || die "invalid quota"
+case "$spam" in rspamd|none) : ;; *) die "invalid spam filter" ;; esac
+case "$email" in *"@$domain") : ;; *) die "admin email not in domain" ;; esac
+
+# Admin password from stdin (one newline-terminated line). Never on the argv.
+IFS= read -r password || die "no password on stdin"
+[ -n "$password" ] || die "empty password"
+printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has control chars"
+[ "${#password}" -ge 8 ] || die "password too short"
+
+localpart="${email%@*}"
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq || true
+apt-get install -y -qq postfix dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd opendkim opendkim-tools
+
+# Postfix main.cf (values are validated identifiers; postconf -e takes a single key=value argv token).
+postconf -e "myhostname = $hostname"
+postconf -e "mydomain = $domain"
+postconf -e "mydestination = localhost"
+postconf -e "virtual_mailbox_domains = $domain"
+postconf -e "virtual_mailbox_base = /var/mail/vhosts"
+postconf -e "virtual_mailbox_maps = hash:/etc/postfix/vmailbox"
+postconf -e "virtual_minimum_uid = 1000"
+postconf -e "virtual_uid_maps = static:5000"
+postconf -e "virtual_gid_maps = static:5000"
+postconf -e "virtual_transport = lmtp:unix:private/dovecot-lmtp"
+postconf -e "smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem"
+postconf -e "smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key"
+postconf -e "smtpd_tls_security_level = may"
+postconf -e "smtp_tls_security_level = may"
+postconf -e "smtpd_sasl_type = dovecot"
+postconf -e "smtpd_sasl_path = private/auth"
+postconf -e "smtpd_sasl_auth_enable = yes"
+postconf -e "smtpd_recipient_restrictions = permit_sasl_authenticated,permit_mynetworks,reject_unauth_destination"
+postconf -e "milter_default_action = accept"
+postconf -e "milter_protocol = 6"
+postconf -e "milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}"
+postconf -e "smtpd_milters = inet:localhost:8891"
+postconf -e "non_smtpd_milters = inet:localhost:8891"
+# Submission (587): TLS mandatory, authenticated relay only.
+postconf -M "submission/inet=submission inet n - y - - smtpd"
+postconf -P "submission/inet/syslog_name=postfix/submission" \
+  "submission/inet/smtpd_tls_security_level=encrypt" \
+  "submission/inet/smtpd_sasl_auth_enable=yes" \
+  "submission/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject"
+
+# vmail user (idempotent).
+groupadd -g 5000 vmail 2>/dev/null || true
+useradd -g vmail -u 5000 -d /var/mail/vhosts -s /usr/sbin/nologin vmail 2>/dev/null || true
+mkdir -p "/var/mail/vhosts/$domain/$localpart"
+chown -R vmail:vmail /var/mail/vhosts
+
+# Virtual mailbox map (world-readable: it lists addresses, never secrets; the agent inventories it).
+umask 022
+printf '%s %s/%s/\n' "$email" "$domain" "$localpart" > /etc/postfix/vmailbox
+postmap /etc/postfix/vmailbox
+
+# Dovecot users file. Feed the password to `doveadm pw` over stdin (it prompts twice) rather than
+# via `-p`: an argv token lands in /proc/<pid>/cmdline and is visible to `ps`/journald for the life
+# of the process. The pipe keeps the cleartext off the process list entirely.
+hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
+umask 077
+printf '%s:%s\n' "$email" "$hash" > /etc/dovecot/users
+chown root:dovecot /etc/dovecot/users
+chmod 640 /etc/dovecot/users
+umask 022
+
+# Dovecot: virtual users from the passwd-file, Maildir under /var/mail/vhosts, LMTP + auth sockets
+# inside the Postfix chroot. The 2.3 and 2.4 configuration syntaxes differ, so the file is chosen by
+# the installed major version; an unknown version fails loudly rather than writing a guess.
+dovecot_version="$(dovecot --version 2>/dev/null | cut -d' ' -f1)"
+mkdir -p /etc/dovecot/conf.d
+case "$dovecot_version" in
+  2.3.*)
+    cat > /etc/dovecot/conf.d/99-aetheus.conf <<'DOVECOT_EOF'
+#{include:mail/dovecot-2.3/99-aetheus.conf}#
+DOVECOT_EOF
+    cat > /etc/dovecot/conf.d/99-aetheus-ssl.conf <<'DOVECOT_EOF'
+#{include:mail/dovecot-2.3/99-aetheus-ssl.conf}#
+DOVECOT_EOF
+    ;;
+  2.4.*)
+    cat > /etc/dovecot/conf.d/99-aetheus.conf <<'DOVECOT_EOF'
+#{include:mail/dovecot-2.4/99-aetheus.conf}#
+DOVECOT_EOF
+    cat > /etc/dovecot/conf.d/99-aetheus-ssl.conf <<'DOVECOT_EOF'
+#{include:mail/dovecot-2.4/99-aetheus-ssl.conf}#
+DOVECOT_EOF
+    ;;
+  *)
+    die "unsupported dovecot version: ${dovecot_version:-unknown}"
+    ;;
+esac
+# System (PAM) accounts are not mail accounts on an Aetheus-managed stack.
+if [ -f /etc/dovecot/conf.d/10-auth.conf ]; then
+  sed -i 's/^!include auth-system\.conf\.ext/#!include auth-system.conf.ext/' /etc/dovecot/conf.d/10-auth.conf
+fi
+doveconf -n >/dev/null || die "dovecot configuration rejected"
+
+# OpenDKIM: per-domain keys, KeyTable/SigningTable, milter on localhost:8891 (the socket Postfix uses).
+mkdir -p "/etc/opendkim/keys/$domain"
+if [ ! -f "/etc/opendkim/keys/$domain/$selector.private" ]; then
+  opendkim-genkey -s "$selector" -d "$domain" -D "/etc/opendkim/keys/$domain/"
+fi
+chown -R opendkim:opendkim /etc/opendkim/keys
+# 711: the unprivileged agent may open the public .txt by name (never list or read the .private, 600).
+chmod 711 /etc/opendkim/keys "/etc/opendkim/keys/$domain"
+chmod 600 "/etc/opendkim/keys/$domain/$selector.private"
+chmod 644 "/etc/opendkim/keys/$domain/$selector.txt"
+printf '%s._domainkey.%s %s:%s:/etc/opendkim/keys/%s/%s.private\n' "$selector" "$domain" "$domain" "$selector" "$domain" "$selector" > /etc/opendkim/KeyTable
+printf '*@%s %s._domainkey.%s\n' "$domain" "$selector" "$domain" > /etc/opendkim/SigningTable
+printf '127.0.0.1\n::1\nlocalhost\n%s\n' "$hostname" > /etc/opendkim/TrustedHosts
+chmod 644 /etc/opendkim/KeyTable /etc/opendkim/SigningTable /etc/opendkim/TrustedHosts
+cat > /etc/opendkim.conf <<'OPENDKIM_EOF'
+#{include:mail/opendkim.conf}#
+OPENDKIM_EOF
+
+postfix check || die "postfix configuration rejected"
+
+# Ownership marker read by the agent collector (world-readable, no secret).
+mkdir -p /etc/aetheus
+printf 'managed-by=aetheus\ndomain=%s\n' "$domain" > /etc/aetheus/mail-stack.managed
+chmod 644 /etc/aetheus/mail-stack.managed
+
+# Enable + (re)start services.
+systemctl enable postfix dovecot opendkim
+systemctl restart opendkim
+systemctl restart dovecot
+systemctl restart postfix
+
+# Optional spam filter: the incremental helper owns the rspamd configuration (one source of truth);
+# it installs rspamd + Redis and chains the rspamd milter after OpenDKIM.
+if [ "$spam" = "rspamd" ]; then
+  /usr/local/lib/aetheus/mail-manage spam-install
+fi
+
+echo "Mail server setup completed successfully for $domain (quota ${quota}MB, spam filter $spam)"

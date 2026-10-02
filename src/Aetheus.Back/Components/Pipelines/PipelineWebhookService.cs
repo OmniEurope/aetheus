@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Aetheus.Back.Components.ExternalRepos;
+using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Settings;
 using Aetheus.Back.Data.Entities;
 
@@ -89,9 +89,20 @@ public partial class PipelineWebhookService(
         };
         using var pipelineLock = await PipelineTriggerLocks.AcquireAsync(pipeline.Id, ct).ConfigureAwait(false);
         Task<bool> ReplaceAsync() => ReplaceRunAsync(pipeline, definition, variables, ct);
-        return transaction is { IsRelational: true }
-            ? await transaction.ExecuteInTransactionAsync(ReplaceAsync, ct).ConfigureAwait(false)
-            : await ReplaceAsync().ConfigureAwait(false);
+        if (transaction is not { IsRelational: true })
+            return await ReplaceAsync().ConfigureAwait(false);
+        try
+        {
+            return await transaction.ExecuteInTransactionAsync(ReplaceAsync, ct).ConfigureAwait(false);
+        }
+        catch (BadRequestException refusal)
+        {
+            // Mandatory catch (recette R-522): inside the transaction the launcher records nothing, since
+            // the rollback would erase it; the refusal is recorded here, once the transaction is over.
+            await runService.RecordRefusedAutomatedLaunchAsync(
+                pipeline.Id, "Webhook", refusal.Message, variables, ct).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private async Task<string> ReadAuthoritativeYamlAsync(Pipeline pipeline, CancellationToken ct)
@@ -139,8 +150,8 @@ public partial class PipelineWebhookService(
             "Webhook latest-wins requested cancellation of {Count} superseded run(s) for pipeline {PipelineId}",
             activeRunIds.Count, pipeline.Id);
         logger.LogInformation("Webhook triggering pipeline {PipelineId} ({PipelineName})", pipeline.Id, pipeline.Name);
-        var replacement = await runService.TriggerPreparedRunAsync(
-            preparation, variables, ct: ct).ConfigureAwait(false);
+        var replacement = await runService.TriggerPreparedAutomatedRunAsync(
+            preparation, "Webhook", variables, ct).ConfigureAwait(false);
         return replacement is not null
             ? true
             : throw new ConflictException($"Webhook replacement for pipeline {pipeline.Id} could not be persisted.");

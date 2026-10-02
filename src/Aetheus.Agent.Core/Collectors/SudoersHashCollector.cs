@@ -29,7 +29,7 @@ public sealed class SudoersHashCollector(
         "/etc/sudoers.d/aetheus-cron",
         "/etc/sudoers.d/aetheus-portsentry",
         "/etc/sudoers.d/aetheus-service-enable",
-        // S-FEAT-W8KN - argv-exact apt-get install/remove allow-list (package-manage capability).
+        // S-FEAT-W8KN - argv-exact apt-get install/purge allow-list (package-manage capability).
         "/etc/sudoers.d/aetheus-package",
         // ADR-024 4.1 - argv-exact apt-get upgrade grant (patch-manage capability). Its presence
         // is what derives Server.PatchManagementAvailable backend-side.

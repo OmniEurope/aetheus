@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -12,6 +11,10 @@ public class ServerPortsentryRkhunterTests : BunitContext
     public ServerPortsentryRkhunterTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        // Recette R-210: the section also reads the protocols its Protocol header filter offers.
+        _handler.SetJsonResponse("portsentry/filter-values", new PortsentryFilterValuesDto());
+        // R-181: an installed RKHunter section loads its scan history on first render too.
+        _handler.SetJsonResponse("api/servers/8/rkhunter/history", new List<RkhunterScanResultDto>());
     }
 
     // ──── Portsentry ────
@@ -26,8 +29,10 @@ public class ServerPortsentryRkhunterTests : BunitContext
             .Add(x => x.ServerId, 7)
             .Add(x => x.Ps, ps));
 
-        Assert.Contains("PortSentry", cut.Markup);
-        Assert.Contains("NotInstalled", cut.Markup);
+        Assert.Contains("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("PortsentrySetup", cut.Markup, StringComparison.Ordinal);
+        // Title heading removed (the page header shows it); the PortSentry split button is installed-only.
+        Assert.DoesNotContain("PortSentry", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -93,7 +98,9 @@ public class ServerPortsentryRkhunterTests : BunitContext
             .Add(x => x.ServerId, 8)
             .Add(x => x.Rk, rk));
 
-        Assert.Contains("RKHunter", cut.Markup);
+        Assert.Contains("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("RkhunterSetup", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("RKHunter", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -111,8 +118,8 @@ public class ServerPortsentryRkhunterTests : BunitContext
             .Add(x => x.ServerId, 8)
             .Add(x => x.Rk, rk));
 
-        Assert.Contains("RKHunter", cut.Markup);
-        Assert.Contains("1.4.6", cut.Markup);
+        Assert.Contains("v1.4.6", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("RKHunter", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]

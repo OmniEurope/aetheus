@@ -1,0 +1,104 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/performance"
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+@* PLAN-003 lot 27 / D27: measure before correcting. What the server took to answer each API route
+   (24 hours of this instance), and what this browser actually waited for. *@
+<PageTitle>@L["Performance"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Performance"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("speed")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="performance" />
+    </Badges>
+</OmniPageHeader>
+@* R-181: no Refresh button. The report reloads on the ApiPerformance admin push, sent when new API
+   timings were recorded (at most every 15 s while requests keep coming, nothing when idle). *@
+
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mt-lg">
+        @L["GridLoadFailed"]
+    </OmniAlert>
+}
+else if (_report is null)
+{
+    <AetheusLoader />
+}
+else
+{
+    @* Recette R-454: the window, then one export of every row of the three tables, raw, for an AI. *@
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Wrap="true" Gap="OmniSpacing.Medium" Align="OmniAlignment.Center"
+               Justify="OmniJustification.Between" Class="omni-u-mt-lg omni-u-mb-md">
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-m-0" data-testid="performance-window">
+            @WindowText
+        </OmniText>
+        <OmniMarkdownExportButton TItem="PerformanceExportRow" Export="@CreateExport" FileName="performance"
+                                  Text="@L["PerformanceExportMarkdown"]" title="@L["PerformanceExportMarkdownHint"]" />
+    </OmniStack>
+
+    @* Recette R-454: the three tables in tabs, all rendered so a push refreshes every grid. *@
+    <UrlSyncedTabs Slugs="@TabSlugs" RenderAllPanels="true">
+        <Tabs>
+            <OmniTabsItem Key="slowest" Title="@L["PerformanceSlowestCalls"]"><Icon><OmniIcon Name="OmniIconName.Hourglass" /></Icon><ChildContent>
+                @* Recette R-240: no pager, the slowest calls scroll in a virtualized, bounded grid. *@
+                <AetheusDataGrid @ref="_slowestGrid" Data="@_report.Slowest" TItem="ApiCallTimingDto" KeyProperty="At" Virtualize="true" EmptyText="@L["PerformanceNoSamples"]" class="omni-u-mb-lg">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="ApiCallTimingDto" Property="DurationMs" Title="@L["Duration"]" Width="7rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                            <Template Context="call">@Milliseconds(call.DurationMs)</Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ApiCallTimingDto" Property="Method" Title="@L["Method"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                        <OmniDataGridColumn TItem="ApiCallTimingDto" Property="Route" Title="@L["Route"]" MinWidth="16rem" Filterable="true" >
+                            <Template Context="call"><code>@call.Route</code></Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ApiCallTimingDto" Property="StatusCode" Title="@L["Status"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                        <OmniDataGridColumn TItem="ApiCallTimingDto" Property="At" Value="@LocalAt" Title="@L["Date"]" Width="11rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+                            <Template Context="call">@call.At.ToLocalTime().ToString("g")</Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+            <OmniTabsItem Key="routes" Title="@L["PerformanceByRoute"]"><Icon><OmniIcon Name="OmniIconName.Rows" /></Icon><ChildContent>
+                <AetheusDataGrid @ref="_endpointsGrid" Data="@_report.Endpoints" TItem="ApiEndpointTimingDto" KeyProperty="Route" Virtualize="true" EmptyText="@L["PerformanceNoSamples"]" class="omni-u-mb-lg">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="ApiEndpointTimingDto" Property="Method" Title="@L["Method"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                        <OmniDataGridColumn TItem="ApiEndpointTimingDto" Property="Route" Title="@L["Route"]" MinWidth="16rem" Filterable="true" >
+                            <Template Context="endpoint"><code>@endpoint.Route</code></Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ApiEndpointTimingDto" Property="Count" Title="@L["PerformanceCalls"]" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+                        <OmniDataGridColumn TItem="ApiEndpointTimingDto" Property="P50Ms" Title="@L["PerformanceP50"]" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                            <Template Context="endpoint">@Milliseconds(endpoint.P50Ms)</Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ApiEndpointTimingDto" Property="P95Ms" Title="@L["PerformanceP95"]" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                            <Template Context="endpoint">@Milliseconds(endpoint.P95Ms)</Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ApiEndpointTimingDto" Property="P99Ms" Title="@L["PerformanceP99"]" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                            <Template Context="endpoint">@Milliseconds(endpoint.P99Ms)</Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ApiEndpointTimingDto" Property="MaxMs" Title="@L["Maximum"]" Width="6rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                            <Template Context="endpoint">@Milliseconds(endpoint.MaxMs)</Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+            <OmniTabsItem Key="browser" Title="@L["PerformanceThisBrowser"]"><Icon><OmniIcon Name="OmniIconName.Globe" /></Icon><ChildContent>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["PerformanceThisBrowserHint"]</OmniText>
+                <AetheusDataGrid @ref="_browserGrid" Data="@_browserCalls" TItem="ClientApiCall" KeyProperty="At" Virtualize="true" EmptyText="@L["PerformanceNoSamples"]">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="ClientApiCall" Property="DurationMs" Title="@L["Duration"]" Width="7rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" >
+                            <Template Context="call">@Milliseconds(call.DurationMs)</Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ClientApiCall" Property="Method" Title="@L["Method"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                        <OmniDataGridColumn TItem="ClientApiCall" Property="Path" Title="@L["Route"]" MinWidth="16rem" Filterable="true" >
+                            <Template Context="call"><code>@call.Path</code></Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ClientApiCall" Property="StatusCode" Title="@L["Status"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                        <OmniDataGridColumn TItem="ClientApiCall" Property="Bytes" Title="@L["Size"]" Width="7rem" TextAlign="OmniDataGridTextAlign.End" Filterable="true" >
+                            <Template Context="call">@(call.Bytes is { } bytes ? FormatBytes(bytes) : string.Empty)</Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

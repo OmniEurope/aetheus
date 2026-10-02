@@ -74,12 +74,11 @@ public sealed class PollingService(
         logger.LogInformation("Polling service started (interval: {Interval}s, maxConcurrent: {Max})",
             _options.PollingIntervalSeconds, _options.MaxConcurrentTasks);
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_options.PollingIntervalSeconds));
-
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                await Task.Delay(NextPollDelay(), timeProvider, stoppingToken).ConfigureAwait(false);
                 await PollOnceAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -91,6 +90,24 @@ public sealed class PollingService(
                 logger.LogWarning(ex, "Polling failed, will retry next interval");
             }
         }
+    }
+
+    /// <summary>Ticks of the last task claim or completion, read and written across task threads.</summary>
+    private long _lastTaskActivityTicks = DateTimeOffset.MinValue.UtcTicks;
+
+    private void MarkTaskActivity() =>
+        Interlocked.Exchange(ref _lastTaskActivityTicks, timeProvider.GetUtcNow().UtcTicks);
+
+    /// <summary>The configured interval when idle; the active one while a task runs or shortly after
+    /// one was claimed or finished. Never slower than the configured interval.</summary>
+    internal TimeSpan NextPollDelay()
+    {
+        var idle = TimeSpan.FromSeconds(_options.PollingIntervalSeconds);
+        var sinceActivity = timeProvider.GetUtcNow().UtcTicks - Interlocked.Read(ref _lastTaskActivityTicks);
+        var active = !_runningTasks.IsEmpty || sinceActivity < AgentRuntimeDefaults.ActivePollingWindow.Ticks;
+        return active && AgentRuntimeDefaults.ActivePollingInterval < idle
+            ? AgentRuntimeDefaults.ActivePollingInterval
+            : idle;
     }
 
     // E-3: one poll iteration's work (reconcile + fetch + dispatch), extracted so tests can
@@ -151,6 +168,7 @@ public sealed class PollingService(
             var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var executionTask = TrackTaskAsync(task, cts, registered.Task);
             _runningTasks.TryAdd(task.Id, new TrackedTask(executionTask, cts));
+            MarkTaskActivity();
             registered.SetResult();
         }
     }
@@ -195,6 +213,7 @@ public sealed class PollingService(
         {
             runtimeHealth.EndTask();
             _runningTasks.TryRemove(task.Id, out _);
+            MarkTaskActivity();
             cts.Dispose();
         }
     }
@@ -206,6 +225,8 @@ public sealed class PollingService(
             logger.LogInformation("Starting task {TaskId}: {Name}", task.Id, task.Name);
 
             task.EnvironmentVariables["AETHEUS_AGENT_WORK_DIRECTORY"] = _options.WorkDirectory;
+            if (OperatingSystem.IsLinux())
+                task.EnvironmentVariables[AgentHelperPaths.VariableName] = AgentHelperPaths.LinuxDirectory;
             PendingTaskEnvironmentNormalizer.RehomeMirrorCloneUrls(
                 task.EnvironmentVariables,
                 _options.ServerUrl,
@@ -288,6 +309,10 @@ public sealed class PollingService(
         }
     }
 
+    private static bool ChangesHostServices(OperationKind operation) => operation is
+        OperationKind.ServiceStart or OperationKind.ServiceStop or OperationKind.ServiceRestart or
+        OperationKind.ServiceEnable or OperationKind.ServiceInstall or OperationKind.ServiceUninstall;
+
     private async Task ExecuteOperationAsync(PendingTaskDto task, CancellationToken ct)
     {
         // Transition the claimed task before resolving the local handler. Older agents may not know
@@ -336,6 +361,9 @@ public sealed class PollingService(
         try
         {
             await CompleteTaskAsync(task.Id, result, CancellationToken.None).ConfigureAwait(false);
+            // Recette R-508: whatever the outcome, the host's services may have changed.
+            if (ChangesHostServices(task.Operation))
+                runtimeHealth.RequestHeartbeat();
         }
         finally
         {

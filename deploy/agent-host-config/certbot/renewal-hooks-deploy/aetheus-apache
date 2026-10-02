@@ -1,0 +1,4 @@
+#!/bin/sh
+# Managed by the Aetheus agent installer: serve a renewed certificate right away.
+command -v apache2ctl >/dev/null 2>&1 || exit 0
+apache2ctl configtest && systemctl reload apache2

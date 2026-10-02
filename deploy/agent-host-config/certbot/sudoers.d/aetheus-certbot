@@ -1,0 +1,10 @@
+# Aetheus Agent - certbot management. The helpers are the security boundary: root-owned,
+# agent-non-writable, re-validate every domain/cert name, and only issue/renew/delete/revoke certs.
+# noexec is intentionally omitted (the helpers are vetted scripts that must exec certbot/openssl/apache2ctl).
+# Domains/email travel in env (kept off argv) and are preserved through sudo via env_keep.
+Cmnd_Alias AETHEUS_CERTBOT = #{CERTBOT_ISSUE_HELPER_PATH}#, #{CERTBOT_MANAGE_HELPER_PATH}#
+Defaults!AETHEUS_CERTBOT timestamp_timeout=0
+Defaults!AETHEUS_CERTBOT env_reset
+Defaults!AETHEUS_CERTBOT env_keep += "AETHEUS_CERTBOT_DOMAINS AETHEUS_CERTBOT_EMAIL AETHEUS_CERTBOT_MODE"
+Defaults!AETHEUS_CERTBOT secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_CERTBOT

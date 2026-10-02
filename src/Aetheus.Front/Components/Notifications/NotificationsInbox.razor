@@ -1,0 +1,79 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/notifications"
+@* R-114: the current user's notifications. Every row is one the backend recorded for this user; while
+   no transport exists they are all "Not configured, nothing was sent" (R-117). *@
+
+<PageTitle>@L["MyNotifications"] - Aetheus</PageTitle>
+
+@* Recette R-189: the trail under the title instead of a description, no total badge, no filter row
+   (the grid's header filters do that job), and no Refresh: the list follows the feed (R-182). *@
+<OmniPageHeader Title="@L["MyNotifications"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("notifications")" /></Icon>
+    <Actions>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="MarkAllReadAsync" Busy="@_markingAll"
+                    Disabled="@(Feed.UnreadCount == 0)"
+                    Class="@(_markingAll ? "notifications-mark-all btn-busy" : "notifications-mark-all")">
+            <OmniIcon Name="OmniIconName.CheckCircle" />
+            <span>@L["NotificationsMarkAllRead"]</span>
+        </OmniButton>
+    </Actions>
+</OmniPageHeader>
+
+<OmniAlert Severity="OmniSeverity.Info" Class="omni-u-mb-sm notifications-transport-notice">
+    <Icon><OmniIcon Name="OmniIconName.Info" /></Icon>
+    <ChildContent>@L["NotificationsNotSentNotice"]</ChildContent>
+</OmniAlert>
+
+<AetheusDataGrid @ref="_grid" TItem="NotificationDeliveryDto" Data="@_rows" Count="@_count" LoadData="@LoadData"
+    PageSize="20" AllowSorting="true" IsLoading="@_loading" Density="OmniDensity.Compact" FullHeight="true"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<NotificationDeliveryDto>(_rows, _count))"
+    RowClick="@OpenAsync"
+    RowRender="@(args => args.Class = args.Item.ReadAt is null ? "notification-row--unread" : null)">
+    <Columns>
+        @* Recette R-224: every header filter is a real column filter of the endpoint. *@
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Property="CreatedAt" Title="@L["Date"]" Width="11rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange">
+            <Template Context="row">
+                @* Recette R-299: the date itself; how long ago stays in the tooltip. *@
+                <span title="@RelativeTime.FormatAgo(L, row.CreatedAt)">@row.CreatedAt.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture)</span>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Property="IsRead" Title="@L["NotificationRead"]" Width="6rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@YesNoText">
+            <Template Context="row">
+                <OmniIcon Name="@(row.IsRead ? OmniIconName.Check : OmniIconName.Bell)"
+                          title="@(row.IsRead ? L["NotificationReadYes"] : L["NotificationReadNo"])"
+                          Label="@(row.IsRead ? L["NotificationReadYes"] : L["NotificationReadNo"])" />
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Property="EventType" Title="@L["NotificationEvent"]" Width="14rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.EventTypes" FormatFilterValue="@EventText" FilterSearchable="true">
+            <Template Context="row">
+                <span title="@row.EventType">@NotificationLabels.EventLabel(L, row.EventType)</span>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Property="ChannelName" Title="@L["NotificationChannel"]" Width="10rem" Filterable="false">
+            <Template Context="row">
+                @(row.ChannelName ?? L["NotificationChannelNone"].Value)
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Property="Subject" Title="@L["NotificationSubject"]" MinWidth="16rem" Filterable="true" />
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Property="Status" Title="@L["Status"]" Width="16rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText">
+            <Template Context="row">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@NotificationLabels.StatusVariant(row.Status)"
+                           Class="notification-status-badge">@NotificationLabels.StatusLabel(L, row.Status)</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="NotificationDeliveryDto" Title="@L["Actions"]" Width="6rem" Sortable="false" Filterable="false">
+            <Template Context="row">
+                @if (row.ReadAt is null)
+                {
+                    <span @onclick:stopPropagation="true">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => MarkReadAsync(row))"
+                                title="@L["NotificationsMarkRead"]" Label="@L["NotificationsMarkRead"]" Class="notifications-mark-read">
+                        <OmniIcon Name="OmniIconName.Check" />
+                    </OmniButton>
+                    </span>
+                }
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

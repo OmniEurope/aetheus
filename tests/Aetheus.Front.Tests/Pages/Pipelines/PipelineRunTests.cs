@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Components.Pipelines;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Pages;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -162,6 +158,24 @@ public class PipelineRunTests : BunitContext
             ],
             Reports = [new AnalysisRunGateReportDto { ReportId = 9, FindingCount = 1 }]
         });
+        // Recette R-485: the Gate tab reads its figures and its rows from the run findings route.
+        _handler.SetJsonResponse(HttpMethod.Get, "api/analysis/runs/findings", new AnalysisRunFindingsPageDto
+        {
+            Items =
+            [
+                new AnalysisRunGateFindingDto
+                {
+                    FindingId = 17, Title = "Unsafe command", Message = "Untrusted input reaches a command sink.",
+                    RuleId = "security.command", Category = AnalysisCategory.Sast, Severity = AnalysisSeverity.High,
+                    Status = AnalysisFindingStatus.Open, FilePath = "src/Runner.cs", StartLine = 42, IsNew = true
+                }
+            ],
+            TotalCount = 1,
+            Page = 1,
+            PageSize = 25,
+            OpenCount = 1,
+            NewOpenCount = 1
+        });
 
         var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 701));
 
@@ -170,13 +184,14 @@ public class PipelineRunTests : BunitContext
         var logs = cut.Markup.IndexOf("Logs", overview, StringComparison.Ordinal);
         var gate = cut.Markup.IndexOf("AnalysisGateTab", logs, StringComparison.Ordinal);
         Assert.True(overview >= 0 && overview < logs && logs < gate);
-        Assert.DoesNotContain("AnalysisFindingsReport", cut.Find(".rz-tabview-nav").TextContent);
+        Assert.DoesNotContain("AnalysisFindingsReport", cut.Find(".omni-tabs__viewport").TextContent);
         var gateTile = cut.Find(".run-overview-tiles .analysis-run-gate-tile");
         Assert.Contains("AnalysisGateOverview", gateTile.TextContent);
         Assert.Contains("AnalysisGateFindingsCount", gateTile.TextContent);
         gateTile.Click();
-        cut.WaitForState(() => cut.Markup.Contains("AnalysisGateDescription", StringComparison.Ordinal));
-        Assert.Contains("AnalysisGateDescription", cut.Markup);
+        // PLAN-003 lot 21 removed the description line under the Gate heading; the heading itself
+        // and the finding rows prove the tile opened the Gate tab.
+        cut.WaitForState(() => cut.Markup.Contains("analysis-run-gate-page", StringComparison.Ordinal));
         Assert.Contains("/analysis/findings/17", cut.Markup);
         Assert.Equal("Untrusted input reaches a command sink.", cut.Find(".analysis-finding-grid-message").TextContent);
         Assert.Equal("src/Runner.cs", cut.Find(".analysis-finding-location code").TextContent);
@@ -205,7 +220,7 @@ public class PipelineRunTests : BunitContext
 
         cut.WaitForState(() => cut.Markup.Contains("running-quality", StringComparison.Ordinal));
         Assert.Empty(cut.FindAll(".analysis-run-gate-tile"));
-        Assert.DoesNotContain("AnalysisGateTab", cut.Find(".rz-tabview-nav").TextContent);
+        Assert.DoesNotContain("AnalysisGateTab", cut.Find(".omni-tabs__viewport").TextContent);
         Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("api/analysis/runs/703/result", StringComparison.Ordinal));
     }
 
@@ -230,7 +245,7 @@ public class PipelineRunTests : BunitContext
         Assert.DoesNotContain("run-params-grid", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("RunParametersCount", cut.Find(".run-parameters-tile").TextContent);
 
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
         var method = typeof(PipelineRun).GetMethod("ShowParameters", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -321,9 +336,52 @@ public class PipelineRunTests : BunitContext
     }
 
     [Fact]
+    public void Artifacts_ShowTheirSizeAndDigest()
+    {
+        // PLAN-006 lot 12.5. The store computes a digest over the exact bytes it kept and recorded
+        // it; nothing showed it, so an artifact could not be identified across a restore.
+        _handler.SetJsonResponse("api/pipelines/runs/713", new PipelineRunDto
+        {
+            Id = 713,
+            PipelineId = 5,
+            PipelineName = "artifacts",
+            Status = PipelineStatus.Success,
+            Artifacts =
+            [
+                new PipelineArtifactDto
+                {
+                    Id = 1, Name = "app.zip", SizeBytes = 1536, StageName = "package",
+                    Sha256 = "0123456789abcdef" + new string('0', 48)
+                },
+                // Published before the store computed one: an empty cell would read as "not verified".
+                new PipelineArtifactDto { Id = 2, Name = "legacy.zip", SizeBytes = 10, StageName = "package" }
+            ]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 713));
+        cut.WaitForState(() => cut.FindAll(".run-artifacts-tile").Count == 1, TimeSpan.FromSeconds(2));
+        Assert.Single(cut.FindAll(".run-artifacts-tile")).Click();
+
+        cut.WaitForAssertion(() => Assert.Contains("app.zip", cut.Markup));
+        // Shortened on screen, complete in the title, so it can be copied and compared.
+        Assert.Contains("0123456789ab", cut.Markup);
+        Assert.Contains("0123456789abcdef" + new string('0', 48), cut.Markup);
+        // Recette R-373: the short digest is the link to its artifact.
+        var digest = cut.Find(".run-artifact-digest a.short-id__text");
+        Assert.Equal("/artifacts/1", digest.GetAttribute("href"));
+        Assert.Equal("01234567", digest.TextContent);
+        Assert.Contains(PipelineRunFormatting.FormatSize(1536), cut.Markup);
+        Assert.Contains("DigestUnavailable", cut.Markup);
+    }
+
+    [Fact]
     public void ChildRun_RendersLinkedParentPipelineTile()
     {
         _handler.SetPaginatedJsonResponse("api/git/repos?projectId=8", new List<GitLightRepoDto>());
+        _handler.SetJsonResponse("api/pipelines/runs/7/lineage", new PipelineRunLineageDto
+        {
+            Downstream = [new PipelineRunLinkDto { RunId = 51, PipelineId = 9, ProjectId = 8, PipelineName = "deploy-prod", BuildNumber = 12, Status = PipelineStatus.WaitingForApproval }]
+        });
         _handler.SetJsonResponse("api/pipelines/runs/7", new PipelineRunDto
         {
             Id = 7,
@@ -341,13 +399,39 @@ public class PipelineRunTests : BunitContext
         });
 
         var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 7));
-        cut.WaitForState(() => cut.Markup.Contains("run-parent-pipeline-tile"), TimeSpan.FromSeconds(2));
+        // R-498: the lineage tile names the parent run and the run this one started, both as links.
+        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("a.run-lineage-child")), TimeSpan.FromSeconds(2));
 
-        var tile = cut.Find("a.run-parent-pipeline-tile");
-        Assert.Equal("/pipelines/runs/42?projectId=8", tile.GetAttribute("href"));
-        Assert.Contains("ParentPipeline", tile.TextContent);
-        Assert.Contains("release-parent", tile.TextContent);
-        Assert.Contains("Run #42", tile.TextContent);
+        var tile = cut.Find(".run-lineage-tile");
+        Assert.Contains("RunLineage", tile.TextContent);
+        var parent = tile.QuerySelector("a.run-lineage-parent")!;
+        Assert.Equal("/pipelines/runs/42?projectId=8", parent.GetAttribute("href"));
+        Assert.Contains("release-parent #42", parent.TextContent);
+        var child = tile.QuerySelector("a.run-lineage-child")!;
+        Assert.Equal("/pipelines/runs/51?projectId=8", child.GetAttribute("href"));
+        Assert.Contains("deploy-prod #12", child.TextContent);
+        // It sits right after the source tile.
+        var tiles = cut.FindAll(".run-overview-tiles > *").ToList();
+        var lineageAt = tiles.FindIndex(element => element.ClassList.Contains("run-lineage-tile"));
+        Assert.True(lineageAt > 0 && tiles[lineageAt - 1].ClassList.Contains("run-source-tile") || tiles.All(element => !element.ClassList.Contains("run-source-tile")));
+    }
+
+    [Fact]
+    public void R498_ARunSomeoneLaunched_NamesThatPerson_AndAnAutomaticOneSaysSo()
+    {
+        var run = new PipelineRunDto { Id = 7, PipelineId = 5, PipelineName = "candidate", Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow };
+        _handler.SetJsonResponse("api/pipelines/runs/7/lineage", new PipelineRunLineageDto { TriggeredBy = "sony" });
+
+        var launched = Render<PipelineRunLineageTile>(parameters => parameters.Add(component => component.Run, run));
+
+        launched.WaitForAssertion(() => Assert.Equal("sony", launched.Find(".run-lineage-actor").TextContent));
+        Assert.Contains("RunLaunchedBy", launched.Markup);
+        Assert.Empty(launched.FindAll(".run-lineage-child"));
+
+        _handler.SetJsonResponse("api/pipelines/runs/8/lineage", new PipelineRunLineageDto());
+        var automatic = Render<PipelineRunLineageTile>(parameters => parameters.Add(component => component.Run, run with { Id = 8 }));
+
+        automatic.WaitForAssertion(() => Assert.Equal("RunLaunchedAutomatically", automatic.Find(".run-lineage-actor").TextContent));
     }
 
     [Fact]
@@ -378,7 +462,11 @@ public class PipelineRunTests : BunitContext
         cut.Render(parameters => parameters.Add(component => component.RunId, 318));
         cut.WaitForState(() => cut.Markup.Contains("child-ci"), TimeSpan.FromSeconds(2));
 
-        Assert.Contains("PipelineRun #318", cut.Markup);
+        // The header title is the run identity: it has to follow the parameter change, not just the
+        // body. "child-ci" appears in the run card before the header re-renders, so wait on the title.
+        cut.WaitForAssertion(
+            () => Assert.Contains("PipelineRun #318", cut.Find(".omni-page-header__title").TextContent, StringComparison.Ordinal),
+            TimeSpan.FromSeconds(2));
         Assert.Contains("child-ci", cut.Markup);
         Assert.DoesNotContain("parent-release", cut.Markup);
     }
@@ -396,7 +484,7 @@ public class PipelineRunTests : BunitContext
         });
         var cut = Render<PipelineRun>(p => p.Add(x => x.RunId, 51));
         cut.WaitForState(() => cut.FindComponents<PipelineRunLiveDuration>().Any(component =>
-            typeof(Aetheus.Front.Shared.LiveDurationComponentBase).GetField("_timer", BindingFlags.NonPublic | BindingFlags.Instance)!
+            typeof(Aetheus.Front.Components.Pipelines.LiveDurationComponentBase).GetField("_timer", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .GetValue(component.Instance) is not null));
         _handler.SetJsonResponse("api/pipelines/runs/51", new PipelineRunDto
         {
@@ -413,7 +501,7 @@ public class PipelineRunTests : BunitContext
         await cut.InvokeAsync(async () => await (Task)reload.Invoke(cut.Instance, [])!);
 
         Assert.All(cut.FindComponents<PipelineRunLiveDuration>(), component =>
-            Assert.Null(typeof(Aetheus.Front.Shared.LiveDurationComponentBase).GetField("_timer", BindingFlags.NonPublic | BindingFlags.Instance)!
+            Assert.Null(typeof(Aetheus.Front.Components.Pipelines.LiveDurationComponentBase).GetField("_timer", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .GetValue(component.Instance)));
     }
 
@@ -494,7 +582,7 @@ public class PipelineRunTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("Deploy"), TimeSpan.FromSeconds(2));
 
         // Verify the real grouping contract on the computed stage model: the 3 steps collapse into 2
-        // stages - "prepare" (1 step) and "build" (2 steps). (The timeline markup lives behind a Radzen
+        // stages - "prepare" (1 step) and "build" (2 steps). (The timeline markup lives behind a
         // tab; asserting _stages is a deterministic check of the grouping logic itself.)
         var byName = StageStepCounts(cut);
         Assert.Equal(2, byName.Count);
@@ -587,7 +675,7 @@ public class PipelineRunTests : BunitContext
     }
 
     [Fact]
-    public void StepProgress_TerminalRunDoesNotShowIncompleteRatio()
+    public void StepProgress_TotalCountsStepsTheRunNeverReached()
     {
         var run = new PipelineRunDto
         {
@@ -601,26 +689,27 @@ public class PipelineRunTests : BunitContext
                 .ToList()
         };
 
-        Assert.Equal((14, 14), PipelineRunPresentation.StepProgress(run));
+        Assert.Equal((14, 16), PipelineRunPresentation.StepProgress(run));
+        Assert.Equal((14, 16), PipelineRunPresentation.StepProgress(run with { Status = PipelineStatus.Cancelled }));
         Assert.Equal((14, 16), PipelineRunPresentation.StepProgress(run with { Status = PipelineStatus.Running }));
     }
 
     [Theory]
-    [InlineData(PipelineStatus.Success, BadgeStyle.Success)]
-    [InlineData(PipelineStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(PipelineStatus.Running, BadgeStyle.Info)]
-    public void GetRunBadge_ReturnsExpectedStyle(PipelineStatus status, BadgeStyle expected)
+    [InlineData(PipelineStatus.Success, OmniTone.Success)]
+    [InlineData(PipelineStatus.Failed, OmniTone.Danger)]
+    [InlineData(PipelineStatus.Running, OmniTone.Accent)]
+    public void GetRunBadge_ReturnsExpectedStyle(PipelineStatus status, OmniTone expected)
     {
         var result = PipelineRunFormatting.GetRunBadge(status);
         Assert.Equal(expected, result);
     }
 
     [Theory]
-    [InlineData(TaskExecutionStatus.Success, BadgeStyle.Success)]
-    [InlineData(TaskExecutionStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Running, BadgeStyle.Info)]
-    [InlineData(TaskExecutionStatus.Pending, BadgeStyle.Light)]
-    public void GetStepBadge_ReturnsExpectedStyle(TaskExecutionStatus status, BadgeStyle expected)
+    [InlineData(TaskExecutionStatus.Success, OmniTone.Success)]
+    [InlineData(TaskExecutionStatus.Failed, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Running, OmniTone.Accent)]
+    [InlineData(TaskExecutionStatus.Pending, OmniTone.Neutral)]
+    public void GetStepBadge_ReturnsExpectedStyle(TaskExecutionStatus status, OmniTone expected)
     {
         var result = PipelineRunFormatting.GetStepBadge(status);
         Assert.Equal(expected, result);

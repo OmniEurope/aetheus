@@ -84,6 +84,7 @@ internal static class PipelineReleasePublisher
             startInfo.ArgumentList.Add("--oneline");
             startInfo.ArgumentList.Add("--no-decorate");
             startInfo.ArgumentList.Add("-50");
+            GitRepositoryEnvironment.Neutralize(startInfo.Environment);
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process is null) return null;
             var output = await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
@@ -110,6 +111,7 @@ internal static class PipelineReleasePublisher
                 CreateNoWindow = true
             };
             foreach (var argument in args) startInfo.ArgumentList.Add(argument);
+            GitRepositoryEnvironment.Neutralize(startInfo.Environment);
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process is null) return null;
             var output = await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);

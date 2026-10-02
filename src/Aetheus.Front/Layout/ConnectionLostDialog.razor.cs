@@ -5,7 +5,7 @@ namespace Aetheus.Front.Layout;
 /// <summary>
 /// Full-screen overlay shown when the realtime hub connection is lost. Presentational only: the
 /// detection, grace period, countdown and manual-reconnect orchestration live in <c>MainLayout</c>,
-/// which drives this component through its parameters. Mirrors the Astraia connection-lost dialog.
+/// which drives <c>OmniConnectionOverlay</c> through this component's parameters.
 /// </summary>
 public partial class ConnectionLostDialog
 {
@@ -17,6 +17,12 @@ public partial class ConnectionLostDialog
 
     /// <summary>True while a manual reconnect is in flight (spinner hidden, button busy).</summary>
     [Parameter] public bool ManualReconnecting { get; set; }
+
+    /// <summary>
+    /// Why the last attempt failed, when the tracker knows. Shown verbatim: the overlay saying only
+    /// "connection lost" is what made a real incident impossible to describe without opening F12.
+    /// </summary>
+    [Parameter] public string? LastFailureReason { get; set; }
 
     /// <summary>Invoked when the user clicks the manual reconnect button.</summary>
     [Parameter] public EventCallback OnManualReconnect { get; set; }

@@ -56,10 +56,13 @@ public sealed class GitBranchProtectionService(
         return GitLightMapper.MapProtectionRuleToDto(rule);
     }
 
-    public async Task<bool> DeleteRuleAsync(int ruleId, CancellationToken ct = default)
+    public async Task<bool> DeleteRuleAsync(int repoId, int ruleId, CancellationToken ct = default)
     {
         var rule = await repository.FindBranchProtectionRuleAsync(ruleId, ct).ConfigureAwait(false);
-        if (rule is null) return false;
+        // The caller is authorized on repoId, so a rule belonging to another repository must be
+        // refused here rather than deleted: the id alone carried no ownership, which let an admin of
+        // one repository drop the force-push and pull-request protections of any other.
+        if (rule is null || rule.GitInternalRepoId != repoId) return false;
 
         await repository.RemoveBranchProtectionRuleAsync(rule, ct).ConfigureAwait(false);
         await audit.LogAsync(

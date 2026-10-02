@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.VariableLibraries;
 using Aetheus.Back.Components.Vaults;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests.Pipelines;
@@ -26,14 +25,14 @@ public class PipelineVariableResolverTests
 
     private static PipelineRun NewRun(
         Project? project, string additionalVarsJson = "{}", string? commitHash = null, int buildNumber = 0) => new()
-    {
-        Id = 42,
-        PipelineId = 7,
-        CommitHash = commitHash,
-        BuildNumber = buildNumber,
-        AdditionalVariablesJson = additionalVarsJson,
-        Pipeline = new Pipeline { Id = 7, Name = "build", ProjectId = project is null ? null : 1, Project = project }
-    };
+        {
+            Id = 42,
+            PipelineId = 7,
+            CommitHash = commitHash,
+            BuildNumber = buildNumber,
+            AdditionalVariablesJson = additionalVarsJson,
+            Pipeline = new Pipeline { Id = 7, Name = "build", ProjectId = project is null ? null : 1, Project = project }
+        };
 
     [Fact]
     public async Task ResolveFullVariablesForRunAsync_InjectsSystemAndProjectVariables()
@@ -199,5 +198,155 @@ public class PipelineVariableResolverTests
 
         Assert.Equal("true", vars["runSmokeChecks"]);
         Assert.Equal("true", vars["AETHEUS_RUN_SMOKE_CHECKS"]);
+    }
+
+    /// <summary>
+    /// D-03: a variables block can fall back. A pipeline referencing a capability the control plane
+    /// does not serve yet stays launchable, and the value it expands to is the default rather than
+    /// the literal text - which used to be baked into the images.
+    /// </summary>
+    [Fact]
+    public async Task ResolveFullVariablesForRunAsync_AppliesADefaultForANameNothingProvides()
+    {
+        var run = NewRun(project: null, buildNumber: 12);
+        var def = new PipelineYamlDefinition
+        {
+            Name = "release-fast",
+            Trigger = "manual",
+            Variables = new Dictionary<string, string>
+            {
+                ["APP_VERSION"] = "1.1.$(RELEASE_COUNTER:-$(BUILD_PIPELINE_RUNNUMBER))",
+                ["CHANNEL"] = "$(RELEASE_CHANNEL:-stable)",
+                ["EXPLICIT"] = "$(BUILD_PIPELINE_RUNNUMBER:-0)"
+            }
+        };
+
+        var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
+
+        Assert.Equal("stable", vars["CHANNEL"]);
+        Assert.Equal("12", vars["EXPLICIT"]);
+        // One substitution does not nest a default, but resolution expands in passes: the inner
+        // reference resolves first, then the outer default applies. That is the release-fast case -
+        // a new counter with the per-pipeline run number as its fallback.
+        Assert.Equal("1.1.12", vars["APP_VERSION"]);
+    }
+
+    /// <summary>
+    /// A default on a name some step publishes later must NOT be applied at resolution: it would be
+    /// baked in before the real value exists. It stays pending and is resolved once outputs are known.
+    /// </summary>
+    [Fact]
+    public async Task ResolveFullVariablesForRunAsync_KeepsADefaultPendingForANameAStepPublishes()
+    {
+        var run = NewRun(project: null);
+        var def = new PipelineYamlDefinition
+        {
+            Name = "deploy",
+            Trigger = "manual",
+            Variables = new Dictionary<string, string> { ["BROWSER_IMAGE"] = "smoke:$(SOURCE_COMMIT:-latest)" },
+            Stages =
+            [
+                new PipelineStageDefinition
+                {
+                    Name = "Prepare",
+                    Steps = [new PipelineStepDefinition { Name = "prepare", Shell = "sh prepare.sh", Outputs = ["SOURCE_COMMIT"] }]
+                }
+            ]
+        };
+
+        var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
+
+        Assert.Equal("smoke:$(SOURCE_COMMIT:-latest)", vars["BROWSER_IMAGE"]);
+    }
+
+    /// <summary>
+    /// D-02: a value referencing a name a script publishes (not visible as a setvariable line in the
+    /// step text) used to be refused at every stage dispatch. Declaring it under outputs: is enough.
+    /// </summary>
+    [Fact]
+    public async Task ResolveFullVariablesForRunAsync_AcceptsAReferenceToADeclaredOutput()
+    {
+        var run = NewRun(project: null);
+        var def = new PipelineYamlDefinition
+        {
+            Name = "deploy",
+            Trigger = "manual",
+            Variables = new Dictionary<string, string> { ["BROWSER_IMAGE"] = "smoke:$(SOURCE_COMMIT)" },
+            Stages =
+            [
+                new PipelineStageDefinition
+                {
+                    Name = "Prepare",
+                    Steps = [new PipelineStepDefinition { Name = "prepare", Shell = "sh prepare.sh", Outputs = ["SOURCE_COMMIT"] }]
+                }
+            ]
+        };
+
+        var vars = await _sut.ResolveFullVariablesForRunAsync(run, def, TestContext.Current.CancellationToken);
+
+        Assert.Equal("smoke:$(SOURCE_COMMIT)", vars["BROWSER_IMAGE"]);
+    }
+
+    [Fact]
+    public async Task DropResolvedLibraryWarningsAsync_DropsOnlyTheLibraryThatNowExists()
+    {
+        // A run records its warnings at launch. The library named in the first was created afterwards,
+        // while the run was still going; the second still does not exist, and neither does the third
+        // warning name a library at all.
+        _varLib.ResolveLibrariesWithCrossAccessAndNamesAsync(
+                Arg.Any<List<string>>(), 1, Arg.Any<CancellationToken>())
+            .Returns((new Dictionary<string, string>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "aetheus-prod-host" }));
+
+        var current = await _sut.DropResolvedLibraryWarningsAsync(
+            [
+                "Variable library 'aetheus-prod-host' not found.",
+                "Variable library 'still-missing' not found.",
+                "Vault 'prod' not found."
+            ],
+            1,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            ["Variable library 'still-missing' not found.", "Vault 'prod' not found."],
+            current);
+    }
+
+    [Fact]
+    public async Task DropResolvedLibraryWarningsAsync_WithoutALibraryWarning_AsksNothing()
+    {
+        var current = await _sut.DropResolvedLibraryWarningsAsync(
+            ["Vault 'prod' not found."], 1, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["Vault 'prod' not found."], current);
+        await _varLib.DidNotReceive().ResolveLibrariesWithCrossAccessAndNamesAsync(
+            Arg.Any<List<string>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _varLib.DidNotReceive().ResolveLibrariesWithNamesAsync(
+            Arg.Any<List<string>>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DropResolvedLibraryWarningsAsync_StillMissing_KeepsTheWarning()
+    {
+        _varLib.ResolveLibrariesWithCrossAccessAndNamesAsync(
+                Arg.Any<List<string>>(), 1, Arg.Any<CancellationToken>())
+            .Returns((new Dictionary<string, string>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
+
+        var current = await _sut.DropResolvedLibraryWarningsAsync(
+            ["Variable library 'aetheus-prod-host' not found."], 1, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["Variable library 'aetheus-prod-host' not found."], current);
+    }
+
+    [Fact]
+    public async Task DropResolvedLibraryWarningsAsync_WithoutAProject_UsesTheProjectlessLookup()
+    {
+        _varLib.ResolveLibrariesWithNamesAsync(
+                Arg.Any<List<string>>(), null, Arg.Any<CancellationToken>())
+            .Returns((new Dictionary<string, string>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "shared" }));
+
+        var current = await _sut.DropResolvedLibraryWarningsAsync(
+            ["Variable library 'shared' not found."], null, TestContext.Current.CancellationToken);
+
+        Assert.Empty(current);
     }
 }

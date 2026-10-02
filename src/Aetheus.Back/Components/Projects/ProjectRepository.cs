@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Analysis;
+using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Projects;
@@ -33,13 +35,12 @@ public class ProjectRepository(
         };
 
         var items = await query
-            .Include(p => p.Pipelines)
-                .ThenInclude(pl => pl.Runs.OrderByDescending(r => r.StartedAt).Take(1))
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .AsSplitQuery()
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        // R-481: the pipeline count and the last run, without the pipelines' YAML.
+        await ProjectPipelineSummaries.AttachAsync(db, items, withLastRun: true, ct).ConfigureAwait(false);
 
         return (items, totalCount);
     }
@@ -86,32 +87,26 @@ public class ProjectRepository(
     {
         if (projectIds.Count == 0) return [];
 
-        var latestCommits = await db.GitCommits
-            .AsNoTracking()
-            .Where(commit => projectIds.Contains(commit.ProjectId))
-            .GroupBy(commit => commit.ProjectId)
-            .Select(group => group
-                .OrderByDescending(commit => commit.CommittedAt ?? commit.CreatedAt)
-                .ThenByDescending(commit => commit.Id)
-                .Select(commit => new
-                {
-                    commit.ProjectId,
-                    commit.Id,
-                    commit.Sha,
-                    commit.Message,
-                    Date = commit.CommittedAt ?? commit.CreatedAt
-                })
-                .First())
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var latestCommits = await LatestCommitsAsync(projectIds, ct).ConfigureAwait(false);
 
+        // PLAN-003 lot 8 / D24: the tile names the run a person launched, never one of its children.
+        // A child run is the one a parent's step triggered, so "root" is simply a run no step points
+        // at. Filtering here rather than walking up from the newest run keeps it one query, and the
+        // tile loses its "child of" line because there is no longer a child to explain.
+        // PLAN-005 lot 7 / D45: a root run still Running wins over a newer finished one, otherwise the
+        // tile says "last run: success" in the middle of a deployment. Running is the only status
+        // counted as in progress; among several, the most recently started. The step it is on comes
+        // back in the same row (running, else assigned, else the next pending non-system step), so
+        // the list stays within its bounded number of commands.
         var latestRuns = await db.PipelineRuns
             .AsNoTracking()
             .Where(run => run.Pipeline.ProjectId.HasValue
-                && projectIds.Contains(run.Pipeline.ProjectId.Value))
+                && projectIds.Contains(run.Pipeline.ProjectId.Value)
+                && !db.PipelineStepRuns.Any(step => step.TriggeredRunId == run.Id))
             .GroupBy(run => run.Pipeline.ProjectId!.Value)
             .Select(group => group
-                .OrderByDescending(run => run.StartedAt)
+                .OrderByDescending(run => run.Status == PipelineStatus.Running)
+                .ThenByDescending(run => run.StartedAt)
                 .ThenByDescending(run => run.Id)
                 .Select(run => new
                 {
@@ -120,15 +115,14 @@ public class ProjectRepository(
                     PipelineName = run.Pipeline.Name,
                     run.Status,
                     run.StartedAt,
-                    ParentRunId = db.PipelineStepRuns
-                        .Where(step => step.TriggeredRunId == run.Id)
-                        .OrderBy(step => step.Id)
-                        .Select(step => (int?)step.PipelineRunId)
-                        .FirstOrDefault(),
-                    ParentRunName = db.PipelineStepRuns
-                        .Where(step => step.TriggeredRunId == run.Id)
-                        .OrderBy(step => step.Id)
-                        .Select(step => step.PipelineRun.Pipeline.Name)
+                    CurrentStep = run.StepRuns
+                        .Where(step => step.Status == TaskExecutionStatus.Running
+                            || step.Status == TaskExecutionStatus.Assigned
+                            || (step.Status == TaskExecutionStatus.Pending && !step.IsSystem))
+                        .OrderBy(step => step.Status == TaskExecutionStatus.Running ? 0
+                            : step.Status == TaskExecutionStatus.Assigned ? 1 : 2)
+                        .ThenBy(step => step.Order)
+                        .Select(step => new { step.StageName, step.StepName })
                         .FirstOrDefault()
                 })
                 .First())
@@ -199,16 +193,110 @@ public class ProjectRepository(
                 run?.PipelineName,
                 run?.Status,
                 run?.StartedAt,
-                run?.ParentRunId,
-                run?.ParentRunName,
                 gradesByProject.GetValueOrDefault(projectId)?.OverallGrade,
                 productionStatus,
                 analyticsAvailable
                     ? productionApps.Where(app => app.AnalyticsEnabled).Sum(app => app.ActiveSessionCount)
+                    : null,
+                run?.Status == PipelineStatus.Running,
+                run is { Status: PipelineStatus.Running, CurrentStep: { } step }
+                    ? $"{NormalizeStageName(step.StageName)} · {step.StepName}"
                     : null);
         }
 
         return result;
+    }
+
+    private sealed record LatestCommit(int ProjectId, int Id, string Sha, string? Message, DateTime Date);
+
+    /// <summary>
+    /// Recette R-481: the newest commit of each project, one indexed top-1 lookup per project instead of
+    /// numbering every commit of every listed project. A commit's date is <c>CommittedAt ?? CreatedAt</c>;
+    /// a sort on that expression cannot use an index, so each side is looked up on its own index
+    /// (<c>ProjectId, CommittedAt, Id</c> and <c>ProjectId, CreatedAt, Id</c>) and the newer one wins.
+    /// </summary>
+    private async Task<List<LatestCommit>> LatestCommitsAsync(IReadOnlyCollection<int> projectIds, CancellationToken ct)
+    {
+        // Single-column correlated subqueries stay scalar subqueries with LIMIT 1 in SQL (an index
+        // top-1 each); a row projection here would be rewritten into a ROW_NUMBER over every commit.
+        var commits = db.GitCommits;
+        var heads = await db.Projects.AsNoTracking()
+            .Where(project => projectIds.Contains(project.Id))
+            .Select(project => new
+            {
+                ProjectId = project.Id,
+                DatedId = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt != null)
+                    .OrderByDescending(c => c.CommittedAt).ThenByDescending(c => c.Id).Select(c => (int?)c.Id).FirstOrDefault(),
+                DatedAt = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt != null)
+                    .OrderByDescending(c => c.CommittedAt).ThenByDescending(c => c.Id).Select(c => c.CommittedAt).FirstOrDefault(),
+                DatedSha = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt != null)
+                    .OrderByDescending(c => c.CommittedAt).ThenByDescending(c => c.Id).Select(c => c.Sha).FirstOrDefault(),
+                DatedMessage = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt != null)
+                    .OrderByDescending(c => c.CommittedAt).ThenByDescending(c => c.Id).Select(c => c.Message).FirstOrDefault(),
+                RecordedId = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt == null)
+                    .OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id).Select(c => (int?)c.Id).FirstOrDefault(),
+                RecordedAt = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt == null)
+                    .OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id).Select(c => (DateTime?)c.CreatedAt).FirstOrDefault(),
+                RecordedSha = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt == null)
+                    .OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id).Select(c => c.Sha).FirstOrDefault(),
+                RecordedMessage = commits.Where(c => c.ProjectId == project.Id && c.CommittedAt == null)
+                    .OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id).Select(c => c.Message).FirstOrDefault()
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // The newer of the two sides, as COALESCE(CommittedAt, CreatedAt) DESC, Id DESC ordered them.
+        return heads
+            .Select(head => new[]
+                {
+                    head.DatedId is { } datedId && head.DatedAt is { } datedAt
+                        ? new LatestCommit(head.ProjectId, datedId, head.DatedSha ?? string.Empty, head.DatedMessage, datedAt)
+                        : null,
+                    head.RecordedId is { } recordedId && head.RecordedAt is { } recordedAt
+                        ? new LatestCommit(head.ProjectId, recordedId, head.RecordedSha ?? string.Empty, head.RecordedMessage, recordedAt)
+                        : null
+                }
+                .OfType<LatestCommit>()
+                .OrderByDescending(commit => commit.Date)
+                .ThenByDescending(commit => commit.Id)
+                .FirstOrDefault())
+            .OfType<LatestCommit>()
+            .ToList();
+    }
+
+    /// <summary>
+    /// The step each run is on, as "stage · step": the running one, else the assigned one, else the
+    /// next pending non-system step. One label per run; a run with none of those has no entry.
+    /// </summary>
+    private static async Task<Dictionary<int, string>> CurrentStepLabelsAsync(
+        IQueryable<PipelineStepRun> steps, CancellationToken ct)
+    {
+        var candidates = await steps
+            .AsNoTracking()
+            .Where(step => step.Status == TaskExecutionStatus.Running
+                || step.Status == TaskExecutionStatus.Assigned
+                || (step.Status == TaskExecutionStatus.Pending && !step.IsSystem))
+            .Select(step => new
+            {
+                step.PipelineRunId,
+                step.StageName,
+                step.StepName,
+                step.Status,
+                step.Order
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return candidates
+            .GroupBy(step => step.PipelineRunId)
+            .Select(group => group
+                .OrderBy(step => step.Status == TaskExecutionStatus.Running ? 0
+                    : step.Status == TaskExecutionStatus.Assigned ? 1 : 2)
+                .ThenBy(step => step.Order)
+                .First())
+            .ToDictionary(
+                step => step.PipelineRunId,
+                step => $"{NormalizeStageName(step.StageName)} · {step.StepName}");
     }
 
     private static ProjectProductionStatus ResolveProductionStatus(IEnumerable<AppHealthStatus> statuses)
@@ -237,54 +325,47 @@ public class ProjectRepository(
             .ConfigureAwait(false);
     }
 
-    public async Task<Dictionary<int, string>> GetActiveRunStepLabelsAsync(int projectId, CancellationToken ct = default)
-    {
-        var candidates = await db.PipelineStepRuns
-            .AsNoTracking()
-            .Where(step => step.PipelineRun.Pipeline.ProjectId == projectId
+    public Task<Dictionary<int, string>> GetActiveRunStepLabelsAsync(int projectId, CancellationToken ct = default) =>
+        CurrentStepLabelsAsync(
+            db.PipelineStepRuns.Where(step => step.PipelineRun.Pipeline.ProjectId == projectId
                 && (step.PipelineRun.Status == PipelineStatus.Running
                     || step.PipelineRun.Status == PipelineStatus.Pending
-                    || step.PipelineRun.Status == PipelineStatus.WaitingForApproval)
-                && (step.Status == TaskExecutionStatus.Running
-                    || step.Status == TaskExecutionStatus.Assigned
-                    || (step.Status == TaskExecutionStatus.Pending && !step.IsSystem)))
-            .Select(step => new
-            {
-                step.PipelineRunId,
-                step.StageName,
-                step.StepName,
-                step.Status,
-                step.Order
-            })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        return candidates
-            .GroupBy(step => step.PipelineRunId)
-            .Select(group => group
-                .OrderBy(step => step.Status == TaskExecutionStatus.Running ? 0
-                    : step.Status == TaskExecutionStatus.Assigned ? 1 : 2)
-                .ThenBy(step => step.Order)
-                .First())
-            .ToDictionary(
-                step => step.PipelineRunId,
-                step => $"{NormalizeStageName(step.StageName)} · {step.StepName}");
-    }
+                    || step.PipelineRun.Status == PipelineStatus.WaitingForApproval)),
+            ct);
 
     private static string NormalizeStageName(string stageName) =>
         stageName.StartsWith("System:", StringComparison.Ordinal)
             ? stageName["System:".Length..]
             : stageName;
 
+    /// <summary>Recette R-482, R2-024: the same grade as the list's insight (the latest candidate's),
+    /// without the rest of it; its run is the candidate's root run.</summary>
+    public async Task<AnalysisGradeSummaryDto?> GetLatestGateGradeAsync(int projectId, CancellationToken ct = default) =>
+        (await analysisGrades.GetGradesAsync([projectId], ct).ConfigureAwait(false))
+            .GetValueOrDefault(projectId);
+
     public async Task<ProjectSectionCounts> GetProjectSectionCountsAsync(int projectId, CancellationToken ct = default)
     {
-        // S-TECH-N8R3: independent COUNT queries (cheap, indexed) rather than loading the collections.
-        var servers = await db.ProjectServers.CountAsync(ps => ps.ProjectId == projectId, ct).ConfigureAwait(false);
-        var releases = await db.Releases.CountAsync(r => r.ProjectId == projectId, ct).ConfigureAwait(false);
-        var vaults = await db.Vaults.CountAsync(v => v.ProjectId == projectId, ct).ConfigureAwait(false);
-        var libraries = await db.VariableLibraries.CountAsync(v => v.ProjectId == projectId, ct).ConfigureAwait(false);
-        var environments = await db.Environments.CountAsync(e => e.ProjectId == projectId, ct).ConfigureAwait(false);
-        return new ProjectSectionCounts(servers, releases, vaults, libraries, environments);
+        // Recette R-482: the six counts in one round trip (one statement with six scalar subqueries)
+        // instead of six statements one after the other; still counts, never the collections.
+        // PLAN-003 lot 29 / D23: a server also reaches the project through one of its environments.
+        // Counted apart from the direct attachments, and distinct, so a server linked to three
+        // environments of the same project counts once.
+        var counts = await db.Projects.AsNoTracking()
+            .Where(project => project.Id == projectId)
+            .Select(project => new ProjectSectionCounts(
+                db.ProjectServers.Count(ps => ps.ProjectId == projectId),
+                db.Releases.Count(r => r.ProjectId == projectId),
+                db.Vaults.Count(v => v.ProjectId == projectId),
+                db.VariableLibraries.Count(v => v.ProjectId == projectId),
+                db.Environments.Count(e => e.ProjectId == projectId),
+                db.EnvironmentServers
+                    .Where(es => es.Environment.ProjectId == projectId)
+                    .Select(es => es.ServerId)
+                    .Distinct()
+                    .Count()))
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        return counts ?? new ProjectSectionCounts(0, 0, 0, 0, 0, 0);
     }
 
     public async Task<Project?> FindProjectWithPipelinesAsync(int id, CancellationToken ct = default)
@@ -354,7 +435,7 @@ public class ProjectRepository(
 
     public async Task<(List<ProjectServer> Items, int TotalCount)> GetProjectServersPageAsync(
         int projectId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.ProjectServers
             .Where(projectServer => projectServer.ProjectId == projectId)
@@ -368,6 +449,9 @@ public class ProjectRepository(
                 || (projectServer.Server != null
                     && projectServer.Server.Name.ToLower().Contains(normalized)));
         }
+
+        // Recette R-212: the header filters of the project's servers, before the count.
+        query = ProjectServerListQuery.Columns.ApplyFilters(query, columnFilters);
 
         query = query.Include(projectServer => projectServer.Server);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
@@ -409,11 +493,9 @@ public class ProjectRepository(
 
     public async Task<(List<ServerTask> Items, int TotalCount)> GetTasksPagedAsync(
         int projectId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
-        var query = db.Tasks
-            .Where(t => t.PipelineRun != null && t.PipelineRun.Pipeline.ProjectId == projectId)
-            .AsNoTracking();
+        var query = ProjectTasks(projectId);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -421,6 +503,9 @@ public class ProjectRepository(
             query = query.Where(task => task.Name.ToLower().Contains(normalized)
                 || (task.Server != null && task.Server.Name.ToLower().Contains(normalized)));
         }
+
+        // Recette R-212: the header filters of the project's tasks, before the count.
+        query = TaskListQuery.Columns.ApplyFilters(query, columnFilters);
 
         query = query.Include(task => task.Server);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
@@ -444,9 +529,16 @@ public class ProjectRepository(
         return (items, totalCount);
     }
 
+    public Task<TaskFilterValuesDto> GetTaskFilterValuesAsync(int projectId, CancellationToken ct = default)
+        => TaskListQuery.FilterValuesAsync(ProjectTasks(projectId), ct);
+
+    private IQueryable<ServerTask> ProjectTasks(int projectId) => db.Tasks
+        .Where(t => t.PipelineRun != null && t.PipelineRun.Pipeline.ProjectId == projectId)
+        .AsNoTracking();
+
     public async Task<(List<TaskLog> Items, int TotalCount)> GetLogsPagedAsync(
         int projectId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.TaskLogs
             .Where(l => l.Task.PipelineRun != null && l.Task.PipelineRun.Pipeline.ProjectId == projectId)
@@ -457,6 +549,9 @@ public class ProjectRepository(
             var normalized = search.Trim().ToLowerInvariant();
             query = query.Where(log => log.Message.ToLower().Contains(normalized));
         }
+
+        // Recette R-212: the header filters of the project's logs, before the count.
+        query = ProjectLogListQuery.Columns.ApplyFilters(query, columnFilters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy, sortDescending) switch

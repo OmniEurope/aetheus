@@ -17,7 +17,12 @@ public interface IServerRepository
     Task<(List<ServerDto> Items, int TotalCount)> GetServersPagedProjectedAsync(
         string? search, string? sortBy, bool sortDescending,
         ServerType? type, ServerStatus? status,
-        int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
+        int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null);
+
+    /// <summary>Recette R-211: the OS, agent version and tags of every server in scope, for the list's
+    /// checkable column filters (their values, and the tag filter itself).</summary>
+    Task<List<ServerFilterFact>> GetServerFilterFactsAsync(List<int>? accessibleIds, CancellationToken ct = default);
 
     Task<Server?> GetServerDetailAsync(int id, CancellationToken ct = default);
     // Heartbeat inventory writes, security counters and metric history moved to
@@ -38,7 +43,7 @@ public interface IServerRepository
     /// </summary>
     Task<Server?> FindServerWithTokensAsync(int id, CancellationToken ct = default);
 
-    Task RemoveServerAsync(Server server, CancellationToken ct = default);
+    // Removal is no longer a plain delete: see IServerRetirementRepository (retire, then purge).
 
 
 
@@ -91,7 +96,7 @@ public interface IServerRepository
     Task<List<Project>> GetProjectsForServerAsync(int serverId, CancellationToken ct = default);
     Task<(List<Project> Items, int Total)> GetProjectsForServerPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default);
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null);
 
     Task<List<Pipeline>> GetPipelinesForServerAsync(int serverId, CancellationToken ct = default);
 
@@ -109,5 +114,13 @@ public interface IServerRepository
         List<int>? accessibleIds,
         CancellationToken ct = default);
 
-    Task<(List<TaskLog> Items, int TotalCount)> GetLogsPagedAsync(int serverId, int page, int pageSize, CancellationToken ct = default);
+    /// <summary>A page of the server's task log, narrowed by the grid's column filters (recette R-210 /
+    /// R-224) and ordered by its sort keys, newest first when it sends none.</summary>
+    Task<(List<TaskLog> Items, int TotalCount)> GetLogsPagedAsync(
+        int serverId,
+        int page,
+        int pageSize,
+        IReadOnlyList<GridFilter>? filters = null,
+        IReadOnlyList<GridSort>? sorts = null,
+        CancellationToken ct = default);
 }

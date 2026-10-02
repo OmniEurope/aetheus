@@ -4,8 +4,6 @@ using System.Text;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Agent.Core.Tests;

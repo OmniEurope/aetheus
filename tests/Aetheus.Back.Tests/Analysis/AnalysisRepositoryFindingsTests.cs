@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 
@@ -138,6 +136,23 @@ public sealed class AnalysisRepositoryFindingsTests : IDisposable
         Assert.Equal([3], bySeverity.Items.Select(row => row.Finding.Id));
         Assert.Equal([4], byStatus.Items.Select(row => row.Finding.Id));
         Assert.Equal(4, everything.TotalCount);
+    }
+
+    /// <summary>The ID column's number filter: inclusive bounds and one identifier left out.</summary>
+    [Fact]
+    public async Task GetFindingsAsync_FiltersOnTheIdColumnRange()
+    {
+        _db.AnalysisFindings.AddRange(Enumerable.Range(1, 6).Select(id => Finding(id)));
+        await SaveAsync();
+
+        var range = await _repository.GetFindingsAsync(
+            10, new AnalysisFindingPaginationRequest { IdFrom = 2, IdTo = 5, IdNot = 3 }, Ct);
+        var exact = await _repository.GetFindingsAsync(
+            10, new AnalysisFindingPaginationRequest { IdFrom = 4, IdTo = 4 }, Ct);
+
+        Assert.Equal([2, 4, 5], range.Items.Select(row => row.Finding.Id).Order());
+        Assert.Equal(3, range.TotalCount);
+        Assert.Equal([4], exact.Items.Select(row => row.Finding.Id));
     }
 
     [Fact]
@@ -503,13 +518,22 @@ public sealed class AnalysisRepositoryFindingsTests : IDisposable
             Occurrence(3, 1, 2, isNew: false));
         _db.AnalysisComponents.Add(new AnalysisComponent
         {
-            Id = 1, OrganizationId = 7, ProjectId = 10, AnalysisReportId = 1,
-            Name = "serilog", Version = "1.0.0"
+            Id = 1,
+            OrganizationId = 7,
+            ProjectId = 10,
+            AnalysisReportId = 1,
+            Name = "serilog",
+            Version = "1.0.0"
         });
         _db.AnalysisMetrics.Add(new AnalysisMetric
         {
-            Id = 1, OrganizationId = 7, ProjectId = 10, AnalysisReportId = 1,
-            Key = "coverage", Value = 80, ToolName = "coverlet"
+            Id = 1,
+            OrganizationId = 7,
+            ProjectId = 10,
+            AnalysisReportId = 1,
+            Key = "coverage",
+            Value = 80,
+            ToolName = "coverlet"
         });
         await SaveAsync();
         _db.ChangeTracker.Clear();

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
+using Aetheus.Back.Components.Auth;
 
 namespace Aetheus.Back.Components.PersonalAccessTokens;
 
@@ -37,6 +38,7 @@ public sealed class PersonalAccessTokensController(IPersonalAccessTokenService s
     }
 
     [HttpDelete("{id:int}")]
+    [NotResourceScoped("A token belongs to the calling user: RevokeAsync only matches a token of their own user id.")]
     public async Task<IActionResult> Revoke(int id, CancellationToken ct)
     {
         if (RejectPatPrincipal(out var forbid)) return forbid;

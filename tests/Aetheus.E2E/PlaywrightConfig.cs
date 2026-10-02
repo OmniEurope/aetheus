@@ -48,7 +48,7 @@ internal static class PlaywrightConfig
     /// Stable, framework-agnostic readiness hook. MainLayout puts
     /// <c>data-testid="blazor-ready"</c> on the top-level app container that only
     /// renders once the boot gate (auth/orgs/permissions) has resolved, so waiting on
-    /// it is a deterministic "the chrome is up" signal that survives Radzen class churn.
+    /// it is a deterministic "the chrome is up" signal that survives component class churn.
     /// </summary>
     public const string BlazorReadyTestId = "blazor-ready";
 }

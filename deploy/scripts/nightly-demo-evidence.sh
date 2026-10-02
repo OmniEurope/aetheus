@@ -15,8 +15,18 @@ fail() {
   exit 1
 }
 
-[ "${NIGHTLY_DEPLOY_TARGET:-}" = demo ] || fail "Nightly evidence can describe only the demo."
-[ "${DEMO_STATE_DIR:-}" = /var/lib/aetheus-demo ] || fail "Unexpected demo state directory."
+# Shape, not value: the exact path belongs to the aetheus.demo library, and pinning it here made that
+# library decorative. What must hold is that this is a demo state directory, not production's. The
+# NIGHTLY_DEPLOY_TARGET check that stood here went with the variable (PLAN-003 2.1): a deployment
+# deploys, and this production-token guard is what keeps the demo's evidence away from production.
+case "${STATE_DIR:-}" in
+  *prod*) fail "The demo state directory names production: $STATE_DIR" ;;
+  /var/lib/*/*) fail "The demo state directory must be a direct child of /var/lib: $STATE_DIR" ;;
+  /var/lib/?*) ;;
+  *) fail "The demo state directory must live under /var/lib: '${STATE_DIR:-}'" ;;
+esac
+COMPOSE_PROJECT="${COMPOSE_PROJECT:?COMPOSE_PROJECT is required}"
+APP_HOST="${APP_HOST:?APP_HOST is required}"
 WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
 SOURCE_SHA="${BUILD_SOURCEVERSION:?BUILD_SOURCEVERSION is required}"
 STARTED_EPOCH="${NIGHTLY_STARTED_EPOCH:?NIGHTLY_STARTED_EPOCH is required}"
@@ -24,7 +34,7 @@ case "$STARTED_EPOCH" in ''|*[!0-9]*) fail "NIGHTLY_STARTED_EPOCH is invalid." ;
 
 ARTIFACT_DIR="$WORKSPACE/.pipeline-artifacts"
 EVIDENCE_DIR="$WORKSPACE/.nightly-evidence"
-METRICS_FILE="$DEMO_STATE_DIR/nightly-metrics"
+METRICS_FILE="$STATE_DIR/nightly-metrics"
 [ -d "$EVIDENCE_DIR" ] || fail "The nightly evidence directory is missing."
 
 FINISHED_EPOCH="$(date -u +%s)"
@@ -76,8 +86,8 @@ cp "$METRICS_FILE" "$EVIDENCE_DIR/demo-metrics.txt"
 # The colour and the deployed revision are read back from the environment the cutover committed, not
 # from what this run intended. Reporting the intention would make this file agree with itself even
 # when the cutover landed somewhere else.
-ACTIVE_COLOR="$(cat "$DEMO_STATE_DIR/live-color" 2>/dev/null || echo unknown)"
-DEPLOYED_REVISION="$(tr -d '\r\n' < "$DEMO_STATE_DIR/source-commit" 2>/dev/null || echo unknown)"
+ACTIVE_COLOR="$(cat "$STATE_DIR/live-color" 2>/dev/null || echo unknown)"
+DEPLOYED_REVISION="$(tr -d '\r\n' < "$STATE_DIR/source-commit" 2>/dev/null || echo unknown)"
 [ "$DEPLOYED_REVISION" = "$SOURCE_SHA" ] \
   || fail "The committed demo revision is $DEPLOYED_REVISION, not the $SOURCE_SHA this run built."
 case "$ACTIVE_COLOR" in blue|green) ;; *) fail "The committed demo colour is unusable: $ACTIVE_COLOR" ;; esac
@@ -85,16 +95,21 @@ case "$ACTIVE_COLOR" in blue|green) ;; *) fail "The committed demo colour is unu
 cat > "$EVIDENCE_DIR/demo-deployment.txt" <<EOF
 schema=2
 source_sha=$SOURCE_SHA
-compose_project=$DEMO_COMPOSE_PROJECT
-host=$DEMO_HOST
+compose_project=$COMPOSE_PROJECT
+host=$APP_HOST
 active_color=$ACTIVE_COLOR
 cutover=native
 release_mutation=none
 EOF
 
-docker image rm "${NIGHTLY_BROWSER_SMOKE_IMAGE:?NIGHTLY_BROWSER_SMOKE_IMAGE is required}" >/dev/null 2>&1 || true
+# The image the preparation loaded and published (AETHEUS_BROWSER_SMOKE_IMAGE, a step output).
+docker image rm "${AETHEUS_BROWSER_SMOKE_IMAGE:?AETHEUS_BROWSER_SMOKE_IMAGE is required}" >/dev/null 2>&1 || true
 # A nightly that failed before this step leaves its 4 GB browser-smoke image behind, and nothing
 # else on the host ever removes it. Bounding the repository here keeps those leaks to the retention
 # floor instead of letting them accumulate run after run.
-sh "$WORKSPACE/deploy/scripts/retain-docker-images.sh" aetheus-back aetheus-front aetheus-nightly-browser-smoke
+# shellcheck source=deploy-identity.sh
+. "$WORKSPACE/deploy/scripts/deploy-identity.sh"
+deploy_image_repos
+sh "$WORKSPACE/deploy/scripts/retain-docker-images.sh" \
+  "$BACK_IMAGE_REPO" "$FRONT_IMAGE_REPO" "$COMPOSE_PROJECT-browser-smoke"
 echo "Independent Nightly recorded $SOURCE_SHA serving on $ACTIVE_COLOR."

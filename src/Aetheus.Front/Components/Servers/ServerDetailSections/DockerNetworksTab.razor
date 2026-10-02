@@ -1,0 +1,24 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Networks tab of the Docker section. Extracted so the parent stops carrying five tabs' worth of
+   filter state; it owns nothing but its own search box and grouping. *@
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Class="omni-u-mb-md" Gap="OmniSpacing.Small">
+    <CountBadge Value="@FilteredNetworks.Count" Variant="OmniTone.Accent" />
+    <OmniTextBox aria-label="@L["FilterNetworks"]" @bind-Value="_networkSearch" Placeholder="@L["FilterNetworks"]" Class="docker-search" />
+</OmniStack>
+<OmniDataGrid @ref="_grid" FillAvailableHeight="true" Items="@FilteredNetworks" TItem="DockerNetworkDto" KeyOf="@(row => row.NetworkId)" NewRowHighlight="@(TimeSpan.FromSeconds(5))"
+    AllowGrouping="true" ShowGroupPanel="true" @bind-Groups="_networkGroups"
+    AllGroupsExpanded="@_allNetworkGroupsExpanded" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="DockerNetworkDto" Property="Project" Title="@L["Project"]" Width="8.75rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true" />
+        <OmniDataGridColumn TItem="DockerNetworkDto" Property="Name" Title="@L["Name"]" Filterable="true" />
+        <OmniDataGridColumn TItem="DockerNetworkDto" Property="Driver" Title="@L["Driver"]" Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+        <OmniDataGridColumn TItem="DockerNetworkDto" Property="Scope" Title="@L["Scope"]" Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+        <OmniDataGridColumn TItem="DockerNetworkDto" Title="@L["ID"]" Width="8.75rem" Sortable="false">
+            <Template Context="n">
+                <span title="@n.NetworkId">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@n.NetworkId[..Math.Min(12, n.NetworkId.Length)]</OmniText>
+                </span>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</OmniDataGrid>

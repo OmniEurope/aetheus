@@ -1,0 +1,14 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerTaskAwareSectionBase
+@page "/servers/{Id:int}/mail"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@implements IDisposable
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["Mail"] - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Components.Servers.ServerDetailSections.ServerMailSection
+        @ref="_section" Server="@Loader.Server" ServerId="@Id" />
+}

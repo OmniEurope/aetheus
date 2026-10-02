@@ -74,6 +74,13 @@ internal static class RateLimitingExtensions
                     "analytics-address:"
                     + (context.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                     _ => FixedWindow(60)));
+            // PLAN-003 lot 14: a browser posts one report per violation; a broken page could post
+            // many, so this has its own partition rather than eating the global budget.
+            options.AddPolicy("csp-report", context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    "csp-report:"
+                    + (context.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                    _ => FixedWindow(30)));
             options.AddPolicy("external-login", context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     "external-login:"
@@ -128,7 +135,8 @@ internal static class RateLimitingExtensions
     {
         foreach (var name in new[]
                  {
-                     "login", "enrollment", "auth-token", "webhook", "external-login", "otlp-ingest", "web-analytics-public"
+                     "login", "enrollment", "auth-token", "webhook", "external-login", "otlp-ingest",
+                     "web-analytics-public", "csp-report"
                  })
             options.AddPolicy(name, _ => RateLimitPartition.GetNoLimiter("all"));
     }

@@ -6,7 +6,7 @@ namespace Aetheus.Agent.Core.Operations;
 /// F-32: typed operation pathway. Each <see cref="OperationKind"/> maps to a strict set of
 /// arguments built via <c>ProcessStartInfo.ArgumentList</c>. No shell, no string interpolation,
 /// no regex allow-list. The target string is validated against a per-kind pattern in
-/// <see cref="Aetheus.Shared.Validation.OperationTargetValidator"/> (shared with the backend).
+/// <see cref="Aetheus.Shared.Components.Shared.OperationTargetValidator"/> (shared with the backend).
 /// </summary>
 public interface IOperationExecutor
 {

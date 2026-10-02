@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Linq;
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -43,12 +40,12 @@ public class ModuleLinksSectionTests : BunitContext
     // ── GetTypeBadge - all enum values ────────────────────────────────────────
 
     [Theory]
-    [InlineData(ModuleLinkType.Docker, BadgeStyle.Primary)]
-    [InlineData(ModuleLinkType.Apache, BadgeStyle.Warning)]
-    [InlineData(ModuleLinkType.Certbot, BadgeStyle.Success)]
-    [InlineData(ModuleLinkType.Mail, BadgeStyle.Light)]
-    [InlineData(ModuleLinkType.Teamspeak, BadgeStyle.Light)]
-    public void GetTypeBadge_ReturnsExpectedStyle(ModuleLinkType type, BadgeStyle expected)
+    [InlineData(ModuleLinkType.Docker, OmniTone.Accent)]
+    [InlineData(ModuleLinkType.Apache, OmniTone.Warning)]
+    [InlineData(ModuleLinkType.Certbot, OmniTone.Success)]
+    [InlineData(ModuleLinkType.Mail, OmniTone.Neutral)]
+    [InlineData(ModuleLinkType.Teamspeak, OmniTone.Neutral)]
+    public void GetTypeBadge_ReturnsExpectedStyle(ModuleLinkType type, OmniTone expected)
     {
         var result = ModuleLinksTab.GetTypeBadge(type);
         Assert.Equal(expected, result);

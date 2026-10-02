@@ -69,6 +69,18 @@ $env:DB_PASSWORD = $dbPass
 $env:JWT_KEY     = $jwtKey
 $env:APP_VERSION = "local"
 
+# Both Dockerfiles copy a host publish instead of compiling, so it has to exist before any build.
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$env:DOTNET = "dotnet"
+Push-Location $repoRoot
+try {
+    & sh "deploy/scripts/publish-application.sh" ".pipeline-publish"
+    if ($LASTEXITCODE -ne 0) { throw "The host publish failed; the images would contain no application." }
+}
+finally {
+    Pop-Location
+}
+
 if ($Rebuild) {
     docker compose -f $compose -p "${appName}-local" build --no-cache
 }

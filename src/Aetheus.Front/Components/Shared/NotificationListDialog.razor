@@ -1,0 +1,17 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* PLAN-005 lot 2 / D33: the information, success and warning notifications that did not get a
+   toast of their own because three were already on screen. Errors never land here. *@
+<OmniStack Gap="OmniSpacing.Small">
+    @foreach (var message in Messages)
+    {
+        <OmniAlert Severity="@AlertSeverity(message.Severity)" data-testid="notification-list-item">
+            @if (!string.IsNullOrWhiteSpace(message.Title))
+            {
+                <strong>@message.Title</strong>
+            }
+            <div class="notification-detail-text">@message.Message</div>
+        </OmniAlert>
+    }
+    <DialogFooter OnCancel="@(() => Dialog.Close())" CancelText="@L["Close"]" />
+</OmniStack>

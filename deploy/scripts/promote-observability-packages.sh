@@ -39,7 +39,7 @@ command -v openssl >/dev/null
 # simulator from the repository removed it and the promotion died with exit 127 and no output
 # (publisher run 1238). A host that genuinely has node on PATH is unaffected.
 if ! command -v node >/dev/null 2>&1; then
-  for NODE_BIN_DIR in "${HOME:-/var/lib/aetheus-agent}"/.aetheus/node-v*/bin
+  for NODE_BIN_DIR in "${HOME:-${AETHEUS_AGENT_WORK_DIRECTORY:?HOME or AETHEUS_AGENT_WORK_DIRECTORY is required}}"/.aetheus/node-v*/bin
   do
     [ -x "$NODE_BIN_DIR/node" ] || continue
     PATH="$NODE_BIN_DIR:$PATH"

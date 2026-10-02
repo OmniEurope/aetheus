@@ -4,7 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Back.Components.Analysis;
 
@@ -102,68 +101,6 @@ internal static class AnalysisGradeEngine
             summaryCommit,
             pipelineRunId ?? summaries.Select(summary => summary.PipelineRunId).Distinct().SingleOrDefault(),
             summaries.Max(summary => summary.EvaluatedAt)));
-    }
-
-    public static AnalysisGradeSummaryDto CombineLatestDomains(
-        IEnumerable<AnalysisGradeSummaryDto> summaries)
-    {
-        var materialized = summaries.ToList();
-        var domains = materialized
-            .SelectMany(summary => summary.Domains)
-            .Where(domain => domain.Required || domain.Measures.Count > 0)
-            .GroupBy(domain => domain.Domain)
-            .Select(group => group
-                .OrderByDescending(domain => domain.EvaluatedAt)
-                .First())
-            .Concat(Enum.GetValues<AnalysisGradeDomain>()
-                .Where(domain => materialized
-                    .SelectMany(summary => summary.Domains)
-                    .All(candidate => candidate.Domain != domain
-                        || candidate.Required
-                        || candidate.Measures.Count == 0))
-                .Select(domain => new AnalysisGradeDomainDto
-                {
-                    Domain = domain,
-                    Completeness = AnalysisGradeCompleteness.Incomplete
-                }))
-            .GroupBy(domain => domain.Domain)
-            .Select(group => group.First())
-            .OrderBy(domain => domain.Domain)
-            .ToList();
-        var required = domains.Where(domain => domain.Required).ToList();
-        var complete = required.Count > 0
-            && required.All(domain => domain.Completeness == AnalysisGradeCompleteness.Complete
-                && domain.Grade.HasValue);
-        var grade = complete
-            ? required.Max(domain => domain.Grade)
-            : null;
-        AnalysisGradeDomain? limiting = grade.HasValue
-            ? required.First(domain => domain.Grade == grade).Domain
-            : null;
-        var commits = domains
-            .Where(domain => domain.Required)
-            .Select(domain => domain.CommitHash)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        var result = new AnalysisGradeSummaryDto
-        {
-            OverallGrade = grade,
-            MinimumGrade = materialized
-                .Where(summary => summary.MinimumGrade.HasValue)
-                .Select(summary => summary.MinimumGrade!.Value)
-                .Cast<AnalysisGrade?>()
-                .OrderBy(value => value)
-                .FirstOrDefault(),
-            Completeness = complete
-                ? AnalysisGradeCompleteness.Complete
-                : AnalysisGradeCompleteness.Incomplete,
-            LimitingDomain = limiting,
-            CommitHash = commits.Count == 1 ? commits[0] : null,
-            EvaluatedAt = domains.Max(domain => domain.EvaluatedAt),
-            Domains = domains
-        };
-        return WithHash(result);
     }
 
     private static PipelineAnalysisGradingDefinition? Resolve(

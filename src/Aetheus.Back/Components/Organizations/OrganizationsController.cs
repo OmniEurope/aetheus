@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs.Organizations;
-
+using Aetheus.Shared.Components.Organizations;
 namespace Aetheus.Back.Components.Organizations;
 
 [ApiController]

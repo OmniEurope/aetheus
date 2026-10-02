@@ -8,9 +8,10 @@ internal sealed class AgentUpdateConfirmationService(
     IAgentUpdateRepository repository,
     IAuditService audit,
     IHubContext<ServerHub> hub,
-    ILogger<AgentUpdateConfirmationService> logger) : IAgentUpdateConfirmationService
+    ILogger<AgentUpdateConfirmationService> logger,
+    AgentUpdateNotificationPublisher notifications) : IAgentUpdateConfirmationService
 {
-    public async Task ProcessHeartbeatAsync(
+    public async Task<string?> ProcessHeartbeatAsync(
         int serverId,
         ServerHeartbeatDto heartbeat,
         CancellationToken ct)
@@ -18,7 +19,7 @@ internal sealed class AgentUpdateConfirmationService(
         var request = await repository
             .ConfirmFromHeartbeatAsync(serverId, heartbeat, ct)
             .ConfigureAwait(false);
-        if (request is null) return;
+        if (request is null) return null;
 
         var confirmed = request.Status == AgentUpdateRequestStatus.Confirmed;
         if (!confirmed)
@@ -47,5 +48,7 @@ internal sealed class AgentUpdateConfirmationService(
                 request.Id,
                 ct)
             .ConfigureAwait(false);
+        await notifications.PublishOutcomeAsync(request, ct).ConfigureAwait(false);
+        return confirmed ? request.TargetVersion : null;
     }
 }

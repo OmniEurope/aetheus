@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Organizations;
-using Aetheus.Front.Pages.Users;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Organizations;
+using Aetheus.Front.Components.Users;
+using Aetheus.Shared.Components.Organizations;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -36,9 +34,9 @@ public sealed class SilentMutationFailureNotificationTests : BunitContext
 
         await cut.InvokeAsync(() => (Task)typeof(UserEdit)
             .GetMethod("OnAddOrg", PrivateInstance)!.Invoke(cut.Instance, [])!);
-        var notifications = Services.GetRequiredService<NotificationService>();
-        Assert.Contains(notifications.Messages, message => message.Severity == NotificationSeverity.Error);
-        notifications.Messages.Clear();
+        var notifications = Services.GetRequiredService<OmniOverlayService>();
+        Assert.Contains(notifications.Toasts(), message => message.Severity == OmniSeverity.Danger);
+        Services.ClearToasts();
 
         var org = new UserOrganizationDto(7, 70, "Org", "org", OrganizationRole.Member);
         handler.SetResponse(HttpMethod.Put, "api/organizations/7/members/70", HttpStatusCode.BadRequest);
@@ -46,7 +44,7 @@ public sealed class SilentMutationFailureNotificationTests : BunitContext
             .GetMethod("OnChangeOrgRole", PrivateInstance)!
             .Invoke(cut.Instance, [org, OrganizationRole.Maintainer])!);
 
-        Assert.Contains(notifications.Messages, message => message.Severity == NotificationSeverity.Error);
+        Assert.Contains(notifications.Toasts(), message => message.Severity == OmniSeverity.Danger);
     }
 
     [Fact]
@@ -65,8 +63,8 @@ public sealed class SilentMutationFailureNotificationTests : BunitContext
             .GetMethod("OnSaveGeneral", PrivateInstance)!.Invoke(cut.Instance, [])!);
 
         Assert.Contains(
-            Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
+            Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
     }
 
     [Fact]
@@ -84,7 +82,7 @@ public sealed class SilentMutationFailureNotificationTests : BunitContext
             .GetMethod("OnAddUser", PrivateInstance)!.Invoke(cut.Instance, [])!);
 
         Assert.Contains(
-            Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
+            Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
     }
 }

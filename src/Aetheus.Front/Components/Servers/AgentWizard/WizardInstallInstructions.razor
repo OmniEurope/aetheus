@@ -1,0 +1,35 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits AgentInstallOptionsComponentBase
+@* Renders the platform-specific install instructions (Linux or Windows). *@
+@if (IsLinux)
+{
+    <WizardCodeBlock Code="@_linuxCombined" Label="@L["WizardInstallOneCommandLabel"]" InlineLine="true" />
+    @if (!string.IsNullOrEmpty(_linuxCombinedDev))
+    {
+        <WizardCodeBlock Code="@_linuxCombinedDev" Label="@L["WizardDevHostVariantLabel"]" InlineLine="true" />
+    }
+    @if (!string.IsNullOrEmpty(Token))
+    {
+        <WizardTokenBlock Token="@Token" />
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+            <OmniIcon Name="OmniIconName.Password" Class="icon-xs-app" /> @L["WizardTokenPromptedHint"]
+        </OmniText>
+    }
+    <WizardStepSection Label="@L["WizardInstallLinuxStep1"].Value" Lines="@_linuxStep1" />
+    <WizardStepSection Label="@L["WizardInstallLinuxStep2"].Value" Lines="@_linuxStep2" />
+    <WizardStepSection Label="@L["WizardInstallLinuxStep3"].Value" Lines="@_linuxStep3" />
+}
+else
+{
+    <WizardCodeBlock Code="@_winCombined" Label="@L["WizardInstallOneCommandLabel"]" InlineLine="true" />
+    @if (!string.IsNullOrEmpty(Token))
+    {
+        <WizardTokenBlock Token="@Token" />
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+            <OmniIcon Name="OmniIconName.Password" Class="icon-xs-app" /> @L["WizardTokenPromptedHint"]
+        </OmniText>
+    }
+    <WizardStepSection Label="@L["WizardInstallWindowsStep1"].Value" Lines="@_winStep1" />
+    <WizardStepSection Label="@L["WizardInstallWindowsStep2"].Value" Lines="@_winStep2" />
+    <WizardStepSection Label="@L["WizardInstallWindowsStep3"].Value" Lines="@_winStep3" />
+}

@@ -61,4 +61,39 @@ internal sealed class PipelineRunLineageRepository(AppDbContext db) : IPipelineR
             .Where(pair => roots.ContainsKey(pair.Value))
             .ToDictionary(pair => pair.Key, pair => roots[pair.Value]);
     }
+
+    public Task<PipelineRunWindow?> GetRunWindowAsync(int runId, CancellationToken ct = default) =>
+        db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == runId)
+            .Select(run => new PipelineRunWindow(run.StartedAt, run.CompletedAt))
+            .FirstOrDefaultAsync(ct);
+
+    public Task<List<PipelineRunLinkDto>> GetDownstreamRunsAsync(
+        int runId, DateTime startedFromUtc, DateTime startedToUtc, CancellationToken ct = default)
+    {
+        // A child carries its parent in the variables it was launched with (both launch paths write
+        // UPSTREAM_RUN_ID), serialized without spaces. The run has no typed parent column; the index on
+        // StartedAt bounds the read to the runs started while the parent ran, or just after it ended,
+        // so the text match never reads the whole table.
+        // Recette R2-026: a run started by one of this run's own `type: trigger` steps (its step run
+        // records the child in TriggeredRunId) is a stage of this run, already in its timeline; only
+        // the runs launched after it (an on_success chain) are its follow-ups.
+        var parentMarker = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture, $"\"UPSTREAM_RUN_ID\":\"{runId}\"");
+        return db.PipelineRuns.AsNoTracking()
+            .Where(run => run.StartedAt >= startedFromUtc && run.StartedAt <= startedToUtc
+                && run.Id != runId && run.AdditionalVariablesJson.Contains(parentMarker)
+                && !db.PipelineStepRuns.Any(step => step.PipelineRunId == runId && step.TriggeredRunId == run.Id))
+            .OrderBy(run => run.StartedAt).ThenBy(run => run.Id)
+            .Select(run => new PipelineRunLinkDto
+            {
+                RunId = run.Id,
+                PipelineId = run.PipelineId,
+                ProjectId = run.Pipeline.ProjectId,
+                PipelineName = run.Pipeline.Name,
+                BuildNumber = run.BuildNumber,
+                Status = run.Status
+            })
+            .ToListAsync(ct);
+    }
 }

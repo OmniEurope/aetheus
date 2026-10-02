@@ -1,0 +1,25 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Releases
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniAlert Severity="OmniSeverity.Warning">
+        @string.Format(L["RollbackReleaseSummary"].Value, SourceVersion, TargetVersion, DeploymentAge)
+    </OmniAlert>
+
+    <OmniDropDown aria-label="@L["RollbackPipeline"]" TValue="int?" Options="@(Pipelines.ToOptions(item => (int?)item.Id, item => item.Name))"
+        @bind-Value="_pipelineId" Placeholder="@L["RollbackPipeline"]" Class="omni-u-w-100" />
+
+    @if (_canRestoreDatabase)
+    {
+        <OmniCheckBox TValue="bool" Value="_restoreDatabase" ValueExpression="@(() => _restoreDatabase)" ValueChanged="@(value => OnRestoreDatabaseChanged(value))">@L["RestoreDatabaseFromVerifiedBackup"]</OmniCheckBox>
+        @if (_restoreDatabase)
+        {
+            <OmniDropDown aria-label="@L["SelectVerifiedBackup"]" TValue="int?" Options="@(_verifiedBackups.ToOptions(item => (int?)item.Id, item => item.Label))"
+                @bind-Value="_backupRunId" Placeholder="@L["SelectVerifiedBackup"]" Class="omni-u-w-100" />
+            <OmniAlert Severity="OmniSeverity.Danger">@L["DatabaseRestoreWarning"]</OmniAlert>
+        }
+    }
+
+    <DialogFooter OnCancel="@(() => Dialog.Close())">
+        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@Confirm" Disabled="@(!_pipelineId.HasValue || (_restoreDatabase && !_backupRunId.HasValue))"><OmniIcon Name="OmniIconName.ArrowUUpLeft" /> <span>@L["Rollback"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

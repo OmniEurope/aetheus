@@ -10,6 +10,16 @@ public class MailAccount
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
 
+    // PLAN-005
+    public MailRecordSource Source { get; set; } = MailRecordSource.Aetheus;
+
+    /// <summary>Set by the heartbeat reconciliation when the server stopped reporting the mailbox.</summary>
+    public DateTime? MissingSince { get; set; }
+
+    /// <summary>Maildir size from the last quota report, in MiB (rounded up).</summary>
+    public int UsedMb { get; set; }
+    public DateTime? UsageMeasuredAt { get; set; }
+
     // Navigation
     public MailDomain MailDomain { get; set; } = null!;
 }

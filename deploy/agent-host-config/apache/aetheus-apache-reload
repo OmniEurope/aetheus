@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fixed-purpose root-owned helper: validate the configuration, then apply it. No arguments, no
+# environment-controlled paths.
+#
+# The configtest is not a convenience. Reloading IS how a blue-green cutover moves traffic, so a
+# reload that returns success without having applied anything would report a cutover that never
+# happened. Refusing an invalid configuration here keeps the previous colour serving and makes the
+# switch step fail honestly instead.
+set -eu
+[ "$#" -eq 0 ] || { echo "aetheus-apache-reload accepts no arguments" >&2; exit 2; }
+/usr/sbin/apache2ctl configtest || { echo "aetheus-apache-reload: configuration rejected; nothing applied" >&2; exit 1; }
+exec /bin/systemctl reload apache2.service

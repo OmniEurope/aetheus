@@ -4,8 +4,6 @@ using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -16,6 +14,7 @@ namespace Aetheus.Back.Tests;
 public class ServersControllerTests
 {
     private readonly IServerLifecycleService _serviceMock = Substitute.For<IServerLifecycleService>();
+    private readonly IServerRetirementService _retirementMock = Substitute.For<IServerRetirementService>();
     private readonly IServerHeartbeatService _heartbeatMock = Substitute.For<IServerHeartbeatService>();
     private readonly IServerServiceManagementService _servicesMock = Substitute.For<IServerServiceManagementService>();
     private readonly IServerAgentContactService _agentContactMock = Substitute.For<IServerAgentContactService>();
@@ -27,7 +26,7 @@ public class ServersControllerTests
 
     public ServersControllerTests()
     {
-        _sut = new ServersController(_serviceMock, _heartbeatMock, _servicesMock,
+        _sut = new ServersController(_serviceMock, _retirementMock, _heartbeatMock, _servicesMock,
             _agentContactMock, _diagnosticMock,
             _agentUpdateMock, _authzMock, _authServiceMock,
             Substitute.For<ILogger<ServersController>>());
@@ -158,40 +157,83 @@ public class ServersControllerTests
     }
 
     [Fact]
-    public async Task DeleteServer_Authorized_ReturnsNoContent()
+    public async Task RetireServer_Authorized_RetiresAndReturnsNoContent()
     {
         _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Admin, Arg.Any<CancellationToken>())
             .Returns(true);
-        _serviceMock.DeleteServerAsync(1, Arg.Any<CancellationToken>())
+        _retirementMock.RetireServerAsync(1, Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(true);
 
-        var result = await _sut.DeleteServer(1, TestContext.Current.CancellationToken);
+        var result = await _sut.RetireServer(1, TestContext.Current.CancellationToken);
 
         Assert.IsType<NoContentResult>(result);
+        await _retirementMock.Received(1).RetireServerAsync(1, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _retirementMock.DidNotReceive().PurgeServerAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task DeleteServer_Forbidden_ReturnsForbid()
+    public async Task RetireServer_Forbidden_ReturnsForbid()
     {
         _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Admin, Arg.Any<CancellationToken>())
             .Returns(false);
 
-        var result = await _sut.DeleteServer(1, TestContext.Current.CancellationToken);
+        var result = await _sut.RetireServer(1, TestContext.Current.CancellationToken);
 
         Assert.IsType<ForbidResult>(result);
+        await _retirementMock.DidNotReceive().RetireServerAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task DeleteServer_NotFound_ReturnsNotFound()
+    public async Task RetireServer_NotFound_ReturnsNotFound()
     {
         _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Admin, Arg.Any<CancellationToken>())
             .Returns(true);
-        _serviceMock.DeleteServerAsync(1, Arg.Any<CancellationToken>())
+        _retirementMock.RetireServerAsync(1, Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(false);
 
-        var result = await _sut.DeleteServer(1, TestContext.Current.CancellationToken);
+        var result = await _sut.RetireServer(1, TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task PurgeServer_Forbidden_ReturnsForbidWithoutPurging()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, 1, Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var result = await _sut.PurgeServer(1, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(result);
+        await _retirementMock.DidNotReceive().PurgeServerAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PurgeServer_Authorized_ReturnsNoContent_OrNotFound()
+    {
+        _authzMock.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Arg.Any<int>(), Permission.Admin, Arg.Any<CancellationToken>())
+            .Returns(true);
+        _retirementMock.PurgeServerAsync(1, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
+        _retirementMock.PurgeServerAsync(2, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(false);
+
+        Assert.IsType<NoContentResult>(await _sut.PurgeServer(1, TestContext.Current.CancellationToken));
+        Assert.IsType<NotFoundResult>(await _sut.PurgeServer(2, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GetRetiredServers_ScopesTheListToTheCallerReadableServers()
+    {
+        var accessible = new List<int> { 4 };
+        _authzMock.GetAccessibleResourceIdsAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Server, Permission.Read, Arg.Any<CancellationToken>())
+            .Returns(accessible);
+        _retirementMock.GetRetiredServersAsync(Arg.Any<PaginationRequest>(), accessible, Arg.Any<CancellationToken>())
+            .Returns(new PaginatedResult<RetiredServerDto> { Items = [new RetiredServerDto { Id = 4, Name = "vps2577917" }], TotalCount = 1 });
+
+        var result = await _sut.GetRetiredServers(new PaginationRequest(), TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PaginatedResult<RetiredServerDto>>(ok.Value);
+        Assert.Equal(4, Assert.Single(page.Items).Id);
     }
 
     [Fact]

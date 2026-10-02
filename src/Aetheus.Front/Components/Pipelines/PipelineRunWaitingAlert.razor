@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* A live run that dispatches nothing used to look identical to one making progress. The scheduler
+   records why it could not dispatch, here and in every triggered child. *@
+@if (Waits.Count > 0)
+{
+<OmniAlert Severity="OmniSeverity.Info" Title="@L["RunWaitingTitle"]" Class="omni-u-mt-sm">
+        @foreach (var wait in Waits)
+        {
+            <div>
+                @if (wait.Source is { Length: > 0 } source)
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral" Class="omni-u-me-sm">@source</OmniBadge>
+                }
+                @wait.Reason
+                @if (wait.Since is { } since)
+                {
+                    <span class="omni-u-text-muted omni-u-ms-sm">
+                        @L["RunWaitingSince"]
+                        <PipelineRunLiveDuration StartedAt="since" CompletedAt="null" IsRunning="true" />
+                    </span>
+                }
+            </div>
+        }
+</OmniAlert>
+}

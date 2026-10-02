@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Pipeline definitions (PLAN-006 lot 6): the YAML a control plane executes on real hosts. Tests:
+# tests/security-rules/aetheus-pipeline.yaml.
+rules:
+  - id: aetheus.pipeline.secret-literal-in-variables
+    languages: [generic]
+    paths:
+      include:
+        - "*.pipeline/*.yaml"
+        - "*.pipeline/*.yml"
+        - "*pipeline-templates/*.yaml"
+        - "*deploy/pipelines/*.yaml"
+    severity: ERROR
+    message: >-
+      A secret-named variable carries a literal value in the pipeline file, which every reader of the
+      repository sees. Put it in a vault and reference it.
+    metadata:
+      cwe: CWE-798
+      category: security
+    # A secret-named key whose value is neither a reference, empty, nor a boolean or number.
+    pattern-regex: (?m)^[ \t]+[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY|APIKEY|PRIVATE_KEY)[A-Z0-9_]*:[ \t]*["']?(?!\$\(|["']|true\b|false\b|\d+\b|$)[^\s"'#]
+
+  - id: aetheus.pipeline.echo-secret-reference
+    languages: [generic]
+    paths:
+      include:
+        - "*.pipeline/*.yaml"
+        - "*.pipeline/*.yml"
+        - "*pipeline-templates/*.yaml"
+        - "*deploy/pipelines/*.yaml"
+    severity: ERROR
+    message: >-
+      The step prints a secret-named variable. Masking only knows the values it was told about; a
+      derived or re-encoded value goes to the log in clear. Pass it to the command, never to echo.
+    metadata:
+      cwe: CWE-532
+      category: security
+    pattern-regex: (?m)\b(?:echo|printf)\b[^\n]*\$\(?\{?[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY|APIKEY|PRIVATE_KEY)[A-Z0-9_]*
+
+  - id: aetheus.pipeline.pipe-remote-to-shell
+    languages: [generic]
+    paths:
+      include:
+        - "*.pipeline/*.yaml"
+        - "*.pipeline/*.yml"
+        - "*pipeline-templates/*.yaml"
+        - "*deploy/pipelines/*.yaml"
+    severity: ERROR
+    message: >-
+      A download piped into a shell runs whatever the server answers, unreviewed and unpinned. The same
+      rule as aetheus.shell.pipe-remote-to-shell, for the shell written inline in a pipeline.
+    metadata:
+      cwe: CWE-494
+      category: security
+    pattern-regex: \b(?:curl|wget)\b[^\n|]*\|[ \t]*(?:sudo[ \t]+)?(?:ba|z)?sh\b

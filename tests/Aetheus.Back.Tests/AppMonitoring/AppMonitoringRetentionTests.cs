@@ -25,10 +25,8 @@ public class AppMonitoringRetentionTests : IDisposable
     public void Dispose() => _db.Dispose();
 
     [Fact]
-    public async Task AggregateRawIntoHourly_ComputesBucket_AndIsIdempotent()
+    public async Task AggregateHour_ComputesBucket_AndIsIdempotent()
     {
-        var currentHourStart = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc);
-        var rawFloor = currentHourStart.AddDays(-7);
         var hour = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc); // completed hour
 
         _db.AppHealthSamples.AddRange(
@@ -37,7 +35,7 @@ public class AppMonitoringRetentionTests : IDisposable
             new AppHealthSample { MonitoredAppId = 1, Timestamp = hour.AddMinutes(45), IsUp = false, ResponseTimeMs = null });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var written = await _repo.AggregateRawIntoHourlyAsync(currentHourStart, rawFloor, ct: TestContext.Current.CancellationToken);
+        var written = await _repo.AggregateHourAsync(hour, ct: TestContext.Current.CancellationToken);
         Assert.Equal(1, written);
 
         var agg = await _db.AppHealthHourly.AsNoTracking().SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -47,48 +45,60 @@ public class AppMonitoringRetentionTests : IDisposable
         Assert.Equal(150, agg.AvgResponseTimeMs);
 
         // Idempotent: re-running the same window must not duplicate the bucket.
-        var again = await _repo.AggregateRawIntoHourlyAsync(currentHourStart, rawFloor, ct: TestContext.Current.CancellationToken);
+        var again = await _repo.AggregateHourAsync(hour, ct: TestContext.Current.CancellationToken);
         Assert.Equal(0, again);
         Assert.Equal(1, await _db.AppHealthHourly.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task AggregateRawIntoHourly_IgnoresCurrentIncompleteHour()
+    public async Task AggregateHour_IgnoresSamplesOfTheNextHour()
     {
         var currentHourStart = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc);
-        var rawFloor = currentHourStart.AddDays(-7);
 
-        // Sample inside the current (incomplete) hour must not be aggregated yet.
+        // A sample inside the current (incomplete) hour is not part of the completed hour before it.
         _db.AppHealthSamples.Add(new AppHealthSample { MonitoredAppId = 1, Timestamp = currentHourStart.AddMinutes(5), IsUp = true, ResponseTimeMs = 50 });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var written = await _repo.AggregateRawIntoHourlyAsync(currentHourStart, rawFloor, ct: TestContext.Current.CancellationToken);
+        var written = await _repo.AggregateHourAsync(currentHourStart.AddHours(-1), ct: TestContext.Current.CancellationToken);
         Assert.Equal(0, written);
         Assert.Equal(0, await _db.AppHealthHourly.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task AggregateRawIntoHourly_WideCatchUpFloor_BackfillsHoursMissedByShortLookback()
+    public async Task R2020_AggregateHour_RollsUpEachApplicationOfTheHourOnItsOwn()
+    {
+        var hour = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc);
+        _db.MonitoredApps.Add(new MonitoredApp { Id = 2, ProjectId = 1, Name = "other" });
+        _db.AppHealthSamples.AddRange(
+            new AppHealthSample { MonitoredAppId = 1, Timestamp = hour.AddMinutes(5), IsUp = true, ResponseTimeMs = 100 },
+            new AppHealthSample { MonitoredAppId = 2, Timestamp = hour.AddMinutes(5), IsUp = false, ResponseTimeMs = null },
+            new AppHealthSample { MonitoredAppId = 2, Timestamp = hour.AddMinutes(35), IsUp = true, ResponseTimeMs = 300 });
+        // Application 1 is already rolled up for this hour: only application 2 is written.
+        _db.AppHealthHourly.Add(new AppHealthHourly { MonitoredAppId = 1, HourUtc = hour, SampleCount = 1, UpCount = 1 });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, await _repo.AggregateHourAsync(hour, ct: TestContext.Current.CancellationToken));
+
+        var other = await _db.AppHealthHourly.AsNoTracking()
+            .SingleAsync(h => h.MonitoredAppId == 2, TestContext.Current.CancellationToken);
+        Assert.Equal((2, 1, 300d), (other.SampleCount, other.UpCount, other.AvgResponseTimeMs));
+    }
+
+    [Fact]
+    public async Task R2020_MetricAggregateHour_BackfillsAnOldHourWithoutReadingTheOthers()
     {
         var metricRepo = new AppMetricRepository(_db);
         var currentHourStart = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc);
         var oldHour = currentHourStart.AddHours(-30); // beyond a 6h steady-state lookback, within a 48h catch-up
-        _db.AppMetricSamples.Add(new AppMetricSample
-        {
-            MonitoredAppId = 1,
-            MetricName = "cpu",
-            Timestamp = oldHour.AddMinutes(10),
-            Value = 5
-        });
+        _db.AppMetricSamples.AddRange(
+            new AppMetricSample { MonitoredAppId = 1, MetricName = "cpu", Timestamp = oldHour.AddMinutes(10), Value = 5 },
+            new AppMetricSample { MonitoredAppId = 1, MetricName = "cpu", Timestamp = currentHourStart.AddHours(-2), Value = 9 });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        // The steady-state 6h lookback misses it - that is the permanent-gap bug on a long downtime.
-        var shortFloor = currentHourStart.AddHours(-6);
-        Assert.Equal(0, await metricRepo.AggregateRawIntoHourlyAsync(currentHourStart, shortFloor, ct: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await metricRepo.AggregateHourAsync(oldHour, ct: TestContext.Current.CancellationToken));
 
-        // The startup catch-up widens the floor (48h) and backfills the missed hour.
-        var catchUpFloor = currentHourStart.AddHours(-48);
-        Assert.Equal(1, await metricRepo.AggregateRawIntoHourlyAsync(currentHourStart, catchUpFloor, ct: TestContext.Current.CancellationToken));
+        var rollup = await _db.AppMetricHourly.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((oldHour, 1, 5d), (rollup.HourUtc, rollup.SampleCount, rollup.AvgValue));
     }
 
     [Fact]

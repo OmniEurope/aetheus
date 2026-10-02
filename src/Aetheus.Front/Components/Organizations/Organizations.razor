@@ -1,0 +1,49 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/organizations"
+
+<PageTitle>@L["Organizations"] - Aetheus</PageTitle>
+
+<div class="iam-page iam-list-page">
+    <OmniPageHeader Title="@L["Organizations"]" Class="iam-page-header" Subtitle="@Breadcrumb.Subtitle(L["OrganizationManagement"])">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("apartment")" /></Icon>
+        <Badges>
+        </Badges>
+        <Actions>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnCreate" title="@L["NewOrganization"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        </Actions>
+    </OmniPageHeader>
+
+    <AdminIdentityNav ActiveSection="organizations" />
+
+    <div class="iam-grid-surface">
+        <AetheusDataGrid @ref="_grid" TItem="OrganizationDto" Data="@_items" Count="@_totalCount"
+            PageSize="20" IsLoading="@_loading" LoadData="@LoadDataAsync"
+            Virtualize="@AetheusGrid.RemoteVirtualization"
+            VirtualData="@(() => new OmniDataGridResult<OrganizationDto>(_items, _totalCount))"
+            FullHeight="true" RowClick="@(org => OpenDetail(org))">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="OrganizationDto" Property="Name" Title="@L["Name"]" MinWidth="180px" Filterable="true" >
+                    <Template Context="org">
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+                            <span class="server-name-link">@org.Name</span>
+                        </OmniStack>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="OrganizationDto" Property="Slug" Title="@L["Slug"]" Width="160px" Filterable="true" >
+                    <Template Context="org"><OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@org.Slug</OmniBadge></Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="OrganizationDto" Property="Description" Title="@L["Description"]" MinWidth="240px" Filterable="true" />
+                <OmniDataGridColumn TItem="OrganizationDto" Property="MemberCount" Title="@L["Members"]" Width="140px" Filterable="true" FilterOperator="OmniDataGridFilterOperator.Equals" />
+                <OmniDataGridColumn TItem="OrganizationDto" Property="ProjectCount" Title="@L["Projects"]" Width="140px" Filterable="true" FilterOperator="OmniDataGridFilterOperator.Equals" />
+                <OmniDataGridColumn TItem="OrganizationDto" Title="@L["Actions"]" Width="110px" TextAlign="OmniDataGridTextAlign.Center" Sortable="false" Filterable="false" >
+                    <Template Context="org">
+                        <span @onclick:stopPropagation="true">
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OpenDetail(org))" title="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnDelete(org))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                        </span>
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+        </AetheusDataGrid>
+    </div>
+</div>

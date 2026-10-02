@@ -2,8 +2,6 @@
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 

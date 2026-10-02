@@ -1,0 +1,17 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniFormField For="oe-pages-pipelines-stepeditdialog-1"><LabelContent>@L["StepName"]</LabelContent><ChildContent>
+        <OmniTextBox @bind-Value="_name" Id="oe-pages-pipelines-stepeditdialog-1" />
+    </ChildContent></OmniFormField>
+
+    <OmniFormField For="oe-pages-pipelines-stepeditdialog-2"><LabelContent>@L["ShellCommand"]</LabelContent><ChildContent>
+        <OmniTextArea @bind-Value="_shell" Rows="6" Class="text-mono-sm" Id="oe-pages-pipelines-stepeditdialog-2" />
+    </ChildContent></OmniFormField>
+
+    <OmniFormField For="oe-pages-pipelines-stepeditdialog-numeric-1"><LabelContent>@L["TimeoutSeconds"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_timeout" Minimum="1" Maximum="86400" Id="oe-pages-pipelines-stepeditdialog-numeric-1" /></ChildContent></OmniFormField>
+
+    <DialogFooter OnCancel="@OnCancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnSave" Disabled="@string.IsNullOrWhiteSpace(_name)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

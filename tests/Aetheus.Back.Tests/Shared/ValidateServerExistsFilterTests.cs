@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Shared;
+using Aetheus.Back.Data;
+using Aetheus.Back.Data.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
-using NSubstitute;
+using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests;
 
@@ -15,9 +16,10 @@ public class ValidateServerExistsFilterTests
     [Fact]
     public async Task ServerExists_CallsNext()
     {
-        var repoMock = Substitute.For<IServerRepository>();
-        repoMock.ServerExistsAsync(1, Arg.Any<CancellationToken>()).Returns(true);
-        var filter = new ValidateServerExistsFilter(repoMock);
+        await using var db = CreateDb();
+        db.Servers.Add(new Server { Id = 1, Name = "s1", Hostname = "s1" });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var filter = new ValidateServerExistsFilter(new ServerExistenceRepository(db));
 
         var nextCalled = false;
         var context = CreateContext(new Dictionary<string, object?> { { "serverId", 1 } });
@@ -34,9 +36,8 @@ public class ValidateServerExistsFilterTests
     [Fact]
     public async Task ServerNotFound_ReturnsNotFound()
     {
-        var repoMock = Substitute.For<IServerRepository>();
-        repoMock.ServerExistsAsync(999, Arg.Any<CancellationToken>()).Returns(false);
-        var filter = new ValidateServerExistsFilter(repoMock);
+        await using var db = CreateDb();
+        var filter = new ValidateServerExistsFilter(new ServerExistenceRepository(db));
 
         var context = CreateContext(new Dictionary<string, object?> { { "serverId", 999 } });
 
@@ -48,8 +49,8 @@ public class ValidateServerExistsFilterTests
     [Fact]
     public async Task NoServerIdArg_CallsNext()
     {
-        var repoMock = Substitute.For<IServerRepository>();
-        var filter = new ValidateServerExistsFilter(repoMock);
+        await using var db = CreateDb();
+        var filter = new ValidateServerExistsFilter(new ServerExistenceRepository(db));
 
         var nextCalled = false;
         var context = CreateContext(new Dictionary<string, object?>());
@@ -62,6 +63,12 @@ public class ValidateServerExistsFilterTests
 
         Assert.True(nextCalled);
     }
+
+    // The filter reads the shared Servers table itself (layer guard, 2026-09-25): a real in-memory
+    // database proves the query, where a substitute only proved the call.
+    private static AppDbContext CreateDb() => new(
+        new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options,
+        TimeProvider.System);
 
     private static ActionExecutingContext CreateContext(Dictionary<string, object?> actionArguments)
     {

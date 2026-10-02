@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Reflection;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -110,9 +108,12 @@ public class VisualPipelineEditorDeepTests : BunitContext
         {
             Assert.Equal(2, JSInterop.Invocations.Count(invocation =>
                 invocation.Identifier == "visualPipeline.loadLayout"));
-            var nodeStyle = cut.Find(".vp-node").GetAttribute("style");
-            Assert.Contains("--node-x: 100px", nodeStyle, StringComparison.Ordinal);
-            Assert.Contains("--node-y: 76.66666666666666px", nodeStyle, StringComparison.Ordinal);
+            // PLAN-008 lot 44: the coordinates ride as data attributes and a script copies them
+            // into the custom properties through the CSSOM, so the markup carries no style.
+            var node = cut.Find(".vp-node");
+            Assert.Equal("100", node.GetAttribute("data-node-x"));
+            Assert.Equal("76.66666666666666", node.GetAttribute("data-node-y"));
+            Assert.Null(node.GetAttribute("style"));
             Assert.DoesNotContain("vp-canvas-inner-loading", cut.Markup, StringComparison.Ordinal);
         });
     }
@@ -197,7 +198,7 @@ public class VisualPipelineEditorDeepTests : BunitContext
         try
         {
             CultureInfo.CurrentCulture = new CultureInfo("fr-FR");
-            var result = Aetheus.Front.Pages.Pipelines.VisualPipelineGeometry.BuildEdgePath(0.0, 0.0, 100.0, 50.5);
+            var result = Aetheus.Front.Components.Pipelines.VisualPipelineGeometry.BuildEdgePath(0.0, 0.0, 100.0, 50.5);
             Assert.StartsWith("M", result);
             Assert.DoesNotContain(",", result);
             Assert.Contains("100.0", result);

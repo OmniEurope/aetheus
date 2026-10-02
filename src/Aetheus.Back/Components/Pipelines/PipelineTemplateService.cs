@@ -36,7 +36,7 @@ public sealed class PipelineTemplateService(
             throw new NotFoundException("Pipeline template not found");
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetTemplateVersionsPagedAsync(
-            id, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            id, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PipelineTemplateVersionSummaryDto>
         {
             Items = items,

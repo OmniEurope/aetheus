@@ -1,0 +1,94 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+            <OmniIcon Name="OmniIconName.ShieldCheck" />
+            @if (_firewall is not null && _firewall.Installed)
+            {
+                <OmniBadge Fill="OmniFill.Solid" Tone="@(!_firewall.StatusKnown ? OmniTone.Warning : _firewall.Active ? OmniTone.Success : OmniTone.Neutral)">@(!_firewall.StatusKnown ? L["FirewallStatusUnknown"] : _firewall.Active ? L["FirewallActive"] : L["FirewallInactive"])</OmniBadge>
+            }
+        </OmniStack>
+        @if (CanManage && _firewall is { Installed: true, StatusKnown: true })
+        {
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                @if (_firewall.Active)
+                {
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => ToggleAsync(false))" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.ShieldWarning" /> <span>@L["FirewallDisable"]</span></OmniButton>
+                }
+                else
+                {
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => ToggleAsync(true))" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.ShieldCheck" /> <span>@L["FirewallEnable"]</span></OmniButton>
+                }
+            </OmniStack>
+        }
+    </OmniStack>
+
+    @if (_loading)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+    }
+    else if (_firewall is null || !_firewall.Installed)
+    {
+        <EmptyState Icon="gpp_bad" Title="@L["FirewallNotInstalledTitle"]" Description="@L["FirewallNotInstalledDescription"]" />
+    }
+    else if (!_firewall.StatusKnown)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning">
+            @(string.IsNullOrWhiteSpace(_firewall.CollectionDiagnostics)
+                ? L["FirewallStatusUnknownHint"]
+                : _firewall.CollectionDiagnostics)
+        </OmniAlert>
+    }
+    else
+    {
+        @if (!CanManage)
+        {
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted">@L["FirewallManageDisabledHint"]</OmniText>
+        }
+
+        @if (CanManage)
+        {
+            <OmniCard>
+                <OmniTemplateForm TModel="NewRuleModel" Model="@_rule" OnValidSubmit="@((EditContext context) => SubmitRuleAsync((NewRuleModel)context.Model))">
+                    <OmniDataAnnotationsValidator Localizer="@L" />
+                    <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.End">
+                        <OmniFormField For="oe-pages-servers-serverdetailsections-serverfirewallsection-numeric-1"><LabelContent>@L["FirewallPort"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_rule.Port" Minimum="1" Maximum="65535" Id="oe-pages-servers-serverdetailsections-serverfirewallsection-numeric-1" /></ChildContent></OmniFormField>
+                        <OmniFormField Label="@L["FirewallProtocol"]" For="oe-formfield-pages-servers-serverdetailsections-serverfirewallsection-1">
+                            <OmniDropDown Id="oe-formfield-pages-servers-serverdetailsections-serverfirewallsection-1" TValue="string" @bind-Value="_rule.Protocol" Options="@(Protocols.ToOptions(item => (string)item, item => item))" />
+                        </OmniFormField>
+                        <OmniFormField For="oe-pages-servers-serverdetailsections-serverfirewallsection-3"><LabelContent>@L["FirewallSource"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_rule.Source" maxlength="64" Id="oe-pages-servers-serverdetailsections-serverfirewallsection-3" />
+                        </ChildContent></OmniFormField>
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => _ruleAction = FirewallRuleAction.Allow)" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.LockOpen" /> <span>@L["FirewallAllow"]</span></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => _ruleAction = FirewallRuleAction.Deny)" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Prohibit" /> <span>@L["FirewallDeny"]</span></OmniButton>
+                    </OmniRow>
+                </OmniTemplateForm>
+            </OmniCard>
+        }
+
+        <OmniDataGrid @ref="_grid" FillAvailableHeight="true" Items="@_firewall.Rules" TItem="FirewallRuleDto" KeyOf="@(row => row.Raw)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+            <EmptyContent>
+                <EmptyState Icon="rule" Title="@L["FirewallNoRulesTitle"]" Description="@L["FirewallNoRulesDescription"]" />
+            </EmptyContent>
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="FirewallRuleDto" Property="Port" Title="@L["FirewallPort"]" Width="6.25rem"  Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators"/>
+                <OmniDataGridColumn TItem="FirewallRuleDto" Property="Protocol" Title="@L["FirewallProtocol"]" Width="6.25rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                <OmniDataGridColumn TItem="FirewallRuleDto" Property="Action" Title="@L["FirewallActionColumn"]" Width="6.875rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ActionText">
+                    <Template Context="r">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@(r.Action == "allow" ? OmniTone.Success : OmniTone.Danger)">@LocalizeAction(r.Action)</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="FirewallRuleDto" Property="Source" Title="@L["FirewallSource"]"  Filterable="true"/>
+                <OmniDataGridColumn TItem="FirewallRuleDto" Title="@L["Actions"]" MinWidth="9rem" Sortable="false">
+                    <Template Context="r">
+                        @if (CanManage && IsDeletable(r))
+                        {
+                            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteRuleAsync(r))" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+        </OmniDataGrid>
+    }
+</OmniStack>

@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Shared;
 
@@ -153,7 +149,7 @@ public class ReleasesListTests : BunitContext
     {
         var cut = Render<ReleasesList>();
         var method = ListType.GetMethod("OnLoadData", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new LoadDataArgs()])!);
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new GridLoadArgs()])!);
 
         var releases = (List<ReleaseDto>)ListType.GetField("_releases", Priv)!.GetValue(cut.Instance)!;
         Assert.NotEmpty(releases);
@@ -165,7 +161,7 @@ public class ReleasesListTests : BunitContext
     {
         var cut = Render<ReleasesList>();
         var method = ListType.GetMethod("OnLoadData", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new LoadDataArgs { Skip = 25, Top = 25 }])!);
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new GridLoadArgs { Skip = 25, Top = 25 }])!);
 
         Assert.False((bool)ListType.GetField("_loading", Priv)!.GetValue(cut.Instance)!);
     }
@@ -209,7 +205,7 @@ public class ReleasesListTests : BunitContext
         const string syncUrl = "api/releases/sync/1";
         // The grid now sends its current sort with the page request, so the reload URL carries the
         // default ordering explicitly instead of leaving it implicit on the server.
-        const string reloadUrl = "api/releases?page=1&pageSize=25&sortBy=PublishedAt&sortDescending=True&projectId=1";
+        const string reloadUrl = "api/releases?page=1&pageSize=20&sortBy=PublishedAt&sortDescending=True&projectId=1";
         _handler.SetJsonResponse(HttpMethod.Post, syncUrl, new List<ReleaseDto>
         {
             new() { Id = 9, ProjectId = 1, Version = "1.2.0", Status = ReleaseStatus.Detected }
@@ -223,7 +219,7 @@ public class ReleasesListTests : BunitContext
             Items = [new ReleaseDto { Id = 9, ProjectId = 1, ProjectName = "MyProject", Version = "1.2.0", Status = ReleaseStatus.Detected }],
             TotalCount = 1,
             Page = 1,
-            PageSize = 25
+            PageSize = 20
         });
         ListType.GetField("_projectFilter", Priv)!.SetValue(cut.Instance, 1);
         var method = ListType.GetMethod("SyncReleases", Priv)!;
@@ -236,8 +232,8 @@ public class ReleasesListTests : BunitContext
             request.Method == HttpMethod.Get.Method && request.Url.Contains("api/releases?", StringComparison.Ordinal))
             > releaseGetsBeforeSync);
         cut.WaitForAssertion(() => Assert.Contains("1.2.0", cut.Markup, StringComparison.Ordinal));
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages, message =>
-            message.Severity == NotificationSeverity.Success
+        Assert.Contains(Services.Toasts(), message =>
+            message.Severity == OmniSeverity.Success
             && message.Summary == "Synced"
             && message.Detail.Contains("ReleasesSynced", StringComparison.Ordinal));
     }
@@ -328,6 +324,43 @@ public class ReleasesListTests : BunitContext
 
         cut.WaitForState(() => cut.Markup.Contains("9.9.9"), TimeSpan.FromSeconds(2));
         Assert.Contains("9.9.9", cut.Markup);
+    }
+
+    [Fact]
+    public async Task HeaderFilters_AreSentAsColumnFilters_WithNamesFromTheApi()
+    {
+        // Recette R-224: dates, status and grade lists, project and pipeline lists read from the API.
+        _handler.SetJsonResponse("api/releases/filter-values", new ReleaseFilterValuesDto
+        {
+            ProjectNames = ["MyProject"],
+            SourcePipelineNames = ["build"]
+        });
+        var cut = Render<ReleasesList>();
+        var grid = cut.FindComponent<AetheusDataGrid<ReleaseDto>>();
+        var separator = Aetheus.Shared.Components.Shared.GridFilter.ListSeparator;
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(ReleaseDto.PublishedAt), "2026-09-01",
+                    OmniDataGridFilterOperator.GreaterThanOrEquals, OmniDataGridFilterOperator.LessThan, "2026-09-10"),
+                new GridFilterDescriptor(nameof(ReleaseDto.Status), $"Published{separator}Deployed", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(ReleaseDto.SourcePipelineName), "build", OmniDataGridFilterOperator.In)
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/releases?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=PublishedAt", StringComparison.Ordinal)
+                && url.Contains("Filters[0].SecondValue=2026-09-10", StringComparison.Ordinal)
+                && url.Contains($"Filters[1].Value=Published{separator}Deployed", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Field=SourcePipelineName", StringComparison.Ordinal);
+        }));
+        var values = (ReleaseFilterValuesDto)ListType.GetField("_filterValues", Priv)!.GetValue(cut.Instance)!;
+        Assert.Equal(["build"], values.SourcePipelineNames);
     }
 
     private static Action? GetOnChangedHandler(ProjectDetailLoader loader) =>

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
@@ -60,5 +58,22 @@ public class ProjectArtifactsSectionTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.Contains("second-artifact", cut.Markup));
         Assert.DoesNotContain("first-artifact", cut.Markup);
+    }
+
+    [Fact]
+    public async Task ColumnSort_ReachesTheProjectArtifactsApi()
+    {
+        _handler.SetJsonResponse("api/artifacts/project/1", Page("alpha"));
+        var cut = Render<ProjectArtifactsSection>(p => p.Add(c => c.ProjectId, 1));
+        var method = typeof(ProjectArtifactsSection).GetMethod("OnLoadData",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance,
+            [new GridLoadArgs { Skip = 0, Top = 25, OrderBy = "Name desc" }])!);
+
+        Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains("api/artifacts/project/1", StringComparison.Ordinal)
+            && request.Url.Contains("sortBy=Name", StringComparison.Ordinal)
+            && request.Url.Contains("sortDescending=true", StringComparison.Ordinal));
     }
 }

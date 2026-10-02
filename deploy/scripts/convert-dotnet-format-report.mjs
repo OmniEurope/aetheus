@@ -8,14 +8,19 @@ export function convertDotnetFormatReport(report) {
   const results = [];
   for (const document of report) {
     if (!document || !Array.isArray(document.FileChanges)) throw new Error("The dotnet format report contains an invalid document.");
-    const reportedPath = document.FileName ?? document.FilePath;
+    // FilePath is the full path; FileName is the bare file name, which cannot be opened or told apart
+    // from a namesake in another folder.
+    const reportedPath = document.FilePath ?? document.FileName;
     if (typeof reportedPath !== "string" || reportedPath.length === 0) throw new Error("A dotnet format finding has no file name.");
     const uri = (isAbsolute(reportedPath) ? relative(process.cwd(), reportedPath) : reportedPath).replaceAll("\\", "/");
     for (const change of document.FileChanges) {
       if (!change || typeof change !== "object") throw new Error("The dotnet format report contains an invalid finding.");
       results.push({
         ruleId: String(change.DiagnosticId ?? "DOTNET_FORMAT"),
-        level: "warning",
+        // Layout is never more than a low-severity finding, and one finding is one file under one rule:
+        // without the path in its identity, every file sharing a rule collapsed into a single finding.
+        level: "note",
+        partialFingerprints: { "dotnetFormatFile/v1": uri },
         message: { text: String(change.FormatDescription ?? "dotnet format would change this source file.") },
         locations: [{ physicalLocation: {
           artifactLocation: { uri },

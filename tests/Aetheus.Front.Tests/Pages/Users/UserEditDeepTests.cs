@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Users;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Users;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Users;
 
@@ -230,15 +226,15 @@ public class UserEditDeepTests : BunitContext
     }
 
     [Theory]
-    [InlineData(Permission.Admin, BadgeStyle.Danger)]
-    [InlineData(Permission.Write, BadgeStyle.Warning)]
-    [InlineData(Permission.Read, BadgeStyle.Info)]
-    public void GetPermissionBadgeStyle_ReturnsExpected(Permission permission, BadgeStyle expected)
+    [InlineData(Permission.Admin, OmniTone.Danger)]
+    [InlineData(Permission.Write, OmniTone.Warning)]
+    [InlineData(Permission.Read, OmniTone.Accent)]
+    public void GetPermissionBadgeStyle_ReturnsExpected(Permission permission, OmniTone expected)
     {
         SetupNewUser();
         var cut = Render<UserEdit>(p => p.Add(x => x.Id, (int?)null));
         var method = typeof(UserEdit).GetMethod("GetPermissionBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [permission])!;
+        var result = (OmniTone)method.Invoke(null, [permission])!;
         Assert.Equal(expected, result);
     }
 }

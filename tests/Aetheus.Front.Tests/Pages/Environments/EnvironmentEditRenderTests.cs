@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Environments;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Environments;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -116,10 +114,10 @@ public class EnvironmentEditRenderTests : BunitContext
     {
         var method = typeof(EnvironmentEdit).GetMethod("TypeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        Assert.Equal(Radzen.BadgeStyle.Danger, method.Invoke(null, [EnvironmentType.Production]));
-        Assert.Equal(Radzen.BadgeStyle.Warning, method.Invoke(null, [EnvironmentType.Staging]));
-        Assert.Equal(Radzen.BadgeStyle.Info, method.Invoke(null, [EnvironmentType.Testing]));
-        Assert.Equal(Radzen.BadgeStyle.Success, method.Invoke(null, [EnvironmentType.Development]));
+        Assert.Equal(OmniTone.Danger, method.Invoke(null, [EnvironmentType.Production]));
+        Assert.Equal(OmniTone.Warning, method.Invoke(null, [EnvironmentType.Staging]));
+        Assert.Equal(OmniTone.Accent, method.Invoke(null, [EnvironmentType.Testing]));
+        Assert.Equal(OmniTone.Success, method.Invoke(null, [EnvironmentType.Development]));
     }
 
     [Fact]
@@ -135,6 +133,25 @@ public class EnvironmentEditRenderTests : BunitContext
             .GetValue(cut.Instance);
         Assert.NotNull(detail);
         Assert.True(detail.RequireApproval);
+    }
+
+    /// <summary>
+    /// Recette R2-001: advancing a branch is an explicit <c>type: advance-branch</c> step of the deploy
+    /// pipeline; the environment form no longer offers the hidden switch that did it.
+    /// </summary>
+    [Fact]
+    public void DoesNotOfferTheRetiredBranchAdvanceSetting()
+    {
+        SetupStubs();
+
+        var cut = Render<EnvironmentEdit>(p => p.Add(x => x.Id, 1));
+        // The approval instructions field only renders once the loaded environment is bound, so the
+        // assertions below run against the populated form, not an empty shell.
+        cut.WaitForState(() => cut.Markup.Contains("ApprovalInstructions", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(2));
+
+        Assert.DoesNotContain("AdvanceBranch", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Advance a branch", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]

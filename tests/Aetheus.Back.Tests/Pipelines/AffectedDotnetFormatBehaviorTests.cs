@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using Aetheus.Back.Components.Git;
+using Aetheus.Back.Tests.Git;
 
 namespace Aetheus.Back.Tests.Pipelines;
 
@@ -24,6 +26,7 @@ public sealed class AffectedDotnetFormatBehaviorTests
             await GitAsync(root, "init");
             await GitAsync(root, "config", "user.email", "tests@aetheus.invalid");
             await GitAsync(root, "config", "user.name", "Aetheus Tests");
+            GitFixtureGuard.AssertOwnedBy(root, root);
             Directory.CreateDirectory(Path.Combine(root, "src"));
             await File.WriteAllTextAsync(Path.Combine(root, "Aetheus.slnx"), "<Solution />\n",
                 TestContext.Current.CancellationToken);
@@ -201,6 +204,9 @@ public sealed class AffectedDotnetFormatBehaviorTests
         };
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
         foreach (var (key, value) in environment) startInfo.Environment[key] = value;
+        // WHY: pre-push hook env inheritance incident - GIT_DIR/GIT_INDEX_FILE would redirect the git
+        // calls of these fixture scripts to the real repository.
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(startInfo);
         using var process = Process.Start(startInfo)!;
         var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);

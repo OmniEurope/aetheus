@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Pages.Shared;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Pipelines;

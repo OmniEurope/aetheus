@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Environments;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Environments;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -66,14 +64,14 @@ public class EnvironmentEditExtendedTests : BunitContext
     // ── TypeStyle static method ────────────────────────────────────────────
 
     [Theory]
-    [InlineData(EnvironmentType.Production, Radzen.BadgeStyle.Danger)]
-    [InlineData(EnvironmentType.Staging, Radzen.BadgeStyle.Warning)]
-    [InlineData(EnvironmentType.Testing, Radzen.BadgeStyle.Info)]
-    [InlineData(EnvironmentType.Development, Radzen.BadgeStyle.Success)]
-    public void TypeStyle_ReturnsCorrectBadge(EnvironmentType type, Radzen.BadgeStyle expected)
+    [InlineData(EnvironmentType.Production, OmniTone.Danger)]
+    [InlineData(EnvironmentType.Staging, OmniTone.Warning)]
+    [InlineData(EnvironmentType.Testing, OmniTone.Accent)]
+    [InlineData(EnvironmentType.Development, OmniTone.Success)]
+    public void TypeStyle_ReturnsCorrectBadge(EnvironmentType type, OmniTone expected)
     {
         var method = typeof(EnvironmentEdit).GetMethod("TypeStyle", PrivStatic)!;
-        var result = (Radzen.BadgeStyle)method.Invoke(null, [type])!;
+        var result = (OmniTone)method.Invoke(null, [type])!;
         Assert.Equal(expected, result);
     }
 

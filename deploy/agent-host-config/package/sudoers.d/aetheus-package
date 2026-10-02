@@ -1,0 +1,37 @@
+# Aetheus Agent - managed-package install/uninstall. Each entry is an EXACT fully-resolved argv;
+# no wildcards. The package set mirrors Aetheus.Shared.Constants.ManageablePackages (All for install,
+# Removable for purge). An uninstall purges, never removes: `remove` left the conffiles behind and the
+# service stayed listed as installed (recette R2-031).
+Cmnd_Alias AETHEUS_PACKAGE = \
+    /usr/bin/apt-get update, \
+    /usr/bin/apt-get install -y nginx, \
+    /usr/bin/apt-get install -y apache2, \
+    /usr/bin/apt-get install -y docker.io, \
+    /usr/bin/apt-get install -y fail2ban, \
+    /usr/bin/apt-get install -y rkhunter, \
+    /usr/bin/apt-get install -y ufw, \
+    /usr/bin/apt-get install -y portsentry, \
+    /usr/bin/apt-get install -y postfix, \
+    /usr/bin/apt-get install -y dovecot-core, \
+    /usr/bin/apt-get install -y mysql-server, \
+    /usr/bin/apt-get install -y mariadb-server, \
+    /usr/bin/apt-get install -y postgresql, \
+    /usr/bin/apt-get install -y redis-server, \
+    /usr/bin/apt-get install -y mongodb-org, \
+    /usr/bin/apt-get install -y certbot, \
+    /usr/bin/apt-get purge -y nginx, \
+    /usr/bin/apt-get purge -y apache2, \
+    /usr/bin/apt-get purge -y rkhunter, \
+    /usr/bin/apt-get purge -y portsentry, \
+    /usr/bin/apt-get purge -y postfix, \
+    /usr/bin/apt-get purge -y dovecot-core, \
+    /usr/bin/apt-get purge -y certbot
+
+Defaults!AETHEUS_PACKAGE timestamp_timeout=0
+Defaults!AETHEUS_PACKAGE env_reset
+Defaults!AETHEUS_PACKAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+# Keep DEBIAN_FRONTEND so the agent can run apt non-interactively: postfix/dovecot (and anything that
+# pulls them, e.g. rkhunter) otherwise block on a debconf prompt with no controlling tty and exit 100.
+Defaults!AETHEUS_PACKAGE env_keep += "DEBIAN_FRONTEND"
+
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_PACKAGE

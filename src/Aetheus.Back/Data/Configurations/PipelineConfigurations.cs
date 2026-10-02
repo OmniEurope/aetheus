@@ -71,6 +71,7 @@ internal sealed class PipelineStepRunConfiguration : IEntityTypeConfiguration<Pi
         builder.Property(e => e.FailureReason).HasMaxLength(2048);
         builder.Property(e => e.SkippedCondition).HasMaxLength(1000);
         builder.Property(e => e.SkippedConditionVariablesJson).HasMaxLength(4000);
+        builder.Property(e => e.SkippedReason).HasMaxLength(1000);
         builder.HasOne(e => e.PipelineRun)
                .WithMany(r => r.StepRuns)
                .HasForeignKey(e => e.PipelineRunId)
@@ -82,6 +83,32 @@ internal sealed class PipelineStepRunConfiguration : IEntityTypeConfiguration<Pi
         builder.HasOne(e => e.Task)
                .WithMany()
                .HasForeignKey(e => e.TaskId)
+               .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+internal sealed class PipelineRunArtifactInputConfiguration : IEntityTypeConfiguration<PipelineRunArtifactInput>
+{
+    public void Configure(EntityTypeBuilder<PipelineRunArtifactInput> builder)
+    {
+        // Unbounded like PipelineStepRun.StepName and PipelineArtifact.Name, which these copy.
+        builder.Property(e => e.Sha256).HasMaxLength(64);
+        builder.HasIndex(e => e.PipelineRunId);
+        builder.HasIndex(e => e.ArtifactId);
+        builder.HasIndex(e => e.ReleaseId);
+        // The record lives and dies with its run; losing the artifact or the release keeps the copied
+        // name and digest readable instead of erasing the fact that they were consumed.
+        builder.HasOne(e => e.PipelineRun)
+               .WithMany()
+               .HasForeignKey(e => e.PipelineRunId)
+               .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(e => e.Artifact)
+               .WithMany()
+               .HasForeignKey(e => e.ArtifactId)
+               .OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne(e => e.Release)
+               .WithMany()
+               .HasForeignKey(e => e.ReleaseId)
                .OnDelete(DeleteBehavior.SetNull);
     }
 }

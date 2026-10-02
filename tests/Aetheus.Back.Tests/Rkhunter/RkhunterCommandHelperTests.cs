@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Rkhunter;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests;
 

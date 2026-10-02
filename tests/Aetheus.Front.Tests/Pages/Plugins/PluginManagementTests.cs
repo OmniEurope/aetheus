@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -91,15 +87,15 @@ public class PluginManagementTests : BunitContext
     }
 
     [Theory]
-    [InlineData(PluginStatus.Enabled, BadgeStyle.Success)]
-    [InlineData(PluginStatus.Disabled, BadgeStyle.Warning)]
-    [InlineData(PluginStatus.Error, BadgeStyle.Danger)]
-    public void GetStatusBadgeStyle_ReturnsExpected(PluginStatus status, BadgeStyle expected)
+    [InlineData(PluginStatus.Enabled, OmniTone.Success)]
+    [InlineData(PluginStatus.Disabled, OmniTone.Warning)]
+    [InlineData(PluginStatus.Error, OmniTone.Danger)]
+    public void GetStatusBadgeStyle_ReturnsExpected(PluginStatus status, OmniTone expected)
     {
         var method = typeof(PluginManagement).GetMethod("GetStatusBadgeStyle",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
-        var result = (BadgeStyle)method.Invoke(null, [status])!;
+        var result = (OmniTone)method.Invoke(null, [status])!;
         Assert.Equal(expected, result);
     }
 

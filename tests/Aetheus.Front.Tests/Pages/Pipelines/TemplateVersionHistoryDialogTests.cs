@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Pipelines;
 
@@ -43,7 +41,7 @@ public sealed class TemplateVersionHistoryDialogTests : BunitContext
         var cut = RenderDialog();
 
         await InvokeAsync(cut, "LoadVersionsAsync",
-            new LoadDataArgs { Skip = 10, Top = 10, OrderBy = "Version desc" });
+            new GridLoadArgs { Skip = 10, Top = 10, OrderBy = "Version desc" });
         cut.Render();
 
         Assert.Contains("page-two", cut.Markup);

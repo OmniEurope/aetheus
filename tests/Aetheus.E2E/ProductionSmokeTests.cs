@@ -15,15 +15,6 @@ public sealed class ProductionSmokeTests : E2ETestBase
     {
         var elapsed = Stopwatch.StartNew();
 
-        // The bounded deployment smoke authenticates as the self-expiring bootstrap admin identity
-        // (NameIdentifier "bootstrap", no persisted user row), so the front's boot-time
-        // GET /api/users/me/permissions resolves no DB user and returns 404 for THIS synthetic
-        // identity only - real accounts carry a user row and receive 200. Treat that single 404 as
-        // expected here instead of an unexpected browser error that fails production readiness.
-        AllowBrowserDiagnostic(new System.Text.RegularExpressions.Regex(
-            @"users/me/permissions.*status of 404|status of 404.*users/me/permissions",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase));
-
         var websocketConnected = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var serverMessageReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         Page.WebSocket += (_, socket) =>
@@ -39,7 +30,7 @@ public sealed class ProductionSmokeTests : E2ETestBase
 
         await Page.GotoAsync(FrontendUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
         await Page.WaitForSelectorAsync("[data-testid='blazor-ready']", new() { Timeout = 30000 });
-        await Expect(Page.Locator(".rz-panel-menu")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Expect(Page.Locator(".omni-panel-menu")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         var socketUrl = await websocketConnected.Task.WaitAsync(TimeSpan.FromSeconds(30));
         var serverMessage = await serverMessageReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
@@ -94,7 +85,7 @@ public sealed class ProductionSmokeTests : E2ETestBase
         if (projectCount > 0)
             await Expect(Page.GetByTestId("project-item").First).ToBeVisibleAsync(new() { Timeout = 30000 });
         else
-            await Expect(Page.GetByTestId("projects-empty").Or(Page.Locator(".rz-panel-menu")).First)
+            await Expect(Page.GetByTestId("projects-empty").Or(Page.Locator(".omni-panel-menu")).First)
                 .ToBeVisibleAsync(new() { Timeout = 30000 });
 
         var contentSecurityPolicies = await Page.EvaluateAsync<string[]>(

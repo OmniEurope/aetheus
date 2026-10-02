@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -320,6 +315,8 @@ public class RoleEditTests : BunitContext
             Description = "Role with audit logs",
             Permissions = []
         });
+        // Recette R-238: the trail's Action filter lists the audit actions.
+        _handler.SetJsonResponse("api/audit/actions", new List<string> { "Created", "Updated" });
         _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto>
         {
             Items =
@@ -342,6 +339,38 @@ public class RoleEditTests : BunitContext
             && request.Url.Contains("api/audit", StringComparison.Ordinal)
             && request.Url.Contains("entityType=Role", StringComparison.Ordinal)
             && request.Url.Contains("entityId=4", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task EntityAuditTrail_HeaderFilters_AreSentAsColumnFilters_BesideTheEntityScope()
+    {
+        // Recette R-238: the trail's timestamp range and action list reach the audit endpoint, next to
+        // the entity it is scoped to.
+        _handler.SetJsonResponse("api/audit/actions", new List<string> { "Created", "Updated" });
+        _handler.SetJsonResponse("api/audit", new PaginatedResult<AuditLogDto> { Items = [], TotalCount = 0 });
+        var cut = Render<EntityAuditTrail>(p => p.Add(x => x.EntityType, "Role").Add(x => x.EntityId, 4));
+        var grid = cut.FindComponent<AetheusDataGrid<AuditLogDto>>();
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(AuditLogDto.Timestamp), "2026-09-01T08:00:00Z",
+                    OmniDataGridFilterOperator.GreaterThanOrEquals, OmniDataGridFilterOperator.LessThan, "2026-09-01T09:00:00Z"),
+                new GridFilterDescriptor(nameof(AuditLogDto.Action), "Updated", OmniDataGridFilterOperator.In)
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/audit?", StringComparison.Ordinal)
+                && url.Contains("entityType=Role", StringComparison.Ordinal)
+                && url.Contains("entityId=4", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=Timestamp", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=Action", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Value=Updated", StringComparison.Ordinal);
+        }));
     }
 
     [Fact]
@@ -370,9 +399,9 @@ public class RoleEditTests : BunitContext
             "LoadAvailableUsersAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         await cut.InvokeAsync(async () => await (Task)loadMembers.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25, OrderBy = "Username desc" }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25, OrderBy = "Username desc" }])!);
         await cut.InvokeAsync(async () => await (Task)loadAvailable.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 0, Top = 25, Filter = "bob" }])!);
+            [new GridLoadArgs { Skip = 0, Top = 25, Filter = "bob" }])!);
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("api/roles/5/users", StringComparison.Ordinal) &&

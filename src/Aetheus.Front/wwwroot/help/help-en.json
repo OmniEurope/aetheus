@@ -5,10 +5,13 @@
     "description": "Monitor platform health, servers, projects, applications, and recent runs from a real-time overview.",
     "icon": "dashboard",
     "sections": [
-      { "title": "Platform indicators", "content": "The cards summarize online and offline servers, pending tasks, and running pipelines. Application health distinguishes an available, degraded, unavailable, or unknown service." },
-      { "title": "Servers and projects", "content": "The lists show resources you can access. Open a server or project to enter its detail workspace. Capability diagnostics identify whether an agent can build, deploy, or manage a target." },
-      { "title": "Monitored applications", "content": "The Monitored applications area lists every tracked application, its availability, and its latest status change. Current visitors appear only when web analytics are available. Data refreshes in real time when application state changes." },
-      { "title": "Recent activity", "content": "Recent runs show project, pipeline, status, and update time. Open a run to inspect its definition, steps, logs, and results." },
+      { "title": "Home tiles", "content": "The home page shows four tiles: Servers, Recent runs, Projects, and Monitored applications. Each tile header shows one badge per non-zero count, such as the number of online and offline servers. When approvals are waiting for a decision, they are listed above the tiles, each one linking to its run." },
+      { "title": "Servers and projects", "content": "The lists show resources you can access. Click a row to open the server or project in its detail workspace. Capability diagnostics identify whether an agent can build, deploy, or manage a target." },
+      { "title": "Monitored applications", "content": "The Monitored applications area lists every tracked application, its availability, and its latest status change. Current visitors appear only when web analytics are available. Data refreshes in real time when application state changes. The **Supervision** entry of the side menu gives the same list across all projects, with the last event received." },
+      { "title": "Recent activity", "content": "Recent runs show project, pipeline, status, and update time. Runs triggered by another run are grouped under their parent run; only the most recent group starts open. Open a run to inspect its definition, steps, logs, and results." },
+      { "title": "Top bar", "content": "The right side of the bar holds the connection icon (connected to the backend or not), help for the current page, pending approvals (a click opens the list, each row leads to its run), running tasks with their count, the notification bell, and the user menu. That menu shows your role, the active organization, the language, and the light, dark, or system mode; it leads to the theme and to Settings, shows the version, and ends with the **Logout** button." },
+      { "title": "Real time and reconnection", "content": "Pages follow the server in real time, with no Refresh button. If the link drops, a Connection lost screen counts down to the next attempt and closes by itself once the link is back. When you return to a tab that was in the background, a Synchronising… indicator shows while data reloads. When a new Aetheus version is deployed, a banner offers **Reload**." },
+      { "title": "Buttons and confirmations", "content": "A button's colour states its importance in its zone: blue for the main action, grey for other actions and for leaving a dialog, red for a destructive or interrupting action (delete, stop, revoke, regenerate a key). Green marks a result (badge, notification), not a button; a few chosen exceptions exist, such as the notification bell. A confirmation names its action with a precise verb (Create, Delete, Stop...) and **Go back** closes it without doing anything." },
       { "title": "Custom dashboard", "content": "An administrator can replace the standard overview with a custom dashboard marked as default. Use **Manage dashboards** to create and arrange its widgets." }
     ]
   },
@@ -18,14 +21,16 @@
     "description": "Enroll agents, monitor compatibility, and manage the services and resources available on each machine.",
     "icon": "dns",
     "sections": [
-      { "title": "Server fleet", "content": "Search by name, hostname, or tags; filter by type, status, and agent compatibility; and choose visible columns. Badges identify insecure TLS, deployment capability, and compatibility level. **Update all agents** starts a bulk operation for eligible agents." },
-      { "title": "Add an agent", "content": "The **Add agent** wizard creates a registration token and Linux or Windows instructions using the backend URL. Copy the command or all instructions, install the service on the target, and wait for its first heartbeat. Treat a registration token as a secret used only for enrollment." },
+      { "title": "Server fleet", "content": "Filter the grid from each column header: name, type, status, hostname, operating system, agent version, tags, and last heartbeat. The title badges count agents that need an update or whose compatibility is unknown; the insecure TLS badge sits in the Status column. **Add** opens the add-agent wizard. The **Tools** menu holds **Update all agents** (a bulk operation on eligible agents), **Check** (port check), **Retired servers**, and **Choose columns**." },
+      { "title": "Add an agent", "content": "The wizard moves through four steps shown at the top: **Platform** (the machine's operating system), **Capabilities** (pipeline runner, server management, deployment agent, container isolation, OS patch management, firewall management), **Install** (Linux or Windows commands using the backend URL, registration token, and install link to copy), then **Verify**, which waits for the agent's first heartbeat and leads to its page. Treat the token as a secret used only for enrollment." },
       { "title": "Presence and compatibility", "content": "Heartbeats drive Online/Offline state and metrics. **Contact agent** checks recent presence and returns diagnostics. Up to date, Update recommended, Update required, and Unknown compare version, protocol, and expected capabilities. An update may wait for active tasks to finish." },
       { "title": "Overview and properties", "content": "Overview shows CPU, memory, disk, uptime, heartbeat, and diagnostics. Properties and Configuration contain identity, tags, capabilities, runner options, container isolation, and TLS options. Edit and Delete require the appropriate permissions." },
-      { "title": "Services and modules", "content": "Services lets you select, install, start, stop, restart, or uninstall supported services. Docker, Apache, Certbot, Mail, TeamSpeak, Portsentry, and Rkhunter pages expose module-specific data and actions. Operations are blocked when the agent is offline or lacks the required capability." },
+      { "title": "Services and modules", "content": "Services lets you select, install, start, stop, restart, or uninstall supported services; a service log opens in follow mode and rereads its last lines every 30 s. Docker, Apache, Certbot, Mail, TeamSpeak, Portsentry, and Rkhunter pages expose module-specific data and actions. The Ports page holds the server's port registry: deployments declare their ports there and a reservation can be added by hand. Operations are blocked when the agent is offline or lacks the required capability." },
+      { "title": "Certbot certificates", "content": "The Certbot page shows how each certificate renews (Conforming, Not web root, Wrong web root) and the result of the last renewal test. **Normalize** makes every certificate renew through the Aetheus ACME web root. **Dry run** rehearses every renewal against the staging authority without touching real certificates. A failed test raises a notification." },
+      { "title": "Mail server", "content": "The Mail page adopts an existing Postfix/Dovecot/OpenDKIM configuration: domains, mailboxes and aliases found on the server appear as **Adopted**, and rows the server no longer reports are marked **Missing from the server** instead of being deleted. Setup provisions a working stack (LMTP delivery, authenticated submission on 587, DKIM, optional rspamd). The status card shows TLS, OpenDKIM and the spam filter; **Obtain a certificate** requests Let's Encrypt for the mail hostname. **Verify DNS** compares the published MX, SPF, DKIM and DMARC records with what the server needs. The Diagnostics tab checks services, DNS, reverse DNS and ports, sends a test email and measures mailbox usage, all without SSH." },
       { "title": "System administration", "content": "Cron, Firewall, and Updates expose system operations allowed by the agent installation. Applications, Modules, and Services reflect collected inventory. Elevation is never implicit: only capabilities enabled during installation are offered." },
       { "title": "Linked resources", "content": "Projects, Pipelines, Libraries, Vaults, Releases, Tasks, and Logs filter the resources linked to the server. They reuse the permissions, filters, and actions of their global views." },
-      { "title": "Real-time and security", "content": "Heartbeats, task states, and logs arrive in real time. Subscriptions are restored and data is reconciled after reconnect. Administrative actions remain subject to resource permissions and agent capabilities." }
+      { "title": "Real-time and security", "content": "Heartbeats, task states, and logs arrive in real time; server sections update on each heartbeat and each finished task. Subscriptions are restored and data is reconciled after reconnect. Administrative actions remain subject to resource permissions and agent capabilities." }
     ]
   },
   {
@@ -34,13 +39,14 @@
     "description": "Organize repositories, pipelines, targets, quality, backups, and operations in a shared project workspace.",
     "icon": "folder",
     "sections": [
-      { "title": "List and views", "content": "Search and filter projects by status, favorites, or sort order. Dense and comfortable modes adjust presentation. Cards can show the latest commit, run, production state, analysis grade, and users currently present." },
+      { "title": "List and views", "content": "Search and filter projects by status, favorites, or sort order. Dense and comfortable modes adjust presentation. Cards can show the latest commit, run, production state, analysis grade, and users currently present. Supervision of every project at once is the **Supervision** entry of the side menu." },
       { "title": "Create or edit", "content": "Set the name, description, repository URL, default branch, and tags. A project belongs to an organization and its actions follow permissions. The Edit page centralizes these settings." },
-      { "title": "Overview and board", "content": "Overview combines status, README, Git information, pipelines, and activity. The board organizes project work into columns and movable items when that feature is configured." },
+      { "title": "Project menu", "content": "A project's side menu lists, according to your permissions, Overview, Pipelines, Quality, Servers, Releases, Artifacts, Libraries, Vaults, Environments, Monitoring, Tasks, Logs, Git, and Edit. The header's three-dot menu holds the current section's actions (such as **Export all** in Quality), **Follow** to be notified of the project's events, and Edit." },
+      { "title": "Overview and board", "content": "Overview combines the Information and Repository cards, README, pipelines, latest commits, and activity. The board organizes project work into columns and movable items when that feature is configured." },
       { "title": "Delivery", "content": "Pipelines, Releases, Artifacts, and Environments cover definition, execution, promotion, and deliverables. Servers associates available targets with the project." },
       { "title": "Shared configuration", "content": "Libraries provide non-sensitive variables and Vaults provide encrypted secrets. Resources can be inherited according to owner scope and effective permissions." },
       { "title": "Quality, backups, and AI", "content": "Quality opens the project analysis portfolio. Backups manages policies and restore checks. AI tasks runs definitions owned by the project with a selected runner profile." },
-      { "title": "Operations", "content": "Monitoring combines availability and telemetry. Tasks and Logs filter project activity. External repository exposes the source repository connection. Sections preserve project context and update from available events." }
+      { "title": "Operations", "content": "Monitoring combines the project's monitored applications, their availability, and their telemetry. Tasks and Logs filter project activity; a task's status badge takes the colour of its state. External repository exposes the source repository connection. Sections preserve project context and update from available events." }
     ]
   },
   {
@@ -49,9 +55,9 @@
     "description": "Manage project Git mirrors and explore code, branches, commits, tags, protection rules, and pull requests.",
     "icon": "commit",
     "sections": [
-      { "title": "Create and synchronize", "content": "A repository belongs to a project and has a name, description, default branch, and status. The backend maintains a local mirror used for browsing and Git operations. Refresh to retrieve remote changes." },
+      { "title": "Create and synchronize", "content": "A repository belongs to a project and has a name, description, default branch, and status. The list separates Internal repositories and the External Repository. An external repository attached to a project that already has its internal one sits beside it, as an additional source: a pipeline builds it by naming it in its definition (`source:` with `repository:`), and its card shows the lines to write. The token stays empty for a public repository. The backend maintains a local mirror used for browsing and Git operations; pushed changes arrive with no Refresh button, and **Retry** reloads a view that failed to load." },
       { "title": "Code and files", "content": "Browse the tree, open files, copy content, and read the rendered README. Binary files are identified and are not rendered as text." },
-      { "title": "Branches, tags, and commits", "content": "Create a branch or tag, set the default branch, and inspect the commit graph. A commit view shows author, date, parents, changed files, and diff; first-parent mode clarifies merge commits." },
+      { "title": "Branches, tags, and commits", "content": "Create a branch or tag, set the default branch, and inspect the commit graph. A commit view shows author, date, parents, changed files, and diff; first-parent mode clarifies merge commits. Throughout the application, a long identifier (commit, release, artifact) is shortened to its first eight characters, with the full value as a tooltip and a link to the object." },
       { "title": "Blame and history", "content": "Blame associates each line with a commit. Commit search and branch detail pages help investigate a specific change." },
       { "title": "Protection and pull requests", "content": "Branch rules can require a pull request and prevent deletion or force-push. Pull requests expose source, target, status, and merge actions when your permissions allow them." },
       { "title": "Real-time and permissions", "content": "Branch, tag, commit, and push changes arrive in real time. Create, delete, protect, and merge actions remain subject to repository and project permissions." }
@@ -63,8 +69,8 @@
     "description": "Define deployment targets, servers, approvals, and safety controls for dynamic analysis.",
     "icon": "layers",
     "sections": [
-      { "title": "Definition", "content": "An environment belongs to a project and has a name, description, and type such as Development, Testing, Staging, or Production. Associate the servers that form the target." },
-      { "title": "Approval", "content": "Enable **Approval required** to pause deployment until a decision. Instructions describe what reviewers must check and the approval timeout limits waiting." },
+      { "title": "Definition", "content": "An environment belongs to a project and has a name, description, and type such as Development, Testing, Staging, or Production. Associate the servers that form the target. A row's **Duplicate** button creates a copy of the environment in the same project and opens it." },
+      { "title": "Approval", "content": "Enable **Approval required** to pause deployment until a decision. Instructions describe what reviewers must check and the approval timeout limits waiting. This approval is distinct from the one a pipeline can declare for a stage: approving one never satisfies the other." },
       { "title": "DAST", "content": "To allow dynamic analysis, enable DAST and explicitly state whether the environment is ephemeral and contains real data. Allowed hosts bound the targets the scanner may contact." },
       { "title": "Pipeline use", "content": "A pipeline selects the environment to resolve servers and approval rules. The run page identifies the selected target and blocks an operation whose prerequisites are not satisfied." }
     ]
@@ -75,14 +81,17 @@
     "description": "Design, validate, and run traceable CI/CD workflows with logs, results, artifacts, quality, and deployment controls.",
     "icon": "account_tree",
     "sections": [
+      { "title": "Pipelines list", "content": "The header switches between two views, **Catalog** and **Runs**, each with its count; the address keeps the chosen view. **Create** stays visible; **Import** (from a YAML file) is in the three-dot menu. The catalog filters by search, trigger, template, favorites, and pipelines with children, and its status summary is clickable. Each row carries the favorite star, **Run** with its **Options** arrow, and a three-dot menu (Edit, and Update when a newer template version exists)." },
       { "title": "Create a pipeline", "content": "Choose project, server, or owner scope, then set name, description, source branch, and trigger. A pipeline can start blank, from a template, or from a Git-managed repository definition." },
+      { "title": "Pipeline page", "content": "The page opens on the Runs tab: four tiles (success rate, average duration, last success, latest grade) then the runs grid, which scrolls with no paging. **Run** is the only visible action; the three-dot menu holds Edit, Dry Run, the template actions (Update, Promote, Extract) when they apply, and Delete. If the pipeline is changed elsewhere while you edit it, a banner offers to reload instead of overwriting your changes." },
       { "title": "YAML and visual editors", "content": "YAML mode provides formatting and validation. Visual mode organizes stages, jobs, steps, dependencies, agent, operating system, and variables. Add, duplicate, move, or delete items while keeping the equivalent definition." },
-      { "title": "Validation and dry run", "content": "**Validate YAML** checks structure. Dry run prepares resolved commands without applying effects. Review the diff before saving to understand changes from the stored version." },
+      { "title": "Validation and dry run", "content": "**Validate** checks the YAML structure. Dry run (three-dot menu) prepares resolved commands without applying effects. Review the diff before saving to understand changes from the stored version." },
+      { "title": "Launch a run", "content": "**Run** starts on the declared parameter defaults and opens the new run directly; it asks a question only when a required parameter has no default. **Options** lets you choose branch and parameters. At launch, Aetheus refuses within seconds a run that is certain to fail: a stage no runner can take, an analysis step with no up-to-date runner (the message says to update the agent from its server page), or a retained release artifact that is missing or invalid. When the refusal hits an automated launch (schedule, push, webhook), nobody is there to read it: it shows in the pipeline's list as a failed run carrying the reason, and the project's subscribers receive the \"Automatic launch refused\" notification." },
       { "title": "Variables, secrets, and connections", "content": "Libraries provide non-sensitive values, Vaults provide masked secrets, and Service connections provide integration credentials. Template and run parameters complete these values at start time." },
-      { "title": "Triggers", "content": "A run can be manual, scheduled, webhook-driven, or started by another pipeline. Branch and commit are fixed for reproducibility. Environment approvals can pause progress." },
-      { "title": "Run tracking", "content": "Run detail shows status, progress, stages, steps, duration, commands, output, and logs. Follow and search logs, collapse command or output, copy logs, and jump to top or bottom." },
-      { "title": "Cancel and rerun", "content": "Cancel an active run. Rerun a completed run on the same commit, branch head, or failed steps when available. Lineage links parent and child runs." },
-      { "title": "Results and deliverables", "content": "Tabs combine tests, coverage by file or assembly, lint, complexity, artifacts, and release. Analysis gates show reports, new findings, blockers, warnings, and missing producers." },
+      { "title": "Triggers and approvals", "content": "A run can be manual, scheduled, webhook-driven, or started by another pipeline. Branch and commit are fixed for reproducibility. Two distinct approvals can pause a stage: the one the pipeline declares and the one of the target environment. When both apply, the pipeline asks first, then the environment; approving one does not satisfy the other." },
+      { "title": "Run tracking", "content": "The page shows as soon as the run is loaded; child runs, gate, metrics, and approvals arrive behind it. Overview shows status, tiles, the compatibility attestation, and a timeline where each stage expands into its steps; a trigger step expands into the child run. The **Lineage** tile, after Source repository, says where the run comes from (the parent run, else the person who launched it, else Automatic) and which runs it started in turn, each a link with its status; among those, a run of a pipeline you cannot read is left out. The Logs tab lets you follow, search, collapse command or output, copy, and jump to top or bottom; scrolling by hand stops following until you return to the end of the log." },
+      { "title": "Cancel and rerun", "content": "Cancel an active run: the confirmation says **Stop**, and **Go back** closes it without doing anything. Rerun a completed run on the same commit, branch head, or failed steps when available. Lineage links parent and child runs." },
+      { "title": "Results and deliverables", "content": "The Artifacts tab is a grid with **Download** on each row. The Coverage tab shows line and branch coverage gauges (green from 80 %, orange from 50 %, red below), their trend, and a per-project tree (rate and covered lines) that opens on its files. Test Results, Lint, and Code quality complete them. The Gate tab shows reports, new findings, blockers, warnings, and missing producers; the YAML tab shows the definition that ran." },
       { "title": "Fleet and templates", "content": "Fleet compares pipelines linked to a template, pinned version, and latest available version. It opens compatible updates and identifies legacy unpinned references." },
       { "title": "Real-time and access", "content": "Progress, steps, logs, results, and completion arrive in real time and reconcile after reconnect. Available actions depend on pipeline, project, server, and environment permissions." }
     ]
@@ -108,8 +117,9 @@
     "icon": "data_object",
     "sections": [
       { "title": "Scope and inheritance", "content": "A library belongs to an allowed scope, such as project, environment, or project-server. Global and contextual views identify inherited resources and their origin." },
-      { "title": "Entries", "content": "Add, edit, or remove key-value pairs. Keys become references in pipeline definitions; use stable naming to avoid collisions." },
-      { "title": "Import and export", "content": "Export a library for backup or transfer, then import a compatible file. Review keys before saving because an import can replace an existing key value." },
+      { "title": "Entries", "content": "Add, edit, or remove key-value pairs. Each row offers **Copy the key** and **Copy the value**. Keys become references in pipeline definitions; use stable naming to avoid collisions." },
+      { "title": "Import and export", "content": "The **Tools** menu offers Export, to back up or move a library, and Import of a compatible file. Review keys before saving because an import can replace an existing key value." },
+      { "title": "Ports", "content": "On a saved library, the **Tools** menu also offers **Check**, which compares its port values with a server's port registry and with what the agent last saw listening, and **Allocate**, which reserves free ports on a server and writes them into the library." },
       { "title": "Versions", "content": "History shows stored versions and entry counts. Read and write permissions derive from the owner scope." }
     ]
   },
@@ -120,9 +130,10 @@
     "icon": "lock",
     "sections": [
       { "title": "Scope and encryption", "content": "A vault belongs to an allowed scope and values are encrypted at rest. Lists never display secrets in clear text and logs apply masking." },
-      { "title": "Secrets", "content": "Add a key, value, and optional expiration. **Copy key reference** provides pipeline syntax without copying the secret value." },
-      { "title": "Rotation", "content": "Rotation creates a new value for an existing key while retaining version traceability. Update dependent external systems before retiring an old value." },
-      { "title": "Import, export, and history", "content": "Export contains keys only, never values. Import adds or updates provided secrets. History shows versions and dates without revealing content." }
+      { "title": "Secrets", "content": "Add a key, value, and optional expiration. In the grid, **Copy the key** copies the name, **Copy the value** copies the secret without ever showing it (the action is audited), and **Copy Key Reference** provides pipeline syntax." },
+      { "title": "Generate a value", "content": "Beside the value field, when adding, updating, or rotating a secret, **Generate** creates a secure value using the recipe inferred from the key name. Its arrow offers other ways to generate: 32 or 64 letters and digits, or 64 hexadecimal characters (32 bytes)." },
+      { "title": "Rotation", "content": "**Rotate** asks for confirmation, then for the new value of an existing key; rotation retains version traceability. Update dependent external systems before retiring an old value." },
+      { "title": "Import, export, and history", "content": "Export contains keys only, never values. Import adds or updates provided secrets. History shows versions, dates, and author without storing or revealing content." }
     ]
   },
   {
@@ -133,6 +144,7 @@
     "sections": [
       { "title": "List and detection", "content": "Releases belong to a project and can originate from Git tags or the delivery workflow. The list shows version, status, branch, and latest activity." },
       { "title": "Provenance", "content": "Detail links tag, branch, commit, pipeline, and source run. These links trace a published version back to its exact definition and code." },
+      { "title": "Creation and build inputs", "content": "Detail shows the creating pipeline and run (Not recorded for a release published before this tracking existed), the run that built the deliverables when it differs, and the last run that recorded the release. Build inputs list the artifacts consumed, with the run that produced them, even after retention removed them, and the packages from the build SBOM." },
       { "title": "Deliverables", "content": "Linked artifacts and deliverables are listed with destination. A usable release retains access to stored bytes, not metadata alone." },
       { "title": "Promotion and rollback", "content": "Promotion advances a release to the selected environment under pipeline controls. Rollback selects an earlier compatible version and runs its contract; it does not bypass environment checks." }
     ]
@@ -155,19 +167,20 @@
     "description": "Track commands sent to agents, progress, results, and associated logs.",
     "icon": "task_alt",
     "sections": [
-      { "title": "List", "content": "Global and contextual lists show accessible tasks with status, server, origin, and dates. Project and server views apply their filter automatically." },
-      { "title": "Lifecycle", "content": "A task moves through pending, assigned, running, then success, failure, or cancellation. Real-time changes remove terminal tasks from active tracking and refresh lists." },
+      { "title": "List", "content": "Global and contextual lists show accessible tasks with status, server, origin, and dates. Project and server views apply their filter automatically, and the status badge takes the colour of the state (success in green, failure in red)." },
+      { "title": "Lifecycle", "content": "A task moves through pending, assigned, running, then success, failure, or cancellation. Real-time changes remove terminal tasks from active tracking and refresh lists. The tasks button of the top bar shows how many tasks are running." },
       { "title": "Agent execution", "content": "An agent claims a task compatible with its capabilities and concurrency slots. Assigned work is not automatically redistributed to prevent repeating an external effect." },
-      { "title": "Logs", "content": "Open or watch the task identifier in the log console. Running output streams live and persisted output remains available after completion." }
+      { "title": "Logs", "content": "Open or watch the task identifier in the Live Logs page. Running output streams live and persisted output remains available after completion." }
     ]
   },
   {
     "key": "logs",
-    "title": "Task logs",
-    "description": "Watch one task output stream and control display of masked values.",
+    "title": "Live logs",
+    "description": "Watch live the output of one task an agent runs and control display of masked values.",
     "icon": "receipt_long",
     "sections": [
-      { "title": "Select a task", "content": "Enter the numeric identifier and select **Watch**. The console joins that task’s real-time group and displays received lines. Start watching again after changing the identifier." },
+      { "title": "What the page is for", "content": "The page shows, as it is written, the output of one task an agent runs: an installation, a command, or a pipeline step. It follows one specific task live; it is not a place to browse log history." },
+      { "title": "Select a task", "content": "Enter the task's numeric identifier, shown in the Tasks list, in the field below the title, then select **Watch**. The console joins that task’s real-time group and displays received lines. Start watching again after changing the identifier." },
       { "title": "Connection and waiting", "content": "Connected confirms the log hub link. If no line is available, the task may not have started, may produce no output, or may have ended without retained logs." },
       { "title": "Masking", "content": "**Show masked** keeps secret protection. **Show unmasked** only restores data the backend permits; values permanently masked at source cannot be recovered." },
       { "title": "Clear", "content": "**Clear** empties the local console only. It does not delete persisted logs or the task. This page does not offer global agent, pipeline, or level filters." }
@@ -176,12 +189,12 @@
   {
     "key": "alerts",
     "title": "Alerts",
-    "description": "Define server metric rules and process triggered alerts and read state.",
+    "description": "Define server metric rules and review the alerts triggered during your session.",
     "icon": "notification_important",
     "sections": [
       { "title": "Rules", "content": "A rule has a name, server, metric, threshold, sustained duration, severity, and active state. Duration prevents triggering on a short spike." },
-      { "title": "Create and edit", "content": "Select metric and server, set threshold and duration, then save. Disable a rule instead of deleting it when you want to preserve configuration." },
-      { "title": "Recent alerts", "content": "Triggers show message, severity, server, and time. The navigation count represents unread items; **Mark all read** resets it." },
+      { "title": "Create and edit", "content": "**Create** opens the form: select metric and server, set threshold and duration, then save. Disable a rule instead of deleting it when you want to preserve configuration." },
+      { "title": "Recent alerts", "content": "The Recent alerts section lists the triggers received during your session (at most 50) with time, severity, server, and message. The navigation count represents unread items. The **Clear recent alerts** button, in the section's three-dot menu, empties this list and resets the count to zero." },
       { "title": "Real-time", "content": "New triggers and rule changes arrive in real time. Administrators configure optional external channels separately under Notification rules." }
     ]
   },
@@ -192,8 +205,9 @@
     "icon": "shield",
     "sections": [
       { "title": "Portfolio", "content": "Portfolio compares projects, grades, posture, scanners, and finding volume. Filter by organization, project, pipeline, branch, commit, category, or period, then search for a finding." },
+      { "title": "Project quality", "content": "Inside a project, Quality opens on an overview: global grade, limiting domain, graded commit (linked to its page), date, last run (linked to the run), and latest release (linked to its page). The Findings tab lists open findings; **Export all**, in the project's three-dot menu, downloads the AI prompt of every finding as one Markdown file." },
       { "title": "Reports and provenance", "content": "Each record retains source, tool, pipeline run, branch, and commit. Reports aggregate tests, coverage, lint, vulnerabilities, SBOM, and other configured producers." },
-      { "title": "Finding detail", "content": "Detail shows rule, category, file, line, symbol, excerpt, first and last occurrence, related reports, and external documentation. Occurrences show persistence across analyses." },
+      { "title": "Finding detail", "content": "Detail shows rule, category, file, the line as a badge, an **Open file** button and, when readable, the source passage with the affected lines highlighted. Branch and commit link to their pages. Symbol, first and last occurrence, related reports, and external documentation complete it; occurrences show persistence across analyses." },
       { "title": "Decisions", "content": "Change status with a reason and optional expiration. History keeps author, date, reason, and decision to distinguish remediation, temporary acceptance, and false positive." },
       { "title": "Ticket and AI assistance", "content": "Create a ticket when integration is available. The AI prompt assembles finding context; preview, copy, or download Markdown before using it with an authorized tool." },
       { "title": "Pipeline gates", "content": "Run pages show new findings, blockers, warnings, reports, and missing producers. An incomplete gate is not treated as silent success." }
@@ -254,7 +268,7 @@
     "description": "Scope ownership of projects, servers, and members and manage organization-wide rules.",
     "icon": "apartment",
     "sections": [
-      { "title": "Create and edit", "content": "Set name, slug, and description. The slug identifies the organization in selectors and integrations; choose it carefully." },
+      { "title": "Create and edit", "content": "Set name, slug, and description. The slug identifies the organization in selectors and integrations; choose it carefully. The search at the top of the page is shared with Users and Roles." },
       { "title": "Members", "content": "Add a user with the desired role or remove one. Owner controls the organization. Membership and permission changes propagate to affected sessions." },
       { "title": "Projects", "content": "Detail lists owned projects and supports assignment where available. Organization resources become visible according to member roles and effective permissions." },
       { "title": "Quality gates", "content": "Shared quality settings can define expectations for organization projects. Evaluate changes against pipelines that consume these rules." },
@@ -267,7 +281,7 @@
     "description": "Compose rights by resource type and scope, assign roles to users, and inspect change history.",
     "icon": "admin_panel_settings",
     "sections": [
-      { "title": "Roles", "content": "Create a role with name, description, and active state, or clone an existing role. A disabled role should no longer grant its permissions." },
+      { "title": "Roles", "content": "Create a role with name, description, and active state, or clone an existing role. A disabled role should no longer grant its permissions. The search at the top of the page is shared with Users and Organizations." },
       { "title": "Permission matrix", "content": "The matrix combines resource type, scope, and Read, Write, or Admin level. Bulk actions apply a level to several rows; review before saving." },
       { "title": "Users", "content": "Add or remove users from the role tab. A user can hold multiple roles and effective rights are the union of allowed grants." },
       { "title": "Effective access", "content": "Organizations and direct permissions supplement roles. Changes take effect live and may show a blocking acknowledgement dialog to the affected user." },
@@ -280,11 +294,11 @@
     "description": "Manage accounts, passwords, organizations, roles, TOTP, and effective permissions.",
     "icon": "group",
     "sections": [
-      { "title": "List", "content": "Search by username or email, filter state, and inspect roles and creation time. Active and disabled accounts are clearly distinguished." },
+      { "title": "List and search", "content": "Users, Organizations, and Roles share one search, to the right of their section links. Each section shows its result count in brackets when it is positive, and the search takes you to a section when it is the only one with results. The list shows roles, state, and creation time; active and disabled accounts are clearly distinguished." },
       { "title": "Create and edit", "content": "Enter username, email, initial password, and state. **Must change password** forces renewal at the next sign-in." },
-      { "title": "Security", "content": "Change or reset password and inspect TOTP state. Passwords follow minimum length and are never displayed again." },
+      { "title": "Security", "content": "Change or reset password and inspect TOTP state. Passwords follow minimum length and are never displayed again. There is no self-service reset: a user who lost a password must ask an administrator to reset it here." },
       { "title": "Roles and organizations", "content": "Assign roles and add the user to allowed organizations. Removing organization membership removes the corresponding inherited access." },
-      { "title": "Effective permissions", "content": "The view lists resource type, permission, and origin, including granting role. Refresh after a change to verify the actual result." },
+      { "title": "Effective permissions", "content": "The view lists resource type, permission, and origin, including granting role. It reloads by itself when a user, role, or organization changes, with no Refresh button." },
       { "title": "Deletion", "content": "Deleting an account is a sensitive administrative action. Review memberships and resource ownership before confirmation." }
     ]
   },
@@ -319,9 +333,9 @@
     "icon": "inventory",
     "sections": [
       { "title": "Create a feed", "content": "Set name, NuGet or npm type, and upstream URL. Use a registry URL compatible with the selected type." },
-      { "title": "Tracked packages", "content": "**Manage packages** opens the feed catalog. Add or remove packages whose versions should be resolved and synchronized." },
-      { "title": "Synchronization", "content": "Synchronization queries upstream, stores supported versions, and reports failures, unsupported packages, or rate limits. The page updates when the hosted service completes a change." },
-      { "title": "Refresh and delete", "content": "Refresh to reread persisted state. Deleting a feed removes configuration and tracking; review catalog consumers first." }
+      { "title": "Tracked packages", "content": "**Packages** opens the feed catalog. Add or remove packages whose versions should be resolved and synchronized; **Sync now** starts a synchronization from that catalog." },
+      { "title": "Synchronization", "content": "Synchronization queries upstream, stores supported versions, and reports failures, unsupported packages, or rate limits; the summary counts synced, failed, and unsupported packages. The page updates when the hosted service completes a change." },
+      { "title": "Live updates and deletion", "content": "The list follows changes live, with no Refresh button. Deleting a feed removes configuration and tracking; review catalog consumers first." }
     ]
   },
   {
@@ -343,33 +357,35 @@
     "description": "Register and manage extensions known to the platform.",
     "icon": "extension",
     "sections": [
-      { "title": "Catalog", "content": "Search plugins and inspect name, author, version, type, status, and creation time." },
+      { "title": "Catalog", "content": "Search plugins and inspect name, author, version, type, status, and creation time. The page is the Plugins entry of the Administration menu." },
       { "title": "Register", "content": "Provide metadata and entry point expected by the plugin type. Registration does not replace installing dependencies in the runtime environment." },
       { "title": "Edit and unregister", "content": "Update metadata or status when a version changes. Unregistering removes the extension; verify no active configuration depends on it." }
     ]
   },
   {
     "key": "audit",
-    "title": "Audit log",
-    "description": "Search sensitive actions and verify audit-chain integrity.",
+    "title": "Audit logs",
+    "description": "Search sensitive actions, read them in plain words, and verify audit-chain integrity.",
     "icon": "policy",
     "sections": [
-      { "title": "Search", "content": "Filter by text, action, entity type, and date range. Each entry shows timestamp, user, action, entity, and identifier." },
-      { "title": "Details", "content": "Open an entry to inspect and copy recorded details during investigation. Secret values must not appear in audit data." },
-      { "title": "Integrity", "content": "**Verify chain** checks cryptographic links between entries. Results distinguish intact entries, a precise break, or unavailable verification." },
+      { "title": "Search", "content": "Each column filters from its header: date range (time included), user, action (multiple choice with search), entity type, identifier, and details. Sorting and filters are applied by the server to the whole log, and new entries arrive live." },
+      { "title": "Actions", "content": "Every action has a readable label, in English and in French, and a colour from the kind of change: red for a deletion, revocation, failure, or block; orange for a rotation, reset, reveal, or disabling; green for a creation, addition, or enabling; the accent colour for an update; grey for the rest." },
+      { "title": "Details", "content": "The eye icon opens an entry's recorded details; the copy icon copies them during investigation. Secret values must not appear in audit data." },
+      { "title": "Integrity", "content": "**Verify**, in the header, lets you verify chain integrity: it checks cryptographic links between entries. The badge shown distinguishes an intact chain (with its entry count), a break detected at a precise entry, or unavailable verification." },
       { "title": "Interpretation", "content": "An intact chain proves consistency of available records, not absence of an unaudited external action. Correlate with system logs and affected resources." }
     ]
   },
   {
     "key": "system-logs",
     "title": "System logs",
-    "description": "Analyze backend logs with filters, correlation, export, and automatic refresh.",
+    "description": "Analyze backend logs with server-side filters, correlation, CSV export, and live following.",
     "icon": "description",
     "sections": [
-      { "title": "Filters", "content": "Filter by file, level, category, text, correlation identifier, and date range. Clear filters to return to the general view." },
-      { "title": "Navigation", "content": "Refresh manually, enable automatic refresh, or load more rows. The counter reports currently displayed entries." },
-      { "title": "Details and correlation", "content": "Open the complete message and copy message or correlation identifier. Search the same identifier to trace one request across components." },
-      { "title": "Export and purge", "content": "Download the selected file or export results as CSV. Purge is a destructive administrative action requiring confirmation and must follow retention policy." }
+      { "title": "Filters", "content": "The top bar filters by file, level, date range, and text. Column headers add sorting and filters on date, level, category, message, and correlation identifier. Every filter and the sort are applied by the server to the whole log, not only to the rows on screen." },
+      { "title": "Navigation", "content": "The grid reads the log block by block as you scroll: there is no Load more button and no manual refresh any more. The page follows the log files live." },
+      { "title": "Details and correlation", "content": "Click a row or its eye icon to open the complete message; the icon is red when an exception is attached. Copy the message or correlation identifier, then filter on that identifier to trace one request across components." },
+      { "title": "Robot requests", "content": "Refused requests that match no route of the application, typically robots probing for weaknesses, are counted per minute instead of being written one by one. A refusal on a real route and every server error keep their own line, with the reason for the refusal." },
+      { "title": "Export and purge", "content": "**Export CSV** exports the rows matching the top bar filters; **Download** fetches the selected file. **Purge** deletes, after confirmation, log files older than 30 days: this purge is a destructive administrative action and must follow retention policy." }
     ]
   },
   {
@@ -387,16 +403,17 @@
   {
     "key": "settings",
     "title": "User settings",
-    "description": "Manage profile, appearance, language, notifications, password, TOTP, and personal access tokens.",
+    "description": "Manage appearance, language, notification preferences, password, TOTP, and personal access tokens.",
     "icon": "settings",
     "sections": [
-      { "title": "Profile", "content": "Change display name and inspect username, role, and account information. Username remains the sign-in identifier." },
-      { "title": "Appearance and language", "content": "Choose light or dark theme and French or English. Theme persists in the browser; language reloads resources and the matching help catalog." },
-      { "title": "Notification preferences", "content": "Enable or disable email, pipeline, and server alerts for your account. These preferences differ from global channels and rules managed by administrators." },
-      { "title": "Password", "content": "Enter current password, new password, and confirmation. An account marked **Must change password** is sent to the required flow after sign-in." },
-      { "title": "Two-factor authentication", "content": "Enable TOTP by scanning the QR code or using the manual key, then verify a code. Store recovery codes outside the application. Disabling requires confirmation." },
+      { "title": "Appearance", "content": "The Appearance tab sets the look of the whole site, two settings per row: mode (light, dark, or the system's), theme, palette, and density. **Theme**, in the user menu, leads straight to these settings; the mode can also be changed there." },
+      { "title": "Language", "content": "In the same tab, choose French or English. The language reloads application resources and the matching help catalog." },
+      { "title": "Notification preferences", "content": "One switch per event type, grouped by what raises it, decides what you are notified of for the projects you follow. Follow a project with **Follow** in its three-dot menu; the Followed projects section lets you **Unfollow**. No sending channel is configured yet: nothing is sent, notifications are listed in My notifications. These preferences differ from global channels and rules managed by administrators." },
+      { "title": "My notifications", "content": "The bell of the top bar shows the unread count and the latest notifications; **Mark all as read** marks them read and **See all** opens the My notifications page. That page lists date, event, subject, channel, and read state, with sorting and column filters; each notification can be marked as read there." },
+      { "title": "Password", "content": "In the Security tab, enter current password, new password, and confirmation. An account marked **Must change password** is sent to the required flow after sign-in. There is no self-service reset: the **Forgot password?** link of the sign-in page says to ask an administrator." },
+      { "title": "Two-factor authentication", "content": "In the Security tab, enable TOTP by scanning the QR code or using the manual key, then verify a code. Store recovery codes outside the application. Disabling asks for your password." },
       { "title": "Personal access tokens", "content": "Create a token with name, scope, and expiration. The complete value appears once: copy it immediately into a secret manager. The list shows prefix, state, creation, expiration, and last use; revoke any compromised token." },
-      { "title": "About", "content": "About shows the application version and general product information. Include the displayed version when reporting a problem so support can identify the exact build." }
+      { "title": "About", "content": "The About tab shows, as labelled lines, the application version, your username, and your role, which help support identify the exact build. The username, your sign-in identifier, cannot be changed here." }
     ]
   },
   {
@@ -405,7 +422,7 @@
     "description": "Manage shared secrets, registration tokens, and platform quality gates.",
     "icon": "tune",
     "sections": [
-      { "title": "General", "content": "General settings control global behaviors exposed by this version. Save each group after change and verify consuming components." },
+      { "title": "General", "content": "General settings control global behaviors exposed by this version. Each line has its own Save button; then verify the components that consume the changed setting." },
       { "title": "Secrets", "content": "Add or update a shared secret key. Values are protected and can be shown temporarily according to permissions. Deleting a secret can break an integration; identify consumers first." },
       { "title": "Registration tokens", "content": "Generate a token to enroll an agent, copy it while available, and monitor expiration and use. Revoke unused or exposed tokens." },
       { "title": "Quality gates", "content": "Configure global thresholds proposed to analyses and pipelines. More specific rules can supplement or replace them according to scope." }
@@ -417,11 +434,39 @@
     "description": "Entry point for platform administrator features.",
     "icon": "admin_panel_settings",
     "sections": [
-      { "title": "Identity and access", "content": "Users, Organizations, and Roles manage accounts, membership, resource ownership, and effective permissions." },
-      { "title": "Monitoring and compliance", "content": "Audit log verifies actions and chain integrity. System logs supports diagnostics. Dashboards configures the shared home view." },
-      { "title": "Integrations", "content": "Notification rules, AI runner profiles, Package feeds, Package registry, and Plugins configure cross-platform services." },
-      { "title": "Platform and API", "content": "Platform settings contains secrets, registration tokens, and quality gates. API reference exposes the active backend OpenAPI contract." },
+      { "title": "Home page", "content": "The Administration page shows one tile per entry of the Administration menu, in three groups (Users and access, Monitoring, Platform). Each tile carries the menu icon and a short description, and leads to its page." },
+      { "title": "Users and access", "content": "Users, Organizations, and Roles manage identity and access: accounts, membership, resource ownership, and effective permissions. The three pages share one search." },
+      { "title": "Monitoring", "content": "Audit logs verifies actions and chain integrity. System logs supports diagnostics. Performance measures API response times. Notification rules configures sending channels and rules." },
+      { "title": "Platform and API", "content": "Platform settings contains secrets, registration tokens, and quality gates. AI runner profiles, Package feeds, Package registry, and Plugins configure cross-platform integrations. Dashboards configures the shared home view and API reference exposes the active backend OpenAPI contract." },
       { "title": "Access control", "content": "The Administration menu is visible only to administrators. Each screen applies its own checks and confirmations; help grants no additional rights." }
+    ]
+  },
+  {
+    "key": "supervision",
+    "title": "Supervision",
+    "description": "Every supervised application of every project you can access, then, inside each project, its availability, telemetry, and ingestion.",
+    "icon": "monitor_heart",
+    "sections": [
+      { "title": "One list for every project", "content": "**Supervision**, a side-menu entry under Projects, gathers the monitored applications of all the projects you can read. Open one to land on its project's Monitoring page, already set on that application. The list is scoped to your permissions on the server side." },
+      { "title": "Totals", "content": "Above the list, tiles add up every visible application: number of applications (up, in alert), current visitors, unique visitors of the day, the week and the month, sessions and page views of the month. The audience tiles only appear when at least one application measures its audience. It is a sum per application: a person who visits two applications counts once in each." },
+      { "title": "Status and people online", "content": "Status comes from the availability probe: available, degraded, unavailable or unknown, and Since tells when it last changed. People online appear only for applications with web analytics enabled; the column is hidden when none has it." },
+      { "title": "Last event", "content": "Last event is the latest telemetry of any kind the application sent, traces, metrics, logs or web analytics. Never means nothing ever arrived: the application is not configured to report. An old date on an application that is up means it was reporting and then stopped, which usually points to a deployment that no longer passes its telemetry settings." },
+      { "title": "A project's applications", "content": "Inside a project, the Monitoring section lists its applications: status, name, probe URL, hosting server, uptime over 24 hours (green bars up, red bars down) and over 7 days, and response time. The hosting server is the one chosen at registration; otherwise, when Aetheus deduces it from the fleet's Apache virtual hosts, it is named with the backend probe mention and links to its page. Off-fleet (backend probe) means no server was found." },
+      { "title": "Telemetry", "content": "Under the list, pick an application for its tabs Visitors, Top pages (every route of the month), Performance, Logs, Errors, and Ingestion. Performance replaces the former Metrics tab: an overview (measured routes, requests, slowest route at p95), the per-route grid (calls, p50, p95, p99, maximum) over the application's last 24 hours, then **Explore a metric** on demand. These timings come from the Aetheus.Telemetry package, version 0.2.0 or later. Logs and Errors export to Markdown following the filters and sort. The Visitors tab starts with the date of the last event received, kept up to date live; a signed-in visitor is counted by their account, whatever the device, and the sign-in page is not measured." },
+      { "title": "Ingestion", "content": "The Ingestion tab manages the ingestion key, audience measurement, and metric thresholds. The key is shown only once: copy it right away. **Regenerate key** asks for confirmation, because the current key stops working at once and every sender must receive the new one; **Go back** cancels. **Revoke** cuts the key after confirmation. The very first generation, with no key to replace, acts directly." }
+    ]
+  },
+  {
+    "key": "performance",
+    "title": "Performance",
+    "description": "How long the API takes to answer, per route, and what this browser actually waited for, to measure before correcting.",
+    "icon": "speed",
+    "sections": [
+      { "title": "What the server measured", "content": "Every API request is timed by the server on the same instrument the telemetry exports. Three tabs, each with its own address: Slowest calls lists the twenty longest requests; By route gives the number of calls, the 50th, 95th and 99th percentiles, and the maximum per route; This browser is described below. Routes are shown as templates, so no identifier or query value is kept." },
+      { "title": "The window", "content": "The figures cover the last 24 hours of the running instance. After a restart or a deployment the window starts again at the instance start, and the page says since when it counts. A cap keeps memory bounded; when it is reached, the oldest requests are dropped and the page says so." },
+      { "title": "This browser", "content": "This browser lists the slowest API calls of your current session as you waited for them, network and server together, with the size of each answer. Compare it with the server figures: a call slow here and fast on the server points to the network or to the size of the answer, not to the server." },
+      { "title": "Export everything to Markdown", "content": "**Export everything to Markdown** downloads, in one file, every raw row of the three tables for an AI to read. The browser table there holds every call of the session, not only the slowest ones." },
+      { "title": "Monitored applications", "content": "The same per-route measure exists for each monitored application that uses the Aetheus.Telemetry package, version 0.2.0 or later, with telemetry enabled: open the Performance tab of its telemetry, in the Monitoring section of its project. From version 1.0.0 of the package, the tab says since when the requests are counted (the window holds 24 hours at most and restarts with the application) and a route no longer appears under two cases. A p95 taken on fewer than 20 calls, or a p99 on fewer than 100, equals the maximum: it is shown in grey, as an order of magnitude. Under the table, “Export all as .md” downloads the window, the figures and every route." }
     ]
   }
 ]

@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 
@@ -105,6 +104,30 @@ public sealed class PipelineFleetRepositoryTests : IDisposable
 
         static (string, string, int) Owner(PipelineFleetItemDto item) =>
             (item.OwnerName, item.OwnerType, item.OrganizationId);
+    }
+
+    [Fact]
+    public async Task GetPageAsync_ScopedToAProject_LeavesOutEveryOtherProject()
+    {
+        // PLAN-003 lot 12: the project pipelines page used to fetch the whole fleet and discard
+        // the rest client-side. The filter has to hold for the three ways a pipeline belongs to a
+        // project: directly, through an environment, or through a project server.
+        await SeedProjectAndTemplateAsync();
+        _db.Projects.Add(new Project { Id = 11, Name = "other", OrganizationId = 7 });
+        _db.Environments.Add(new Environment { Id = 21, Name = "staging", ProjectId = 10 });
+        _db.ProjectServers.Add(new ProjectServer { Id = 31, DisplayName = "vps-1", ProjectId = 10 });
+        _db.Pipelines.AddRange(
+            Pipeline(1, "mine-direct", projectId: 10),
+            Pipeline(2, "mine-via-environment", environmentId: 21),
+            Pipeline(3, "mine-via-server", projectServerId: 31),
+            Pipeline(4, "someone-elses", projectId: 11));
+        await SaveAsync();
+        _db.ChangeTracker.Clear();
+
+        var page = await _repository.GetPageAsync(Request(projectId: 10), null, null, Ct);
+
+        Assert.Equal(3, page.TotalCount);
+        Assert.DoesNotContain(page.Items, item => item.PipelineName == "someone-elses");
     }
 
     // ---------- freshness ----------

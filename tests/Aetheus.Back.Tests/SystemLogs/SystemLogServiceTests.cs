@@ -111,6 +111,39 @@ public class SystemLogServiceTests : IDisposable
         Assert.All(result.Items, e => Assert.Equal("Error", e.Level));
     }
 
+    /// <summary>Recette R-453: the virtualized grid sends its header filters and its sort; they apply
+    /// to the whole filtered log before paging, not to one block.</summary>
+    [Fact]
+    public async Task GetLogEntriesAsync_AppliesColumnFiltersAndSortBeforePaging()
+    {
+        var logContent = "2025-01-15 10:30:00.123 [INF] alpha one\n2025-01-15 10:31:00.456 [ERR] beta two\n"
+            + "2025-01-15 10:32:00.789 [INF] alpha three\n";
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "app.log"), logContent, cancellationToken: TestContext.Current.CancellationToken);
+
+        var filtered = await _sut.GetLogEntriesAsync(null, null, null, null, null, 1, 1,
+            TestContext.Current.CancellationToken, sortBy: "Timestamp", sortDescending: false,
+            filters: [new GridFilter { Field = "Message", Operator = GridFilterOperator.Contains, Value = "alpha" }]);
+
+        Assert.Equal(2, filtered.TotalCount);
+        Assert.Equal("alpha one", Assert.Single(filtered.Items).Message);
+
+        var byLevel = await _sut.GetLogEntriesAsync(null, null, null, null, null, 1, 50,
+            TestContext.Current.CancellationToken,
+            filters: [new GridFilter { Field = "Level", Operator = GridFilterOperator.In, Value = "Error" }]);
+
+        Assert.Equal("beta two", Assert.Single(byLevel.Items).Message);
+    }
+
+    [Fact]
+    public async Task GetLogEntriesAsync_UnknownColumn_IsABadRequest()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "app.log"), "2025-01-15 10:30:00.123 [INF] alpha\n",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => _sut.GetLogEntriesAsync(null, null, null, null, null, 1, 50,
+            TestContext.Current.CancellationToken, sortBy: "Exception"));
+    }
+
     [Fact]
     public async Task GetLogEntriesAsync_FiltersBySearch()
     {

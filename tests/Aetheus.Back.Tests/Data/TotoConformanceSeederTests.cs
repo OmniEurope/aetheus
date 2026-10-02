@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -258,7 +256,7 @@ public sealed class TotoConformanceSeederTests
             Name = TotoConformanceSeeder.LegacyProjectName,
             Description = "Legacy conformance project.",
             DefaultBranch = "main",
-            Status = Aetheus.Shared.Enums.ProjectStatus.Active,
+            Status = Aetheus.Shared.Components.Projects.ProjectStatus.Active,
             OrganizationId = 1,
             Tags = "[\"conformance\",\"toto\"]",
             CreatedAt = DateTime.UnixEpoch,
@@ -270,7 +268,7 @@ public sealed class TotoConformanceSeederTests
             Name = TotoConformanceSeeder.ProjectName,
             Description = "Legacy demo project.",
             DefaultBranch = "main",
-            Status = Aetheus.Shared.Enums.ProjectStatus.Active,
+            Status = Aetheus.Shared.Components.Projects.ProjectStatus.Active,
             OrganizationId = 1,
             Tags = "[\"demo\",\"qa\",\"toto\"]",
             CreatedAt = DateTime.UnixEpoch,
@@ -489,7 +487,7 @@ public sealed class TotoConformanceSeederTests
             environment =>
             {
                 Assert.Equal("qa", environment.Name);
-                Assert.Equal(Aetheus.Shared.Enums.EnvironmentType.Testing, environment.Type);
+                Assert.Equal(Aetheus.Shared.Components.Environments.EnvironmentType.Testing, environment.Type);
                 Assert.True(environment.DastEnabled);
                 Assert.True(environment.DastIsEphemeral);
             });

@@ -5,7 +5,6 @@ using System.Text.Json;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Analysis;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -60,7 +59,9 @@ public sealed class PipelineScannerTaskFactory(
                 runId,
                 stepRun,
                 $"candidate scanner preflight requires agent manifest {ScannerManifestCatalog.Sha256}; "
-                + "the selected agent reported another or no manifest hash.",
+                + $"agent '{legServer.Name}' reported "
+                + $"{TaskRepository.ExtractScannerManifestSha256(legServer.ScannerCapabilitiesJson) ?? "no manifest hash"}. "
+                + "Update the agent from its server page (Update agent).",
                 ct).ConfigureAwait(false);
             return StepDispatchResult.Handled;
         }
@@ -110,13 +111,17 @@ public sealed class PipelineScannerTaskFactory(
         Server server,
         IReadOnlyDictionary<string, string> variables)
     {
-        if (!variables.TryGetValue("UPSTREAM_PIPELINE", out var upstreamPipeline)
-            || !string.Equals(upstreamPipeline, "aetheus-candidate", StringComparison.OrdinalIgnoreCase))
+        if (!RequiresCandidateScannerManifest(variables.GetValueOrDefault("UPSTREAM_PIPELINE")))
             return true;
         return ServerDataMapper.DeserializeDiagnostics(server.ScannerCapabilitiesJson).Contains(
             $"scanner-manifest:sha256:{ScannerManifestCatalog.Sha256}",
             StringComparer.Ordinal);
     }
+
+    /// <summary>Scanner steps of a pipeline triggered by the candidate need the exact manifest this
+    /// backend embeds. Shared with the launch preflight so both answer the same question.</summary>
+    internal static bool RequiresCandidateScannerManifest(string? upstreamPipeline) =>
+        string.Equals(upstreamPipeline, "aetheus-candidate", StringComparison.OrdinalIgnoreCase);
 
     private async Task FailScannerStepAsync(
         int runId, PipelineStepRun stepRun, string reason, CancellationToken ct)

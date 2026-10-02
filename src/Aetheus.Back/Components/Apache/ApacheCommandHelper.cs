@@ -51,8 +51,15 @@ public static partial class ApacheCommandHelper
     // now dispatch typed OperationKind.ApacheGetConfig / ApacheGetHtaccess / ApacheSaveHtaccess handled
     // by ApacheOperationExecutor (direct File read/write, no shell).
 
+    /// <summary>
+    /// An absolute Linux path with no traversal. The regex alone cannot express this: it allows both
+    /// '.' and '/', so "/var/www/../../etc" matches it while escaping the intended root. The segment
+    /// test is what makes the name true.
+    /// </summary>
     public static bool IsValidDocumentRoot(string path) =>
-        !string.IsNullOrWhiteSpace(path) && DocumentRootRegex().IsMatch(path);
+        !string.IsNullOrWhiteSpace(path)
+        && DocumentRootRegex().IsMatch(path)
+        && !path.Split('/').Contains("..");
 
     // Only allow alphanumeric, hyphens, dots, and .conf extension
     [GeneratedRegex(@"^[a-zA-Z0-9._-]+$")]

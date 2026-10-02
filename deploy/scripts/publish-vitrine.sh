@@ -6,14 +6,18 @@ DOMAIN="${1:-}"
 WEB_ROOT="${2:-}"
 SOURCE_DIR="${3:-site}"
 case "$DOMAIN" in ""|*SITE_DOMAIN*) echo "SITE_DOMAIN not provided by the Variable Library"; exit 1;; esac
+# A direct child of /var/www, whatever it is called. The `aetheus-` prefix this used to demand named
+# the project rather than bounding the path, and naming things is the Variable Library's job.
 case "$WEB_ROOT" in
-  /var/www/aetheus-*) ;;
-  *) echo "Refusing publication outside a dedicated /var/www/aetheus-* web root: '$WEB_ROOT'"; exit 1;;
+  /var/www/*/*|*..*) echo "Refusing publication outside a dedicated /var/www child: '$WEB_ROOT'"; exit 1;;
+  /var/www/?*) ;;
+  *) echo "Refusing publication outside a dedicated /var/www child: '$WEB_ROOT'"; exit 1;;
 esac
 
 CANONICAL_WEB_ROOT="$(readlink -m -- "$WEB_ROOT")"
 case "$CANONICAL_WEB_ROOT" in
-  /var/www/aetheus-*) ;;
+  /var/www/*/*) echo "Refusing publication through an unsafe or escaping web root: '$WEB_ROOT'"; exit 1;;
+  /var/www/?*) ;;
   *) echo "Refusing publication through an unsafe or escaping web root: '$WEB_ROOT'"; exit 1;;
 esac
 if [ -L "$WEB_ROOT" ]; then

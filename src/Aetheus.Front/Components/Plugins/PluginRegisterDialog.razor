@@ -1,0 +1,34 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniTemplateForm TModel="RegisterPluginRequest" Model="@_model" OnValidSubmit="@SubmitAsync">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Large">
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniFormField For="oe-pages-plugins-pluginregisterdialog-1" Class="omni-u-w-100"><LabelContent>@L["PluginName"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Name" Id="oe-pages-plugins-pluginregisterdialog-1" />
+                    <ValidationMessage For="@(() => _model.Name)" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniFormField For="oe-pages-plugins-pluginregisterdialog-2" Class="omni-u-w-100"><LabelContent>@L["Version"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Version" Id="oe-pages-plugins-pluginregisterdialog-2" />
+                    <ValidationMessage For="@(() => _model.Version)" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniFormField For="oe-pages-plugins-pluginregisterdialog-3" Class="omni-u-w-100"><LabelContent>@L["Author"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Author" Id="oe-pages-plugins-pluginregisterdialog-3" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12" SmallSpan="6">
+                <OmniFormField Label="@L["PluginType"]" Class="omni-u-w-100" For="oe-formfield-pages-plugins-pluginregisterdialog-1">
+                    <OmniDropDown Id="oe-formfield-pages-plugins-pluginregisterdialog-1" @bind-Value="_model.Type" Options="@_pluginTypes" />
+                </OmniFormField>
+            </OmniColumn>
+        </OmniRow>
+        <DialogFooter OnCancel="@Cancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Register"]</span></OmniButton>
+        </DialogFooter>
+    </OmniStack>
+</OmniTemplateForm>

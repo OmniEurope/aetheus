@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Browser code (PLAN-006 lot 6). Tests: tests/security-rules/aetheus-javascript.js.
+rules:
+  - id: aetheus.javascript.dom-xss
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Data the page does not control (the URL, another window's message, browser storage) reaches an
+      HTML or code sink. Write it with textContent, or sanitize it on the way.
+    metadata:
+      cwe: CWE-79
+      category: security
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - pattern: location.hash
+          - pattern: location.search
+          - pattern: location.href
+          - pattern: window.location.hash
+          - pattern: window.location.search
+          - pattern: window.location.href
+          - pattern: document.URL
+          - pattern: document.referrer
+          - pattern: window.name
+          - pattern: localStorage.getItem(...)
+          - pattern: sessionStorage.getItem(...)
+          - patterns:
+              - pattern-inside: |
+                  $W.addEventListener("message", ($EVENT) => { ... })
+              - pattern: $EVENT.data
+          - patterns:
+              - pattern-inside: |
+                  $W.addEventListener("message", function ($EVENT) { ... })
+              - pattern: $EVENT.data
+    # The sink is the written value only (focus-metavariable), so a sanitizer wrapped around it counts.
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $EL.innerHTML = $X
+              - pattern: $EL.outerHTML = $X
+              - pattern: $EL.insertAdjacentHTML($POS, $X)
+              - pattern: document.write($X)
+              - pattern: document.writeln($X)
+              - pattern: eval($X)
+              - pattern: new Function(..., $X)
+          - focus-metavariable: $X
+    pattern-sanitizers:
+      - pattern-either:
+          - pattern: DOMPurify.sanitize(...)
+          - pattern: encodeURIComponent(...)
+
+  - id: aetheus.javascript.secret-in-console
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A secret-named value is written to the browser console, where extensions, screenshots and
+      shared recordings pick it up.
+    metadata:
+      cwe: CWE-532
+      category: security
+    patterns:
+      - pattern: console.$METHOD(..., $VALUE, ...)
+      # Identifiers and member paths only: a string literal that merely mentions a token is a message.
+      - metavariable-regex:
+          metavariable: $VALUE
+          regex: ^[A-Za-z_$][\w$.]*(?i:password|secret|token|apikey|api_key)[\w$]*$
+
+  - id: aetheus.javascript.fetch-credentials-include
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      credentials "include" sends the browser's cookies to whatever origin this fetch targets. Keep
+      "same-origin" (the default) unless the call is deliberately cross-origin and authenticated.
+    metadata:
+      cwe: CWE-352
+      category: security
+    # PLAN-006 listed "fetch without credentials". The default ("same-origin") is the safe choice, so
+    # a rule on its absence would flag correct code; the risky act is opting into "include".
+    pattern-regex: credentials\s*:\s*["']include["']

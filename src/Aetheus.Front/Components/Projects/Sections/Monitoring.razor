@@ -1,0 +1,17 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectLoaderSectionBase
+@page "/projects/{Id:int}/monitoring"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Monitoring"] - Aetheus</PageTitle>
+
+@if (Loader?.Project is not null)
+{
+    @* Recette R-350: one page instead of two competing tabs. The monitored applications come first in
+       a compact table (the height of their rows), and the telemetry of the selected application sits
+       under it with its own application picker and sub-tabs. *@
+    <MonitoredAppsList ProjectId="Id" />
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="monitoring-telemetry-heading">@L["Telemetry"]</OmniHeading>
+    <AppTelemetryPanel ProjectId="Id" SelectedAppId="App" />
+}

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
@@ -87,34 +86,9 @@ public class MainLayoutRenderTests : BunitContext
         SetProperty(instance, "HttpFactory", httpFactory);
 
         SetProperty(instance, "RealtimeSession", Services.GetRequiredService<RealtimeSessionLifecycle>());
+        SetProperty(instance, "Appearance", Services.GetRequiredService<Aetheus.Front.Components.Settings.SiteAppearanceState>());
 
         return instance;
-    }
-
-    [Fact]
-    public async Task ToggleDarkMode_FlipsDarkModeValue()
-    {
-        var instance = CreateInstance();
-        typeof(MainLayout).GetField("_darkMode", Priv)!.SetValue(instance, true);
-
-        var method = typeof(MainLayout).GetMethod("ToggleDarkMode", PrivPub)!;
-        await (Task)method.Invoke(instance, [])!;
-
-        var darkMode = (bool)typeof(MainLayout).GetField("_darkMode", Priv)!.GetValue(instance)!;
-        Assert.False(darkMode);
-    }
-
-    [Fact]
-    public async Task ToggleDarkMode_WhenFalse_SetsTrue()
-    {
-        var instance = CreateInstance();
-        typeof(MainLayout).GetField("_darkMode", Priv)!.SetValue(instance, false);
-
-        var method = typeof(MainLayout).GetMethod("ToggleDarkMode", PrivPub)!;
-        await (Task)method.Invoke(instance, [])!;
-
-        var darkMode = (bool)typeof(MainLayout).GetField("_darkMode", Priv)!.GetValue(instance)!;
-        Assert.True(darkMode);
     }
 
     [Fact]
@@ -214,9 +188,9 @@ public class MainLayoutRenderTests : BunitContext
         var orgs = (ActiveOrganizationService)typeof(MainLayout).GetProperty("Orgs", Priv)!.GetValue(instance)!;
         // Seed the available orgs so the int branch can resolve id 1 and switch the active org.
         typeof(ActiveOrganizationService).GetProperty("Available")!
-            .SetValue(orgs, new List<Aetheus.Shared.DTOs.Organizations.MyOrganizationDto>
+            .SetValue(orgs, new List<Aetheus.Shared.Components.Organizations.MyOrganizationDto>
             {
-                new(1, "Acme", "acme", Aetheus.Shared.Enums.OrganizationRole.Owner)
+                new(1, "Acme", "acme", Aetheus.Shared.Components.Shared.OrganizationRole.Owner)
             });
 
         var method = typeof(MainLayout).GetMethod("OnActiveOrgChanged", PrivPub)!;
@@ -232,9 +206,9 @@ public class MainLayoutRenderTests : BunitContext
         var instance = CreateInstance();
         var orgs = (ActiveOrganizationService)typeof(MainLayout).GetProperty("Orgs", Priv)!.GetValue(instance)!;
         typeof(ActiveOrganizationService).GetProperty("Available")!
-            .SetValue(orgs, new List<Aetheus.Shared.DTOs.Organizations.MyOrganizationDto>
+            .SetValue(orgs, new List<Aetheus.Shared.Components.Organizations.MyOrganizationDto>
             {
-                new(1, "Acme", "acme", Aetheus.Shared.Enums.OrganizationRole.Owner)
+                new(1, "Acme", "acme", Aetheus.Shared.Components.Shared.OrganizationRole.Owner)
             });
 
         var method = typeof(MainLayout).GetMethod("OnActiveOrgChanged", PrivPub)!;
@@ -257,60 +231,6 @@ public class MainLayoutRenderTests : BunitContext
 
         Assert.Null(ex);
         Assert.Null(typeof(MainLayout).GetField("_errorBoundary", Priv)!.GetValue(instance));
-    }
-
-    [Fact]
-    public void CloseUserMenu_SetsMenuClosed()
-    {
-        var instance = CreateInstance();
-        typeof(MainLayout).GetField("_userMenuOpen", Priv)!.SetValue(instance, true);
-
-        var method = typeof(MainLayout).GetMethod("CloseUserMenu", Priv)!;
-        method.Invoke(instance, []);
-
-        var menuOpen = (bool)typeof(MainLayout).GetField("_userMenuOpen", Priv)!.GetValue(instance)!;
-        Assert.False(menuOpen);
-    }
-
-    [Fact]
-    public void HandleUserMenuKeyDown_Escape_ClosesMenu()
-    {
-        var instance = CreateInstance();
-        typeof(MainLayout).GetField("_userMenuOpen", Priv)!.SetValue(instance, true);
-
-        var method = typeof(MainLayout).GetMethod("HandleUserMenuKeyDown", Priv)!;
-        var args = new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" };
-        method.Invoke(instance, [args]);
-
-        var menuOpen = (bool)typeof(MainLayout).GetField("_userMenuOpen", Priv)!.GetValue(instance)!;
-        Assert.False(menuOpen);
-    }
-
-    [Fact]
-    public void HandleUserMenuKeyDown_OtherKey_DoesNotCloseMenu()
-    {
-        var instance = CreateInstance();
-        typeof(MainLayout).GetField("_userMenuOpen", Priv)!.SetValue(instance, true);
-
-        var method = typeof(MainLayout).GetMethod("HandleUserMenuKeyDown", Priv)!;
-        var args = new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" };
-        method.Invoke(instance, [args]);
-
-        var menuOpen = (bool)typeof(MainLayout).GetField("_userMenuOpen", Priv)!.GetValue(instance)!;
-        Assert.True(menuOpen);
-    }
-
-    [Fact]
-    public void ToggleUserMenu_OpensMenu()
-    {
-        var instance = CreateInstance();
-        typeof(MainLayout).GetField("_userMenuOpen", Priv)!.SetValue(instance, false);
-
-        var method = typeof(MainLayout).GetMethod("ToggleUserMenu", Priv)!;
-        method.Invoke(instance, []);
-
-        var menuOpen = (bool)typeof(MainLayout).GetField("_userMenuOpen", Priv)!.GetValue(instance)!;
-        Assert.True(menuOpen);
     }
 
     [Fact]

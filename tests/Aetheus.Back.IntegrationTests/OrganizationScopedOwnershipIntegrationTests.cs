@@ -3,9 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.IntegrationTests;

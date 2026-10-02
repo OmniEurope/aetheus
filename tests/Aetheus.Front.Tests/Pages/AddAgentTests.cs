@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
+using Aetheus.Front.Components.Servers.AgentWizard;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Pages;
-using Aetheus.Front.Pages.Servers.AgentWizard;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
@@ -39,7 +36,7 @@ public class AddAgentTests : BunitContext
     {
         var cut = Render<AddAgent>();
         // The wizard opens on the platform-selection step.
-        Assert.Contains("wizard-platform-card", cut.Markup);
+        Assert.Contains("omni-selectable-card", cut.Markup);
     }
 
     [Fact]
@@ -48,8 +45,8 @@ public class AddAgentTests : BunitContext
         var cut = Render<AddAgent>();
         var markup = cut.Markup;
         // Both platform cards render with their brand SVG icons.
-        Assert.Contains("wizard-platform-card", markup);
-        Assert.Contains("wizard-platform-icon", markup);
+        Assert.Contains("omni-selectable-card", markup);
+        Assert.Contains("omni-selectable-card__icon", markup);
         Assert.Contains("<svg", markup);
     }
 
@@ -58,14 +55,14 @@ public class AddAgentTests : BunitContext
     {
         var cut = Render<AddAgent>();
         var markup = cut.Markup;
-        Assert.Contains("wizard-platform-card", markup);
+        Assert.Contains("omni-selectable-card", markup);
     }
 
     [Fact]
     public void LinuxPlatform_IsSelectedByDefault()
     {
         var cut = Render<AddAgent>();
-        Assert.Contains("wizard-platform-selected", cut.Markup);
+        Assert.Contains("omni-selectable-card--selected", cut.Markup);
     }
 
     [Fact]
@@ -73,7 +70,7 @@ public class AddAgentTests : BunitContext
     {
         var cut = Render<AddAgent>();
         // With the API base URL configured, the wizard still renders its platform step.
-        Assert.Contains("wizard-platform-card", cut.Markup);
+        Assert.Contains("omni-selectable-card", cut.Markup);
     }
 
     // --- CanAdvance tests ---
@@ -370,10 +367,10 @@ public class AddAgentTests : BunitContext
         var method = typeof(AddAgent).GetMethod("BuildPlatformStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
         var rendered = Render(fragment);
-        Assert.Contains("wizard-platform-card", rendered.Markup);
-        Assert.Contains("wizard-platform-icon", rendered.Markup);
+        Assert.Contains("omni-selectable-card", rendered.Markup);
+        Assert.Contains("omni-selectable-card__icon", rendered.Markup);
         Assert.Contains("<svg", rendered.Markup);
-        Assert.Contains("wizard-platform-selected", rendered.Markup);
+        Assert.Contains("omni-selectable-card--selected", rendered.Markup);
     }
 
     [Fact]
@@ -411,7 +408,7 @@ public class AddAgentTests : BunitContext
         var method = typeof(AddAgent).GetMethod("BuildVerifyStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
         var rendered = Render(fragment);
-        Assert.Contains("refresh", rendered.Markup);
+        Assert.Contains(rendered.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Refresh);
         Assert.Contains("wizard-verify-list", rendered.Markup);
     }
 
@@ -437,8 +434,8 @@ public class AddAgentTests : BunitContext
         var method = typeof(AddAgent).GetMethod("BuildVerifyStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
         var rendered = Render(fragment);
-        Assert.Contains("check_circle", rendered.Markup);
-        Assert.Contains("wizard-verify-success-icon", rendered.Markup);
+        Assert.NotNull(rendered.Find("svg.omni-icon.wizard-verify-success-icon"));
+        Assert.DoesNotContain("check_circle", rendered.Markup);
     }
 
     [Fact]
@@ -453,15 +450,59 @@ public class AddAgentTests : BunitContext
     }
 
     [Fact]
-    public void BuildPlatformStep_LinuxSelected_ShowsCheckCircle()
+    public void BuildPlatformStep_LinuxSelected_ShowsTheFrameWithoutACheckMark()
     {
         var cut = Render<AddAgent>();
         typeof(AddAgent).GetField("_platform", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "linux");
         var method = typeof(AddAgent).GetMethod("BuildPlatformStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
         var rendered = Render(fragment);
-        Assert.Contains("check_circle", rendered.Markup);
-        Assert.Contains("wizard-platform-check", rendered.Markup);
+        // Recette R-399: the chosen card is its accent frame; no check mark is added beside the label.
+        var selected = rendered.Find(".omni-selectable-card.omni-selectable-card--selected");
+        Assert.Equal("true", selected.GetAttribute("aria-checked"));
+        Assert.Empty(rendered.FindAll(".omni-selectable-card > :not(.omni-selectable-card__icon):not(.omni-selectable-card__text)"));
+        Assert.Equal(2, rendered.FindAll(".omni-selectable-card").Count);
+        Assert.All(rendered.FindAll(".omni-selectable-card"), card => Assert.Equal(2, card.Children.Length));
+    }
+
+    [Fact]
+    public void BuildCapabilitiesStep_SelectedCards_CarryNoCheckMark()
+    {
+        var cut = Render<AddAgent>();
+        var method = typeof(AddAgent).GetMethod("BuildCapabilitiesStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
+        var rendered = Render(fragment);
+        Assert.NotEmpty(rendered.FindAll(".omni-selectable-card.omni-selectable-card--selected"));
+        Assert.Empty(rendered.FindAll(".omni-selectable-card > :not(.omni-selectable-card__icon):not(.omni-selectable-card__text)"));
+    }
+
+    [Fact]
+    public void BuildInstallStep_RendersTheCommandsInOmniCodeBlocks()
+    {
+        var cut = Render<AddAgent>();
+        typeof(AddAgent).GetField("_platform", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "linux");
+        var method = typeof(AddAgent).GetMethod("BuildInstallStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
+        var rendered = Render(fragment);
+        // Recette R-400: OE's readable code surface, not the local dark blocks.
+        Assert.NotEmpty(rendered.FindAll(".omni-code-block.wizard-code-block"));
+        Assert.Empty(rendered.FindAll(".wizard-pre"));
+        Assert.Empty(rendered.FindAll(".wizard-code-header"));
+    }
+
+    [Fact]
+    public void BuildVerifyStep_Listening_PutsStopOutsideThePanel()
+    {
+        var cut = Render<AddAgent>();
+        var detection = typeof(AddAgent).GetField("_detection", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        typeof(AgentDetectionMonitor).GetProperty("Listening")!.SetValue(detection, true);
+        var method = typeof(AddAgent).GetMethod("BuildVerifyStep", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var fragment = (RenderFragment)method.Invoke(cut.Instance, [])!;
+        var rendered = Render(fragment);
+        // Recette R-401: the panel holds only the search state; stopping it is a button below.
+        var panel = rendered.Find(".wizard-polling");
+        Assert.Empty(panel.QuerySelectorAll("button"));
+        Assert.Contains(rendered.FindAll("button"), b => b.TextContent.Contains("WizardCancelCheck"));
     }
 
     [Fact]

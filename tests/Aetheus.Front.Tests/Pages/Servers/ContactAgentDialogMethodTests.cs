@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -11,21 +10,21 @@ public class ContactAgentDialogMethodTests
     private static readonly BindingFlags PrivStatic = BindingFlags.NonPublic | BindingFlags.Static;
     private static readonly Type DialogType = typeof(ContactAgentDialog);
 
-    // === TokenBarClass (private static) ===
+    // === TokenBarVariant (private static) ===
 
     [Theory]
-    [InlineData(-5.0, "token-bar-expired")]
-    [InlineData(0.0, "token-bar-critical")]  // 0 is not < 0, falls to < 7 branch
-    [InlineData(3.0, "token-bar-critical")]
-    [InlineData(6.9, "token-bar-critical")]
-    [InlineData(7.0, "token-bar-warning")]
-    [InlineData(29.0, "token-bar-warning")]
-    [InlineData(30.0, "token-bar-ok")]
-    [InlineData(365.0, "token-bar-ok")]
-    public void TokenBarClass_ReturnsExpectedClass(double daysRemaining, string expected)
+    [InlineData(-5.0, OmniTone.Danger)]
+    [InlineData(0.0, OmniTone.Danger)]
+    [InlineData(3.0, OmniTone.Danger)]
+    [InlineData(6.9, OmniTone.Danger)]
+    [InlineData(7.0, OmniTone.Warning)]
+    [InlineData(29.0, OmniTone.Warning)]
+    [InlineData(30.0, OmniTone.Success)]
+    [InlineData(365.0, OmniTone.Success)]
+    public void TokenBarVariant_ReturnsExpectedVariant(double daysRemaining, OmniTone expected)
     {
-        var method = DialogType.GetMethod("TokenBarClass", PrivStatic)!;
-        var result = (string)method.Invoke(null, [daysRemaining])!;
+        var method = DialogType.GetMethod("TokenBarVariant", PrivStatic)!;
+        var result = (OmniTone)method.Invoke(null, [daysRemaining])!;
         Assert.Equal(expected, result);
     }
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
 using Microsoft.Extensions.Localization;
 using NSubstitute;
 

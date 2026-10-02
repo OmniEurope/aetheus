@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography;
@@ -118,15 +119,7 @@ public static class AgentCoreServiceCollectionExtensions
         {
             client.Timeout = Timeout.InfiniteTimeSpan; // per-probe timeout is enforced via a linked CTS
         })
-        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            UseCookies = false,
-            SslOptions = new SslClientAuthenticationOptions
-            {
-                RemoteCertificateValidationCallback = (_, _, _, _) => true
-            }
-        });
+        .ConfigurePrimaryHttpMessageHandler(BuildAppProbeHandler);
 
         // Deployment probe client, shared by `type: smoke` and the blue-green readiness gate. Both aim
         // at an origin the deployment itself controls, so redirects and proxies would only obscure what
@@ -160,6 +153,8 @@ public static class AgentCoreServiceCollectionExtensions
         services.AddSingleton<ITeamspeakCollector>(sp => sp.GetRequiredService<TeamspeakCollector>());
         services.AddSingleton<PortsentryCollector>();
         services.AddSingleton<IPortsentryCollector>(sp => sp.GetRequiredService<PortsentryCollector>());
+        services.AddSingleton<ListeningPortsCollector>();
+        services.AddSingleton<IListeningPortsCollector>(sp => sp.GetRequiredService<ListeningPortsCollector>());
         services.AddSingleton<RkhunterCollector>();
         services.AddSingleton<IRkhunterCollector>(sp => sp.GetRequiredService<RkhunterCollector>());
         services.AddSingleton<SecurityUpdatesCollector>();
@@ -182,6 +177,7 @@ public static class AgentCoreServiceCollectionExtensions
         services.AddSingleton<IOperationExecutor, PackageOperationExecutor>();
         services.AddSingleton<IOperationExecutor, SystemPackageUpgradeExecutor>();
         services.AddSingleton<IOperationExecutor, FirewallOperationExecutor>();
+        services.AddSingleton<IOperationExecutor, PortsObserveOperationExecutor>();
         services.AddSingleton<IOperationExecutor, BackupOperationExecutor>();
         services.AddSingleton<IOperationExecutor, ApacheOperationExecutor>();
         services.AddSingleton<IOperationExecutor, CertbotOperationExecutor>();
@@ -191,6 +187,9 @@ public static class AgentCoreServiceCollectionExtensions
         services.AddSingleton<IOperationExecutor, PortsentryOperationExecutor>();
         services.AddSingleton<IOperationExecutor, CronOperationExecutor>();
         services.AddSingleton<IOperationExecutor, PipelineArtifactOperationExecutor>();
+        services.AddSingleton<IFileSystemReader, PhysicalFileSystemReader>();
+        services.AddSingleton<IOperationExecutor, PipelineDotnetTestOperationExecutor>();
+        services.AddSingleton<IOperationExecutor, PipelineGateStatusOperationExecutor>();
         services.AddSingleton<IScannerProcessRunner, ScannerProcessRunner>();
         services.AddSingleton<ScannerSourceProjectionManager>();
         services.AddSingleton<IOperationExecutor, ScannerOperationExecutor>();
@@ -213,11 +212,35 @@ public static class AgentCoreServiceCollectionExtensions
         services.AddHostedService<PollingService>();
         services.AddHostedService<AgentLivenessWatchdogService>();
         services.AddHostedService<AppProbeWorker>();
+        services.AddHostedService<RunWorkspaceReaper>();
+        services.AddHostedService<Aetheus.Agent.Core.Operations.BlueGreenConfirmationWatchdog>();
         services.AddHostedService(sp => sp.GetRequiredService<DockerStorageMaintenanceService>());
 
         return services;
     }
 
+    // Extracted from AddAgentCore so the suppression below covers this handler alone. Left inline,
+    // it would have had to sit on the whole registration method and would then silently cover any
+    // future client added there.
+    [SuppressMessage("Security", "CA5359:Do not disable certificate validation",
+        Justification = "ADR-021 probe channel: authenticates nothing, carries no token, and only reports whether a possibly self-signed app answers.")]
+    [SuppressMessage("Aetheus.Security", "SEC008",
+        Justification = "Same reason as CA5359 above: the ADR-021 probe channel authenticates nothing and carries no token.")]
+    private static SocketsHttpHandler BuildAppProbeHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        SslOptions = new SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (_, _, _, _) => true
+        }
+    };
+
+    // CA5398 would have this pass SslProtocols.None and let the OS pick. Pinning 1.2 and 1.3 is the
+    // stricter choice, not the laxer one: the agent runs on hosts we do not control, and the system
+    // default still negotiates older versions on some of them. Revisit when 1.3 alone is realistic.
+    [SuppressMessage("Security", "CA5398:Avoid hardcoded SslProtocols values",
+        Justification = "Pins TLS 1.2/1.3 deliberately; the OS default is weaker on some agent hosts.")]
     private static SocketsHttpHandler BuildPrimaryHandler(AetheusAgentOptions options) => new()
     {
         SslOptions = new SslClientAuthenticationOptions
@@ -230,6 +253,10 @@ public static class AgentCoreServiceCollectionExtensions
     // S-FEAT-24: choose the TLS validation strategy. Pinning (preferred for the dev cert) accepts the
     // server cert only when its SHA-256 thumbprint matches the configured pin - far narrower than the
     // accept-any AllowInsecureCerts escape hatch. Falls back to accept-any, then to default validation.
+    [SuppressMessage("Security", "CA5359:Do not disable certificate validation",
+        Justification = "Reachable only with AllowInsecureCerts and no pinned thumbprint; ValidateTlsPosture refuses to start outside loopback in that state.")]
+    [SuppressMessage("Aetheus.Security", "SEC008",
+        Justification = "Same guard as CA5359 above: accept-any is reachable only with AllowInsecureCerts and no pin, and ValidateTlsPosture refuses that state outside loopback.")]
     internal static RemoteCertificateValidationCallback? BuildCertValidationCallback(AetheusAgentOptions options)
     {
         if (!string.IsNullOrWhiteSpace(options.PinnedServerCertThumbprint))
@@ -244,6 +271,10 @@ public static class AgentCoreServiceCollectionExtensions
             };
         }
 
+        // CA5359 is right that this accepts any certificate. It is reachable only when
+        // AllowInsecureCerts is set AND no thumbprint is pinned, and ValidateTlsPosture below
+        // refuses to start the agent in that state against anything but loopback or
+        // host.docker.internal. The guard, not this callback, is what keeps it honest.
         return options.AllowInsecureCerts ? (_, _, _, _) => true : null;
     }
 

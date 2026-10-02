@@ -17,8 +17,8 @@ trap 'rm -rf "$OUTPUT"' EXIT HUP INT TERM
 "$DOTNET" run \
   --project "$ROOT/deploy/tools/Aetheus.PackageNormalizer/Aetheus.PackageNormalizer.csproj" \
   --configuration Release --no-restore -- \
-  "$OUTPUT/feed/Aetheus.Telemetry.0.1.0.nupkg" \
-  "$OUTPUT/feed/Aetheus.WebAnalytics.0.1.0.nupkg"
+  "$OUTPUT/feed/Aetheus.Telemetry.1.0.0.nupkg" \
+  "$OUTPUT/feed/Aetheus.WebAnalytics.1.0.0.nupkg"
 
 PROJECT="$ROOT/examples/optional-observability/OptionalObservabilityExample.csproj"
 MANIFEST="$ROOT/examples/optional-observability/aetheus.integrations.json"

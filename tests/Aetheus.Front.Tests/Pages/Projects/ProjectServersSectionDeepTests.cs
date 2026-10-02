@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -90,8 +87,8 @@ public class ProjectServersSectionDeepTests : BunitContext
     {
         var method = typeof(ProjectServersSection).GetMethod("GetTypeBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ProjectServerType.AgentServer])!;
-        Assert.Equal(BadgeStyle.Info, result);
+        var result = (OmniTone)method.Invoke(null, [ProjectServerType.AgentServer])!;
+        Assert.Equal(OmniTone.Accent, result);
     }
 
     // ── Test 3: GetTypeBadge - ExternalHost ─────────────────────────────────
@@ -101,8 +98,8 @@ public class ProjectServersSectionDeepTests : BunitContext
     {
         var method = typeof(ProjectServersSection).GetMethod("GetTypeBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ProjectServerType.ExternalHost])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [ProjectServerType.ExternalHost])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     // ── Test 4: GetTypeBadge - default value ────────────────────────────────
@@ -112,8 +109,8 @@ public class ProjectServersSectionDeepTests : BunitContext
     {
         var method = typeof(ProjectServersSection).GetMethod("GetTypeBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ProjectServerType)99])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(ProjectServerType)99])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── Test 5: GetStatusBadge - Online ─────────────────────────────────────
@@ -123,8 +120,8 @@ public class ProjectServersSectionDeepTests : BunitContext
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)ServerStatus.Online])!;
-        Assert.Equal(BadgeStyle.Success, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)ServerStatus.Online])!;
+        Assert.Equal(OmniTone.Success, result);
     }
 
     // ── Test 6: GetStatusBadge - Offline ────────────────────────────────────
@@ -134,8 +131,8 @@ public class ProjectServersSectionDeepTests : BunitContext
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)ServerStatus.Offline])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)ServerStatus.Offline])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     // ── Test 7: GetStatusBadge - null ────────────────────────────────────────
@@ -145,8 +142,8 @@ public class ProjectServersSectionDeepTests : BunitContext
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)null])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)null])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── Test 8: Empty server list shows empty state icon ─────────────────────

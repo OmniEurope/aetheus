@@ -24,7 +24,9 @@ public sealed class IngestService(
     INotificationService notificationService,
     AppIngestGate ingestGate,
     TimeProvider timeProvider,
-    ILogger<IngestService> logger) : IIngestService
+    ILogger<IngestService> logger,
+    IAppTelemetryChangePublisher telemetryChanges,
+    IngestKeyRejectionLog rejections) : IIngestService
 {
     // Volume bounds (audit F-MON-06 + S-TECH-VOLM). PG growth is capped on five axes: metric-name
     // cardinality per app (MaxMetricNamesPerApp), points per request (MaxPointsPerRequest), the accepted
@@ -55,13 +57,23 @@ public sealed class IngestService(
 
     public async Task<int?> ResolveAppIdAsync(string ingestKey, CancellationToken ct = default)
     {
+        // Recette R2-013: every refusal is reported to the deduplicated warning, the request line itself
+        // being left to debug by RequestErrorLoggingMiddleware.
         if (string.IsNullOrWhiteSpace(ingestKey))
+        {
+            rejections.Record(null);
             return null;
+        }
 
         var hash = hasher.Hash(ingestKey);
         var cacheKey = KeyCacheKey(hash);
         if (cache.TryGetValue<CachedKeyResolution>(cacheKey, out var cached))
-            return cached.AppId > 0 ? cached.AppId : null; // -1 = negative-cached miss
+        {
+            if (cached.AppId > 0)
+                return cached.AppId;
+            rejections.Record(hash); // -1 = negative-cached miss
+            return null;
+        }
 
         var resolution = await appRepo.ResolveIngestKeyHashAsync(
             hash,
@@ -89,6 +101,8 @@ public sealed class IngestService(
                 new CachedKeyResolution(resolution?.AppId ?? -1),
                 options);
         }
+        if (resolution is null)
+            rejections.Record(hash);
         return resolution?.AppId;
     }
 
@@ -139,7 +153,7 @@ public sealed class IngestService(
         // The name set is cached per app (short TTL) so the hot path avoids a SELECT DISTINCT on every push.
         var (existingNames, nameCount) = await LoadMetricNamesAsync(appId, ct).ConfigureAwait(false);
         var budget = MaxMetricNamesPerApp - nameCount;
-        var newNames = false;
+        var newNames = new List<string>();
 
         var samples = new List<AppMetricSample>(accepted.Count);
         // Track per-metric extremes so a threshold breach anywhere in the batch is caught, not only the last point.
@@ -154,7 +168,7 @@ public sealed class IngestService(
                 if (budget <= 0) { dropped++; continue; }
                 existingNames.Add(p.MetricName);
                 budget--;
-                newNames = true;
+                newNames.Add(p.MetricName);
             }
 
             samples.Add(new AppMetricSample
@@ -164,7 +178,8 @@ public sealed class IngestService(
                 MetricName = p.MetricName,
                 Value = p.Value,
                 Unit = Truncate(p.Unit, 32),
-                AttributesJson = Truncate(p.AttributesJson, 1024)
+                AttributesJson = Truncate(p.AttributesJson, 1024),
+                Kind = p.Kind
             });
             extremesByMetric[p.MetricName] = extremesByMetric.TryGetValue(p.MetricName, out var e)
                 ? (Math.Min(e.Min, p.Value), Math.Max(e.Max, p.Value))
@@ -182,8 +197,13 @@ public sealed class IngestService(
 
         if (samples.Count > 0)
             await metricRepo.AddSamplesAsync(samples, ct).ConfigureAwait(false);
-        if (newNames)
-            cache.Set(MetricNamesCacheKey(appId), existingNames, TimeSpan.FromMinutes(5));
+        if (newNames.Count > 0)
+        {
+            // R-477: a name goes to the names table the first time it is seen, which is what the metric
+            // explorer and this cache's next refill read, instead of a DISTINCT over the samples.
+            await metricRepo.AddMetricNamesAsync(appId, newNames, ct).ConfigureAwait(false);
+            cache.Set(MetricNamesCacheKey(appId), existingNames, MetricNamesCacheLifetime);
+        }
 
         await appRepo.TouchIngestAsync(appId, dropped, now, ct).ConfigureAwait(false);
         await EvaluateThresholdsAsync(appId, extremesByMetric, now, ct).ConfigureAwait(false);
@@ -192,6 +212,16 @@ public sealed class IngestService(
             logger.LogInformation("Ingest metrics app {AppId}: {Accepted} accepted, {Dropped} dropped (caps)", appId, samples.Count, dropped);
         return new IngestOutcome(samples.Count, dropped);
     }
+
+    /// <summary>
+    /// R-458: how long an app's metric-name set is trusted before it is read again. Since R-477 the
+    /// read is the app's rows of the names table (one per name), no longer a DISTINCT over 30 days of
+    /// samples. The set only grows through this ingestion (which writes it back), so one read an hour
+    /// is enough; what a longer life can cost is bounded: names the other blue-green colour added in
+    /// the meantime are unseen here, so the name cap may be passed by what that colour added within
+    /// the hour.
+    /// </summary>
+    internal static readonly TimeSpan MetricNamesCacheLifetime = TimeSpan.FromHours(1);
 
     private static string MetricNamesCacheKey(int appId) => $"metric-names:{appId}";
 
@@ -222,7 +252,7 @@ public sealed class IngestService(
             return (new HashSet<string>(cached, StringComparer.Ordinal), cached.Count);
 
         var names = (await metricRepo.GetMetricNamesAsync(appId, ct).ConfigureAwait(false)).ToHashSet(StringComparer.Ordinal);
-        cache.Set(MetricNamesCacheKey(appId), new HashSet<string>(names, StringComparer.Ordinal), TimeSpan.FromMinutes(5));
+        cache.Set(MetricNamesCacheKey(appId), new HashSet<string>(names, StringComparer.Ordinal), MetricNamesCacheLifetime);
         return (names, names.Count);
     }
 
@@ -232,10 +262,12 @@ public sealed class IngestService(
         var (accepted, dropped, _) = CapByCount(records, MaxPointsPerRequest);
 
         var logs = new List<AppLogEntry>(accepted.Count);
+        var loggedErrors = new List<AppErrorUpsert>();
         foreach (var r in accepted)
         {
             var ts = r.Timestamp == default ? now : DateTime.SpecifyKind(r.Timestamp, DateTimeKind.Utc);
             if (!WithinIngestWindow(ts, now)) { dropped++; continue; }
+            if (LoggedError(r, ts) is { } loggedError) loggedErrors.Add(loggedError);
             logs.Add(new AppLogEntry
             {
                 MonitoredAppId = appId,
@@ -249,8 +281,31 @@ public sealed class IngestService(
 
         if (logs.Count > 0)
             await logRepo.AddLogsAsync(logs, ct).ConfigureAwait(false);
+        if (loggedErrors.Count > 0)
+            await errorRepo.UpsertErrorsAsync(appId, loggedErrors, ct).ConfigureAwait(false);
         await appRepo.TouchIngestAsync(appId, dropped, now, ct).ConfigureAwait(false);
+        // R-181: the open Logs tab reloads on this push instead of a Refresh click.
+        if (logs.Count > 0)
+            await telemetryChanges.PublishAsync(appId, ct).ConfigureAwait(false);
         return new IngestOutcome(logs.Count, dropped);
+    }
+
+    /// <summary>OTLP severity number from which a log record is an error (ERROR and FATAL).</summary>
+    private const int ErrorSeverityNumber = 17;
+
+    /// <summary>
+    /// Recette R-491: an exception logged outside any span (a background service's failed sweep, say)
+    /// never reached the Errors tab, which was fed by traces alone; production logged one every hour and
+    /// the tab showed none. A record at error level that carries an exception opens or feeds an error
+    /// group: its exception type, grouped by the logger that wrote it, with the log line as its message.
+    /// </summary>
+    private static AppErrorUpsert? LoggedError(ParsedLogRecord record, DateTime at)
+    {
+        if (record.SeverityNumber < ErrorSeverityNumber || string.IsNullOrWhiteSpace(record.ExceptionType))
+            return null;
+        var type = Truncate(record.ExceptionType, 256)!;
+        var source = Truncate(record.Source, 512);
+        return new AppErrorUpsert(Fingerprint(type, source), type, Truncate(record.Body, 1000) ?? string.Empty, source, at);
     }
 
     public async Task<IngestOutcome> IngestErrorsAsync(int appId, IReadOnlyList<ParsedError> errors, CancellationToken ct = default)
@@ -275,6 +330,9 @@ public sealed class IngestService(
 
         var groups = upserts.Count > 0 ? await errorRepo.UpsertErrorsAsync(appId, upserts, ct).ConfigureAwait(false) : 0;
         await appRepo.TouchIngestAsync(appId, dropped, now, ct).ConfigureAwait(false);
+        // R-181: the open Errors tab reloads on this push instead of a Refresh click.
+        if (upserts.Count > 0)
+            await telemetryChanges.PublishAsync(appId, ct).ConfigureAwait(false);
         return new IngestOutcome(groups, dropped);
     }
 

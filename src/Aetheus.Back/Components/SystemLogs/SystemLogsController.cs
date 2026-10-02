@@ -24,11 +24,16 @@ public class SystemLogsController(ISystemLogService logService, ISettingsService
         [FromQuery] DateTime? dateTo,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
-        CancellationToken ct = default)
+        [FromQuery, StringLength(50)] string? sortBy = null,
+        [FromQuery] bool sortDescending = true,
+        CancellationToken ct = default,
+        [FromQuery(Name = "Filters"), MaxLength(PaginationRequest.MaxFilters)] List<GridFilter>? filters = null)
     {
         page = Math.Max(1, page);
         pageSize = PaginationDefaults.Clamp(pageSize);
-        return Ok(await logService.GetLogEntriesAsync(fileName, level, search, dateFrom, dateTo, page, pageSize, ct));
+        // Recette R-453: the virtualized grid's column sort and header filters travel with each block.
+        return Ok(await logService.GetLogEntriesAsync(fileName, level, search, dateFrom, dateTo, page, pageSize, ct,
+            sortBy, sortDescending, filters is { Count: > 0 } ? filters : null));
     }
 
     [HttpGet("export")]

@@ -239,6 +239,21 @@ public sealed class AuthRepositoryTokenTests : IDisposable
     // ---------- refresh tokens ----------
 
     [Fact]
+    public async Task RevokeRefreshTokenAsync_RevokesOnlyAnActiveToken_SoASecondRotationLoses()
+    {
+        _db.RefreshTokens.Add(Refresh(1, 100, NowUtc.AddDays(7)));
+        await SaveAsync();
+
+        Assert.True(await _repository.RevokeRefreshTokenAsync(1, 2, Ct));
+        Assert.False(await _repository.RevokeRefreshTokenAsync(1, 3, Ct));
+        Assert.False(await _repository.RevokeRefreshTokenAsync(404, 3, Ct));
+
+        var state = await _repository.FindRefreshTokenStateAsync(1, Ct);
+        Assert.Equal(NowUtc, state!.RevokedAt);
+        Assert.Equal(2, state.ReplacedById); // the winner's replacement is kept
+    }
+
+    [Fact]
     public async Task DeleteExpiredRefreshTokensAsync_StagesTheExpiredAndLongRevokedTokensOfOneUser()
     {
         _db.RefreshTokens.AddRange(

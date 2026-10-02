@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Mail;
 
 public static class MailCommandHelper
 {
-    // Field validation is shared with the agent via Aetheus.Shared.Validation.MailValidation
+    // Field validation is shared with the agent via Aetheus.Shared.Components.Shared.MailValidation
     // (single source of truth for the typed MailSetup operation); these thin wrappers keep the
     // backend call sites unchanged.
     public static bool IsValidDomainName(string name) => MailValidation.IsValidDomainName(name);
@@ -27,28 +26,6 @@ public static class MailCommandHelper
         return "'" + value.Replace("'", "'\\''") + "'";
     }
 
-    public static string BuildServiceCommand(MailAction action) => action switch
-    {
-        MailAction.StartPostfix => "systemctl start postfix",
-        MailAction.StopPostfix => "systemctl stop postfix",
-        MailAction.RestartPostfix => "systemctl restart postfix",
-        MailAction.ReloadPostfix => "systemctl reload postfix",
-        MailAction.StartDovecot => "systemctl start dovecot",
-        MailAction.StopDovecot => "systemctl stop dovecot",
-        MailAction.RestartDovecot => "systemctl restart dovecot",
-        MailAction.ReloadDovecot => "systemctl reload dovecot",
-        MailAction.FlushQueue => "postqueue -f",
-        MailAction.ViewQueue => "postqueue -p",
-        MailAction.TestConfig => "postfix check 2>&1 && echo 'Postfix config OK'",
-        _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
-    };
-
-    public static string BuildGetLogsCommand(string logType, int lines)
-    {
-        var unit = logType == "postfix" ? "postfix@-.service" : "dovecot";
-        return $"journalctl -u {unit} --no-pager -n {lines} 2>/dev/null || tail -n {lines} /var/log/mail.log 2>/dev/null";
-    }
-
     // S-FEAT-W8KN: add-domain / add-account / add-alias / dkim-rotate no longer build free-form shell
     // strings (they always failed for the non-root agent). They dispatch the typed MailAddDomain /
     // MailAddAccount / MailAddAlias / MailDkimRotate operations through the root-owned mail-manage
@@ -62,16 +39,7 @@ public static class MailCommandHelper
     // through the root-owned mail-manage helper (argv-exact, re-validated), like the add-* ops.
     // (SedEscape went with them - it was only used by those sed-based builders.)
 
-    public static string BuildSpamAssassinServiceCommand(string action)
-    {
-        // Whitelist of permitted systemctl actions - prevents arbitrary action strings
-        // (e.g. "restart spamassassin; rm -rf /") from reaching the shell.
-        return action switch
-        {
-            "start" or "stop" or "restart" or "reload" or "enable" or "disable" or "status"
-                => $"systemctl {action} spamassassin",
-            _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
-        };
-    }
-
+    // PLAN-005: BuildServiceCommand / BuildGetLogsCommand / BuildSpamAssassinServiceCommand were removed.
+    // Their shell strings needed privileges the non-root agent never had; service control, queue, logs
+    // and the rspamd spam filter now dispatch typed operations through the mail-manage helper.
 }

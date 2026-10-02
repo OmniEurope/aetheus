@@ -1,0 +1,382 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git-repositories/{Id:int}"
+
+<PageTitle>@(_repo?.Name ?? L["GitRepository"]) - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else if (_repo is null)
+{
+    <OmniAlert Severity="OmniSeverity.Warning">@L["NotFound"]</OmniAlert>
+}
+else
+{
+    <OmniPageHeader Title="@_repo.Name" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon>
+        <Badges>
+            @if (_repo.IsEmpty)
+            {
+                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["Empty"]</OmniBadge>
+            }
+        </Badges>
+        <Actions>
+            @* R2-003 (2026-10-01): the repository as a zip, its default branch. Secondary: browsing is the
+               page's purpose, the download an extra (STD-BTN). *@
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@DownloadArchiveAsync" Busy="@_downloadingArchive" Disabled="@_repo.IsEmpty"><OmniIcon Name="OmniIconName.Download" /> <span>@L["DownloadZip"]</span></OmniButton>
+        </Actions>
+    </OmniPageHeader>
+    @if (!string.IsNullOrEmpty(_repo.Description))
+    {
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mt-xs">@_repo.Description</OmniText>
+    }
+    @if (!string.IsNullOrEmpty(_repo.CloneUrl))
+    {
+        @* Recette R2-002 (OE 1.4.0): one read-only field with OE's Copy button welded to its end; the
+           button shows a check after a copy, and only a refused copy adds a toast. *@
+        <OmniTextBox Value="@_repo.CloneUrl" ReadOnly="true" Copyable="true" OnCopy="@OnCloneUrlCopied"
+                     Class="clone-url-input omni-u-mt-sm" aria-label="@L["CloneUrl"]" ValueExpression="@(() => _repo.CloneUrl)"/>
+    }
+
+    <UrlSyncedTabs Slugs="@TabSlugs" @bind-SelectedIndex="_selectedTab" class="omni-u-mt-lg">
+        <Tabs>
+            <OmniTabsItem Key="commits" Title="@L["Commits"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("history"))" /></Icon><ChildContent>
+                @if (_commits.Error)
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mt-sm">
+                        <OmniAlert Severity="OmniSeverity.Danger"
+                            Class="omni-u-m-0 omni-u-grow">@L["LoadFailed"]</OmniAlert>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadCommits"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniStack>
+                }
+                else
+                {
+                    @* The grid stays mounted; IsLoading is the in-grid overlay. Previously
+                       hiding the grid behind a {_commitsLoading} branch unmounted it, and
+                       the AetheusDataGrid wrapper's first-render auto-Reload then fired
+                       repeatedly on every re-mount - infinite fetch loop. AutoLoad=false
+                       also prevents double-fetching the initial page (we already load it
+                       in OnInitializedAsync via LoadCommits). *@
+                    <AetheusDataGrid @ref="_grids.Commits" FullHeight="true" TItem="GitLightCommitDto" Data="@_commits.Items"
+                        Count="@_commits.TotalCount" IsLoading="@_commits.Loading" LoadData="@OnLoadCommits"
+                        Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<GitLightCommitDto>(_commits.Items, _commits.TotalCount))"
+                        AutoLoad="false" EmptyText="@L["NoCommitsFound"]"
+                        RowClick="@(c => Nav.NavigateTo($"/git-repositories/{Id}/commits/{c.Sha}"))">
+                        @* Commits are the one grid on this page that cannot honour a column sort: the page
+                           comes from a git revision walk paged by offset, so its order is the walk's
+                           (topological, newest first), and re-ordering it would mean reading the whole
+                           history per page. The columns say so rather than offering an order that never
+                           arrives; the other five grids here do sort server-side.
+                           R2-004 (2026-10-01): the filters live in the columns, the toolbar above the grid is
+                           gone. The back maps each one to git: Message to a literal case-insensitive --grep
+                           (contains only), Branch to the refs the walk starts from (none ticked walks every
+                           ref), Author to --author (R-224), Date to --since/--until. git filters dates on the
+                           committer date, so the Date column shows that date. The SHA opens the commit page and
+                           offers no filter. A ?search= link pre-fills the Message filter, visible and removable.
+                           R2-005: the Branch column is the ref git reached the commit through (--source). *@
+                        <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="GitLightCommitDto" Property="ShortSha" Title="@L["Commit"]" Width="100px" Sortable="false" Filterable="false" >
+                                <Template Context="c">
+                                    <a href="@($"/git-repositories/{Id}/commits/{c.Sha}")" class="omni-link" @onclick:stopPropagation="true"><code>@c.ShortSha</code></a>
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="GitLightCommitDto" Property="Message" Title="@L["Message"]" Width="auto" Sortable="false" Filterable="true" FilterOperators="@GitRepositoryGrids.MessageOperators" DefaultFilterValue="@CommitSearch" />
+                            <OmniDataGridColumn TItem="GitLightCommitDto" Property="SourceRef" Title="@L["Branch"]" Width="160px" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_grids.Values.CommitBranches" FilterSearchable="true" >
+                                <Template Context="c">
+                                    @if (!string.IsNullOrEmpty(c.SourceRef))
+                                    {
+                                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@c.SourceRef</OmniBadge>
+                                    }
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="GitLightCommitDto" Property="AuthorName" Title="@L["Author"]" Width="150px" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_grids.Values.CommitAuthors" FilterSearchable="true" />
+                            <OmniDataGridColumn TItem="GitLightCommitDto" Property="CommitDate" Title="@L["Date"]" FormatString="{0:g}" Width="160px" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+                        </Columns>
+                    </AetheusDataGrid>
+                }
+            </ChildContent></OmniTabsItem>
+
+            <OmniTabsItem Key="branches" Title="@L["Branches"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("account_tree"))" /></Icon><ChildContent>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ShowCreateBranchDialog" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                </OmniStack>
+                @if (_branchPage.Error)
+                {
+                    <OmniAlert Severity="OmniSeverity.Danger">
+                        @L["LoadFailed"] <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadBranchesAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniAlert>
+                }
+                <AetheusDataGrid @ref="_grids.Branches" FullHeight="true" TItem="GitLightBranchDto" Data="@_branchRows"
+                    Count="@_branchPage.TotalCount" IsLoading="@_branchPage.Loading"
+                    LoadData="@OnLoadBranches" AutoLoad="false" EmptyText="@L["NoBranchesFound"]"
+                    Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<GitLightBranchDto>(_branchRows, _branchPage.TotalCount))">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="GitLightBranchDto" Property="Name" Title="@L["Name"]" Width="auto" Filterable="true" >
+                            <Template Context="b">
+                                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@b.Name</OmniText>
+                                    @if (b.IsDefault)
+                                    {
+                                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@L["Default"]</OmniBadge>
+                                    }
+                                    @if (IsBranchProtected(b.Name))
+                                    {
+                                        <OmniIcon Name="OmniIconName.Lock" Class="omni-u-text-warning" />
+                                    }
+                                </OmniStack>
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="GitLightBranchDto" Property="LastCommitSha" Title="@L["LastCommit"]" Width="100px" Filterable="true" >
+                            <Template Context="b">
+                                @if (!string.IsNullOrEmpty(b.LastCommitSha)) { <ShortId Value="@b.LastCommitSha" Href="@($"/git-repositories/{Id}/commits/{Uri.EscapeDataString(b.LastCommitSha)}")" Copyable="false" Class="text-mono" /> }
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="GitLightBranchDto" Property="LastCommitDate" Title="@L["Date"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+                        <OmniDataGridColumn TItem="GitLightBranchDto" Title="" Width="110px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                            <Template Context="b">
+                                @if (!b.IsDefault)
+                                {
+                                    <GitDefaultBranchButton RepositoryId="@Id" Branch="@b" CanWrite="@_canWrite" Changed="@LoadData" />
+                                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteBranch(b))" Disabled="@(!_canWrite)" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                                }
+                            </Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+
+            <OmniTabsItem Key="tags" Title="@L["Tags"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("label"))" /></Icon><ChildContent>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ShowCreateTagDialog" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                </OmniStack>
+                @if (_tagPage.Error)
+                {
+                    <OmniAlert Severity="OmniSeverity.Danger">
+                        @L["LoadFailed"] <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadTagsAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniAlert>
+                }
+                <AetheusDataGrid @ref="_grids.Tags" FullHeight="true" TItem="GitLightTagDto" Data="@_tags"
+                    Count="@_tagPage.TotalCount" IsLoading="@_tagPage.Loading"
+                    LoadData="@OnLoadTags" AutoLoad="false" EmptyText="@L["NoTagsFound"]"
+                    Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<GitLightTagDto>(_tags, _tagPage.TotalCount))">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="GitLightTagDto" Property="Name" Title="@L["Name"]" Width="auto" Filterable="true" />
+                        <OmniDataGridColumn TItem="GitLightTagDto" Property="Sha" Title="@L["Commit"]" Width="100px" Filterable="true" >
+                            <Template Context="t">
+                                <ShortId Value="@t.Sha" Href="@($"/git-repositories/{Id}/commits/{Uri.EscapeDataString(t.Sha)}")" Copyable="false" Class="text-mono" />
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="GitLightTagDto" Property="Message" Title="@L["Message"]" Width="auto" Filterable="true" />
+                        <OmniDataGridColumn TItem="GitLightTagDto" Property="TaggerDate" Title="@L["Date"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+                        <OmniDataGridColumn TItem="GitLightTagDto" Title="" Width="80px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                            <Template Context="t">
+                                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteTag(t))" Disabled="@(!_canWrite)" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                            </Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+
+            <OmniTabsItem Key="files" Title="@L["Files"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("folder_open"))" /></Icon><ChildContent>
+                @if (_treeError)
+                {
+                    <OmniAlert Severity="OmniSeverity.Danger">
+                        @L["LoadFailed"] <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadTree"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniAlert>
+                }
+                else
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+                        <OmniDropDown aria-label="@L["Branch"]" TValue="string" Options="@((_branches.Select(b => b.Name)).ToOptions(item => (string)item, item => item))" @bind-Value="_treeRef"
+                            @bind-Value:after="LoadTree" Placeholder="@_repo.DefaultBranch" AllowEmpty="false" />
+                        @if (!string.IsNullOrEmpty(_treePath))
+                        {
+                        <OmniBreadcrumb>
+                            <OmniBreadcrumbItem>/</OmniBreadcrumbItem>
+                            @foreach (var segment in _treePath.Split('/'))
+                            {
+                                <OmniBreadcrumbItem>@segment</OmniBreadcrumbItem>
+                            }
+                        </OmniBreadcrumb>
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@NavigateUp" title="@L["Back"]" Label="@L["Back"]"><OmniIcon Name="OmniIconName.ArrowLeft" /></OmniButton>
+                        }
+                    </OmniStack>
+
+                    @if (_blobContent is not null)
+                    {
+                        <OmniCard Class="omni-u-p-lg">
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+                                <OmniIcon Name="OmniIconName.Document" />
+                                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@_blobContent.Path</OmniText>
+                                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@GitRepositoryViewHelpers.FormatSize(_blobContent.Size)</OmniBadge>
+                                <div class="pipeline-list-spacer"></div>
+                                @if (!_blobContent.IsBinary)
+                                {
+                                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ToggleBlame" title="@L["Blame"]"><OmniIcon Name="OmniIconName.UserFocus" /> <span>@(_blameLines is not null ? L["Code"] : L["Blame"])</span></OmniButton>
+                                }
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CloseBlobAsync" title="@L["Back"]" Label="@L["Back"]"><OmniIcon Name="OmniIconName.ArrowLeft" /></OmniButton>
+                            </OmniStack>
+                            @if (_blameLines is not null)
+                            {
+                                <OmniCodeBlock Code="@_blameFormatted" Title="@L["Blame"]" Class="blame-view code-block-bounded" />
+                            }
+                            else if (_blobContent.IsBinary)
+                            {
+                                <OmniAlert Severity="OmniSeverity.Info">@L["BinaryFile"]</OmniAlert>
+                            }
+                            else
+                            {
+                                <div id="@_monacoElementId" class="monaco-viewer-container" aria-label="@L["Code"]"></div>
+                            }
+                        </OmniCard>
+                    }
+                    else
+                    {
+                        <AetheusDataGrid @ref="_grids.Tree" FullHeight="true" TItem="GitLightTreeEntryDto" Data="@_treeEntries"
+                            Count="@_treeTotalCount" IsLoading="@_treeLoading"
+                            LoadData="@OnLoadTree" AutoLoad="false" EmptyText="@L["NoFilesFound"]"
+                            Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<GitLightTreeEntryDto>(_treeEntries, _treeTotalCount))">
+                            <Columns>
+                                <OmniDataGridColumn Frozen="true" TItem="GitLightTreeEntryDto" Property="Name" Title="@L["Name"]" Width="auto" Filterable="true" >
+                                    <Template Context="e">
+                                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                                            <OmniIcon Name="@MaterialIconMap.Resolve(e.Type == GitTreeEntryType.Tree ? "folder" : "description")" Class="@(e.Type == GitTreeEntryType.Tree ? "omni-u-text-warning" : "omni-u-text-muted")" />
+                                            <a href="javascript:void(0)" class="omni-link" @onclick="@(() => NavigateToEntry(e))" @onclick:preventDefault>@e.Name</a>
+                                        </OmniStack>
+                                    </Template>
+                                </OmniDataGridColumn>
+                                <OmniDataGridColumn TItem="GitLightTreeEntryDto" Property="Size" Title="@L["Size"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                                    <Template Context="e">
+                                        @if (e.Size.HasValue)
+                                        {
+                                            @GitRepositoryViewHelpers.FormatSize(e.Size.Value)
+                                        }
+                                    </Template>
+                                </OmniDataGridColumn>
+                            </Columns>
+                        </AetheusDataGrid>
+                    }
+                }
+            </ChildContent></OmniTabsItem>
+
+            <OmniTabsItem Key="pulls" Title="@L["PullRequests"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("merge_type"))" /></Icon><ChildContent>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ShowCreatePrDialog" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                </OmniStack>
+                @if (_pullRequests.Error)
+                {
+                    <OmniAlert Severity="OmniSeverity.Danger">
+                        @L["LoadFailed"] <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadPrsAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniAlert>
+                }
+                <AetheusDataGrid @ref="_grids.PullRequests" FullHeight="true" TItem="InternalPullRequestDto" Data="@_pullRequests.Items"
+                    Count="@_pullRequests.TotalCount" IsLoading="@_pullRequests.Loading" LoadData="@OnLoadPrs"
+                    Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<InternalPullRequestDto>(_pullRequests.Items, _pullRequests.TotalCount))"
+                    EmptyText="@L["NoPullRequestsFound"]">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="InternalPullRequestDto" Property="Number" Title="#" Width="60px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+                        <OmniDataGridColumn TItem="InternalPullRequestDto" Property="Title" Title="@L["Title"]" Width="auto" Filterable="true" />
+                        <OmniDataGridColumn TItem="InternalPullRequestDto" Property="SourceBranch" Title="@L["Source"]" Width="140px" Filterable="true" >
+                            <Template Context="pr">
+                                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@pr.SourceBranch</OmniBadge>
+                                <OmniIcon Name="OmniIconName.ArrowRight" Class="omni-u-text-muted" />
+                                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@pr.TargetBranch</OmniBadge>
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="InternalPullRequestDto" Property="AuthorLogin" Title="@L["Author"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_grids.Values.PullRequestAuthors" FilterSearchable="true" />
+                        <OmniDataGridColumn TItem="InternalPullRequestDto" Property="Status" Title="@L["Status"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@_grids.PrStatusText(L)" >
+                            <Template Context="pr">
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@GetPrStatusBadge(pr.Status)">@L.Localize(pr.Status)</OmniBadge>
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="InternalPullRequestDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+                        <OmniDataGridColumn TItem="InternalPullRequestDto" Title="" Width="150px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                            <Template Context="pr">
+                                @if (pr.Status == PullRequestStatus.Open)
+                                {
+                                    @* R2-037 (2026-10-01): Fusionner is the row's main action, blue by the user's choice (R-533). *@
+                                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => MergePr(pr))" Disabled="@(!_canWrite)" title="@L["Merge"]" Label="@L["Merge"]"><OmniIcon Name="OmniIconName.GitMerge" /></OmniButton>
+                                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => ClosePr(pr))" Disabled="@(!_canWrite)" title="@L["Close"]" Label="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+                                }
+                            </Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+
+            <OmniTabsItem Key="graph" Title="@L["Graph"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("timeline"))" /></Icon><ChildContent>
+                @if (_graphError)
+                {
+                    <OmniAlert Severity="OmniSeverity.Danger">
+                        @L["LoadFailed"] <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadGraph"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniAlert>
+                }
+                else if (_graphLoading)
+                {
+                    <AetheusLoader />
+                }
+                else
+                {
+                    @* O: SVG lane graph (reload lives on the page header - LoadData reloads the graph too). *@
+                    <div class="commit-graph-svg-wrap">
+                        <Aetheus.Front.Components.Git.GitCommitGraph Commits="@_graphCommits" RepoId="@Id" />
+                    </div>
+                }
+            </ChildContent></OmniTabsItem>
+
+            @if (!string.IsNullOrEmpty(_readmeHtml))
+            {
+                <OmniTabsItem Key="readme" Title="@L["Readme"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("description"))" /></Icon><ChildContent>
+                    <div class="readme-rendered">@((MarkupString)_readmeHtml)</div>
+                </ChildContent></OmniTabsItem>
+            }
+
+            <OmniTabsItem Key="protection" Title="@L["BranchProtection"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("security"))" /></Icon><ChildContent>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ShowAddProtectionRuleDialog" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+                </OmniStack>
+                @if (_protectionPage.Error)
+                {
+                    <OmniAlert Severity="OmniSeverity.Danger">
+                        @L["LoadFailed"] <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadProtectionRulesAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                    </OmniAlert>
+                }
+                <AetheusDataGrid @ref="_grids.Protection" FullHeight="true" TItem="BranchProtectionRuleDto" Data="@_protectionRows"
+                    Count="@_protectionPage.TotalCount" IsLoading="@_protectionPage.Loading"
+                    LoadData="@OnLoadProtectionRules" AutoLoad="false" EmptyText="@L["NoRulesFound"]"
+                    Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<BranchProtectionRuleDto>(_protectionRows, _protectionPage.TotalCount))">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="BranchProtectionRuleDto" Property="Pattern" Title="@L["Pattern"]" Width="auto" Filterable="true" />
+                        <OmniDataGridColumn TItem="BranchProtectionRuleDto" Property="PreventDeletion" Title="@L["PreventDeletion"]" Width="140px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@_grids.YesNoText(L)" >
+                            <Template Context="r">
+                                <OmniSwitch Value="@r.PreventDeletion" ValueChanged="@((bool v) => UpdateProtectionRule(r, preventDeletion: v))"
+                                    ValueExpression="@(() => r.PreventDeletion)" Disabled="@(!_canWrite)"
+                                    aria-label="@($"{L["PreventDeletion"]}: {r.Pattern}")" />
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="BranchProtectionRuleDto" Property="PreventForcePush" Title="@L["PreventForcePush"]" Width="150px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@_grids.YesNoText(L)" >
+                            <Template Context="r">
+                                <OmniSwitch Value="@r.PreventForcePush" ValueChanged="@((bool v) => UpdateProtectionRule(r, preventForcePush: v))"
+                                    ValueExpression="@(() => r.PreventForcePush)" Disabled="@(!_canWrite)"
+                                    aria-label="@($"{L["PreventForcePush"]}: {r.Pattern}")" />
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="BranchProtectionRuleDto" Property="RequirePullRequest" Title="@L["RequirePR"]" Width="130px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@_grids.YesNoText(L)" >
+                            <Template Context="r">
+                                <OmniSwitch Value="@r.RequirePullRequest" ValueChanged="@((bool v) => UpdateProtectionRule(r, requirePr: v))"
+                                    ValueExpression="@(() => r.RequirePullRequest)" Disabled="@(!_canWrite)"
+                                    aria-label="@($"{L["RequirePR"]}: {r.Pattern}")" />
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="BranchProtectionRuleDto" Title="" Width="80px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                            <Template Context="r">
+                                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteProtectionRule(r))" Disabled="@(!_canWrite)" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                            </Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

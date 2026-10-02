@@ -16,7 +16,7 @@ public class RepoSourceResolverTests
     private readonly IProjectRepository _projectRepo = Substitute.For<IProjectRepository>();
     private readonly IGitLightRepository _lightRepo = Substitute.For<IGitLightRepository>();
 
-    private RepoSourceResolver Build(bool externalReposEnabled)
+    private RepoSourceResolver Build()
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -24,10 +24,9 @@ public class RepoSourceResolverTests
                 ["Aetheus:PublicApiBaseUrl"] = "https://aetheus.example.com"
             })
             .Build();
-        var features = Options.Create(new FeatureFlagsOptions { ExternalRepos = externalReposEnabled });
         // HttpContext is null here, so resolution falls to the configured PublicApiBaseUrl (config-first).
         var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
-        return new RepoSourceResolver(_projectRepo, _lightRepo, config, httpContextAccessor, features);
+        return new RepoSourceResolver(_projectRepo, _lightRepo, config, httpContextAccessor);
     }
 
     [Fact]
@@ -36,36 +35,24 @@ public class RepoSourceResolverTests
         _projectRepo.FindProjectAsync(7, Arg.Any<CancellationToken>())
             .Returns(new Project { Id = 7, RepositoryUrl = "https://github.com/acme/app.git", DefaultBranch = "main" });
 
-        var source = await Build(externalReposEnabled: true).ResolveAsync(7, ct: TestContext.Current.CancellationToken);
+        var source = await Build().ResolveAsync(7, ct: TestContext.Current.CancellationToken);
 
         Assert.False(source.IsExternal);
         Assert.Equal("https://github.com/acme/app.git", source.CloneUrl);
     }
 
     [Fact]
-    public async Task External_FlagOn_ReturnsMirrorSmartHttpUrl()
+    public async Task External_ReturnsMirrorSmartHttpUrl()
     {
         _projectRepo.FindProjectAsync(9, Arg.Any<CancellationToken>())
             .Returns(new Project { Id = 9, GitConnectionId = 3, RepositoryUrl = "stale", DefaultBranch = "develop" });
         _lightRepo.GetByProjectAsync(9, Arg.Any<CancellationToken>())
             .Returns([new GitInternalRepo { ProjectId = 9, Slug = "app", GitConnectionId = 3 }]);
 
-        var source = await Build(externalReposEnabled: true).ResolveAsync(9, ct: TestContext.Current.CancellationToken);
+        var source = await Build().ResolveAsync(9, ct: TestContext.Current.CancellationToken);
 
         Assert.True(source.IsExternal);
         Assert.True(source.IsMirrorBacked);
         Assert.Equal("https://aetheus.example.com/git/9/app.git", source.CloneUrl);
-    }
-
-    [Fact]
-    public async Task External_FlagOff_TreatedAsInternal()
-    {
-        _projectRepo.FindProjectAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new Project { Id = 9, GitConnectionId = 3, RepositoryUrl = "https://internal/url.git" });
-
-        var source = await Build(externalReposEnabled: false).ResolveAsync(9, ct: TestContext.Current.CancellationToken);
-
-        Assert.False(source.IsExternal);
-        Assert.Equal("https://internal/url.git", source.CloneUrl);
     }
 }

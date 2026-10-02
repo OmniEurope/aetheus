@@ -10,6 +10,9 @@ namespace Aetheus.Back.Components.Servers;
 public interface IServerLifecycleService
 {
     Task<PaginatedResult<ServerDto>> GetServersAsync(PaginationRequest request, ServerType? type = null, ServerStatus? status = null, AgentCompatibilityStatus? compatibility = null, List<int>? accessibleIds = null, CancellationToken ct = default);
+    /// <summary>Recette R-211: values of the servers list's checkable column filters.</summary>
+    Task<ServerFilterValuesDto> GetServerFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default);
+
     Task<AgentCompatibilitySummaryDto> GetAgentCompatibilitySummaryAsync(
         List<int>? accessibleIds = null,
         CancellationToken ct = default);
@@ -27,7 +30,7 @@ public interface IServerLifecycleService
     /// Idempotent. When on, the scheduler refuses any non-container-isolated step on this server.</summary>
     Task<ServerDto?> SetContainerIsolationRequiredAsync(int id, bool required, string actorUsername, CancellationToken ct = default);
 
-    Task<bool> DeleteServerAsync(int id, CancellationToken ct = default);
+    // Removal lives in IServerRetirementService (PLAN-004 R-11): retire, then optionally purge.
     Task<bool> ServerExistsAsync(int serverId, CancellationToken ct = default);
     Task<List<string>> GetServerNamesAsync(CancellationToken ct = default);
     Task<List<string>> GetServerNamesAsync(List<int>? accessibleIds = null, CancellationToken ct = default);

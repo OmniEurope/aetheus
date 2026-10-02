@@ -1,0 +1,41 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.VariableLibraries
+@* PLAN-005 lot 5 - checks the library's own PORT_* values instead of asking the operator to retype
+   ports that are already written down, and answers with both facts: nobody claims it, and nothing is
+   listening on it. *@
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniText Element="OmniTextElement.Paragraph">@L["PortCheckLibraryHint"]</OmniText>
+
+    <OmniStack Gap="OmniSpacing.XSmall">
+        <OmniLabel For="lib-check-server">@L["Server"]</OmniLabel>
+        <OmniDropDown Id="lib-check-server" name="lib-check-server" TValue="int?" Options="@(_servers.ToOptions(item => (int?)item.ServerId, item => item.ServerName))" @bind-Value="_serverId" Placeholder="@L["Server"]" Class="w-100" />
+    </OmniStack>
+
+    @if (_error is not null)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning"><Icon><OmniIcon name="OmniIconName.Warning" /></Icon><ChildContent>@_error</ChildContent></OmniAlert>
+    }
+
+    @if (_result is not null)
+    {
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@_result.ServerName</OmniText>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@ScanCaption</OmniText>
+            </OmniStack>
+
+            @foreach (var entry in _result.Entries)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+                    <PortVerdictBadge Entry="@entry" />
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@entry.Port</OmniText>
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@ObservationText(entry)</OmniText>
+                </OmniStack>
+            }
+        </OmniStack>
+    }
+
+    <DialogFooter OnCancel="@(() => Dialog.Close())">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@CheckAsync" Disabled="@(_serverId is null)" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon name="OmniIconName.Check" /> <span>@L["CheckPorts"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

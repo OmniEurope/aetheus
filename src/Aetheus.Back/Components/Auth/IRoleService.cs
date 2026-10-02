@@ -13,7 +13,7 @@ public interface IRoleService
     Task SetPermissionsForRoleAsync(int roleId, SetResourcePermissionsRequest request, CancellationToken ct = default);
     Task<RoleDto?> CloneRoleAsync(int id, CancellationToken ct = default);
     Task<UserPermissionSummaryDto?> GetEffectivePermissionsAsync(int userId, CancellationToken ct = default);
-    Task<UserPermissionSummaryDto?> GetMyPermissionsAsync(string username, CancellationToken ct = default);
+    Task<UserPermissionSummaryDto?> GetMyPermissionsAsync(System.Security.Claims.ClaimsPrincipal principal, CancellationToken ct = default);
 
     Task<List<RoleUserDto>> GetUsersInRoleAsync(int roleId, CancellationToken ct = default);
     Task<PaginatedResult<RoleUserDto>> GetUsersInRoleAsync(

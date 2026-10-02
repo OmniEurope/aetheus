@@ -6,9 +6,10 @@ namespace Aetheus.Front.Tests.Architecture;
 
 /// <summary>
 /// Guards the convention that every HttpClient JSON read in
-/// <c>src/Aetheus.Front/Services</c> passes <c>JsonOptions.Web</c>. Without
+/// <c>src/Aetheus.Front/Components</c> (where PLAN-009 moved the former <c>Services</c> folder and
+/// the api clients) passes <c>JsonOptions.Web</c>. Without
 /// it the global UTC→Local DateTime converter (wired through that options
-/// instance in <c>Services/JsonOptions.cs</c>) is bypassed, and timestamps
+/// instance in <c>Components/Shared/JsonOptions.cs</c>) is bypassed, and timestamps
 /// come back as UTC - silently. Bugs of this class don't fail tests, they
 /// just make the UI show times in the wrong timezone, which is the worst
 /// possible failure mode (no error, just quietly-wrong data).
@@ -32,13 +33,13 @@ public class JsonOptionsCoverageTests
     [Fact]
     public void Every_JsonAsync_Call_In_Services_Passes_JsonOptionsWeb()
     {
-        var servicesDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front", "Services");
-        Assert.True(Directory.Exists(servicesDir), $"Services dir not found: {servicesDir}");
+        var front = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
+        var roots = new[] { Path.Combine(front, "Components") };
 
         var violations = new List<string>();
         var callsScanned = 0;
 
-        foreach (var file in RepositoryScan.Enumerate(servicesDir, "*.cs"))
+        foreach (var (_, file) in RepositoryScan.EnumerateUnion(roots, "*.cs"))
         {
             var raw = File.ReadAllText(file);
             var stripped = StripCommentsAndStrings(raw);
@@ -69,10 +70,10 @@ public class JsonOptionsCoverageTests
         // and the test would silently pass forever. 50 is well below the real count
         // (current = 131) but high enough to fail loud on a broken scanner.
         Assert.True(callsScanned >= 50,
-            $"Scanner found only {callsScanned} JSON call sites in {servicesDir} - likely a path or regex bug.");
+            $"Scanner found only {callsScanned} JSON call sites in {string.Join(", ", roots)} - likely a path or regex bug.");
 
         Assert.True(violations.Count == 0,
-            "Calls to ReadFromJsonAsync/GetFromJsonAsync in Aetheus.Front/Services must pass "
+            "Calls to ReadFromJsonAsync/GetFromJsonAsync in Aetheus.Front/Components must pass "
             + "JsonOptions.Web to engage the global UTC→Local DateTime converter:\n  "
             + string.Join("\n  ", violations));
     }

@@ -1,0 +1,121 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+
+@* --- Status bar --- *@
+<OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-lg">
+    <OmniBadge Fill="OmniFill.Solid" Tone="@(Ps.IsInstalled ? OmniTone.Success : OmniTone.Neutral)">@(Ps.IsInstalled ? L["Installed"] : L["NotInstalled"])</OmniBadge>
+    @if (Ps.IsInstalled)
+    {
+        <OmniBadge Fill="OmniFill.Solid" Tone="@(Ps.IsRunning ? OmniTone.Success : OmniTone.Danger)">@(Ps.IsRunning ? L["Running"] : L["Stopped"])</OmniBadge>
+        @if (!string.IsNullOrEmpty(Ps.Version))
+        {
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">v@(Ps.Version)</OmniText>
+        }
+        @if (!string.IsNullOrEmpty(Ps.Mode))
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@($"{L["Mode"]}: {Ps.Mode}")</OmniBadge>
+        }
+        <OmniBadge Fill="OmniFill.Solid" Tone="@GetBlockedCountBadgeStyle(Ps.BlockedCount)">@($"{Ps.BlockedCount} {L["BlockedIps"]}")</OmniBadge>
+    }
+    <div class="blade-content-spacer"></div>
+
+    @if (!Ps.IsInstalled)
+    {
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenSetupDialogAsync"><OmniIcon Name="OmniIconName.RocketLaunch" /> <span>@L["PortsentrySetup"]</span></OmniButton>
+    }
+    else
+    {
+        <OmniSplitButton Variant="OmniButtonVariant.Secondary" Text="@L["PortSentry"]" Disabled="@_actionRunning" OnClick="@(() => ExecuteActionAsync(PortsentryAction.Restart))"><Icon><OmniIcon Name="OmniIconName.Play" /></Icon><ChildContent>
+            <OmniMenuItem OnClick="@(() => ExecuteActionAsync(PortsentryAction.Start))">@L["Start"]</OmniMenuItem>
+            <OmniMenuItem OnClick="@(() => ExecuteActionAsync(PortsentryAction.Stop))">@L["Stop"]</OmniMenuItem>
+            <OmniMenuItem OnClick="@(() => ExecuteActionAsync(PortsentryAction.Restart))">@L["Restart"]</OmniMenuItem>
+        </ChildContent></OmniSplitButton>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@GetLogsAsync"><OmniIcon Name="OmniIconName.Document" /> <span>@L["ViewLogs"]</span></OmniButton>
+    }
+</OmniRow>
+
+@if (Ps.IsInstalled)
+{
+    <UrlSyncedTabs Slugs="@(new[] { "blocked", "whitelist", "config" })">
+        <Tabs>
+            @* --- Blocked IPs tab --- *@
+            <OmniTabsItem Key="blocked" Title="@L["BlockedIps"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("block"))" /></Icon><ChildContent>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+                    <CountBadge Value="@_blockedCount" Variant="@GetBlockedCountBadgeStyle(_blockedCount)" />
+                </OmniStack>
+                <AetheusDataGrid FullHeight="true" @ref="_blockedGrid" Data="@_blockedIps" Count="@_blockedCount"
+                    TItem="PortsentryBlockedIpDto" IsLoading="@_blockedLoading" LoadData="@LoadBlockedAsync"
+                    PageSize="25" Density="OmniDensity.Compact" AllowSorting="true" EmptyText="@L["NoBlockedIps"]"
+                    Virtualize="@AetheusGrid.RemoteVirtualization"
+                    VirtualData="@(() => new OmniDataGridResult<PortsentryBlockedIpDto>(_blockedIps, _blockedCount))">
+                    <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="PortsentryBlockedIpDto" Property="IpAddress" Title="@L["IpAddress"]" Width="180px" Filterable="true" />
+                            <OmniDataGridColumn TItem="PortsentryBlockedIpDto" Property="Protocol" Title="@L["Protocol"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_protocolValues" />
+                            <OmniDataGridColumn TItem="PortsentryBlockedIpDto" Property="BlockedAt" Title="@L["BlockedAt"]" Width="180px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+                                <Template Context="b">
+                                    @b.BlockedAt.ToString("g")
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PortsentryBlockedIpDto" Property="Reason" Title="@L["Reason"]" Filterable="true" />
+                            <OmniDataGridColumn TItem="PortsentryBlockedIpDto" Title="" Width="80px" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                                <Template Context="b">
+                                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => UnblockIpAsync(b.IpAddress))" title="@L["Unblock"]"><OmniIcon Name="OmniIconName.LockOpen" /></OmniButton>
+                                </Template>
+                            </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+
+            @* --- Whitelist tab --- *@
+            <OmniTabsItem Key="whitelist" Title="@L["Whitelist"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("shield"))" /></Icon><ChildContent>
+                <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.End" Class="omni-u-mb-md">
+                    <div>
+                        <OmniLabel For="WlIp">@L["IpAddress"]</OmniLabel>
+                        <OmniTextBox @bind-Value="_whitelistIp" Id="WlIp" Placeholder="192.168.1.1" Class="w-rem-11" />
+                    </div>
+                    <div>
+                        <OmniLabel For="WlDesc">@L["Description"]</OmniLabel>
+                        <OmniTextBox @bind-Value="_whitelistDesc" Id="WlDesc" Placeholder="@L["WhitelistDescription"]" Class="w-rem-15-625" />
+                    </div>
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@AddWhitelistIpAsync"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+                </OmniRow>
+                <AetheusDataGrid FullHeight="true" @ref="_whitelistGrid" Data="@_whitelist" Count="@_whitelistCount"
+                    TItem="PortsentryWhitelistIpDto" IsLoading="@_whitelistLoading" LoadData="@LoadWhitelistAsync"
+                    PageSize="25" Density="OmniDensity.Compact" AllowSorting="true" EmptyText="@L["NoWhitelistEntries"]"
+                    Virtualize="@AetheusGrid.RemoteVirtualization"
+                    VirtualData="@(() => new OmniDataGridResult<PortsentryWhitelistIpDto>(_whitelist, _whitelistCount))">
+                    <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="PortsentryWhitelistIpDto" Property="IpAddress" Title="@L["IpAddress"]" Width="180px" Filterable="true" />
+                            <OmniDataGridColumn TItem="PortsentryWhitelistIpDto" Property="Description" Title="@L["Description"]" Filterable="true" />
+                            <OmniDataGridColumn TItem="PortsentryWhitelistIpDto" Property="CreatedAt" Title="@L["CreatedAt"]" Width="180px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+                                <Template Context="w">
+                                    @w.CreatedAt.ToString("g")
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PortsentryWhitelistIpDto" Title="" Width="80px" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                                <Template Context="w">
+                                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RemoveWhitelistIpAsync(w))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                                </Template>
+                            </OmniDataGridColumn>
+                    </Columns>
+                </AetheusDataGrid>
+            </ChildContent></OmniTabsItem>
+
+            @* --- Configuration tab --- *@
+            <OmniTabsItem Key="config" Title="@L["Configuration"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("settings"))" /></Icon><ChildContent>
+                <OmniRow Gap="OmniSpacing.Large" Class="omni-u-mb-lg">
+                    <OmniColumn Span="12" MediumSpan="6">
+                        <OmniFieldset><Legend>@L["TcpPorts"]</Legend><ChildContent>
+                            <OmniText Element="OmniTextElement.Paragraph">@(string.IsNullOrEmpty(Ps.TcpPorts) ? "-" : Ps.TcpPorts)</OmniText>
+                        </ChildContent></OmniFieldset>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="6">
+                        <OmniFieldset><Legend>@L["UdpPorts"]</Legend><ChildContent>
+                            <OmniText Element="OmniTextElement.Paragraph">@(string.IsNullOrEmpty(Ps.UdpPorts) ? "-" : Ps.UdpPorts)</OmniText>
+                        </ChildContent></OmniFieldset>
+                    </OmniColumn>
+                </OmniRow>
+            </ChildContent></OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

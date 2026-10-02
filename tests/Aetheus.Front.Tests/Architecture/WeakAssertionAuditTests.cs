@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Aetheus.Front.Tests.Architecture;
@@ -41,7 +40,7 @@ public class WeakAssertionAuditTests
             if (Path.GetFileName(file) == "WeakAssertionAuditTests.cs") continue;
 
             var source = File.ReadAllText(file);
-            var masked = MaskCommentsAndStrings(source);
+            var masked = SourceMasker.MaskCommentsAndStrings(source);
             foreach (var (pattern, label) in WeakAssertions)
             {
                 offenders.AddRange(pattern.Matches(masked).Cast<Match>().Select(match =>
@@ -68,7 +67,7 @@ public class WeakAssertionAuditTests
             );
             """;
 
-        var masked = MaskCommentsAndStrings(source);
+        var masked = SourceMasker.MaskCommentsAndStrings(source);
         var matches = WeakAssertions.SelectMany(item => item.Pattern.Matches(masked).Cast<Match>()).ToArray();
 
         Assert.Single(matches);
@@ -80,58 +79,6 @@ public class WeakAssertionAuditTests
         var line = 1;
         for (var i = 0; i < index; i++) if (source[i] == '\n') line++;
         return line;
-    }
-
-    private static string MaskCommentsAndStrings(string source)
-    {
-        var masked = new StringBuilder(source);
-        for (var i = 0; i < source.Length; i++)
-        {
-            if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '/')
-            {
-                var end = source.IndexOf('\n', i + 2);
-                var exclusiveEnd = end < 0 ? source.Length : end;
-                Mask(masked, i, exclusiveEnd);
-                i = exclusiveEnd - 1;
-            }
-            else if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '*')
-            {
-                var end = source.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                var exclusiveEnd = end < 0 ? source.Length : end + 2;
-                Mask(masked, i, exclusiveEnd);
-                i = exclusiveEnd - 1;
-            }
-            else if (source[i] is '"' or '\'')
-            {
-                var delimiter = source[i];
-                var verbatim = delimiter == '"' && i > 0 && source[i - 1] == '@';
-                var end = i + 1;
-                while (end < source.Length)
-                {
-                    if (source[end] == delimiter)
-                    {
-                        if (verbatim && end + 1 < source.Length && source[end + 1] == '"')
-                        {
-                            end += 2;
-                            continue;
-                        }
-                        end++;
-                        break;
-                    }
-                    if (!verbatim && source[end] == '\\' && end + 1 < source.Length) end += 2;
-                    else end++;
-                }
-                Mask(masked, i, end);
-                i = end - 1;
-            }
-        }
-        return masked.ToString();
-    }
-
-    private static void Mask(StringBuilder source, int start, int exclusiveEnd)
-    {
-        for (var i = start; i < exclusiveEnd; i++)
-            if (source[i] is not ('\r' or '\n')) source[i] = ' ';
     }
 
     private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;

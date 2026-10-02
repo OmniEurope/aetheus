@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using ReleasesSection = Aetheus.Front.Pages.Projects.Sections.Releases;
+using ReleasesSection = Aetheus.Front.Components.Projects.Sections.Releases;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
 /// <summary>
-/// Tests for the thin routing-layer section pages under Pages/Projects/Sections/.
+/// Tests for the thin routing-layer section pages under Components/Projects/Sections/.
 /// Focus: Releases section (14 missed lines at 0% coverage).
 /// </summary>
 public class ProjectSectionsTests : BunitContext

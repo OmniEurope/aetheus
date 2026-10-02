@@ -29,6 +29,8 @@ using Aetheus.Back.Components.PackageRegistry;
 using Aetheus.Back.Components.PersonalAccessTokens;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Plugins;
+using Aetheus.Back.Components.PortAllocation;
+using Aetheus.Back.Components.PortRegistry;
 using Aetheus.Back.Components.Portsentry;
 using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Components.Releases;
@@ -113,7 +115,9 @@ internal static class AetheusModulesExtensions
             .AddTeamspeakModule()
             .AddPortsentryModule()
             .AddRkhunterModule()
-            .AddModuleLinksModule();
+            .AddModuleLinksModule()
+            .AddPortRegistryModule()
+            .AddPortAllocationModule();
 
         return services;
     }

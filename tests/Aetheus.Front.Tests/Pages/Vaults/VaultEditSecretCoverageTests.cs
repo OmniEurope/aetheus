@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.VaultsCoverage;
 
@@ -24,7 +21,7 @@ namespace Aetheus.Front.Tests.Pages.VaultsCoverage;
 /// - OnSubmit (new mode → create)
 /// </summary>
 // Renamed from VaultUpdateSecretTests: this fixture never exercises UpdateSecret (excluded because
-// it opens a Radzen dialog that hangs in bUnit). It covers the create/update/reload code paths instead.
+// it opens a dialog that hangs in bUnit). It covers the create/update/reload code paths instead.
 public class VaultEditSecretCoverageTests : BunitContext
 {
     private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
@@ -71,32 +68,32 @@ public class VaultEditSecretCoverageTests : BunitContext
     public void GetExpiryBadge_Expired_ReturnsDanger()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(-1)])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(-1)])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
     public void GetExpiryBadge_SoonExpiring_ReturnsWarning()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(7)])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(7)])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
     public void GetExpiryBadge_FarExpiry_ReturnsLight()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(30)])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(30)])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Fact]
     public void GetExpiryBadge_ExactlyZeroDays_ReturnsDanger()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
@@ -104,8 +101,8 @@ public class VaultEditSecretCoverageTests : BunitContext
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", PrivStatic)!;
         // > 14 days → Light
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(15)])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(15)])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── AddSecret: empty key guard ─────────────────────────────────────────────

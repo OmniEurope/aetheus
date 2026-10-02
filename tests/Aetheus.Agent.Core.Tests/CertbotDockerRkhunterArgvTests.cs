@@ -2,7 +2,6 @@
 using System.Runtime.InteropServices;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -34,11 +33,26 @@ public class CertbotDockerRkhunterArgvTests
         Assert.Equal(new[] { "-n", "/usr/local/lib/aetheus/aetheus-certbot-manage", verb, certName }, argv);
     }
 
-    [Fact]
-    public void Certbot_RenewAll_Argv_OmitsLineageName()
+    [Theory]
+    [InlineData(OperationKind.CertbotRenewAll, "renew-all")]
+    [InlineData(OperationKind.CertbotNormalize, "normalize")]
+    [InlineData(OperationKind.CertbotRenewalCheck, "renewal-check")]
+    public void Certbot_AllLineageVerbs_Argv_OmitLineageName(OperationKind kind, string verb)
     {
-        var argv = CertbotOperationExecutor.BuildManageArgv(OperationKind.CertbotRenewAll, "renew-all", "ignored");
-        Assert.Equal(new[] { "-n", "/usr/local/lib/aetheus/aetheus-certbot-manage", "renew-all" }, argv);
+        var argv = CertbotOperationExecutor.BuildManageArgv(kind, verb, "ignored");
+        Assert.Equal(new[] { "-n", "/usr/local/lib/aetheus/aetheus-certbot-manage", verb }, argv);
+    }
+
+    [Theory]
+    [InlineData(OperationKind.CertbotNormalize)]
+    [InlineData(OperationKind.CertbotRenewalCheck)]
+    public void Certbot_ConventionOperations_AreHandledAndTargetless(OperationKind kind)
+    {
+        var sut = new CertbotOperationExecutor(
+            Options.Create(new AetheusAgentOptions()), NullLogger<CertbotOperationExecutor>.Instance);
+
+        Assert.True(sut.CanHandle(kind));
+        Assert.True(OperationTargetValidator.IsValid(kind, "-"));
     }
 
     [Fact]

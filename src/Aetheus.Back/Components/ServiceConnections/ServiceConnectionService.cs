@@ -16,7 +16,7 @@ public class ServiceConnectionService(
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetPagedAsync(
             request.Search, projectId, page, pageSize, accessibleIds, ct,
-            request.SortBy, request.SortDescending).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, request.Filters).ConfigureAwait(false);
 
         return new PaginatedResult<ServiceConnectionDto>
         {
@@ -26,6 +26,9 @@ public class ServiceConnectionService(
             PageSize = pageSize
         };
     }
+
+    public async Task<ServiceConnectionFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default) =>
+        new() { Projects = await repo.GetProjectNamesAsync(accessibleIds, ct).ConfigureAwait(false) };
 
     public async Task<ServiceConnectionDetailDto?> GetConnectionAsync(int id, CancellationToken ct = default)
     {

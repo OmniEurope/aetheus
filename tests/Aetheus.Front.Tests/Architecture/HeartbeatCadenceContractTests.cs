@@ -19,7 +19,7 @@ public class HeartbeatCadenceContractTests
     {
         var root = FindRepoRoot();
         var pulseSource = File.ReadAllText(
-            Path.Combine(root, "src", "Aetheus.Front", "Shared", "HeartbeatPulse.razor.cs"));
+            Path.Combine(root, "src", "Aetheus.Front", "Components", "Servers", "HeartbeatPulse.razor.cs"));
         var cssSource = File.ReadAllText(
             Path.Combine(root, "src", "Aetheus.Front", "wwwroot", "css", "app.css"));
 

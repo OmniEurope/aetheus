@@ -17,7 +17,7 @@ public class GitRealtimeHubContractTests
             root,
             "src",
             "Aetheus.Front",
-            "Pages",
+            "Components",
             "Git",
             "GitRepositories.razor.cs"));
 

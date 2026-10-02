@@ -2,7 +2,6 @@
 using System.Reflection;
 using Aetheus.Agent.Core.Collectors;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 

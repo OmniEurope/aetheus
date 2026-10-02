@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Servers;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Aetheus.Back.Components.Shared;
 
-public class ValidateServerExistsFilter(IServerRepository serverRepo) : IAsyncActionFilter
+public class ValidateServerExistsFilter(ServerExistenceRepository serverRepo) : IAsyncActionFilter
 {
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {

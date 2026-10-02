@@ -43,22 +43,22 @@ public partial class AgentInstallerController(
         }
 
         if (string.IsNullOrWhiteSpace(effectiveToken))
-            return BadRequest(new Aetheus.Shared.DTOs.ApiError { Message = "Missing registration token." });
+            return BadRequest(new Aetheus.Shared.Components.Shared.ApiError { Message = "Missing registration token." });
 
         var registrationIsValid = await authService.IsRegistrationTokenValidAsync(effectiveToken, ct);
         if (!registrationIsValid)
-            return BadRequest(new Aetheus.Shared.DTOs.ApiError { Message = "Invalid or expired registration token." });
+            return BadRequest(new Aetheus.Shared.Components.Shared.ApiError { Message = "Invalid or expired registration token." });
 
         // F-14/F-15: never trust Request.Host \u2014 it can be spoofed via the Host header. Require
         // the configured public URL outside Development.
         var serverUrl = ResolveServerUrl();
         if (serverUrl is null)
-            return BadRequest(new Aetheus.Shared.DTOs.ApiError { Message = "Server public URL is not configured." });
+            return BadRequest(new Aetheus.Shared.Components.Shared.ApiError { Message = "Server public URL is not configured." });
 
         // F-15: validate the version string before embedding it in a shell script.
         var resolvedVersion = version ?? config["App:Version"] ?? "dev";
         if (!VersionPattern().IsMatch(resolvedVersion))
-            return BadRequest(new Aetheus.Shared.DTOs.ApiError { Message = "Invalid version." });
+            return BadRequest(new Aetheus.Shared.Components.Shared.ApiError { Message = "Invalid version." });
 
         var script = installer.Build(platform, effectiveToken, serverUrl, resolvedVersion, pipelineRunner, serverManagement);
         return File(Encoding.UTF8.GetBytes(script.Body), script.ContentType, script.FileName);

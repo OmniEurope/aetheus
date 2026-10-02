@@ -1,0 +1,9 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerLoaderSectionBase
+@page "/servers/{Id:int}/modules"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["Modules"] - Aetheus</PageTitle>
+
+<Aetheus.Front.Components.Servers.ServerDetailSections.ServerModulesSection ServerId="@Id" />

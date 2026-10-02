@@ -31,7 +31,8 @@ public class ArtifactCleanupServiceTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var sut = new ArtifactCleanupService(
-            scopeFactory, NullLogger<ArtifactCleanupService>.Instance, clock, operationLock);
+            scopeFactory, NullLogger<ArtifactCleanupService>.Instance, clock, operationLock,
+            Substitute.For<IChunkedArtifactUploadService>());
         return (sut, repo, storage, operationLock, clock.GetUtcNow().UtcDateTime);
     }
 

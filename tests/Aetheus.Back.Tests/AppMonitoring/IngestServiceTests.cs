@@ -3,9 +3,9 @@ using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.AppMonitoring.Ingest;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Notifications;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -21,6 +21,8 @@ public class IngestServiceTests : IDisposable
     private readonly IngestService _service;
     private readonly IngestKeyHasher _hasher;
     private readonly INotificationService _notifications = Substitute.For<INotificationService>();
+    private readonly IAppTelemetryChangePublisher _telemetryChanges = Substitute.For<IAppTelemetryChangePublisher>();
+    private readonly RecordingLogger<IngestKeyRejectionLog> _rejectionLog = new();
 
     public IngestServiceTests()
     {
@@ -33,7 +35,9 @@ public class IngestServiceTests : IDisposable
         _service = new IngestService(appRepo, metricRepo, new AppLogRepository(_db), new AppErrorRepository(_db),
             _hasher, new MemoryCache(new MemoryCacheOptions()), _notifications, new AppIngestGate(),
             new FakeTimeProvider(new DateTimeOffset(2026, 1, 10, 12, 0, 0, TimeSpan.Zero)),
-            Substitute.For<ILogger<IngestService>>());
+            Substitute.For<ILogger<IngestService>>(), _telemetryChanges,
+            new IngestKeyRejectionLog(
+                new FakeTimeProvider(new DateTimeOffset(2026, 1, 10, 12, 0, 0, TimeSpan.Zero)), _rejectionLog));
 
         _db.MonitoredApps.Add(new MonitoredApp
         {
@@ -78,6 +82,28 @@ public class IngestServiceTests : IDisposable
         Assert.Null(await _service.ResolveAppIdAsync(
             "secret-key",
             ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task R2_013_ARefusedKey_IsOneWarning_ThenCounted_EvenFromTheNegativeCache()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        Assert.Null(await _service.ResolveAppIdAsync("stale-key", ct)); // database miss
+        Assert.Null(await _service.ResolveAppIdAsync("stale-key", ct)); // negative-cache hit
+        Assert.Equal(1, await _service.ResolveAppIdAsync("secret-key", ct));
+
+        var warning = Assert.Single(_rejectionLog.Entries);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Contains(_hasher.Hash("stale-key")[..12], warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task R2_013_AMissingKey_IsReportedAsMissing()
+    {
+        Assert.Null(await _service.ResolveAppIdAsync(" ", TestContext.Current.CancellationToken));
+
+        Assert.Contains(IngestKeyRejectionLog.MissingKey, Assert.Single(_rejectionLog.Entries).Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -199,5 +225,87 @@ public class IngestServiceTests : IDisposable
         // Back under threshold -> clears the breach.
         await _service.IngestMetricsAsync(1, [new ParsedMetricPoint("cpu", 40, "%", default, null)], ct: TestContext.Current.CancellationToken);
         Assert.False(await _db.AppMetricThresholds.AsNoTracking().Select(t => t.IsBreached).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task R477_ANameSeenForTheFirstTime_IsRecordedOnce_AndPrunedWithItsLastSample()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _service.IngestMetricsAsync(1,
+            [new ParsedMetricPoint("cpu", 1, "%", default, null), new ParsedMetricPoint("mem", 2, "MiB", default, null)], ct: ct);
+        await _service.IngestMetricsAsync(1, [new ParsedMetricPoint("cpu", 3, "%", default, null)], ct: ct);
+
+        Assert.Equal(["cpu", "mem"], await _db.AppMetricNames.AsNoTracking().OrderBy(n => n.Name).Select(n => n.Name).ToListAsync(ct));
+
+        // The retention sweep purged the last samples of "mem": the name goes with them.
+        _db.AppMetricSamples.RemoveRange(_db.AppMetricSamples.Where(sample => sample.MetricName == "mem"));
+        await _db.SaveChangesAsync(ct);
+        var pruned = await new AppMetricRepository(_db).PruneMetricNamesAsync(ct);
+
+        Assert.Equal(1, pruned);
+        Assert.Equal(["cpu"], await _db.AppMetricNames.AsNoTracking().Select(n => n.Name).ToListAsync(ct));
+    }
+
+    [Fact]
+    public async Task IngestLogs_StoredRows_PushTheChangeToTheOpenViews()
+    {
+        var outcome = await _service.IngestLogsAsync(1,
+            [new ParsedLogRecord(default, 9, "Information", "started", null)],
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, outcome.Accepted);
+        Assert.Equal(1, await _db.AppLogEntries.CountAsync(TestContext.Current.CancellationToken));
+        await _telemetryChanges.Received(1).PublishAsync(1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task R491_AnErrorLoggedWithAnException_OpensAnErrorGroup()
+    {
+        var record = new ParsedLogRecord(
+            default, 17, "Error", "Error during app telemetry retention sweep", null,
+            ExceptionType: "Microsoft.EntityFrameworkCore.DbUpdateException",
+            Source: "Aetheus.Back.Services.AppTelemetryRetentionService");
+
+        // The same failure twice, a warning with an exception, and an error without one.
+        await _service.IngestLogsAsync(1,
+            [
+                record, record,
+                new ParsedLogRecord(default, 13, "Warning", "retrying", null, ExceptionType: "System.TimeoutException", Source: "X"),
+                new ParsedLogRecord(default, 17, "Error", "plain error line", null)
+            ],
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(4, await _db.AppLogEntries.CountAsync(TestContext.Current.CancellationToken));
+        var group = await _db.AppErrorEvents.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("Microsoft.EntityFrameworkCore.DbUpdateException", group.ExceptionType);
+        Assert.Equal("Error during app telemetry retention sweep", group.Message);
+        Assert.Equal("Aetheus.Back.Services.AppTelemetryRetentionService", group.TopFrame);
+        Assert.Equal(2, group.OccurrenceCount);
+    }
+
+    [Fact]
+    public async Task IngestLogs_NothingStored_PushesNothing()
+    {
+        // Out of the ingest window: dropped and counted, no row, so no view has anything new to show.
+        var outcome = await _service.IngestLogsAsync(1,
+            [new ParsedLogRecord(new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), 9, null, "old", null)],
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, outcome.Accepted);
+        await _telemetryChanges.DidNotReceive().PublishAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task IngestErrors_StoredGroups_PushTheChange_AndMetricsDoNot()
+    {
+        await _service.IngestMetricsAsync(1, [new ParsedMetricPoint("cpu", 1, "%", default, null)],
+            ct: TestContext.Current.CancellationToken);
+        await _telemetryChanges.DidNotReceive().PublishAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+
+        await _service.IngestErrorsAsync(1,
+            [new ParsedError("InvalidOperationException", "boom", "at Foo.Bar()", default)],
+            ct: TestContext.Current.CancellationToken);
+
+        await _telemetryChanges.Received(1).PublishAsync(1, Arg.Any<CancellationToken>());
     }
 }

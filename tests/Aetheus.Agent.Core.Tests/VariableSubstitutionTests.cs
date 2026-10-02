@@ -2,7 +2,6 @@
 using System.Text.Json;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 

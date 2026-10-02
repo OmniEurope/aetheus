@@ -11,6 +11,22 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
     private static readonly ReleaseStatus[] DeployedReleaseStatuses =
         [ReleaseStatus.Deployed, ReleaseStatus.Superseded];
 
+    /// <summary>How many of a project's most recently deployed releases keep their payload past
+    /// ordinary retention: the deployed one and the two it superseded, the redeployable window.</summary>
+    private const int RetainedDeployedReleases = 3;
+
+    /// <summary>
+    /// Recette R-210 / R-224: the header filters of a project's artifacts grid. The size column shows a
+    /// formatted size and the release column a list of links, so the grid offers no filter on them.
+    /// </summary>
+    internal static readonly GridQueryMap<PipelineArtifact> ProjectColumns = new GridQueryMap<PipelineArtifact>()
+        .Text("Name", a => a.Name)
+        .Text("PipelineName", a => a.Pipeline.Name)
+        .Enum("RetentionPolicy", a => a.RetentionPolicy)
+        .Text("EnvironmentName", a => a.EnvironmentName)
+        .Number("SizeBytes", a => a.SizeBytes)
+        .Date("CreatedAt", a => a.CreatedAt);
+
     public async Task<PipelineArtifact?> FindAsync(int id, CancellationToken ct = default) =>
         await db.PipelineArtifacts
             .Where(a => a.Id == id)
@@ -24,7 +40,8 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
     public async Task<(List<PipelineArtifact> Items, int TotalCount)> GetByProjectPagedAsync(
-        int projectId, ArtifactRetentionPolicy? policy, int? pipelineId, int page, int pageSize, CancellationToken ct = default)
+        int projectId, ArtifactRetentionPolicy? policy, int? pipelineId, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null, string? sortBy = null, bool sortDescending = true)
     {
         var query = db.PipelineArtifacts
             .Where(a => a.ProjectId == projectId)
@@ -34,19 +51,42 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
             query = query.Where(a => a.RetentionPolicy == policy.Value);
         if (pipelineId.HasValue)
             query = query.Where(a => a.PipelineId == pipelineId.Value);
+        query = ProjectColumns.ApplyFilters(query, columnFilters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
+        var detailQuery = query
             .Include(a => a.Pipeline)
             .Include(a => a.Releases)
             .Include(a => a.PipelineRun)
-            .AsSplitQuery()
-            .OrderByDescending(a => a.CreatedAt)
+            .AsSplitQuery();
+        var ordered = ProjectColumns.ApplySorts(detailQuery,
+            [new GridSort { Field = sortBy ?? "CreatedAt", Descending = sortDescending }])!;
+        var items = await ordered.ThenBy(a => a.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
 
         return (items, totalCount);
+    }
+
+    /// <summary>Recette R-210: the pipeline and environment names present across a project's artifacts.</summary>
+    public async Task<ProjectArtifactFilterValuesDto> GetProjectFilterValuesAsync(int projectId, CancellationToken ct = default)
+    {
+        var rows = await db.PipelineArtifacts.AsNoTracking()
+            .Where(a => a.ProjectId == projectId)
+            .Select(a => new { PipelineName = a.Pipeline.Name, a.EnvironmentName })
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+        static List<string> Distinct(IEnumerable<string?> values) => [.. values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
+        return new ProjectArtifactFilterValuesDto
+        {
+            PipelineNames = Distinct(rows.Select(row => row.PipelineName)),
+            EnvironmentNames = Distinct(rows.Select(row => row.EnvironmentName))
+        };
     }
 
     public async Task<List<PipelineArtifact>> GetByPipelineAndProjectAsync(
@@ -83,9 +123,16 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
             .Where(a => a.RetentionExpiresAt <= cutoff
                 && (a.RetentionLeaseExpiresAt == null || a.RetentionLeaseExpiresAt <= cutoff)
                 // The factually deployed release is the rollback baseline. Its payload must survive
-                // ordinary retention even when its original deadline has passed; it becomes eligible
-                // again as soon as a later deployment supersedes that release.
-                && !a.Releases.Any(release => release.Status == ReleaseStatus.Deployed)
+                // ordinary retention even when its original deadline has passed. So do the payloads of
+                // the releases deployed just before it (PLAN-007 lot 5): the last three releases a
+                // project ever deployed stay redeployable, and a fourth deployment makes the oldest
+                // of them eligible again. Without this, N-1 was purged the day after N shipped.
+                && !a.Releases.Any(release => release.Status == ReleaseStatus.Deployed
+                    || (release.Status == ReleaseStatus.Superseded
+                        && db.Releases.Count(newer => newer.ProjectId == release.ProjectId
+                            && (newer.Status == ReleaseStatus.Deployed || newer.Status == ReleaseStatus.Superseded)
+                            && (newer.PublishedAt ?? newer.DetectedAt) > (release.PublishedAt ?? release.DetectedAt))
+                        < RetainedDeployedReleases))
                 && !db.DependencyTrackOutboxItems.Any(item =>
                     item.PipelineArtifactId == a.Id && item.CompletedAt == null))
             .OrderBy(a => a.RetentionExpiresAt)
@@ -135,10 +182,26 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
             artifact.Releases.Add(release);
     }
 
-    public async Task RemoveAsync(PipelineArtifact artifact, CancellationToken ct = default)
+    public async Task<bool> RemoveAsync(PipelineArtifact artifact, CancellationToken ct = default)
     {
-        db.PipelineArtifacts.Remove(artifact);
+        ArgumentNullException.ThrowIfNull(artifact);
+        // R-463: removing the tracked entity expected exactly one row and threw
+        // DbUpdateConcurrencyException when another path had deleted it first, which also stopped the
+        // rest of the cleanup batch. A delete by identifier that touches no row means "already done".
+        if (db.Database.IsRelational())
+        {
+            var deleted = await db.PipelineArtifacts.Where(a => a.Id == artifact.Id)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            if (db.Entry(artifact).State != EntityState.Detached)
+                db.Entry(artifact).State = EntityState.Detached;
+            return deleted > 0;
+        }
+
+        var current = await db.PipelineArtifacts.FirstOrDefaultAsync(a => a.Id == artifact.Id, ct).ConfigureAwait(false);
+        if (current is null) return false;
+        db.PipelineArtifacts.Remove(current);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<int> GetNextBuildNumberAsync(int projectId, int pipelineId, CancellationToken ct = default)
@@ -179,6 +242,17 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
                         && a.Pipeline.Name == pipelineName
                         && a.PipelineRun.Status == PipelineStatus.Success
                         && a.PipelineRun.CommitHash == commitHash)
+            .Include(a => a.Project)
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+    public async Task<PipelineArtifact?> FindLatestSuccessfulPipelineArtifactAsync(
+        int projectId, string pipelineName, string name, CancellationToken ct = default) =>
+        await db.PipelineArtifacts
+            .Where(a => a.ProjectId == projectId
+                        && a.Name == name
+                        && a.Pipeline.Name == pipelineName
+                        && a.PipelineRun.Status == PipelineStatus.Success)
             .Include(a => a.Project)
             .OrderByDescending(a => a.CreatedAt)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
@@ -369,6 +443,50 @@ public sealed class ArtifactRepository(AppDbContext db) : IArtifactRepository
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         return context is null ? null : (context.PipelineId, context.ProjectId);
     }
+
+    /// <summary>
+    /// Owning project of an artifact, following the pipeline's exactly-one-owner triple. Canonical
+    /// shape: <c>PipelineServerResolver.GetPipelineProjectIdAsync</c>, which answers the same
+    /// question from a loaded <c>Pipeline</c> this module does not hold.
+    /// </summary>
+    public async Task<int?> GetArtifactOwningProjectIdAsync(int artifactId, CancellationToken ct = default)
+    {
+        // One round trip: the three owner columns are read together and resolved below, rather than
+        // probing Environments and ProjectServers in sequence on every authorization.
+        var owner = await db.PipelineArtifacts.AsNoTracking()
+            .Where(artifact => artifact.Id == artifactId)
+            .Select(artifact => new
+            {
+                artifact.Pipeline.ProjectId,
+                artifact.Pipeline.EnvironmentId,
+                artifact.Pipeline.ProjectServerId
+            })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (owner is null) return null;
+        if (owner.ProjectId is { } direct) return direct;
+
+        if (owner.EnvironmentId is { } environmentId)
+            return await db.Environments.AsNoTracking()
+                .Where(environment => environment.Id == environmentId)
+                .Select(environment => environment.ProjectId)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        if (owner.ProjectServerId is { } projectServerId)
+            return await db.ProjectServers.AsNoTracking()
+                .Where(projectServer => projectServer.Id == projectServerId)
+                .Select(projectServer => (int?)projectServer.ProjectId)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        // A legacy pipeline with all three owners null. No project can be named, so no permission
+        // can be checked, and the caller refuses.
+        return null;
+    }
+
+    public async Task<int?> GetReleaseProjectIdAsync(int releaseId, CancellationToken ct = default) =>
+        await db.Releases.AsNoTracking()
+            .Where(release => release.Id == releaseId)
+            .Select(release => (int?)release.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
     /// <summary>
     /// Whether a server ran any step of a run - the RBAC question an agent upload has to answer.

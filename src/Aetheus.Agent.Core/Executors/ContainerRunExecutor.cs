@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using Aetheus.Agent.Core.Toolchains;
 
 namespace Aetheus.Agent.Core.Executors;
@@ -34,14 +33,6 @@ public sealed class ContainerRunExecutor(
     private const int PidsLimit = 4096;
     private const int WindowsContainerUid = 65532;
     private const int WindowsContainerGid = 65532;
-
-    // S-TECH-72: the agent's real uid/gid, passed to `docker run --user` so container output is
-    // owned by the agent rather than root. Linux-only (container isolation is a Linux feature).
-    [DllImport("libc", SetLastError = false)]
-    private static extern uint getuid();
-
-    [DllImport("libc", SetLastError = false)]
-    private static extern uint getgid();
 
     // Closed allow-list of OCI runtimes that may reach `docker run --runtime`. `runc` is the
     // implicit default (never passed explicitly); only the kernel-isolating runtimes are accepted.
@@ -351,8 +342,8 @@ public sealed class ContainerRunExecutor(
         // their own identity so workspace outputs remain host-accessible. Docker Desktop receives
         // an arbitrary fixed identity and writable tmpfs state because Windows bind mounts cannot
         // reliably preserve POSIX ownership for HOME/cache directories.
-        var containerUid = OperatingSystem.IsWindows() ? WindowsContainerUid : getuid();
-        var containerGid = OperatingSystem.IsWindows() ? WindowsContainerGid : getgid();
+        var containerUid = OperatingSystem.IsWindows() ? WindowsContainerUid : AgentUserIdentity.Uid;
+        var containerGid = OperatingSystem.IsWindows() ? WindowsContainerGid : AgentUserIdentity.Gid;
         a.Add("--user"); a.Add($"{containerUid}:{containerGid}");
         var networkMode = NetworkMode(spec.Network);
         a.Add("--network"); a.Add(networkMode);
@@ -449,34 +440,10 @@ public sealed class ContainerRunExecutor(
     internal string ResolveHostWorkspace(
         ContainerSpec spec,
         IReadOnlyDictionary<string, string> environmentVariables)
-    {
-        var fallback = Path.Combine(_options.WorkDirectory, "cw", spec.WorkspaceKey.ToString());
-        if (!environmentVariables.TryGetValue(HostWorkspaceVariable, out var candidate)
-            || string.IsNullOrWhiteSpace(candidate))
-            return fallback;
-
-        var mixed = (uint)spec.WorkspaceKey * 2654435761u;
-        var slot = mixed.ToString("x8");
-        var expected = OperatingSystem.IsWindows()
-            ? Path.Combine(@"C:\w", slot, "s")
-            : Path.Combine(Path.GetTempPath(), slot, "s");
-
-        try
-        {
-            var normalizedCandidate = Path.GetFullPath(candidate);
-            var normalizedExpected = Path.GetFullPath(expected);
-            var comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-            return string.Equals(normalizedCandidate, normalizedExpected, comparison)
-                ? normalizedCandidate
-                : fallback;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return fallback;
-        }
-    }
+        => HostWorkspaceResolver.Resolve(
+            spec.WorkspaceKey,
+            environmentVariables.GetValueOrDefault(HostWorkspaceVariable),
+            _options.WorkDirectory);
 
     // The docker env-file format is line-based: multi-line values (e.g. PEM secrets) cannot be
     // represented and a key containing '=' or a newline would corrupt neighbouring entries.

@@ -8,8 +8,6 @@ using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -39,15 +37,6 @@ public sealed class ExternalRepoServiceTests
                 Arg.Any<GitAuthType>(), Arg.Any<GitCredentialPayload?>(), Arg.Any<CancellationToken>())
             .Returns((true, (string?)null));
         _encryption.EncryptValue(Arg.Any<string>()).Returns(call => $"enc:{call.Arg<string>()}");
-    }
-
-    [Fact]
-    public async Task AttachAsync_FeatureDisabled_IsHiddenAsNotFound()
-    {
-        var service = Build(enabled: false);
-
-        await Assert.ThrowsAsync<NotFoundException>(() => service.AttachAsync(ValidRequest(), ct: TestContext.Current.CancellationToken));
-        await _projects.DidNotReceive().FindProjectAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -106,12 +95,15 @@ public sealed class ExternalRepoServiceTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task AttachAsync_ExistingSource_RejectsExternalOrInternalConflict(bool external)
+    public async Task AttachAsync_WhenAnExternalRepositoryIsAlreadyAttached_Rejects(bool asProjectSource)
     {
-        var project = new Project { Id = 1, GitConnectionId = external ? 8 : null };
+        // One external repository per project: the project's own source, or the additional source
+        // that sits beside its internal repository (recette R-534).
+        var project = new Project { Id = 1, GitConnectionId = asProjectSource ? 8 : null };
         _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(project);
-        if (!external)
-            _light.GetByProjectAsync(1, Arg.Any<CancellationToken>()).Returns([new GitInternalRepo { Id = 4 }]);
+        if (!asProjectSource)
+            _light.GetByProjectAsync(1, Arg.Any<CancellationToken>()).Returns(
+                [InternalRepo(project), AdditionalMirror(project, connectionId: 8, slug: "public")]);
 
         await Assert.ThrowsAsync<ConflictException>(() => Build().AttachAsync(ValidRequest(), ct: TestContext.Current.CancellationToken));
         await _mirror.DidNotReceive().TestConnectivityAsync(
@@ -119,8 +111,71 @@ public sealed class ExternalRepoServiceTests
             Arg.Any<GitAuthType>(), Arg.Any<GitCredentialPayload?>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task AttachAsync_BesideAnInternalRepository_AttachesAnAdditionalSource_AndLeavesTheProjectSourceAlone()
+    {
+        var project = new Project { Id = 1, Name = "API", RepositoryUrl = "https://api.example/git/1/api.git", DefaultBranch = "develop" };
+        _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(project);
+        _light.GetByProjectAsync(1, Arg.Any<CancellationToken>()).Returns([InternalRepo(project)]);
+        _git.AddConnectionAsync(Arg.Any<GitConnection>(), Arg.Any<CancellationToken>()).Returns(call =>
+        {
+            call.Arg<GitConnection>().Id = 23;
+            return Task.CompletedTask;
+        });
+        _mirror.SyncAsync(Arg.Any<GitConnection>(), Arg.Any<GitInternalRepo>(), Arg.Any<CancellationToken>())
+            .Returns(GitMirrorStatus.Ready);
+
+        var dto = await Build().AttachAsync(
+            ValidRequest() with { RepositoryName = "api-public" }, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(dto.IsProjectSource);
+        Assert.Equal("api-public", dto.Slug);
+        Assert.Equal("https://api.example/git/1/api-public.git", dto.CloneUrl);
+        // The project keeps its own source: nothing a pipeline already reads has moved.
+        Assert.Null(project.GitConnectionId);
+        Assert.Equal("https://api.example/git/1/api.git", project.RepositoryUrl);
+        Assert.Equal("develop", project.DefaultBranch);
+        await _projects.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _light.Received(1).AddAsync(Arg.Is<GitInternalRepo>(r =>
+            r.Slug == "api-public" && r.GitConnectionId == 23), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AttachAsync_WhenTheMirrorWouldTakeTheInternalRepositorySlug_NamesItAfterItsOwner()
+    {
+        var project = new Project { Id = 1, Name = "API" };
+        _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(project);
+        _light.GetByProjectAsync(1, Arg.Any<CancellationToken>()).Returns([InternalRepo(project)]);
+        _mirror.SyncAsync(Arg.Any<GitConnection>(), Arg.Any<GitInternalRepo>(), Arg.Any<CancellationToken>())
+            .Returns(GitMirrorStatus.Ready);
+
+        // The remote repository is called "api" like the internal one: a pipeline names its source by slug.
+        var dto = await Build().AttachAsync(ValidRequest(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("team-api", dto.Slug);
+    }
+
+    [Fact]
+    public async Task AttachAsync_HttpsWithoutAToken_IsAnAnonymousRead_ThatTheConnectivityProbeDecides()
+    {
+        _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(new Project { Id = 1 });
+        _mirror.TestConnectivityAsync(
+                Arg.Any<GitProviderType>(), Arg.Any<string?>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<GitAuthType>(), Arg.Any<GitCredentialPayload?>(), Arg.Any<CancellationToken>())
+            .Returns((false, "Authentication failed"));
+
+        var error = await Assert.ThrowsAsync<BadRequestException>(() => Build().AttachAsync(
+            ValidRequest() with { Username = null, Token = null }, ct: TestContext.Current.CancellationToken));
+
+        // A public repository needs no token; a private one is refused by the remote's own answer.
+        Assert.Contains("Authentication failed", error.Message, StringComparison.Ordinal);
+        await _mirror.Received(1).TestConnectivityAsync(
+            GitProviderType.GitHub, Arg.Any<string?>(), "team", "api", GitAuthType.HttpsToken,
+            Arg.Is<GitCredentialPayload?>(credential => credential != null && credential.Token == null),
+            Arg.Any<CancellationToken>());
+    }
+
     [Theory]
-    [InlineData(GitAuthType.HttpsToken, null, null, null, "access token")]
     [InlineData(GitAuthType.Ssh, null, null, "host ssh-ed25519 AAAA", "private key")]
     [InlineData(GitAuthType.Ssh, null, "PRIVATE KEY", null, "known_hosts")]
     public async Task AttachAsync_InvalidCredential_FailsBeforeConnectivity(
@@ -250,6 +305,43 @@ public sealed class ExternalRepoServiceTests
     }
 
     [Fact]
+    public async Task GetForProjectAsync_AnAdditionalSource_IsFoundThroughItsMirror_AndSaysItsSlug()
+    {
+        var project = new Project { Id = 1, RepositoryUrl = "https://api.example/git/1/api.git" };
+        var connection = new GitConnection { Id = 8, ProjectId = 1, ProviderType = GitProviderType.GitHub, OwnerOrGroup = "team", RepositoryName = "api-public" };
+        _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(project);
+        _git.FindConnectionAsync(8, Arg.Any<CancellationToken>()).Returns(connection);
+        _light.GetByProjectAsync(1, Arg.Any<CancellationToken>()).Returns(
+            [InternalRepo(project), AdditionalMirror(project, connectionId: 8, slug: "api-public")]);
+
+        var dto = await Build().GetForProjectAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(dto);
+        Assert.False(dto.IsProjectSource);
+        Assert.Equal("api-public", dto.Slug);
+        Assert.Equal("https://api.example/git/1/api-public.git", dto.CloneUrl);
+    }
+
+    [Fact]
+    public async Task DetachAsync_AnAdditionalSource_RemovesItsMirror_AndLeavesTheProjectSourceAlone()
+    {
+        var project = new Project { Id = 1, RepositoryUrl = "https://api.example/git/1/api.git" };
+        var connection = new GitConnection { Id = 8, ProjectId = 1, ProviderType = GitProviderType.GitHub };
+        var mirrorRepo = AdditionalMirror(project, connectionId: 8, slug: "api-public");
+        _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(project);
+        _git.FindConnectionAsync(8, Arg.Any<CancellationToken>()).Returns(connection);
+        _light.GetByProjectAsync(1, Arg.Any<CancellationToken>()).Returns([InternalRepo(project), mirrorRepo]);
+        _mirror.ResolveMirrorPath(1, "api-public").Returns(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+
+        Assert.True(await Build().DetachAsync(1, ct: TestContext.Current.CancellationToken));
+
+        Assert.Equal("https://api.example/git/1/api.git", project.RepositoryUrl);
+        await _projects.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _light.Received(1).RemoveAsync(mirrorRepo, Arg.Any<CancellationToken>());
+        await _git.Received(1).RemoveConnectionAsync(connection, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task DetachAsync_ProjectWithoutAttachment_ReturnsFalseWithoutSideEffects()
     {
         _projects.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(new Project { Id = 1 });
@@ -260,7 +352,7 @@ public sealed class ExternalRepoServiceTests
         await _audit.DidNotReceive().LogAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
-    private ExternalRepoService Build(bool enabled = true)
+    private ExternalRepoService Build()
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -271,9 +363,28 @@ public sealed class ExternalRepoServiceTests
         return new ExternalRepoService(
             _projects, _git, _light, _connections, _mirror, _encryption, _audit, _notifier,
             Substitute.For<IHttpContextAccessor>(), config,
-            Options.Create(new FeatureFlagsOptions { ExternalRepos = enabled }),
             _time, NullLogger<ExternalRepoService>.Instance);
     }
+
+    private static GitInternalRepo InternalRepo(Project project) => new()
+    {
+        Id = 4,
+        ProjectId = project.Id,
+        Project = project,
+        Slug = "api",
+        GitConnectionId = 2,
+        GitConnection = new GitConnection { Id = 2, ProjectId = project.Id, ProviderType = GitProviderType.AetheusGit }
+    };
+
+    private static GitInternalRepo AdditionalMirror(Project project, int connectionId, string slug) => new()
+    {
+        Id = 5,
+        ProjectId = project.Id,
+        Project = project,
+        Slug = slug,
+        GitConnectionId = connectionId,
+        GitConnection = new GitConnection { Id = connectionId, ProjectId = project.Id, ProviderType = GitProviderType.GitHub }
+    };
 
     private static AttachExternalRepoRequest ValidRequest() => new()
     {

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,6 +68,45 @@ public class ServerDetailLoaderEnsureLoadedTests : BunitContext
         Portsentry = new PortsentryDataDto(),
         Rkhunter = new RkhunterDataDto()
     };
+
+    // ── Recette R-514: leaving, then coming back before the leave has finished ──────────────
+
+    [Fact]
+    public async Task ALeaveTeardownThatRunsAfterTheReaderCameBack_KeepsTheLoadedServer()
+    {
+        _handler.SetJsonResponse("api/servers/5", MakeServer(5));
+        var nav = Services.GetRequiredService<NavigationManager>();
+        var loader = CreateLoader();
+        nav.NavigateTo("/servers/5/tasks");
+        await loader.EnsureLoadedAsync(5, Xunit.TestContext.Current.CancellationToken);
+
+        // The reader opens a task, then comes back with the browser's back button.
+        nav.NavigateTo("/tasks/22358");
+        nav.NavigateTo("/servers/5/tasks");
+        await loader.EnsureLoadedAsync(5, Xunit.TestContext.Current.CancellationToken);
+        // The teardown the leave asked for only gets its turn now.
+        await loader.TeardownOnLeaveAsync();
+
+        Assert.NotNull(loader.Server);
+        Assert.True(loader.InitialLoadCompleted);
+        Assert.Equal(5, GetCurrentId(loader));
+    }
+
+    [Fact]
+    public async Task LeavingTheServerPages_EmptiesTheLoader()
+    {
+        _handler.SetJsonResponse("api/servers/5", MakeServer(5));
+        var nav = Services.GetRequiredService<NavigationManager>();
+        var loader = CreateLoader();
+        nav.NavigateTo("/servers/5/tasks");
+        await loader.EnsureLoadedAsync(5, Xunit.TestContext.Current.CancellationToken);
+
+        nav.NavigateTo("/tasks/22358");
+        await loader.TeardownOnLeaveAsync();
+
+        Assert.Null(loader.Server);
+        Assert.Null(GetCurrentId(loader));
+    }
 
     // ── Initial load: Server populated ───────────────────────────────────────
     // The deterministic test hub fails immediately; the loader must keep the successful
@@ -187,22 +223,35 @@ public class ServerDetailLoaderEnsureLoadedTests : BunitContext
         Assert.Equal(6, GetCurrentId(sut));
     }
 
-    // ── 404 response: EnsureLoadedAsync throws HttpRequestException ──────────
-    // GetFromJsonAsync throws on non-2xx status codes (including 404), so neither
-    // InitialLoadCompleted nor Server is set. The loader propagates the exception.
+    // ── 404 response: the load completes without a server ─────────────────────
+    // Propagating the HttpRequestException reached the error boundary ("an error occurred") on
+    // /servers/{unknown id}; the layout's "server not found" state needs a completed empty load.
 
     [Fact]
-    public async Task EnsureLoadedAsync_NotFoundServer_PropagatesAndLeavesStateIncomplete()
+    public async Task EnsureLoadedAsync_NotFoundServer_CompletesWithoutServer()
     {
         _handler.SetResponse("api/servers/7", System.Net.HttpStatusCode.NotFound);
-
         var sut = CreateLoader();
-        await Assert.ThrowsAsync<HttpRequestException>(() =>
-            sut.EnsureLoadedAsync(7, Xunit.TestContext.Current.CancellationToken));
+        var changed = 0;
+        sut.OnChanged += () => changed++;
 
-        // Server stays null and InitialLoadCompleted stays false (exception prevented the set)
+        await sut.EnsureLoadedAsync(7, Xunit.TestContext.Current.CancellationToken);
+
         Assert.Null(sut.Server);
-        Assert.False(sut.InitialLoadCompleted);
+        Assert.True(sut.InitialLoadCompleted);
+        Assert.True(changed > 0);
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_NotFoundServer_IsNotRequestedAgainOnTheNextRender()
+    {
+        _handler.SetResponse("api/servers/7", System.Net.HttpStatusCode.NotFound);
+        var sut = CreateLoader();
+
+        await sut.EnsureLoadedAsync(7, Xunit.TestContext.Current.CancellationToken);
+        await sut.EnsureLoadedAsync(7, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Single(_handler.Requests, request => request.Url.EndsWith("api/servers/7", StringComparison.Ordinal));
     }
 
     // ── OnChanged fires after successful load ─────────────────────────────────

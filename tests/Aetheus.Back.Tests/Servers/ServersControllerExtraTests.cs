@@ -4,8 +4,6 @@ using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -23,7 +21,8 @@ public class ServersControllerExtraTests
 
     public ServersControllerExtraTests()
     {
-        _sut = new ServersController(_lifecycle, Substitute.For<IServerHeartbeatService>(), _services,
+        _sut = new ServersController(_lifecycle, Substitute.For<IServerRetirementService>(),
+            Substitute.For<IServerHeartbeatService>(), _services,
             Substitute.For<IServerAgentContactService>(), _diagnostic,
             Substitute.For<IAgentUpdateService>(), _authz, Substitute.For<IAuthService>(),
             Substitute.For<ILogger<ServersController>>());

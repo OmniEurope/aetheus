@@ -10,7 +10,12 @@ Orchestre la disponibilité et la livraison des mises à jour d’agent.
   `/api/servers/agent/update-all*`; il n’existe pas de contrôleur dédié.
 - Enregistrement DI : `AgentUpdateModuleExtensions.cs`.
 - `AgentUpdateService` réserve le serveur, attend son inactivité et crée l’unique
-  tâche `AgentSelfUpdate`.
+  tâche `AgentSelfUpdate`. `QueueUpdateAsync` **ne court-circuite pas** un agent déjà
+  à la bonne version : sa seule appelante est l’action par serveur, où un opérateur a
+  désigné ce serveur-là, et réinstaller un agent à jour est une raison de cliquer, pas
+  une raison de refuser. Le balayage de flotte (`update-all`) continue lui de sauter
+  les agents à jour, personne n’y ayant rien désigné. `AlreadyUpToDate` n’est donc plus
+  atteignable par le chemin par serveur.
 - `AgentCompatibilityPolicy` et `AgentReleaseCatalog` évaluent la fenêtre de
   protocole, les capacités et le manifeste distribué.
 - `AgentUpdateRepository` persiste `AgentUpdateRequest`; le coordinateur traite

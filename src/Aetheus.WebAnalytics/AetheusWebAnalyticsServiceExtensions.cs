@@ -62,6 +62,7 @@ public static class AetheusWebAnalyticsServiceExtensions
             ProductionOnly = section.GetValue("ProductionOnly", true),
             HonorDoNotTrack = section.GetValue("HonorDoNotTrack", true),
             EnablePrivacyPage = section.GetValue("EnablePrivacyPage", false),
+            AcceptDeclaredUserId = section.GetValue("AcceptDeclaredUserId", false),
             SessionTimeoutMinutes = section.GetValue("SessionTimeoutMinutes", 30),
             DetailedRetentionDays = section.GetValue("DetailedRetentionDays", 30),
             SessionRetentionDays = section.GetValue("SessionRetentionDays", 90),

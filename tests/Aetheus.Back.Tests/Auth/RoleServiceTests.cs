@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Users;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -416,7 +414,7 @@ public class RoleServiceTests
         _repoMock.GetEffectivePermissionsAsync(1, Arg.Any<CancellationToken>())
             .Returns([new EffectivePermissionDto { ResourceType = ResourceType.Server }]);
 
-        var result = await _sut.GetMyPermissionsAsync("alice", ct: TestContext.Current.CancellationToken);
+        var result = await _sut.GetMyPermissionsAsync(UserPrincipal("1", "alice"), ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         Assert.Single(result.EffectivePermissions);
@@ -435,10 +433,72 @@ public class RoleServiceTests
         var sut = new RoleService(_repoMock, _userServiceMock, _auditMock, _authzMock,
             Substitute.For<IAdminChangeNotifier>(), _userNotifierMock, permissions);
 
-        var result = await sut.GetMyPermissionsAsync("alice", ct: TestContext.Current.CancellationToken);
+        var result = await sut.GetMyPermissionsAsync(UserPrincipal("1", "alice"), ct: TestContext.Current.CancellationToken);
 
         Assert.Contains(result!.EffectivePermissions, p => p.ResourceType == ResourceType.Project && p.ResourceId == 10 && p.Permission == Permission.Read);
         Assert.Contains(result.EffectivePermissions, p => p.ResourceType == ResourceType.Server && p.ResourceId == 20 && p.Permission == Permission.Read);
+    }
+
+    private static System.Security.Claims.ClaimsPrincipal UserPrincipal(string subject, string name, params string[] roles)
+    {
+        var claims = new List<System.Security.Claims.Claim>
+        {
+            new(System.Security.Claims.ClaimTypes.NameIdentifier, subject),
+            new(System.Security.Claims.ClaimTypes.Name, name)
+        };
+        claims.AddRange(roles.Select(role => new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role)));
+        return new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "Bearer"));
+    }
+
+    [Fact]
+    public async Task R2_014_TheBootstrapIdentity_GetsTheSummaryOfItsRoleClaims_NotA404()
+    {
+        // The deployment smoke test signs in as the run-scoped bootstrap identity, which has no user row.
+        _repoMock.GetEffectivePermissionsForRolesAsync(
+                Arg.Is<IReadOnlyCollection<string>>(names => names.SequenceEqual(new[] { "Admin" })),
+                Arg.Any<CancellationToken>())
+            .Returns([new EffectivePermissionDto { ResourceType = ResourceType.Server, Permission = Permission.Admin, GrantedByRole = "Admin" }]);
+
+        var result = await _sut.GetMyPermissionsAsync(
+            UserPrincipal("bootstrap", "aetheus-deploy-2471", "Admin"), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.UserId);
+        Assert.Equal("aetheus-deploy-2471", result.Username);
+        Assert.Equal(["Admin"], result.Roles);
+        var permission = Assert.Single(result.EffectivePermissions);
+        Assert.Equal("Admin", permission.GrantedByRole);
+        await _userServiceMock.DidNotReceive().GetCurrentUserAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task R2_014_TheBootstrapIdentity_GainsNothingFromAUserRowOfTheSameName()
+    {
+        // Only its claims count: a user row named like it, or organization membership, lends it nothing.
+        var permissions = Substitute.For<IPermissionRepository>();
+        permissions.GetOrganizationIdsForUsernameAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([4]);
+        permissions.GetResourceIdsByOrganizationsAsync(Arg.Any<ResourceType>(), Arg.Any<List<int>>(), Arg.Any<CancellationToken>()).Returns([10]);
+        _userServiceMock.GetCurrentUserAsync(Arg.Any<CancellationToken>())
+            .Returns(new UserDto { Id = 9, Username = "admin", Roles = ["Admin", "Operators"] });
+        var sut = new RoleService(_repoMock, _userServiceMock, _auditMock, _authzMock,
+            Substitute.For<IAdminChangeNotifier>(), _userNotifierMock, permissions);
+
+        var result = await sut.GetMyPermissionsAsync(UserPrincipal("bootstrap", "admin"), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Empty(result.Roles);
+        Assert.Empty(result.EffectivePermissions);
+        await _repoMock.DidNotReceive().GetEffectivePermissionsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _repoMock.DidNotReceive().GetEffectivePermissionsForRolesAsync(
+            Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task R2_014_AnAccountWhoseRowIsGone_StillGetsNoSummary()
+    {
+        _userServiceMock.GetCurrentUserAsync(Arg.Any<CancellationToken>()).Returns((UserDto?)null);
+
+        Assert.Null(await _sut.GetMyPermissionsAsync(UserPrincipal("12", "deleted"), TestContext.Current.CancellationToken));
     }
 
     [Fact]

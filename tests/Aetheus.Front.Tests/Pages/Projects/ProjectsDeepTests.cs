@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using ProjectsPage = Aetheus.Front.Pages.Projects.Projects;
+using ProjectsPage = Aetheus.Front.Components.Projects.Projects;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -188,7 +186,7 @@ public class ProjectsDeepTests : BunitContext
     {
         SetupProjects();
         var cut = Render<ProjectsPage>();
-        var options = (List<object>)typeof(ProjectsPage).GetField("_statusOptions", Priv)!.GetValue(cut.Instance)!;
+        var options = (System.Collections.IList)typeof(ProjectsPage).GetField("_statusOptions", Priv)!.GetValue(cut.Instance)!;
         Assert.Equal(2, options.Count);
     }
 }

@@ -1,0 +1,46 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/help"
+
+<PageTitle>@L["HelpCenter"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["HelpCenter"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("help")" /></Icon>
+</OmniPageHeader>
+
+<OmniStack Gap="OmniSpacing.XLarge">
+    <OmniTextBox aria-label="@L["SearchHelp"]" Placeholder="@L["SearchHelp"]" Value="@_search" ValueChanged="OnSearchInputAsync"
+        Class="help-search-box"  ValueExpression="@(() => _search)"/>
+
+    @if (_loading)
+    {
+        <AetheusLoader Size="OmniControlSize.Large" />
+    }
+    else
+    {
+        <OmniRow Gap="OmniSpacing.Large">
+            @foreach (var article in _filtered)
+            {
+                <OmniColumn Span="12" MediumSpan="6">
+                    <div role="button" tabindex="0"
+                         @onclick="@(() => Nav.NavigateTo($"/help/{article.Key}"))"
+                         @onkeydown="@(e => OnCardKeyDown(e, article.Key))">
+                    <OmniCard Class="help-card omni-u-pointer">
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium" Class="omni-u-mb-sm">
+                            <OmniIcon Name="@MaterialIconMap.Resolve(article.Icon)" Class="help-card-icon" />
+                            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@article.Title</OmniHeading>
+                        </OmniStack>
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@article.Description</OmniText>
+                    </OmniCard>
+                    </div>
+                </OmniColumn>
+            }
+        </OmniRow>
+
+        @if (_filtered.Count == 0)
+        {
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-text-center">
+                @L["NoHelpResults"]
+            </OmniText>
+        }
+    }
+</OmniStack>

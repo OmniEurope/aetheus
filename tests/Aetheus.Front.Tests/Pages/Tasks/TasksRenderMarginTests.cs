@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Tasks;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Tasks;
 using Bunit;
-using Radzen;
-using TasksPage = Aetheus.Front.Pages.Tasks.Tasks;
+using OmniEurope.Blazor.Components;
+using TasksPage = Aetheus.Front.Components.Tasks.Tasks;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -57,7 +55,7 @@ public class TasksRenderMarginTests : BunitContext
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(2));
         Assert.DoesNotContain("deploy", cut.Markup);
         Assert.DoesNotContain("backup", cut.Markup);
-        Assert.Contains("filter_list", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Filter);
     }
 
     [Fact]
@@ -69,7 +67,7 @@ public class TasksRenderMarginTests : BunitContext
         // OnLoadData must exist (renamed/removed → test fails instead of silently passing).
         var m = typeof(TaskListView).GetMethod("OnLoadData", Priv)
             ?? throw new InvalidOperationException("OnLoadData not found");
-        await cut.InvokeAsync(async () => await (Task)m.Invoke(cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+        await cut.InvokeAsync(async () => await (Task)m.Invoke(cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
 
         // The handler populates _tasks and _totalCount from the API result.
         var tasks = (List<ServerTaskDto>)typeof(TaskListView).GetField("_tasks", Priv)!.GetValue(cut.Instance)!;
@@ -80,14 +78,14 @@ public class TasksRenderMarginTests : BunitContext
     }
 
     [Theory]
-    [InlineData(TaskExecutionStatus.Success, BadgeStyle.Success)]
-    [InlineData(TaskExecutionStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Timeout, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Running, BadgeStyle.Info)]
-    [InlineData(TaskExecutionStatus.Pending, BadgeStyle.Light)]
-    [InlineData(TaskExecutionStatus.Cancelled, BadgeStyle.Warning)]
-    [InlineData(TaskExecutionStatus.Assigned, BadgeStyle.Light)]
-    public void GetTaskBadge_AllStatuses(TaskExecutionStatus status, BadgeStyle expected)
+    [InlineData(TaskExecutionStatus.Success, OmniTone.Success)]
+    [InlineData(TaskExecutionStatus.Failed, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Timeout, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Running, OmniTone.Accent)]
+    [InlineData(TaskExecutionStatus.Pending, OmniTone.Neutral)]
+    [InlineData(TaskExecutionStatus.Cancelled, OmniTone.Warning)]
+    [InlineData(TaskExecutionStatus.Assigned, OmniTone.Neutral)]
+    public void GetTaskBadge_AllStatuses(TaskExecutionStatus status, OmniTone expected)
     {
         Assert.Equal(expected, TaskListView.GetTaskBadge(status));
     }

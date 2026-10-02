@@ -120,7 +120,11 @@ public static class PipelineParameterResolver
             // Leaving its names unreserved let a pipeline parameter declare one and carry a chosen
             // administrator password through the run, so the prefix is reserved like the others.
             || name.StartsWith("DEPLOYMENT_BOOTSTRAP_", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("BOOTSTRAP_STAMP", StringComparison.OrdinalIgnoreCase);
+            || name.Equals("BOOTSTRAP_STAMP", StringComparison.OrdinalIgnoreCase)
+            // The parent context of a run started by another (UPSTREAM_RUN_ID, UPSTREAM_PIPELINE,
+            // UPSTREAM_CHAIN, UPSTREAM_RELEASE) is written by the engine alone: a launch parameter of
+            // that name would let a run claim any parent in the run lineage (audit of 2026-09-30).
+            || name.StartsWith("UPSTREAM_", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The declared defaults (name→default) for parameters that declare one - injected at the
     /// lowest precedence so an explicit YAML <c>variables:</c> entry of the same name still wins.</summary>

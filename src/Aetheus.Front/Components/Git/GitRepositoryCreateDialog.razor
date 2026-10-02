@@ -1,0 +1,29 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniTemplateForm TModel="CreateGitLightRepoRequest" Model="@_request" OnValidSubmit="@Submit">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Large">
+        <OmniFormField Label="@L["Name"]" Class="omni-u-w-100" For="Name">
+            <OmniTextBox @bind-Value="_request.Name"
+
+                Id="Name" Class="omni-u-w-100" />
+        </OmniFormField>
+        <ValidationMessage For="@(() => _request.Name)" />
+
+        <OmniFormField Label="@L["Description"]" Class="omni-u-w-100" For="Description">
+            <OmniTextArea @bind-Value="_request.Description"
+
+                Id="Description" Rows="3" Class="omni-u-w-100" />
+        </OmniFormField>
+
+        <OmniFormField Label="@L["DefaultBranch"]" Class="omni-u-w-100" For="DefaultBranch">
+            <OmniTextBox @bind-Value="_request.DefaultBranch"
+
+                Id="DefaultBranch" Placeholder="main" Class="omni-u-w-100" />
+        </OmniFormField>
+
+        <DialogFooter OnCancel="@Cancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_submitting ? "btn-busy" : null)" Busy="@(_submitting)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        </DialogFooter>
+    </OmniStack>
+</OmniTemplateForm>

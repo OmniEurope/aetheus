@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Git;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Git;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -124,14 +122,14 @@ public sealed class GitCommitDetailTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal(2, cut.FindAll(".git-file-option").Count);
+            Assert.Equal(2, cut.FindAll(".git-file-listbox option").Count);
             Assert.Contains("public sealed class First", cut.Find(".git-focused-diff-body").TextContent);
             Assert.DoesNotContain("public sealed class Second", cut.Find(".git-focused-diff-body").TextContent);
             Assert.Equal("true", cut.Find("button[aria-label='AllFiles']").GetAttribute("aria-pressed"));
             Assert.Equal("true", cut.Find("button[aria-label='HideDiff']").GetAttribute("aria-expanded"));
         });
 
-        cut.FindAll(".git-file-option")[1].Click();
+        cut.Find(".git-file-listbox").Change("1");
 
         cut.WaitForAssertion(() =>
         {
@@ -143,17 +141,17 @@ public sealed class GitCommitDetailTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Single(cut.FindAll(".git-file-option"));
+            Assert.Single(cut.FindAll(".git-file-listbox option"));
             Assert.Contains("src/First.cs", cut.Find(".git-file-listbox").TextContent);
             Assert.Contains("public sealed class First", cut.Find(".git-focused-diff-body").TextContent);
             Assert.Equal("true", cut.Find("button[aria-label='Added']").GetAttribute("aria-pressed"));
         });
 
-        cut.Find(".git-file-search").Change("missing");
+        cut.Find(".git-file-search").Input("missing");
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Empty(cut.FindAll(".git-file-option"));
+            Assert.Empty(cut.FindAll(".git-file-listbox option"));
             Assert.Contains("NoFilesFound", cut.Markup, StringComparison.Ordinal);
             Assert.Empty(cut.FindAll(".git-focused-diff-body"));
         });

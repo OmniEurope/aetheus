@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Alerts;
@@ -46,8 +45,7 @@ public sealed class StorageAlertProvisioningService(
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var alertRepository = scope.ServiceProvider.GetRequiredService<IAlertRepository>();
-        var serverRepository = scope.ServiceProvider.GetRequiredService<IServerRepository>();
-        var servers = await serverRepository.GetServerIdNamePairsAsync(ct: ct).ConfigureAwait(false);
+        var servers = await alertRepository.GetServerIdNamePairsAsync(ct).ConfigureAwait(false);
         var provisioningKeys = new HashSet<string>(StringComparer.Ordinal);
         var candidateRules = new List<AlertRule>();
 

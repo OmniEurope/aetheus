@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Settings;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Settings;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using SettingsPage = Aetheus.Front.Pages.Settings.Settings;
+using SettingsPage = Aetheus.Front.Components.Settings.Settings;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -62,7 +61,7 @@ public class SettingsExtendedTests : BunitContext
         var idx = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", InstPriv)!
             .GetValue(cut.Instance)!;
-        Assert.Equal(3, idx); // "security" is index 3 in TabNames
+        Assert.Equal(2, idx); // "security" is index 2 in TabNames
     }
 
     [Fact]
@@ -87,7 +86,7 @@ public class SettingsExtendedTests : BunitContext
         var cut = Render<SettingsPage>();
         var method = typeof(SettingsPage).GetMethod("OnTabChange", InstPriv)!;
 
-        method.Invoke(cut.Instance, [2]); // "notifications" tab
+        method.Invoke(cut.Instance, ["security"]); // OE tabs report their key; "security" is index 2
 
         var idx = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", InstPriv)!
@@ -104,14 +103,14 @@ public class SettingsExtendedTests : BunitContext
         var method = typeof(SettingsPage).GetMethod("OnTabChange", InstPriv)!;
         var uriBefore = nav.Uri;
 
-        // Index 99 is out of the TabNames array - the index is still stored but the
-        // bounds guard prevents the /settings/{tab} navigation.
-        method.Invoke(cut.Instance, [99]);
+        // A key that names no tab has no index: nothing is stored and no /settings/{tab}
+        // navigation happens.
+        method.Invoke(cut.Instance, ["unknown"]);
 
         var idx = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", InstPriv)!
             .GetValue(cut.Instance)!;
-        Assert.Equal(99, idx);
+        Assert.Equal(0, idx);
         // No /settings/{tab} navigation happened - the URL is unchanged.
         Assert.Equal(uriBefore, nav.Uri);
         Assert.DoesNotContain("/settings/", nav.Uri);

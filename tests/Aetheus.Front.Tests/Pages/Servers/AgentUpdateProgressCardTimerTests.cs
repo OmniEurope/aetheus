@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -23,7 +22,7 @@ public class AgentUpdateProgressCardTimerTests
         var localizer = new BunitTestHelper.StubLocalizer();
         CardType.GetProperty("L", Priv)!.SetValue(instance, localizer);
         CardType.GetProperty("Toast", Priv)!.SetValue(instance,
-            new Aetheus.Front.Services.NotifyHelper(new Radzen.NotificationService(), localizer));
+            new Aetheus.Front.Components.Shared.NotifyHelper(new OmniEurope.Blazor.Components.OmniOverlayService(new Microsoft.Extensions.Time.Testing.FakeTimeProvider()), localizer));
         return instance;
     }
 

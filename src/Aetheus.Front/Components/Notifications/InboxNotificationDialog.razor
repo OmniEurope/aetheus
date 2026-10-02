@@ -1,0 +1,37 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Recette R-300: one notification opened from its row: the subject, when and how it went, then the
+   elements the event carried (its payload), one line each. *@
+<OmniStack Gap="OmniSpacing.Medium" Class="notification-detail">
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@Notification.Subject</OmniHeading>
+    <dl class="notification-detail-facts">
+        <dt>@L["Date"]</dt>
+        <dd>@Notification.CreatedAt.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture)</dd>
+        <dt>@L["NotificationEvent"]</dt>
+        <dd>@NotificationLabels.EventLabel(L, Notification.EventType)</dd>
+        <dt>@L["NotificationChannel"]</dt>
+        <dd>@(Notification.ChannelName ?? L["NotificationChannelNone"].Value)</dd>
+        <dt>@L["Status"]</dt>
+        <dd><OmniBadge Fill="OmniFill.Solid" Tone="@NotificationLabels.StatusVariant(Notification.Status)">@NotificationLabels.StatusLabel(L, Notification.Status)</OmniBadge></dd>
+        @if (!string.IsNullOrWhiteSpace(Notification.ErrorMessage))
+        {
+            <dt>@L["Error"]</dt>
+            <dd>@Notification.ErrorMessage</dd>
+        }
+    </dl>
+    <OmniHeading Level="OmniHeadingLevel.H6" Class="omni-u-m-0">@L["NotificationContent"]</OmniHeading>
+    @if (Elements.Count > 0)
+    {
+        <dl class="notification-detail-facts">
+            @foreach (var (name, value) in Elements)
+            {
+                <dt>@name</dt>
+                <dd class="omni-u-mono">@value</dd>
+            }
+        </dl>
+    }
+    else
+    {
+        <OmniText Tone="OmniTextTone.Muted">@L["NotificationNoContent"]</OmniText>
+    }
+    <DialogFooter OnCancel="@(() => Dialog.Close())" CancelText="@L["Close"]" />
+</OmniStack>

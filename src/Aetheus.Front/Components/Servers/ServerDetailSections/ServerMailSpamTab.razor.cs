@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Globalization;
+
+namespace Aetheus.Front.Components.Servers.ServerDetailSections;
+
+/// <summary>PLAN-005 lot 4: rspamd state, lifecycle, thresholds and training.</summary>
+public partial class ServerMailSpamTab
+{
+    [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
+    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private OmniDialogService Dialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public MailSpamFilterStateDto Spam { get; set; } = new();
+    [Parameter, EditorRequired] public int ServerId { get; set; }
+    [Parameter] public bool CanManage { get; set; }
+
+    private bool _busy;
+
+    internal static string Score(double? score) =>
+        score?.ToString("0.##", CultureInfo.CurrentCulture) ?? "?";
+
+    private async Task InstallAsync()
+    {
+        _busy = true;
+        try
+        {
+            var queued = await Api.Mail.InstallSpamFilterAsync(ServerId);
+            if (queued is not null) Toast.Success(L["TaskQueued"]);
+            else Toast.Error(L["ActionFailed"]);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunAsync(MailAction action)
+    {
+        _busy = true;
+        try
+        {
+            var queued = await Api.Mail.QueueMailActionAsync(ServerId, new MailActionRequest { Action = action });
+            if (queued is not null) Toast.Success(L["TaskQueued"]);
+            else Toast.Error(L["ActionFailed"]);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task EditThresholdsAsync()
+    {
+        var model = new MailDialogModel
+        {
+            RejectScore = Spam.RejectScore ?? 15,
+            AddHeaderScore = Spam.AddHeaderScore ?? 6,
+            GreylistScore = Spam.GreylistScore ?? 4
+        };
+        if (await OpenAsync(MailDialogMode.SpamThresholds, L["MailSpamThresholds"], model) is not { } result) return;
+
+        _busy = true;
+        try
+        {
+            var queued = await Api.Mail.UpdateSpamFilterAsync(ServerId, new UpdateSpamFilterRequest
+            {
+                RejectScore = result.RejectScore,
+                AddHeaderScore = result.AddHeaderScore,
+                GreylistScore = result.GreylistScore
+            });
+            if (queued is not null) Toast.Success(L["TaskQueued"]);
+            else Toast.Error(L["ActionFailed"]);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LearnAsync()
+    {
+        if (await OpenAsync(MailDialogMode.LearnSpam, L["MailLearnTitle"], new MailDialogModel()) is not { } result) return;
+
+        _busy = true;
+        try
+        {
+            var queued = await Api.Mail.LearnSpamAsync(ServerId, new LearnSpamRequest { IsSpam = result.IsSpam, RawMessage = result.RawMessage });
+            if (queued is not null) Toast.Success(L["TaskQueued"]);
+            else Toast.Error(L["ActionFailed"]);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<MailDialogModel?> OpenAsync(MailDialogMode mode, string title, MailDialogModel model) =>
+        await Dialog.OpenAsync<MailOperationDialog>(title,
+            new Dictionary<string, object?> { { "Mode", mode }, { "Model", model } },
+            new OmniDialogOptions { Width = mode == MailDialogMode.LearnSpam ? "42rem" : "32rem", AutoFocusFirstElement = false })
+        as MailDialogModel;
+}

@@ -1,0 +1,75 @@
+[Unit]
+Description=Aetheus Infrastructure Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=exec - the unit is "active" as soon as the binary execs. We previously
+# used Type=notify (with .NET's AddSystemd sending READY=1), but on some hosts
+# the sd_notify signal does not reach systemd (env propagation / wrapped
+# ExecStart / NotifyAccess quirks), so systemd would kill the agent at
+# TimeoutStartSec ON EVERY START - the process worked, sent its first heartbeat,
+# then got terminated mid-work in a constant restart loop. Type=exec sidesteps
+# that entirely; the agent's actual readiness is then verified out-of-band by
+# the install script's HTTP health check. AddSystemd() stays in Program.cs for
+# clean SIGTERM handling.
+Type=exec
+User=#{AGENT_USER}#
+Group=#{AGENT_GROUP}#
+UMask=0077
+WorkingDirectory=#{INSTALL_DIR}#
+# StateDirectory: systemd creates/owns /var/lib/aetheus-agent (= $WORK_DIR) for the service user
+# on every start, and auto-adds it to ReadWritePaths under ProtectSystem=strict. Deployment targets
+# use mode 0710 solely as the ACL mask for the named aetheus-deploy traverse-only entry; other hosts
+# remain 0700. This
+# is the canonical home for the agent's credential-encryption key material
+# (/var/lib/aetheus-agent/keys, hardened 0700). LinuxCredentialProtector still migrates any
+# legacy keys from the old install-dir location on first run, so existing enrollments survive.
+StateDirectory=aetheus-agent
+StateDirectoryMode=#{STATE_DIRECTORY_MODE}#
+ExecStart=#{EXEC_START}#
+Restart=always
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=30
+# KillMode=mixed: sends SIGTERM to the main process only; child processes
+# (e.g. the self-update script) survive the service stop and finish their work.
+# Default 'control-group' would kill ALL processes in the cgroup, breaking updates.
+KillMode=mixed
+Environment=DOTNET_ENVIRONMENT=Production
+# Explicit PATH so pipeline steps and the Docker capability probe find tools regardless of how
+# they were installed. /snap/bin is included because snap-packaged Docker lives there and the
+# systemd default PATH omits it (a snap Docker would otherwise be invisible to the agent).
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
+# --- Security hardening ---
+#{NNP_BLOCK}#
+#{PROTECT_SYSTEM_BLOCK}#
+ProtectHome=true
+ReadWritePaths=#{WORK_DIR}# #{INSTALL_DIR}##{READ_WRITE_PATHS_BLOCK}#
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+#{SANDBOX_PRIV_BLOCK}#
+LockPersonality=true
+RestrictAddressFamilies=#{ADDRESS_FAMILIES}#
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# NOTE: MemoryDenyWriteExecute is intentionally NOT set - the .NET JIT needs
+# W^X-violating mappings and it would crash the runtime.
+# Phase 3 hardening: cgroup-level backstops covering the agent AND every pipeline step it spawns.
+# TasksMax caps total processes/threads (a fork bomb in a step can't exhaust the host's PID space);
+# 4096 is far above any real build's needs. MemoryMax is left commented because build memory varies
+# wildly and a low cap would OOM-kill legitimate compiles - uncomment and tune per runner if desired.
+TasksMax=4096
+#MemoryMax=8G
+
+[Install]
+WantedBy=multi-user.target

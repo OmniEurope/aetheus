@@ -97,7 +97,9 @@ public sealed class PipelineSchedulerService(
             }
             catch (BadRequestException ex)
             {
-                logger.LogWarning(
+                // Information, not Warning (recette R-521): R-522 leaves a failed run that carries the
+                // reasons, and a preflight refusal is already warned, problem by problem, by the preflight.
+                logger.LogInformation(
                     ex,
                     "Scheduled pipeline {PipelineId} ({PipelineName}) was refused by configuration validation",
                     pipeline.Id,

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 using Bunit;
-using Radzen;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests.Shared;
 
@@ -47,7 +43,7 @@ public class RoleAssignmentPickerTests : BunitContext
             request.Url.Contains("api/roles?page=1&pageSize=25", StringComparison.Ordinal));
         Assert.DoesNotContain(_handler.Requests, request =>
             request.Url.Contains("api/users/roles", StringComparison.Ordinal));
-        Assert.NotNull(cut.FindComponent<RadzenTextBox>());
+        Assert.NotNull(cut.FindComponent<OmniTextBox>());
     }
 
     [Fact]
@@ -64,18 +60,21 @@ public class RoleAssignmentPickerTests : BunitContext
         cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("search=security", StringComparison.OrdinalIgnoreCase)));
 
-        cut.Find(".role-assignment-toolbar button").Click();
+        cut.FindAll(".role-assignment-toolbar button")
+            .Single(button => button.TextContent.Contains("ClearFilters", StringComparison.Ordinal))
+            .Click();
 
         cut.WaitForAssertion(() =>
             Assert.True(string.IsNullOrEmpty(
-                cut.Find(".role-assignment-search").GetAttribute("value"))));
+                cut.Find(".role-assignment-search").GetAttribute("value")),
+                cut.Find(".role-assignment-search").OuterHtml));
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("api/roles?page=1&pageSize=25", StringComparison.Ordinal)
             && !request.Url.Contains("search=", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task AdvancedNameFilter_UsesThePagedServerSearch()
+    public async Task AdvancedNameFilter_IsSentAsTheServerColumnFilter()
     {
         SetupRoles(new RoleDto { Id = 3, Name = "Security Auditor" });
         var cut = Render<RoleAssignmentPicker>(parameters =>
@@ -84,29 +83,27 @@ public class RoleAssignmentPickerTests : BunitContext
         _handler.Requests.Clear();
         var load = typeof(RoleAssignmentPicker).GetMethod(
             "LoadDataAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 25,
             Filters =
             [
-                new FilterDescriptor
-                {
-                    Property = nameof(RoleDto.Name),
-                    FilterValue = "auditor",
-                    FilterOperator = FilterOperator.Contains
-                }
+                new GridFilterDescriptor(nameof(RoleDto.Name), "auditor", OmniDataGridFilterOperator.Contains)
             ]
         };
 
         await cut.InvokeAsync(async () => await (Task)load.Invoke(cut.Instance, [args])!);
 
-        Assert.Contains(_handler.Requests, request =>
+        // Recette R-210: the Role header filter is a real column filter (operator kept), not the free-text
+        // search that also matched descriptions.
+        Assert.Contains(_handler.Requests, IsNameColumnFilter);
+        Assert.DoesNotContain(_handler.Requests, request =>
             request.Url.Contains("search=auditor", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void AdvancedNameFilter_ThroughRenderedControls_UsesServerSearch()
+    public void SimpleNameFilter_ThroughRenderedControls_IsSentAsTheServerColumnFilter()
     {
         SetupRoles(new RoleDto { Id = 3, Name = "Security Auditor" });
         var cut = Render<RoleAssignmentPicker>(parameters =>
@@ -114,13 +111,19 @@ public class RoleAssignmentPickerTests : BunitContext
         cut.WaitForAssertion(() => Assert.Contains("Security Auditor", cut.Markup));
         _handler.Requests.Clear();
 
-        cut.Find(".role-assignment-grid .rz-grid-filter-icon").MouseDown();
-        cut.Find(".role-assignment-grid .rz-grid-filter input.rz-textbox").Change("auditor");
-        cut.Find(".role-assignment-grid form.rz-grid-filter").Submit();
+        // Recette R-024: the column's filter lives in its header menu, not in a second header row.
+        const string nameFilter = ".role-assignment-grid th[data-omni-col='Name'] .omni-data-grid__filter-menu";
+        cut.Find($"{nameFilter} input").Input("auditor");
+        Assert.Empty(cut.FindAll($"{nameFilter} .omni-data-grid__filter-apply"));
 
-        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
-            request.Url.Contains("search=auditor", StringComparison.OrdinalIgnoreCase)));
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, IsNameColumnFilter));
     }
+
+    private static bool IsNameColumnFilter((string Method, string Url) request) =>
+        Uri.UnescapeDataString(request.Url).Contains("api/roles", StringComparison.Ordinal)
+        && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Name", StringComparison.Ordinal)
+        && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Operator=Contains", StringComparison.Ordinal)
+        && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=auditor", StringComparison.Ordinal);
 
     [Fact]
     public void Toggle_PreservesSelectionOutsideTheLoadedPage()
@@ -151,7 +154,7 @@ public class RoleAssignmentPickerTests : BunitContext
         cut.WaitForAssertion(() =>
             Assert.Equal(2, cut.FindAll(".role-assignment-grid tbody tr").Count));
 
-        cut.Find(".role-assignment-filter input").Change(true);
+        cut.Find(".role-assignment-filter.omni-switch").Click();
 
         cut.WaitForAssertion(() =>
         {

@@ -8,8 +8,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.PackageRegistry;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;

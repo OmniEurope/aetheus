@@ -1,0 +1,19 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* PLAN-005 lot 2 / D32: the whole text of a notification, and the id that finds it in the logs. *@
+<OmniStack Gap="OmniSpacing.Medium">
+    <div class="notification-detail-text">@Detail</div>
+    @if (!string.IsNullOrWhiteSpace(CorrelationId))
+    {
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-m-0">
+            @L["CorrelationId"] : <code>@CorrelationId</code>
+        </OmniText>
+    }
+    @if (_copied is { } copied)
+    {
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0" data-testid="notification-copy-result">@(copied ? L["Copied"] : L["CopyFailed"])</OmniText>
+    }
+    <DialogFooter OnCancel="@(() => Dialog.Close())" CancelText="@L["Close"]">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@CopyAsync"><OmniIcon Name="OmniIconName.Copy" /> <span>@L["Copy"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

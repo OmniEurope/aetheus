@@ -2,9 +2,6 @@
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Toolchains;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -33,9 +30,13 @@ public class ContainerRunExecutorTests
         var exec = NewExecutor();
         var spec = new ContainerSpec { WorkspaceKey = runId };
         var slot = unchecked((uint)runId * 2654435761u).ToString("x8");
+        // Spelled out rather than read from HostWorkspaceResolver: the point is to assert the agreed
+        // path independently, so a change to the production formula fails here instead of following
+        // it. Linux left the OS temp directory in 544b409e (systemd PrivateTmp destroyed live
+        // workspaces); this expectation had stayed on the old one and failed on every Linux agent.
         var expected = OperatingSystem.IsWindows()
             ? Path.Combine(@"C:\w", slot, "s")
-            : Path.Combine(Path.GetTempPath(), slot, "s");
+            : Path.Combine("/var/lib/aetheus-agent", "w", slot, "s");
 
         var accepted = exec.ResolveHostWorkspace(
             spec,

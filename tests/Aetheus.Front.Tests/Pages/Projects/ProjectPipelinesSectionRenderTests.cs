@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -25,9 +22,10 @@ public class ProjectPipelinesSectionRenderTests : BunitContext
     {
         var cut = Render<ProjectPipelinesSection>(p =>
             p.Add(x => x.Pipelines, new List<PipelineDto>()));
-        // Loaded (empty) → section chrome renders with no recent runs.
+        // Loaded (empty) → the catalogue view opens on its empty state (R-120). Recette R-215: the view
+        // switch and its counts sit in the page header, which this section alone does not render.
         Assert.Contains("Pipelines", cut.Markup);
-        Assert.Contains("NoRecentRuns", cut.Markup);
+        cut.WaitForAssertion(() => Assert.Contains("NoPipelinesFound", cut.Markup));
     }
 
     [Fact]
@@ -39,8 +37,8 @@ public class ProjectPipelinesSectionRenderTests : BunitContext
                 new() { Id = 1, Name = "CI", LastRunStatus = PipelineStatus.Success },
                 new() { Id = 2, Name = "CD", LastRunStatus = PipelineStatus.Running }
             }));
-        // The section renders its chrome (Pipelines header + Recent runs heading) around the shared list.
+        // The section renders the shared list, on its catalogue view (R-120 / R-215).
         Assert.Contains("Pipelines", cut.Markup);
-        Assert.Contains("RecentRuns", cut.Markup);
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".pipeline-catalog-panel")));
     }
 }

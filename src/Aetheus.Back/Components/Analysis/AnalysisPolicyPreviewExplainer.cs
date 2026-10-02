@@ -46,6 +46,7 @@ internal static class AnalysisPolicyPreviewExplainer
             AnalysisCategory.Coverage => "coverage",
             AnalysisCategory.CodeQuality or AnalysisCategory.Duplication => "scanner:code-quality",
             AnalysisCategory.Architecture => "complexity",
+            AnalysisCategory.Accessibility => "lint",
             { } category => $"scanner:{category.ToString().ToLowerInvariant()}",
             _ => null
         };

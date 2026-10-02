@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -23,10 +21,10 @@ public class ServerModulesAppsSectionTests : BunitContext
     {
         _handler.SetJsonResponse("api/servers/30/modules", new List<ServerModuleDto>());
         var cut = Render<ServerModulesSection>(p => p.Add(x => x.ServerId, 30));
-        // After the fetch resolves, the section header and empty-grid text render.
+        // After the fetch resolves, the empty-grid text renders; the title heading is gone (page header shows it).
         cut.WaitForAssertion(() =>
         {
-            Assert.Contains("Modules", cut.Markup);
+            Assert.DoesNotContain(">Modules<", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("NoRecords", cut.Markup);
         });
     }
@@ -67,10 +65,10 @@ public class ServerModulesAppsSectionTests : BunitContext
     {
         _handler.SetPaginatedJsonResponse("api/servers/31/apps", new List<ServerAppDto>());
         var cut = Render<ServerAppsSection>(p => p.Add(x => x.ServerId, 31));
-        // After the fetch resolves, the section header and empty-grid text render.
+        // After the fetch resolves, the empty-grid text renders; the title heading is gone (page header shows it).
         cut.WaitForAssertion(() =>
         {
-            Assert.Contains("Applications", cut.Markup);
+            Assert.DoesNotContain(">Applications<", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("NoRecords", cut.Markup);
         });
     }

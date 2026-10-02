@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http;
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -41,7 +40,7 @@ public class ServerFirewallSectionTests : BunitContext
         Assert.Contains("22", cut.Markup);
         Assert.Contains("8080", cut.Markup);
         Assert.Contains("FirewallActive", cut.Markup);
-        Assert.Contains("lock_open", cut.Markup); // add-rule form present when capable
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.LockOpen); // add-rule form present when capable
     }
 
     [Fact]
@@ -50,7 +49,9 @@ public class ServerFirewallSectionTests : BunitContext
         var cut = RenderWith(Firewall(active: true, cap: false), cap: false);
 
         Assert.Contains("FirewallManageDisabledHint", cut.Markup);
-        Assert.DoesNotContain("lock_open", cut.Markup);
+        // The add-rule form is absent. Read by its buttons, not by the LockOpen icon: the OE grid now
+        // draws one too, on its frozen-column toggle.
+        Assert.DoesNotContain(cut.FindComponents<OmniButton>(), button => button.Markup.Contains("FirewallAllow", StringComparison.Ordinal));
     }
 
     [Fact]

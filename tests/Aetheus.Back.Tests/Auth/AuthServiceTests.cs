@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
@@ -97,7 +95,7 @@ public class AuthServiceTests
     public async Task LoginAsync_RunScopedBootstrapIdentity_ReturnsTokenWithoutDatabaseMutation()
     {
         const string username = "deploy-smoke-0123456789abcdef";
-        const string password = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var password = new string('p', 64);
         var expiresAt = TimeProvider.System.GetUtcNow().AddMinutes(5);
         _config["Auth:DeploymentBootstrapUser"] = username;
         _config["Auth:DeploymentBootstrapPassword"] = password;
@@ -125,7 +123,7 @@ public class AuthServiceTests
     [Fact]
     public async Task RunScopedBootstrapIdentity_DoesNotBecomeTheAdministratorPassword()
     {
-        const string deployPassword = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        var deployPassword = new string('d', 48);
         _config["Auth:DeploymentBootstrapUser"] = "deploy-smoke-separate";
         _config["Auth:DeploymentBootstrapPassword"] = deployPassword;
         _config["Auth:DeploymentBootstrapExpiresAtUtc"] =

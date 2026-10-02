@@ -8,7 +8,7 @@ namespace Aetheus.Analyzers;
 
 /// <summary>
 /// PRM002: Forbids @code blocks in .razor files. Use code-behind (.razor.cs) instead.
-/// Razor inputs are supplied centrally by Directory.Build.targets.
+/// Razor inputs are supplied by the Razor SDK as AdditionalFiles.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class PRM002_NoInlineCodeBlockAnalyzer : DiagnosticAnalyzer

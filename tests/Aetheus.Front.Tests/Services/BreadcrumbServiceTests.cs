@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Layout;
+using Aetheus.Front.Resources;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Localization;
+using NSubstitute;
 
 namespace Aetheus.Front.Tests;
 
@@ -10,17 +13,26 @@ public class BreadcrumbServiceTests : BunitContext
 {
     private NavigationManager Nav => Services.GetRequiredService<NavigationManager>();
 
+    /// <summary>Recette R-395: the Aetheus facade over OE's trail, the one OmniPageHeader reads.</summary>
+    private BreadcrumbService Create(IOmniBreadcrumbResolver? resolver = null) =>
+        new(new OmniBreadcrumbService(Nav, resolver), Nav, Substitute.For<IStringLocalizer<AppStrings>>());
+
+    private sealed class Fallback(Func<string, IReadOnlyList<OmniBreadcrumbEntry>> resolve) : IOmniBreadcrumbResolver
+    {
+        public IReadOnlyList<OmniBreadcrumbEntry> Resolve(string relativePath) => resolve(relativePath);
+    }
+
     [Fact]
     public void Items_InitiallyEmpty()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         Assert.Empty(sut.Items);
     }
 
     [Fact]
     public void Set_AddsItemsAndFiresOnChanged()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         var changed = false;
         sut.OnChanged += () => changed = true;
 
@@ -35,7 +47,7 @@ public class BreadcrumbServiceTests : BunitContext
     [Fact]
     public void Clear_RemovesItemsAndFiresOnChanged()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         sut.Set(new BreadcrumbItem("Home", "/"));
 
         var changed = false;
@@ -50,7 +62,7 @@ public class BreadcrumbServiceTests : BunitContext
     [Fact]
     public void Set_ReplacesExistingItems()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         sut.Set(new BreadcrumbItem("Old"));
 
         sut.Set(new BreadcrumbItem("New"));
@@ -62,7 +74,7 @@ public class BreadcrumbServiceTests : BunitContext
     [Fact]
     public void ParentHref_ReturnsNearestClickableAncestor()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         sut.Set(
             new BreadcrumbItem("Projects", "/projects"),
             new BreadcrumbItem("Project without a link"),
@@ -75,7 +87,7 @@ public class BreadcrumbServiceTests : BunitContext
     [Fact]
     public void ParentHref_DoesNotUseCurrentItemHref()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         sut.Set(new BreadcrumbItem("Current page", "/current-page"));
 
         Assert.Null(sut.ParentHref);
@@ -84,7 +96,7 @@ public class BreadcrumbServiceTests : BunitContext
     [Fact]
     public void LocationChanged_ClearsItemsAndFiresOnChanged()
     {
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         sut.Set(new BreadcrumbItem("Home", "/"));
 
         var changed = false;
@@ -99,8 +111,7 @@ public class BreadcrumbServiceTests : BunitContext
     [Fact]
     public void LocationChanged_WithFallback_ReplacesItemsWithoutAnEmptyState()
     {
-        var sut = new BreadcrumbService(Nav);
-        sut.ConfigureFallback(path => [new BreadcrumbItem($"fallback:{path}")]);
+        var sut = Create(new Fallback(path => [new OmniBreadcrumbEntry($"fallback:{path}")]));
         sut.Set(new BreadcrumbItem("Loaded page"));
 
         Nav.NavigateTo("/other-page");
@@ -115,7 +126,7 @@ public class BreadcrumbServiceTests : BunitContext
         // A tab switch via UrlSyncedTabs changes only the ?tab= query on the SAME path. The breadcrumb,
         // set once by the owning page behind an early-return guard, must survive that navigation - the
         // regression the user reported ("le fil d'Ariane est perdu dès qu'on clique sur un onglet").
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         Nav.NavigateTo("/users/5");
         sut.Set(new BreadcrumbItem("Users", "/users"), new BreadcrumbItem("alice"));
 
@@ -133,7 +144,7 @@ public class BreadcrumbServiceTests : BunitContext
     {
         // A stray trailing slash (from a link/redirect) is the same logical page - it must not read as a
         // page change and wipe the breadcrumb.
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         Nav.NavigateTo("/settings");
         sut.Set(new BreadcrumbItem("Settings"));
 
@@ -147,7 +158,7 @@ public class BreadcrumbServiceTests : BunitContext
     {
         // Leaving the page entirely (path changes, not just the query) must still reset so the next
         // page starts clean.
-        var sut = new BreadcrumbService(Nav);
+        var sut = Create();
         Nav.NavigateTo("/users/5?tab=roles");
         sut.Set(new BreadcrumbItem("Users", "/users"), new BreadcrumbItem("alice"));
 
@@ -157,12 +168,13 @@ public class BreadcrumbServiceTests : BunitContext
     }
 
     [Fact]
-    public void Dispose_UnsubscribesFromLocationChanged()
+    public void DisposingTheTrail_UnsubscribesFromLocationChanged()
     {
-        var sut = new BreadcrumbService(Nav);
+        var trail = new OmniBreadcrumbService(Nav);
+        var sut = new BreadcrumbService(trail, Nav, Substitute.For<IStringLocalizer<AppStrings>>());
         sut.Set(new BreadcrumbItem("Home", "/"));
 
-        sut.Dispose();
+        trail.Dispose();
 
         var changed = false;
         sut.OnChanged += () => changed = true;

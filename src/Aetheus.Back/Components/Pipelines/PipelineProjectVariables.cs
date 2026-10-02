@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.ExternalRepos;
+using Aetheus.Back.Components.Git;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Pipelines;

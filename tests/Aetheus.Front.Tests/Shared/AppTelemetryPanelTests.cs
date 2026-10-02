@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -32,7 +29,12 @@ public class AppTelemetryPanelTests : BunitContext
             UniqueVisitorsToday = 3,
             UniqueVisitorsThisWeek = 8,
             UniqueVisitorsThisMonth = 12,
-            StorageBudgetBytes = 104_857_600
+            StorageBudgetBytes = 104_857_600,
+            TopPages =
+            [
+                new AppWebAnalyticsPageDto { Route = "/docs", PageViews = 11 },
+                new AppWebAnalyticsPageDto { Route = "/pricing", PageViews = 7 }
+            ]
         });
         _handler.SetJsonResponse(
             "web-analytics/configuration",
@@ -53,10 +55,77 @@ public class AppTelemetryPanelTests : BunitContext
 
         Assert.Contains("toto-qa", cut.Markup);        // app picker populated
         Assert.Contains("Visitors", cut.Markup);
-        Assert.Contains("Metrics", cut.Markup);        // sub-tab labels (stub localizer echoes keys)
+        Assert.Contains("Performance", cut.Markup);    // sub-tab labels (stub localizer echoes keys); R-455: replaces Metrics
         Assert.Contains("Logs", cut.Markup);
         Assert.Contains("Errors", cut.Markup);
         Assert.Contains("Ingestion", cut.Markup);
+        Assert.Contains("WebAnalyticsPagesTab", cut.Markup);
+    }
+
+    [Fact]
+    public void R467_TheApplicationNamedByThePage_IsTheOneThePanelOpensOn()
+    {
+        SeedTelemetry();
+        _handler.SetJsonResponse("api/appmonitoring/projects/1/apps", new List<MonitoredAppDto>
+        {
+            new() { Id = 5, ProjectId = 1, Name = "toto-qa", CurrentStatus = AppHealthStatus.Up, HasIngestKey = true },
+            new() { Id = 9, ProjectId = 1, Name = "toto-prod", CurrentStatus = AppHealthStatus.Up, HasIngestKey = true }
+        });
+
+        var cut = Render<AppTelemetryPanel>(p => p.Add(c => c.ProjectId, 1).Add(c => c.SelectedAppId, 9));
+
+        // The telemetry read is the one of the named application, not of the first in the list.
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, r => r.Url.Contains("apps/9/web-analytics", StringComparison.Ordinal)));
+        Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("apps/5/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void R467_AnApplicationTheProjectDoesNotHave_FallsBackToTheFirstOne()
+    {
+        SeedTelemetry();
+
+        var cut = Render<AppTelemetryPanel>(p => p.Add(c => c.ProjectId, 1).Add(c => c.SelectedAppId, 404));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, r => r.Url.Contains("apps/5/web-analytics", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void R355_TopPagesLiveInTheirOwnSubTab_NotInTheVisitorsView()
+    {
+        SeedTelemetry();
+        var cut = Render<AppTelemetryPanel>(p => p.Add(c => c.ProjectId, 1));
+        cut.WaitForAssertion(() => Assert.Contains("UniqueVisitorsToday", cut.Markup));
+
+        // Visitors (first tab) no longer carries the top pages grid.
+        Assert.DoesNotContain("TopPagesThisMonth", cut.Markup);
+
+        var pagesTab = cut.FindAll("[role='tab']").Single(tab => tab.GetAttribute("data-key") == "pages");
+        Assert.Contains("WebAnalyticsPagesTab", pagesTab.TextContent);
+        pagesTab.Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("TopPagesThisMonth", cut.Markup);
+            var rows = cut.FindAll(".omni-data-grid__table tbody tr[data-omni-row-index]");
+            Assert.Equal(2, rows.Count);
+            Assert.Contains("/docs", rows[0].TextContent);
+            Assert.Contains("11", rows[0].TextContent);
+            Assert.Contains("/pricing", rows[1].TextContent);
+        });
+    }
+
+    [Fact]
+    public void R355_PagesView_HttpFailure_ShowsErrorAndRetry()
+    {
+        _handler.SetResponse("api/appmonitoring/apps/5/web-analytics?days=30", HttpStatusCode.ServiceUnavailable);
+
+        var cut = Render<AppWebAnalyticsPagesView>(parameters => parameters.Add(component => component.AppId, 5));
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("LoadFailed", cut.Markup);
+            Assert.Contains("Retry", cut.Markup);
+            Assert.DoesNotContain("TopPagesThisMonth", cut.Markup);
+        });
     }
 
     [Fact]
@@ -101,6 +170,32 @@ public class AppTelemetryPanelTests : BunitContext
     }
 
     [Fact]
+    public async Task R469_AStoredBatch_RefreshesTheFiguresAndTheLastEventDate()
+    {
+        const string url = "api/appmonitoring/apps/5/web-analytics?days=30";
+        _handler.SetJsonResponse(url, new AppWebAnalyticsSummaryDto { UniqueVisitorsToday = 3 });
+        var cut = Render<AppWebAnalyticsView>(parameters => parameters
+            .Add(component => component.AppId, 5)
+            .Add(component => component.ProjectId, 8));
+        cut.WaitForAssertion(() => Assert.Contains(">3<", cut.Markup));
+        _handler.SetJsonResponse(url, new AppWebAnalyticsSummaryDto
+        {
+            UniqueVisitorsToday = 4,
+            LastIngestAtUtc = new DateTime(2026, 9, 30, 8, 15, 0, DateTimeKind.Local)
+        });
+
+        await cut.Instance.LiveFeed!.OnEventAsync(8);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains(">4<", cut.Markup);
+            Assert.Contains(new DateTime(2026, 9, 30, 8, 15, 0).ToString("g"), cut.FindAll(".web-analytics-summary-tile")[0].TextContent);
+        });
+        // No loader replaces the figures while a push is read.
+        Assert.Empty(cut.FindAll(".aetheus-loader"));
+    }
+
+    [Fact]
     public void WebAnalyticsView_RendersPeriodCountsAndIngestionHealth()
     {
         _handler.SetJsonResponse("api/appmonitoring/apps/5/web-analytics?days=30", new AppWebAnalyticsSummaryDto
@@ -117,7 +212,17 @@ public class AppTelemetryPanelTests : BunitContext
             RejectedEvents = 2,
             EstimatedStorageBytes = 50,
             StorageBudgetBytes = 100,
-            StorageUsagePercent = 50
+            StorageUsagePercent = 50,
+            Daily =
+            [
+                new AppWebAnalyticsPointDto { DayUtc = new DateOnly(2026, 9, 25), UniqueVisitors = 2, PageViews = 5 },
+                new AppWebAnalyticsPointDto { DayUtc = new DateOnly(2026, 9, 26), UniqueVisitors = 3, PageViews = 6 }
+            ],
+            TopPages =
+            [
+                new AppWebAnalyticsPageDto { Route = "/docs", PageViews = 11 },
+                new AppWebAnalyticsPageDto { Route = "/pricing", PageViews = 7 }
+            ]
         });
 
         var cut = Render<AppWebAnalyticsView>(parameters => parameters.Add(component => component.AppId, 5));
@@ -125,8 +230,23 @@ public class AppTelemetryPanelTests : BunitContext
         {
             Assert.Contains("UniqueVisitorsThisWeek", cut.Markup);
             Assert.Contains(">8<", cut.Markup);
-            Assert.Contains("AnalyticsIngestionHealth", cut.Markup);
-            Assert.Contains("RejectedAnalyticsEvents", cut.Markup);
+            // Recette R2-007: the storage card left the Visitors tab (one line of the Ingestion tab now).
+            Assert.DoesNotContain("AnalyticsIngestionHealth", cut.Markup);
+            Assert.DoesNotContain("AnalyticsStorage", cut.Markup);
+            // Recette R-356: compact tiles, a third of the row from the small breakpoint.
+            Assert.NotEmpty(cut.FindAll(".web-analytics-summary-tile"));
+            // R-469: the date of the last event has its own tile, first of the row ("Never" without one).
+            Assert.Contains("LastEventReceived", cut.FindAll(".web-analytics-summary-tile")[0].TextContent);
+            Assert.Contains("Never", cut.FindAll(".web-analytics-summary-tile")[0].TextContent);
+            // R-470: the daily chart is a wide, low drawing.
+            Assert.DoesNotContain("LastAnalyticsIngest", cut.Markup);
+            // Recette R-362: the chart names both series per day, the UTC day axis and the count axis.
+            Assert.Contains("AudienceDailyTitle", cut.Markup);
+            Assert.Contains("AudienceDailyCaption", cut.Markup);
+            Assert.Contains("UniqueVisitorsPerDay", cut.Markup);
+            Assert.Contains("PageViewsPerDay", cut.Markup);
+            Assert.Contains("AudienceDailyValueAxis", cut.Markup);
+            Assert.Contains("AudienceDailyCategoryAxis", cut.Markup);
             Assert.Contains("BrowserPerformanceSamplesLast30Days", cut.Markup);
             Assert.Contains(">9<", cut.Markup);
             Assert.Contains("AverageBrowserNavigationDuration", cut.Markup);
@@ -134,6 +254,9 @@ public class AppTelemetryPanelTests : BunitContext
             Assert.Contains("P95BrowserNavigationDuration", cut.Markup);
             Assert.Contains(">240 ms<", cut.Markup);
             Assert.Contains("BrowserErrorsLast30Days", cut.Markup);
+            // Recette R-355: the top pages moved to their own sub-tab.
+            Assert.DoesNotContain("TopPagesThisMonth", cut.Markup);
+            Assert.Empty(cut.FindAll(".omni-data-grid__table"));
         });
     }
 }

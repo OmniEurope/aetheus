@@ -1,0 +1,15 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* R-113: the first-level "Notifications" entry of the side menu, with the same unread count as the
+   header bell (UserNotificationsFeed, R-115). Laid out like the Alerts entry (nav-alert-item). *@
+
+<div class="nav-alert-item">
+    <OmniPanelMenuItem Text="@L["MyNotifications"]" Icon="@BellIcon" Href="notifications"
+                       aria-describedby="@(Feed.UnreadCount > 0 ? "nav-notification-count" : null)" />
+    @if (Feed.UnreadCount > 0)
+    {
+        <OmniBadge Id="nav-notification-count" Fill="OmniFill.Solid" Tone="OmniTone.Success" Class="nav-alert-count"
+                   title="@string.Format(L["NotificationBellTooltip"], Feed.UnreadCount)">
+            @(Feed.UnreadCount > 99 ? "99+" : Feed.UnreadCount.ToString(System.Globalization.CultureInfo.CurrentCulture))
+        </OmniBadge>
+    }
+</div>

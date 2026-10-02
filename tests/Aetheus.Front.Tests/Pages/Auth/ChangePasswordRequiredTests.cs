@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Auth;
-using Aetheus.Front.Services;
+using Aetheus.Front.Components.Auth;
 using Aetheus.Front.Tests.Services;
 using Bunit;
 using Bunit.TestDoubles;
@@ -47,6 +46,22 @@ public class ChangePasswordRequiredTests : BunitContext
         Assert.NotEmpty(cut.FindAll("input"));
     }
 
+    [Theory]
+    [InlineData("CurrentPassword")]
+    [InlineData("NewPassword")]
+    [InlineData("ConfirmPassword")]
+    public void EachPasswordField_HasASingleRevealToggle(string fieldId)
+    {
+        // Recette R-002: the page added its own eye beside the package's one, two buttons on a field.
+        var cut = Render<ChangePasswordRequired>();
+        var toggle = Assert.Single(cut.FindAll($"button[aria-controls='{fieldId}']"));
+        Assert.Equal("password", cut.Find($"#{fieldId}").GetAttribute("type"));
+
+        toggle.Click();
+
+        Assert.Equal("text", cut.Find($"#{fieldId}").GetAttribute("type"));
+    }
+
     [Fact]
     public async Task OnSubmit_Success_LogsOutAndRedirectsToLogin()
     {
@@ -68,6 +83,22 @@ public class ChangePasswordRequiredTests : BunitContext
         Assert.Equal(1, factory.StopAllCount);
         // …and the user was redirected to the login screen.
         Assert.EndsWith("/login", nav.Uri);
+    }
+
+    /// <summary>PLAN-005 lot 8 / D47: the page asked for before the forced change is kept for the new sign-in.</summary>
+    [Fact]
+    public async Task OnSubmit_Success_KeepsTheRequestedPageForTheNewSignIn()
+    {
+        _handler.SetResponse(HttpMethod.Post, "api/users/me/change-password", System.Net.HttpStatusCode.OK);
+        UseCountingHubFactory();
+        var nav = Services.GetRequiredService<BunitNavigationManager>();
+        nav.NavigateTo("http://localhost/account/change-password?returnUrl=%2Fprojects%2F1%2Fpipelines");
+
+        var cut = Render<ChangePasswordRequired>();
+        SetModel(cut, "OldPass1!", "NewPass2!");
+        await InvokeSubmit(cut);
+
+        Assert.Equal("http://localhost/login?returnUrl=%2Fprojects%2F1%2Fpipelines", nav.Uri);
     }
 
     [Fact]

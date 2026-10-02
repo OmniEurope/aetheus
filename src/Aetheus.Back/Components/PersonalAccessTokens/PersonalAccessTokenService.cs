@@ -46,7 +46,7 @@ internal sealed class PersonalAccessTokenService(
     {
         var (page, pageSize) = request.Normalize();
         var (tokens, total) = await repo.GetForUserPagedAsync(
-            userId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            userId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PersonalAccessTokenDto>
         {
             Items = tokens.Select(Map).ToList(),

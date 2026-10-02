@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text;
 using System.Text.RegularExpressions;
-using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -20,14 +19,34 @@ internal static partial class PipelineCommandBuilder
     internal const int CleanupTimeoutSeconds = 60;
     internal const int ArtifactCollectionTimeoutSeconds = 300;
 
-    // Workspace lives under the OS temp dir so the agent's systemd sandbox (PrivateTmp=true,
-    // ProtectSystem=strict) keeps it writable AND isolated from the host /tmp. The slot is an
-    // opaque hash of the run id (Azure-style short path) - neither the app name nor the
-    // sequential run id leaks into logs or `pwd`.
+    /// <summary>
+    /// Linux agents run under systemd with <c>PrivateTmp=true</c>, which hands the service a fresh
+    /// tmpfs on every start. A workspace under /tmp therefore did not survive an agent restart, and
+    /// a self-update landing between two jobs of a live run wiped the sources out from under the
+    /// next job: the step preamble recreated the empty directory and the run failed on the first
+    /// missing repository file (production run 2185). The workspace now lives under the agent's
+    /// durable work directory - the Linux installer WORK_DIR and the agent default - which is listed
+    /// in the unit ReadWritePaths so ProtectSystem=strict still allows writes, and is where
+    /// container workspaces already live. Windows was never affected: C:\w is durable.
+    /// The slot stays an opaque hash of the run id (Azure-style short path) - neither the app name
+    /// nor the sequential run id leaks into logs or <c>pwd</c>.
+    /// </summary>
+    internal const string LinuxAgentWorkDirectory = "/var/lib/aetheus-agent";
+
+    /// <summary>
+    /// Emitted by a step preamble that had to recreate its own run workspace. Phrased for whoever
+    /// reads the failing log: it names the cause instead of leaving them to infer it from whatever
+    /// missing file the step reports next.
+    /// </summary>
+    internal const string WorkspaceLostWarning =
+        "aetheus: run workspace was missing and has been recreated empty - the agent restarted "
+        + "during this run (self-update, service restart or reboot). Steps needing the repository "
+        + "will report missing files; re-run the pipeline to rebuild the workspace.";
+
     internal static string GetDefaultWorkspace(int runId, bool isWindows)
     {
         var slot = GetWorkspaceSlot(runId);
-        return isWindows ? $@"C:\w\{slot}\s" : $"/tmp/{slot}/s";
+        return isWindows ? $@"C:\w\{slot}\s" : $"{LinuxAgentWorkDirectory}/w/{slot}/s";
     }
 
     internal static string GetWorkspaceSlot(int runId)
@@ -38,8 +57,14 @@ internal static partial class PipelineCommandBuilder
 
     // Qualified step outputs use the Azure-style $(Stage.Step.Variable) syntax. Keep the
     // character set deliberately narrow so ordinary shell command substitutions are untouched.
-    [GeneratedRegex(@"\$\(([A-Za-z_][A-Za-z0-9_.]*)\)")]
+    // `$(NAME:-default)` carries a fallback used when NAME is missing or empty, as in POSIX. The
+    // default cannot contain a parenthesis: nesting is not supported, and refusing it keeps
+    // `$(A:-$(B))` from matching half of itself.
+    [GeneratedRegex(@"\$\(([A-Za-z_][A-Za-z0-9_.]*)(?::-([^()]*))?\)")]
     private static partial Regex VariablePattern();
+
+    /// <summary>Every default applies: the value is being rendered for the step that runs now.</summary>
+    private static readonly Func<string, bool> EveryDefaultApplies = _ => true;
 
     // S-TECH-V6QN: ${{ parameters.X }} is a distinct namespace from $(X). It resolves only from the
     // run-parameter keys (carried as "parameters.X" in the variable map), so a same-named YAML
@@ -52,9 +77,21 @@ internal static partial class PipelineCommandBuilder
     /// stripped from the exported step environment (see <c>ScopeStepEnvironment</c>).</summary>
     internal const string ParameterKeyPrefix = "parameters.";
 
-    internal static string Substitute(string command, Dictionary<string, string> variables)
+    internal static string Substitute(string command, IReadOnlyDictionary<string, string> variables)
+        => Substitute(command, variables, EveryDefaultApplies);
+
+    /// <summary>
+    /// Substitutes <c>${{ parameters.X }}</c> and <c>$(X)</c>. An unknown <c>$(X)</c> stays literal.
+    /// <c>$(X:-default)</c> takes the value of X when it is defined and not empty; otherwise
+    /// <paramref name="defaultApplies"/> decides whether the default is used now or the reference
+    /// is kept literal because X may still be provided later in the run. A null predicate is the
+    /// pre-default behaviour, which leaves every reference carrying a default untouched: vault
+    /// secrets are opaque data, and a value that happens to contain that shape must not change.
+    /// </summary>
+    internal static string Substitute(
+        string command, IReadOnlyDictionary<string, string> variables, Func<string, bool>? defaultApplies)
     {
-        if (string.IsNullOrEmpty(command) || variables.Count == 0)
+        if (string.IsNullOrEmpty(command))
             return command;
 
         // Resolve the ${{ parameters.X }} namespace first, then the $(X) variable syntax.
@@ -67,7 +104,14 @@ internal static partial class PipelineCommandBuilder
         return VariablePattern().Replace(command, match =>
         {
             var varName = match.Groups[1].Value;
-            return variables.TryGetValue(varName, out var value) ? value : match.Value;
+            var fallback = match.Groups[2];
+            if (!fallback.Success)
+                return variables.TryGetValue(varName, out var value) ? value : match.Value;
+            if (defaultApplies is null)
+                return match.Value;
+            if (variables.TryGetValue(varName, out var defined) && defined.Length > 0)
+                return defined;
+            return defaultApplies(varName) ? fallback.Value : match.Value;
         });
     }
 
@@ -349,9 +393,18 @@ internal static partial class PipelineCommandBuilder
             // the clone preamble here cloned the repo a SECOND time - a redundant fetch + reset over the
             // network with no benefit. Every step now enters the run workspace, including pipelines
             // without a repository, so concurrent runs never share the agent's global work directory.
+            //
+            // System:Prepare created this directory before any user step ran, so finding it gone means
+            // it was destroyed mid-run - an agent restart is the usual cause. Say so: the recreate above
+            // otherwise turns a lost workspace into "no such file" on whatever the step touches first,
+            // which reads as a missing repository file and sends the reader hunting the wrong bug
+            // (production run 2185 lost 27 minutes to `ensure-dotnet-sdk.sh: No such file`). The warning
+            // never fails the step on its own: the teardown still needs to run.
             command = isWindows
-                ? $"New-Item -ItemType Directory -Force -Path '{workDir}' | Out-Null\nSet-Location '{workDir}'\n{command}"
-                : $"mkdir -p -- \"{workDir}\"\ncd \"{workDir}\"\n{command}";
+                ? $"if (-not [System.IO.Directory]::Exists('{workDir}')) {{ Write-Warning '{WorkspaceLostWarning}' }}\n"
+                  + $"New-Item -ItemType Directory -Force -Path '{workDir}' | Out-Null\nSet-Location '{workDir}'\n{command}"
+                : $"if [ ! -d \"{workDir}\" ]; then echo \"{WorkspaceLostWarning}\" >&2; fi\n"
+                  + $"mkdir -p -- \"{workDir}\"\ncd \"{workDir}\"\n{command}";
         }
 
         return AddStrictShellMode(command, isWindows);

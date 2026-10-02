@@ -15,20 +15,12 @@ public sealed class ScannerOperationExecutor(
     IScannerProcessRunner processRunner,
     ScannerSourceProjectionManager sourceProjectionManager,
     TimeProvider timeProvider,
-    ILogger<ScannerOperationExecutor> logger) : IOperationExecutor
+    ILogger<ScannerOperationExecutor> logger) : EnvironmentOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
     private readonly ScannerReportPublisher _reportPublisher = new(apiClient, timeProvider);
-    public bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineRunScanner;
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override bool CanHandle(OperationKind kind) => kind == OperationKind.PipelineRunScanner;
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
         string target,
         IReadOnlyDictionary<string, string> envVars,
@@ -120,10 +112,12 @@ public sealed class ScannerOperationExecutor(
         if (!ScannerOperationValidator.ValidateDastTarget(
                 invocation.Scanner, invocation.Environment, timeProvider, out var dastError))
             return await FailAsync(invocation, AnalysisReportStatus.Error, dastError).ConfigureAwait(false);
-        if (!await ValidateImageAssociationAsync(
-                invocation.Scanner, sourceDirectory, invocation.Environment, invocation.CancellationToken).ConfigureAwait(false))
+        var imageAssociation = await ValidateImageAssociationAsync(
+            invocation.Scanner, sourceDirectory, invocation.Environment, invocation.CancellationToken)
+            .ConfigureAwait(false);
+        if (!imageAssociation.IsValid)
             return await FailAsync(invocation, AnalysisReportStatus.Error,
-                "Built-artifact analysis refused: archive revision does not match the pipeline source commit.").ConfigureAwait(false);
+                $"Built-artifact analysis refused: {imageAssociation.Reason}.").ConfigureAwait(false);
 
         resources.Egress = await RestrictedScannerEgress.StartAsync(
             invocation.Scanner, invocation.Environment, processRunner,
@@ -197,12 +191,14 @@ public sealed class ScannerOperationExecutor(
         IReadOnlyDictionary<string, string> effectiveEnvironment,
         RestrictedScannerEgress? egress)
     {
+        var skipDatabaseUpdate = await TrivyDatabaseFreshness.ShouldSkipUpdateAsync(
+            invocation.Scanner, cacheDirectory, timeProvider.GetUtcNow(), invocation.OnOutput).ConfigureAwait(false);
         try
         {
             var process = string.Equals(invocation.Scanner.Execution, "container", StringComparison.Ordinal)
                 ? ScannerContainerProcessBuilder.Build(
                     invocation.Scanner, sourceDirectory, invocation.OutputDirectory, cacheDirectory,
-                    trustedHarnessPath, effectiveEnvironment, egress)
+                    trustedHarnessPath, effectiveEnvironment, egress, skipDatabaseUpdate)
                 : await BuildBinaryProcessAsync(
                     invocation.Scanner, sourceDirectory, reportPath, rulesDirectory,
                     invocation.CancellationToken).ConfigureAwait(false);

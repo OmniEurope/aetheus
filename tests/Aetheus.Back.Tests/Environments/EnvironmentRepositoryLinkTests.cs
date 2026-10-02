@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Environments;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 

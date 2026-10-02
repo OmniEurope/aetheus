@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Tasks;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.Tasks;
 

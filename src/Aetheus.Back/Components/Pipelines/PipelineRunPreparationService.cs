@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.ExternalRepos;
+using Aetheus.Back.Components.Git;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -17,10 +16,13 @@ public interface IPipelineRunPreparationService
     /// pipeline does not exist.</summary>
     /// <param name="yamlOverride">Bypasses the git-first read (dry-run / preflight of unsaved YAML).</param>
     /// <param name="commitOverride">Pins the snapshot to a commit instead of the branch head.</param>
+    /// <param name="workspaceCommitOverride">With a <c>source:</c> block, pins the workspace to this commit of
+    /// the source repository instead of its branch head; ignored without one.</param>
     /// <exception cref="BadRequestException">The branch is invalid, the definition is illegal, or the
     /// pipeline needs a workspace it cannot be given.</exception>
     Task<PipelineRunPreparation?> PrepareRunAsync(
-        int pipelineId, string? sourceBranch, string? yamlOverride, string? commitOverride, CancellationToken ct);
+        int pipelineId, string? sourceBranch, string? yamlOverride, string? commitOverride, CancellationToken ct,
+        string? workspaceCommitOverride = null);
 
     /// <summary>The parameters a launch dialog should ask for, read from the same authoritative
     /// definition the trigger will use.</summary>
@@ -39,6 +41,8 @@ public sealed class PipelineRunPreparationService(
     IPipelineGitService pipelineGit,
     IPipelineTemplateResolver templateResolver,
     IPipelineRunParameterResolver parameterResolver,
+    IGitCliService gitCli,
+    IPipelineWorkspaceSourceResolver workspaceSources,
     IConfiguration configuration,
     ILogger<PipelineRunPreparationService> logger) : IPipelineRunPreparationService
 {
@@ -52,7 +56,8 @@ public sealed class PipelineRunPreparationService(
             .Any(stage => stage.Steps.Any(step => !string.Equals(step.Type, "trigger", StringComparison.OrdinalIgnoreCase)));
 
     public async Task<PipelineRunPreparation?> PrepareRunAsync(
-        int id, string? sourceBranch, string? yamlOverride, string? commitOverride, CancellationToken ct)
+        int id, string? sourceBranch, string? yamlOverride, string? commitOverride, CancellationToken ct,
+        string? workspaceCommitOverride = null)
     {
         var pipeline = await repo.FindPipelineAsync(id, ct).ConfigureAwait(false);
         if (pipeline is null) return null;
@@ -67,9 +72,20 @@ public sealed class PipelineRunPreparationService(
             ?? await repo.GetPipelineProjectIdAsync(pipeline, ct).ConfigureAwait(false);
         var source = await ResolvePipelineSourceAsync(pipeline, effectiveProjectId, branch, ct).ConfigureAwait(false);
         var commitHash = commitOverride ?? source?.CommitHash;
+        if (source is null && pipeline.Project?.RepositoryUrl is { Length: > 0 } externalUrl
+            && commitOverride is null)
+        {
+            // A project may point straight at a public HTTPS repository without an internal mirror.
+            // Pin its selected branch before creating a run; the agent then checks out this exact SHA.
+            var remote = await gitCli.ResolveBranchCommitAsync(externalUrl, branch, ct).ConfigureAwait(false);
+            branch = remote.Branch;
+            commitHash = remote.Commit;
+        }
         var repositoryUrl = ResolveRepositoryUrl(source, pipeline);
         var definitionYaml = await ResolveDefinitionYamlAsync(
-            pipeline, effectiveProjectId, branch, commitHash, yamlOverride, ct).ConfigureAwait(false);
+            pipeline, effectiveProjectId, branch, commitHash, yamlOverride, source is null, ct).ConfigureAwait(false);
+        // Recette R2-041: keys this backend does not know are skipped by the parser; the run says so.
+        var definitionWarnings = PipelineYamlDiagnostics.UnknownPropertyWarnings(definitionYaml, logger);
         var organizationId = await repo.GetPipelineOrganizationIdAsync(id, ct).ConfigureAwait(false);
         var resolution = await templateResolver.ResolveAsync(definitionYaml, organizationId ?? 0, parameters: null, ct)
             .ConfigureAwait(false);
@@ -77,9 +93,8 @@ public sealed class PipelineRunPreparationService(
         var definition = resolution.Definition;
         var effectiveStages = YamlParsingHelper.FlattenJobs(definition);
         ValidatePreparedDefinition(definition, effectiveStages);
-        ValidateWorkspaceRequirements(definition, repositoryUrl, commitHash);
         var targetIds = await parameterResolver.ResolveCandidateTargetServerIdsAsync(definition, organizationId, ct).ConfigureAwait(false);
-        return new PipelineRunPreparation
+        var preparation = await ApplyWorkspaceSourceAsync(new PipelineRunPreparation
         {
             PipelineId = id,
             Pipeline = pipeline,
@@ -90,7 +105,36 @@ public sealed class PipelineRunPreparationService(
             Definition = definition,
             EffectiveStages = effectiveStages,
             EffectiveProjectId = effectiveProjectId,
-            TargetServerIds = targetIds
+            TargetServerIds = targetIds,
+            DefinitionWarnings = definitionWarnings
+        }, source?.RepositoryId, workspaceCommitOverride, ct).ConfigureAwait(false);
+        ValidateWorkspaceRequirements(definition, preparation.RepositoryUrl, preparation.CommitHash);
+        return preparation;
+    }
+
+    /// <summary>
+    /// Recette R-534: a <c>source:</c> block moves the workspace to another repository of the project.
+    /// The definition keeps the repository and the revision it was read at, now recorded beside the
+    /// workspace's; the branch, commit and clone URL of the run become those of what it checks out.
+    /// Without the block the preparation is returned as it is.
+    /// </summary>
+    private async Task<PipelineRunPreparation> ApplyWorkspaceSourceAsync(
+        PipelineRunPreparation preparation, int? definitionRepositoryId, string? workspaceCommit, CancellationToken ct)
+    {
+        if (preparation.Definition.Source is not { } workspaceSource) return preparation;
+        if (preparation.EffectiveProjectId is not { } projectId)
+            throw new BadRequestException("A source: block needs a pipeline that belongs to a project.");
+
+        var workspace = await workspaceSources.ResolveAsync(
+            projectId, workspaceSource, preparation.Pipeline.SourceRepositoryId ?? definitionRepositoryId,
+            preparation.CommitHash, ct, workspaceCommit).ConfigureAwait(false);
+        return preparation with
+        {
+            BranchName = workspace.Branch,
+            CommitHash = workspace.CommitHash,
+            RepositoryUrl = MirrorCloneUrl.Rehome(configuration, workspace.CloneUrl),
+            DefinitionCommitHash = preparation.CommitHash,
+            DefinitionBranchName = preparation.BranchName
         };
     }
 
@@ -105,9 +149,15 @@ public sealed class PipelineRunPreparationService(
         var yaml = pipeline.YamlDefinition;
         if (pipeline.ProjectId is { } projectId)
         {
-            var gitYaml = await pipelineGit.ReadProjectPipelineYamlAsync(
-                projectId, pipeline.Name, ct, sourceBranch ?? pipeline.SourceBranch,
-                pipeline.SourceRepositoryId).ConfigureAwait(false);
+            var branch = sourceBranch ?? pipeline.SourceBranch ?? pipeline.Project?.DefaultBranch;
+            var gitYaml = await pipelineGit.ReadProjectPipelineYamlAsync(projectId, pipeline.Name, ct,
+                branch, pipeline.SourceRepositoryId).ConfigureAwait(false);
+            if (pipeline.Project?.RepositoryUrl is { Length: > 0 } url
+                && await ResolvePipelineSourceAsync(pipeline, projectId, branch, ct).ConfigureAwait(false) is null)
+            {
+                var remote = await gitCli.ResolveBranchCommitAsync(url, branch, ct).ConfigureAwait(false);
+                gitYaml = await gitCli.ReadPipelineYamlAsync(url, remote.Commit, pipeline.Name, ct).ConfigureAwait(false);
+            }
             if (!string.IsNullOrWhiteSpace(gitYaml)) yaml = gitYaml;
         }
 
@@ -126,6 +176,8 @@ public sealed class PipelineRunPreparationService(
                 Default = p.Default,
                 Required = p.Required,
                 Description = p.Description,
+                DisplayNameFr = string.IsNullOrWhiteSpace(p.DisplayNameFr) ? null : p.DisplayNameFr,
+                DescriptionFr = string.IsNullOrWhiteSpace(p.DescriptionFr) ? null : p.DescriptionFr,
                 AllowedValues = p.AllowedValues
             })
             .ToList();
@@ -142,10 +194,9 @@ public sealed class PipelineRunPreparationService(
 
     private string? ResolveRepositoryUrl(PipelineSourceDto? source, Pipeline pipeline)
     {
-        var repositoryUrl = MirrorCloneUrl.Rehome(configuration, source?.CloneUrl);
-        return string.IsNullOrWhiteSpace(repositoryUrl)
-            ? MirrorCloneUrl.Rehome(configuration, pipeline.Project?.RepositoryUrl)
-            : repositoryUrl;
+        return string.IsNullOrWhiteSpace(source?.CloneUrl)
+            ? pipeline.Project?.RepositoryUrl
+            : MirrorCloneUrl.Rehome(configuration, source.CloneUrl);
     }
 
     private async Task<string> ResolveDefinitionYamlAsync(
@@ -154,10 +205,17 @@ public sealed class PipelineRunPreparationService(
         string? branch,
         string? commitHash,
         string? yamlOverride,
+        bool externalSource,
         CancellationToken ct)
     {
         if (yamlOverride is not null || projectId is not { } gitProjectId)
             return yamlOverride ?? pipeline.YamlDefinition;
+        if (externalSource && pipeline.Project?.RepositoryUrl is { Length: > 0 } externalUrl
+            && !string.IsNullOrWhiteSpace(commitHash))
+        {
+            var externalYaml = await gitCli.ReadPipelineYamlAsync(externalUrl, commitHash, pipeline.Name, ct).ConfigureAwait(false);
+            return externalYaml ?? pipeline.YamlDefinition;
+        }
         var gitYaml = !string.IsNullOrWhiteSpace(commitHash)
             ? await pipelineGit.ReadProjectPipelineYamlAtRevisionAsync(
                 gitProjectId, pipeline.Name, commitHash, ct, pipeline.SourceRepositoryId).ConfigureAwait(false)

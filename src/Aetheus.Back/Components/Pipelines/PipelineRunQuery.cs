@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Linq.Expressions;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -10,6 +11,16 @@ namespace Aetheus.Back.Components.Pipelines;
 /// working-looking affordance that tells the reader something false.</para></summary>
 internal static class PipelineRunQuery
 {
+    /// <summary>The runs grid's columns (PLAN-008 lot 12): the keys its filters and sorts may name.</summary>
+    internal static readonly GridQueryMap<PipelineRun> Columns = new GridQueryMap<PipelineRun>()
+        .Number("id", r => r.Id)
+        .Number("buildNumber", r => r.BuildNumber)
+        .Enum("status", r => r.Status)
+        .Date("startedAt", r => r.StartedAt)
+        .Date("completedAt", r => r.CompletedAt)
+        .Text("branchName", r => r.BranchName)
+        .Text("commitHash", r => r.CommitHash);
+
     /// <summary>Column filters, applied before the count so the pager reports the size of the filtered
     /// set rather than of rows the reader can never reach.</summary>
     public static IQueryable<PipelineRun> ApplyFilters(
@@ -32,7 +43,8 @@ internal static class PipelineRunQuery
             query = query.Where(r => r.CommitHash != null && r.CommitHash.ToLower().Contains(commit));
         }
 
-        return query;
+        // The generic column filters of the grid, on top of the typed ones an older front still sends.
+        return Columns.ApplyFilters(query, request?.Filters);
     }
 
     /// <summary>Applies the requested order. The sort key is matched against a closed set of columns
@@ -43,6 +55,11 @@ internal static class PipelineRunQuery
     public static IQueryable<PipelineRun> ApplySort(
         IQueryable<PipelineRun> query, PipelineRunPaginationRequest? request, DateTime now)
     {
+        // Sort keys of the grid, when it sends them, replace SortBy. The newest run stays the tie-breaker
+        // so rows with the same key keep a stable order across pages.
+        if (Columns.ApplySorts(query, request?.Sorts) is { } sorted)
+            return sorted.ThenByDescending(r => r.StartedAt).ThenByDescending(r => r.Id);
+
         var down = request?.SortDescending ?? true;
 
         return request?.SortBy?.ToLowerInvariant() switch

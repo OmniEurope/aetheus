@@ -37,7 +37,12 @@ AGENT_USER="aetheus-agent"
 AGENT_GROUP="aetheus-agent"
 INSTALL_DIR="/opt/aetheus-agent"
 WORK_DIR="/var/lib/aetheus-agent"
-PRODUCTION_STATE_DIR="/var/lib/aetheus-production"
+# These three are the host layout, which the deployment pipelines read from their Variable Libraries.
+# They are defaults here rather than constants so a host that names them differently can say so at
+# install time (--production-state-dir, --demo-state-dir, --acme-webroot) instead of needing an
+# edited copy of this script. Nothing else changes: the installer still owns creating them, because
+# the deployment runs as the agent user and cannot create a directory under /var/lib.
+PRODUCTION_STATE_DIR="${AETHEUS_PRODUCTION_STATE_DIR:-/var/lib/aetheus-production}"
 PRODUCTION_ENV_FILE="$PRODUCTION_STATE_DIR/.env-prod"
 LEGACY_PRODUCTION_ENV_FILE="$WORK_DIR/aetheus-prod/.env-prod"
 # The nightly demo deployment keeps its Compose environment and secrets here, exactly as production
@@ -45,7 +50,7 @@ LEGACY_PRODUCTION_ENV_FILE="$WORK_DIR/aetheus-prod/.env-prod"
 # as the agent user, which cannot create a directory under /var/lib: the nightly failed on both the
 # mirror and the production host with "State directory /var/lib/aetheus-demo does not exist and
 # could not be created". No secrets are generated or migrated here - the demo preparation owns that.
-DEMO_STATE_DIR="/var/lib/aetheus-demo"
+DEMO_STATE_DIR="${AETHEUS_DEMO_STATE_DIR:-/var/lib/aetheus-demo}"
 SERVICE_NAME="aetheus-agent"
 AGENT_POSTURE_VERSION="2"
 AGENT_POSTURE_VERSION_FILE="/etc/aetheus-agent-posture-version"
@@ -69,7 +74,7 @@ RKHUNTER_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-rkhunter"
 CRON_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-cron"
 PORTSENTRY_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-portsentry"
 SERVICE_ENABLE_SUDOERS_FILE="/etc/sudoers.d/aetheus-service-enable"
-# S-FEAT-W8KN - argv-exact apt-get install/remove allow-list (managed-package install/uninstall).
+# S-FEAT-W8KN - argv-exact apt-get install/purge allow-list (managed-package install/uninstall).
 PACKAGE_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-package"
 # ADR-024 4.1 - argv-exact apt-get upgrade grant (fleet OS patching / patch-manage capability).
 PATCH_MANAGE_SUDOERS_FILE="/etc/sudoers.d/aetheus-patch"
@@ -108,6 +113,13 @@ CERTBOT_ISSUE_HELPER_PATH="$AETHEUS_HELPER_DIR/aetheus-certbot-issue"
 # Certbot lifecycle management (renew/delete/revoke a named lineage). Same boundary model as the issue
 # helper: root-owned, re-validates the cert name, runs a fixed certbot verb (no free-form argv).
 CERTBOT_MANAGE_HELPER_PATH="$AETHEUS_HELPER_DIR/aetheus-certbot-manage"
+# Certbot convention (PLAN-007): every lineage renews through the Aetheus ACME web root. cli.ini makes
+# that the default of a manual certbot run too; the deploy hook reloads Apache after a renewal; the
+# weekly renewal check records its outcome where the agent collector can read it.
+CERTBOT_CLI_INI="/etc/letsencrypt/cli.ini"
+CERTBOT_APACHE_DEPLOY_HOOK="/etc/letsencrypt/renewal-hooks/deploy/aetheus-apache"
+CERTBOT_STATE_DIR="/var/lib/aetheus-certbot"
+CERTBOT_RENEWAL_CHECK_UNIT="aetheus-certbot-renewal-check"
 DEPLOY_UNIT_TEMPLATE_PATH="/etc/systemd/system/aetheus-app@.service"
 DEPLOY_BASE_DIR="$WORK_DIR/deploy"
 # Static web root the deployment module makes agent-writable (via ACL) so a pipeline can publish a
@@ -138,6 +150,137 @@ NC='\033[0m'
 log_info()  { printf "${GREEN}[INFO]${NC} %s\n" "$1"; }
 log_warn()  { printf "${YELLOW}[WARN]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[ERROR]${NC} %s\n" "$1"; }
+
+# R-249 - every host configuration file this installer writes (units, sudoers drop-ins, root-owned
+# helpers, appsettings.json) is a versioned template under agent-host-config/: next to this script
+# in the agent archive, deploy/agent-host-config in a repository checkout. Its manifest declares the
+# #{NAME}# placeholders of each template.
+if [ -d "$SCRIPT_DIR_PREVIEW/agent-host-config" ]; then
+    HOST_CONFIG_DIR="$SCRIPT_DIR_PREVIEW/agent-host-config"
+else
+    HOST_CONFIG_DIR="$(cd "$SCRIPT_DIR_PREVIEW/.." && pwd)/agent-host-config"
+fi
+
+# Fails before anything on the host is touched when the templates are missing or incomplete: an
+# installer extracted without its agent-host-config folder must stop, not half-configure a host.
+require_host_config() {
+    if [ ! -f "$HOST_CONFIG_DIR/manifest" ]; then
+        log_error "Host configuration templates not found: $HOST_CONFIG_DIR/manifest"
+        log_error "Extract the whole agent archive and run install-agent-linux.sh from the extracted folder."
+        exit 1
+    fi
+    _rqc_missing="$(awk '/^[[:space:]]*(#|$)/ { next } { print $1 }' "$HOST_CONFIG_DIR/manifest" \
+        | while IFS= read -r _rqc_rel; do [ -f "$HOST_CONFIG_DIR/$_rqc_rel" ] || printf '%s ' "$_rqc_rel"; done)"
+    if [ -n "$_rqc_missing" ]; then
+        log_error "Host configuration templates missing from $HOST_CONFIG_DIR: $_rqc_missing"
+        exit 1
+    fi
+}
+
+# Renders the template $1 (relative to HOST_CONFIG_DIR) into the file $2. Each #{NAME}# the manifest
+# declares for the template becomes the value of the installer variable NAME, inserted literally
+# (never re-read as shell or as another placeholder). A line that is exactly #{include:<path>}# is
+# replaced by that template verbatim. The installation stops, with $2 left untouched, when the
+# template is not in the manifest, a declared placeholder has no value or is not used, the template
+# holds an undeclared or unterminated placeholder, or a carriage return. The destination is written
+# with `cat >`, exactly as the heredoc each template replaces did (same inode, mode and owner).
+render_host_config() {
+    _rhc_rel="$1"
+    _rhc_dest="$2"
+    case "$_rhc_rel" in
+        ''|/*|*..*) log_error "Invalid host configuration template name: $_rhc_rel"; exit 1 ;;
+    esac
+    if [ ! -f "$HOST_CONFIG_DIR/$_rhc_rel" ]; then
+        log_error "Host configuration template missing: $HOST_CONFIG_DIR/$_rhc_rel"
+        exit 1
+    fi
+    if ! _rhc_names="$(awk -v rel="$_rhc_rel" '
+        $1 == rel { found = 1; for (i = 2; i <= NF; i++) printf "%s ", $i }
+        END { exit found ? 0 : 1 }' "$HOST_CONFIG_DIR/manifest")"; then
+        log_error "Host configuration template $_rhc_rel is not declared in $HOST_CONFIG_DIR/manifest"
+        exit 1
+    fi
+    # A carriage return means a CRLF checkout slipped into the archive: it would end up in sudoers,
+    # units and helpers. Counted with tr, which sees it on every platform.
+    for _rhc_file in "$_rhc_rel" $(sed -n 's/^#{include:\(.*\)}#$/\1/p' "$HOST_CONFIG_DIR/$_rhc_rel"); do
+        [ -f "$HOST_CONFIG_DIR/$_rhc_file" ] || continue
+        if [ "$(LC_ALL=C tr -cd '\r' < "$HOST_CONFIG_DIR/$_rhc_file" | wc -c)" -ne 0 ]; then
+            log_error "Refusing to install $_rhc_dest: template $_rhc_file has carriage returns (CRLF line endings)."
+            exit 1
+        fi
+    done
+    _rhc_tmp="$(mktemp "${TMPDIR:-/tmp}/aetheus-host-config.XXXXXX")"
+    if ! (
+        for _rhc_name in $_rhc_names; do
+            case "$_rhc_name" in
+                [A-Z_]*) ;;
+                *) echo "render_host_config: invalid placeholder name '$_rhc_name' for $_rhc_rel" >&2; exit 1 ;;
+            esac
+            case "$_rhc_name" in
+                *[!A-Z0-9_]*) echo "render_host_config: invalid placeholder name '$_rhc_name' for $_rhc_rel" >&2; exit 1 ;;
+            esac
+            eval "_rhc_isset=\${$_rhc_name+set}"
+            if [ "$_rhc_isset" != set ]; then
+                echo "render_host_config: #{$_rhc_name}# has no value for $_rhc_rel" >&2
+                exit 1
+            fi
+            eval "AHC_VALUE_$_rhc_name=\$$_rhc_name"
+            export "AHC_VALUE_$_rhc_name"
+        done
+        AHC_NAMES="$_rhc_names" AHC_DIR="$HOST_CONFIG_DIR" AHC_REL="$_rhc_rel" LC_ALL=C awk '
+            function fail(msg) {
+                printf "render_host_config: %s (%s line %d)\n", msg, ENVIRON["AHC_REL"], FNR > "/dev/stderr"
+                failed = 1
+                exit 1
+            }
+            BEGIN {
+                n = split(ENVIRON["AHC_NAMES"], names, " ")
+                for (i = 1; i <= n; i++) if (names[i] != "") used[names[i]] = 0
+            }
+            index($0, "\r") > 0 { fail("carriage return in template") }
+            substr($0, 1, 10) == "#{include:" && substr($0, length($0) - 1) == "}#" {
+                inc = substr($0, 11, length($0) - 12)
+                if (inc == "" || index(inc, "..") > 0 || substr(inc, 1, 1) == "/") fail("invalid include " inc)
+                path = ENVIRON["AHC_DIR"] "/" inc
+                while ((r = (getline l < path)) > 0) {
+                    if (index(l, "\r") > 0 || index(l, "#{") > 0) fail("included template " inc " holds a carriage return or a placeholder")
+                    printf "%s\n", l
+                }
+                if (r < 0) fail("cannot read included template " inc)
+                close(path)
+                next
+            }
+            {
+                line = $0
+                out = ""
+                while ((p = index(line, "#{")) > 0) {
+                    out = out substr(line, 1, p - 1)
+                    rest = substr(line, p + 2)
+                    q = index(rest, "}#")
+                    if (q == 0) fail("unterminated placeholder")
+                    name = substr(rest, 1, q - 1)
+                    if (!(name in used)) fail("undeclared placeholder #{" name "}#")
+                    out = out ENVIRON["AHC_VALUE_" name]
+                    used[name] = 1
+                    line = substr(rest, q + 2)
+                }
+                printf "%s\n", out line
+            }
+            END {
+                if (failed) exit 1
+                for (name in used) if (!used[name]) {
+                    printf "render_host_config: declared placeholder #{%s}# unused in %s\n", name, ENVIRON["AHC_REL"] > "/dev/stderr"
+                    exit 1
+                }
+            }' "$HOST_CONFIG_DIR/$_rhc_rel"
+    ) > "$_rhc_tmp"; then
+        rm -f "$_rhc_tmp"
+        log_error "Refusing to install $_rhc_dest: template $_rhc_rel did not render (see above)."
+        exit 1
+    fi
+    cat "$_rhc_tmp" > "$_rhc_dest"
+    rm -f "$_rhc_tmp"
+}
 
 preserve_production_environment() {
     if [ -L "$PRODUCTION_ENV_FILE" ] || [ -L "$LEGACY_PRODUCTION_ENV_FILE" ]; then
@@ -273,7 +416,7 @@ Elevation options (ALL DISABLED BY DEFAULT - opt in with --enable-* or --module 
                             pre-existing units (no wildcards). Required for the server
                             Configuration YAML deploy to enable services on boot.
   --enable-package-manage   S-FEAT-W8KN: tight NOPASSWD sudoers rule for
-                            'apt-get install|remove -y <pkg>' over a FIXED package list
+                            'apt-get install|purge -y <pkg>' over a FIXED package list
                             (no wildcards). Required to install/uninstall managed server
                             components (docker/apache/mail/...) from Aetheus.
   --enable-patch-manage     ADR-024 4.1: tight NOPASSWD sudoers rule for
@@ -367,7 +510,7 @@ ENABLE_TEAMSPEAK=0         # opt-in: teamspeak-group membership + credential dir
 ENABLE_CRON_MANAGE=0       # opt-in: cron-apply sudo helper (writes /etc/cron.d/aetheus-<id>)
 ENABLE_PORTSENTRY_MANAGE=0 # opt-in: unblock-ip sudo helper (iptables/ip6tables + hosts.deny)
 ENABLE_SERVICE_ENABLE=0    # opt-in: systemctl enable --now on a FIXED unit list (argv-exact)
-ENABLE_PACKAGE_MANAGE=0    # opt-in: apt-get install/remove -y on a FIXED package list (argv-exact)
+ENABLE_PACKAGE_MANAGE=0    # opt-in: apt-get install/purge -y on a FIXED package list (argv-exact)
 ENABLE_PATCH_MANAGE=0      # opt-in: apt-get upgrade -y (fleet OS patching, argv-exact) - ADR-024 4.1
 ENABLE_FIREWALL_MANAGE=0   # opt-in: ufw control via root-owned helper (firewall) - ADR-024 4.2
 ENABLE_MAIL_SETUP=0        # opt-in: root-owned mail-setup helper (full postfix/dovecot/opendkim setup)
@@ -392,9 +535,35 @@ MODULE_SERVER_MANAGEMENT=0
 MODULE_DEPLOYMENT=0
 ENABLE_DEPLOYMENT=0        # derived from MODULE_DEPLOYMENT (and preserved on --upgrade)
 DOTNET_CHANNEL="10.0"
-DOTNET_RUNTIME_VERSION="10.0.11"
+DOTNET_RUNTIME_VERSION="10.0.12"
 DOTNET_INSTALLER_URL="https://raw.githubusercontent.com/dotnet/install-scripts/da3ce11ba63f3dbb0fb835d41bda2665d5c48e84/src/dotnet-install.sh"
 DOTNET_INSTALLER_SHA256="082f7685e156738a1b2e2ed8381a621870d4ce8e8c59278034556f05c186eb2e"
+
+ACME_WEBROOT_OVERRIDE=""
+
+# The host layout options below are paths this installer creates and chowns, so they are bounded
+# before anything is done with them: a direct child of /var/lib (or /var/www), no traversal, no
+# trailing slash. A typo must fail here rather than create a directory somewhere unexpected.
+require_state_dir() {
+    _candidate="$1"
+    _label="$2"
+    case "$_candidate" in
+        *..*|*/) echo "Invalid --${_label}-state-dir: $_candidate" >&2; exit 1 ;;
+        /var/lib/*/*) echo "--${_label}-state-dir must be a direct child of /var/lib: $_candidate" >&2; exit 1 ;;
+        /var/lib/?*) printf '%s' "$_candidate" ;;
+        *) echo "--${_label}-state-dir must live under /var/lib: $_candidate" >&2; exit 1 ;;
+    esac
+}
+
+require_web_root() {
+    _candidate="$1"
+    case "$_candidate" in
+        *..*|*/) echo "Invalid --acme-webroot: $_candidate" >&2; exit 1 ;;
+        /var/www/*/*) echo "--acme-webroot must be a direct child of /var/www: $_candidate" >&2; exit 1 ;;
+        /var/www/?*) printf '%s' "$_candidate" ;;
+        *) echo "--acme-webroot must live under /var/www: $_candidate" >&2; exit 1 ;;
+    esac
+}
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -404,6 +573,18 @@ while [ "$#" -gt 0 ]; do
         --server-url) SERVER_URL="$2"; shift 2 ;;
         --token)      REG_TOKEN="$2"; shift 2 ;;
         --name)       AGENT_NAME="$2"; shift 2 ;;
+        # Host layout. Optional, and the defaults are what every current host uses; they exist so a
+        # host that names these differently can say so here rather than needing an edited installer.
+        --production-state-dir)
+            PRODUCTION_STATE_DIR="$(require_state_dir "$2" production)"
+            PRODUCTION_ENV_FILE="$PRODUCTION_STATE_DIR/.env-prod"
+            shift 2 ;;
+        --demo-state-dir)
+            DEMO_STATE_DIR="$(require_state_dir "$2" demo)"
+            shift 2 ;;
+        --acme-webroot)
+            ACME_WEBROOT_OVERRIDE="$(require_web_root "$2")"
+            shift 2 ;;
         --enable-service-control)       ENABLE_SERVICE_CONTROL=1; POSTURE_EXPLICIT=1; shift ;;
         --enable-apache-introspection)  ENABLE_APACHE=1; POSTURE_EXPLICIT=1; shift ;;
         --enable-apache-manage)         ENABLE_APACHE_MANAGE=1; ENABLE_APACHE=1; POSTURE_EXPLICIT=1; shift ;;
@@ -472,6 +653,9 @@ if [ "$MODULE_DEPLOYMENT" -eq 1 ]; then
     ENABLE_DEPLOYMENT=1
 fi
 
+# R-249: the ACME web root the certbot and mail-manage helper templates declare as #{ACME_WEBROOT}#.
+ACME_WEBROOT="${ACME_WEBROOT_OVERRIDE:-/var/www/aetheus-acme}"
+
 # =============================================================================
 # Helper functions
 # =============================================================================
@@ -515,160 +699,15 @@ install_agent_update_supervisor() {
     chown root:root "$AGENT_UPDATE_URL_FILE"
     chmod 600 "$AGENT_UPDATE_URL_FILE"
 
-    cat > "$AGENT_UPDATE_WORKER_PATH.tmp.$$" <<'AETHEUS_AGENT_UPDATE_WORKER'
-#!/bin/sh
-set -eu
-
-request_file="/var/lib/aetheus-agent/.agent-posture-upgrade-request"
-running_file="/var/lib/aetheus-agent/.agent-posture-upgrade-running"
-failed_request_file="/var/lib/aetheus-agent/.agent-posture-upgrade-failed-request"
-result_file="/var/lib/aetheus-agent/.agent-posture-upgrade-result"
-server_url_file="/etc/aetheus-agent-update-url"
-install_dir="/opt/aetheus-agent"
-work_dir="/var/lib/aetheus-agent"
-upgrade_dir=""
-rollback_ready=0
-outcome="failed"
-phase="claim"
-target_version="unknown"
-target_sha="unknown"
-target_commit="unknown"
-
-write_result() {
-    result_tmp="$result_file.tmp.$$"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$outcome" "$target_version" "$target_sha" "$target_commit" "$phase" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        > "$result_tmp"
-    chown root:root "$result_tmp"
-    chmod 644 "$result_tmp"
-    mv -f -- "$result_tmp" "$result_file"
-}
-
-restore_previous_agent() {
-    [ "$rollback_ready" -eq 1 ] || return 0
-    find "$install_dir" -mindepth 1 -maxdepth 1 ! -name appsettings.json \
-        -exec rm -rf -- {} +
-    cp -a "$rollback"/. "$install_dir"/
-    chown -R aetheus-agent:aetheus-agent "$install_dir"
-    rm -f -- "$work_dir/.agent-update-pending"
-    systemctl daemon-reload
-    systemctl start aetheus-agent
-}
-
-cleanup() {
-    [ -z "$upgrade_dir" ] || rm -rf -- "$upgrade_dir"
-}
-
-finish() {
-    exit_code="$?"
-    trap - EXIT HUP INT TERM
-    if [ "$outcome" != success ]; then
-        restore_previous_agent || true
-        if [ -f "$running_file" ]; then
-            mv -f -- "$running_file" "$failed_request_file"
-        fi
-        write_result || true
-    fi
-    cleanup
-    exit "$exit_code"
-}
-
-[ -f "$request_file" ] || exit 0
-trap finish EXIT HUP INT TERM
-[ ! -e "$running_file" ] || exit 9
-mv -- "$request_file" "$running_file"
-
-tab="$(printf '\t')"
-IFS="$tab" read -r target_version archive_name archive_size target_sha target_commit extra < "$running_file"
-case "$target_version" in ''|*[!0-9A-Za-z.+-]*) phase="invalid-version"; exit 10 ;; esac
-case "$archive_name" in
-    aetheus-agent-linux-x64-v*.tar.gz) ;;
-    *) phase="invalid-archive-name"; exit 11 ;;
-esac
-case "$archive_name" in *[!0-9A-Za-z.+-]*) phase="invalid-archive-name"; exit 11 ;; esac
-case "$archive_size" in ''|*[!0-9]*) phase="invalid-archive-size"; exit 12 ;; esac
-[ "$archive_size" -gt 0 ] || { phase="invalid-archive-size"; exit 12; }
-[ "${#target_sha}" -eq 64 ] || { phase="invalid-archive-sha"; exit 13; }
-case "$target_sha" in *[!0-9a-fA-F]*) phase="invalid-archive-sha"; exit 13 ;; esac
-case "${#target_commit}" in 40|64) ;; *) phase="invalid-commit"; exit 14 ;; esac
-case "$target_commit" in *[!0-9a-fA-F]*) phase="invalid-commit"; exit 14 ;; esac
-[ -z "${extra:-}" ] || { phase="invalid-request-fields"; exit 15; }
-
-# Let the running agent publish the handoff result before this root-owned unit replaces it.
-sleep 5
-server_url="$(head -n 1 "$server_url_file" | tr -d '\r\n')"
-case "$server_url" in
-    https://*|http://localhost*|http://127.0.0.1*|http://\[::1\]*) ;;
-    *) phase="invalid-server-url"; exit 16 ;;
-esac
-
-upgrade_dir="$(mktemp -d /var/tmp/aetheus-agent-upgrade.XXXXXX)"
-archive="$upgrade_dir/agent.tar.gz"
-payload="$upgrade_dir/payload"
-rollback="$upgrade_dir/rollback"
-mkdir -p "$payload" "$rollback"
-
-phase="download"
-curl -fSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
-    "$server_url/downloads/releases/$target_version/$archive_name" -o "$archive"
-[ "$(stat -c %s "$archive")" = "$archive_size" ] || { phase="size-mismatch"; exit 17; }
-[ "$(sha256sum "$archive" | cut -d ' ' -f1)" = "$(printf '%s' "$target_sha" | tr 'A-F' 'a-f')" ] \
-    || { phase="sha256-mismatch"; exit 18; }
-if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
-    phase="unsafe-archive"; exit 19
-fi
-phase="extract"
-tar -xzf "$archive" -C "$payload"
-test -f "$payload/install-agent-linux.sh"
-test -f "$payload/Aetheus.Agent.Linux.dll" || test -f "$payload/Aetheus.Agent.Linux"
-
-# Preserve a last-known-good binary tree independently from the agent-owned staging area.
-find "$install_dir" -mindepth 1 -maxdepth 1 ! -name appsettings.json \
-    -exec cp -a {} "$rollback/" \;
-rollback_ready=1
-
-phase="install"
-sh "$payload/install-agent-linux.sh" --upgrade --yes
-phase="service-health"
-systemctl is-active --quiet aetheus-agent
-outcome="success"
-phase="complete"
-write_result
-rm -f -- "$running_file" "$failed_request_file"
-rollback_ready=0
-exit 0
-AETHEUS_AGENT_UPDATE_WORKER
+    render_host_config agent-update/agent-posture-upgrade "$AGENT_UPDATE_WORKER_PATH.tmp.$$"
     mv "$AGENT_UPDATE_WORKER_PATH.tmp.$$" "$AGENT_UPDATE_WORKER_PATH"
     chown root:root "$AGENT_UPDATE_WORKER_PATH"
     chmod 755 "$AGENT_UPDATE_WORKER_PATH"
 
-    cat > "$AGENT_UPDATE_SERVICE_PATH.tmp.$$" <<EOF
-[Unit]
-Description=Aetheus agent binary and integration-posture upgrade
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=$AGENT_UPDATE_WORKER_PATH
-TimeoutStartSec=900
-PrivateTmp=true
-ProtectHome=true
-NoNewPrivileges=true
-EOF
+    render_host_config agent-update/aetheus-agent-upgrade.service "$AGENT_UPDATE_SERVICE_PATH.tmp.$$"
     mv "$AGENT_UPDATE_SERVICE_PATH.tmp.$$" "$AGENT_UPDATE_SERVICE_PATH"
 
-    cat > "$AGENT_UPDATE_PATH_PATH.tmp.$$" <<EOF
-[Unit]
-Description=Watch for an Aetheus agent self-update request
-
-[Path]
-PathExists=$AGENT_UPDATE_REQUEST_FILE
-Unit=aetheus-agent-upgrade.service
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    render_host_config agent-update/aetheus-agent-upgrade.path "$AGENT_UPDATE_PATH_PATH.tmp.$$"
     mv "$AGENT_UPDATE_PATH_PATH.tmp.$$" "$AGENT_UPDATE_PATH_PATH"
     chown root:root "$AGENT_UPDATE_SERVICE_PATH" "$AGENT_UPDATE_PATH_PATH"
     chmod 644 "$AGENT_UPDATE_SERVICE_PATH" "$AGENT_UPDATE_PATH_PATH"
@@ -1052,22 +1091,7 @@ write_sudoers() {
     # opt-in (written only when service-control is enabled), so the daemon-lifecycle grant is an explicit
     # choice, scoped so the agent can bounce a wedged daemon without gaining a root shell.
     log_info "Configuring narrow service-control sudoers rule..."
-    cat > "$SUDOERS_FILE" <<EOF
-# Aetheus Agent - service control only (no wildcards, runas root only)
-Defaults:$AGENT_USER !requiretty, env_reset, secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-Cmnd_Alias AETHEUS_SYSTEMCTL = \\
-    /bin/systemctl start apache2, /bin/systemctl stop apache2, /bin/systemctl restart apache2, /bin/systemctl status apache2, \\
-    /bin/systemctl start docker, /bin/systemctl stop docker, /bin/systemctl restart docker, /bin/systemctl status docker, \\
-    /bin/systemctl start nginx, /bin/systemctl stop nginx, /bin/systemctl restart nginx, /bin/systemctl status nginx, \\
-    /bin/systemctl start postfix, /bin/systemctl stop postfix, /bin/systemctl restart postfix, /bin/systemctl status postfix, \\
-    /bin/systemctl start dovecot, /bin/systemctl stop dovecot, /bin/systemctl restart dovecot, /bin/systemctl status dovecot, \\
-    /bin/systemctl start ts3server, /bin/systemctl stop ts3server, /bin/systemctl restart ts3server, /bin/systemctl status ts3server, \\
-    /bin/systemctl start portsentry, /bin/systemctl stop portsentry, /bin/systemctl restart portsentry, /bin/systemctl status portsentry, \\
-    /bin/systemctl start rkhunter, /bin/systemctl stop rkhunter, /bin/systemctl restart rkhunter, /bin/systemctl status rkhunter, \\
-    /bin/systemctl start cron, /bin/systemctl stop cron, /bin/systemctl restart cron, /bin/systemctl status cron, \\
-    /bin/systemctl start crond, /bin/systemctl stop crond, /bin/systemctl restart crond, /bin/systemctl status crond
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_SYSTEMCTL
-EOF
+    render_host_config agent/sudoers.d/aetheus-agent "$SUDOERS_FILE"
     chmod 440 "$SUDOERS_FILE"
     visudo -cf "$SUDOERS_FILE" || {
         log_error "Invalid sudoers syntax"
@@ -1077,7 +1101,7 @@ EOF
 }
 
 # Item #6 - controlled sudo escalation for Apache manage. Strictly follows the recipe in
-# docs/claudes/claude-security.md#controlled-sudo-escalation:
+# docs/contracts/security.md#controlled-sudo-escalation:
 #   - exact argv (no wildcards) so apache2ctl -f <arbitrary> and friends are unreachable
 #   - noexec for fixed systemctl commands; a root-owned no-argument helper for configtest,
 #     because apache2ctl must exec apache2 (ADR-019 compensating boundary)
@@ -1087,14 +1111,7 @@ EOF
 write_apache_manage_sudoers() {
     log_info "Configuring Apache-manage sudoers (item #6, ultra-strict allow-list)..."
     mkdir -p "$(dirname "$APACHE_CONFIGTEST_HELPER_PATH")"
-    cat > "$APACHE_CONFIGTEST_HELPER_PATH" <<'APACHE_TEST_EOF'
-#!/bin/sh
-# Fixed-purpose root-owned helper. apache2ctl must exec apache2, so sudo noexec cannot be used.
-# No arguments or environment-controlled paths are accepted.
-set -eu
-[ "$#" -eq 0 ] || { echo "aetheus-apache-configtest accepts no arguments" >&2; exit 2; }
-exec /usr/sbin/apache2ctl configtest
-APACHE_TEST_EOF
+    render_host_config apache/aetheus-apache-configtest "$APACHE_CONFIGTEST_HELPER_PATH"
     chown root:root "$APACHE_CONFIGTEST_HELPER_PATH"
     chmod 755 "$APACHE_CONFIGTEST_HELPER_PATH"
 
@@ -1102,54 +1119,11 @@ APACHE_TEST_EOF
     # element, so the three-word `systemctl reload apache2.service` grant above is unreachable from
     # it. A shell step could pass three words; a typed step has no shell. Hence this second
     # no-argument helper, on the same fixed-purpose pattern as configtest above.
-    cat > "$APACHE_RELOAD_HELPER_PATH" <<'APACHE_RELOAD_EOF'
-#!/bin/sh
-# Fixed-purpose root-owned helper: validate the configuration, then apply it. No arguments, no
-# environment-controlled paths.
-#
-# The configtest is not a convenience. Reloading IS how a blue-green cutover moves traffic, so a
-# reload that returns success without having applied anything would report a cutover that never
-# happened. Refusing an invalid configuration here keeps the previous colour serving and makes the
-# switch step fail honestly instead.
-set -eu
-[ "$#" -eq 0 ] || { echo "aetheus-apache-reload accepts no arguments" >&2; exit 2; }
-/usr/sbin/apache2ctl configtest || { echo "aetheus-apache-reload: configuration rejected; nothing applied" >&2; exit 1; }
-exec /bin/systemctl reload apache2.service
-APACHE_RELOAD_EOF
+    render_host_config apache/aetheus-apache-reload "$APACHE_RELOAD_HELPER_PATH"
     chown root:root "$APACHE_RELOAD_HELPER_PATH"
     chmod 755 "$APACHE_RELOAD_HELPER_PATH"
 
-    cat > "$APACHE_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - Apache management. Item #6 of the plan; see
-# docs/claudes/claude-security.md#controlled-sudo-escalation for the rules every
-# line below must satisfy.
-
-# 1. Test the config through a fixed root-owned helper. This alias intentionally omits noexec:
-#    apache2ctl must exec apache2, and the helper accepts no arguments or variable paths.
-#    The reload helper joins it for the same reason: it runs configtest before applying, so it too
-#    must exec apache2. It exists because a typed blue-green step invokes "sudo -n <path>" with a
-#    single argv element and therefore cannot reach the three-word systemctl grant below.
-# 2. systemd reload + lifecycle. These fixed argv commands retain noexec.
-# Every entry uses an EXACT fully-resolved binary path + fixed argv string. No wildcards.
-Cmnd_Alias AETHEUS_APACHE_TEST = $APACHE_CONFIGTEST_HELPER_PATH, \\
-    $APACHE_RELOAD_HELPER_PATH
-Cmnd_Alias AETHEUS_APACHE_MANAGE = \\
-    /bin/systemctl reload apache2.service, \\
-    /bin/systemctl start apache2.service, \\
-    /bin/systemctl stop apache2.service, \\
-    /bin/systemctl restart apache2.service
-
-Defaults!AETHEUS_APACHE_MANAGE noexec
-Defaults!AETHEUS_APACHE_MANAGE timestamp_timeout=0
-Defaults!AETHEUS_APACHE_MANAGE env_reset
-Defaults!AETHEUS_APACHE_MANAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-Defaults!AETHEUS_APACHE_TEST timestamp_timeout=0
-Defaults!AETHEUS_APACHE_TEST env_reset
-Defaults!AETHEUS_APACHE_TEST secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_APACHE_MANAGE
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_APACHE_TEST
-EOF
+    render_host_config apache/sudoers.d/aetheus-apache "$APACHE_MANAGE_SUDOERS_FILE"
     chmod 440 "$APACHE_MANAGE_SUDOERS_FILE"
     visudo -cf "$APACHE_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid Apache-manage sudoers syntax"
@@ -1204,176 +1178,79 @@ write_certbot_manage() {
     log_info "Configuring certbot management: root-owned production ACME/local TLS helper + sudoers..."
     ensure_helper_dir
 
-    cat > "$CERTBOT_ISSUE_HELPER_PATH" <<'HELPER_EOF'
-#!/bin/sh
-# Aetheus Agent certbot-issue helper - root-owned, invoked via /etc/sudoers.d/aetheus-certbot.
-# Args: $1 = primary domain. Env: AETHEUS_CERTBOT_DOMAINS (comma list), AETHEUS_CERTBOT_EMAIL,
-# AETHEUS_CERTBOT_MODE (production or local).
-set -eu
-# Under /var/www, not under the agent state directory. Apache runs as www-data and cannot traverse
-# /var/lib/aetheus-agent, so it answered 403 on every challenge served from there and no new
-# certificate could be issued - docs.aetheus.sonytumen.com could never get one. Moving the web root
-# to the tree Apache is meant to read fixes that without loosening the agent directory, and the
-# challenge files are public, single-use and short-lived by design.
-ACME_WEBROOT=/var/www/aetheus-acme
-ACME_CONF=/etc/apache2/conf-available/aetheus-acme-webroot.conf
-LIVE_DIR=/etc/letsencrypt/live
-SITES_AVAIL=/etc/apache2/sites-available
-SITES_ENABLED=/etc/apache2/sites-enabled
-valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._-]{1,253}$'; }
-
-primary="${1:-}"
-valid_domain "$primary" || { echo "invalid primary domain" >&2; exit 2; }
-domains="${AETHEUS_CERTBOT_DOMAINS:-$primary}"
-email="${AETHEUS_CERTBOT_EMAIL:-}"
-mode="${AETHEUS_CERTBOT_MODE:-production}"
-case "$mode" in production|local) ;; *) echo "invalid certificate mode" >&2; exit 2;; esac
-# The email is agent-influenced env input to a root-run certbot: validate it
-# with the same discipline as domains (basic shape, no leading '-', no spaces).
-if [ -n "$email" ]; then
-    printf '%s' "$email" | grep -Eq '^[^@[:space:]-][^@[:space:]]*@[^@[:space:]]+$' \
-        || { echo "invalid email" >&2; exit 2; }
-fi
-
-# Build validated -d args.
-set --
-san_names=""
-OLDIFS=$IFS; IFS=','
-for d in $domains; do
-    d=$(printf '%s' "$d" | tr -d ' ')
-    [ -n "$d" ] || continue
-    valid_domain "$d" || { echo "invalid domain in list: $d" >&2; exit 2; }
-    set -- "$@" -d "$d"
-    if [ -n "$san_names" ]; then san_names="$san_names,DNS:$d"; else san_names="DNS:$d"; fi
-done
-IFS=$OLDIFS
-if [ "$#" -eq 0 ]; then set -- -d "$primary"; san_names="DNS:$primary"; fi
-
-# Real ACME through a stable webroot shared by every managed vhost.
-# --expand: when a lineage already covers a SUBSET of the requested names (e.g. adding an api host to an
-#   existing apex+app cert), reissue and REPLACE it to cover all of them instead of erroring on the
-#   interactive "expand?" prompt (which -n turns into a hard failure).
-# --keep-until-expiring: when the requested names EXACTLY match a still-valid cert, keep it (idempotent -
-#   no needless reissue, so repeated runs don't burn the Let's Encrypt duplicate-cert rate limit).
-if [ "$mode" = local ]; then
-    echo "local certificate mode selected - ACME is not contacted."
-fi
-if [ "$mode" = production ]; then
-    command -v certbot >/dev/null 2>&1 || { echo "certbot not installed" >&2; exit 1; }
-    mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"
-    cat > "$ACME_CONF" <<CONF
-Alias /.well-known/acme-challenge/ $ACME_WEBROOT/.well-known/acme-challenge/
-<Directory "$ACME_WEBROOT/.well-known/acme-challenge">
-    Require all granted
-</Directory>
-CONF
-    a2enconf aetheus-acme-webroot >/dev/null
-    apache2ctl configtest
-    systemctl reload apache2
-    if [ -n "$email" ]; then set -- "$@" -m "$email"; else set -- "$@" --register-unsafely-without-email; fi
-    certbot certonly --webroot --webroot-path "$ACME_WEBROOT" --non-interactive --agree-tos --expand --keep-until-expiring "$@" \
-        || { echo "certbot ACME validation failed for $primary" >&2; exit 1; }
-    echo "certbot: real certificate obtained for $primary"
-    exit 0
-fi
-
-# Local-only certificate in the LE layout + an SSL vhost proxying to the same upstream as :80.
-command -v openssl >/dev/null 2>&1 || { echo "openssl missing - cannot create local cert" >&2; exit 1; }
-dir="$LIVE_DIR/$primary"
-# Never replace an existing CA-issued certificate, even in an explicitly local environment.
-if [ -f "$dir/fullchain.pem" ]; then
-    _subj=$(openssl x509 -in "$dir/fullchain.pem" -noout -subject 2>/dev/null)
-    _iss=$(openssl x509 -in "$dir/fullchain.pem" -noout -issuer 2>/dev/null)
-    if [ -n "$_subj" ] && [ "${_subj#subject}" != "${_iss#issuer}" ]; then
-        echo "keeping the existing CA-issued certificate for $primary (refusing to overwrite a real cert with self-signed)." >&2
-        exit 1
-    fi
-fi
-mkdir -p "$dir"
-openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-    -keyout "$dir/privkey.pem" -out "$dir/fullchain.pem" \
-    -subj "/CN=$primary" -addext "subjectAltName=$san_names" 2>/dev/null
-chmod 600 "$dir/privkey.pem"
-
-http_site="$SITES_AVAIL/${primary}.conf"
-ssl_site="$SITES_AVAIL/${primary}-ssl.conf"
-proxy_line=$(grep -E '^[[:space:]]*ProxyPass[[:space:]]+/' "$http_site" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*//')
-[ -n "$proxy_line" ] || proxy_line="ProxyPass / http://127.0.0.1:8090/"
-proxy_rev=$(printf '%s' "$proxy_line" | sed 's/^ProxyPass/ProxyPassReverse/')
-cat > "$ssl_site" <<VHOST
-# Managed by Aetheus - local self-signed HTTPS for $primary
-<VirtualHost *:443>
-    ServerName $primary
-    SSLEngine on
-    SSLCertificateFile $dir/fullchain.pem
-    SSLCertificateKeyFile $dir/privkey.pem
-    ProxyPreserveHost On
-    ProxyRequests Off
-    $proxy_line
-    $proxy_rev
-</VirtualHost>
-VHOST
-a2enmod ssl >/dev/null 2>&1 || true
-ln -sfn "$ssl_site" "$SITES_ENABLED/${primary}-ssl.conf"
-if apache2ctl configtest 2>&1; then
-    apache2ctl graceful 2>/dev/null || systemctl reload apache2
-    echo "local self-signed HTTPS configured for $primary."
-    exit 0
-fi
-echo "apache configtest failed after writing the SSL vhost for $primary" >&2
-exit 1
-HELPER_EOF
+    # Nothing in the helper is expanded at install time except #{ACME_WEBROOT}#, the one value that
+    # belongs to the host rather than to the helper (R-249: it replaces the former sed of
+    # __AETHEUS_ACME_WEBROOT__, and render_host_config refuses to install it unsubstituted). Bounded
+    # by require_web_root above, so this can only ever be a direct child of /var/www.
+    render_host_config certbot/aetheus-certbot-issue "$CERTBOT_ISSUE_HELPER_PATH"
     chown root:root "$CERTBOT_ISSUE_HELPER_PATH"
     chmod 755 "$CERTBOT_ISSUE_HELPER_PATH"
 
     # Lifecycle helper: renew/delete/revoke a named lineage (or renew all). The cert name is the only
     # variable and is re-validated here against the SAME shape the backend/agent enforce, so a fixed
     # certbot verb runs argv-exact - certbot stays GTFOBins-forbidden as a free-form sudo target.
-    cat > "$CERTBOT_MANAGE_HELPER_PATH" <<'MANAGE_EOF'
-#!/bin/sh
-# Aetheus Agent certbot-manage helper - root-owned, invoked via /etc/sudoers.d/aetheus-certbot.
-# Args: $1 = verb (renew|renew-all|delete|revoke), $2 = cert lineage name (omitted for renew-all).
-set -eu
-valid_name() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$'; }
-command -v certbot >/dev/null 2>&1 || { echo "certbot not installed" >&2; exit 1; }
-verb="${1:-}"
-case "$verb" in
-  renew-all)
-    certbot renew --non-interactive ;;
-  renew)
-    name="${2:-}"; valid_name "$name" || { echo "invalid cert name" >&2; exit 2; }
-    certbot renew --cert-name "$name" --non-interactive ;;
-  delete)
-    name="${2:-}"; valid_name "$name" || { echo "invalid cert name" >&2; exit 2; }
-    certbot delete --cert-name "$name" --non-interactive ;;
-  revoke)
-    name="${2:-}"; valid_name "$name" || { echo "invalid cert name" >&2; exit 2; }
-    certbot revoke --cert-name "$name" --delete-after-revoke --non-interactive ;;
-  *)
-    echo "unknown certbot-manage verb: $verb" >&2; exit 2 ;;
-esac
-MANAGE_EOF
+    render_host_config certbot/aetheus-certbot-manage "$CERTBOT_MANAGE_HELPER_PATH"
     chown root:root "$CERTBOT_MANAGE_HELPER_PATH"
     chmod 755 "$CERTBOT_MANAGE_HELPER_PATH"
 
-    cat > "$CERTBOT_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - certbot management. The helpers are the security boundary: root-owned,
-# agent-non-writable, re-validate every domain/cert name, and only issue/renew/delete/revoke certs.
-# noexec is intentionally omitted (the helpers are vetted scripts that must exec certbot/openssl/apache2ctl).
-# Domains/email travel in env (kept off argv) and are preserved through sudo via env_keep.
-Cmnd_Alias AETHEUS_CERTBOT = $CERTBOT_ISSUE_HELPER_PATH, $CERTBOT_MANAGE_HELPER_PATH
-Defaults!AETHEUS_CERTBOT timestamp_timeout=0
-Defaults!AETHEUS_CERTBOT env_reset
-Defaults!AETHEUS_CERTBOT env_keep += "AETHEUS_CERTBOT_DOMAINS AETHEUS_CERTBOT_EMAIL AETHEUS_CERTBOT_MODE"
-Defaults!AETHEUS_CERTBOT secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_CERTBOT
-EOF
+    render_host_config certbot/sudoers.d/aetheus-certbot "$CERTBOT_MANAGE_SUDOERS_FILE"
     chmod 440 "$CERTBOT_MANAGE_SUDOERS_FILE"
     visudo -cf "$CERTBOT_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid certbot-manage sudoers syntax"
         rm -f "$CERTBOT_MANAGE_SUDOERS_FILE"
         exit 1
     }
+    write_certbot_conventions
+}
+
+# PLAN-007: make the Aetheus ACME web root the only renewal path, for Aetheus and for a manual run.
+write_certbot_conventions() {
+    _cc_webroot="${ACME_WEBROOT_OVERRIDE:-/var/www/aetheus-acme}"
+    mkdir -p "$(dirname "$CERTBOT_CLI_INI")" "$(dirname "$CERTBOT_APACHE_DEPLOY_HOOK")" "$CERTBOT_STATE_DIR"
+    chmod 755 "$CERTBOT_STATE_DIR"
+
+    # cli.ini: only the marked block is ours; anything the operator wrote outside it is kept.
+    [ -f "$CERTBOT_CLI_INI" ] || : > "$CERTBOT_CLI_INI"
+    sed -i '/^# BEGIN aetheus-managed$/,/^# END aetheus-managed$/d' "$CERTBOT_CLI_INI"
+    if grep -Eq '^[[:space:]]*(authenticator|webroot-path|webroot_path|apache|standalone)[[:space:]]*(=|$)' "$CERTBOT_CLI_INI"; then
+        log_warn "  $CERTBOT_CLI_INI sets its own authenticator or web root outside the Aetheus block - review it."
+    fi
+    printf '%s\n' \
+        '# BEGIN aetheus-managed' \
+        '# Written by the Aetheus agent installer: a certificate requested without options renews' \
+        '# through the Aetheus ACME web root, never through the Apache plugin.' \
+        'authenticator = webroot' \
+        "webroot-path = $_cc_webroot" \
+        '# END aetheus-managed' >> "$CERTBOT_CLI_INI"
+    chmod 644 "$CERTBOT_CLI_INI"
+
+    # Webroot renewals do not touch Apache, so nothing reloads it: without this hook a renewed
+    # certificate is only served after the next restart.
+    render_host_config certbot/renewal-hooks-deploy/aetheus-apache "$CERTBOT_APACHE_DEPLOY_HOOK"
+    chmod 755 "$CERTBOT_APACHE_DEPLOY_HOOK"
+
+    # Weekly renewal rehearsal: a broken renewal surfaces weeks before the certificate expires.
+    render_host_config certbot/aetheus-certbot-renewal-check.service "/etc/systemd/system/$CERTBOT_RENEWAL_CHECK_UNIT.service"
+    render_host_config certbot/aetheus-certbot-renewal-check.timer "/etc/systemd/system/$CERTBOT_RENEWAL_CHECK_UNIT.timer"
+    systemctl daemon-reload
+    systemctl enable --now "$CERTBOT_RENEWAL_CHECK_UNIT.timer" >/dev/null 2>&1 \
+        || log_warn "  Could not enable $CERTBOT_RENEWAL_CHECK_UNIT.timer."
+
+    # Bring lineages issued before the convention (Apache plugin, old web root) onto it now.
+    if command -v certbot >/dev/null 2>&1; then
+        if "$CERTBOT_MANAGE_HELPER_PATH" normalize; then
+            log_info "  Certbot lineages follow the Aetheus web root convention."
+        else
+            log_warn "  Some certbot lineages could not be normalized - see the output above and the Certbot section."
+        fi
+    fi
+}
+
+remove_certbot_conventions() {
+    systemctl disable --now "$CERTBOT_RENEWAL_CHECK_UNIT.timer" >/dev/null 2>&1 || true
+    rm -f "/etc/systemd/system/$CERTBOT_RENEWAL_CHECK_UNIT.service" "/etc/systemd/system/$CERTBOT_RENEWAL_CHECK_UNIT.timer"
+    systemctl daemon-reload 2>/dev/null || true
+    # cli.ini and the deploy hook stay: they keep manual renewals working without the agent.
 }
 
 # Migration cleanup: a host previously provisioned by the PRE-RENAME "prometheus" agent still carries
@@ -1420,6 +1297,7 @@ apply_sudoers() {
         write_certbot_manage
     else
         rm -f "$CERTBOT_MANAGE_SUDOERS_FILE" "$CERTBOT_ISSUE_HELPER_PATH" "$CERTBOT_MANAGE_HELPER_PATH"
+        remove_certbot_conventions
     fi
     if [ "$ENABLE_RKHUNTER_MANAGE" -eq 1 ]; then
         write_rkhunter_manage_sudoers
@@ -1444,7 +1322,7 @@ apply_sudoers() {
     else
         rm -f "$SERVICE_ENABLE_SUDOERS_FILE"
     fi
-    # S-FEAT-W8KN - fixed-package apt-get install/remove allow-list (argv-exact, no helper).
+    # S-FEAT-W8KN - fixed-package apt-get install/purge allow-list (argv-exact, no helper).
     if [ "$ENABLE_PACKAGE_MANAGE" -eq 1 ]; then
         write_package_manage_sudoers
     else
@@ -1556,68 +1434,15 @@ ensure_helper_dir() {
 # re-validates every argument and can ONLY write /etc/cron.d/aetheus-<id>) and a NOPASSWD sudoers
 # grant for exactly that binary. noexec is intentionally NOT set on this Cmnd_Alias: the helper is a
 # vetted shell script that must exec coreutils (chmod/chown) - it is itself the boundary, not a
-# general GTFOBins tool. See docs/claudes/claude-security.md#controlled-sudo-escalation.
+# general GTFOBins tool. See docs/contracts/security.md#controlled-sudo-escalation.
 write_cron_manage() {
     log_info "Configuring cron-manage helper + sudoers (Phase 3, root-owned helper boundary)..."
     ensure_helper_dir
-    cat > "$CRON_HELPER_PATH" <<'HELPER_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent cron helper - root-owned, invoked via /etc/sudoers.d/aetheus-cron (NOPASSWD).
-# Writes/removes /etc/cron.d/aetheus-<id> ONLY. Re-validates every argument; never evals input.
-set -eu
-CRON_DIR="/etc/cron.d"
-die() { echo "$1" >&2; exit 1; }
-valid_id()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]{1,64}$'; }
-valid_user()  { printf '%s' "$1" | grep -Eiq '^[a-z_][a-z0-9_-]{0,31}$'; }
-valid_sched() { printf '%s' "$1" | grep -Eq '^[0-9* /,-]+$'; }
-valid_cmd()   { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9 _/.:@=,-]+$'; }
-
-action="${1:-}"
-id="${2:-}"
-valid_id "$id" || die "invalid id"
-target="$CRON_DIR/aetheus-$id"
-
-case "$action" in
-    save)
-        user="${3:-}"; sched="${4:-}"; cmd="${5:-}"
-        valid_user "$user"  || die "invalid user"
-        # A root cron job turns agent compromise into a root-cron escalation - refuse it here too
-        # (the backend + agent already reject it; this is the last line).
-        [ "$user" != root ] || die "root user not permitted"
-        valid_sched "$sched" || die "invalid schedule"
-        # /etc/cron.d is strictly 5-field - a 6th field would be read as the run-as user, corrupting
-        # the entry. Reject anything that is not exactly 5 whitespace-separated fields.
-        [ "$(printf '%s' "$sched" | wc -w)" -eq 5 ] || die "schedule must be 5 fields"
-        valid_cmd "$cmd"    || die "invalid command"
-        umask 022
-        printf '# Managed by Aetheus (job %s)\n%s %s %s\n' "$id" "$sched" "$user" "$cmd" > "$target"
-        chown root:root "$target"
-        chmod 644 "$target"
-        echo "wrote $target"
-        ;;
-    delete)
-        rm -f "$target"
-        echo "removed $target"
-        ;;
-    *)
-        die "unknown action"
-        ;;
-esac
-HELPER_EOF
+    render_host_config cron/cron-apply "$CRON_HELPER_PATH"
     chown root:root "$CRON_HELPER_PATH"
     chmod 755 "$CRON_HELPER_PATH"
 
-    cat > "$CRON_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - cron management (Phase 3). The helper is the security boundary: root-owned,
-# agent-non-writable, re-validates every argument, and can only write /etc/cron.d/aetheus-<id>.
-# noexec is intentionally omitted (the helper is a vetted script that must exec coreutils).
-Cmnd_Alias AETHEUS_CRON = $CRON_HELPER_PATH
-Defaults!AETHEUS_CRON timestamp_timeout=0
-Defaults!AETHEUS_CRON env_reset
-Defaults!AETHEUS_CRON secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_CRON
-EOF
+    render_host_config cron/sudoers.d/aetheus-cron "$CRON_MANAGE_SUDOERS_FILE"
     chmod 440 "$CRON_MANAGE_SUDOERS_FILE"
     visudo -cf "$CRON_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid cron-manage sudoers syntax"
@@ -1635,7 +1460,7 @@ EOF
 #      aetheus-app@<app>.service) + a NOPASSWD sudoers grant for exactly that binary. noexec is
 #      omitted (the helper is a vetted script that must exec systemctl) - same recipe as cron-apply.
 #   3. The agent-owned $DEPLOY_BASE_DIR tree (it writes releases/ and atomically flips current).
-# See docs/claudes/claude-security.md#controlled-sudo-escalation.
+# See docs/contracts/security.md#controlled-sudo-escalation.
 # S-FEAT-DPU2 (v2 isolation - IMPLEMENTED): the unit template below runs each deployed app under a
 # transient per-app systemd identity (DynamicUser) with a StateDirectory for its writable state,
 # instead of the shared agent user. The ownership split that makes this work: $DEPLOY_BASE_DIR/%i
@@ -1653,99 +1478,14 @@ write_deploy_module() {
     log_info "Configuring deployment module: unit template + deploy-restart helper + sudoers + base dir..."
     ensure_helper_dir
 
-    cat > "$DEPLOY_UNIT_TEMPLATE_PATH" <<EOF
-# Managed by Aetheus - deploy unit TEMPLATE (anti-injection: posed at install, never YAML-generated).
-# %i is the validated app instance name. The 'run' launcher ships inside the deployed artifact.
-[Unit]
-Description=Aetheus deployed app %i
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=exec
-# S-FEAT-DPU2 (v2 isolation): each deployed app runs under a TRANSIENT, per-app system identity
-# (systemd DynamicUser) instead of the shared agent user - so a third-party build shares no uid,
-# no \$HOME, and no process/file surface with the agent or with sibling deployed apps. No account
-# management is needed (the uid is allocated per start), which keeps this module's anti-injection
-# model intact (the app name never spawns a useradd).
-DynamicUser=yes
-# The transient uid joins the dedicated read-only group that owns the deploy trees (setgid below), so
-# it can read its agent-written, secret-bearing release payload WITHOUT that payload being world-readable
-# and WITHOUT joining the agent's own group (no agent-surface sharing).
-SupplementaryGroups=$DEPLOY_READ_GROUP
-WorkingDirectory=$DEPLOY_BASE_DIR/%i/current
-ExecStart=$DEPLOY_BASE_DIR/%i/current/run
-Restart=always
-RestartSec=5
-# Writable state lives on a systemd-managed StateDirectory - /var/lib/aetheus-app-<app>, created
-# and chowned to the transient uid on every start and PERSISTED across restarts/redeploys (not wiped
-# like RuntimeDirectory). HOME points here so the ASP.NET Core Data Protection key ring
-# (~/.aspnet/DataProtection-Keys) and any \$HOME cache survive - without the app ever writing into the
-# agent-owned deploy tree. This is the ownership split that makes DynamicUser compatible with the
-# agent-manages-releases / app-reads-releases model.
-StateDirectory=aetheus-app-%i
-Environment=HOME=/var/lib/aetheus-app-%i
-# ADR-021 phase 2 (zero-config OTLP): the deploy executor may drop a .aetheus-env (OTEL endpoint +
-# ingestion key) into the flipped release. The leading '-' makes it OPTIONAL, so a deploy that injects
-# nothing (feature off / no linked MonitoredApp) leaves the unit unchanged.
-EnvironmentFile=-$DEPLOY_BASE_DIR/%i/current/.aetheus-env
-
-# Hardening - the DEPLOYED app is a third-party build; it must NOT inherit the agent user's sudo
-# surface (the agent unit runs NoNewPrivileges=false to use deploy-restart, but the app never needs
-# it). ProtectSystem=full keeps /usr,/boot,/etc read-only. The read-only payload
-# ($DEPLOY_BASE_DIR/%i/current -> releases/) is agent-owned and GROUP-readable by $DEPLOY_READ_GROUP
-# (mode 0750, NEVER world - it carries pipeline-substituted secrets in cleartext): the deploy executor
-# chmods each release 0750 and the setgid base dir stamps the group, so the transient uid reads via its
-# SupplementaryGroups membership while other host users cannot. No ReadWritePaths into the deploy tree:
-# the app's only writable area is its StateDirectory above.
-NoNewPrivileges=true
-ProtectSystem=full
-ProtectHome=true
-PrivateTmp=true
-ProtectControlGroups=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-RestrictSUIDSGID=true
-RestrictRealtime=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    render_host_config deploy/aetheus-app@.service "$DEPLOY_UNIT_TEMPLATE_PATH"
     chmod 644 "$DEPLOY_UNIT_TEMPLATE_PATH"
 
-    cat > "$DEPLOY_RESTART_HELPER_PATH" <<'HELPER_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent deploy-restart helper - root-owned, invoked via /etc/sudoers.d/aetheus-deploy
-# (NOPASSWD). (Re)starts ONLY aetheus-app@<app>.service for a re-validated <app>. Never evals input.
-set -eu
-app="${1:-}"
-if [ "$app" = "--probe" ] && [ "$#" -eq 1 ]; then
-    echo "aetheus-deploy-helper-v2"
-    exit 0
-fi
-printf '%s' "$app" | grep -Eq '^[a-zA-Z0-9_-]{1,64}$' || { echo "invalid app" >&2; exit 1; }
-unit="aetheus-app@${app}.service"
-# `enable` makes the FIRST deploy of a template instance persist across reboot (idempotent on later
-# deploys); `restart` then starts it (fresh) or restarts it (already running). Together they cover the
-# first-instantiation case the bare `restart` missed.
-systemctl enable "$unit"
-systemctl restart "$unit"
-echo "restarted $unit"
-HELPER_EOF
+    render_host_config deploy/deploy-restart "$DEPLOY_RESTART_HELPER_PATH"
     chown root:root "$DEPLOY_RESTART_HELPER_PATH"
     chmod 755 "$DEPLOY_RESTART_HELPER_PATH"
 
-    cat > "$DEPLOY_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - cross-agent deployment. The helper is the security boundary: root-owned,
-# agent-non-writable, re-validates <app>, and can only restart aetheus-app@<app>.service.
-# noexec is intentionally omitted (the helper is a vetted script that must exec systemctl).
-Cmnd_Alias AETHEUS_DEPLOY = $DEPLOY_RESTART_HELPER_PATH
-Defaults!AETHEUS_DEPLOY timestamp_timeout=0
-Defaults!AETHEUS_DEPLOY env_reset
-Defaults!AETHEUS_DEPLOY secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_DEPLOY
-EOF
+    render_host_config deploy/sudoers.d/aetheus-deploy "$DEPLOY_MANAGE_SUDOERS_FILE"
     chmod 440 "$DEPLOY_MANAGE_SUDOERS_FILE"
     visudo -cf "$DEPLOY_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid deploy sudoers syntax"
@@ -1799,33 +1539,7 @@ EOF
 write_portsentry_manage() {
     log_info "Configuring portsentry-unblock helper + sudoers (Phase 3, root-owned helper boundary)..."
     ensure_helper_dir
-    cat > "$UNBLOCK_HELPER_PATH" <<'HELPER_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent portsentry unblock helper - root-owned, invoked via
-# /etc/sudoers.d/aetheus-portsentry (NOPASSWD). Removes ONE validated IP from iptables/ip6tables
-# INPUT DROP rules and /etc/hosts.deny. Never evals input.
-set -u
-ip="${1:-}"
-# IPv4 or IPv6: hex digits, dots, colons only - no shell metachars, no spaces.
-printf '%s' "$ip" | grep -Eq '^[0-9a-fA-F.:]{2,45}$' || { echo "invalid ip" >&2; exit 1; }
-
-# Firewall removal is best-effort (the rule may not exist). secure_path resolves the binaries.
-iptables  -D INPUT -s "$ip" -j DROP 2>/dev/null || true
-ip6tables -D INPUT -s "$ip" -j DROP 2>/dev/null || true
-
-# Drop matching lines from /etc/hosts.deny (anchored token-boundary filter to a temp, then replace).
-# We only ever DELETE lines - never interpret the file - so no 'spawn' directive can be triggered here.
-# Anchored (dots escaped) so unblocking 10.0.0.1 cannot also strip a deny rule for 10.0.0.10 / 110.0.0.1.
-if [ -f /etc/hosts.deny ]; then
-    tmp="$(mktemp)"
-    esc_ip="$(printf '%s' "$ip" | sed 's/[.]/\\./g')"
-    grep -vE "(^|[^0-9A-Fa-f.:])${esc_ip}([^0-9A-Fa-f.:]|\$)" /etc/hosts.deny > "$tmp" 2>/dev/null || true
-    cat "$tmp" > /etc/hosts.deny
-    rm -f "$tmp"
-fi
-echo "unblocked $ip"
-HELPER_EOF
+    render_host_config portsentry/unblock-ip "$UNBLOCK_HELPER_PATH"
     chown root:root "$UNBLOCK_HELPER_PATH"
     chmod 755 "$UNBLOCK_HELPER_PATH"
 
@@ -1833,59 +1547,11 @@ HELPER_EOF
     # lists into the config, then enables the service. Re-validates every positional arg (the agent already
     # validated, but the helper is the boundary) and never evals input. Replaces the old back-side sed/apt
     # shell chain the agent CommandValidator rejected.
-    cat > "$PORTSENTRY_SETUP_HELPER_PATH" <<'SETUP_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent portsentry-setup helper - root-owned, invoked via
-# /etc/sudoers.d/aetheus-portsentry (NOPASSWD). Positional args: <mode> <tcp_ports> <udp_ports>.
-set -u
-mode="${1:-}"
-tcp_ports="${2:-}"
-udp_ports="${3:-}"
-
-# Mode: 1-16 alphanumerics. Port lists: comma-separated digit groups. No shell metachars, no spaces.
-printf '%s' "$mode"      | grep -Eq '^[a-zA-Z0-9]{1,16}$'   || { echo "invalid mode" >&2; exit 1; }
-printf '%s' "$tcp_ports" | grep -Eq '^[0-9]{1,5}(,[0-9]{1,5})*$' || { echo "invalid tcp ports" >&2; exit 1; }
-printf '%s' "$udp_ports" | grep -Eq '^[0-9]{1,5}(,[0-9]{1,5})*$' || { echo "invalid udp ports" >&2; exit 1; }
-
-# Advanced UDP scan mode mirrors the mode, forced to the 'a' (advanced) family for parity with the
-# previous behaviour (e.g. mode "tcp"/"atcp" -> UDP mode "atcp").
-udp_mode="a$(printf '%s' "$mode" | sed 's/^a*//')"
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq portsentry
-
-# Scan modes live in /etc/default/portsentry; the port lists / block toggles in portsentry.conf.
-if [ -f /etc/default/portsentry ]; then
-    sed -i "s/^TCP_MODE=.*/TCP_MODE=\"$mode\"/"     /etc/default/portsentry
-    sed -i "s/^UDP_MODE=.*/UDP_MODE=\"$udp_mode\"/" /etc/default/portsentry
-fi
-if [ -f /etc/portsentry/portsentry.conf ]; then
-    sed -i "s/^TCP_PORTS=.*/TCP_PORTS=\"$tcp_ports\"/" /etc/portsentry/portsentry.conf
-    sed -i "s/^UDP_PORTS=.*/UDP_PORTS=\"$udp_ports\"/" /etc/portsentry/portsentry.conf
-    sed -i "s/^BLOCK_TCP=.*/BLOCK_TCP=\"1\"/"           /etc/portsentry/portsentry.conf
-    sed -i "s/^BLOCK_UDP=.*/BLOCK_UDP=\"1\"/"           /etc/portsentry/portsentry.conf
-fi
-
-systemctl enable portsentry
-systemctl restart portsentry
-echo "PortSentry setup completed (mode $mode)"
-SETUP_EOF
+    render_host_config portsentry/portsentry-setup "$PORTSENTRY_SETUP_HELPER_PATH"
     chown root:root "$PORTSENTRY_SETUP_HELPER_PATH"
     chmod 755 "$PORTSENTRY_SETUP_HELPER_PATH"
 
-    cat > "$PORTSENTRY_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - portsentry management (Phase 3). Two root-owned helpers, each the security
-# boundary: unblock-ip validates + removes ONE IP from iptables/ip6tables + /etc/hosts.deny;
-# portsentry-setup validates + installs/configures portsentry. noexec is intentionally omitted (the
-# helpers are vetted scripts that must exec iptables/grep/apt-get/sed/systemctl).
-Cmnd_Alias AETHEUS_PORTSENTRY = $UNBLOCK_HELPER_PATH, $PORTSENTRY_SETUP_HELPER_PATH
-Defaults!AETHEUS_PORTSENTRY timestamp_timeout=0
-Defaults!AETHEUS_PORTSENTRY env_reset
-Defaults!AETHEUS_PORTSENTRY secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_PORTSENTRY
-EOF
+    render_host_config portsentry/sudoers.d/aetheus-portsentry "$PORTSENTRY_MANAGE_SUDOERS_FILE"
     chmod 440 "$PORTSENTRY_MANAGE_SUDOERS_FILE"
     visudo -cf "$PORTSENTRY_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid portsentry-manage sudoers syntax"
@@ -1897,30 +1563,10 @@ EOF
 # Phase 3 (option B) - systemctl enable --now on a FIXED list of pre-existing units. `systemctl
 # enable` is otherwise forbidden (mints new root services); permitted here ONLY argv-exact, no
 # wildcards, against units that already exist. Mirrors the AETHEUS_SYSTEMCTL unit set.
-# See docs/claudes/claude-security.md#controlled-sudo-escalation.
+# See docs/contracts/security.md#controlled-sudo-escalation.
 write_service_enable_sudoers() {
     log_info "Configuring service-enable sudoers (Phase 3 option B, fixed-unit allow-list)..."
-    cat > "$SERVICE_ENABLE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - enable-on-boot for the server-config YAML deploy. Each entry is an EXACT
-# fully-resolved argv (systemctl enable --now <unit>) for a pre-existing managed unit. No wildcards.
-Cmnd_Alias AETHEUS_SERVICE_ENABLE = \\
-    /bin/systemctl enable --now apache2, \\
-    /bin/systemctl enable --now nginx, \\
-    /bin/systemctl enable --now postfix, \\
-    /bin/systemctl enable --now dovecot, \\
-    /bin/systemctl enable --now ts3server, \\
-    /bin/systemctl enable --now portsentry, \\
-    /bin/systemctl enable --now rkhunter, \\
-    /bin/systemctl enable --now cron, \\
-    /bin/systemctl enable --now crond
-
-Defaults!AETHEUS_SERVICE_ENABLE noexec
-Defaults!AETHEUS_SERVICE_ENABLE timestamp_timeout=0
-Defaults!AETHEUS_SERVICE_ENABLE env_reset
-Defaults!AETHEUS_SERVICE_ENABLE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_SERVICE_ENABLE
-EOF
+    render_host_config service-enable/sudoers.d/aetheus-service-enable "$SERVICE_ENABLE_SUDOERS_FILE"
     chmod 440 "$SERVICE_ENABLE_SUDOERS_FILE"
     visudo -cf "$SERVICE_ENABLE_SUDOERS_FILE" || {
         log_error "Invalid service-enable sudoers syntax"
@@ -1933,51 +1579,14 @@ EOF
 # package in the closed allow-list (kept in lockstep with Aetheus.Shared.Constants.ManageablePackages
 # by ManageablePackagesSudoersAuditTests). Names are the real apt package names (docker.io / mysql-server
 # / mariadb-server / mongodb-org), NOT the service keys. `apt-get update` is allow-listed so a fresh box
-# with an empty index can refresh before install. INSTALL covers the full list; REMOVE is restricted to
+# with an empty index can refresh before install. INSTALL covers the full list; PURGE is restricted to
 # the Removable subset (protected packages - databases, ufw/fail2ban, docker - cannot be uninstalled). No
 # wildcards: anything outside the list is refused by sudo at the OS level. noexec is intentionally NOT set
 # - apt-get must exec dpkg + maintainer scripts; the argv-exact allow-list (no -o / config-file flags) is
-# the boundary. See docs/claudes/claude-security.md#controlled-sudo-escalation.
+# the boundary. See docs/contracts/security.md#controlled-sudo-escalation.
 write_package_manage_sudoers() {
     log_info "Configuring package-manage sudoers (S-FEAT-W8KN, fixed-package allow-list)..."
-    cat > "$PACKAGE_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - managed-package install/uninstall. Each entry is an EXACT fully-resolved argv;
-# no wildcards. The package set mirrors Aetheus.Shared.Constants.ManageablePackages (All for install,
-# Removable for remove).
-Cmnd_Alias AETHEUS_PACKAGE = \\
-    /usr/bin/apt-get update, \\
-    /usr/bin/apt-get install -y nginx, \\
-    /usr/bin/apt-get install -y apache2, \\
-    /usr/bin/apt-get install -y docker.io, \\
-    /usr/bin/apt-get install -y fail2ban, \\
-    /usr/bin/apt-get install -y rkhunter, \\
-    /usr/bin/apt-get install -y ufw, \\
-    /usr/bin/apt-get install -y portsentry, \\
-    /usr/bin/apt-get install -y postfix, \\
-    /usr/bin/apt-get install -y dovecot-core, \\
-    /usr/bin/apt-get install -y mysql-server, \\
-    /usr/bin/apt-get install -y mariadb-server, \\
-    /usr/bin/apt-get install -y postgresql, \\
-    /usr/bin/apt-get install -y redis-server, \\
-    /usr/bin/apt-get install -y mongodb-org, \\
-    /usr/bin/apt-get install -y certbot, \\
-    /usr/bin/apt-get remove -y nginx, \\
-    /usr/bin/apt-get remove -y apache2, \\
-    /usr/bin/apt-get remove -y rkhunter, \\
-    /usr/bin/apt-get remove -y portsentry, \\
-    /usr/bin/apt-get remove -y postfix, \\
-    /usr/bin/apt-get remove -y dovecot-core, \\
-    /usr/bin/apt-get remove -y certbot
-
-Defaults!AETHEUS_PACKAGE timestamp_timeout=0
-Defaults!AETHEUS_PACKAGE env_reset
-Defaults!AETHEUS_PACKAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-# Keep DEBIAN_FRONTEND so the agent can run apt non-interactively: postfix/dovecot (and anything that
-# pulls them, e.g. rkhunter) otherwise block on a debconf prompt with no controlling tty and exit 100.
-Defaults!AETHEUS_PACKAGE env_keep += "DEBIAN_FRONTEND"
-
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_PACKAGE
-EOF
+    render_host_config package/sudoers.d/aetheus-package "$PACKAGE_MANAGE_SUDOERS_FILE"
     chmod 440 "$PACKAGE_MANAGE_SUDOERS_FILE"
     visudo -cf "$PACKAGE_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid package-manage sudoers syntax"
@@ -1988,21 +1597,7 @@ EOF
 
 write_patch_manage_sudoers() {
     log_info "Configuring patch-manage sudoers (ADR-024 4.1, apt-get upgrade, argv-exact)..."
-    cat > "$PATCH_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - fleet OS patching. A single EXACT argv (no wildcards): whole-box apt-get upgrade.
-# The agent runs a non-mutating 'apt-get -s upgrade' simulation FIRST (unprivileged, no sudo) and
-# aborts on any critical package (Aetheus.Shared.Constants.CriticalPackages) before ever calling this.
-Cmnd_Alias AETHEUS_PATCH = \\
-    /usr/bin/apt-get upgrade -y
-
-Defaults!AETHEUS_PATCH timestamp_timeout=0
-Defaults!AETHEUS_PATCH env_reset
-Defaults!AETHEUS_PATCH secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-# Keep DEBIAN_FRONTEND so the upgrade runs non-interactively (no debconf tty prompt -> exit 100).
-Defaults!AETHEUS_PATCH env_keep += "DEBIAN_FRONTEND"
-
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_PATCH
-EOF
+    render_host_config patch/sudoers.d/aetheus-patch "$PATCH_MANAGE_SUDOERS_FILE"
     chmod 440 "$PATCH_MANAGE_SUDOERS_FILE"
     visudo -cf "$PATCH_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid patch-manage sudoers syntax"
@@ -2015,87 +1610,12 @@ write_firewall_manage() {
     log_info "Configuring firewall-manage helper + sudoers (ADR-024 4.2, ufw)..."
     ensure_helper_dir
     # Root-owned helper = the security boundary: it re-validates every argument, re-enforces anti-lockout
-    # with the REAL SSH port, and never evals. Quoted heredoc marker => no expansion inside.
-    cat > "$FIREWALL_HELPER_PATH" <<'FWEOF'
-#!/bin/sh
-# Aetheus firewall helper (ADR-024 4.2). Root-owned; the agent may exec but not modify it.
-set -u
-UFW=/usr/sbin/ufw
-# Detect the real SSH port so anti-lockout protects the actual admin port, not just 22.
-# `sshd -T` is authoritative and includes the /etc/ssh/sshd_config.d/*.conf drop-ins (Ubuntu 22.04+
-# ships the effective Port there, not in the main file); fall back to scanning the main config only.
-ADMIN_PORT="$(/usr/sbin/sshd -T 2>/dev/null | awk '/^port[[:space:]]/ {print $2; exit}')"
-[ -n "$ADMIN_PORT" ] || ADMIN_PORT="$(awk '/^[Pp]ort[[:space:]]+[0-9]+/ {print $2; exit}' /etc/ssh/sshd_config 2>/dev/null)"
-[ -n "$ADMIN_PORT" ] || ADMIN_PORT=22
-
-fw_valid_source() {
-    [ "$1" = "any" ] && return 0
-    echo "$1" | grep -Eq '^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$'
-}
-
-action="${1:-}"
-case "$action" in
-    status)
-        exec "$UFW" status numbered
-        ;;
-    enable)
-        # Never lock out: allow the admin port before the default-deny policy takes effect.
-        "$UFW" allow "${ADMIN_PORT}/tcp" >/dev/null 2>&1
-        exec "$UFW" --force enable
-        ;;
-    disable)
-        exec "$UFW" --force disable
-        ;;
-    allow|deny|delete)
-        port="${2:-}"; proto="${3:-}"; source="${4:-any}"
-        echo "$port" | grep -Eq '^[0-9]{1,5}$' || { echo "invalid port" >&2; exit 2; }
-        [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { echo "port out of range" >&2; exit 2; }
-        echo "$proto" | grep -Eq '^(tcp|udp)$' || { echo "invalid protocol" >&2; exit 2; }
-        fw_valid_source "$source" || { echo "invalid source" >&2; exit 2; }
-        # Anti-lockout: refuse to close (deny/delete) the administration port.
-        if [ "$action" != "allow" ] && [ "$port" = "$ADMIN_PORT" ]; then
-            echo "refused: would close the administration port $ADMIN_PORT" >&2
-            exit 3
-        fi
-        if [ "$source" = "any" ]; then
-            case "$action" in
-                allow) exec "$UFW" allow "${port}/${proto}" ;;
-                deny)  exec "$UFW" deny  "${port}/${proto}" ;;
-                delete)
-                    "$UFW" --force delete allow "${port}/${proto}" 2>/dev/null
-                    exec "$UFW" --force delete deny "${port}/${proto}"
-                    ;;
-            esac
-        else
-            case "$action" in
-                allow) exec "$UFW" allow from "$source" to any port "$port" proto "$proto" ;;
-                deny)  exec "$UFW" deny  from "$source" to any port "$port" proto "$proto" ;;
-                delete)
-                    "$UFW" --force delete allow from "$source" to any port "$port" proto "$proto" 2>/dev/null
-                    exec "$UFW" --force delete deny from "$source" to any port "$port" proto "$proto"
-                    ;;
-            esac
-        fi
-        ;;
-    *)
-        echo "unknown firewall command" >&2
-        exit 2
-        ;;
-esac
-FWEOF
+    # with the REAL SSH port, and never evals. The template declares no placeholder => nothing is expanded inside.
+    render_host_config firewall/aetheus-firewall "$FIREWALL_HELPER_PATH"
     chown root:root "$FIREWALL_HELPER_PATH"
     chmod 755 "$FIREWALL_HELPER_PATH"
 
-    cat > "$FIREWALL_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - firewall (ufw) management. Path-only grant of the root-owned aetheus-firewall helper,
-# which IS the security boundary: it re-validates port/protocol/source and re-enforces anti-lockout.
-Cmnd_Alias AETHEUS_FIREWALL = $FIREWALL_HELPER_PATH
-Defaults!AETHEUS_FIREWALL timestamp_timeout=0
-Defaults!AETHEUS_FIREWALL env_reset
-Defaults!AETHEUS_FIREWALL secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_FIREWALL
-EOF
+    render_host_config firewall/sudoers.d/aetheus-firewall "$FIREWALL_MANAGE_SUDOERS_FILE"
     chmod 440 "$FIREWALL_MANAGE_SUDOERS_FILE"
     visudo -cf "$FIREWALL_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid firewall-manage sudoers syntax"
@@ -2111,110 +1631,11 @@ EOF
 # that always failed for the non-root agent; this is the typed OperationKind.MailSetup path. noexec is
 # intentionally NOT set on this Cmnd_Alias: the helper is a vetted script that must exec apt-get /
 # postconf / systemctl / doveadm - it is itself the boundary. See
-# docs/claudes/claude-security.md#controlled-sudo-escalation.
+# docs/contracts/security.md#controlled-sudo-escalation.
 write_mail_setup() {
     log_info "Configuring mail-setup helper + sudoers (S-FEAT-W8KN, root-owned helper boundary)..."
     ensure_helper_dir
-    cat > "$MAIL_SETUP_HELPER_PATH" <<'HELPER_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent mail-setup helper - root-owned, invoked via /etc/sudoers.d/aetheus-mail (NOPASSWD).
-# Installs + configures postfix/dovecot/opendkim for ONE domain. Re-validates every argument; reads the
-# admin password from stdin (never argv). Never evals input.
-set -eu
-
-die() { echo "$1" >&2; exit 1; }
-valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; }
-valid_email()  { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'; }
-valid_sel()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]+$'; }
-valid_quota()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,7}$'; }
-
-hostname="${1:-}"
-domain="${2:-}"
-selector="${3:-}"
-email="${4:-}"
-quota="${5:-}"
-
-valid_domain "$hostname" || die "invalid hostname"
-valid_domain "$domain"   || die "invalid domain"
-valid_sel    "$selector" || die "invalid selector"
-valid_email  "$email"    || die "invalid email"
-valid_quota  "$quota"    || die "invalid quota"
-
-# Admin password from stdin (one newline-terminated line). Never on the argv.
-IFS= read -r password || die "no password on stdin"
-[ -n "$password" ] || die "empty password"
-printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has control chars"
-[ "${#password}" -ge 8 ] || die "password too short"
-
-localpart="${email%@*}"
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq || true
-apt-get install -y -qq postfix dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd opendkim opendkim-tools
-
-# Postfix main.cf (values are validated identifiers; postconf -e takes a single key=value argv token).
-postconf -e "myhostname = $hostname"
-postconf -e "mydomain = $domain"
-postconf -e "mydestination = localhost"
-postconf -e "virtual_mailbox_domains = $domain"
-postconf -e "virtual_mailbox_base = /var/mail/vhosts"
-postconf -e "virtual_mailbox_maps = hash:/etc/postfix/vmailbox"
-postconf -e "virtual_minimum_uid = 1000"
-postconf -e "virtual_uid_maps = static:5000"
-postconf -e "virtual_gid_maps = static:5000"
-postconf -e "virtual_transport = lmtp:unix:private/dovecot-lmtp"
-postconf -e "smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem"
-postconf -e "smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key"
-postconf -e "smtpd_tls_security_level = may"
-postconf -e "smtp_tls_security_level = may"
-postconf -e "smtpd_sasl_type = dovecot"
-postconf -e "smtpd_sasl_path = private/auth"
-postconf -e "smtpd_sasl_auth_enable = yes"
-postconf -e "smtpd_recipient_restrictions = permit_sasl_authenticated,permit_mynetworks,reject_unauth_destination"
-postconf -e "milter_default_action = accept"
-postconf -e "milter_protocol = 6"
-postconf -e "smtpd_milters = inet:localhost:8891"
-postconf -e "non_smtpd_milters = inet:localhost:8891"
-
-# vmail user (idempotent).
-groupadd -g 5000 vmail 2>/dev/null || true
-useradd -g vmail -u 5000 -d /var/mail/vhosts -s /usr/sbin/nologin vmail 2>/dev/null || true
-mkdir -p "/var/mail/vhosts/$domain"
-chown -R vmail:vmail /var/mail/vhosts
-
-# Virtual mailbox map.
-umask 022
-printf '%s %s/%s/\n' "$email" "$domain" "$localpart" > /etc/postfix/vmailbox
-postmap /etc/postfix/vmailbox
-
-# Dovecot users file. Feed the password to `doveadm pw` over stdin (it prompts twice) rather than
-# via `-p`: an argv token lands in /proc/<pid>/cmdline and is visible to `ps`/journald for the life
-# of the process. The pipe keeps the cleartext off the process list entirely.
-hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
-umask 077
-printf '%s:%s\n' "$email" "$hash" > /etc/dovecot/users
-chmod 600 /etc/dovecot/users
-
-# OpenDKIM.
-mkdir -p /etc/opendkim/keys
-opendkim-genkey -s "$selector" -d "$domain" -D /etc/opendkim/keys/
-printf '%s._domainkey.%s %s:%s:/etc/opendkim/keys/%s.private\n' "$selector" "$domain" "$domain" "$selector" "$selector" > /etc/opendkim/KeyTable
-printf '*@%s %s._domainkey.%s\n' "$domain" "$selector" "$domain" > /etc/opendkim/SigningTable
-printf '127.0.0.1\nlocalhost\n' > /etc/opendkim/TrustedHosts
-chown -R opendkim:opendkim /etc/opendkim/keys
-chmod 600 "/etc/opendkim/keys/$selector.private"
-
-mkdir -p /etc/dovecot/conf.d
-
-# Enable + (re)start services.
-systemctl enable postfix dovecot opendkim
-systemctl restart opendkim
-systemctl restart postfix
-systemctl restart dovecot
-
-echo "Mail server setup completed successfully for $domain (quota ${quota}MB)"
-HELPER_EOF
+    render_host_config mail/mail-setup "$MAIL_SETUP_HELPER_PATH"
     chown root:root "$MAIL_SETUP_HELPER_PATH"
     chmod 755 "$MAIL_SETUP_HELPER_PATH"
 
@@ -2222,207 +1643,12 @@ HELPER_EOF
     # root-owned boundary recipe as mail-setup: re-validates every argument, reads an account password
     # from stdin (never argv), and operates on the stack mail-setup provisioned. Never evals input. The
     # agent (MailOperationExecutor.ManageHelperPath) shells out to exactly this binary via sudo -n.
-    cat > "$MAIL_MANAGE_HELPER_PATH" <<'MANAGE_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent mail-manage helper - root-owned, invoked via /etc/sudoers.d/aetheus-mail (NOPASSWD).
-# Incremental management of an already-provisioned mail stack: add-domain, add-account, add-alias,
-# dkim-rotate, change-password, remove-domain, delete-account, remove-alias, dkim-read. Re-validates
-# every argument; reads an account password from stdin (never argv). Never evals input. First argv token
-# is a fixed sub-command.
-set -eu
-
-die() { echo "$1" >&2; exit 1; }
-valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; }
-valid_email()  { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'; }
-valid_sel()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]+$'; }
-valid_quota()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,7}$'; }
-without_space_key() { awk -v key="$1" '$1 != key' "$2" > "$2.tmp" 2>/dev/null || true; }
-without_colon_key() { awk -F: -v key="$1" '$1 != key' "$2" > "$2.tmp" 2>/dev/null || true; }
-
-cmd="${1:-}"
-[ -n "$cmd" ] || die "no sub-command"
-
-case "$cmd" in
-  add-domain)
-    domain="${2:-}"
-    valid_domain "$domain" || die "invalid domain"
-    mkdir -p "/var/mail/vhosts/$domain"
-    chown -R vmail:vmail "/var/mail/vhosts/$domain"
-    cur="$(postconf -h virtual_mailbox_domains 2>/dev/null || echo '')"
-    case " $cur " in
-      *" $domain "*) : ;;
-      *) if [ -n "$cur" ]; then postconf -e "virtual_mailbox_domains = $cur, $domain"; else postconf -e "virtual_mailbox_domains = $domain"; fi ;;
-    esac
-    systemctl reload postfix
-    echo "Domain $domain added"
-    ;;
-  add-account)
-    email="${2:-}"; domain="${3:-}"; quota="${4:-}"
-    valid_email "$email"   || die "invalid email"
-    valid_domain "$domain" || die "invalid domain"
-    valid_quota "$quota"   || die "invalid quota"
-    case "$email" in *"@$domain") : ;; *) die "email not in domain" ;; esac
-    IFS= read -r password || die "no password on stdin"
-    [ -n "$password" ] || die "empty password"
-    printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has control chars"
-    [ "${#password}" -ge 8 ] || die "password too short"
-    localpart="${email%@*}"
-    mkdir -p "/var/mail/vhosts/$domain/$localpart"
-    chown -R vmail:vmail "/var/mail/vhosts/$domain"
-    umask 022
-    touch /etc/postfix/vmailbox
-    without_space_key "$email" /etc/postfix/vmailbox
-    printf '%s %s/%s/\n' "$email" "$domain" "$localpart" >> /etc/postfix/vmailbox.tmp
-    mv /etc/postfix/vmailbox.tmp /etc/postfix/vmailbox
-    postmap /etc/postfix/vmailbox
-    hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
-    umask 077
-    touch /etc/dovecot/users
-    without_colon_key "$email" /etc/dovecot/users
-    printf '%s:%s\n' "$email" "$hash" >> /etc/dovecot/users.tmp
-    mv /etc/dovecot/users.tmp /etc/dovecot/users
-    chmod 600 /etc/dovecot/users
-    echo "Account $email added (quota ${quota}MB)"
-    ;;
-  add-alias)
-    email="${2:-}"; destination="${3:-}"
-    valid_email "$email"       || die "invalid alias"
-    valid_email "$destination" || die "invalid destination"
-    umask 022
-    touch /etc/postfix/virtual
-    without_space_key "$email" /etc/postfix/virtual
-    printf '%s %s\n' "$email" "$destination" >> /etc/postfix/virtual.tmp
-    mv /etc/postfix/virtual.tmp /etc/postfix/virtual
-    postmap /etc/postfix/virtual
-    cur="$(postconf -h virtual_alias_maps 2>/dev/null || echo '')"
-    case "$cur" in
-      *hash:/etc/postfix/virtual*) : ;;
-      *) postconf -e "virtual_alias_maps = hash:/etc/postfix/virtual" ;;
-    esac
-    systemctl reload postfix
-    echo "Alias $email -> $destination added"
-    ;;
-  dkim-rotate)
-    domain="${2:-}"; selector="${3:-}"
-    valid_domain "$domain" || die "invalid domain"
-    valid_sel "$selector"  || die "invalid selector"
-    mkdir -p /etc/opendkim/keys
-    opendkim-genkey -s "$selector" -d "$domain" -D /etc/opendkim/keys/
-    chown opendkim:opendkim \
-      "/etc/opendkim/keys/$selector.private" \
-      "/etc/opendkim/keys/$selector.txt"
-    chmod 600 "/etc/opendkim/keys/$selector.private"
-    chmod 644 "/etc/opendkim/keys/$selector.txt"
-    touch /etc/opendkim/KeyTable /etc/opendkim/SigningTable
-    awk -v suffix="._domainkey.$domain" \
-      'length($1) < length(suffix) || substr($1, length($1) - length(suffix) + 1) != suffix' \
-      /etc/opendkim/KeyTable > /etc/opendkim/KeyTable.tmp 2>/dev/null || true
-    printf '%s._domainkey.%s %s:%s:/etc/opendkim/keys/%s.private\n' "$selector" "$domain" "$domain" "$selector" "$selector" >> /etc/opendkim/KeyTable.tmp
-    mv /etc/opendkim/KeyTable.tmp /etc/opendkim/KeyTable
-    without_space_key "*@$domain" /etc/opendkim/SigningTable
-    printf '*@%s %s._domainkey.%s\n' "$domain" "$selector" "$domain" >> /etc/opendkim/SigningTable.tmp
-    mv /etc/opendkim/SigningTable.tmp /etc/opendkim/SigningTable
-    systemctl restart opendkim
-    echo "DKIM rotated for $domain (selector $selector)"
-    ;;
-  change-password)
-    # S-TECH-MCPW: change an existing mailbox password. The new password arrives on stdin (never argv),
-    # is validated, hashed via doveadm pw over stdin, and rewritten idempotently into /etc/dovecot/users.
-    email="${2:-}"
-    valid_email "$email" || die "invalid email"
-    IFS= read -r password || die "no password on stdin"
-    [ -n "$password" ] || die "empty password"
-    printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has control chars"
-    [ "${#password}" -ge 8 ] || die "password too short"
-    awk -F: -v key="$email" '$1 == key { found=1; exit } END { exit !found }' \
-      /etc/dovecot/users 2>/dev/null || die "account does not exist"
-    hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
-    umask 077
-    touch /etc/dovecot/users
-    without_colon_key "$email" /etc/dovecot/users
-    printf '%s:%s\n' "$email" "$hash" >> /etc/dovecot/users.tmp
-    mv /etc/dovecot/users.tmp /etc/dovecot/users
-    chmod 600 /etc/dovecot/users
-    echo "Password changed for $email"
-    ;;
-  remove-domain)
-    # Removal counterpart of add-domain: drop the domain from virtual_mailbox_domains, reload postfix.
-    # Rebuilds the list by field so no sed/regex address is interpolated.
-    domain="${2:-}"
-    valid_domain "$domain" || die "invalid domain"
-    cur="$(postconf -h virtual_mailbox_domains 2>/dev/null || echo '')"
-    new=""
-    for d in $(printf '%s' "$cur" | tr ',' ' '); do
-      [ "$d" = "$domain" ] && continue
-      if [ -n "$new" ]; then new="$new, $d"; else new="$d"; fi
-    done
-    postconf -e "virtual_mailbox_domains = $new"
-    systemctl reload postfix
-    echo "Domain $domain removed"
-    ;;
-  delete-account)
-    # Removal counterpart of add-account: drop the mailbox line from vmailbox + dovecot users, re-map.
-    email="${2:-}"; domain="${3:-}"
-    valid_email "$email"   || die "invalid email"
-    valid_domain "$domain" || die "invalid domain"
-    case "$email" in *"@$domain") : ;; *) die "email not in domain" ;; esac
-    if [ -f /etc/postfix/vmailbox ]; then
-      without_space_key "$email" /etc/postfix/vmailbox
-      mv /etc/postfix/vmailbox.tmp /etc/postfix/vmailbox
-      postmap /etc/postfix/vmailbox
-    fi
-    if [ -f /etc/dovecot/users ]; then
-      without_colon_key "$email" /etc/dovecot/users
-      mv /etc/dovecot/users.tmp /etc/dovecot/users
-      chmod 600 /etc/dovecot/users
-    fi
-    echo "Account $email deleted"
-    ;;
-  remove-alias)
-    # Removal counterpart of add-alias: drop the alias line from /etc/postfix/virtual, re-map, reload.
-    email="${2:-}"
-    valid_email "$email" || die "invalid alias"
-    if [ -f /etc/postfix/virtual ]; then
-      without_space_key "$email" /etc/postfix/virtual
-      mv /etc/postfix/virtual.tmp /etc/postfix/virtual
-      postmap /etc/postfix/virtual
-      systemctl reload postfix
-    fi
-    echo "Alias $email removed"
-    ;;
-  dkim-read)
-    # Read a domain's DKIM public key (DNS TXT) by selector. Root reads the world-relevant .txt and
-    # prints it to stdout; the backend surfaces it as the DNS record to publish.
-    selector="${2:-}"
-    valid_sel "$selector" || die "invalid selector"
-    keyfile="/etc/opendkim/keys/$selector.txt"
-    [ -f "$keyfile" ] || die "no DKIM key for selector $selector"
-    cat "$keyfile"
-    ;;
-  *)
-    die "unknown sub-command: $cmd"
-    ;;
-esac
-MANAGE_EOF
+    # Same web root as the certbot helpers (PLAN-007): a mail certificate renews like every other one.
+    render_host_config mail/mail-manage "$MAIL_MANAGE_HELPER_PATH"
     chown root:root "$MAIL_MANAGE_HELPER_PATH"
     chmod 755 "$MAIL_MANAGE_HELPER_PATH"
 
-    cat > "$MAIL_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - mail setup + incremental management (S-FEAT-W8KN). Each helper is the security
-# boundary: root-owned, agent-non-writable, re-validates every argument, reads passwords from stdin.
-# noexec is intentionally omitted (the helpers must exec apt-get / postconf / postmap / systemctl /
-# doveadm / opendkim-genkey). mail-setup provisions one domain; mail-manage does the incremental ops.
-Cmnd_Alias AETHEUS_MAIL = $MAIL_SETUP_HELPER_PATH
-Cmnd_Alias AETHEUS_MAIL_MANAGE = $MAIL_MANAGE_HELPER_PATH
-Defaults!AETHEUS_MAIL timestamp_timeout=0
-Defaults!AETHEUS_MAIL env_reset
-Defaults!AETHEUS_MAIL secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-Defaults!AETHEUS_MAIL_MANAGE timestamp_timeout=0
-Defaults!AETHEUS_MAIL_MANAGE env_reset
-Defaults!AETHEUS_MAIL_MANAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_MAIL, AETHEUS_MAIL_MANAGE
-EOF
+    render_host_config mail/sudoers.d/aetheus-mail "$MAIL_MANAGE_SUDOERS_FILE"
     chmod 440 "$MAIL_MANAGE_SUDOERS_FILE"
     visudo -cf "$MAIL_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid mail-setup sudoers syntax"
@@ -2438,152 +1664,15 @@ EOF
 # useradd/cat>/etc/systemd/systemctl shell pipeline that always failed for the non-root agent; this is the
 # typed OperationKind.TeamspeakSetup path. noexec is intentionally NOT set: the helper must exec apt-get /
 # curl / tar / systemctl / useradd - it is itself the boundary. See
-# docs/claudes/claude-security.md#controlled-sudo-escalation.
+# docs/contracts/security.md#controlled-sudo-escalation.
 write_teamspeak_setup() {
     log_info "Configuring teamspeak-setup helper + sudoers (root-owned helper boundary)..."
     ensure_helper_dir
-    cat > "$TEAMSPEAK_SETUP_HELPER_PATH" <<'HELPER_EOF'
-#!/bin/sh
-# SPDX-License-Identifier: EUPL-1.2
-# Aetheus Agent teamspeak-setup helper - root-owned, invoked via /etc/sudoers.d/aetheus-teamspeak
-# (NOPASSWD). Installs a TeamSpeak 3 server at <install_path> with <voice_port>/<query_port>. Re-validates
-# every argument. Never evals input. Real operations only - exits non-zero on any failure (no fake success).
-set -eu
-
-TS_VERSION="3.13.7"
-TS_URL="https://files.teamspeak-services.com/releases/server/${TS_VERSION}/teamspeak3-server_linux_amd64-${TS_VERSION}.tar.bz2"
-CRED_DIR="/opt/aetheus-agent/teamspeak"
-CRED_FILE="$CRED_DIR/query-credentials"
-
-die() { echo "$1" >&2; exit 1; }
-# S-TECH-TSPR: reject any ".." segment (path traversal) before the charclass check - POSIX ERE has no
-# lookahead, so the "no .." rule is a separate guard, mirroring the backend TeamspeakInstallPathRegex.
-valid_path() { case "$1" in *..*) return 1 ;; esac; printf '%s' "$1" | grep -Eq '^/[a-zA-Z0-9._/-]{1,127}$'; }
-valid_port() { printf '%s' "$1" | grep -Eq '^[0-9]{1,5}$' && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
-
-install_path="${1:-}"
-voice_port="${2:-9987}"
-query_port="${3:-10011}"
-
-valid_path "$install_path" || die "invalid install path"
-valid_port "$voice_port"   || die "invalid voice port"
-valid_port "$query_port"   || die "invalid query port"
-
-# Whoever invoked sudo is the unprivileged agent user; the credential file must end up readable by it
-# (the agent's TeamspeakServerQuery executor opens the TCP query connection itself). Fall back to the
-# stock user name if SUDO_USER is somehow unset.
-agent_user="${SUDO_USER:-aetheus-agent}"
-
-# S-TECH-TSID: idempotent re-run guard. If a server is already installed at this path (its binary is
-# present) or the unit is live, do NOT re-download/re-extract - that would clobber a running TS3 server
-# and its data. A retry from the UI (or a detection false-positive) must be a no-op, not destructive.
-if [ -x "$install_path/ts3server" ] || systemctl is-active --quiet teamspeak3 2>/dev/null; then
-    echo "TeamSpeak already installed at $install_path - leaving it untouched (idempotent)."
-    systemctl start teamspeak3 2>/dev/null || true
-    exit 0
-fi
-
-# 0. Ensure the tools the download/extract need are present. The TS3 archive is .tar.bz2, so tar needs
-# the bzip2 binary - a minimal/bare box may ship neither it nor curl. Install only what's missing.
-# S-TECH-APTG: DPkg::Lock::Timeout makes apt WAIT for a held dpkg/apt lock (a concurrent batch install)
-# instead of failing immediately with exit 100.
-if ! command -v bzip2 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get -o DPkg::Lock::Timeout=300 update -qq || true
-    apt-get -o DPkg::Lock::Timeout=300 install -y bzip2 curl ca-certificates
-fi
-
-# 1. System user for the daemon (idempotent).
-useradd -r -m -d /opt/teamspeak -s /usr/sbin/nologin teamspeak 2>/dev/null || true
-
-# 2. Download the server tarball to a temp file, optionally verify its integrity, then extract.
-# S-TECH-TSCK: TS_VERSION is the single pinned-version constant; download to a temp file (instead of
-# piping curl straight into tar) so the archive CAN be checksum-verified before it is trusted. Set
-# TS_SHA256 to the published SHA-256 of the tarball to fail-closed on a tampered/rotted download.
-# The operator pins the checksum in a root-owned config file before enabling TeamSpeak. sudo uses
-# env_reset for this helper, so a file is the deliberate, persistent trust channel.
-TS_CHECKSUM_FILE="/etc/aetheus-agent/teamspeak.sha256"
-TS_SHA256=""
-if [ -r "$TS_CHECKSUM_FILE" ]; then
-    TS_SHA256="$(tr -d '[:space:]' < "$TS_CHECKSUM_FILE")"
-fi
-case "$TS_SHA256" in
-    ''|*[!0-9a-fA-F]*)
-        die "TS_SHA256 must be a pinned 64-character hexadecimal checksum"
-        ;;
-esac
-[ "${#TS_SHA256}" -eq 64 ] || die "TS_SHA256 must be a pinned 64-character hexadecimal checksum"
-mkdir -p "$install_path"
-ts_tmp="$(mktemp)"
-trap 'rm -f "$ts_tmp"' EXIT
-curl -fsSL "$TS_URL" -o "$ts_tmp"
-echo "$TS_SHA256  $ts_tmp" | sha256sum -c - || die "TeamSpeak tarball checksum mismatch - refusing to install"
-tar xjf "$ts_tmp" -C "$install_path" --strip-components=1
-chown -R teamspeak:teamspeak "$install_path"
-
-# 3. Accept the license non-interactively (required since 3.1).
-touch "$install_path/.ts3server_license_accepted"
-
-# 4. ts3server.ini with the requested ports.
-printf 'default_voice_port=%s\nquery_port=%s\n' "$voice_port" "$query_port" > "$install_path/ts3server.ini"
-chown teamspeak:teamspeak "$install_path/ts3server.ini"
-
-# 5. systemd unit (matches the TeamspeakCollector's detection of the teamspeak3 unit).
-cat > /etc/systemd/system/teamspeak3.service <<UNIT
-[Unit]
-Description=TeamSpeak 3 Server
-After=network.target
-
-[Service]
-Type=forking
-User=teamspeak
-WorkingDirectory=$install_path
-ExecStart=$install_path/ts3server_startscript.sh start
-ExecStop=$install_path/ts3server_startscript.sh stop
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-# 6. Enable + start.
-systemctl daemon-reload
-systemctl enable teamspeak3
-systemctl start teamspeak3
-
-# 7. Extract the auto-generated ServerQuery admin password from the first-run log and hand it to the
-# agent user. Best-effort: a miss must not fail the install (the server is up either way), so relax -e
-# for this block. TS3 prints: loginname= "serveradmin", password= "XXXX".
-mkdir -p "$CRED_DIR"
-set +e
-for _ in 1 2 3 4 5 6; do
-    pw="$(grep -hoP 'password=\s*"\K[^"]+' "$install_path"/logs/ts3server_*.log 2>/dev/null | head -1)"
-    [ -n "$pw" ] && break
-    sleep 2
-done
-set -e
-if [ -n "${pw:-}" ]; then
-    printf '%s' "$pw" > "$CRED_FILE"
-    chmod 600 "$CRED_FILE"
-fi
-chown -R "$agent_user:$agent_user" "$CRED_DIR" 2>/dev/null || true
-
-echo "TeamSpeak 3 server ${TS_VERSION} installed at $install_path (voice ${voice_port}, query ${query_port})"
-HELPER_EOF
+    render_host_config teamspeak/teamspeak-setup "$TEAMSPEAK_SETUP_HELPER_PATH"
     chown root:root "$TEAMSPEAK_SETUP_HELPER_PATH"
     chmod 755 "$TEAMSPEAK_SETUP_HELPER_PATH"
 
-    cat > "$TEAMSPEAK_SETUP_SUDOERS_FILE" <<EOF
-# Aetheus Agent - TeamSpeak install. The helper is the security boundary: root-owned,
-# agent-non-writable, re-validates every argument, and installs exactly one TS3 server. noexec is
-# intentionally omitted (the helper must exec apt-get / curl / tar / systemctl / useradd).
-Cmnd_Alias AETHEUS_TEAMSPEAK = $TEAMSPEAK_SETUP_HELPER_PATH
-Defaults!AETHEUS_TEAMSPEAK timestamp_timeout=0
-Defaults!AETHEUS_TEAMSPEAK env_reset
-Defaults!AETHEUS_TEAMSPEAK secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_TEAMSPEAK
-EOF
+    render_host_config teamspeak/sudoers.d/aetheus-teamspeak "$TEAMSPEAK_SETUP_SUDOERS_FILE"
     chmod 440 "$TEAMSPEAK_SETUP_SUDOERS_FILE"
     visudo -cf "$TEAMSPEAK_SETUP_SUDOERS_FILE" || {
         log_error "Invalid teamspeak-setup sudoers syntax"
@@ -2597,26 +1686,7 @@ EOF
 # propupd. Any other rkhunter flag (e.g. --logfile, --configfile) is refused by sudo.
 write_rkhunter_manage_sudoers() {
     log_info "Configuring RKHunter-manage sudoers (items #10.2/#10.3, ultra-strict allow-list)..."
-    cat > "$RKHUNTER_MANAGE_SUDOERS_FILE" <<EOF
-# Aetheus Agent - RKHunter management. Items #10.2/#10.3 of the plan; see
-# docs/claudes/claude-security.md#controlled-sudo-escalation.
-
-# 1. Run scan (rkhunter --check needs root to read /var/lib/rkhunter/db + scan certain paths).
-# 2. Update signature DB (rkhunter --update fetches new mirror data, writes /var/lib/rkhunter).
-# 3. Refresh baseline (rkhunter --propupd recomputes file checksums after legitimate upgrades).
-# Every entry uses an EXACT fully-resolved binary path + fixed argv string. No wildcards.
-Cmnd_Alias AETHEUS_RKHUNTER_MANAGE = \\
-    /usr/bin/rkhunter --check --skip-keypress --nocolors --report-warnings-only, \\
-    /usr/bin/rkhunter --update --nocolors, \\
-    /usr/bin/rkhunter --propupd --nocolors
-
-Defaults!AETHEUS_RKHUNTER_MANAGE noexec
-Defaults!AETHEUS_RKHUNTER_MANAGE timestamp_timeout=0
-Defaults!AETHEUS_RKHUNTER_MANAGE env_reset
-Defaults!AETHEUS_RKHUNTER_MANAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
-
-$AGENT_USER ALL=(root) NOPASSWD: AETHEUS_RKHUNTER_MANAGE
-EOF
+    render_host_config rkhunter/sudoers.d/aetheus-rkhunter "$RKHUNTER_MANAGE_SUDOERS_FILE"
     chmod 440 "$RKHUNTER_MANAGE_SUDOERS_FILE"
     visudo -cf "$RKHUNTER_MANAGE_SUDOERS_FILE" || {
         log_error "Invalid RKHunter-manage sudoers syntax"
@@ -2748,6 +1818,10 @@ NoNewPrivileges=false"
         SANDBOX_PRIV_BLOCK="RestrictSUIDSGID=false
 # CapabilityBoundingSet intentionally left at the default (full set) so the sudo grant can elevate."
     else
+        # R-249: restores the block commit df6895eb9 dropped by mistake (its sandboxed branch left
+        # NNP_BLOCK unset, so the unit carried an empty line instead). Same text and position as before.
+        NNP_BLOCK="# Fully sandboxed: no sudo grant, so privilege escalation is blocked outright.
+NoNewPrivileges=true"
         # Fully sandboxed collector: no sudo grant, so strip every capability and block setuid exec.
         SANDBOX_PRIV_BLOCK="RestrictSUIDSGID=true
 # CapabilityBoundingSet emptied - a non-root collector needs no capabilities.
@@ -2769,8 +1843,11 @@ ProtectSystem=false"
             READ_WRITE_PATHS_BLOCK="$READ_WRITE_PATHS_BLOCK /etc/apache2"
         fi
         if [ "$ENABLE_CERTBOT_MANAGE" -eq 1 ]; then
-            mkdir -p /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt
-            READ_WRITE_PATHS_BLOCK="$READ_WRITE_PATHS_BLOCK /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt"
+            # The helpers run inside this unit's mount namespace: the ACME web root receives the
+            # challenge files and the state directory the renewal-check outcome (PLAN-007).
+            _rw_acme_webroot="${ACME_WEBROOT_OVERRIDE:-/var/www/aetheus-acme}"
+            mkdir -p /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt "$_rw_acme_webroot" "$CERTBOT_STATE_DIR"
+            READ_WRITE_PATHS_BLOCK="$READ_WRITE_PATHS_BLOCK /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt $_rw_acme_webroot $CERTBOT_STATE_DIR"
         fi
     fi
 
@@ -2781,83 +1858,13 @@ ProtectSystem=false"
         STATE_DIRECTORY_MODE="0710"
     fi
 
-    cat > "$SYSTEMD_UNIT_PATH" <<EOF
-[Unit]
-Description=Aetheus Infrastructure Agent
-After=network-online.target
-Wants=network-online.target
+    ADDRESS_FAMILIES="AF_UNIX AF_INET AF_INET6"
+    if [ "$ENABLE_MAIL_SETUP" -eq 1 ]; then
+        # Postfix postqueue uses getifaddrs(), which needs a netlink socket under this unit's sandbox.
+        ADDRESS_FAMILIES="$ADDRESS_FAMILIES AF_NETLINK"
+    fi
 
-[Service]
-# Type=exec - the unit is "active" as soon as the binary execs. We previously
-# used Type=notify (with .NET's AddSystemd sending READY=1), but on some hosts
-# the sd_notify signal does not reach systemd (env propagation / wrapped
-# ExecStart / NotifyAccess quirks), so systemd would kill the agent at
-# TimeoutStartSec ON EVERY START - the process worked, sent its first heartbeat,
-# then got terminated mid-work in a constant restart loop. Type=exec sidesteps
-# that entirely; the agent's actual readiness is then verified out-of-band by
-# the install script's HTTP health check. AddSystemd() stays in Program.cs for
-# clean SIGTERM handling.
-Type=exec
-User=$AGENT_USER
-Group=$AGENT_GROUP
-UMask=0077
-WorkingDirectory=$INSTALL_DIR
-# StateDirectory: systemd creates/owns /var/lib/aetheus-agent (= \$WORK_DIR) for the service user
-# on every start, and auto-adds it to ReadWritePaths under ProtectSystem=strict. Deployment targets
-# use mode 0710 solely as the ACL mask for the named aetheus-deploy traverse-only entry; other hosts
-# remain 0700. This
-# is the canonical home for the agent's credential-encryption key material
-# (/var/lib/aetheus-agent/keys, hardened 0700). LinuxCredentialProtector still migrates any
-# legacy keys from the old install-dir location on first run, so existing enrollments survive.
-StateDirectory=aetheus-agent
-StateDirectoryMode=$STATE_DIRECTORY_MODE
-ExecStart=$EXEC_START
-Restart=always
-RestartSec=10
-TimeoutStartSec=120
-TimeoutStopSec=30
-# KillMode=mixed: sends SIGTERM to the main process only; child processes
-# (e.g. the self-update script) survive the service stop and finish their work.
-# Default 'control-group' would kill ALL processes in the cgroup, breaking updates.
-KillMode=mixed
-Environment=DOTNET_ENVIRONMENT=Production
-# Explicit PATH so pipeline steps and the Docker capability probe find tools regardless of how
-# they were installed. /snap/bin is included because snap-packaged Docker lives there and the
-# systemd default PATH omits it (a snap Docker would otherwise be invisible to the agent).
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
-
-# --- Security hardening ---
-$NNP_BLOCK
-$PROTECT_SYSTEM_BLOCK
-ProtectHome=true
-ReadWritePaths=$WORK_DIR $INSTALL_DIR$READ_WRITE_PATHS_BLOCK
-PrivateTmp=true
-ProtectControlGroups=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectClock=true
-ProtectHostname=true
-ProtectProc=invisible
-RestrictNamespaces=true
-RestrictRealtime=true
-$SANDBOX_PRIV_BLOCK
-LockPersonality=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
-# NOTE: MemoryDenyWriteExecute is intentionally NOT set - the .NET JIT needs
-# W^X-violating mappings and it would crash the runtime.
-# Phase 3 hardening: cgroup-level backstops covering the agent AND every pipeline step it spawns.
-# TasksMax caps total processes/threads (a fork bomb in a step can't exhaust the host's PID space);
-# 4096 is far above any real build's needs. MemoryMax is left commented because build memory varies
-# wildly and a low cap would OOM-kill legitimate compiles - uncomment and tune per runner if desired.
-TasksMax=4096
-#MemoryMax=8G
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    render_host_config agent/aetheus-agent.service "$SYSTEMD_UNIT_PATH"
 }
 
 # Faithful "can the agent itself reach the backend?" probe - runs the agent
@@ -3048,6 +2055,12 @@ run_health_check() {
     return 1
 }
 
+# R-249: every mode but --purge renders host configuration templates; check they are all present
+# before the first change to the host.
+if [ "$MODE" != "purge" ]; then
+    require_host_config
+fi
+
 # =============================================================================
 # Mode: BOOTSTRAP UPDATE SUPERVISOR
 # =============================================================================
@@ -3131,6 +2144,7 @@ if [ "$MODE" = "purge" ]; then
         rm -f "$CERTBOT_MANAGE_SUDOERS_FILE" "$TEAMSPEAK_SETUP_SUDOERS_FILE"
         rm -f "$CRON_HELPER_PATH" "$UNBLOCK_HELPER_PATH" "$PORTSENTRY_SETUP_HELPER_PATH" "$MAIL_SETUP_HELPER_PATH" "$MAIL_MANAGE_HELPER_PATH" "$DEPLOY_RESTART_HELPER_PATH" "$FIREWALL_HELPER_PATH"
         rm -f "$CERTBOT_ISSUE_HELPER_PATH" "$CERTBOT_MANAGE_HELPER_PATH" "$TEAMSPEAK_SETUP_HELPER_PATH"
+        remove_certbot_conventions
         rmdir "$AETHEUS_HELPER_DIR" 2>/dev/null || true
     fi
     # Deployment unit template lives under /etc/systemd/system (not $AETHEUS_HELPER_DIR); remove it too.
@@ -3503,41 +2517,7 @@ DOCKER_STORAGE_DEPLOYMENT_ONLY=false
 if [ "$MODULE_DEPLOYMENT" -eq 1 ] && [ "$MODULE_PIPELINE_RUNNER" -eq 0 ]; then
     DOCKER_STORAGE_DEPLOYMENT_ONLY=true
 fi
-cat > "$INSTALL_DIR/appsettings.json" <<EOF
-{
-  "Aetheus": {
-    "ServerUrl": "$SERVER_URL_J",
-    "RegistrationToken": "$REG_TOKEN_J",
-    "Name": "$AGENT_NAME_J",
-    "PollingIntervalSeconds": 10,
-    "HeartbeatIntervalSeconds": 30,
-    "MaxConcurrentTasks": 2,
-    "WorkDirectory": "$WORK_DIR_J",
-    "LogRetentionDays": 30,
-    "AllowInsecureCerts": $ALLOW_INSECURE_JSON,
-    "DockerStorageMaintenance": {
-      "PolicyVersion": 3,
-      "Enabled": true,
-      "DryRun": false,
-      "DeploymentOnly": $DOCKER_STORAGE_DEPLOYMENT_ONLY,
-      "AllowBuildsOnDeploymentTarget": false,
-      "MaintenanceIntervalMinutes": 60,
-      "MaxCacheAgeHours": 168,
-      "PressureCacheAgeHours": 24,
-      "ReservedSpaceGiB": 5,
-      "MaxCacheGiB": 15,
-      "MinFreeSpaceGiB": 20,
-      "PressureUsedPercent": 80,
-      "NuGetCacheRetentionDays": 30
-    }
-  },
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information"
-    }
-  }
-}
-EOF
+render_host_config agent/appsettings.json "$INSTALL_DIR/appsettings.json"
 chown "$AGENT_USER:$AGENT_GROUP" "$INSTALL_DIR/appsettings.json"
 chmod 600 "$INSTALL_DIR/appsettings.json"
 

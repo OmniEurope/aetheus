@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Radzen;
+using Aetheus.Front.Components.Pipelines;
 
 namespace Aetheus.Front.Tests.Pages.Pipelines;
 
@@ -42,10 +39,15 @@ public sealed class PipelineRunFormattingBehaviorTests
         var blocking = FailedStep();
 
         Assert.True(PipelineRunFormatting.IsRolledBack(rolledBack));
-        Assert.Equal(BadgeStyle.Warning, PipelineRunFormatting.GetStepBadge(rolledBack));
-        Assert.Equal(BadgeStyle.Warning, PipelineRunFormatting.GetStepBadge(advisory));
+        Assert.Equal(OmniTone.Warning, PipelineRunFormatting.GetStepBadge(rolledBack));
+        // PLAN-003 lot 22 / D13: an advisory failure is red like any failure, distinguished by being
+        // outlined rather than by a warning colour.
+        Assert.Equal(OmniTone.Danger, PipelineRunFormatting.GetStepBadge(advisory));
+        Assert.Equal(OmniFill.Outline, PipelineRunFormatting.GetStepBadgeVariant(advisory));
         Assert.False(PipelineRunFormatting.IsRolledBack(blocking));
-        Assert.Equal(BadgeStyle.Danger, PipelineRunFormatting.GetStepBadge(blocking));
+        Assert.Equal(OmniTone.Danger, PipelineRunFormatting.GetStepBadge(blocking));
+        Assert.Equal(OmniFill.Solid, PipelineRunFormatting.GetStepBadgeVariant(blocking));
+        Assert.Equal(OmniFill.Solid, PipelineRunFormatting.GetStepBadgeVariant(rolledBack));
     }
 
     [Fact]
@@ -76,9 +78,9 @@ public sealed class PipelineRunFormattingBehaviorTests
     }
 
     [Theory]
-    [InlineData(0.9, "var(--rz-success)", "rz-color-success")]
-    [InlineData(0.6, "var(--rz-warning)", "rz-color-warning")]
-    [InlineData(0.2, "var(--rz-danger)", "rz-color-danger")]
+    [InlineData(0.9, "var(--omni-u-text-success)", "omni-u-text-success")]
+    [InlineData(0.6, "var(--omni-u-text-warning)", "omni-u-text-warning")]
+    [InlineData(0.2, "var(--omni-u-text-danger)", "omni-u-text-danger")]
     public void CoverageColors_ReflectRisk(double rate, string color, string colorClass)
     {
         Assert.Equal(color, PipelineRunFormatting.CoverageColor(rate));
@@ -86,16 +88,16 @@ public sealed class PipelineRunFormattingBehaviorTests
     }
 
     [Theory]
-    [InlineData(4, "rz-color-success")]
-    [InlineData(8, "rz-color-warning")]
-    [InlineData(12, "rz-color-danger")]
+    [InlineData(4, "omni-u-text-success")]
+    [InlineData(8, "omni-u-text-warning")]
+    [InlineData(12, "omni-u-text-danger")]
     public void ComplexityColor_ReflectsRisk(double value, string expected)
         => Assert.Equal(expected, PipelineRunFormatting.ComplexityColorClass(value));
 
     [Theory]
-    [InlineData(4, "rz-color-success")]
-    [InlineData(20, "rz-color-warning")]
-    [InlineData(40, "rz-color-danger")]
+    [InlineData(4, "omni-u-text-success")]
+    [InlineData(20, "omni-u-text-warning")]
+    [InlineData(40, "omni-u-text-danger")]
     public void CrapColor_ReflectsRisk(double value, string expected)
         => Assert.Equal(expected, PipelineRunFormatting.CrapColorClass(value));
 
@@ -122,28 +124,6 @@ public sealed class PipelineRunFormattingBehaviorTests
         Assert.True(PipelineRunFormatting.StageRunsInParallel(overlapping));
         Assert.False(PipelineRunFormatting.StageRunsInParallel(sequential));
     }
-
-    [Theory]
-    [InlineData(TaskExecutionStatus.Success, PointStyle.Success, "check")]
-    [InlineData(TaskExecutionStatus.Failed, PointStyle.Danger, "close")]
-    [InlineData(TaskExecutionStatus.Timeout, PointStyle.Danger, "close")]
-    [InlineData(TaskExecutionStatus.Cancelled, PointStyle.Warning, "block")]
-    [InlineData(TaskExecutionStatus.Running, PointStyle.Info, "sync")]
-    [InlineData(TaskExecutionStatus.Pending, PointStyle.Light, "schedule")]
-    public void TimelinePresentation_MapsEveryExecutionState(
-        TaskExecutionStatus status,
-        PointStyle expectedStyle,
-        string expectedIcon)
-    {
-        Assert.Equal(expectedStyle, PipelineRunFormatting.StatusPointStyle(status));
-        Assert.Equal(expectedIcon, PipelineRunFormatting.StatusPointIcon(status));
-    }
-
-    [Theory]
-    [InlineData("1.1.57", "1.1.57")]
-    [InlineData("c-aad836e31883c38b4390a1f7d0a7b9c2d3e419fe4", "c-aad83…19fe4")]
-    public void TruncateMiddle_ShortensOnlyValuesThatWouldOverflowATile(string value, string expected)
-        => Assert.Equal(expected, PipelineRunFormatting.TruncateMiddle(value));
 
     [Fact]
     public void BuiltAppVersion_PrefersTheResolvedVariableAndFallsBackToAStepOutput()

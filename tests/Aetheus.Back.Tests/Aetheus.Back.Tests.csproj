@@ -1,15 +1,14 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="coverlet.MTP" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="NetArchTest.Rules" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +27,13 @@
     <Content Include="..\fixtures\agent-protocol\*.json"
              Link="fixtures\agent-protocol\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests that only exist on one OS: see tests/Shared/PlatformSpecificTests.cs. -->
+    <Compile Include="..\Shared\PlatformSpecificTests.cs" Link="Shared\PlatformSpecificTests.cs" />
+    <!-- PLAN-003 2.4: the SARIF the accessibility suite writes, fed here to the real parser. -->
+    <Compile Include="..\Aetheus.E2E\AccessibilitySarif.cs" Link="Shared\AccessibilitySarif.cs" />
   </ItemGroup>
 
 </Project>

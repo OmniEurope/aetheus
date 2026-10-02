@@ -8,11 +8,15 @@ import test from "node:test";
 
 const script = resolve("deploy/scripts/generate-artifact-provenance.mjs");
 
+// The fixture named `aetheus-back.tar` while the pipeline had long since moved to `.tar.gz`, so the
+// generator matched nothing and the docker-images category came back empty. The test failed for an
+// unknown number of commits because it was in the repository and listed in no pipeline (PLAN-006
+// lot 7); it is registered in CI's script-test list now, which is what keeps this from recurring.
 test("produces deterministic category sizes without file contents", () => {
   const workspace = mkdtempSync(join(tmpdir(), "aetheus-provenance-"));
   mkdirSync(join(workspace, ".pipeline-artifacts"), { recursive: true });
   mkdirSync(join(workspace, ".pipeline-artifacts", "agent-release"), { recursive: true });
-  writeFileSync(join(workspace, ".pipeline-artifacts", "aetheus-back.tar"), "secret-payload");
+  writeFileSync(join(workspace, ".pipeline-artifacts", "aetheus-back.tar.gz"), "secret-payload");
   writeFileSync(join(workspace, ".pipeline-artifacts", "source-commit"), "a".repeat(40));
   writeFileSync(join(workspace, ".pipeline-artifacts", "agent-release", "agent-release-manifest.json"),
     JSON.stringify({ archives: [{ fileName: "agent.tar.gz", sizeBytes: 123, sha256: "b".repeat(64) }] }));

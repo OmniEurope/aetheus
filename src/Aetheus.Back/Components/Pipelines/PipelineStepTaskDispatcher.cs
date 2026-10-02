@@ -5,7 +5,6 @@ using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -44,7 +43,10 @@ public sealed class PipelineStepTaskDispatcher(
     IPipelineStepTaskBuilder taskBuilder,
     IPipelineRunFinalizer finalizer,
     IPipelineTriggerStepCoordinator triggerSteps,
+    IPipelineBranchAdvanceStep branchAdvanceSteps,
     IPipelineAnalysisTaskFactory analysisTasks,
+    IPipelineDotnetTestTaskFactory dotnetTestTasks,
+    IPipelineGateStatusTaskFactory gateStatusTasks,
     IPipelineDeploymentTaskFactory deploymentTasks,
     IPipelineHostOperationTaskFactory hostTasks,
     IPipelineArtifactTaskFactory artifactTasks,
@@ -276,14 +278,34 @@ public sealed class PipelineStepTaskDispatcher(
                     runId, legServer, stepRun, stepDef, legVars, stageDef, stageIsContainer, ct)
                     .ConfigureAwait(false);
             case "analysis-gate":
-            {
-                // The factory validates and builds; finalizing a run stays here, with the engine.
-                var gateError = analysisTasks.CreateAnalysisGateTask(
-                    runId, legServer, stepRun, stepDef, legVars, stageDef);
-                if (gateError is null) return StepDispatchResult.Handled;
-                await finalizer.FailRunWithUnmatchedStagesAsync(runId, [gateError], [stepRun], ct).ConfigureAwait(false);
-                return StepDispatchResult.RunFinalized;
-            }
+                {
+                    // The factory validates and builds; finalizing a run stays here, with the engine.
+                    var gateError = analysisTasks.CreateAnalysisGateTask(
+                        runId, legServer, stepRun, stepDef, legVars, stageDef);
+                    if (gateError is null) return StepDispatchResult.Handled;
+                    await finalizer.FailRunWithUnmatchedStagesAsync(runId, [gateError], [stepRun], ct).ConfigureAwait(false);
+                    return StepDispatchResult.RunFinalized;
+                }
+            case "dotnet-test":
+                {
+                    // Same shape as analysis-gate: the factory validates and builds, failing the run
+                    // stays here with the engine.
+                    var testError = dotnetTestTasks.CreateDotnetTestTask(
+                        runId, legServer, stepRun, stepDef, legVars, stageDef);
+                    if (testError is null) return StepDispatchResult.Handled;
+                    await finalizer.FailRunWithUnmatchedStagesAsync(runId, [testError], [stepRun], ct)
+                        .ConfigureAwait(false);
+                    return StepDispatchResult.RunFinalized;
+                }
+            case "gate-status":
+                {
+                    var gateError = gateStatusTasks.CreateGateStatusTask(
+                        runId, legServer, stepRun, stepDef, legVars, stageDef);
+                    if (gateError is null) return StepDispatchResult.Handled;
+                    await finalizer.FailRunWithUnmatchedStagesAsync(runId, [gateError], [stepRun], ct)
+                        .ConfigureAwait(false);
+                    return StepDispatchResult.RunFinalized;
+                }
             case "publish-observability":
                 analysisTasks.CreateObservabilityTask(runId, legServer, stepRun, stepDef, legVars, secretKeys);
                 return StepDispatchResult.Handled;
@@ -310,6 +332,12 @@ public sealed class PipelineStepTaskDispatcher(
                 return StepDispatchResult.Handled;
             case "complexity":
                 analysisTasks.CreateComplexityTask(runId, legServer, stepRun, stepDef, legVars, stageDef);
+                return StepDispatchResult.Handled;
+            case "mutation":
+                analysisTasks.CreateMutationTask(runId, legServer, stepRun, stepDef, legVars, stageDef);
+                return StepDispatchResult.Handled;
+            case "artifacts":
+                analysisTasks.CreateCollectArtifactsTask(runId, legServer, stepRun, stepDef, legVars, stageDef);
                 return StepDispatchResult.Handled;
             case "restore-artifacts":
                 await artifactTasks.CreateRestoreArtifactsTaskAsync(
@@ -346,6 +374,9 @@ public sealed class PipelineStepTaskDispatcher(
             case "trigger":
                 await triggerSteps.CreateTriggerStepAsync(
                     runId, stepRun, stepDef, legVars, launcher, ct).ConfigureAwait(false);
+                return StepDispatchResult.Handled;
+            case "advance-branch":
+                await branchAdvanceSteps.ExecuteAsync(runId, stepRun, stepDef, legVars, ct).ConfigureAwait(false);
                 return StepDispatchResult.Handled;
             default:
                 taskBuilder.CreateCommandTask(

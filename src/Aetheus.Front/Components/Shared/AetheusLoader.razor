@@ -1,0 +1,8 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* Recette R-536 (decision of 2026-10-01): the product's one loading indicator is the package's logo
+   loader holding the Aetheus plane. OE floats the mark up and down, never turns it, and holds it still
+   under reduced motion (PLAN-003 D11); this wrapper only gives it the logo, the words and the layout. *@
+<OmniLogoLoader Size="Size" Label="@L["Loading"]" Class="@CssClass">
+    <img src="aetheus-icon.svg" alt="" class="aetheus-loader-logo" />
+</OmniLogoLoader>

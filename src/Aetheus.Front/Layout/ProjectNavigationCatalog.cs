@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Layout;
 
@@ -48,6 +46,10 @@ internal static class ProjectNavigationCatalog
         new("Git", "commit", "git"),
         new("Edit", "settings", "edit", ProjectNavigationAccess.ProjectWrite)
     ];
+
+    /// <summary>Recette R-219: the icon of a section, shown before its title; null for an unknown slug.</summary>
+    public static string? IconFor(string slug) =>
+        Items.FirstOrDefault(item => string.Equals(item.Slug, slug, StringComparison.OrdinalIgnoreCase))?.Icon;
 
     public static IEnumerable<ProjectNavigationItem> VisibleItems(
         PermissionService permissions,

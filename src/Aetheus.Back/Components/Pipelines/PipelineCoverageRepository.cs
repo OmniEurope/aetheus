@@ -1,10 +1,37 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Linq.Expressions;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 internal sealed class PipelineCoverageRepository(AppDbContext db)
 {
+    private static readonly string[] ComplexityKeys =
+        ["complexity.cyclomatic.avg", "complexity.cyclomatic.max", "complexity.crap.avg"];
+
+    /// <summary>Recette R-484: the tests of a run counted by outcome in the database.</summary>
+    public async Task<PipelineTestResultSummaryDto?> GetTestResultSummaryAsync(int runId, CancellationToken ct = default)
+    {
+        var outcomes = await db.TestResults
+            .AsNoTracking()
+            .Where(t => t.PipelineRunId == runId)
+            .GroupBy(t => t.Outcome)
+            .Select(group => new { Outcome = group.Key, Count = group.Count(), DurationMs = group.Sum(t => t.DurationMs) })
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (outcomes.Count == 0) return null;
+
+        int Count(TestOutcome outcome) => outcomes.Where(item => item.Outcome == outcome).Sum(item => item.Count);
+        return new PipelineTestResultSummaryDto
+        {
+            TotalTests = outcomes.Sum(item => item.Count),
+            Passed = Count(TestOutcome.Passed),
+            Failed = Count(TestOutcome.Failed),
+            Skipped = Count(TestOutcome.Skipped),
+            Errors = Count(TestOutcome.Error),
+            TotalDurationMs = outcomes.Sum(item => item.DurationMs)
+        };
+    }
+
     public async Task<List<CoverageResult>> GetCoverageResultsAsync(int runId, CancellationToken ct = default)
     {
         return await db.CoverageResults
@@ -28,16 +55,7 @@ internal sealed class PipelineCoverageRepository(AppDbContext db)
         var pipelineId = await ResolvePipelineIdAsync(runId, ct).ConfigureAwait(false);
         if (pipelineId is null) return [];
 
-        var rows = await db.CoverageResults.AsNoTracking()
-            .Where(c => c.PipelineRun.PipelineId == pipelineId)
-            .OrderByDescending(c => c.PipelineRun.StartedAt)
-            .ThenByDescending(c => c.LinesValid)
-            .ThenByDescending(c => c.CreatedAt)
-            .Select(c => new CoverageTrendRow(c.PipelineRunId, c.PipelineRun.StartedAt, c.LineRate, c.BranchRate))
-            .Take(take * 4)
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        return CollapseCoverageRows(rows, take);
+        return await GetCoverageTrendRowsAsync(c => c.PipelineRun.PipelineId == pipelineId, take, ct).ConfigureAwait(false);
     }
 
     // S-FEAT-C4R2: complexity/CRAP trend for the pipeline behind <paramref name="runId"/> - one point
@@ -48,24 +66,30 @@ internal sealed class PipelineCoverageRepository(AppDbContext db)
         var pipelineId = await ResolvePipelineIdAsync(runId, ct).ConfigureAwait(false);
         if (pipelineId is null) return [];
 
-        var keys = new[] { "complexity.cyclomatic.avg", "complexity.cyclomatic.max", "complexity.crap.avg" };
-        var rows = await db.RunMetrics.AsNoTracking()
-            .Where(m => m.PipelineRun.PipelineId == pipelineId && keys.Contains(m.Key))
-            .OrderByDescending(m => m.PipelineRun.StartedAt)
-            .ThenByDescending(m => m.CreatedAt)
-            .Select(m => new ComplexityMetricRow(m.PipelineRunId, m.PipelineRun.StartedAt, m.Key, m.Value))
-            .Take(take * 12)
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        return CollapseComplexityRows(rows, take);
+        return await GetComplexityTrendRowsAsync(m => m.PipelineRun.PipelineId == pipelineId, take, ct).ConfigureAwait(false);
     }
 
     // Archived module-finalisation plan, section 4.4: latest coverage result of each recent run across
     // ALL pipelines of the project, oldest->newest. Same fetch-then-dedupe shape as the per-pipeline trend.
-    public async Task<List<CoverageTrendRow>> GetProjectCoverageTrendAsync(int projectId, int take, CancellationToken ct = default)
+    public Task<List<CoverageTrendRow>> GetProjectCoverageTrendAsync(int projectId, int take, CancellationToken ct = default) =>
+        GetCoverageTrendRowsAsync(c => c.PipelineRun.Pipeline.ProjectId == projectId, take, ct);
+
+    // Archived module-finalisation plan, section 4.4: complexity/CRAP trend across project pipelines.
+    public Task<List<ComplexityTrendRow>> GetProjectComplexityTrendAsync(int projectId, int take, CancellationToken ct = default) =>
+        GetComplexityTrendRowsAsync(m => m.PipelineRun.Pipeline.ProjectId == projectId, take, ct);
+
+    private Task<int?> ResolvePipelineIdAsync(int runId, CancellationToken ct) =>
+        db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == runId)
+            .Select(run => (int?)run.PipelineId)
+            .FirstOrDefaultAsync(ct);
+
+    // Shared fetch of the per-pipeline and per-project trends: only the scope predicate differs.
+    private async Task<List<CoverageTrendRow>> GetCoverageTrendRowsAsync(
+        Expression<Func<CoverageResult, bool>> scope, int take, CancellationToken ct)
     {
         var rows = await db.CoverageResults.AsNoTracking()
-            .Where(c => c.PipelineRun.Pipeline.ProjectId == projectId)
+            .Where(scope)
             .OrderByDescending(c => c.PipelineRun.StartedAt)
             .ThenByDescending(c => c.LinesValid)
             .ThenByDescending(c => c.CreatedAt)
@@ -76,12 +100,12 @@ internal sealed class PipelineCoverageRepository(AppDbContext db)
         return CollapseCoverageRows(rows, take);
     }
 
-    // Archived module-finalisation plan, section 4.4: complexity/CRAP trend across project pipelines.
-    public async Task<List<ComplexityTrendRow>> GetProjectComplexityTrendAsync(int projectId, int take, CancellationToken ct = default)
+    private async Task<List<ComplexityTrendRow>> GetComplexityTrendRowsAsync(
+        Expression<Func<RunMetric, bool>> scope, int take, CancellationToken ct)
     {
-        var keys = new[] { "complexity.cyclomatic.avg", "complexity.cyclomatic.max", "complexity.crap.avg" };
         var rows = await db.RunMetrics.AsNoTracking()
-            .Where(m => m.PipelineRun.Pipeline.ProjectId == projectId && keys.Contains(m.Key))
+            .Where(scope)
+            .Where(m => ComplexityKeys.Contains(m.Key))
             .OrderByDescending(m => m.PipelineRun.StartedAt)
             .ThenByDescending(m => m.CreatedAt)
             .Select(m => new ComplexityMetricRow(m.PipelineRunId, m.PipelineRun.StartedAt, m.Key, m.Value))
@@ -90,12 +114,6 @@ internal sealed class PipelineCoverageRepository(AppDbContext db)
 
         return CollapseComplexityRows(rows, take);
     }
-
-    private Task<int?> ResolvePipelineIdAsync(int runId, CancellationToken ct) =>
-        db.PipelineRuns.AsNoTracking()
-            .Where(run => run.Id == runId)
-            .Select(run => (int?)run.PipelineId)
-            .FirstOrDefaultAsync(ct);
 
     private static List<CoverageTrendRow> CollapseCoverageRows(
         IEnumerable<CoverageTrendRow> rows, int take)
@@ -207,6 +225,57 @@ internal sealed class PipelineCoverageRepository(AppDbContext db)
     {
         return await db.Pipelines
             .FirstOrDefaultAsync(p => p.Name == name && p.ProjectId == projectId, ct).ConfigureAwait(false);
+    }
+
+    public async Task<List<(int Id, string Name, string Yaml)>> GetPipelineDefinitionsForProjectAsync(int projectId, CancellationToken ct = default)
+    {
+        var rows = await db.Pipelines
+            .AsNoTracking()
+            .Where(pipeline => pipeline.ProjectId == projectId)
+            .OrderBy(pipeline => pipeline.Name)
+            .Select(pipeline => new { pipeline.Id, pipeline.Name, pipeline.YamlDefinition })
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. rows.Select(row => (row.Id, row.Name, row.YamlDefinition))];
+    }
+
+    public async Task<List<StepTimingRow>> GetRecentSuccessfulStepTimingsAsync(
+        int pipelineId, int runId, int take, CancellationToken ct = default)
+    {
+        // "Before" is measured against the viewed run's own start, so an old run is compared with
+        // what came before it, not with runs that did not exist yet when it ran.
+        var current = await db.PipelineRuns
+            .AsNoTracking()
+            .Where(run => run.Id == runId && run.PipelineId == pipelineId)
+            .Select(run => new { run.StartedAt })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (current is null) return [];
+
+        var sampledRuns = db.PipelineRuns
+            .AsNoTracking()
+            .Where(run => run.PipelineId == pipelineId
+                && run.Id != runId
+                && run.Status == PipelineStatus.Success
+                && run.StartedAt < current.StartedAt)
+            .OrderByDescending(run => run.StartedAt)
+            .ThenByDescending(run => run.Id)
+            .Take(take)
+            .Select(run => run.Id);
+
+        return await db.PipelineStepRuns
+            .AsNoTracking()
+            .Where(step => sampledRuns.Contains(step.PipelineRunId)
+                && step.StartedAt != null
+                && step.CompletedAt != null)
+            .Select(step => new StepTimingRow(
+                step.PipelineRunId,
+                step.PipelineRun.StartedAt,
+                step.StageName,
+                step.StepName,
+                step.MatrixLeg,
+                step.IsSystem,
+                step.StartedAt!.Value,
+                step.CompletedAt!.Value))
+            .ToListAsync(ct).ConfigureAwait(false);
     }
 }
 

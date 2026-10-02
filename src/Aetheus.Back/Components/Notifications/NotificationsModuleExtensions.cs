@@ -7,6 +7,8 @@ public static class NotificationsModuleExtensions
     {
         services.AddScoped<INotificationRepository, NotificationRepository>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IUserNotificationRepository, UserNotificationRepository>();
+        services.AddScoped<IUserNotificationService, UserNotificationService>();
         return services;
     }
 }

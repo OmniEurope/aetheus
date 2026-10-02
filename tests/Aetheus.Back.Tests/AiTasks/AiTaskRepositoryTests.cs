@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.AiTasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 
@@ -93,6 +92,24 @@ public sealed class AiTaskRepositoryTests : IDisposable
         Assert.Equal(["alpha", "beta"], first.Items.Select(profile => profile.Name));
         Assert.Equal(["gamma"], second.Items.Select(profile => profile.Name));
         Assert.Equal(3, first.Total);
+    }
+
+    [Fact]
+    public async Task GetProfilesPageAsync_SortsByBinaryBeforePaging()
+    {
+        _db.AiRunnerProfiles.AddRange(
+            new AiRunnerProfile { Id = 1, Name = "alpha", OrganizationId = 1, Binary = "a" },
+            new AiRunnerProfile { Id = 2, Name = "beta", OrganizationId = 1, Binary = "z" },
+            new AiRunnerProfile { Id = 3, Name = "gamma", OrganizationId = 1, Binary = "m" });
+        await SaveAsync();
+
+        var first = await _repository.GetProfilesPageAsync(null, 1, 2, Ct,
+            sortBy: "Binary", sortDescending: true);
+        var second = await _repository.GetProfilesPageAsync(null, 2, 2, Ct,
+            sortBy: "Binary", sortDescending: true);
+
+        Assert.Equal(["beta", "gamma"], first.Items.Select(profile => profile.Name));
+        Assert.Equal(["alpha"], second.Items.Select(profile => profile.Name));
     }
 
     [Fact]
@@ -225,6 +242,25 @@ public sealed class AiTaskRepositoryTests : IDisposable
 
         Assert.Equal(3, total);
         Assert.Equal(["review-c"], items.Select(definition => definition.Name));
+    }
+
+    [Fact]
+    public async Task GetDefinitionsPageAsync_SortsByEnabledBeforePaging()
+    {
+        _db.AiRunnerProfiles.Add(Profile(1, "claude"));
+        _db.AiTaskDefinitions.AddRange(
+            Definition(1, "alpha", enabled: false),
+            Definition(2, "beta", enabled: true),
+            Definition(3, "gamma", enabled: true));
+        await SaveAsync();
+
+        var first = await _repository.GetDefinitionsPageAsync(null, 1, 2,
+            null, null, null, null, Ct, sortBy: "Enabled", sortDescending: true);
+        var second = await _repository.GetDefinitionsPageAsync(null, 2, 2,
+            null, null, null, null, Ct, sortBy: "Enabled", sortDescending: true);
+
+        Assert.Equal(["beta", "gamma"], first.Items.Select(definition => definition.Name));
+        Assert.Equal(["alpha"], second.Items.Select(definition => definition.Name));
     }
 
     [Fact]

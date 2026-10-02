@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Alerts;
-using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,7 +20,6 @@ public sealed class StorageAlertProvisioningServiceTests
             options.UseInMemoryDatabase(databaseName));
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IAlertRepository, AlertRepository>();
-        services.AddScoped<IServerRepository, ServerRepository>();
         await using var provider = services.BuildServiceProvider();
 
         await using (var seedScope = provider.CreateAsyncScope())
@@ -77,7 +74,6 @@ public sealed class StorageAlertProvisioningServiceTests
         services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(databaseName));
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IAlertRepository, AlertRepository>();
-        services.AddScoped<IServerRepository, ServerRepository>();
         await using var provider = services.BuildServiceProvider();
         int serverId;
         await using (var scope = provider.CreateAsyncScope())

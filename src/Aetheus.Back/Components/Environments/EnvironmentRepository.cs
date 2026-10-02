@@ -8,7 +8,7 @@ public class EnvironmentRepository(AppDbContext db) : IEnvironmentRepository
 {
     public async Task<(List<Environment> Items, int TotalCount)> GetEnvironmentsPagedAsync(
         string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false)
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.Environments.AsNoTracking().AsQueryable();
 
@@ -20,6 +20,9 @@ public class EnvironmentRepository(AppDbContext db) : IEnvironmentRepository
 
         if (projectId.HasValue)
             query = query.Where(e => e.ProjectId == projectId.Value);
+
+        // Recette R-224: the header filters, after the scope and before the count.
+        query = EnvironmentListQuery.Columns.ApplyFilters(query, columnFilters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 

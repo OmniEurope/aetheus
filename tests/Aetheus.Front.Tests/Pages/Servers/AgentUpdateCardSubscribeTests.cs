@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
+using Aetheus.Front.Components.Servers;
 using Bunit;
 using Microsoft.AspNetCore.SignalR.Client;
 

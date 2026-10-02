@@ -2,7 +2,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Aetheus.Front.Services;
 
 namespace Aetheus.Front.Tests;
 

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using Aetheus.Tests.Shared;
 
 namespace Aetheus.Agent.Core.Tests;
 
 public sealed class WindowsInstallerPathSafetyTests
 {
-    [Fact]
-    [Trait("Platform", "windows")]
+    [PlatformFact("windows")]
     public async Task Validator_AcceptsSeparateApplicationAndDataDirectories()
     {
         var root = Path.Combine(Path.GetTempPath(), $"aetheus-path-safety-{Guid.NewGuid():N}");
@@ -17,12 +17,11 @@ public sealed class WindowsInstallerPathSafetyTests
         Assert.Contains("PATHS_VALID", result.Output, StringComparison.Ordinal);
     }
 
-    [Theory]
+    [PlatformTheory("windows")]
     [InlineData(@"C:\", @"C:\ProgramData\AetheusAgent")]
     [InlineData(@"C:\Program Files\AetheusAgent", @"C:\")]
     [InlineData(@"C:\Windows\AetheusAgent", @"C:\ProgramData\AetheusAgent")]
     [InlineData(@"C:\Program Files\AetheusAgent", @"C:\Program Files\AetheusAgent\work")]
-    [Trait("Platform", "windows")]
     public async Task Validator_RejectsRootsSystemDirectoriesAndOverlaps(string installDir, string workDir)
     {
         var result = await RunAsync(installDir, workDir);

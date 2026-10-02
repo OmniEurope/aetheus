@@ -27,12 +27,13 @@ public class ReleaseService(
     IPipelineRepository? pipelineRepo = null,
     IDbTransactionScope? transaction = null) : IReleaseService
 {
-    public async Task<PaginatedResult<ReleaseDto>> GetReleasesAsync(int? projectId, PaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default)
+    public async Task<PaginatedResult<ReleaseDto>> GetReleasesAsync(int? projectId, PaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default, bool deployableOnly = false)
     {
         var (page, pageSize) = request.Normalize();
+        var (columnFilters, releaseIds) = await ListFilters.ResolveAsync(request.Filters, projectId, accessibleIds, null, ct).ConfigureAwait(false);
         var (items, totalCount) = await repo.GetReleasesPagedAsync(
             request.Search, projectId, page, pageSize, accessibleIds, ct,
-            request.SortBy, request.SortDescending).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, deployableOnly, columnFilters, releaseIds).ConfigureAwait(false);
 
         return new PaginatedResult<ReleaseDto>
         {
@@ -101,7 +102,8 @@ public class ReleaseService(
                 ProjectId = projectId,
                 Version = version,
                 BranchName = branchName,
-                Status = ReleaseStatus.Detected
+                Status = ReleaseStatus.Detected,
+                DetectedAt = timeProvider.GetUtcNow().UtcDateTime
             }, ct).ConfigureAwait(false);
         }
     }
@@ -252,7 +254,7 @@ public class ReleaseService(
             throw new BadRequestException(rollback.FailureReason);
         }
         rollback.PipelineRunId = run.Id;
-        if (run.Status is PipelineStatus.Success or PipelineStatus.Failed or PipelineStatus.Cancelled)
+        if (run.Status.IsTerminal())
         {
             rollback.Status = RollbackStatus.Failed;
             rollback.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -296,6 +298,13 @@ public class ReleaseService(
         if (artifactPipelineRunId.HasValue && artifactRetention is null)
             throw new BadRequestException("Artifact retention is unavailable; refusing to publish a release without a retained payload.");
 
+        // F1: hydrate the candidate's sealed assurance verdict from the SAME run's own step outputs
+        // (the AssuranceSeal stage publishes CANDIDATE_ASSURANCE_GRADE/CANDIDATE_DEPLOYABLE/
+        // CANDIDATE_BLOCKING_TESTS before the Candidate stage below it calls this endpoint), so the
+        // release row carries it without a client round-trip. Null on any pipeline that publishes no
+        // such verdict (e.g. a legacy release).
+        var assuranceVerdict = await ReleaseAssuranceVerdictReader.ReadAsync(pipelineRepo, pipelineRunId, ct).ConfigureAwait(false);
+
         async Task<(ReleaseDto Dto, bool Created)> PersistAsync()
         {
             var deployedReleases = deployed
@@ -308,15 +317,21 @@ public class ReleaseService(
 
             var releaseStatus = deployed ? ReleaseStatus.Deployed : ReleaseStatus.Published;
             var existingByVersion = await repo.FindByVersionAsync(projectId, version, ct).ConfigureAwait(false);
+            if (ReleaseRunOutcome.IsLiveBeforeThisRun(existingByVersion, deployed, pipelineRunId))
+                return (await MapToDtoAsync(existingByVersion, ct).ConfigureAwait(false), false);
             if (existingByVersion is not null)
             {
+                ReleaseRunOutcome.RecordSourceIdentity(existingByVersion, deployed, commitHash, tagName, branchName);
                 existingByVersion.Status = releaseStatus;
                 existingByVersion.PublishedAt = timeProvider.GetUtcNow().UtcDateTime;
                 existingByVersion.PipelineRunId = pipelineRunId;
                 existingByVersion.Changelog = changelog;
-                if (commitHash is not null) existingByVersion.CommitHash = commitHash;
-                if (tagName is not null) existingByVersion.TagName = tagName;
-                if (branchName is not null) existingByVersion.BranchName = branchName;
+                if (assuranceVerdict is not null)
+                {
+                    existingByVersion.AssuranceGrade = assuranceVerdict.Grade;
+                    existingByVersion.Deployable = assuranceVerdict.Deployable;
+                    existingByVersion.BlockingTestCount = assuranceVerdict.BlockingTestCount;
+                }
                 await repo.SaveChangesAsync(ct).ConfigureAwait(false);
                 await LinkRunArtifactsToReleaseAsync(
                     existingByVersion, retainedArtifactRunId, validatedArtifacts, ct).ConfigureAwait(false);
@@ -328,8 +343,12 @@ public class ReleaseService(
             }
 
             var maxBuildNumber = await repo.GetMaxBuildNumberAsync(projectId, ct).ConfigureAwait(false);
+            var now = timeProvider.GetUtcNow().UtcDateTime;
             var release = new Release
             {
+                // The release comes to be here: never leaving DetectedAt at its default, which every
+                // screen reading it rendered as 01/01/0001.
+                DetectedAt = now,
                 ProjectId = projectId,
                 Version = version,
                 BranchName = branchName ?? string.Empty,
@@ -339,7 +358,10 @@ public class ReleaseService(
                 CommitHash = commitHash,
                 TagName = tagName ?? $"v{version}",
                 BuildNumber = maxBuildNumber + 1,
-                PublishedAt = timeProvider.GetUtcNow().UtcDateTime
+                PublishedAt = now,
+                AssuranceGrade = assuranceVerdict?.Grade,
+                Deployable = assuranceVerdict?.Deployable,
+                BlockingTestCount = assuranceVerdict?.BlockingTestCount
             };
 
             await repo.AddReleaseAsync(release, ct).ConfigureAwait(false);
@@ -412,14 +434,7 @@ public class ReleaseService(
         }
 
         var release = await repo.FindByPipelineRunIdAsync(pipelineRunId, ct).ConfigureAwait(false);
-        if (release is null) return;
-
-        release.Status = release.Status == ReleaseStatus.Deployed
-            ? ReleaseStatus.Deployed
-            : status == PipelineStatus.Success ? ReleaseStatus.Published : ReleaseStatus.Failed;
-        if (release.Status == ReleaseStatus.Published)
-            release.PublishedAt = timeProvider.GetUtcNow().UtcDateTime;
-
+        if (release is null || !ReleaseRunOutcome.Apply(release, status, timeProvider.GetUtcNow().UtcDateTime)) return;
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -527,6 +542,9 @@ public class ReleaseService(
         BuildNumber = r.BuildNumber,
         CommitHash = r.CommitHash,
         TagName = r.TagName,
+        AssuranceGrade = r.AssuranceGrade,
+        Deployable = r.Deployable,
+        BlockingTestCount = r.BlockingTestCount,
         RepositoryUrl = r.Project?.RepositoryUrl,
         Artifacts = r.Artifacts.Select(GitGraphMapper.ToLink).ToList(),
         Commits = r.Commits.Select(GitGraphMapper.ToLink).ToList(),
@@ -551,9 +569,9 @@ public class ReleaseService(
     {
         ArgumentNullException.ThrowIfNull(request);
         var (page, pageSize) = request.Normalize();
-        var (releases, total) = await repo
-            .GetReleasesForServerPagedAsync(serverId, page, pageSize, ct, request.SortBy, request.SortDescending)
-            .ConfigureAwait(false);
+        var (columnFilters, releaseIds) = await ListFilters.ResolveAsync(request.Filters, null, null, serverId, ct).ConfigureAwait(false);
+        var (releases, total) = await repo.GetReleasesForServerPagedAsync(
+            serverId, page, pageSize, ct, request.SortBy, request.SortDescending, columnFilters, releaseIds).ConfigureAwait(false);
         return new PaginatedResult<ReleaseDto>
         {
             Items = await MapToDtosAsync(releases, ct).ConfigureAwait(false),
@@ -563,13 +581,18 @@ public class ReleaseService(
         };
     }
 
+    // Recette R-224: the header filters and filter values of the releases list.
+    private ReleaseListFilters ListFilters => new(repo, pipelineRepo);
+    public Task<ReleaseFilterValuesDto> GetReleaseFilterValuesAsync(int? projectId, List<int>? accessibleIds, int? serverId, CancellationToken ct = default)
+        => ListFilters.ValuesAsync(projectId, accessibleIds, serverId, ct);
+
     private async Task<ReleaseDto> MapToDtoAsync(Release release, CancellationToken ct)
         => (await MapToDtosAsync([release], ct).ConfigureAwait(false))[0];
 
     private async Task<List<ReleaseDto>> MapToDtosAsync(
         IReadOnlyCollection<Release> releases, CancellationToken ct)
     {
-        var mapped = releases.Select(MapToDto).ToList();
-        return await ReleaseSourcePipelineEnricher.EnrichAsync(mapped, pipelineRepo, ct).ConfigureAwait(false);
+        var mapped = await ReleaseSourcePipelineEnricher.EnrichAsync(releases.Select(MapToDto).ToList(), pipelineRepo, ct).ConfigureAwait(false);
+        return await ReleaseRedeployEnricher.EnrichAsync(mapped, repo, ct).ConfigureAwait(false);
     }
 }

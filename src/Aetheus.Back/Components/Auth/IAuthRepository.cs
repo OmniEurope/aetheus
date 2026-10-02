@@ -7,7 +7,13 @@ public interface IAuthRepository
 {
     Task<RegistrationToken?> FindValidRegistrationTokenAsync(string token, CancellationToken ct = default);
 
+    /// <summary>Finds a server by hostname in any organization, retired servers included.</summary>
     Task<Server?> FindServerByHostnameAsync(string hostname, CancellationToken ct = default);
+
+    /// <summary>PLAN-004 R-11: finds a server of <paramref name="organizationId"/> (retired included)
+    /// that recorded this machine identity hash; <paramref name="hostname"/> breaks ties.</summary>
+    Task<Server?> FindServerByMachineIdHashAsync(
+        int organizationId, string machineIdHash, string hostname, CancellationToken ct = default);
 
     Task<User?> FindUserWithRolesAsync(string username, CancellationToken ct = default);
     Task<User?> FindUserByIdWithRolesAsync(int userId, CancellationToken ct = default);
@@ -69,7 +75,13 @@ public interface IAuthRepository
     // --- Refresh Tokens (F-012) ---
     Task AddRefreshTokenAsync(RefreshToken token, CancellationToken ct = default);
     Task<RefreshToken?> FindRefreshTokenByHashAsync(string tokenHash, CancellationToken ct = default);
-    Task RevokeRefreshTokenAsync(int tokenId, int? replacedById, CancellationToken ct = default);
+    /// <summary>Untracked current state of one refresh token (re-read after a lost rotation race).</summary>
+    Task<RefreshToken?> FindRefreshTokenStateAsync(int tokenId, CancellationToken ct = default);
+    /// <summary>
+    /// Revokes the token only while it is still active; false when it was already revoked (a concurrent
+    /// rotation won, or a logout revoked it) or does not exist. Commits immediately.
+    /// </summary>
+    Task<bool> RevokeRefreshTokenAsync(int tokenId, int? replacedById, CancellationToken ct = default);
     Task RevokeAllUserRefreshTokensAsync(int userId, CancellationToken ct = default);
     Task DeleteExpiredRefreshTokensAsync(int userId, CancellationToken ct = default);
     Task<int> DeleteAllExpiredRefreshTokensAsync(DateTime utcNow, CancellationToken ct = default);

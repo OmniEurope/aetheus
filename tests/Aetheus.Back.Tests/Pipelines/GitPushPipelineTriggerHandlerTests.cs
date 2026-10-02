@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Git.Events;
 using Aetheus.Back.Components.Pipelines;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -31,6 +29,9 @@ public sealed class GitPushPipelineTriggerHandlerTests
 
     private static GitPushProcessedEvent Push(string reference, string commit, string defaultBranch = "main") =>
         new(7, 1, "repo", "Repo", defaultBranch, "/srv/git/repo.git", [new GitRefUpdate(reference, commit)]);
+
+    private static GitPushProcessedEvent Push(string reference, string oldCommit, string commit, string defaultBranch) =>
+        new(7, 1, "repo", "Repo", defaultBranch, "/srv/git/repo.git", [new GitRefUpdate(reference, commit, oldCommit)]);
 
     /// <summary>
     /// Definitions are synchronised from the pushed commit BEFORE anything is triggered, so a push
@@ -84,8 +85,11 @@ public sealed class GitPushPipelineTriggerHandlerTests
             """;
         var pipeline = new PipelineDto
         {
-            Id = 24, Name = "candidate", ProjectId = 7,
-            TriggerType = PipelineTriggerType.Webhook, YamlDefinition = yaml
+            Id = 24,
+            Name = "candidate",
+            ProjectId = 7,
+            TriggerType = PipelineTriggerType.Webhook,
+            YamlDefinition = yaml
         };
         var preparation = new PipelineRunPreparation
         {
@@ -102,9 +106,8 @@ public sealed class GitPushPipelineTriggerHandlerTests
                 pipeline.Id, "GitPush", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>())
             .Returns(preparation);
         _runService.CancelRunAsync(415, Arg.Any<CancellationToken>()).Returns(true);
-        _runService.TriggerPreparedRunAsync(
-                preparation, Arg.Any<Dictionary<string, string>>(), Arg.Any<Dictionary<string, string>?>(),
-                Arg.Any<CancellationToken>(), Arg.Any<string?>())
+        _runService.TriggerPreparedAutomatedRunAsync(
+                preparation, "GitPush", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>())
             .Returns(new PipelineRunDto { Id = 416, PipelineId = pipeline.Id });
 
         await _sut.HandleAsync(Push("refs/heads/develop", commit, "develop"), TestContext.Current.CancellationToken);
@@ -116,9 +119,9 @@ public sealed class GitPushPipelineTriggerHandlerTests
                 && variables["AETHEUS_SOURCE_COMMIT"] == commit),
             Arg.Any<CancellationToken>());
         await _runService.Received(1).CancelRunAsync(415, Arg.Any<CancellationToken>());
-        await _runService.Received(1).TriggerPreparedRunAsync(
-            preparation, Arg.Any<Dictionary<string, string>>(), Arg.Any<Dictionary<string, string>?>(),
-            Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        // The automated entry point: a refused replacement leaves a failed run carrying the reason.
+        await _runService.Received(1).TriggerPreparedAutomatedRunAsync(
+            preparation, "GitPush", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
         await _runService.DidNotReceive().TriggerAutomatedRunAsync(
             Arg.Any<int>(), Arg.Any<string>(), Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>());
     }
@@ -140,5 +143,91 @@ public sealed class GitPushPipelineTriggerHandlerTests
             _sut.HandleAsync(Push("refs/heads/main", "abc"), TestContext.Current.CancellationToken));
 
         Assert.Null(exception);
+    }
+
+    // --- PLAN-006 lot 8.5: paths_ignore is evaluated on the wiring, not only on the pure filter. A
+    // skipped run is invisible, so every uncertainty here must build (fail-open), and only a push whose
+    // full range is known and entirely ignored may skip. ---
+
+    private const string DocsOnlyYaml = """
+        name: candidate
+        trigger: webhook
+        branches:
+          - develop
+        paths_ignore:
+          - "**/*.md"
+        stages: []
+        """;
+
+    private PipelineDto DocsOnlyPipeline() => new()
+    {
+        Id = 24,
+        Name = "candidate",
+        ProjectId = 7,
+        TriggerType = PipelineTriggerType.Webhook,
+        YamlDefinition = DocsOnlyYaml
+    };
+
+    private void StubNoDefinitionSync() =>
+        _cli.GetTreeAsync(Arg.Any<string>(), Arg.Any<string>(), ".pipeline", Arg.Any<CancellationToken>())
+            .Returns([]);
+
+    [Fact]
+    public async Task Handle_PathsIgnore_PushTouchingOnlyIgnoredPaths_SkipsTheRun()
+    {
+        const string oldCommit = "0000000000000000000000000000000000000a";
+        const string newCommit = "0000000000000000000000000000000000000b";
+        StubNoDefinitionSync();
+        _pipelineService.GetWebhookTriggeredPipelinesForProjectAsync(7, Arg.Any<CancellationToken>())
+            .Returns([DocsOnlyPipeline()]);
+        _cli.GetChangedPathsAsync("/srv/git/repo.git", oldCommit, newCommit, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<string>?)["README.md", "docs/guide.md"]);
+
+        await _sut.HandleAsync(
+            Push("refs/heads/develop", oldCommit, newCommit, "develop"), TestContext.Current.CancellationToken);
+
+        await _runService.DidNotReceive().TriggerAutomatedRunAsync(
+            Arg.Any<int>(), Arg.Any<string>(), Arg.Any<Dictionary<string, string>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PathsIgnore_NewBranchHasNoRangeToDiff_StillTriggers()
+    {
+        // git announces all-zero as the previous id for a branch this push creates: there is no range
+        // to diff, so the push must build rather than being silently treated as "nothing changed".
+        const string allZero = "0000000000000000000000000000000000000000";
+        const string newCommit = "0000000000000000000000000000000000000b";
+        StubNoDefinitionSync();
+        _pipelineService.GetWebhookTriggeredPipelinesForProjectAsync(7, Arg.Any<CancellationToken>())
+            .Returns([DocsOnlyPipeline()]);
+        _pipelineService.HasActiveRunAsync(24, Arg.Any<CancellationToken>()).Returns(false);
+
+        await _sut.HandleAsync(
+            Push("refs/heads/develop", allZero, newCommit, "develop"), TestContext.Current.CancellationToken);
+
+        await _cli.DidNotReceive().GetChangedPathsAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _runService.Received(1).TriggerAutomatedRunAsync(
+            24, "GitPush", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PathsIgnore_UnreadableDiff_StillTriggers()
+    {
+        // A repository whose diff cannot be read is unknown, not unchanged: the run must still happen.
+        const string oldCommit = "0000000000000000000000000000000000000a";
+        const string newCommit = "0000000000000000000000000000000000000b";
+        StubNoDefinitionSync();
+        _pipelineService.GetWebhookTriggeredPipelinesForProjectAsync(7, Arg.Any<CancellationToken>())
+            .Returns([DocsOnlyPipeline()]);
+        _pipelineService.HasActiveRunAsync(24, Arg.Any<CancellationToken>()).Returns(false);
+        _cli.GetChangedPathsAsync("/srv/git/repo.git", oldCommit, newCommit, Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<string>?>(_ => throw new InvalidOperationException("git worktree busy"));
+
+        await _sut.HandleAsync(
+            Push("refs/heads/develop", oldCommit, newCommit, "develop"), TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).TriggerAutomatedRunAsync(
+            24, "GitPush", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
     }
 }

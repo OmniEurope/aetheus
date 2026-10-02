@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -148,6 +145,7 @@ public sealed class QualityGatePolicyEditorReadOnlyTests : BunitContext
         var cut = RenderEditor(canEdit: false, Inherited());
 
         Assert.Contains("analysis_preset: recommended", cut.Markup, StringComparison.Ordinal);
-        Assert.Contains("QualityGateCopyYaml", cut.Markup, StringComparison.Ordinal);
+        // R-516: OE's code block, with its copy button in the header.
+        Assert.NotNull(cut.Find(".omni-code-block.quality-gate-yaml-panel figcaption button"));
     }
 }

@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
 /// <summary>
 /// Behavioural tests for ProjectServerDialog.razor.cs - OnSubmit/OnCancel assert the
-/// real dialog-close payload (captured by a spy DialogService), OnTypeChanged /
+/// real dialog-close payload (captured by a spy OmniDialogService), OnTypeChanged /
 /// OnAgentServerSelected assert the mutated state, and the edit-mode template assertions
 /// check that the type/agent selectors are actually hidden.
 /// </summary>
@@ -35,16 +32,16 @@ public class ProjectServerDialogSubmitTests : BunitContext
     ];
 
     /// <summary>
-    /// Registers a spy DialogService (lazy factory so the provider isn't built early) that
-    /// records the Close payload. The dialog injects DialogService, so OnSubmit/OnCancel land
+    /// Registers a spy OmniDialogService (lazy factory so the provider isn't built early) that
+    /// records the Close payload. The dialog injects OmniDialogService, so OnSubmit/OnCancel land
     /// on the spy and we can assert exactly what was sent back to the caller.
     /// </summary>
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     private IRenderedComponent<ProjectServerDialog> RenderDialog(
         ProjectServerType type = ProjectServerType.ExternalHost,
@@ -258,7 +255,7 @@ public class ProjectServerDialogSubmitTests : BunitContext
         Assert.DoesNotContain("ExternalHost", cut.Markup);
         Assert.DoesNotContain("AgentServer", cut.Markup);
         // …and the submit button shows the edit-mode "save" icon, not "add".
-        Assert.Contains("save", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Save);
     }
 
     [Fact]
@@ -267,6 +264,6 @@ public class ProjectServerDialogSubmitTests : BunitContext
         var cut = RenderDialog(editing: null);
 
         Assert.Contains("ExternalHost", cut.Markup);
-        Assert.Contains("add", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Add);
     }
 }

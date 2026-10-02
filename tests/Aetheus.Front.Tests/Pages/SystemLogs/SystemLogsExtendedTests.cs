@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Logs;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Logs;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -58,17 +56,17 @@ public class SystemLogsExtendedTests : BunitContext
     // ── Static helpers ────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("Error", BadgeStyle.Danger)]
-    [InlineData("Fatal", BadgeStyle.Danger)]
-    [InlineData("Warning", BadgeStyle.Warning)]
-    [InlineData("Information", BadgeStyle.Info)]
-    [InlineData("Debug", BadgeStyle.Light)]
-    [InlineData("Verbose", BadgeStyle.Light)]
-    [InlineData("Unknown", BadgeStyle.Light)]
-    public void GetBadgeStyle_AllLevels_ReturnExpected(string level, BadgeStyle expected)
+    [InlineData("Error", OmniTone.Danger)]
+    [InlineData("Fatal", OmniTone.Danger)]
+    [InlineData("Warning", OmniTone.Warning)]
+    [InlineData("Information", OmniTone.Accent)]
+    [InlineData("Debug", OmniTone.Neutral)]
+    [InlineData("Verbose", OmniTone.Neutral)]
+    [InlineData("Unknown", OmniTone.Neutral)]
+    public void GetBadgeStyle_AllLevels_ReturnExpected(string level, OmniTone expected)
     {
         var method = typeof(SystemLogs).GetMethod("GetBadgeStyle", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [level])!;
+        var result = (OmniTone)method.Invoke(null, [level])!;
         Assert.Equal(expected, result);
     }
 
@@ -90,16 +88,22 @@ public class SystemLogsExtendedTests : BunitContext
 
     // ── OnFilterChangedAsync ──────────────────────────────────────────────────
 
+    /// <summary>Recette R-453: a filter of the bar sends the grid back to its first block, with the filter.</summary>
     [Fact]
-    public async Task OnFilterChangedAsync_ResetsPageToOne()
+    public async Task OnFilterChangedAsync_ReloadsTheGridFromItsFirstBlock()
     {
         var cut = RenderPage();
-        typeof(SystemLogs).GetField("_page", Priv)!.SetValue(cut.Instance, 3);
+        cut.WaitForAssertion(() => Assert.Contains("Something broke", cut.Markup, StringComparison.Ordinal));
+        _handler.Requests.Clear();
+        typeof(SystemLogs).GetField("_selectedLevel", Priv)!.SetValue(cut.Instance, "Error");
 
         var method = typeof(SystemLogs).GetMethod("OnFilterChangedAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
-        Assert.Equal(1, (int)typeof(SystemLogs).GetField("_page", Priv)!.GetValue(cut.Instance)!);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains("api/system-logs/entries", StringComparison.Ordinal)
+            && request.Url.Contains("level=Error", StringComparison.Ordinal)
+            && request.Url.Contains("page=1&", StringComparison.Ordinal)));
     }
 
     // ── OnRefreshAsync ────────────────────────────────────────────────────────
@@ -136,28 +140,6 @@ public class SystemLogsExtendedTests : BunitContext
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["first"])!);
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["second"])!);
         Assert.Equal("second", (string?)typeof(SystemLogs).GetField("_searchText", Priv)!.GetValue(cut.Instance));
-    }
-
-    // ── ToggleAutoRefresh ─────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task ToggleAutoRefresh_EnablesTask()
-    {
-        var cut = RenderPage();
-        var method = typeof(SystemLogs).GetMethod("ToggleAutoRefresh", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        Assert.True((bool)typeof(SystemLogs).GetField("_autoRefresh", Priv)!.GetValue(cut.Instance)!);
-        Assert.NotNull(typeof(SystemLogs).GetField("_autoRefreshTask", Priv)!.GetValue(cut.Instance));
-    }
-
-    [Fact]
-    public async Task ToggleAutoRefresh_DisablesTask_OnSecondCall()
-    {
-        var cut = RenderPage();
-        var method = typeof(SystemLogs).GetMethod("ToggleAutoRefresh", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        Assert.False((bool)typeof(SystemLogs).GetField("_autoRefresh", Priv)!.GetValue(cut.Instance)!);
     }
 
     // ── OnDownloadAsync ───────────────────────────────────────────────────────
@@ -231,16 +213,16 @@ public class SystemLogsExtendedTests : BunitContext
     // ── Dispose ───────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Dispose_WithTimers_LeavesTheFlagOn()
+    public async Task Dispose_ReleasesTheLiveSubscription_AndIsSafeTwice()
     {
+        // Recette R-181: the page follows the log files over the admin hub; there is no polling
+        // toggle any more, and disposing twice must not throw.
         var cut = RenderPage();
-        var toggle = typeof(SystemLogs).GetMethod("ToggleAutoRefresh", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)toggle.Invoke(cut.Instance, [])!);
-        // Enabling auto-refresh creates the live timer that Dispose must clean up.
-        Assert.True((bool)typeof(SystemLogs).GetField("_autoRefresh", Priv)!.GetValue(cut.Instance)!);
-        Assert.NotNull(typeof(SystemLogs).GetField("_autoRefreshTask", Priv)!.GetValue(cut.Instance));
 
-        // Dispose with a live auto-refresh timer must not throw (it disposes the timer).
         await cut.Instance.DisposeAsync();
+        var second = await Record.ExceptionAsync(async () => await cut.Instance.DisposeAsync());
+
+        Assert.Null(second);
+        Assert.Empty(cut.FindAll("button[title='AutoRefreshOn'], button[title='AutoRefreshOff']"));
     }
 }

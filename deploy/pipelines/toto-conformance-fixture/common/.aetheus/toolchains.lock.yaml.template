@@ -1,8 +1,8 @@
 version: 1
 toolchains:
   dotnet:
-    version: "10.0.202"
-    image: "mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b"
+    version: "10.0.100"
+    image: "mcr.microsoft.com/dotnet/sdk:10.0.100@sha256:c7445f141c04f1a6b454181bd098dcfa606c61ba0bd213d0a702489e5bd4cd71"
     path: "."
     shell: "bash"
     caches:

@@ -112,7 +112,11 @@ public class ComplexityAnalyzerTests
                 && !path.Contains($"{separator}obj{separator}", StringComparison.OrdinalIgnoreCase)
                 && !path.Contains($"{separator}node_modules{separator}", StringComparison.OrdinalIgnoreCase)
                 && !path.Contains($"{separator}.git{separator}", StringComparison.OrdinalIgnoreCase)
-                && !path.Contains($"{separator}.vs{separator}", StringComparison.OrdinalIgnoreCase))
+                && !path.Contains($"{separator}.vs{separator}", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains($"{separator}.codex-runtime{separator}", StringComparison.OrdinalIgnoreCase)
+                // Other checkouts nested under .claude/worktrees (other sessions, other branches, their
+                // uncommitted work) are not this tree's code: one of them failed this budget on a push.
+                && !path.Contains($"{separator}.claude{separator}", StringComparison.OrdinalIgnoreCase))
             .Select(path => (path, File.ReadAllText(path)));
 
         var report = ComplexityAnalyzer.Analyze(sources);

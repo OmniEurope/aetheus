@@ -1,0 +1,110 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Large" Class="contact-agent-dialog">
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+        <OmniIcon Name="OmniIconName.CellTower" />
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">
+            @string.Format(L["ContactAgentTarget"], ServerName)
+        </OmniText>
+    </OmniStack>
+
+    @if (_state == ContactState.Running)
+    {
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">
+                @string.Format(L["ContactAgentAttempt"], _attempt, MaxAttempts)
+            </OmniText>
+            <AetheusLoader Size="OmniControlSize.Small" />
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-m-0">
+                @L["ContactAgentWaiting"]
+            </OmniText>
+        </OmniStack>
+    }
+    else if (_state == ContactState.Success)
+    {
+        <OmniAlert Severity="OmniSeverity.Success" Class="omni-u-m-0">
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["ContactAgentReachable"]</OmniText>
+                @if (_result?.SecondsSinceLastHeartbeat is { } secs)
+                {
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">
+                        @string.Format(L["ContactAgentLastSeen"], FormatSeconds(secs))
+                    </OmniText>
+                }
+                @if (!string.IsNullOrWhiteSpace(_result?.AgentVersion))
+                {
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">
+                        @string.Format(L["ContactAgentVersion"], _result!.AgentVersion)
+                    </OmniText>
+                }
+            </OmniStack>
+        </OmniAlert>
+    }
+    else if (_state == ContactState.Failed)
+    {
+        <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-m-0">
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">
+                    @string.Format(L["ContactAgentFailed"], MaxAttempts)
+                </OmniText>
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@_errorMessage</OmniText>
+            </OmniStack>
+        </OmniAlert>
+
+        @if (_diagnostic is not null)
+        {
+            <OmniCard Class="omni-u-m-0 omni-u-p-md contact-agent-diagnostic">
+                <OmniStack Gap="OmniSpacing.Small">
+                    <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["WhyOffline"]</OmniText>
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@_diagnostic.Summary</OmniText>
+                    <div class="contact-agent-diagnostic-meta">
+                        @if (_diagnostic.TokenExpiresAt.HasValue)
+                        {
+                            <span class="diagnostic-token-row">
+                                <strong>@L["Token"]:</strong>
+                                @(_diagnostic.TokenValid ? L["Valid"] : L["Invalid"])
+                                @if (_diagnostic.TokenDaysRemaining.HasValue)
+                                {
+                                    <text> (@string.Format(L["TokenDaysRemaining"], _diagnostic.TokenDaysRemaining.Value))</text>
+                                    <OmniProgressBar Value="@TokenBarPercent(_diagnostic.TokenDaysRemaining.Value)"
+                                                     Maximum="100" ShowValue="false"
+                                                     Tone="@TokenBarVariant(_diagnostic.TokenDaysRemaining.Value)"
+                                                     Label="@string.Format(L["TokenDaysRemaining"], _diagnostic.TokenDaysRemaining.Value)"
+                                                     Class="diagnostic-token-progress" />
+                                }
+                            </span>
+                        }
+                        @if (!string.IsNullOrEmpty(_diagnostic.AgentVersion))
+                        {
+                            <span><strong>@L["Agent"]:</strong> @_diagnostic.AgentVersion</span>
+                        }
+                        <span><strong>@L["Backend"]:</strong> @_diagnostic.BackendVersion</span>
+                    </div>
+                </OmniStack>
+            </OmniCard>
+        }
+    }
+
+    @* DF6L (decided - stays bespoke, NOT migrated to DialogFooter): this footer is state-driven -
+       Running shows a single Cancel; Failed shows WhyOffline + Retry + Close (Close last); Success shows
+       only Close. DialogFooter renders ChildContent then a fixed standard Cancel (last, recette R-335),
+       with cancel semantics it owns - it can't express the per-state button sets nor the
+       cancel-vs-close distinction without bloating the shared component with state options for
+       this one dialog. The DialogFooter migration is
+       complete for every dialog it fits; this one is intentionally left bespoke. *@
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End">
+        @if (_state == ContactState.Running)
+        {
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CancelAndCloseAsync"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+        }
+        else
+        {
+            @if (_state == ContactState.Failed)
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@LoadDiagnosticAsync" Disabled="@(_diagnostic is not null && !_diagnosticLoading)" Class="@(_diagnosticLoading ? "btn-busy" : null)" Busy="@(_diagnosticLoading)" title="@L["WhyOffline"]"><OmniIcon Name="OmniIconName.Question" /> <span>@L["Diagnostic"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@StartAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+            }
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => Dialog.Close(_state == ContactState.Success))"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Close"]</span></OmniButton>
+        }
+    </OmniStack>
+</OmniStack>

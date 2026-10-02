@@ -1,9 +1,0 @@
-@* SPDX-License-Identifier: EUPL-1.2 *@
-@* One labelled section of the install wizard with an arbitrary list of code lines. *@
-<div class="wizard-step-section">
-    <p class="rz-text-body2 rz-mb-2 rz-font-bold">@Label</p>
-    @foreach (var line in Lines)
-    {
-        <WizardCodeBlock Code="@line" InlineLine="true" />
-    }
-</div>

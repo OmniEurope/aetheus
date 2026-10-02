@@ -4,13 +4,11 @@ namespace Aetheus.Back.Components.ExternalRepos;
 
 /// <summary>
 /// Registration surface for mirror-backed external repositories (Features:ExternalRepos).
-/// Enforces exactly-one-source (XOR) per project and keeps every credential on the backend.
+/// Enforces at most one external repository per project (the project's source, or an additional
+/// source beside its internal repository, recette R-534) and keeps every credential on the backend.
 /// </summary>
 public interface IExternalRepoService
 {
-    /// <summary>True when the feature flag is on; controllers 404 the whole surface otherwise.</summary>
-    bool IsEnabled { get; }
-
     Task<ExternalRepoDto?> GetForProjectAsync(int projectId, CancellationToken ct = default);
 
     /// <summary>

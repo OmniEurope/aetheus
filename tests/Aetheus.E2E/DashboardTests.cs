@@ -5,6 +5,39 @@ namespace Aetheus.E2E;
 [Category("Dashboard")]
 public class DashboardTests : E2ETestBase
 {
+    [Test]
+    public async Task InitialLoading_KeepsAllFourGridHeadersUnderOeLoadingBar()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pattern = new System.Text.RegularExpressions.Regex(@"/api/(monitoring/dashboard|appmonitoring/summary)(\?|$)");
+        await Page.RouteAsync(pattern, async route =>
+        {
+            await release.Task;
+            await route.ContinueAsync();
+        });
+        try
+        {
+            await Page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+            // Recette R-432: every tile shows OE's loading bar under its headers, on the table only, no veil.
+            var bars = Page.Locator(".dashboard-tile thead > tr.omni-data-grid__progress .omni-loading-bar--active");
+            await Expect(bars).ToHaveCountAsync(4);
+            for (var index = 0; index < 4; index++)
+            {
+                var grid = bars.Nth(index).Locator("xpath=ancestor::table[1]");
+                // The data column headers, not OE's control cells: the runs grid collapses its expand
+                // column while no row can expand (R-297), so that cell is hidden by design.
+                await Expect(grid.Locator("thead th:not([data-omni-control])").First).ToBeVisibleAsync();
+            }
+            await Expect(Page.Locator(".dashboard-tile .omni-logo-loader")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await WaitForNoSpinnerAsync();
+        await Expect(Page.Locator(".dashboard-tile .omni-data-grid__progress")).ToHaveCountAsync(0);
+    }
+
     [SetUp]
     public async Task SetUp()
     {
@@ -18,33 +51,27 @@ public class DashboardTests : E2ETestBase
         await Expect(Page.GetByText("Dashboard").First).ToBeVisibleAsync(new() { Timeout = 5000 });
         await WaitForNoSpinnerAsync();
 
-        var cards = Page.Locator(".rz-card");
+        var cards = Page.Locator(".omni-card");
         await Expect(cards.First).ToBeVisibleAsync(new() { Timeout = 10000 });
         var cardCount = await cards.CountAsync();
-        Assert.That(cardCount, Is.GreaterThanOrEqualTo(4), "Dashboard should show at least 4 stat cards");
+        Assert.That(cardCount, Is.GreaterThanOrEqualTo(4), "Dashboard should show its 4 tiles");
 
-        await Expect(Page.GetByText("Total Servers").First).ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(Page.GetByText("Online").First).ToBeVisibleAsync();
-        await Expect(Page.GetByText("Offline").First).ToBeVisibleAsync();
-        await Expect(Page.GetByText("Pending Tasks").First).ToBeVisibleAsync();
-
-        var serversCard = Page.Locator(".rz-card").Filter(new() { HasText = "Servers" });
+        var serversCard = Page.Locator(".omni-card").Filter(new() { HasText = "Servers" });
         await Expect(serversCard.First).ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        var runsCard = Page.Locator(".rz-card").Filter(new() { HasText = "Recent Pipeline Runs" });
+        var runsCard = Page.Locator(".omni-card").Filter(new() { HasText = "Recent Pipeline Runs" });
         await Expect(runsCard.First).ToBeVisibleAsync(new() { Timeout = 10000 });
         await Expect(Page).ToHaveTitleAsync(new System.Text.RegularExpressions.Regex("Dashboard"));
 
-        var sidebar = Page.Locator(".rz-sidebar");
+        var sidebar = Page.Locator(".omni-sidebar");
         await Expect(sidebar).ToBeVisibleAsync();
-        var nav = Page.Locator(".rz-panel-menu");
+        var nav = Page.Locator(".omni-panel-menu");
         await Expect(nav).ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        // Only the top-level RadzenPanelMenuItems are always rendered. Pipelines/Tasks/Logs
+        // Only the top-level menu items are always rendered. Pipelines/Tasks/Logs
         // are contextual sub-items that only appear once you drill into the Servers/Projects
-        // section, so they are not present on the dashboard. Radzen 10 renders the item
-        // label as `.rz-navigation-item-text`; match it exactly to avoid the strict-mode
-        // clash with the wrapping anchor element.
+        // section, so they are not present on the dashboard. Match labels exactly to avoid
+        // strict-mode clashes with wrapping links.
         await Expect(SidebarNavItem("Dashboard").First).ToBeVisibleAsync();
         await Expect(SidebarNavItem("Servers").First).ToBeVisibleAsync();
         await Expect(SidebarNavItem("Projects").First).ToBeVisibleAsync();
@@ -52,14 +79,14 @@ public class DashboardTests : E2ETestBase
 
         // "Aetheus" can appear twice in the header (app title + the default
         // organization name in the org picker), so target the app title element.
-        var appTitle = Page.Locator(".rz-header .app-title");
+        var appTitle = Page.Locator(".omni-header .app-title");
         await Expect(appTitle).ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(appTitle).ToContainTextAsync("Aetheus");
 
-        // The theme toggle is a switch inside the header user dropdown menu,
-        // not a standalone header button.
-        await Page.Locator(".header-user-btn").ClickAsync();
-        var themeSwitch = Page.Locator(".theme-switch-readonly");
-        await Expect(themeSwitch).ToBeVisibleAsync(new() { Timeout = 5000 });
+        // Signed in, the mode is a row of OE's application menu (light, dark, system), not a standalone
+        // header button.
+        await Page.Locator(".omni-app-menu__trigger").ClickAsync();
+        var themeRow = Page.Locator(".omni-app-menu__modes");
+        await Expect(themeRow).ToBeVisibleAsync(new() { Timeout = 5000 });
     }
 }

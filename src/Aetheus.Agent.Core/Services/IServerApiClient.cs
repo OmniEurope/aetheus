@@ -16,6 +16,10 @@ public interface IServerApiClient
         CancellationToken ct = default);
 
     // ADR-024 4.3: backup result callbacks.
+    /// <summary>PLAN-005 lot 2: pushes what a scan saw. Replaces the whole observed source of that
+    /// server, so an empty list is a real "nothing is listening", never a partial report.</summary>
+    Task ReportObservedPortsAsync(int serverId, ObservedPortsReportDto report, CancellationToken ct = default);
+
     Task ReportBackupResultAsync(int runId, BackupExecuteResultDto result, CancellationToken ct = default);
     Task ReportRestoreCheckResultAsync(int runId, RestoreCheckResultDto result, CancellationToken ct = default);
 
@@ -25,6 +29,13 @@ public interface IServerApiClient
 
     /// <summary>Pulls this server's app-availability probe configs (ADR-021). ServerId is taken from the token claim.</summary>
     Task<List<AppProbeConfigDto>> GetAppProbesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Workspace slots of the runs still in flight. Returns null when the backend could not be
+    /// reached, which the caller must not confuse with "no run is active": one deletes nothing,
+    /// the other would delete every workspace on the host.
+    /// </summary>
+    Task<IReadOnlyList<string>?> GetActiveWorkspaceSlotsAsync(CancellationToken ct = default);
 
     /// <summary>Reports a batch of app-availability probe results. Best-effort; caller re-queues on failure.</summary>
     Task ReportAppProbeResultsAsync(List<AppProbeResultDto> results, CancellationToken ct = default);

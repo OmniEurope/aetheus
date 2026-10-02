@@ -8,7 +8,11 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.Projects;
 
-public class ProjectService(IProjectRepository repo, IAuditService audit, IEntityChangeNotifier notifier, IOrganizationService orgService, Servers.IServerLifecycleService serverService, TimeProvider timeProvider, IMemoryCache cache) : IProjectService
+public class ProjectService(IProjectRepository repo, IAuditService audit, IEntityChangeNotifier notifier, IOrganizationService orgService, Servers.IServerLifecycleService serverService, TimeProvider timeProvider, IMemoryCache cache,
+    // Required, not optional: a missing registration must fail at startup rather than silently leave
+    // every deleted project's ports blocked forever.
+    PortRegistry.IPortRegistryService portRegistry,
+    Notifications.IUserNotificationService userNotifications) : IProjectService
 {
     private const string RepoUrlsCacheKey = "projects:repo-urls";
     private static readonly TimeSpan CacheDuration = BackendRuntimeDefaults.ReferenceDataCacheDuration;
@@ -50,8 +54,8 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
                     LastRunName = insight.LastRunName,
                     LastRunStatus = insight.LastRunStatus,
                     LastRunAt = insight.LastRunAt,
-                    ParentRunId = insight.ParentRunId,
-                    ParentRunName = insight.ParentRunName,
+                    LastRunIsActive = insight.LastRunIsActive,
+                    LastRunCurrentStep = insight.LastRunCurrentStep,
                     LatestGateGrade = insight.LatestGateGrade,
                     ProductionStatus = insight.ProductionStatus,
                     OnlineUserCount = insight.OnlineUserCount
@@ -76,19 +80,18 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
 
         var currentSteps = await repo.GetActiveRunStepLabelsAsync(id, ct).ConfigureAwait(false);
         var counts = await repo.GetProjectSectionCountsAsync(id, ct).ConfigureAwait(false)
-            ?? new ProjectSectionCounts(0, 0, 0, 0, 0);
+            ?? new ProjectSectionCounts(0, 0, 0, 0, 0, 0);
 
         var gitDates = await GetLastGitUpdatesCachedAsync([id], ct).ConfigureAwait(false);
-        var insight = (await repo.GetProjectListInsightsAsync(
-            [id],
-            timeProvider.GetUtcNow().UtcDateTime.AddMinutes(-5),
-            ct).ConfigureAwait(false)).GetValueOrDefault(id);
+        var latestGrade = await repo.GetLatestGateGradeAsync(id, ct).ConfigureAwait(false);
 
         return new ProjectDetailDto
         {
             LastGitUpdateAt = gitDates.GetValueOrDefault(id),
-            LatestGateGrade = insight?.LatestGateGrade,
+            LatestGateGrade = latestGrade?.OverallGrade,
+            LatestGateGradeRunId = latestGrade?.PipelineRunId,
             ServerCount = counts.Servers,
+            EnvironmentServerCount = counts.EnvironmentServers,
             ReleaseCount = counts.Releases,
             VaultCount = counts.Vaults,
             LibraryCount = counts.Libraries,
@@ -138,7 +141,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         };
     }
 
-    public async Task<ProjectDto> CreateProjectAsync(CreateProjectRequest request, CancellationToken ct = default)
+    public async Task<ProjectDto> CreateProjectAsync(CreateProjectRequest request, int? creatorUserId, CancellationToken ct = default)
     {
         var orgId = request.OrganizationId
             ?? await orgService.GetDefaultOrganizationIdAsync(ct).ConfigureAwait(false)
@@ -158,6 +161,10 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         await repo.AddProjectAsync(project, ct).ConfigureAwait(false);
         cache.Remove(RepoUrlsCacheKey);
         await audit.LogAsync("Created", "Project", project.Id, project.Name, ct).ConfigureAwait(false);
+        // Recette R2-034: nobody followed anything, so no project event ever reached a user. The
+        // creator follows the project they created; they can unfollow it like any other.
+        if (creatorUserId is { } creator)
+            await userNotifications.SubscribeAsync(creator, project.Id, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, project.Id, EntityChangeOps.Created, ct, organizationId: orgId).ConfigureAwait(false);
         return ProjectDtoMapper.ToDto(project, includePipelineSummary: true);
     }
@@ -202,6 +209,12 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
             project.GitConnectionId = null;
             await repo.SaveChangesAsync(ct).ConfigureAwait(false);
         }
+
+        // PLAN-005 lot 6: the reservation rows survive the project (their FK is set to null, not
+        // removed), so without this the deleted project's ports stay blocked forever by an owner that
+        // no longer exists. Called from here, downward: the registry is storage and must not learn
+        // what a project is.
+        await portRegistry.ReleaseProjectPortsAsync(id, ct).ConfigureAwait(false);
 
         await repo.RemoveProjectAsync(project, ct).ConfigureAwait(false);
         cache.Remove(RepoUrlsCacheKey);
@@ -270,7 +283,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetProjectServersPageAsync(
             projectId, request.Search, request.SortBy, request.SortDescending,
-            page, pageSize, ct).ConfigureAwait(false);
+            page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<ProjectServerDto>
         {
             Items = items.Select(MapToProjectServerDto).ToList(),
@@ -307,6 +320,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         };
 
         await repo.AddProjectServerAsync(entity, ct).ConfigureAwait(false);
+        await SyncProjectServerPortAsync(entity, projectId, ct).ConfigureAwait(false);
         await audit.LogAsync("Created", "ProjectServer", entity.Id, entity.DisplayName, ct).ConfigureAwait(false);
         // Carry the owning org so a non-admin org member who created the parent project in this same
         // session (not yet joined to entity-Project-{id}) still receives the sub-resource change (F-05).
@@ -329,6 +343,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         entity.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
 
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SyncProjectServerPortAsync(entity, projectId, ct).ConfigureAwait(false);
         await audit.LogAsync("Updated", "ProjectServer", entity.Id, entity.DisplayName, ct).ConfigureAwait(false);
         var project = await repo.FindProjectAsync(projectId, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, projectId, EntityChangeOps.Updated, ct, organizationId: project?.OrganizationId).ConfigureAwait(false);
@@ -342,18 +357,37 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
 
         var name = entity.DisplayName;
         var project = await repo.FindProjectAsync(projectId, ct).ConfigureAwait(false);
+        // Released before the row goes: the registry must not keep defending a port for a project
+        // server that no longer exists.
+        await portRegistry.SyncOwnedPortAsync(
+            null, null, PortRegistry.PortRegistryService.ProjectServerOwnerKey(entity.Id), name, projectId, ct)
+            .ConfigureAwait(false);
         await repo.RemoveProjectServerAsync(entity, ct).ConfigureAwait(false);
         await audit.LogAsync("Deleted", "ProjectServer", projectServerId, name, ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, projectId, EntityChangeOps.Updated, ct, organizationId: project?.OrganizationId).ConfigureAwait(false);
         return true;
     }
 
+    /// <summary>
+    /// PLAN-005 lot 6: mirrors a project server's own port into the registry, so a port it holds stops
+    /// being invisible to the preflight guard. Only an agent server has a registry identity; an
+    /// external host names a machine Aetheus does not manage, so its port has nowhere to be recorded.
+    /// </summary>
+    private Task SyncProjectServerPortAsync(ProjectServer entity, int projectId, CancellationToken ct) =>
+        portRegistry.SyncOwnedPortAsync(
+            entity.ServerId, entity.Port,
+            PortRegistry.PortRegistryService.ProjectServerOwnerKey(entity.Id),
+            entity.DisplayName, projectId, ct);
+
+    public Task<TaskFilterValuesDto> GetProjectTaskFilterValuesAsync(int projectId, CancellationToken ct = default)
+        => repo.GetTaskFilterValuesAsync(projectId, ct);
+
     public async Task<PaginatedResult<ServerTaskDto>> GetProjectTasksAsync(int projectId, PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetTasksPagedAsync(
             projectId, request.Search, request.SortBy, request.SortDescending,
-            page, pageSize, ct).ConfigureAwait(false);
+            page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<ServerTaskDto>
         {
             Items = items.Select(t => new ServerTaskDto
@@ -386,7 +420,7 @@ public class ProjectService(IProjectRepository repo, IAuditService audit, IEntit
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetLogsPagedAsync(
             projectId, request.Search, request.SortBy, request.SortDescending,
-            page, pageSize, ct).ConfigureAwait(false);
+            page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return TaskLogMapper.ToPaginatedResult(items, totalCount, page, pageSize);
     }
 

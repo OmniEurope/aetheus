@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Front.Components.Pipelines;
+
+namespace Aetheus.Front.Tests.Pipelines;
+
+/// <summary>
+/// Recette R-181: a change made elsewhere reloads the edit page only when nothing is being edited;
+/// with unsaved edits the page shows a banner instead of overwriting them.
+/// </summary>
+public sealed class PipelineDefinitionLiveSyncTests
+{
+    private static readonly PipelineDto Saved = new()
+    {
+        Id = 5,
+        Name = "build",
+        Description = "d",
+        YamlDefinition = "stages: []",
+        ProjectId = 2
+    };
+
+    private static PipelineModel Form() => new()
+    {
+        Name = "build",
+        Description = "d",
+        YamlDefinition = "stages: []",
+        ProjectId = 2
+    };
+
+    [Fact]
+    public void FormEqualToTheSavedPipeline_HasNoUnsavedChanges() =>
+        Assert.False(PipelineDefinitionLiveSync.HasUnsavedChanges(Form(), Saved));
+
+    [Fact]
+    public void EditedYaml_OrName_IsAnUnsavedChange()
+    {
+        var yaml = Form();
+        yaml.YamlDefinition = "stages: [build]";
+        var name = Form();
+        name.Name = "deploy";
+
+        Assert.True(PipelineDefinitionLiveSync.HasUnsavedChanges(yaml, Saved));
+        Assert.True(PipelineDefinitionLiveSync.HasUnsavedChanges(name, Saved));
+    }
+
+    [Fact]
+    public void NothingLoadedYet_IsNotAnEdit() =>
+        Assert.False(PipelineDefinitionLiveSync.HasUnsavedChanges(Form(), null));
+}

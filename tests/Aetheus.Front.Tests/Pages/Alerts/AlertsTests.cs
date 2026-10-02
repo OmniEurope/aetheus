@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -96,26 +92,26 @@ public class AlertsTests : BunitContext
     }
 
     [Theory]
-    [InlineData(MetricType.Cpu, BadgeStyle.Warning)]
-    [InlineData(MetricType.Memory, BadgeStyle.Info)]
-    [InlineData(MetricType.Disk, BadgeStyle.Danger)]
-    public void GetMetricBadgeStyle_ReturnsExpected(MetricType metric, BadgeStyle expected)
+    [InlineData(MetricType.Cpu, OmniTone.Warning)]
+    [InlineData(MetricType.Memory, OmniTone.Accent)]
+    [InlineData(MetricType.Disk, OmniTone.Danger)]
+    public void GetMetricBadgeStyle_ReturnsExpected(MetricType metric, OmniTone expected)
     {
         var method = typeof(Alerts).GetMethod("GetMetricBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
-        var result = (BadgeStyle)method.Invoke(null, [metric])!;
+        var result = (OmniTone)method.Invoke(null, [metric])!;
         Assert.Equal(expected, result);
     }
 
     [Theory]
-    [InlineData(AlertSeverity.Critical, BadgeStyle.Danger)]
-    [InlineData(AlertSeverity.Warning, BadgeStyle.Warning)]
-    [InlineData(AlertSeverity.Info, BadgeStyle.Info)]
-    public void GetSeverityBadgeStyle_ReturnsExpected(AlertSeverity severity, BadgeStyle expected)
+    [InlineData(AlertSeverity.Critical, OmniTone.Danger)]
+    [InlineData(AlertSeverity.Warning, OmniTone.Warning)]
+    [InlineData(AlertSeverity.Info, OmniTone.Accent)]
+    public void GetSeverityBadgeStyle_ReturnsExpected(AlertSeverity severity, OmniTone expected)
     {
         var method = typeof(Alerts).GetMethod("GetSeverityBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
-        var result = (BadgeStyle)method.Invoke(null, [severity])!;
+        var result = (OmniTone)method.Invoke(null, [severity])!;
         Assert.Equal(expected, result);
     }
 

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Net.Http.Json;
-using Aetheus.Shared.DTOs;
+using Aetheus.Back.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.IntegrationTests;
 
@@ -74,6 +76,71 @@ public sealed class RefreshTokenIntegrationTests(PostgresFixture fixture)
         Assert.False(string.IsNullOrEmpty(thirdLogin!.Token));
     }
 
+    /// <summary>
+    /// R-072: after a back restart the browser fired several refreshes with the same token at once, and
+    /// each of them pruned the same dead rows, so the later ones failed with DbUpdateConcurrencyException
+    /// (HTTP 500). Parallel refreshes must all succeed, and exactly one of them rotates the token.
+    /// </summary>
+    [Fact]
+    public async Task ParallelRefreshesOfOneToken_NeverFail_AndRotateExactlyOnce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new AetheusWebApplicationFactory(fixture.ConnectionString);
+        using var client = factory.CreateClient();
+        var login = await (await client.PostAsJsonAsync("/api/auth/login",
+            new LoginRequest { Username = "admin", Password = AdminPassword }, cancellationToken: ct))
+            .Content.ReadFromJsonAsync<LoginResponse>(IntegrationJsonOptions.Default, cancellationToken: ct);
+
+        int userId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Dead rows for the opportunistic prune, as a user who has been signed in for a while has.
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            userId = (await db.Users.SingleAsync(u => u.Username == "admin", ct)).Id;
+            for (var i = 0; i < 5; i++)
+                db.RefreshTokens.Add(new Aetheus.Back.Data.Entities.RefreshToken
+                {
+                    UserId = userId,
+                    TokenHash = Guid.NewGuid().ToString("N"),
+                    CreatedAt = DateTime.UtcNow.AddDays(-40),
+                    ExpiresAt = DateTime.UtcNow.AddDays(-10)
+                });
+            await db.SaveChangesAsync(ct);
+        }
+
+        var firedAt = DateTime.UtcNow.AddSeconds(-1);
+        using var start = new SemaphoreSlim(0);
+        var requests = Enumerable.Range(0, 8).Select(async _ =>
+        {
+            await start.WaitAsync(ct);
+            return await client.PostAsJsonAsync("/api/auth/token/refresh",
+                new RefreshTokenRequest { RefreshToken = login!.RefreshToken! }, cancellationToken: ct);
+        }).ToList();
+        start.Release(requests.Count);
+        var responses = await Task.WhenAll(requests);
+
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        var bodies = await Task.WhenAll(responses.Select(r =>
+            r.Content.ReadFromJsonAsync<LoginResponse>(IntegrationJsonOptions.Default, cancellationToken: ct)));
+        Assert.All(bodies, b => Assert.False(string.IsNullOrEmpty(b!.Token)));
+        var rotated = Assert.Single(bodies, b => b!.RefreshToken is not null);
+
+        // The collection runs serially, so every token minted since the burst belongs to it: the one
+        // rotated token is the only live one, the losers' replacements were retired. No fork of the chain.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var minted = await db.RefreshTokens.AsNoTracking()
+                .Where(t => t.UserId == userId && t.CreatedAt >= firedAt)
+                .ToListAsync(ct);
+            Assert.Single(minted, t => t.RevokedAt == null);
+        }
+
+        var next = await client.PostAsJsonAsync("/api/auth/token/refresh",
+            new RefreshTokenRequest { RefreshToken = rotated!.RefreshToken! }, cancellationToken: ct);
+        Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+    }
+
     [Fact]
     public async Task InvalidRefreshToken_Returns401()
     {
@@ -86,5 +153,41 @@ public sealed class RefreshTokenIntegrationTests(PostgresFixture fixture)
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, refreshResp.StatusCode);
+        // PLAN-005 lot 9 / D48: the 401 names its reason, through the real serializer.
+        var error = await refreshResp.Content.ReadFromJsonAsync<ApiError>(IntegrationJsonOptions.Default, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(Aetheus.Shared.Components.Auth.RefreshRejectionCodes.UnknownToken, error!.Code);
+    }
+
+    /// <summary>
+    /// PLAN-005 lot 9 / D48: the anonymous session-end report takes a known reason and a plain
+    /// correlation id, and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task SessionEnded_AcceptsAKnownReasonAnonymously_AndRefusesAnythingElse()
+    {
+        await using var factory = new AetheusWebApplicationFactory(fixture.ConnectionString);
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        var known = await client.PostAsJsonAsync("/api/auth/session-ended", new SessionEndedReport
+        {
+            Reason = Aetheus.Shared.Components.Auth.RefreshRejectionCodes.Replay,
+            CorrelationId = "0f3c9a7e2b"
+        }, cancellationToken: ct);
+        Assert.Equal(HttpStatusCode.NoContent, known.StatusCode);
+
+        var unknown = await client.PostAsJsonAsync("/api/auth/session-ended", new SessionEndedReport
+        {
+            Reason = "anything goes",
+            CorrelationId = "0f3c9a7e2b"
+        }, cancellationToken: ct);
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+
+        var injected = await client.PostAsJsonAsync("/api/auth/session-ended", new SessionEndedReport
+        {
+            Reason = Aetheus.Shared.Components.Auth.RefreshRejectionCodes.Replay,
+            CorrelationId = "a\nFAKE LOG LINE"
+        }, cancellationToken: ct);
+        Assert.Equal(HttpStatusCode.BadRequest, injected.StatusCode);
     }
 }

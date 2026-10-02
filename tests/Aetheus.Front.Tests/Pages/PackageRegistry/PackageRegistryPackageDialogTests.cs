@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.PackageRegistry;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.PackageRegistry;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.PackageRegistry;

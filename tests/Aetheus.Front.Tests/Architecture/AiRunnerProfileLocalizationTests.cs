@@ -13,8 +13,8 @@ public class AiRunnerProfileLocalizationTests
             root,
             "src",
             "Aetheus.Front",
-            "Pages",
-            "Ai",
+            "Components",
+            "AiTasks",
             "AiRunnerProfileDialog.razor.cs"));
 
         Assert.Contains("Notify.Error(\"ValidationError\", \"AiEnvironmentFormatError\")", source);

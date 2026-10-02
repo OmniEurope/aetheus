@@ -16,7 +16,7 @@ public class LogsTests : E2ETestBase
     {
         await NavigateToAsync("tasks");
         await WaitForDataGridAsync();
-        var seededTaskRow = Page.Locator(".rz-data-grid-data tr")
+        var seededTaskRow = Page.Locator(".omni-data-grid__row")
             .Filter(new() { HasText = "Demo web diagnostic" });
         await Expect(seededTaskRow).ToBeVisibleAsync(new() { Timeout = 10000 });
         var taskIdText = (await seededTaskRow.Locator("td").First.InnerTextAsync()).Trim();
@@ -28,10 +28,12 @@ public class LogsTests : E2ETestBase
         await Expect(Page).ToHaveTitleAsync(new System.Text.RegularExpressions.Regex("Live Logs"));
         var watchButton = Page.GetByRole(AriaRole.Button, new() { Name = "Watch" });
         await Expect(watchButton).ToBeVisibleAsync(new() { Timeout = 10000 });
-        var clearButton = Page.GetByRole(AriaRole.Button, new() { Name = "Clear" });
-        await Expect(clearButton).ToBeVisibleAsync(new() { Timeout = 10000 });
-        // The Task Id filter is a RadzenNumeric, which renders as `.rz-numeric`.
-        var taskIdInput = Page.Locator(".rz-numeric input");
+        // Clear moved into the "..." menu (OmniOverflowMenu in Logs.razor), so it is
+        // reached by opening that menu instead of from the toolbar. The assertion is kept: the
+        // action still has to exist and still has to empty the panel further down.
+        var moreActions = Page.Locator("button[title='More actions']");
+        await Expect(moreActions).ToBeVisibleAsync(new() { Timeout = 10000 });
+        var taskIdInput = Page.Locator("input.omni-numeric");
         await Expect(taskIdInput.First).ToBeVisibleAsync(new() { Timeout = 10000 });
         var logPanel = Page.Locator(".live-log-panel");
         await Expect(logPanel).ToBeVisibleAsync();
@@ -49,7 +51,8 @@ public class LogsTests : E2ETestBase
         await Expect(logPanel.Locator(".log-entry").Filter(new() { HasText = "Demo seed record" }))
             .ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        await clearButton.ClickAsync();
+        await moreActions.ClickAsync();
+        await Page.GetByText("Clear", new() { Exact = true }).ClickAsync();
         await Expect(logPanel.Locator(".log-entry")).ToHaveCountAsync(0);
         await Expect(logPanel.GetByText("No log entries yet.", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });

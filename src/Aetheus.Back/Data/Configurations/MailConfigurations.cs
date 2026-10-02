@@ -8,6 +8,12 @@ internal sealed class MailStateConfiguration : IEntityTypeConfiguration<MailStat
 {
     public void Configure(EntityTypeBuilder<MailState> builder)
     {
+        builder.Property(e => e.Hostname).HasMaxLength(253);
+        builder.Property(e => e.TlsCertPath).HasMaxLength(512);
+        builder.Property(e => e.TlsSubject).HasMaxLength(512);
+        builder.Property(e => e.TlsIssuer).HasMaxLength(512);
+        builder.Property(e => e.SpamFilterName).HasMaxLength(40);
+        builder.Property(e => e.SpamFilterVersion).HasMaxLength(100);
         builder.HasIndex(e => e.ServerId).IsUnique();
         builder.HasOne(e => e.Server)
                .WithOne(s => s.MailState)
@@ -20,6 +26,7 @@ internal sealed class MailDomainConfiguration : IEntityTypeConfiguration<MailDom
 {
     public void Configure(EntityTypeBuilder<MailDomain> builder)
     {
+        builder.Property(e => e.DkimPublicKey).HasMaxLength(4096);
         builder.HasIndex(e => new { e.ServerId, e.Name }).IsUnique();
         builder.HasOne(e => e.Server)
                .WithMany(s => s.MailDomains)

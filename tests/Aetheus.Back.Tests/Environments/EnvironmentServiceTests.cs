@@ -3,8 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Environments;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 using Environment = Aetheus.Back.Data.Entities.Environment;
 
@@ -14,13 +12,13 @@ public class EnvironmentServiceTests
 {
     private readonly IEnvironmentRepository _repo = Substitute.For<IEnvironmentRepository>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
+    private readonly Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher _events = Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>();
     private readonly EnvironmentService _sut;
 
     public EnvironmentServiceTests()
     {
         _sut = new EnvironmentService(_repo,
-            _audit, Substitute.For<IEntityChangeNotifier>(),
-            Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>());
+            _audit, Substitute.For<IEntityChangeNotifier>(), _events);
     }
 
     [Fact]
@@ -185,6 +183,33 @@ public class EnvironmentServiceTests
     }
 
     [Fact]
+    public async Task UpdateEnvironmentAsync_LinkedToAProject_PublishesTheEvent_PipelinesCopiesOn()
+    {
+        // Layer guard (2026-09-25): Environments no longer calls Pipelines' git service; it publishes,
+        // in the background as before, and EnvironmentPipelinesCopyHandler does the copy.
+        var env = new Environment { Id = 1, Name = "staging", Servers = [] };
+        _repo.FindEnvironmentAsync(1, Arg.Any<CancellationToken>()).Returns(env);
+        _repo.GetEnvironmentWithServersAsync(1, Arg.Any<CancellationToken>()).Returns(env);
+
+        await _sut.UpdateEnvironmentAsync(1, new UpdateEnvironmentRequest { Name = "staging", ProjectId = 4, ServerIds = [] }, ct: TestContext.Current.CancellationToken);
+
+        _events.Received(1).Publish(Arg.Is<EnvironmentLinkedToProjectEvent>(e =>
+            e.EnvironmentId == 1 && e.EnvironmentName == "staging" && e.ProjectId == 4));
+    }
+
+    [Fact]
+    public async Task UpdateEnvironmentAsync_NotLinked_PublishesNothing()
+    {
+        var env = new Environment { Id = 1, Name = "staging", Servers = [] };
+        _repo.FindEnvironmentAsync(1, Arg.Any<CancellationToken>()).Returns(env);
+        _repo.GetEnvironmentWithServersAsync(1, Arg.Any<CancellationToken>()).Returns(env);
+
+        await _sut.UpdateEnvironmentAsync(1, new UpdateEnvironmentRequest { Name = "staging", ServerIds = [] }, ct: TestContext.Current.CancellationToken);
+
+        _events.DidNotReceive().Publish(Arg.Any<EnvironmentLinkedToProjectEvent>());
+    }
+
+    [Fact]
     public async Task UpdateEnvironmentAsync_Found_UpdatesAndReturns()
     {
         var env = new Environment { Id = 1, Name = "old", Servers = [] };
@@ -225,5 +250,24 @@ public class EnvironmentServiceTests
         Assert.True(result);
         await _repo.Received(1).RemoveEnvironmentAsync(Arg.Any<Environment>(), Arg.Any<CancellationToken>());
         await _audit.Received(1).LogAsync("Deleted", "Environment", 1, "prod", Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Recette R2-001: the "advance a branch after each deployment" setting is retired (a pipeline step
+    /// does it now). Blue-green production shares its database with the previous colour, which still
+    /// reads the two columns, so this version must leave whatever they hold untouched.
+    /// </summary>
+    [Fact]
+    public async Task UpdateEnvironmentAsync_LeavesTheRetiredBranchAdvanceColumnsUntouched()
+    {
+        var env = new Environment { Id = 1, Name = "prod", AdvanceBranchOnDeploy = true, AdvanceBranchName = "main" };
+        _repo.FindEnvironmentAsync(1, Arg.Any<CancellationToken>()).Returns(env);
+        _repo.GetEnvironmentWithServersAsync(1, Arg.Any<CancellationToken>()).Returns(env);
+
+        await _sut.UpdateEnvironmentAsync(1, new UpdateEnvironmentRequest { Name = "prod" },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(env.AdvanceBranchOnDeploy);
+        Assert.Equal("main", env.AdvanceBranchName);
     }
 }

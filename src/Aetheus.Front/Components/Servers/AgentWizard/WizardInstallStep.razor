@@ -1,0 +1,25 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits AgentInstallOptionsComponentBase
+@* Install step: instructions + download button + one-shot installer link. *@
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+    <p>@L["WizardInstallDescription"]</p>
+    <WizardInstallInstructions Platform="@Platform" ServerBaseUrl="@ServerBaseUrl" SiteVersion="@SiteVersion" Token="@InstallerToken"
+                               IncludePipelineRunner="@IncludePipelineRunner" IncludeServerManagement="@IncludeServerManagement"
+                               IncludeDeploymentAgent="@IncludeDeploymentAgent"
+                               IncludePatchManagement="@IncludePatchManagement"
+                               IncludeFirewallManagement="@IncludeFirewallManagement"
+                               IncludeDocker="@IncludeDocker" DevModeInsecureTls="@DevModeInsecureTls" />
+    <OmniRow Gap="OmniSpacing.Small">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenDownloadAsync"><OmniIcon Name="OmniIconName.Download" /> <span>@DownloadLabel</span></OmniButton>
+        @if (!string.IsNullOrWhiteSpace(InstallerToken))
+        {
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CopyInstallerLinkAsync"><OmniIcon Name="@MaterialIconMap.Resolve((_linkCopied ? "check" : "link"))" /> <span>@(_linkCopied ? L["WizardInstallerLinkCopied"] : L["WizardCopyInstallerLink"])</span></OmniButton>
+        }
+    </OmniRow>
+    @if (!string.IsNullOrWhiteSpace(InstallerToken))
+    {
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+            @L["WizardInstallerLinkHint"]
+        </OmniText>
+    }
+</OmniStack>

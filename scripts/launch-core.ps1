@@ -339,7 +339,6 @@ $devConfig["DevBanner"] = [ordered]@{ Branch = "$gitBranch".Trim(); Label = $ban
 $agentDir    = Join-Path $root "src\Aetheus.Agent.Windows"
 $coverageDir = Join-Path $root "TestResults\Coverage"
 $reportDir   = Join-Path $root "TestResults\CoverageReport"
-$runSettings = Join-Path $root "coverage.runsettings"
 $devDbCompose = Join-Path $root "deploy\compose\dev-db.compose.yml"
 $e2eDbCompose = Join-Path $root "deploy\compose\e2e-db.compose.yml"
 # Connection string the E2E backend uses instead of the dev DB, so the destructive E2E reset only
@@ -666,20 +665,24 @@ function Invoke-TestRun {
 
     $tmpOut = Join-Path $env:TEMP "aetheus_test_$(Get-Random).txt"
     $tmpErr = "$tmpOut.err"
-    $verbosity = "minimal"; if ($StreamOutput) { $verbosity = "normal" }
-    # dotnet test accepts a single --results-directory. Coverage used to add a second occurrence
-    # through ExtraArgs, which .NET 10 rejects before discovering any tests. Put both TRX and
-    # Cobertura outputs in the coverage directory for -c, and pass the option exactly once.
+    # `dotnet test` runs in Microsoft.Testing.Platform mode (global.json "test.runner"): the target is
+    # named by --project or --solution, TRX comes from the TrxReport extension and the per-test lines
+    # only appear with --output Detailed. Put both TRX and Cobertura outputs in the coverage directory
+    # for -c, and pass --results-directory exactly once.
     $resultDirectory = if ($Coverage) { $coverageDir } else { Join-Path $root "TestResults\Launcher" }
     New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null
     $safeLabel = ($Label -replace '[^A-Za-z0-9]+', '-').Trim('-').ToLowerInvariant()
     $trxName = "{0}-{1:yyyyMMdd-HHmmssfff}.trx" -f $safeLabel, (Get-Date)
-    $argList = @($Target, "--no-build", "--configuration", $buildConfiguration,
-                 "--logger", "console;verbosity=$verbosity",
-                 "--logger", "trx;LogFileName=$trxName",
-                 "--results-directory", $resultDirectory) + $ExtraArgs
+    $targetSwitch = if ($Target -match '\.slnx?$') { "--solution" } else { "--project" }
+    $argList = @($targetSwitch, $Target, "--no-build", "--configuration", $buildConfiguration, "--no-progress",
+                 "--report-trx", "--report-trx-filename", $trxName,
+                 "--results-directory", $resultDirectory)
+    if ($StreamOutput) { $argList += @("--output", "Detailed") }
+    $argList += $ExtraArgs
     $fullArgs = @("test") + $argList
-    $proc = Start-Process -FilePath "dotnet" -ArgumentList $fullArgs -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+    # From the repository root: `dotnet test` reads the runner from the global.json of its working
+    # directory, and anywhere outside the repository it would fall back to VSTest and refuse these arguments.
+    $proc = Start-Process -FilePath "dotnet" -ArgumentList $fullArgs -WorkingDirectory $root -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $testIndex = 0
@@ -689,10 +692,8 @@ function Invoke-TestRun {
     $streamTotal = 0
     $processStreamLine = {
         param([string]$line)
-        if ($streamTotal -eq 0 -and $line -match 'discovered\s+(\d+)\s+of\s+\d+\s+NUnit') {
-            $streamTotal = [int]$Matches[1]
-        }
-        if ($line -match '^\s*(Passed|Failed|Warning|Skipped)\s+(.+?)\s+\[(.+?)\]') {
+        # Microsoft.Testing.Platform, --output Detailed: "passed <test> (209ms)", then a "from <dll>" line.
+        if ($line -match '^(passed|failed|skipped)\s+(.+?)\s+\(([^()]+)\)\s*$') {
             $testIndex++
             $status = $Matches[1]
             $testName = $Matches[2]
@@ -700,12 +701,12 @@ function Invoke-TestRun {
             $pad = if ($streamTotal -gt 0) { "$streamTotal".Length } else { 2 }
             $idx = "$testIndex".PadLeft($pad, '0')
             $tot = if ($streamTotal -gt 0) { "/$streamTotal" } else { "" }
-            if ($status -eq 'Passed') {
+            if ($status -eq 'passed') {
                 $streamPassed++
                 Write-Host "  [${idx}${tot}] PASS " -NoNewline -ForegroundColor Green
                 Write-Host "$testName " -NoNewline
                 Write-Host "($duration)" -ForegroundColor DarkGray
-            } elseif ($status -eq 'Warning' -or $status -eq 'Skipped') {
+            } elseif ($status -eq 'skipped') {
                 $streamSkipped++
                 Write-Host "  [${idx}${tot}] SKIP " -NoNewline -ForegroundColor Yellow
                 Write-Host "$testName " -NoNewline -ForegroundColor Yellow
@@ -780,12 +781,22 @@ function Invoke-TestRun {
     }
     Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
 
-    $summaryLine = $lines | Where-Object { $_ -match "Test summary:|(?:Passed|Failed)!.*Total:" } | Select-Object -Last 1
+    # Without a TRX, fall back on the console summary Microsoft.Testing.Platform prints last: one
+    # counter per line ("total: N", "failed: N", "succeeded: N", "skipped: N").
+    $summaryLine = $null
+    $consoleCounters = @{}
+    foreach ($line in $lines) {
+        if ($line -match '^\s*(total|failed|succeeded|skipped):\s*(\d+)\s*$') { $consoleCounters[$Matches[1]] = [int]$Matches[2] }
+    }
+    if ($consoleCounters.ContainsKey('total') -and $consoleCounters.ContainsKey('failed') -and $consoleCounters.ContainsKey('succeeded')) {
+        $consoleSkipped = if ($consoleCounters.ContainsKey('skipped')) { $consoleCounters['skipped'] } else { 0 }
+        $summaryLine = "Test summary: total: $($consoleCounters['total']); failed: $($consoleCounters['failed']); succeeded: $($consoleCounters['succeeded']); skipped: $consoleSkipped"
+    }
     $expectedTotal = $streamTotal
     if ($trxCounters) {
-        # The live console stream is diagnostic only: redirected VSTest output can expose its final
-        # line after the process-exit edge and previously made a fully green run look incomplete.
-        # TRX is atomically finalized by VSTest and is therefore the authoritative completion record.
+        # The live console stream is diagnostic only: redirected output can expose its final line
+        # after the process-exit edge and previously made a fully green run look incomplete. TRX is
+        # finalized once by the test run and is therefore the authoritative completion record.
         $trxTotal = [int]$trxCounters.total
         $trxFailed = [int]$trxCounters.failed
         $trxPassed = [int]$trxCounters.passed
@@ -802,9 +813,6 @@ function Invoke-TestRun {
     if ($summaryLine -match "total:\s*(\d+).*?failed:\s*(\d+).*?succeeded:\s*(\d+)") {
         $total  = [int]$Matches[1]; $failed = [int]$Matches[2]; $passed = [int]$Matches[3]
         if ($summaryLine -match "skipped:\s*(\d+)") { $skipped = [int]$Matches[1] }
-    } elseif ($summaryLine -match "Failed:\s*(\d+).*?Passed:\s*(\d+).*?Total:\s*(\d+)") {
-        $failed = [int]$Matches[1]; $passed = [int]$Matches[2]; $total = [int]$Matches[3]
-        if ($summaryLine -match "Skipped:\s*(\d+)") { $skipped = [int]$Matches[1] }
     } elseif ($StreamOutput -and ($streamPassed + $streamFailed) -gt 0) {
         $passed = $streamPassed; $failed = $streamFailed; $skipped = $streamSkipped
         $total = $streamPassed + $streamFailed + $streamSkipped
@@ -822,9 +830,15 @@ function Invoke-TestRun {
 
 function Invoke-CoverageReport {
     Write-Step "Generating HTML coverage report..."
-    # VSTest's TRX logger copies each collector attachment below <run>/In/<machine>, in addition to
-    # the collector's canonical <guid>/coverage.cobertura.xml. Merge only the three direct collector
-    # reports; otherwise every suite is counted twice and the exact-report guard fails.
+    # coverlet.MTP writes coverage.cobertura.<timestamp>.xml at the top of the results directory. Give
+    # each report the <id>/coverage.cobertura.xml layout the CI readers expect (as
+    # deploy/scripts/normalize-coverage-report.sh does there), then merge exactly the three suites.
+    Get-ChildItem -Path $coverageDir -Filter "coverage.cobertura.*.xml" -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $stampDirectory = Join-Path $coverageDir ($_.BaseName -replace '^coverage\.cobertura\.', '')
+            New-Item -ItemType Directory -Path $stampDirectory -Force | Out-Null
+            Move-Item -Path $_.FullName -Destination (Join-Path $stampDirectory "coverage.cobertura.xml")
+        }
     $xmlFiles = @(Get-ChildItem -Path $coverageDir -Recurse -Filter "coverage.cobertura.xml" -ErrorAction SilentlyContinue |
         Where-Object { $_.Directory.Parent.FullName -eq $coverageDir })
     if ($xmlFiles.Count -ne 3) {
@@ -889,7 +903,9 @@ $E2eCategories = @(
     'Logs',
     'Accessibility',
     'ResponsiveAdmin',
-    'ProductionSmoke'
+    'ProductionSmoke',
+    # PLAN-008 lot 0: explicit capture fixture, never part of an unfiltered -te run.
+    'Parity'
 )
 
 function Resolve-E2eCategories([string]$filter) {
@@ -990,6 +1006,7 @@ function Start-Servers {
             Write-Step "Starting Backend with hot reload (https://localhost:$backHttpsPort)..."
             $jobs.BackJob = Start-Job -InitializationScript $dotnetJobInitialization -ScriptBlock {
                 $env:DOTNET_WATCH_RESTART_ON_RUDE_EDIT = "1"
+                $env:UseSharedCompilation = "false"
                 if ($using:e2eEnv) {
                     $env:RateLimiting__Disabled = "true"
                     # The authenticated reset endpoint recreates the complete schema after startup.
@@ -1020,9 +1037,15 @@ function Start-Servers {
                 Set-Location $using:backDir
                 dotnet watch run --configuration Debug @profileArgs 2>&1; "##PROMEXIT##$LASTEXITCODE"
             }
+            # Each watcher builds the same Shared project. Let one complete its initial build
+            # before the next starts, or parallel csc processes race to write Shared.dll.
+            if (-not (Wait-ForEndpoint -url $backUrl -label "Backend hot reload" -maxSeconds 60)) {
+                return $jobs
+            }
             Write-Step "Starting Frontend with hot reload (https://localhost:$frontPort)..."
             $jobs.FrontJob = Start-Job -InitializationScript $dotnetJobInitialization -ScriptBlock {
                 $env:DOTNET_WATCH_RESTART_ON_RUDE_EDIT = "1"
+                $env:UseSharedCompilation = "false"
                 $profileArgs = @()
                 if ($using:portsOverridden) {
                     $env:ASPNETCORE_ENVIRONMENT = "Development"
@@ -1032,8 +1055,11 @@ function Start-Servers {
                 Set-Location $using:frontDir
                 dotnet watch run --configuration Debug @profileArgs 2>&1; "##PROMEXIT##$LASTEXITCODE"
             }
+            if ($ModeAgent -and -not (Wait-ForEndpoint -url $frontUrl -label "Frontend hot reload" -maxSeconds 60)) {
+                return $jobs
+            }
         } else {
-            Write-Step "Starting Backend (https://localhost:$backHttpsPort)..."
+            Write-Step "Starting Backend snapshot (https://localhost:$backHttpsPort)..."
             $jobs.BackJob = Start-Job -InitializationScript $dotnetJobInitialization -ScriptBlock {
                 if ($using:e2eEnv) {
                     $env:RateLimiting__Disabled = "true"
@@ -1054,27 +1080,20 @@ function Start-Servers {
                     $env:Seed__ConformanceToto = "true"
                     $env:AppMonitoring__IngestBaseUrl = "https://host.docker.internal:$using:backHttpsPort"
                 }
-                $profileArgs = @()
-                if ($using:portsOverridden) {
-                    $env:ASPNETCORE_ENVIRONMENT = "Development"
-                    $env:ASPNETCORE_URLS = $using:backAspUrls
-                    $env:Cors__FrontendUrl = $using:corsFrontUrl
-                    $env:Aetheus__PublicApiBaseUrl = $using:backPublicApiUrl
-                    $profileArgs = @("--no-launch-profile")
-                }
+                $env:ASPNETCORE_ENVIRONMENT = "Development"
+                $env:ASPNETCORE_URLS = $using:backAspUrls
+                $env:Cors__FrontendUrl = $using:corsFrontUrl
+                $env:Aetheus__PublicApiBaseUrl = $using:backPublicApiUrl
                 Set-Location $using:backDir
-                dotnet run --no-build --configuration Debug @profileArgs 2>&1; "##PROMEXIT##$LASTEXITCODE"
+                dotnet (Join-Path $using:backSnapshotDir "Aetheus.Back.dll") 2>&1; "##PROMEXIT##$LASTEXITCODE"
             }
-            Write-Step "Starting Frontend (https://localhost:$frontPort)..."
+            Write-Step "Starting Frontend snapshot (https://localhost:$frontPort)..."
             $jobs.FrontJob = Start-Job -InitializationScript $dotnetJobInitialization -ScriptBlock {
-                $profileArgs = @()
-                if ($using:portsOverridden) {
-                    $env:ASPNETCORE_ENVIRONMENT = "Development"
-                    $env:ASPNETCORE_URLS = $using:frontAspUrls
-                    $profileArgs = @("--no-launch-profile")
-                }
-                Set-Location $using:frontDir
-                dotnet run --no-build --configuration Debug @profileArgs 2>&1; "##PROMEXIT##$LASTEXITCODE"
+                $env:ASPNETCORE_ENVIRONMENT = "Development"
+                $env:ASPNETCORE_URLS = $using:frontAspUrls
+                $env:API_BASE_URL = $using:frontApiBaseUrl
+                Set-Location $using:frontSnapshotHostDir
+                dotnet (Join-Path $using:frontSnapshotHostDir "StaticServer.dll") 2>&1; "##PROMEXIT##$LASTEXITCODE"
             }
         }
     }
@@ -1084,14 +1103,15 @@ function Start-Servers {
             Write-Step "Starting Agent with hot reload..."
             $jobs.AgentJob = Start-Job -InitializationScript $dotnetJobInitialization -ScriptBlock {
                 $env:DOTNET_WATCH_RESTART_ON_RUDE_EDIT = "1"
+                $env:UseSharedCompilation = "false"
                 Set-Location $using:agentDir
                 dotnet watch run --configuration Debug 2>&1; "##PROMEXIT##$LASTEXITCODE"
             }
         } else {
-            Write-Step "Starting Agent..."
+            Write-Step "Starting Agent snapshot..."
             $jobs.AgentJob = Start-Job -InitializationScript $dotnetJobInitialization -ScriptBlock {
                 Set-Location $using:agentDir
-                dotnet run --no-build --configuration Debug 2>&1; "##PROMEXIT##$LASTEXITCODE"
+                dotnet (Join-Path $using:agentSnapshotDir "Aetheus.Agent.Windows.dll") 2>&1; "##PROMEXIT##$LASTEXITCODE"
             }
         }
     }
@@ -1102,18 +1122,20 @@ function Start-Servers {
 # The single definition of "this checkout" that BOTH kill passes below use. Matching the bare word
 # "Aetheus" would also match a sibling worktree (every worktree path contains it), and matching just
 # $root would let the parent checkout claim its own worktrees (their paths are nested under it). The
-# "\src\" boundary pins it to this exact checkout and nothing nested or parent.
+# source and local runtime snapshot boundaries pin it to this exact checkout.
 function Get-AetheusOwnProcessPattern {
-    [regex]::Escape((Join-Path $root "src") + [IO.Path]::DirectorySeparatorChar)
+    $source = [regex]::Escape((Join-Path $root "src") + [IO.Path]::DirectorySeparatorChar)
+    $snapshots = [regex]::Escape((Join-Path $root "TestResults") + [IO.Path]::DirectorySeparatorChar + "YLaunch")
+    "($source|$snapshots)"
 }
 
 # True when the process is one of THIS checkout's own. The command line carries the boundary for
 # `dotnet run` and for the Blazor dev server (which names the application path), the executable path
 # carries it for the generated apphosts (Aetheus.Back.exe and friends); either is proof of ownership.
 function Test-AetheusProcessBelongsToCheckout {
-    param([int]$ProcessId, [string]$OwnPattern)
+    param([int]$ProcessId, [string]$OwnPattern, $ProcessInfo)
     try {
-        $info = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+        $info = if ($ProcessInfo) { $ProcessInfo } else { Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue }
         if (-not $info) { return $false }
         return ($info.CommandLine -and $info.CommandLine -match $OwnPattern) -or
                ($info.ExecutablePath -and $info.ExecutablePath -match $OwnPattern)
@@ -1154,14 +1176,15 @@ function Stop-AetheusProcesses([switch]$ListenersOnly) {
         return
     }
 
-    # Command-line sweep for `dotnet run` grandchildren the port pass missed. Same boundary as the
-    # port pass above, from the same helper, so the two can no longer disagree.
-    Get-Process -Name "dotnet" -ErrorAction SilentlyContinue |
-        Where-Object { Test-AetheusProcessBelongsToCheckout -ProcessId $_.Id -OwnPattern $ownPattern } |
-        ForEach-Object {
-            Write-Host "  Killing dotnet PID $($_.Id) (Aetheus-related)" -ForegroundColor Yellow
-            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+    # Read the process table once. Querying Win32_Process by PID for every MSBuild node made a
+    # launcher restart spend minutes here when another build left hundreds of idle dotnet nodes.
+    $dotnetProcesses = Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" -ErrorAction SilentlyContinue
+    foreach ($info in $dotnetProcesses) {
+        if (Test-AetheusProcessBelongsToCheckout -ProcessId $info.ProcessId -OwnPattern $ownPattern -ProcessInfo $info) {
+            Write-Host "  Killing dotnet PID $($info.ProcessId) (Aetheus-related)" -ForegroundColor Yellow
+            Stop-Process -Id $info.ProcessId -Force -ErrorAction SilentlyContinue
         }
+    }
 }
 
 function Stop-Servers([hashtable]$jobs, [bool]$DumpLogs = $false) {
@@ -1259,6 +1282,104 @@ function Start-SshTunnel($info) {
 }
 
 # ============================================================
+#  Preflight: SDK guard + mechanised code rules (report only), same code as the _Generic kit core
+# ============================================================
+
+# dotnet resolves global.json by walking up from the working directory; so does the launcher.
+function Find-YGlobalJson([string]$Root) {
+    $dir = [IO.DirectoryInfo]::new($Root)
+    while ($dir) {
+        $candidate = Join-Path $dir.FullName 'global.json'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+        $dir = $dir.Parent
+    }
+    return $null
+}
+
+function Show-YVersionGuard([string]$Root, [string]$Solution) {
+    $globalJson = Find-YGlobalJson $Root
+    if (-not $globalJson) {
+        Write-Host "  [guard] global.json missing: the SDK floor is undeclared (STD-SDKPIN)." -ForegroundColor Yellow
+        return
+    }
+    $floor = (Get-Content -LiteralPath $globalJson -Raw | ConvertFrom-Json).sdk.version
+    Push-Location -LiteralPath $Root
+    try { $resolved = (& dotnet --version 2>$null | Select-Object -Last 1) } finally { Pop-Location }
+    if (-not $resolved) {
+        Write-Host "  [guard] dotnet --version failed: no installed SDK satisfies the floor $floor ($globalJson)." -ForegroundColor Yellow
+        return
+    }
+    if ([version]($resolved -replace '-.*$', '') -lt [version]$floor) {
+        Write-Host "  [guard] resolved SDK $resolved is below the global.json floor $floor." -ForegroundColor Yellow
+    }
+    $channel = "{0}.{1}" -f ([version]$floor).Major, ([version]$floor).Minor
+    try {
+        $index = Invoke-RestMethod "https://builds.dotnet.microsoft.com/dotnet/release-metadata/releases-index.json" -TimeoutSec 4
+        $entry = $index.'releases-index' | Where-Object { $_.'channel-version' -eq $channel } | Select-Object -First 1
+        if ($entry -and [version]$entry.'latest-sdk' -gt [version]($resolved -replace '-.*$', '')) {
+            Write-Host "  [guard] SDK $($entry.'latest-sdk') is published, this checkout resolves $resolved (floor $floor)." -ForegroundColor Yellow
+        } else {
+            Write-Host "  SDK $resolved (floor $floor, latest published $($entry.'latest-sdk'))." -ForegroundColor DarkGray
+        }
+    } catch {
+        Write-Host "  SDK $resolved (floor $floor, release index unreachable)." -ForegroundColor DarkGray
+    }
+    if ($Solution -and (Test-Path -LiteralPath $Solution)) {
+        $outdated = & dotnet list $Solution package --outdated 2>$null
+        $references = @($outdated | Where-Object { $_ -match '^\s*>\s' } | ForEach-Object { ($_ -split '\s+' | Where-Object { $_ })[1] })
+        # Recette R-535: documented pins are not counted while their end condition is not reached; an
+        # expired one is named and counted again, so no exception outlives its reason.
+        $excepted = @{}
+        $exceptionsFile = Join-Path $Root 'scripts/outdated-package-exceptions.json'
+        if (Test-Path -LiteralPath $exceptionsFile) {
+            $propsFile = Join-Path (Split-Path -Parent $Solution) 'Directory.Build.props'
+            $targetFramework = if (Test-Path -LiteralPath $propsFile) { ([xml](Get-Content -LiteralPath $propsFile -Raw)).Project.PropertyGroup.TargetFramework | Where-Object { $_ } | Select-Object -First 1 } else { $null }
+            $currentVersion = if ($targetFramework -match '^net(\d+\.\d+)$') { [version]$Matches[1] } else { $null }
+            foreach ($exception in (Get-Content -LiteralPath $exceptionsFile -Raw | ConvertFrom-Json).exceptions) {
+                $untilVersion = if ($exception.untilTargetFramework -match '^net(\d+\.\d+)$') { [version]$Matches[1] } else { $null }
+                if ($currentVersion -and $untilVersion -and $currentVersion -ge $untilVersion) {
+                    Write-Host "  [guard] exception expired for $($exception.package) ($targetFramework reached $($exception.untilTargetFramework)): update it or renew the exception (scripts/outdated-package-exceptions.json)." -ForegroundColor Yellow
+                } else {
+                    $excepted[$exception.package] = $true
+                }
+            }
+        }
+        $count = @($references | Where-Object { -not $excepted.ContainsKey($_) }).Count
+        $exceptedCount = @($references | Where-Object { $excepted.ContainsKey($_) }).Count
+        if ($count -gt 0) {
+            Write-Host "  [guard] $count NuGet package reference(s) outdated (dotnet list package --outdated)." -ForegroundColor Yellow
+        }
+        if ($exceptedCount -gt 0) {
+            Write-Host "  $exceptedCount outdated reference(s) pinned on purpose until their end condition (scripts/outdated-package-exceptions.json)." -ForegroundColor DarkGray
+        }
+    }
+}
+
+# verify-rules.ps1 lives in the _Generic kit only; it is never copied. Resolved through
+# $env:GENERIC_KIT, else the conventional path. The launcher shows the count and never blocks: the
+# /audit `rules` lens and CI run it blocking.
+function Show-YRulesPreflight([string]$Root) {
+    $kitRoot = if ($env:GENERIC_KIT) { $env:GENERIC_KIT } else { 'C:\Dev\_Generic' }
+    $verifyRules = Join-Path $kitRoot 'verify-rules.ps1'
+    if (-not (Test-Path -LiteralPath $verifyRules)) {
+        Write-Host "  [rules] verify-rules.ps1 not found in the kit ($kitRoot): mechanised rules not checked." -ForegroundColor DarkGray
+        return
+    }
+    try {
+        $lines = @(& $verifyRules -Root $Root -Warn *>&1 | ForEach-Object { "$_" })
+        $summary = $lines | Where-Object { $_ -match '^Regles mecanisees' } | Select-Object -First 1
+        if ($summary) {
+            $color = if ($summary -match 'aucun motif') { 'DarkGray' } else { 'Yellow' }
+            Write-Host "  [rules] $summary Detail: & '$verifyRules' -Root '$Root' -Warn" -ForegroundColor $color
+        } else {
+            Write-Host "  [rules] verify-rules.ps1 produced no summary line." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  [rules] verify-rules.ps1 failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# ============================================================
 #  MAIN FLOW
 # ============================================================
 
@@ -1301,6 +1422,13 @@ Stop-AetheusProcesses
 
 Start-Sleep -Seconds 1
 
+# ---------- 1b. Preflight: SDK floor guard + mechanised rules (report only, never blocks) ----------
+
+Write-Step "Preflight (SDK guard, code rules)..."
+Show-YVersionGuard -Root $root -Solution $solution
+Show-YRulesPreflight -Root $root
+
+
 # ---------- 2. SSH tunnel for remote agent (before build) ----------
 
 $sshProc = $null
@@ -1325,7 +1453,7 @@ if ($HotReload) {
             (Join-Path $root "src\Aetheus.Front\Aetheus.Front.csproj"),
             (Join-Path $root "tests\Aetheus.E2E\Aetheus.E2E.csproj")
         )) {
-            dotnet build $project --configuration $buildConfiguration
+            dotnet build $project --configuration $buildConfiguration --maxcpucount:1 -p:UseSharedCompilation=false -nodeReuse:false
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "BUILD FAILED." -ForegroundColor Red
                 $script:ylaunchExitCode = 1
@@ -1334,7 +1462,7 @@ if ($HotReload) {
         }
     } else {
         Write-Step "Building solution..."
-        dotnet build $solution --configuration $buildConfiguration
+        dotnet build $solution --configuration $buildConfiguration --maxcpucount:1 -p:UseSharedCompilation=false -nodeReuse:false
         if ($LASTEXITCODE -ne 0) {
             Write-Host "BUILD FAILED." -ForegroundColor Red
             $script:ylaunchExitCode = 1
@@ -1352,7 +1480,7 @@ if ($HotReload) {
     # runtime installed (matches the Docker/prod build, and launch-linux.sh). A framework-
     # dependent build here ships an apphost that aborts with "No frameworks were found"
     # on any box lacking .NET 10 - the failure that bit the agent install. (S-TECH-39)
-        dotnet publish $linuxAgentDir -r linux-x64 -c Debug --self-contained true -v q --nologo
+        dotnet publish $linuxAgentDir -r linux-x64 -c Debug --self-contained true -v q --nologo -p:UseSharedCompilation=false -nodeReuse:false
         if ($LASTEXITCODE -ne 0) {
         # Loud + non-silent: this is the linux-x64/publish output the /downloads endpoint serves. A
         # silent failure here means a remote agent self-update/install would pull the LAST good build
@@ -1367,6 +1495,65 @@ if ($HotReload) {
     }
 }
 
+# The ordinary frontend process must read one immutable set of static assets for its whole lifetime.
+# Running the Blazor dev server from bin/obj let a later build replace its manifest while the browser
+# still used the old index, producing 404s for fingerprinted _framework files (recette R-253).
+# Hot reload deliberately keeps the dev server and its live build output instead.
+$frontSnapshotHostDir = $null
+$backSnapshotDir = $null
+$agentSnapshotDir = $null
+$frontApiBaseUrl = "https://localhost:$backHttpsPort"
+function Copy-RuntimeSnapshot([string]$name, [string]$sourceDir, [string]$entryDll) {
+    $testResultsRoot = [IO.Path]::GetFullPath((Join-Path $root "TestResults") + [IO.Path]::DirectorySeparatorChar)
+    $snapshotDir = [IO.Path]::GetFullPath((Join-Path $testResultsRoot $name))
+    if (-not $snapshotDir.StartsWith($testResultsRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Runtime snapshot path must stay under TestResults."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $sourceDir $entryDll))) {
+        throw "Runtime build output is incomplete: $entryDll."
+    }
+    if (Test-Path -LiteralPath $snapshotDir) {
+        Remove-Item -LiteralPath $snapshotDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $snapshotDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $sourceDir "*") -Destination $snapshotDir -Recurse -Force -ErrorAction Stop
+    if (-not (Test-Path -LiteralPath (Join-Path $snapshotDir $entryDll))) {
+        throw "Runtime snapshot is incomplete: $entryDll."
+    }
+    return $snapshotDir
+}
+if ($ModeFront -and -not $HotReload -and (-not $anyTest -or $TestE2e)) {
+    Write-Step "Copying Backend runtime snapshot..."
+    $backSnapshotDir = Copy-RuntimeSnapshot "YLaunchBack" (Join-Path $backDir "bin\Debug\net10.0") "Aetheus.Back.dll"
+}
+if ($ModeAgent -and -not $HotReload -and -not $anyTest) {
+    Write-Step "Copying Agent runtime snapshot..."
+    $agentSnapshotDir = Copy-RuntimeSnapshot "YLaunchAgent" (Join-Path $agentDir "bin\Debug\net10.0-windows") "Aetheus.Agent.Windows.dll"
+}
+if ($ModeFront -and -not $HotReload -and (-not $anyTest -or $TestE2e)) {
+    Write-Step "Publishing a stable frontend snapshot..."
+    $frontSnapshotDir = Join-Path $root "TestResults\YLaunchFront"
+    $testResultsRoot = [IO.Path]::GetFullPath((Join-Path $root "TestResults") + [IO.Path]::DirectorySeparatorChar)
+    $snapshotPath = [IO.Path]::GetFullPath($frontSnapshotDir)
+    if (-not $snapshotPath.StartsWith($testResultsRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Frontend snapshot path must stay under TestResults."
+    }
+    if (Test-Path -LiteralPath $frontSnapshotDir) {
+        Remove-Item -LiteralPath $frontSnapshotDir -Recurse -Force
+    }
+    $frontSnapshotSiteDir = Join-Path $frontSnapshotDir "site"
+    $frontSnapshotHostDir = Join-Path $frontSnapshotDir "host"
+    dotnet publish (Join-Path $frontDir "Aetheus.Front.csproj") -c Debug -o $frontSnapshotSiteDir --no-restore -p:RunAnalyzers=false -p:PublishTrimmed=false -p:UseSharedCompilation=false -m:1 -nodeReuse:false --nologo
+    if ($LASTEXITCODE -ne 0) { Write-Host "FRONTEND SNAPSHOT FAILED." -ForegroundColor Red; $script:ylaunchExitCode = 1; return }
+    dotnet publish (Join-Path $root "deploy\docker\StaticServer.csproj") -c Debug -o $frontSnapshotHostDir -p:UseSharedCompilation=false -m:1 -nodeReuse:false --nologo
+    if ($LASTEXITCODE -ne 0) { Write-Host "STATIC SERVER SNAPSHOT FAILED." -ForegroundColor Red; $script:ylaunchExitCode = 1; return }
+    Copy-Item -Path (Join-Path $frontSnapshotSiteDir "wwwroot\*") -Destination (Join-Path $frontSnapshotHostDir "wwwroot") -Recurse -Force -ErrorAction Stop
+    if (-not (Test-Path (Join-Path $frontSnapshotHostDir "wwwroot\index.html")) -or
+        -not (Test-Path (Join-Path $frontSnapshotHostDir "StaticServer.dll"))) {
+        throw "Frontend snapshot is incomplete."
+    }
+}
+
 # ---------- 3. Tests (granular) ----------
 
 $testResults = @()
@@ -1377,14 +1564,14 @@ if ($TestBack -or $TestFront -or $TestAgent -or $TestAnalyzers -or $TestIntegrat
         if (Test-Path $coverageDir) { Remove-Item $coverageDir -Recurse -Force }
     }
 
-    # Platform-scoped tests ([Trait("Platform","windows"|"linux")]) are excluded by
-    # tests/Directory.Build.props, not here: putting it in the project keeps a plain `dotnet test`
+    # Platform-scoped tests ([PlatformFact("windows"|"linux")]) are left out at discovery by
+    # tests/Shared/PlatformSpecificTests.cs, not here: putting it in the tests keeps a plain `dotnet test`
     # behaving exactly like this launcher and like CI, instead of failing on the foreign platform.
 
     if ($TestBack) {
         $backTestDir = Join-Path $root "tests\Aetheus.Back.Tests"
         if ($Coverage) {
-            $extraBack = @("--collect", "`"XPlat Code Coverage`"", "--settings", $runSettings)
+            $extraBack = @("--coverlet")
         } else {
             $extraBack = @()
         }
@@ -1396,7 +1583,7 @@ if ($TestBack -or $TestFront -or $TestAgent -or $TestAnalyzers -or $TestIntegrat
     if ($TestFront) {
         $frontTestDir = Join-Path $root "tests\Aetheus.Front.Tests"
         if ($Coverage) {
-            $extraFront = @("--collect", "`"XPlat Code Coverage`"", "--settings", $runSettings)
+            $extraFront = @("--coverlet")
         } else {
             $extraFront = @()
         }
@@ -1411,7 +1598,7 @@ if ($TestBack -or $TestFront -or $TestAgent -or $TestAnalyzers -or $TestIntegrat
     if ($TestAgent -or $Coverage) {
         $agentTestDir = Join-Path $root "tests\Aetheus.Agent.Core.Tests"
         if ($Coverage) {
-            $extraAgent = @("--collect", "`"XPlat Code Coverage`"", "--settings", $runSettings)
+            $extraAgent = @("--coverlet")
         } else {
             $extraAgent = @()
         }
@@ -1584,6 +1771,79 @@ if ($Reset) {
     Ensure-DevDb
 }
 
+# ---------- 6b. Seed accounts (kit launcher core 1.0.5, "Seed accounts" of the deployment contract) ----------
+# The development logins a start prints, so nobody has to look them up. Each entry names the configuration
+# key the seeder reads (DbInitializer: Auth:AdminPassword) and the project that reads it; the value is
+# resolved like ASP.NET Development does, highest precedence first: environment variable (':' -> '__'),
+# user secrets of the project, then its appsettings.Development.json and appsettings.json. A key found
+# nowhere prints "password not found": a password is never invented. Never shown during a test run.
+$seedAccounts = @(
+    @{ Login = "admin"; PasswordKey = "Auth:AdminPassword"; Project = "src\Aetheus.Back\Aetheus.Back.csproj"; Role = "Admin" }
+)
+
+function Test-YSeedAccounts([object[]]$Accounts) {
+    foreach ($a in @($Accounts | Where-Object { $_ })) {
+        if ($a -isnot [hashtable] -or [string]::IsNullOrWhiteSpace([string]$a.Login)) { throw "Every seed account entry needs a Login: @{ Login = 'admin'; PasswordKey = '...'; Project = '...' }." }
+        if ([string]::IsNullOrWhiteSpace([string]$a.PasswordKey)) { throw "Seed account '$($a.Login)' needs the PasswordKey the seeder reads." }
+        if ([string]::IsNullOrWhiteSpace([string]$a.Project)) { throw "Seed account '$($a.Login)': PasswordKey needs the Project that reads it." }
+    }
+}
+
+function Get-YJsonKey([string]$File, [string]$Key) {
+    if (-not (Test-Path -LiteralPath $File)) { return $null }
+    try { $node = Get-Content -LiteralPath $File -Raw | ConvertFrom-Json -AsHashtable } catch { return $null }
+    foreach ($part in $Key.Split(':')) {
+        if ($node -isnot [System.Collections.IDictionary]) { return $null }
+        $match = @($node.Keys | Where-Object { $_ -ieq $part }) | Select-Object -First 1
+        if ($null -eq $match) { return $null }
+        $node = $node[$match]
+    }
+    if ($node -is [string] -and $node) { return $node }
+    return $null
+}
+
+function Resolve-YSeedPassword([hashtable]$Account, [string]$Root, [hashtable]$SecretsCache) {
+    $key = [string]$Account.PasswordKey
+    $fromEnv = [Environment]::GetEnvironmentVariable($key.Replace(':', '__'))
+    if ($fromEnv) { return @{ Value = $fromEnv; Source = "env $($key.Replace(':', '__'))" } }
+    $project = Join-Path $Root $Account.Project
+    if (-not $SecretsCache.ContainsKey($project)) {
+        $pairs = @{}
+        if (Test-Path -LiteralPath $project) {
+            foreach ($line in @(& dotnet user-secrets list --project $project 2>$null)) {
+                if ("$line" -match '^\s*(.+?)\s+=\s+(.*)$') { $pairs[$Matches[1]] = $Matches[2] }
+            }
+        }
+        $SecretsCache[$project] = $pairs
+    }
+    $secret = @($SecretsCache[$project].Keys | Where-Object { $_ -ieq $key }) | Select-Object -First 1
+    if ($secret) { return @{ Value = [string]$SecretsCache[$project][$secret]; Source = 'user secrets' } }
+    $folder = Split-Path -Parent $project
+    foreach ($name in 'appsettings.Development.json', 'appsettings.json') {
+        $value = Get-YJsonKey (Join-Path $folder $name) $key
+        if ($value) { return @{ Value = $value; Source = $name } }
+    }
+    return $null
+}
+
+function Show-YSeedAccounts([object[]]$Accounts, [string]$Root) {
+    if ($Accounts.Count -eq 0) { return }
+    Test-YSeedAccounts $Accounts
+    $cache = @{}
+    Write-Host ""
+    Write-Host "Seed accounts (development):" -ForegroundColor Cyan
+    foreach ($a in $Accounts) {
+        $resolved = Resolve-YSeedPassword $a $Root $cache
+        $role = if ($a.Role) { "  [$($a.Role)]" } else { '' }
+        if ($resolved) {
+            Write-Host ("  {0}  /  {1}{2}" -f $a.Login, $resolved.Value, $role) -ForegroundColor White -NoNewline
+            Write-Host "  ($($resolved.Source))" -ForegroundColor DarkGray
+        } else {
+            Write-Host ("  {0}  /  password not found (key {1}: env, user secrets, appsettings){2}" -f $a.Login, $a.PasswordKey, $role) -ForegroundColor Yellow
+        }
+    }
+}
+
 # ---------- 7. Start servers ----------
 
 $servers = Start-Servers
@@ -1609,6 +1869,7 @@ if ($ModeFront) {
     } else {
         Write-Step "Servers ready (browser open skipped with -s)"
     }
+    Show-YSeedAccounts $seedAccounts $root
 } else {
     Write-Step "Agent started (no frontend in this mode)"
 }
@@ -1617,25 +1878,51 @@ if ($ModeFront) {
 
 Write-Host ""
 Write-Host "Press Ctrl+C to stop all services." -ForegroundColor Magenta
+if ($env:YLAUNCH_VERBOSE -ne '1') { Write-Host "Only warnings and errors are shown from here (YLAUNCH_VERBOSE=1 shows every log line)." -ForegroundColor DarkGray }
 Write-Host ""
 
 # S-UX-36: each server job emits a "##PROMEXIT##<code>" marker as its final line so the teardown can
 # report which component went down AND its exit code (a non-zero `dotnet run` exit leaves the job state
 # at Completed, so the state alone cannot distinguish a clean stop from a crash).
 $exitCodes = @{}
+
+# Recette R-270: once the services are up, the console only relays what needs attention, warnings and
+# errors. A .NET console log entry is a "level: Category[id]" line followed by indented lines; the
+# whole entry is shown or hidden by its level. A line outside that format (dotnet watch, a stack
+# trace start) is shown only when it names a warning or an error. YLAUNCH_VERBOSE=1 relays everything.
+$relayAll = $env:YLAUNCH_VERBOSE -eq '1'
+$relayVisible = @{ Back = $false; Front = $false; Agent = $false }
+function Write-ServerLine([string]$label, [string]$line, [string]$color) {
+    $prefix = "[$($label.ToUpperInvariant())]".PadRight(8)
+    if ($relayAll) { Write-Host "$prefix$line" -ForegroundColor $color; return }
+    if ($line -match '^(info|dbug|trce):\s') { $relayVisible[$label] = $false; return }
+    if ($line -match '^(warn|fail|crit):\s') {
+        $relayVisible[$label] = $true
+        $levelColor = if ($line -match '^warn:') { 'Yellow' } else { 'Red' }
+        Write-Host "$prefix$line" -ForegroundColor $levelColor
+        return
+    }
+    if ($line -match '^\s') {
+        if ($relayVisible[$label]) { Write-Host "$prefix$line" -ForegroundColor $color }
+        return
+    }
+    $relayVisible[$label] = $line -match '(?i)\b(warn(ing)?|error|fail(ed|ure)?|exception|crit(ical)?)\b|[⚠❌]'
+    if ($relayVisible[$label]) { Write-Host "$prefix$line" -ForegroundColor $color }
+}
+
 try {
     while ($true) {
         if ($servers.ContainsKey('BackJob')) {
             Receive-Job -Job $servers.BackJob  -ErrorAction SilentlyContinue |
-                ForEach-Object { if ($_ -match '^##PROMEXIT##(-?\d+)$') { $exitCodes['Back'] = $matches[1] } else { Write-Host "[BACK]  $_" -ForegroundColor DarkCyan } }
+                ForEach-Object { if ($_ -match '^##PROMEXIT##(-?\d+)$') { $exitCodes['Back'] = $matches[1] } else { Write-ServerLine 'Back' "$_" 'DarkCyan' } }
         }
         if ($servers.ContainsKey('FrontJob')) {
             Receive-Job -Job $servers.FrontJob -ErrorAction SilentlyContinue |
-                ForEach-Object { if ($_ -match '^##PROMEXIT##(-?\d+)$') { $exitCodes['Front'] = $matches[1] } else { Write-Host "[FRONT] $_" -ForegroundColor DarkGreen } }
+                ForEach-Object { if ($_ -match '^##PROMEXIT##(-?\d+)$') { $exitCodes['Front'] = $matches[1] } else { Write-ServerLine 'Front' "$_" 'DarkGreen' } }
         }
         if ($servers.ContainsKey('AgentJob')) {
             Receive-Job -Job $servers.AgentJob -ErrorAction SilentlyContinue |
-                ForEach-Object { if ($_ -match '^##PROMEXIT##(-?\d+)$') { $exitCodes['Agent'] = $matches[1] } else { Write-Host "[AGENT] $_" -ForegroundColor DarkYellow } }
+                ForEach-Object { if ($_ -match '^##PROMEXIT##(-?\d+)$') { $exitCodes['Agent'] = $matches[1] } else { Write-ServerLine 'Agent' "$_" 'DarkYellow' } }
         }
         # If ANY launched service reaches a terminal state - crashed (Failed), exited cleanly
         # (Completed), or was killed externally (Stopped) - tear everything down. The services

@@ -148,7 +148,7 @@ public class IngestControllerTests
     [Fact]
     public async Task Visitor_RequiresIngestKey_ThenDelegatesOpaqueDigest()
     {
-        var request = new Aetheus.Shared.DTOs.AppVisitorIngestRequest { VisitorId = new string('a', 64) };
+        var request = new Aetheus.Shared.Components.AppMonitoring.AppVisitorIngestRequest { VisitorId = new string('a', 64) };
         Assert.IsType<UnauthorizedResult>(await Build(null, null, "").Visitor(
             request, TestContext.Current.CancellationToken));
 

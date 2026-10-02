@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using Radzen;
-using ServersPage = Aetheus.Front.Pages.Servers.Servers;
+using ServersPage = Aetheus.Front.Components.Servers.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -12,7 +9,7 @@ namespace Aetheus.Front.Tests.Pages.Servers;
 /// Deep coverage for Servers.razor.cs - OfflineReason, OnLoadData with sort/filter,
 /// ClearFilters, FilterByTag, PersistColumnVisibilityAsync, LoadColumnVisibilityAsync,
 /// column chooser toggle, DisposeAsync, OnPermissionsChanged.
-/// Dialog.Confirm (OnUpdateAllAgents, OnDeleteServer) excluded.
+/// Dialog.Confirm (OnUpdateAllAgents, OnRetireServer) excluded.
 /// </summary>
 public class ServersDeepCoverageTests : BunitContext
 {
@@ -58,11 +55,11 @@ public class ServersDeepCoverageTests : BunitContext
         var cut = Render<ServersPage>();
 
         var method = typeof(ServersPage).GetMethod("OnLoadData", Priv)!;
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 20,
-            Sorts = [new SortDescriptor { Property = "Name", SortOrder = SortOrder.Ascending }]
+            Sorts = [new GridSortDescriptor("Name", GridSortOrder.Ascending)]
         };
 
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [args])!);
@@ -80,11 +77,11 @@ public class ServersDeepCoverageTests : BunitContext
         var cut = Render<ServersPage>();
 
         var method = typeof(ServersPage).GetMethod("OnLoadData", Priv)!;
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 10,
-            Sorts = [new SortDescriptor { Property = "Status", SortOrder = SortOrder.Descending }]
+            Sorts = [new GridSortDescriptor("Status", GridSortOrder.Descending)]
         };
 
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [args])!);
@@ -102,7 +99,7 @@ public class ServersDeepCoverageTests : BunitContext
         var cut = Render<ServersPage>();
 
         var method = typeof(ServersPage).GetMethod("OnLoadData", Priv)!;
-        var args = new LoadDataArgs { Skip = 0, Top = 10 };
+        var args = new GridLoadArgs { Skip = 0, Top = 10 };
 
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [args])!);
 
@@ -110,38 +107,20 @@ public class ServersDeepCoverageTests : BunitContext
         Assert.Equal(2, count);
     }
 
-    // ── Test 4: ClearFilters resets all filters ───────────────────────────────
+    // ── Test 5: FilterByTag sets _search ─────────────────────────────────────
 
+    /// <summary>Recette R-211: a tag clicked in a row becomes the Tags column's own filter, sent to the API.</summary>
     [Fact]
-    public async Task ClearFilters_ResetsSearchAndFilters()
+    public async Task FilterByTag_SetsTheTagsColumnFilter()
     {
         SetupServers(2);
         var cut = Render<ServersPage>();
 
-        // Set filters
-        typeof(ServersPage).GetField("_search", Priv)!.SetValue(cut.Instance, "web");
-        typeof(ServersPage).GetField("_typeFilter", Priv)!.SetValue(cut.Instance, (ServerType?)ServerType.Docker);
-        typeof(ServersPage).GetField("_statusFilter", Priv)!.SetValue(cut.Instance, (ServerStatus?)ServerStatus.Online);
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("prod"));
 
-        await cut.InvokeAsync(async () => await cut.Instance.ClearFilters());
-
-        Assert.Null(typeof(ServersPage).GetField("_search", Priv)!.GetValue(cut.Instance));
-        Assert.Null(typeof(ServersPage).GetField("_typeFilter", Priv)!.GetValue(cut.Instance));
-        Assert.Null(typeof(ServersPage).GetField("_statusFilter", Priv)!.GetValue(cut.Instance));
-    }
-
-    // ── Test 5: FilterByTag sets _search ─────────────────────────────────────
-
-    [Fact]
-    public async Task FilterByTag_SetsSearchField()
-    {
-        SetupServers(1);
-        var cut = Render<ServersPage>();
-
-        await cut.InvokeAsync(async () => await cut.Instance.FilterByTag("production"));
-
-        var search = (string?)typeof(ServersPage).GetField("_search", Priv)!.GetValue(cut.Instance);
-        Assert.Equal("production", search);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Tags", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=prod", StringComparison.Ordinal)));
     }
 
     // ── Test 6: OfflineReason returns non-empty for offline server ────────────

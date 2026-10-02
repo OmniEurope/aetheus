@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
 using Bunit;
-using HelpCenterPage = Aetheus.Front.Pages.Help.HelpCenter;
+using HelpCenterPage = Aetheus.Front.Components.Help.HelpCenter;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -65,7 +64,7 @@ public class HelpCenterTests : BunitContext
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // Searching "servers" narrows the filtered set to the matching article only (Pipelines drops out).
-        var filtered = (IReadOnlyList<Aetheus.Front.Services.HelpArticle>)typeof(HelpCenterPage)
+        var filtered = (IReadOnlyList<Aetheus.Front.Components.Shared.HelpArticle>)typeof(HelpCenterPage)
             .GetField("_filtered", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Single(filtered);
         Assert.Equal("servers", filtered[0].Key);

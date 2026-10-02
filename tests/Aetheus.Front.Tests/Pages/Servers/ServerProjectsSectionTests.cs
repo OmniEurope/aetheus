@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -16,12 +14,13 @@ public class ServerProjectsSectionTests : BunitContext
     }
 
     [Fact]
-    public void Renders_EmptyProjects_ShowsHeadingAndEmptyText()
+    public void Renders_EmptyProjects_ShowsEmptyText_WithoutTitleHeading()
     {
         _handler.SetJsonResponse("api/servers/1/projects", new PaginatedResult<ProjectDto>());
         var cut = Render<ServerProjectsSection>(p => p.Add(x => x.ServerId, 1));
-        cut.WaitForAssertion(() => Assert.Contains("Projects", cut.Markup), TimeSpan.FromSeconds(2));
-        Assert.Contains("NoRecords", cut.Markup);
+        cut.WaitForAssertion(() => Assert.Contains("NoRecords", cut.Markup), TimeSpan.FromSeconds(2));
+        // The title heading is gone: the page header already shows it.
+        Assert.DoesNotContain(">Projects<", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]

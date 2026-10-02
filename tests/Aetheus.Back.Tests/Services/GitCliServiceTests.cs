@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -6,7 +7,7 @@ namespace Aetheus.Back.Tests;
 
 public class GitCliServiceTests
 {
-    private readonly GitCliService _sut = new(NullLogger<GitCliService>.Instance);
+    private readonly GitCliService _sut = new(NullLogger<GitCliService>.Instance, new Aetheus.Back.Components.Git.GitProcessRunner(NullLogger<Aetheus.Back.Components.Git.GitProcessRunner>.Instance));
 
     [Theory]
     [InlineData(" ")]
@@ -36,6 +37,7 @@ public class GitCliServiceTests
     [InlineData("https://[fe80::1]/repo")]
     [InlineData("https://[fc00::1]/repo")]
     [InlineData("https://[::ffff:10.0.0.1]/repo")]
+    [InlineData("https://user:token@github.com/acme/demo.git")]
     public async Task ListReleaseBranches_DisallowedUrl_ReturnsEmpty(string url)
     {
         var result = await _sut.ListReleaseBranchesAsync(url, ct: TestContext.Current.CancellationToken);
@@ -50,4 +52,28 @@ public class GitCliServiceTests
 
         Assert.Null(result);
     }
+
+    [Theory]
+    [InlineData("0123456789abcdef0123456789abcdef01234567\trefs/heads/main\n", "main", "0123456789abcdef0123456789abcdef01234567")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567\trefs/heads/other\n", "main", null)]
+    [InlineData("invalid\trefs/heads/main\n", "main", null)]
+    public void ParseBranchCommit_AcceptsOnlyTheSelectedBranchAndFullHash(string output, string branch, string? expected)
+        => Assert.Equal(expected, GitCliService.ParseBranchCommit(output, branch));
+
+    [Fact]
+    public void ParseDefaultHead_ResolvesTheRemoteBranchAndFullHash()
+    {
+        var result = GitCliService.ParseDefaultHead(
+            "ref: refs/heads/develop\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n");
+
+        Assert.Equal(new GitRemoteBranch("develop", "0123456789abcdef0123456789abcdef01234567"), result);
+    }
+
+    [Theory]
+    [InlineData("file:///tmp/repo")]
+    [InlineData("https://localhost/repo.git")]
+    [InlineData("https://user:token@github.com/example/repo.git")]
+    public async Task ResolveBranchCommit_DisallowedUrl_FailsBeforeGitStarts(string url)
+        => await Assert.ThrowsAsync<BadRequestException>(() =>
+            _sut.ResolveBranchCommitAsync(url, "main", TestContext.Current.CancellationToken));
 }

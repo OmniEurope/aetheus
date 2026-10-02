@@ -13,7 +13,16 @@ EXPECTED_COMMIT="${8:-}"
 WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
 
 case "$RUN_LABEL" in *[!a-zA-Z0-9_-]*|'') echo "Invalid E2E run label." >&2; exit 2 ;; esac
+# PLAN-007 lot 6: NUnit workers, from the pipeline. 1 keeps the suite sequential, as before.
+E2E_WORKERS="${AETHEUS_E2E_WORKERS:-1}"
+case "$E2E_WORKERS" in 1|2|3|4) ;; *) echo "AETHEUS_E2E_WORKERS must be 1 to 4." >&2; exit 2 ;; esac
+echo "E2E suite $RUN_LABEL runs with $E2E_WORKERS NUnit worker(s)."
 case "$PRESERVE_DATABASE" in true|false) ;; *) echo "Preserve-database flag must be true or false." >&2; exit 2 ;; esac
+# true only for a V-1 payload-only baseline running V's suite (run-previous-e2e-gate.sh): the tests
+# marked NewSinceDeployedBaseline are then reported skipped, never passed.
+PREVIOUS_PAYLOAD_ONLY="${E2E_PREVIOUS_PAYLOAD_ONLY:-false}"
+case "$PREVIOUS_PAYLOAD_ONLY" in true|false) ;; *) echo "E2E_PREVIOUS_PAYLOAD_ONLY must be true or false." >&2; exit 2 ;; esac
+echo "E2E suite $RUN_LABEL targets a payload-only V-1: $PREVIOUS_PAYLOAD_ONLY."
 test -s "$ADMIN_PASSWORD_FILE"
 CONTEXT=""
 BUILT_IMAGE=false
@@ -40,11 +49,11 @@ else
     [0-9]*.[0-9]*.[0-9]*) ;;
     *) echo "Could not resolve the Playwright version from $SOURCE_ROOT/Directory.Packages.props." >&2; exit 2 ;;
   esac
-  test "$PLAYWRIGHT_VERSION" = 1.61.0 || {
+  test "$PLAYWRIGHT_VERSION" = 1.63.0 || {
     echo "Playwright package $PLAYWRIGHT_VERSION has no reviewed immutable image digest; update both together." >&2
     exit 2
   }
-  PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright/dotnet:v${PLAYWRIGHT_VERSION}-noble@sha256:0a91cab78ba1057c0d72291e3b3abf9524282514542e29a8eff4daab6cc16a15"
+  PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright/dotnet:v${PLAYWRIGHT_VERSION}-noble@sha256:aa3eaf29a65df8c93fc32ab20cf9359f4d8ecc53e6e89f79378647ace87b46b3"
   CONTEXT="$WORKSPACE/.qa-e2e-context-$RUN_LABEL"
   IMAGE="aetheus-e2e:$RUN_LABEL"
   BUILT_IMAGE=true
@@ -86,6 +95,9 @@ sh "$WORKSPACE/deploy/scripts/run-with-progress.sh" "Playwright E2E tests ($RUN_
   -e E2E_ADMIN_USER=admin \
   -e E2E_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   -e E2E_PRESERVE_DATABASE="$PRESERVE_DATABASE" \
+  -e E2E_WORKERS="$E2E_WORKERS" \
+  -e E2E_PREVIOUS_PAYLOAD_ONLY="$PREVIOUS_PAYLOAD_ONLY" \
+  -e AETHEUS_E2E_RESULTS_DIR=/tmp/aetheus-e2e-results \
   -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 \
   "$IMAGE" \
   sh -c 'set -u
@@ -96,7 +108,8 @@ sh "$WORKSPACE/deploy/scripts/run-with-progress.sh" "Playwright E2E tests ($RUN_
     RAW_EXIT=0
     dotnet test tests/Aetheus.E2E/Aetheus.E2E.csproj -c Release --no-build --no-restore \
       --logger "console;verbosity=minimal" --logger "trx;LogFileName=e2e.trx" \
-      --results-directory "$RESULTS" --nologo || RAW_EXIT=$?
+      --results-directory "$RESULTS" --nologo \
+      -- NUnit.NumberOfTestWorkers="$E2E_WORKERS" || RAW_EXIT=$?
     printf "%s\n" "$RAW_EXIT" > "$RESULTS/raw-exit-code"'
 
 # Keep the browser process non-root and avoid host/container UID mapping entirely. The Docker
@@ -110,5 +123,9 @@ STATUS="$("$NODE" "$WORKSPACE/deploy/scripts/classify-dotnet-test-result.mjs" "$
 
 trap - EXIT INT TERM
 cleanup
-echo "E2E suite $RUN_LABEL produced an executed-test proof against $BACK with findings status $STATUS."
+# Skipped tests are NotExecuted in the TRX, never Passed; say how many, and which, so a skip (a
+# NewSinceDeployedBaseline marker on a payload-only V-1 above all) is read in the gate log itself.
+SKIPPED="$(grep -o 'notExecuted="[0-9]*"' "$TRX" | head -n 1 | tr -dc '0-9')"
+echo "E2E suite $RUN_LABEL produced an executed-test proof against $BACK with findings status $STATUS, ${SKIPPED:-0} test(s) skipped."
+grep -o '<UnitTestResult [^>]*outcome="NotExecuted"[^>]*>' "$TRX" | grep -o 'testName="[^"]*"' | sed 's/^/  skipped: /' || true
 [ "$STATUS" = 0 ] || exit 10

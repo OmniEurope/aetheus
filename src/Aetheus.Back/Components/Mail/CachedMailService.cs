@@ -10,7 +10,7 @@ public class CachedMailService(IMailService inner, IMemoryCache cache) : IMailSe
 
     public async Task<MailDataDto> GetStateAsync(int serverId, CancellationToken ct = default)
     {
-        var key = $"mail:state:{serverId}";
+        var key = MailCacheKeys.State(serverId);
         return await cache.GetOrCreateAsync(key, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = CacheDuration;
@@ -20,7 +20,7 @@ public class CachedMailService(IMailService inner, IMemoryCache cache) : IMailSe
 
     public async Task<List<MailDomainDto>> GetDomainsAsync(int serverId, CancellationToken ct = default)
     {
-        var key = $"mail:domains:{serverId}";
+        var key = MailCacheKeys.Domains(serverId);
         return await cache.GetOrCreateAsync(key, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = CacheDuration;
@@ -55,7 +55,7 @@ public class CachedMailService(IMailService inner, IMemoryCache cache) : IMailSe
 
     public async Task<List<MailAccountDto>> GetAccountsAsync(int serverId, CancellationToken ct = default)
     {
-        var key = $"mail:accounts:{serverId}";
+        var key = MailCacheKeys.Accounts(serverId);
         return await cache.GetOrCreateAsync(key, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = CacheDuration;
@@ -85,13 +85,13 @@ public class CachedMailService(IMailService inner, IMemoryCache cache) : IMailSe
         await inner.DeleteAccountAsync(serverId, accountId, ct).ConfigureAwait(false);
     }
 
-    public async Task ExecuteActionAsync(int serverId, MailActionRequest request, CancellationToken ct = default)
+    public async Task<MailTaskQueuedDto> ExecuteActionAsync(int serverId, MailActionRequest request, CancellationToken ct = default)
     {
         InvalidateCache(serverId);
-        await inner.ExecuteActionAsync(serverId, request, ct).ConfigureAwait(false);
+        return await inner.ExecuteActionAsync(serverId, request, ct).ConfigureAwait(false);
     }
 
-    public async Task GetLogsAsync(int serverId, MailLogRequest request, CancellationToken ct = default) =>
+    public async Task<MailTaskQueuedDto> GetLogsAsync(int serverId, MailLogRequest request, CancellationToken ct = default) =>
         await inner.GetLogsAsync(serverId, request, ct).ConfigureAwait(false);
 
     public async Task SetupAsync(int serverId, MailSetupRequest request, CancellationToken ct = default)
@@ -136,10 +136,5 @@ public class CachedMailService(IMailService inner, IMemoryCache cache) : IMailSe
         return await inner.RotateDkimKeyAsync(serverId, domainId, request, ct).ConfigureAwait(false);
     }
 
-    private void InvalidateCache(int serverId)
-    {
-        cache.Remove($"mail:state:{serverId}");
-        cache.Remove($"mail:domains:{serverId}");
-        cache.Remove($"mail:accounts:{serverId}");
-    }
+    private void InvalidateCache(int serverId) => MailCacheKeys.Invalidate(cache, serverId);
 }

@@ -7,15 +7,22 @@ public class PipelineApproval
     public int Id { get; set; }
     public int PipelineRunId { get; set; }
     public string StageName { get; set; } = string.Empty;
-    public int EnvironmentId { get; set; }
+    /// <summary>Recette R-370: who asked. An environment approval always names its environment; a
+    /// pipeline approval names the stage's environment when it has one, and none otherwise.</summary>
+    public ApprovalScope Scope { get; set; } = ApprovalScope.Environment;
+    public int? EnvironmentId { get; set; }
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime RequestedAt { get; set; }
+
+    /// <summary>PLAN-003 2.7: a stage-specific delay (a confirmation window); null means the environment's
+    /// <c>ApprovalTimeoutMinutes</c>.</summary>
+    public int? TimeoutMinutes { get; set; }
     public DateTime? ResolvedAt { get; set; }
     public int? ResolvedByUserId { get; set; }
     public string? Comments { get; set; }
 
     // Navigation
     public PipelineRun PipelineRun { get; set; } = null!;
-    public Environment Environment { get; set; } = null!;
+    public Environment? Environment { get; set; }
     public User? ResolvedByUser { get; set; }
 }

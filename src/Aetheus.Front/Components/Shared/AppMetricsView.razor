@@ -1,0 +1,99 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* ADR-021 phase 2: OTLP metric time-series chart for a monitored app. *@
+@if (_namesLoading)
+{
+    @* Recette R-444: the list of metrics is being read; "no metric yet" would be a false statement. *@
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else if (_namesLoadFailed)
+{
+    @* Recette R-357: the names call failed; say so instead of claiming nothing was ingested. *@
+    <EmptyState Icon="error" Title="@L["MetricsLoadFailed"]" />
+}
+else if (_names.Count == 0)
+{
+    <EmptyState Icon="show_chart" Title="@L["NoMetricsYet"]" />
+}
+else
+{
+    @* Recette R-444: Metric, Series and Period on one line, each label beside its field, the fields
+       sharing the width; a phone stacks them (app.css). *@
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Wrap="true" Gap="OmniSpacing.Medium" Align="OmniAlignment.Center" Class="app-metrics-filters omni-u-mb-md">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="app-metrics-filter">
+            <OmniLabel For="app-metrics-metric">@L["Metric"]</OmniLabel>
+            <OmniDropDown TValue="string" Id="app-metrics-metric" name="app-metrics-metric" Label="@L["Metric"]" @bind-Value="_selectedMetric" Options="@(_names.ToOptions(item => (string)item, item => item))" @bind-Value:after="OnMetricChanged"
+                            Filterable="true" Class="app-metrics-filter-field" />
+        </OmniStack>
+        @if (_groupsLoading)
+        {
+            <AetheusLoader Size="OmniControlSize.Small" />
+        }
+        else if (_groups.Count > 1)
+        {
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="app-metrics-filter">
+                <OmniLabel For="app-metrics-series">@L["Series"]</OmniLabel>
+                <OmniDropDown Id="app-metrics-series" name="app-metrics-series" @bind-Value="_selectedGroupKey" Options="@(_groups.ToOptions(item => item.Key, item => item.Label))"
+                                @bind-Value:after="OnFilterChanged" Class="app-metrics-filter-field" />
+            </OmniStack>
+        }
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="app-metrics-filter app-metrics-filter-period">
+            <OmniLabel For="app-metrics-period">@L["Period"]</OmniLabel>
+            <OmniDropDown Id="app-metrics-period" name="app-metrics-period" @bind-Value="_hours" Options="@(_periods.ToOptions(item => item.Hours, item => item.Label))"
+                            @bind-Value:after="OnFilterChanged" Class="app-metrics-filter-field" />
+        </OmniStack>
+    </OmniStack>
+
+    @if (_loading)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+    }
+    else if (_points.Count > 0)
+    {
+        @* Headline figures: a chart alone makes the reader estimate the numbers that matter most. *@
+        <OmniRow Gap="OmniSpacing.XLarge" Class="omni-u-mb-md">
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.None">
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["Latest"]</OmniText>
+                <OmniHeading Level="OmniHeadingLevel.H6">@FormatValue(_points[^1].Value)</OmniHeading>
+            </OmniStack>
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.None">
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["Average"]</OmniText>
+                <OmniHeading Level="OmniHeadingLevel.H6">@FormatValue(_average)</OmniHeading>
+            </OmniStack>
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.None">
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["Peak"]</OmniText>
+                <OmniHeading Level="OmniHeadingLevel.H6">@FormatValue(_peak)</OmniHeading>
+            </OmniStack>
+        </OmniRow>
+
+        <OmniChart Title="@(_selectedMetric ?? L["Metric"])" Description="@AxisTitle">
+            @* CategoryProperty is bound to a real DateTime (not a formatted string), so the chart positions
+               points proportionally to elapsed time instead of spacing them evenly by index - a multi-hour
+               collection gap stays visible as a gap instead of disappearing. *@
+            @if (_bandPoints.Count > 0)
+            {
+                <OmniAreaSeries Data="@MaximumPoints" Title="@L["Max"]" ColorIndex="2" />
+                <OmniAreaSeries Data="@MinimumPoints" Title="@L["Min"]" ColorIndex="3" />
+            }
+            @* Measurements are plotted as read: no smoothing, which would invent values between samples. *@
+            <OmniLineSeries Data="@MetricPoints" Title="@_selectedMetric" ColorIndex="0" />
+            @if (_showMarkers)
+            {
+                <OmniMarkers Data="@MetricPoints" ColorIndex="0" />
+            }
+            @if (_p95Points.Count > 0)
+            {
+                <OmniLineSeries Data="@P95Points" Title="@L["P95"]" ColorIndex="1" />
+            }
+            @* No forced Min="0": a low-variance metric (a percentage hovering near 99, a small counter)
+               must not be flattened to an unreadable line against a zero baseline. *@
+            <OmniAxisTitle Text="@AxisTitle" />
+            <OmniCategoryAxis Labels="@OmniChartData.Labels(MetricPoints)" />
+            <OmniLegend Items="@(new[] { _selectedMetric ?? L["Metric"].Value, L["P95"].Value })" />
+        </OmniChart>
+    }
+    else
+    {
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["NotEnoughDataPoints"]</OmniText>
+    }
+}

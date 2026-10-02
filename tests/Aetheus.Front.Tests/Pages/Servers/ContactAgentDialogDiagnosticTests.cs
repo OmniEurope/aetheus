@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -38,7 +36,7 @@ public class ContactAgentDialogDiagnosticTests : BunitContext
         var instance = new ContactAgentDialog();
 
         var api = Services.GetRequiredService<ApiClient>();
-        var dialog = Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var localizer = new BunitTestHelper.StubLocalizer();
         var hubFactory = Services.GetRequiredService<HubConnectionFactory>();
 

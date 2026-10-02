@@ -1,0 +1,11 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@*
+    PLAN-003 lot 22 / D13: the one way a step's status is drawn. A failure is red; a failure the
+    pipeline was told to continue past is the same red, outlined, with a tooltip saying it did not
+    block. Six places used to build this badge themselves, and one of them showed that case orange.
+    R-246: a step skipped by its condition reads "Skipped" with its own icon, never "Cancelled".
+*@
+<OmniBadge Tone="@BadgeVariant" Fill="@BadgeFill" Icon="@StatusIcon"
+           title="@PipelineRunFormatting.StepStatusTitle(Step, L)" Class="@Class">
+    @PipelineRunFormatting.StepStatusText(Step, L)
+</OmniBadge>

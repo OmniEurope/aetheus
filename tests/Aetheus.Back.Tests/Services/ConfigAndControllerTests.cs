@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Cron;
 using Aetheus.Back.Components.SystemLogs;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 

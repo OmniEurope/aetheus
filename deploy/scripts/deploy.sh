@@ -7,9 +7,19 @@ set -e
 # deploy.sh - Aetheus Remote Deployment
 # =============================================================================
 APPNAME="aetheus"
-# Host-specific defaults, overridable via environment so the script is not hard-pinned to one host.
-GITREMOTE="${GITREMOTE:-https://github.com/SonyTumen/aetheus.git}"
-SERVERNAME="${SERVERNAME:-example.com}"
+# No host defaults. This script used to fall back to one specific installation's git remote and
+# domain, which made the wrong host the silent answer: a copy run elsewhere with the variables unset
+# deployed a stranger's repository under a stranger's name instead of saying it had not been told
+# where to go. Required, and refused by name when missing (PLAN-006 lot 10).
+GITREMOTE="${GITREMOTE:-}"
+SERVERNAME="${SERVERNAME:-}"
+require_env() {
+    eval "value=\${$1}"
+    if [ -z "$value" ]; then
+        echo "$1 is required: this script does not assume a host. Set it and re-run." >&2
+        exit 1
+    fi
+}
 BASE_PORT_FRONT=10021
 BASE_PORT_BACK=10022
 DEPLOY_BASE="$(pwd)"
@@ -188,6 +198,11 @@ DB_USER="db${APPNAME}"
 REPO_DIR="${DEPLOY_BASE}/${APPNAME}"
 PROJECT_NAME="${APPNAME}-${ENV}"
 ENV_FILE="${DEPLOY_BASE}/.env-${ENV}"
+
+# Both required here rather than at the top: -h and the diagnostic-only paths must stay usable on a
+# machine that has neither, and refusing them for a value they never read would be noise.
+require_env SERVERNAME
+require_env GITREMOTE
 
 FRONT_URL_ACCEPT="https://${APPNAME}-accept.${SERVERNAME}"
 FRONT_URL_PROD="https://${APPNAME}.${SERVERNAME}"

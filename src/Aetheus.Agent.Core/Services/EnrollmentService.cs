@@ -5,8 +5,6 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Aetheus.Agent.Core.Configuration;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Agent.Core.Services;
@@ -90,7 +88,10 @@ public sealed class EnrollmentService(
             // per-server PipelineRunnerEnabled gate from reality instead of authorising every box.
             PipelineRunnerAvailable = pipelineRunnerAvailable,
             // S-DES-23: report the dev-only TLS-bypass mode at enrollment (known before first heartbeat).
-            InsecureTls = _options.AllowInsecureCerts
+            InsecureTls = _options.AllowInsecureCerts,
+            // PLAN-004 R-11: a keyed hash of the machine identity, so reinstalling the agent on this
+            // machine revives its (possibly retired) server instead of enrolling a new one.
+            MachineIdHash = MachineIdentity.ReadHash()
         };
 
         ServerRegistrationResponse? response;

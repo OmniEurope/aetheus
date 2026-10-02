@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -17,6 +15,26 @@ internal sealed record BlueGreenStepBinding
 {
     internal required string Project { get; init; }
     internal required Dictionary<string, string> Variables { get; init; }
+
+    /// <summary><c>compose_env</c> names this step did not forward because the run does not define
+    /// them at this point, reported so a skip is never silent. Always empty for the steps that start
+    /// a container (<c>bluegreen-up</c>, <c>bluegreen-migrate</c>), which refuse instead.</summary>
+    internal IReadOnlyList<string> SkippedComposeEnv { get; init; } = [];
+
+    /// <summary>
+    /// The run-scoped bootstrap identity. The control plane derives it for <c>bluegreen-up</c> alone:
+    /// it must be in the container environment at start-up, and every later step acts on a colour
+    /// that already carries it. Any other step drops these names from <c>compose_env</c> by design,
+    /// so one list can serve every step of a deployment.
+    /// </summary>
+    /// The telemetry and web analytics names follow the same rule: <c>bluegreen-up</c> alone receives
+    /// them (<c>AppDeployEnvProvider</c>), so one v5 list naming them made the strict migrate step
+    /// refuse a name it was never meant to receive.
+    internal static readonly string[] StartOnlyNames =
+    [
+        "DEPLOYMENT_BOOTSTRAP_USER", "DEPLOYMENT_BOOTSTRAP_PASSWORD", "BOOTSTRAP_STAMP", "DEPLOYMENT_BOOTSTRAP_EXPIRES_AT_UTC",
+        .. Aetheus.Back.Components.AppMonitoring.AppDeployEnvProvider.DerivedNames
+    ];
 
     internal static bool TryBind(
         OperationKind operation,
@@ -61,12 +79,15 @@ internal sealed record BlueGreenStepBinding
             return false;
         }
 
-        if (!TryComposeEnv(substitute(stepDef.ComposeEnv), baseVariables, out var composeEnv, out error))
+        if (!TryComposeEnv(operation, substitute(stepDef.ComposeEnv), baseVariables, out var composeEnv, out var skipped, out error))
+            return false;
+        if (!TryConfirmMinutes(operation, substitute(stepDef.ConfirmMinutes), out var confirmMinutes, out error))
             return false;
 
         binding = new BlueGreenStepBinding
         {
             Project = project,
+            SkippedComposeEnv = skipped,
             Variables = new Dictionary<string, string>(baseVariables, StringComparer.OrdinalIgnoreCase)
             {
                 ["AETHEUS_BG_STATE_DIR"] = stateDir,
@@ -83,6 +104,8 @@ internal sealed record BlueGreenStepBinding
                 ["AETHEUS_BG_MIGRATIONS_DIR"] = migrationsDir
             }
         };
+        if (confirmMinutes > 0)
+            binding.Variables["AETHEUS_BG_CONFIRM_MINUTES"] = confirmMinutes.ToString(CultureInfo.InvariantCulture);
         foreach (var (name, value) in composeEnv)
             binding.Variables[ComposeEnvPrefix + name] = value;
         error = string.Empty;
@@ -97,22 +120,57 @@ internal sealed record BlueGreenStepBinding
     /// </summary>
     internal const string ComposeEnvPrefix = "AETHEUS_BG_COMPOSE_ENV_";
 
+    /// <summary>
+    /// PLAN-003 2.7: the confirmation window a switch arms on the host, in minutes. Only a switch arms
+    /// one; empty or 0 means none. Bounded, because a window of hours is not a confirmation any more.
+    /// </summary>
+    private static bool TryConfirmMinutes(OperationKind operation, string raw, out int minutes, out string error)
+    {
+        minutes = 0;
+        error = string.Empty;
+        if (raw.Length == 0 || raw == "0") return true;
+        if (operation != OperationKind.BlueGreenSwitch)
+        {
+            error = "'confirm_minutes' only applies to bluegreen-switch.";
+            return false;
+        }
+        if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out minutes) || minutes is < 1 or > 240)
+        {
+            error = $"'confirm_minutes' must be a whole number of minutes between 1 and 240, got '{raw}'.";
+            return false;
+        }
+        return true;
+    }
+
     /// <summary>Bounds the forwarded set; a definition needing more is describing something else.</summary>
     private const int MaxComposeEnvEntries = 32;
 
     /// <summary>
-    /// Resolves <c>compose_env</c> against the run variables. An unresolvable name is refused rather
-    /// than dropped: Compose substitutes its own default for a variable it cannot see, so a missing
-    /// image tag would start the placeholder image instead of the one CI built, and the step would
-    /// report a successful cutover of the wrong thing.
+    /// Resolves <c>compose_env</c> against the run variables, per operation (D-01).
+    /// <para>
+    /// A step that starts a container - <c>bluegreen-up</c> the colour, <c>bluegreen-migrate</c> the
+    /// migration job - refuses an unresolvable name rather than dropping it: Compose substitutes its
+    /// own default for a variable it cannot see, so a missing image tag would start the placeholder
+    /// image instead of the one CI built, and the step would report success on the wrong thing. The
+    /// only exception is the migrate step and <see cref="StartOnlyNames"/>, which it never receives.
+    /// </para>
+    /// <para>
+    /// Switch, commit, rollback and retire act on containers that already exist. They forward what
+    /// resolves and skip the rest, reported through <see cref="SkippedComposeEnv"/>: a rollback fires
+    /// on <c>failed()</c>, including a failure before the image tags were ever published, and refusing
+    /// it there turned the one compensation into a second failure.
+    /// </para>
     /// </summary>
     private static bool TryComposeEnv(
+        OperationKind operation,
         string raw,
         IReadOnlyDictionary<string, string> baseVariables,
         out List<KeyValuePair<string, string>> composeEnv,
+        out List<string> skipped,
         out string error)
     {
         composeEnv = [];
+        skipped = [];
         error = string.Empty;
         var names = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (names.Length == 0) return true;
@@ -135,13 +193,22 @@ internal sealed record BlueGreenStepBinding
                 error = $"'compose_env' lists '{name}' twice.";
                 return false;
             }
-            if (!baseVariables.TryGetValue(name, out var value) || value.Length == 0)
+            // Defined is what counts, not non-empty: a library may hold an empty value on purpose
+            // (PLAN-003 2.1), and forwarding it keeps Compose from reading an undefined name instead.
+            if (baseVariables.TryGetValue(name, out var value))
+            {
+                composeEnv.Add(new KeyValuePair<string, string>(name, value));
+                continue;
+            }
+            if (operation != OperationKind.BlueGreenUp && StartOnlyNames.Contains(name, StringComparer.Ordinal))
+                continue;
+            if (operation is OperationKind.BlueGreenUp or OperationKind.BlueGreenMigrate)
             {
                 error = $"'compose_env' names '{name}', which this run does not define; "
                     + "Compose would silently fall back to its own default.";
                 return false;
             }
-            composeEnv.Add(new KeyValuePair<string, string>(name, value));
+            skipped.Add(name);
         }
         return true;
     }
@@ -209,14 +276,16 @@ internal sealed record BlueGreenStepBinding
                 error = "'migrations_dir' is required so the expand/contract gate can inspect pending migrations.";
                 return false;
 
-            case OperationKind.BlueGreenRollback when upstreamConf.Length == 0 || reloadHelper.Length == 0:
+            case OperationKind.BlueGreenRollback or OperationKind.BlueGreenRevert
+                when upstreamConf.Length == 0 || reloadHelper.Length == 0:
                 error = "'upstream_conf' and 'reload_helper' are required to restore traffic.";
                 return false;
 
             // rollback and retire hand reload_helper to `sudo -n` exactly like switch does, so they get
             // the same shape check. The real boundary is argv execution plus an argv-exact sudoers rule,
             // but a validation present on one of three paths reads as an oversight, not defense in depth.
-            case OperationKind.BlueGreenRollback or OperationKind.BlueGreenRetire when reloadHelper.Length > 0:
+            case OperationKind.BlueGreenRollback or OperationKind.BlueGreenRetire or OperationKind.BlueGreenRevert
+                when reloadHelper.Length > 0:
                 return TryReloadHelperShape(reloadHelper, out error);
 
             default:
@@ -280,6 +349,7 @@ internal sealed record BlueGreenStepBinding
         "bluegreen-commit" => OperationKind.BlueGreenCommit,
         "bluegreen-rollback" => OperationKind.BlueGreenRollback,
         "bluegreen-retire" => OperationKind.BlueGreenRetire,
+        "bluegreen-revert" => OperationKind.BlueGreenRevert,
         _ => OperationKind.None
     };
 }

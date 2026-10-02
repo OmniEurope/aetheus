@@ -22,12 +22,45 @@ public sealed class LinuxAgentInstallerHardeningAuditTests
     [Fact]
     public void ServiceUnit_CreatesAgentFilesWithPrivateUmask()
     {
-        var installer = ReadInstaller();
+        // R-249: the unit is the agent/aetheus-agent.service template the installer renders.
+        Assert.Contains(
+            "render_host_config agent/aetheus-agent.service \"$SYSTEMD_UNIT_PATH\"",
+            ReadInstaller(),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "User=#{AGENT_USER}#\nGroup=#{AGENT_GROUP}#\nUMask=0077\nWorkingDirectory=#{INSTALL_DIR}#",
+            LinuxHostConfigTemplates.Read("agent/aetheus-agent.service"),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// R-249: an agent without any sudo grant runs with NoNewPrivileges=true. Commit df6895eb9 had
+    /// dropped the sandboxed branch's NNP_BLOCK, so that unit carried an empty line instead. Renders
+    /// the unit template's hardening section with the installer's own sandboxed-branch value and
+    /// requires the restored line right after the header, as before df6895eb9.
+    /// </summary>
+    [Fact]
+    public void ServiceUnit_WithoutElevation_RendersNoNewPrivilegesTrue()
+    {
+        var installer = ReadInstaller().Replace("\r\n", "\n", StringComparison.Ordinal);
+        var unitWriter = installer[installer.IndexOf("write_systemd_unit() {", StringComparison.Ordinal)..];
+        var sandboxed = unitWriter[unitWriter.IndexOf("    else\n", StringComparison.Ordinal)..];
+        sandboxed = sandboxed[..sandboxed.IndexOf("\n    fi\n", StringComparison.Ordinal)];
+        var assignment = System.Text.RegularExpressions.Regex.Match(sandboxed, "NNP_BLOCK=\"([^\"]*)\"");
+        Assert.True(assignment.Success, "the sandboxed branch of write_systemd_unit must set NNP_BLOCK");
+
+        var rendered = LinuxHostConfigTemplates.Read("agent/aetheus-agent.service")
+            .Replace("#{NNP_BLOCK}#", assignment.Groups[1].Value, StringComparison.Ordinal);
 
         Assert.Contains(
-            "User=$AGENT_USER\nGroup=$AGENT_GROUP\nUMask=0077\nWorkingDirectory=$INSTALL_DIR",
-            installer.Replace("\r\n", "\n", StringComparison.Ordinal),
+            "# --- Security hardening ---\n"
+            + "# Fully sandboxed: no sudo grant, so privilege escalation is blocked outright.\n"
+            + "NoNewPrivileges=true\n"
+            + "#{PROTECT_SYSTEM_BLOCK}#\n",
+            rendered,
             StringComparison.Ordinal);
+        // The elevated branch is unchanged: it still relaxes the flag for the sudo grant.
+        Assert.Contains("NoNewPrivileges=false\"", unitWriter, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -53,18 +86,24 @@ public sealed class LinuxAgentInstallerHardeningAuditTests
     public void ApacheReloadHelper_ValidatesBeforeApplyingAndIsGrantedByExactPath()
     {
         var installer = ReadInstaller();
+        // R-249: the helper and its sudoers drop-in are templates the installer renders.
+        var helper = LinuxHostConfigTemplates.Read("apache/aetheus-apache-reload");
+        var sudoers = LinuxHostConfigTemplates.Read("apache/sudoers.d/aetheus-apache");
 
         Assert.Contains(
             "APACHE_RELOAD_HELPER_PATH=\"/usr/local/lib/aetheus/aetheus-apache-reload\"",
             installer, StringComparison.Ordinal);
         Assert.Contains(
-            "[ \"$#\" -eq 0 ] || { echo \"aetheus-apache-reload accepts no arguments\" >&2; exit 2; }",
+            "render_host_config apache/aetheus-apache-reload \"$APACHE_RELOAD_HELPER_PATH\"",
             installer, StringComparison.Ordinal);
         Assert.Contains(
+            "[ \"$#\" -eq 0 ] || { echo \"aetheus-apache-reload accepts no arguments\" >&2; exit 2; }",
+            helper, StringComparison.Ordinal);
+        Assert.Contains(
             "/usr/sbin/apache2ctl configtest || { echo \"aetheus-apache-reload: configuration rejected; nothing applied\" >&2; exit 1; }",
-            installer, StringComparison.Ordinal);
-        Assert.Contains("exec /bin/systemctl reload apache2.service", installer, StringComparison.Ordinal);
-        Assert.Contains("$APACHE_RELOAD_HELPER_PATH", installer, StringComparison.Ordinal);
+            helper, StringComparison.Ordinal);
+        Assert.Contains("exec /bin/systemctl reload apache2.service", helper, StringComparison.Ordinal);
+        Assert.Contains("#{APACHE_RELOAD_HELPER_PATH}#", sudoers, StringComparison.Ordinal);
         Assert.Contains("chown root:root \"$APACHE_RELOAD_HELPER_PATH\"", installer, StringComparison.Ordinal);
         Assert.Contains("chmod 755 \"$APACHE_RELOAD_HELPER_PATH\"", installer, StringComparison.Ordinal);
         // A rejected sudoers file must leave no helper behind that nothing is allowed to invoke.
@@ -95,16 +134,23 @@ public sealed class LinuxAgentInstallerHardeningAuditTests
     [Fact]
     public void MailManage_UsesLiteralKeyFilteringAndOwnsBothDkimOutputs()
     {
-        var installer = ReadInstaller();
+        // R-249: the helper is the mail/mail-manage template the installer renders.
+        Assert.Contains(
+            "render_host_config mail/mail-manage \"$MAIL_MANAGE_HELPER_PATH\"",
+            ReadInstaller(),
+            StringComparison.Ordinal);
+        var installer = LinuxHostConfigTemplates.Read("mail/mail-manage");
 
         Assert.Contains("without_space_key() { awk -v key=\"$1\" '$1 != key'", installer, StringComparison.Ordinal);
         Assert.Contains("without_colon_key() { awk -F: -v key=\"$1\" '$1 != key'", installer, StringComparison.Ordinal);
         Assert.DoesNotContain("grep -v \"^$email ", installer, StringComparison.Ordinal);
         Assert.DoesNotContain("grep -v \"^$email:", installer, StringComparison.Ordinal);
         Assert.DoesNotContain("grep -v \"^\\*@$domain ", installer, StringComparison.Ordinal);
-        Assert.Contains("\"/etc/opendkim/keys/$selector.private\" \\", installer, StringComparison.Ordinal);
-        Assert.Contains("\"/etc/opendkim/keys/$selector.txt\"", installer, StringComparison.Ordinal);
-        Assert.Contains("chmod 644 \"/etc/opendkim/keys/$selector.txt\"", installer, StringComparison.Ordinal);
+        // PLAN-005: keys live per domain (two domains may share a selector); both outputs stay owned by
+        // opendkim, the private key 600 and the public .txt 644 so the unprivileged agent can inventory it.
+        Assert.Contains("chown -R opendkim:opendkim \"/etc/opendkim/keys/$d\"", installer, StringComparison.Ordinal);
+        Assert.Contains("chmod 600 \"/etc/opendkim/keys/$d/$s.private\"", installer, StringComparison.Ordinal);
+        Assert.Contains("chmod 644 \"/etc/opendkim/keys/$d/$s.txt\"", installer, StringComparison.Ordinal);
     }
 
     private static string ReadInstaller() =>

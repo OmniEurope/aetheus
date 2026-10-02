@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 
@@ -16,6 +14,8 @@ public class ProjectServiceTests
 {
     private readonly IProjectRepository _repo = Substitute.For<IProjectRepository>();
     private readonly IServerLifecycleService _serverService = Substitute.For<IServerLifecycleService>();
+    private readonly Aetheus.Back.Components.Notifications.IUserNotificationService _userNotifications =
+        Substitute.For<Aetheus.Back.Components.Notifications.IUserNotificationService>();
     private readonly ProjectService _sut;
 
     public ProjectServiceTests()
@@ -33,7 +33,7 @@ public class ProjectServiceTests
             .Returns(new Dictionary<int, ProjectListInsight>());
         _repo.GetActiveRunStepLabelsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, string>());
-        _sut = new ProjectService(_repo, Substitute.For<IAuditService>(), Substitute.For<IEntityChangeNotifier>(), orgService, _serverService, TimeProvider.System, Substitute.For<IMemoryCache>());
+        _sut = new ProjectService(_repo, Substitute.For<IAuditService>(), Substitute.For<IEntityChangeNotifier>(), orgService, _serverService, TimeProvider.System, Substitute.For<IMemoryCache>(), Substitute.For<Aetheus.Back.Components.PortRegistry.IPortRegistryService>(), _userNotifications);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class ProjectServiceTests
                 [1] = new(
                     1, 81, "0123456789abcdef", "Ship portfolio view", gitDate,
                     91, "Deploy", PipelineStatus.Success, gitDate.AddMinutes(1),
-                    90, "Release", AnalysisGrade.B, ProjectProductionStatus.Online, 7)
+                    AnalysisGrade.B, ProjectProductionStatus.Online, 7)
             });
 
         var result = await _sut.GetProjectsAsync(new ProjectPaginationRequest { Page = 1, PageSize = 25 }, ct: TestContext.Current.CancellationToken);
@@ -71,7 +71,6 @@ public class ProjectServiceTests
         Assert.Equal(41, result.Items[0].InternalRepositoryId);
         Assert.Equal(81, result.Items[0].LastCommitId);
         Assert.Equal(91, result.Items[0].LastRunId);
-        Assert.Equal(90, result.Items[0].ParentRunId);
         Assert.Equal(AnalysisGrade.B, result.Items[0].LatestGateGrade);
         Assert.Equal(ProjectProductionStatus.Online, result.Items[0].ProductionStatus);
         Assert.Equal(7, result.Items[0].OnlineUserCount);
@@ -103,19 +102,13 @@ public class ProjectServiceTests
             ]
         };
         _repo.GetProjectDetailAsync(1, TestContext.Current.CancellationToken).Returns(project);
-        _repo.GetProjectListInsightsAsync(
-                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 1 })),
-                Arg.Any<DateTime>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new Dictionary<int, ProjectListInsight>
-            {
-                [1] = new(
-                    1, null, null, null, null,
-                    null, null, null, null,
-                    null, null, AnalysisGrade.C, ProjectProductionStatus.Unavailable, null)
-            });
+        _repo.GetLatestGateGradeAsync(1, Arg.Any<CancellationToken>())
+            .Returns(new AnalysisGradeSummaryDto { OverallGrade = AnalysisGrade.C, PipelineRunId = 2478 });
 
         var result = await _sut.GetProjectDetailAsync(1, ct: TestContext.Current.CancellationToken);
+
+        // Recette R-482: the detail reads the grade alone, not the list's whole insight.
+        await _repo.DidNotReceiveWithAnyArgs().GetProjectListInsightsAsync(default!, default, TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         Assert.Equal("My Project", result.Name);
@@ -123,6 +116,7 @@ public class ProjectServiceTests
         Assert.Equal(PipelineStatus.Success, result.Pipelines[0].LastRunStatus);
         Assert.Equal(2, result.Tags.Count);
         Assert.Equal(AnalysisGrade.C, result.LatestGateGrade);
+        Assert.Equal(2478, result.LatestGateGradeRunId);
     }
 
     [Fact]
@@ -173,11 +167,25 @@ public class ProjectServiceTests
             RepositoryUrl = "https://repo",
             DefaultBranch = "main",
             Tags = ["tag1"]
-        }, ct: TestContext.Current.CancellationToken);
+        }, creatorUserId: null, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(5, result.Id);
         Assert.Equal("New Proj", result.Name);
         await _repo.Received(1).AddProjectAsync(Arg.Any<Project>(), TestContext.Current.CancellationToken);
+        // No user row behind the caller: nobody is subscribed.
+        await _userNotifications.DidNotReceive().SubscribeAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task R2034_CreateProjectAsync_SubscribesTheCreatorToTheNewProject()
+    {
+        _repo.AddProjectAsync(Arg.Any<Project>(), TestContext.Current.CancellationToken)
+            .Returns(Task.CompletedTask)
+            .AndDoes(ci => ci.Arg<Project>().Id = 9);
+
+        await _sut.CreateProjectAsync(new CreateProjectRequest { Name = "Followed" }, 42, TestContext.Current.CancellationToken);
+
+        await _userNotifications.Received(1).SubscribeAsync(42, 9, TestContext.Current.CancellationToken);
     }
 
     [Fact]

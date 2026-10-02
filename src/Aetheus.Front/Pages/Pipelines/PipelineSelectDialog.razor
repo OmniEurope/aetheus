@@ -1,8 +1,0 @@
-@* SPDX-License-Identifier: EUPL-1.2 *@
-<RadzenStack Gap="1rem">
-    <RadzenDropDown TValue="int?" Data="@Pipelines" TextProperty="Name" ValueProperty="Id"
-        @bind-Value="_selectedId" Placeholder="@L["SelectPipeline"]" class="rz-w-100" />
-    <DialogFooter OnCancel="@(() => Dialog.Close())">
-        <RadzenButton Text="@L["Confirm"]" Icon="check" Click="@(() => Dialog.Close(_selectedId))" Disabled="@(!_selectedId.HasValue)" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-    </DialogFooter>
-</RadzenStack>

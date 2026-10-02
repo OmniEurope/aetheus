@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Tasks;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Tasks;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Tasks;
 
@@ -36,13 +33,13 @@ public class TasksDeepTests : BunitContext
     // === GetTaskBadge (static) ===
 
     [Theory]
-    [InlineData(TaskExecutionStatus.Success, BadgeStyle.Success)]
-    [InlineData(TaskExecutionStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Timeout, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Running, BadgeStyle.Info)]
-    [InlineData(TaskExecutionStatus.Cancelled, BadgeStyle.Warning)]
-    [InlineData(TaskExecutionStatus.Pending, BadgeStyle.Light)]
-    public void GetTaskBadge_ReturnsExpected(TaskExecutionStatus status, BadgeStyle expected)
+    [InlineData(TaskExecutionStatus.Success, OmniTone.Success)]
+    [InlineData(TaskExecutionStatus.Failed, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Timeout, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Running, OmniTone.Accent)]
+    [InlineData(TaskExecutionStatus.Cancelled, OmniTone.Warning)]
+    [InlineData(TaskExecutionStatus.Pending, OmniTone.Neutral)]
+    public void GetTaskBadge_ReturnsExpected(TaskExecutionStatus status, OmniTone expected)
     {
         Assert.Equal(expected, TaskListView.GetTaskBadge(status));
     }
@@ -65,15 +62,22 @@ public class TasksDeepTests : BunitContext
             new ServerTaskDto { Status = TaskExecutionStatus.Pending, ServerStatus = ServerStatus.Online }));
     }
 
-    // === OnInitialized - status options ===
+    // === No filter row above the grid (recette R-221) ===
 
     [Fact]
-    public void OnInitialized_StatusOptions_HasSixItems()
+    public void NoSearchBoxNorStatusList_AboveTheGrid()
     {
+        // Recette R-221: the column headers are the filters; the toolbar search box and status list
+        // duplicated the Name and Status column filters and are gone, with their fields.
         var cut = RenderView();
-        var options = (List<object>)typeof(TaskListView)
-            .GetField("_statusOptions", Priv)!.GetValue(cut.Instance)!;
-        Assert.Equal(6, options.Count);
+        cut.WaitForState(() => cut.Markup.Contains("Build"), TimeSpan.FromSeconds(2));
+
+        Assert.Empty(cut.FindAll(".task-list-toolbar"));
+        Assert.Empty(cut.FindComponents<OmniDropDown<TaskExecutionStatus?>>());
+        Assert.DoesNotContain("SearchTasks", cut.Markup);
+        Assert.DoesNotContain("AllStatuses", cut.Markup);
+        Assert.Null(typeof(TaskListView).GetField("_search", Priv));
+        Assert.Null(typeof(TaskListView).GetField("_statusFilter", Priv));
     }
 
     // === Detail navigation ===
@@ -88,24 +92,71 @@ public class TasksDeepTests : BunitContext
         Assert.EndsWith("/tasks/2", Services.GetRequiredService<NavigationManager>().Uri);
     }
 
-    // === ClearFilters ===
+    // === Name and Status header filters replace the search box and status list (recette R-221) ===
 
     [Fact]
-    public async Task ClearFilters_ResetsSearchAndStatusFilter()
+    public async Task NameAndStatusHeaderFilters_AreColumnFilters_WithoutSearchOrStatusParameters()
     {
         var cut = RenderView();
+        var grid = cut.FindComponent<AetheusDataGrid<ServerTaskDto>>();
 
-        typeof(TaskListView).GetField("_search", Priv)!.SetValue(cut.Instance, "deploy");
-        typeof(TaskListView).GetField("_statusFilter", Priv)!.SetValue(cut.Instance, (TaskExecutionStatus?)TaskExecutionStatus.Failed);
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(ServerTaskDto.Name), "deploy", OmniDataGridFilterOperator.Contains),
+                new GridFilterDescriptor(nameof(ServerTaskDto.Status), "Failed", OmniDataGridFilterOperator.In)
+            ]
+        }));
 
-        var method = typeof(TaskListView).GetMethod("ClearFilters", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/tasks?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=Name", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Value=deploy", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=Status", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Value=Failed", StringComparison.Ordinal)
+                && !url.Contains("search=", StringComparison.Ordinal)
+                && !url.Contains("status=", StringComparison.Ordinal);
+        }));
+    }
 
-        var search = (string?)typeof(TaskListView).GetField("_search", Priv)!.GetValue(cut.Instance);
-        var filter = (TaskExecutionStatus?)typeof(TaskListView).GetField("_statusFilter", Priv)!.GetValue(cut.Instance);
+    // === Header filters (recette R-212) ===
 
-        Assert.Null(search);
-        Assert.Null(filter);
+    [Fact]
+    public async Task HeaderFilters_AreSentAsColumnFilters_AndTheServerListComesFromTheApi()
+    {
+        _handler.SetJsonResponse("api/tasks/filter-values", new TaskFilterValuesDto { ServerNames = ["web-1", "db-1"] });
+        var cut = RenderView();
+        var grid = cut.FindComponent<AetheusDataGrid<ServerTaskDto>>();
+        var separator = Aetheus.Shared.Components.Shared.GridFilter.ListSeparator;
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(ServerTaskDto.ServerName), $"web-1{separator}db-1", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(ServerTaskDto.Executor), "Docker", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(ServerTaskDto.Status), $"Failed{separator}Timeout", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(ServerTaskDto.CreatedAt), "2026-09-01T08:00:00Z",
+                    OmniDataGridFilterOperator.GreaterThanOrEquals, OmniDataGridFilterOperator.LessThan, "2026-09-01T12:00:00Z")
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/tasks?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=ServerName", StringComparison.Ordinal)
+                && url.Contains($"Filters[0].Value=web-1{separator}db-1", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=Executor", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Field=Status", StringComparison.Ordinal)
+                && url.Contains("Filters[3].Field=CreatedAt", StringComparison.Ordinal)
+                && url.Contains("Filters[3].SecondValue=2026-09-01T12:00:00Z", StringComparison.Ordinal);
+        }));
+        var values = (TaskFilterValuesDto)typeof(TaskListView).GetField("_filterValues", Priv)!.GetValue(cut.Instance)!;
+        Assert.Equal(["web-1", "db-1"], values.ServerNames);
     }
 
     // === Render check ===

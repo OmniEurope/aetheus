@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -129,11 +126,11 @@ public class ServerDockerSectionTests : BunitContext
     // === Static method tests ===
 
     [Theory]
-    [InlineData("running", BadgeStyle.Success)]
-    [InlineData("exited", BadgeStyle.Danger)]
-    [InlineData("paused", BadgeStyle.Warning)]
-    [InlineData("unknown", BadgeStyle.Light)]
-    public void GetContainerBadge_ReturnsExpectedStyle(string state, BadgeStyle expected)
+    [InlineData("running", OmniTone.Success)]
+    [InlineData("exited", OmniTone.Danger)]
+    [InlineData("paused", OmniTone.Warning)]
+    [InlineData("unknown", OmniTone.Neutral)]
+    public void GetContainerBadge_ReturnsExpectedStyle(string state, OmniTone expected)
     {
         // A360-10: called directly. These are pure functions, so reflection bought nothing except a
         // test that keeps compiling after the method it targets is renamed or deleted.
@@ -199,7 +196,7 @@ public class ServerDockerSectionTests : BunitContext
         var cut = RenderContainersTab();
 
         var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!);
 
         Assert.Equal(1, dialog.OpenCount);
@@ -213,7 +210,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderContainersTab();
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.ConfirmResult = true;
         var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456", "nginx"])!);
@@ -302,7 +299,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderDockerSection();
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = new DockerPruneDialogResult(true, true, false);
         var method = typeof(ServerDockerSection).GetMethod("OpenPruneDialogAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
@@ -316,7 +313,7 @@ public class ServerDockerSectionTests : BunitContext
         var cut = RenderContainersTab();
 
         var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456"])!);
 
         Assert.Equal("abc123def456", dialog.LastParameters!["ContainerId"]);
@@ -328,7 +325,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderContainersTab();
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = new DockerResourceLimitsDialogResult(1.5, 512);
         var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["abc123def456"])!);
@@ -341,15 +338,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderContainersTab();
 
-        var method = typeof(DockerContainersTab).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var argsType = typeof(RowRenderEventArgs<DockerContainerDto>);
-        var args = Activator.CreateInstance(argsType)!;
-        argsType.GetProperty("Data")!.SetValue(args, new DockerContainerDto { State = "running" });
-        var attrs = new Dictionary<string, object>();
-        argsType.GetProperty("Attributes")!.SetValue(args, attrs);
-        method.Invoke(cut.Instance, [args]);
-
-        Assert.Equal("docker-row-running", attrs["class"]);
+        Assert.Contains("docker-row-running", cut.Find("tr[data-omni-row-index='0']").ClassList);
     }
 
     [Fact]
@@ -357,26 +346,36 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderContainersTab();
 
-        var method = typeof(DockerContainersTab).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var argsType = typeof(RowRenderEventArgs<DockerContainerDto>);
-        var args = Activator.CreateInstance(argsType)!;
-        argsType.GetProperty("Data")!.SetValue(args, new DockerContainerDto { State = "exited" });
-        var attrs = new Dictionary<string, object>();
-        argsType.GetProperty("Attributes")!.SetValue(args, attrs);
-        method.Invoke(cut.Instance, [args]);
-
-        Assert.Equal("docker-row-exited", attrs["class"]);
+        Assert.Contains("docker-row-exited", cut.Find("tr[data-omni-row-index='1']").ClassList);
     }
 
     [Fact]
-    public void OnContainerRowRender_NullAttributes_DoesNothing()
+    public void ProjectToolbar_StartsOnlyContainersInSelectedProject()
     {
-        var cut = RenderContainersTab();
+        _handler.SetJsonResponse("api/servers/20/docker/action", "{}");
+        var original = MakeDockerServer();
+        var server = original with
+        {
+            Docker = original.Docker with
+            {
+                Containers =
+                [
+                    new DockerContainerDto { ContainerId = "alpha-one", Name = "first", Project = "alpha", State = "exited" },
+                    new DockerContainerDto { ContainerId = "beta-one", Name = "second", Project = "beta", State = "exited" }
+                ]
+            }
+        };
+        var cut = Render<DockerContainersTab>(parameters => parameters
+            .Add(component => component.Server, server)
+            .Add(component => component.ServerId, 20)
+            .Add(component => component.InitialLoaded, true));
 
-        var method = typeof(DockerContainersTab).GetMethod("OnContainerRowRender", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var argsType = typeof(RowRenderEventArgs<DockerContainerDto>);
-        var args = Activator.CreateInstance(argsType)!;
-        method.Invoke(cut.Instance, [args]);
+        cut.Find("select#docker-bulk-project").Change("0");
+        cut.Find("button[title='StartAll']").Click();
+
+        Assert.Single(_handler.Requests, request => request.Url.Contains("docker/action", StringComparison.Ordinal));
+        cut.Find("input[placeholder='FilterContainers']").Input("second");
+        Assert.True(cut.Find("button[title='StartAll']").HasAttribute("disabled"));
     }
 
     [Fact]
@@ -602,61 +601,27 @@ public class ServerDockerSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task RefreshDockerAsync_UpdatesContainers()
+    public void R181_NoRefreshButton_TheContainersFollowTheHeartbeatInventory()
     {
         var cut = RenderDockerSection();
+        Assert.Empty(cut.FindAll(".docker-toolbar button[title='Refresh']"));
+        // No polling toggle either: the heartbeat is the only source of the inventory.
+        Assert.Empty(cut.FindAll(".docker-toolbar .omni-checkbox-label"));
+        Assert.Empty(cut.FindAll(".docker-toolbar .omni-switch"));
+        var server = MakeDockerServer();
+        var pushed = server with
+        {
+            Docker = server.Docker with
+            {
+                Containers = [new DockerContainerDto { ContainerId = "fedcba987654", Name = "pushed-by-heartbeat", Image = "nginx", State = "running" }]
+            }
+        };
 
-        var method = typeof(ServerDockerSection).GetMethod("RefreshDockerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await (Task)method.Invoke(cut.Instance, [])!;
+        // ServerDetailLoader hands every heartbeat's inventory down as a new Server: no fetch involved.
+        cut.Render(p => p.Add(x => x.Server, pushed));
 
-        // Refresh re-fetches the container list from the server (GET docker/containers).
-        Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("api/servers/20/docker/containers"));
-    }
-
-    [Fact]
-    public async Task CopyInspectToClipboardAsync_WithNullContent_LeavesItOut()
-    {
-        var cut = RenderContainersTab();
-
-        typeof(DockerContainersTab).GetField("_inspectContent", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, null);
-
-        var method = typeof(DockerContainersTab).GetMethod("CopyInspectToClipboardAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await (Task)method.Invoke(cut.Instance, [])!;
-
-        // Null inspect content short-circuits before the JS copy - no clipboard interop fires.
-        Assert.DoesNotContain(JSInterop.Invocations, i => i.Identifier == "dockerInterop.copyToClipboard");
-    }
-
-    [Fact]
-    public void OnAutoRefreshChanged_True_CreatesLoop()
-    {
-        var cut = RenderDockerSection();
-
-        var method = typeof(ServerDockerSection).GetMethod("OnAutoRefreshChanged", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        method.Invoke(cut.Instance, [true]);
-
-        var task = typeof(ServerDockerSection).GetField("_autoRefreshTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
-        Assert.NotNull(task);
-
-        // Disable to dispose timer
-        method.Invoke(cut.Instance, [false]);
-        var cts = (CancellationTokenSource?)typeof(ServerDockerSection)
-            .GetField("_autoRefreshCts", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(cut.Instance);
-        Assert.True(cts is null || cts.IsCancellationRequested);
-    }
-
-    [Fact]
-    public void AutoRefreshToggle_ThroughRenderedControl_StartsAndStopsLoop()
-    {
-        var cut = RenderDockerSection();
-        var toggle = cut.Find(".labeled-toggle-native-input");
-
-        toggle.Change(true);
-        Assert.True(cut.Instance.IsAutoRefreshRunning);
-
-        toggle.Change(false);
-        Assert.False(cut.Instance.IsAutoRefreshRunning);
+        cut.WaitForAssertion(() => Assert.Contains("pushed-by-heartbeat", cut.Markup, StringComparison.Ordinal));
+        Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("docker/containers", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -758,7 +723,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderImagesTab();
 
-        cut.Find("input.docker-search").Change("dotnet");
+        cut.Find("input.docker-search").Input("dotnet");
 
         var prop = typeof(DockerImagesTab).GetProperty("FilteredImages", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var filtered = (List<DockerImageDto>)prop.GetValue(cut.Instance)!;
@@ -772,7 +737,7 @@ public class ServerDockerSectionTests : BunitContext
     {
         var cut = RenderComposeTab();
 
-        cut.Find("input.docker-search").Change("monitoring");
+        cut.Find("input.docker-search").Input("monitoring");
 
         var prop = typeof(DockerComposeTab).GetProperty("FilteredCompose", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var filtered = (List<DockerComposeStackDto>)prop.GetValue(cut.Instance)!;
@@ -794,13 +759,32 @@ public class ServerDockerSectionTests : BunitContext
                 new() { NetworkId = "n2", Name = "host", Driver = "host", Scope = "local" }
             }));
 
-        cut.Find("input.docker-search").Change("bridge");
+        cut.Find("input.docker-search").Input("bridge");
 
         var filtered = (List<DockerNetworkDto>)typeof(DockerNetworksTab)
             .GetProperty("FilteredNetworks", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
         Assert.Single(filtered);
         Assert.Equal("bridge", filtered[0].Name);
+    }
+
+    [Fact]
+    public void NetworksTab_ProjectGroupsCollapseTheirOwnRows()
+    {
+        var cut = Render<DockerNetworksTab>(parameters => parameters
+            .Add(p => p.Networks, new List<DockerNetworkDto>
+            {
+                new() { NetworkId = "n1", Name = "bridge", Driver = "bridge", Scope = "local", Project = "alpha" },
+                new() { NetworkId = "n2", Name = "host", Driver = "host", Scope = "local", Project = "beta" }
+            }));
+
+        Assert.Equal(2, cut.FindAll("tr.omni-data-grid__group").Count);
+        Assert.Equal(2, cut.FindAll("tbody tr[data-omni-row-index]").Count);
+
+        cut.Find("tr.omni-data-grid__group button[aria-expanded='true']").Click();
+
+        Assert.Single(cut.FindAll("tbody tr[data-omni-row-index]"));
+        Assert.Single(cut.FindAll("tr.omni-data-grid__group button[aria-expanded='false']"));
     }
 
     [Fact]
@@ -813,7 +797,7 @@ public class ServerDockerSectionTests : BunitContext
                 new() { Name = "logs", Driver = "local", Mountpoint = "/logs" }
             }));
 
-        cut.Find("input.docker-search").Change("pgdata");
+        cut.Find("input.docker-search").Input("pgdata");
 
         var filtered = (List<DockerVolumeDto>)typeof(DockerVolumesTab)
             .GetProperty("FilteredVolumes", BindingFlags.NonPublic | BindingFlags.Instance)!

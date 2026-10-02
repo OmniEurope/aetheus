@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: EUPL-1.2
+
+namespace Aetheus.Front.Components.Pipelines;
+
+internal sealed class PipelineRunLauncher(
+    ApiClient api,
+    PipelineRunGate runGate,
+    PipelineRunDialogCoordinator dialogs,
+    NavigationManager navigation,
+    NotifyHelper toast,
+    IStringLocalizer<AppStrings> localizer)
+{
+    /// <summary>
+    /// Opens the launched run's page (the default). Recette R2-038: the pipeline page keeps the user
+    /// on its runs grid instead, where the new run appears.
+    /// </summary>
+    public bool OpenLaunchedRun { get; init; } = true;
+
+    /// <summary>
+    /// A plain launch: the declared parameters are taken at their defaults and no dialog opens, unless
+    /// a required parameter has no default and the run genuinely cannot be built without an answer.
+    /// </summary>
+    public async Task<PipelineRunLaunchResult?> LaunchAsync(int pipelineId, string? sourceBranch)
+    {
+        if (!await runGate.ConfirmPreflightAsync(pipelineId, sourceBranch)) return null;
+        var (proceed, parameters) = await dialogs.ResolveDefaultParametersAsync(pipelineId, sourceBranch);
+        if (!proceed) return null;
+        return await TriggerAsync(pipelineId, sourceBranch, parameters);
+    }
+
+    /// <summary>
+    /// A launch the user already configured in the unified dialog: branch and parameters are taken as
+    /// chosen, with no second prompt.
+    /// </summary>
+    public async Task<PipelineRunLaunchResult?> LaunchAsync(int pipelineId, PipelineLaunchChoice choice)
+    {
+        if (!await runGate.ConfirmPreflightAsync(pipelineId, choice.SourceBranch)) return null;
+        return await TriggerAsync(pipelineId, choice.SourceBranch, choice.Parameters);
+    }
+
+    /// <summary>
+    /// Triggers the run as given, with no preflight and no prompt (the caller already confirmed it and
+    /// fixed its parameters), then opens the new run or reports why it was refused.
+    /// </summary>
+    public async Task<PipelineRunLaunchResult?> TriggerAsync(
+        int pipelineId, string? sourceBranch, Dictionary<string, string>? parameters)
+    {
+        var outcome = await api.Pipelines.TriggerPipelineRunAsync(pipelineId, parameters, sourceBranch);
+        if (outcome.Value is not null)
+        {
+            // Straight to the new run, in the SPA, unless the caller shows it where the user already is.
+            toast.Info("Running", "PipelineTriggered");
+            if (OpenLaunchedRun) navigation.NavigateTo($"/pipelines/runs/{outcome.Value.Id}");
+            return new PipelineRunLaunchResult(outcome.Value);
+        }
+
+        // R2-039: the reason comes from the body whatever its shape. Joining Error.Errors threw on the
+        // error middleware's body, whose "errors": null left that list null, and the page fell into
+        // its error boundary instead of saying why the launch was refused.
+        var reason = outcome.ErrorMessage is { } refusal ? refusal
+            : outcome.NotFound ? localizer["RunNotFound"].Value
+            : outcome.StatusCode == System.Net.HttpStatusCode.Forbidden ? localizer["PipelineRunForbidden"].Value
+            : localizer["PipelineRunFailedNoReason"].Value;
+        toast.Notify(OmniSeverity.Danger, "PipelineRunFailed", reason);
+        return null;
+    }
+}

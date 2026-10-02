@@ -8,7 +8,7 @@
 # carry no Version=). The csproj files sit one level below these props (/src/<proj>), so MSBuild walks
 # up to /src and finds them there.
 # =============================================================================
-FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.100@sha256:c7445f141c04f1a6b454181bd098dcfa606c61ba0bd213d0a702489e5bd4cd71 AS build
 WORKDIR /src
 
 # CPM + build conventions — required for restore to resolve centrally-managed versions.
@@ -30,7 +30,7 @@ COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-ob
 
 RUN dotnet publish Aetheus.Agent.Linux/Aetheus.Agent.Linux.csproj -c Release -o /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12@sha256:6a94333d37514e385650a3c81a55e5350b67253dbe136e9cf17e499c35606a8c AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish .

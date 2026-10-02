@@ -17,14 +17,20 @@ public class FirewallSudoersAuditTests
     public void FirewallDropIn_GrantsExactlyTheHelperPath()
     {
         var script = Script();
-        var start = script.IndexOf("Cmnd_Alias AETHEUS_FIREWALL", StringComparison.Ordinal);
-        Assert.True(start >= 0, "Cmnd_Alias AETHEUS_FIREWALL not found in install-agent-linux.sh");
-        var end = script.IndexOf("Defaults!AETHEUS_FIREWALL", start, StringComparison.Ordinal);
+        // R-249: the drop-in is the firewall/sudoers.d/aetheus-firewall template the installer renders.
+        Assert.Contains(
+            "render_host_config firewall/sudoers.d/aetheus-firewall \"$FIREWALL_MANAGE_SUDOERS_FILE\"",
+            script,
+            StringComparison.Ordinal);
+        var dropIn = LinuxHostConfigTemplates.Read("firewall/sudoers.d/aetheus-firewall");
+        var start = dropIn.IndexOf("Cmnd_Alias AETHEUS_FIREWALL", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Cmnd_Alias AETHEUS_FIREWALL not found in firewall/sudoers.d/aetheus-firewall");
+        var end = dropIn.IndexOf("Defaults!AETHEUS_FIREWALL", start, StringComparison.Ordinal);
         Assert.True(end > start, "Defaults!AETHEUS_FIREWALL terminator not found");
-        var block = script[start..end];
+        var block = dropIn[start..end];
 
-        // The grant references the same helper path the agent execs (via the $FIREWALL_HELPER_PATH var).
-        Assert.Contains("$FIREWALL_HELPER_PATH", block, StringComparison.Ordinal);
+        // The grant references the same helper path the agent execs (via the FIREWALL_HELPER_PATH placeholder).
+        Assert.Contains("#{FIREWALL_HELPER_PATH}#", block, StringComparison.Ordinal);
         Assert.Contains("FIREWALL_HELPER_PATH=\"" + FirewallOperationExecutor.HelperPath + "\"", script, StringComparison.Ordinal);
     }
 
@@ -34,8 +40,12 @@ public class FirewallSudoersAuditTests
         var script = Script();
         Assert.Contains("--enable-firewall-manage", script, StringComparison.Ordinal);
         Assert.Contains("write_firewall_manage", script, StringComparison.Ordinal);
+        Assert.Contains("render_host_config firewall/aetheus-firewall \"$FIREWALL_HELPER_PATH\"", script, StringComparison.Ordinal);
         // Anti-lockout logic must live in the helper: never close the admin port; auto-allow before enable.
-        Assert.Contains("would close the administration port", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "would close the administration port",
+            LinuxHostConfigTemplates.Read("firewall/aetheus-firewall"),
+            StringComparison.Ordinal);
     }
 
     private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;

@@ -1,0 +1,14 @@
+# Aetheus Agent - service control only (no wildcards, runas root only)
+Defaults:#{AGENT_USER}# !requiretty, env_reset, secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+Cmnd_Alias AETHEUS_SYSTEMCTL = \
+    /bin/systemctl start apache2, /bin/systemctl stop apache2, /bin/systemctl restart apache2, /bin/systemctl status apache2, \
+    /bin/systemctl start docker, /bin/systemctl stop docker, /bin/systemctl restart docker, /bin/systemctl status docker, \
+    /bin/systemctl start nginx, /bin/systemctl stop nginx, /bin/systemctl restart nginx, /bin/systemctl status nginx, \
+    /bin/systemctl start postfix, /bin/systemctl stop postfix, /bin/systemctl restart postfix, /bin/systemctl status postfix, \
+    /bin/systemctl start dovecot, /bin/systemctl stop dovecot, /bin/systemctl restart dovecot, /bin/systemctl status dovecot, \
+    /bin/systemctl start ts3server, /bin/systemctl stop ts3server, /bin/systemctl restart ts3server, /bin/systemctl status ts3server, \
+    /bin/systemctl start portsentry, /bin/systemctl stop portsentry, /bin/systemctl restart portsentry, /bin/systemctl status portsentry, \
+    /bin/systemctl start rkhunter, /bin/systemctl stop rkhunter, /bin/systemctl restart rkhunter, /bin/systemctl status rkhunter, \
+    /bin/systemctl start cron, /bin/systemctl stop cron, /bin/systemctl restart cron, /bin/systemctl status cron, \
+    /bin/systemctl start crond, /bin/systemctl stop crond, /bin/systemctl restart crond, /bin/systemctl status crond
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_SYSTEMCTL

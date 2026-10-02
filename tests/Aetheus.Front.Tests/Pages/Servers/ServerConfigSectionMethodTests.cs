@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -22,18 +19,18 @@ public class ServerConfigSectionMethodTests : BunitContext
     // === GetChangeBadgeStyle (private static) ===
 
     [Theory]
-    [InlineData("pull", BadgeStyle.Success)]
-    [InlineData("create", BadgeStyle.Success)]
-    [InlineData("deploy", BadgeStyle.Success)]
-    [InlineData("enable", BadgeStyle.Success)]
-    [InlineData("update", BadgeStyle.Info)]
-    [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("unknown", BadgeStyle.Light)]
-    [InlineData("delete", BadgeStyle.Light)]
-    public void GetChangeBadgeStyle_ReturnsExpected(string action, BadgeStyle expected)
+    [InlineData("pull", OmniTone.Success)]
+    [InlineData("create", OmniTone.Success)]
+    [InlineData("deploy", OmniTone.Success)]
+    [InlineData("enable", OmniTone.Success)]
+    [InlineData("update", OmniTone.Accent)]
+    [InlineData("unchanged", OmniTone.Neutral)]
+    [InlineData("unknown", OmniTone.Neutral)]
+    [InlineData("delete", OmniTone.Neutral)]
+    public void GetChangeBadgeStyle_ReturnsExpected(string action, OmniTone expected)
     {
         var method = typeof(ServerConfigSection).GetMethod("GetChangeBadgeStyle", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [action])!;
+        var result = (OmniTone)method.Invoke(null, [action])!;
         Assert.Equal(expected, result);
     }
 
@@ -138,19 +135,5 @@ public class ServerConfigSectionMethodTests : BunitContext
         var deploying = (bool)typeof(ServerConfigSection).GetField("_configDeploying", Priv)!.GetValue(cut.Instance)!;
         Assert.False(visible);
         Assert.False(deploying);
-    }
-
-    [Fact]
-    public async Task CopyConfigToClipboardAsync_CallsJs()
-    {
-        var cut = RenderSection();
-        typeof(ServerConfigSection).GetField("_configYaml", Priv)!.SetValue(cut.Instance, "yaml: value");
-
-        var method = typeof(ServerConfigSection).GetMethod("CopyConfigToClipboardAsync", Priv)!;
-        await (Task)method.Invoke(cut.Instance, [])!;
-
-        // The current YAML is written to the clipboard via the JS interop call.
-        var clip = Assert.Single(JSInterop.Invocations, i => i.Identifier == "navigator.clipboard.writeText");
-        Assert.Equal("yaml: value", clip.Arguments[0]);
     }
 }

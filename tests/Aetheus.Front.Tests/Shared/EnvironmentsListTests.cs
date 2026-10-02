@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Shared;
 
@@ -65,22 +61,45 @@ public class EnvironmentsListTests : BunitContext
         });
         var cut = Render<EnvironmentsList>();
         var method = ListType.GetMethod("OnLoadData", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new LoadDataArgs()])!);
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new GridLoadArgs()])!);
 
         var envs = (List<EnvironmentDto>)ListType.GetField("_environments", Priv)!.GetValue(cut.Instance)!;
         Assert.Single(envs);
     }
 
     [Fact]
-    public async Task ClearFilters_ResetsSearch()
+    public async Task HeaderFilters_AreSentAsColumnFilters()
     {
+        // Recette R-221 / R-224: the search row and its Clear button are gone; the column header filters
+        // (Name text, Type list, approval yes/no) narrow the server query as column filters.
         _handler.SetJsonResponse("api/environments", new PaginatedResult<EnvironmentDto> { Items = [], TotalCount = 0 });
         var cut = Render<EnvironmentsList>();
-        ListType.GetField("_search", Priv)!.SetValue(cut.Instance, "abc");
-        var method = ListType.GetMethod("ClearFilters", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
+        var grid = cut.FindComponent<AetheusDataGrid<EnvironmentDto>>();
+        var separator = Aetheus.Shared.Components.Shared.GridFilter.ListSeparator;
 
-        Assert.Null((string?)ListType.GetField("_search", Priv)!.GetValue(cut.Instance));
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(EnvironmentDto.Name), "abc", OmniDataGridFilterOperator.Contains),
+                new GridFilterDescriptor(nameof(EnvironmentDto.Type), $"Production{separator}Staging", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(EnvironmentDto.RequireApproval), "True", OmniDataGridFilterOperator.Equals)
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return request.Method == "GET"
+                && url.Contains("api/environments", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=Name", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Value=abc", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=Type", StringComparison.Ordinal)
+                && url.Contains($"Filters[1].Value=Production{separator}Staging", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Field=RequireApproval", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Value=True", StringComparison.Ordinal)
+                && !url.Contains("search=", StringComparison.Ordinal);
+        }));
     }
 
     [Fact]

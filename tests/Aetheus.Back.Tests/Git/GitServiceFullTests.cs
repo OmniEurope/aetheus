@@ -3,8 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 

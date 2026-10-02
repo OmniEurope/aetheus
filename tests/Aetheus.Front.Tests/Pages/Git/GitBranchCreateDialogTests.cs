@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -41,7 +38,7 @@ public class GitBranchCreateDialogTests : BunitContext
             .Add(x => x.Branches, new List<GitLightBranchDto>()));
 
         Assert.Contains("Create", cut.Markup);
-        Assert.Contains("Cancel", cut.Markup);
+        Assert.Contains("GoBack", cut.Markup);
     }
 
     [Fact]
@@ -76,7 +73,7 @@ public class GitBranchCreateDialogTests : BunitContext
         await cut.InvokeAsync(() => (Task)submit.Invoke(cut.Instance, [])!);
 
         // Submit POSTs the create request to the repo's branches endpoint. (The dialog-close-with-true on
-        // success is a DialogService.Close a standalone bUnit render cannot observe - Radzen only fires
+        // success is a OmniDialogService.Close a standalone bUnit render cannot observe - the service only fires
         // OnClose for a dialog opened through its stack - so we assert the real HTTP side effect.)
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/git/repos/7/branches"));
     }

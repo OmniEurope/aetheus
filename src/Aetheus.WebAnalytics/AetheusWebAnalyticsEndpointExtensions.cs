@@ -196,7 +196,9 @@ public static class AetheusWebAnalyticsEndpointExtensions
     private static bool IsSupportedPayload(AnalyticsBrowserEvent analyticsEvent) =>
         analyticsEvent.Kind switch
         {
-            "page_view" => analyticsEvent.DurationMs is null && analyticsEvent.ErrorType is null,
+            // A heartbeat keeps the visit's LastSeenAtUtc fresh on the current route; the backend
+            // ingest accepts it and never counts it as a page view.
+            "page_view" or "heartbeat" => analyticsEvent.DurationMs is null && analyticsEvent.ErrorType is null,
             "browser_performance" => analyticsEvent.DurationMs is not null
                                      && analyticsEvent.ErrorType is null,
             "browser_error" => analyticsEvent.DurationMs is null

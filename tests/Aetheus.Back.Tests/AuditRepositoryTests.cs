@@ -30,6 +30,33 @@ public class AuditRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task HeaderFilters_TimestampRangeWithHours_ActionList_AndText_AreAppliedToPageAndCount()
+    {
+        // Recette R-238: the timestamp range (hours included) replaces the date pickers; the action list
+        // and the text columns are column filters too, next to the typed parameters.
+        IReadOnlyList<GridFilter> filters =
+        [
+            new GridFilter
+            {
+                Field = "Timestamp", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-01-10T09:00:00Z",
+                SecondOperator = GridFilterOperator.LessThan, SecondValue = "2026-02-01T10:00:00Z"
+            },
+            new GridFilter { Field = "Action", Operator = GridFilterOperator.In, Value = $"Created{GridFilter.ListSeparator}Updated" },
+            new GridFilter { Field = "Username", Operator = GridFilterOperator.Contains, Value = "ADM" }
+        ];
+
+        var logs = await _repo.GetPagedAsync(0, 10, ct: TestContext.Current.CancellationToken, filters: filters);
+        var count = await _repo.CountAsync(ct: TestContext.Current.CancellationToken, filters: filters);
+        var typedAndFiltered = await _repo.CountAsync(entityType: "Server",
+            ct: TestContext.Current.CancellationToken,
+            filters: [new GridFilter { Field = "Details", Operator = GridFilterOperator.Contains, Value = "hostname" }]);
+
+        Assert.Equal(2, count);
+        Assert.Equal(["Updated", "Created"], logs.Select(log => log.Action));
+        Assert.Equal(1, typedAndFiltered);
+    }
+
+    [Fact]
     public async Task GetPagedAsync_ReturnsAllOrderedByTimestampDesc()
     {
         var logs = await _repo.GetPagedAsync(0, 10, ct: TestContext.Current.CancellationToken);

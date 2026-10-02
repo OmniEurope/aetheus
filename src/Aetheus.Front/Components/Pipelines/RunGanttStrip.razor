@@ -1,0 +1,174 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* PLAN-006 lot 12.1: the time axis the ordered list below cannot be. The list says two stages were
+   allowed to run in parallel, because they share a graph depth; these bars say whether they actually
+   did, and where the run's minutes went.
+   PLAN-003 lot 20 / D26: to the right of each bar, aligned columns (a CSS grid, not a table):
+   duration, wait, usual duration, last duration, CPU and I/O. A column no stage has a value for is
+   not drawn at all.
+   Recette R-154 / R-155: before each bar, a hatched segment for the time the stage waited, so a row
+   reads continuously (waiting, then running) without moving any bar off its real time. *@
+@if (Layout is { HasBars: true } layout)
+{
+    var columns = VisibleColumns(layout);
+    var totals = RunGanttChart.Totals(layout);
+    <div class="run-gantt">
+        @* The hatch is defined once and referenced by every row. Its id carries this instance's
+           number so two strips on one page never share (or steal) a pattern. *@
+        <svg class="run-gantt-defs" aria-hidden="true" focusable="false">
+            <defs>
+                <pattern id="@WaitPatternId" class="run-gantt-hatch" patternUnits="userSpaceOnUse" width="1.5" height="1">
+                    <path d="M-0.375,0.25 L0.375,-0.25 M0,1 L1.5,0 M1.125,1.25 L1.875,0.75" />
+                </pattern>
+            </defs>
+        </svg>
+        <div class="run-gantt-row run-gantt-head">
+            <span></span>
+            @* Recette R-158: quarter ticks, each one a light line through every row below. *@
+            <span class="run-gantt-scale">
+                @foreach (var tick in Ticks(layout))
+                {
+                    <span class="run-gantt-tick" data-tick="@tick.Percent">@tick.Label</span>
+                }
+            </span>
+            <span class="run-gantt-cols">
+                @foreach (var column in columns)
+                {
+                    <span title="@L[column.HintKey]" data-column="@column.Kind">@L[column.TitleKey]</span>
+                }
+            </span>
+        </div>
+        @foreach (var bar in layout.Bars)
+        {
+            var progress = Progress(bar, layout);
+            var expanded = IsExpanded(bar);
+            <div class="run-gantt-row">
+                <span class="run-gantt-label@(bar.Stage.IsSystem ? " run-gantt-system" : "")"
+                      title="@bar.Stage.DisplayName">
+                    @* Recette R-160: unfolds the stage into its steps, on this same axis. *@
+                    @if (bar.Stage.Steps.Count > 0)
+                    {
+                        <OmniButton Variant="OmniButtonVariant.Primary" Class="run-gantt-toggle"
+                                    OnClick="@(_ => Toggle(bar))"
+                                    Label="@ToggleText(bar, expanded)" title="@ToggleText(bar, expanded)"
+                                    aria-expanded="@(expanded ? "true" : "false")"
+                                    aria-controls="@StepsId(bar)">
+                            <OmniIcon Name="@(expanded ? OmniIconName.ChevronDown : OmniIconName.ChevronRight)" />
+                        </OmniButton>
+                    }
+                    else
+                    {
+                        <span class="run-gantt-toggle-spacer" aria-hidden="true"></span>
+                    }
+                    @* Recette R-155: the status is also an icon, not only the bar's hue. *@
+                    <OmniIcon Name="@StageIcon(bar.Stage)" Class="@StatusIconClass(bar.Stage.Status)" Label="@StageStatusText(bar.Stage)" />
+                    <span class="run-gantt-label-text">@bar.Stage.DisplayName</span>
+                </span>
+                <div class="run-gantt-track" title="@BarTitle(bar, layout, progress)">
+                    <svg class="run-gantt-svg" viewBox="0 0 100 1" preserveAspectRatio="none" aria-hidden="true">
+                        <rect class="run-gantt-track-fill" x="0" y="0" width="100" height="1" rx="0.15" />
+                        <line class="run-gantt-gridline" x1="25" y1="0" x2="25" y2="1" />
+                        <line class="run-gantt-gridline" x1="50" y1="0" x2="50" y2="1" />
+                        <line class="run-gantt-gridline" x1="75" y1="0" x2="75" y2="1" />
+                        @if (bar.HasWait)
+                        {
+                            <rect class="run-gantt-wait" fill="@WaitPatternFill"
+                                  x="@SvgNumber(bar.WaitOffsetPercent)" y="0.2"
+                                  width="@SvgNumber(bar.WaitWidthPercent)" height="0.6" />
+                        }
+                        <rect class="run-gantt-bar @BarClass(bar)"
+                              x="@SvgNumber(bar.OffsetPercent)" y="0"
+                              width="@SvgNumber(bar.WidthPercent)" height="1" rx="0.15" />
+                        @if (progress is not null)
+                        {
+                            <rect class="run-gantt-progress"
+                                  x="@SvgNumber(bar.OffsetPercent)" y="0"
+                                  width="@SvgNumber(ScaledWidth(bar.WidthPercent, progress.FillPercent))" height="1" rx="0.15" />
+                            @if (progress.IsOverrunning)
+                            {
+                                <rect class="run-gantt-overrun"
+                                      x="@SvgNumber(bar.OffsetPercent)" y="0"
+                                      width="@SvgNumber(ScaledWidth(bar.WidthPercent, progress.OverrunPercent))" height="1" rx="0.15" />
+                            }
+                        }
+                    </svg>
+                </div>
+                <span class="run-gantt-cols">
+                    @foreach (var column in columns)
+                    {
+                        <span class="run-gantt-col" data-column="@column.Kind">@column.Value(bar, layout)</span>
+                    }
+                </span>
+            </div>
+            @if (expanded)
+            {
+                @* Recette R-160: one thinner bar per step, on the stage rows' axis. Only the Duration
+                   column is filled; the other cells stay empty so every column keeps its x. *@
+                <div class="run-gantt-steps" id="@StepsId(bar)" role="group" aria-label="@bar.Stage.DisplayName">
+                    @foreach (var step in RunGanttStepChart.Build(bar.Stage, layout, _now))
+                    {
+                        <div class="run-gantt-row run-gantt-step-row">
+                            <span class="run-gantt-label run-gantt-step-label" title="@step.Label">
+                                <OmniIcon Name="@StepIcon(step.Step)" Class="@StatusIconClass(step.Step.Status)" Label="@StepStatusText(step.Step)" />
+                                <span class="run-gantt-label-text">@step.Label</span>
+                            </span>
+                            @if (step.HasBar)
+                            {
+                                <div class="run-gantt-track run-gantt-step-track" title="@StepTitle(step)">
+                                    <svg class="run-gantt-svg run-gantt-step-svg" viewBox="0 0 100 1" preserveAspectRatio="none" aria-hidden="true">
+                                        <rect class="run-gantt-track-fill" x="0" y="0" width="100" height="1" rx="0.15" />
+                                        <line class="run-gantt-gridline" x1="25" y1="0" x2="25" y2="1" />
+                                        <line class="run-gantt-gridline" x1="50" y1="0" x2="50" y2="1" />
+                                        <line class="run-gantt-gridline" x1="75" y1="0" x2="75" y2="1" />
+                                        <rect class="run-gantt-step-bar @StatusClass(step.Step.Status)"
+                                              x="@SvgNumber(step.OffsetPercent)" y="0"
+                                              width="@SvgNumber(step.WidthPercent)" height="1" rx="0.15" />
+                                    </svg>
+                                </div>
+                            }
+                            else
+                            {
+                                @* No recorded start: named with its status, never drawn. *@
+                                <div class="run-gantt-track run-gantt-step-track" title="@L["GanttStepNoStartHint"]">
+                                    <span class="run-gantt-step-nostart">@L["GanttStepNoStart"]</span>
+                                </div>
+                            }
+                            <span class="run-gantt-cols">
+                                @foreach (var column in columns)
+                                {
+                                    <span class="run-gantt-col" data-column="@column.Kind">@(column.Kind == GanttColumn.Duration && step.HasBar ? FormatDuration(step.Duration) : string.Empty)</span>
+                                }
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        }
+        @* Recette R-157: where the run's time went, in three figures under the strip. *@
+        <div class="run-gantt-total" title="@L["GanttTotalHint"]">
+            <span class="run-gantt-total-item" data-total="execution">
+                <span class="run-gantt-total-label">@L["GanttTotalExecution"]</span>
+                <span class="run-gantt-total-value">@FormatDuration(totals.Execution)</span>
+            </span>
+            <span class="run-gantt-total-item" data-total="wait">
+                <span class="run-gantt-total-label">@L["GanttTotalWait"]</span>
+                <span class="run-gantt-total-value">@FormatDuration(totals.Wait)</span>
+            </span>
+            @if (RunDuration() is { } runDuration)
+            {
+                <span class="run-gantt-total-item" data-total="run">
+                    <span class="run-gantt-total-label">@L["GanttTotalRun"]</span>
+                    <span class="run-gantt-total-value">@FormatDuration(runDuration)</span>
+                </span>
+            }
+        </div>
+        @if (layout.StagesWithoutTiming.Count > 0)
+        {
+            @* Named rather than drawn: a bar for a stage that never ran would put a shape on the time
+               axis for something that occupied none of it. *@
+            <div class="run-gantt-untimed" title="@L["GanttNotStartedHint"]">
+                @L["GanttNotStarted"] @string.Join(", ", layout.StagesWithoutTiming.Select(s => s.DisplayName))
+            </div>
+        }
+    </div>
+}

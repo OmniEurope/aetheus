@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Container definitions (PLAN-006 lot 6). Written as regular expressions over the Dockerfile text
+# rather than as structural patterns: a Dockerfile's meaning is its instruction lines, and a regex on
+# an instruction is exactly as precise as the rule needs. Each one has a firing and a silent case in
+# tests/security-rules/aetheus-dockerfile.Dockerfile, run by `opengrep scan --test`.
+#
+# Not written: "COPY . . without a .dockerignore". OpenGrep sees one file at a time and cannot tell
+# whether a sibling file exists; a rule that guessed would fire on every correct project.
+rules:
+  - id: aetheus.dockerfile.final-user-root
+    languages: [generic]
+    paths:
+      include:
+        - "Dockerfile*"
+        - "*.Dockerfile"
+    severity: WARNING
+    message: >-
+      The last USER instruction is root, so the container's process runs as root. Switch back to an
+      unprivileged user once the steps that need root are done.
+    metadata:
+      cwe: CWE-250
+      category: security
+    # A USER root followed by no other USER instruction until the end of the file.
+    pattern-regex: (?ms)^[ \t]*USER[ \t]+(?:root|0)(?::\S*)?[ \t]*$(?!.*^[ \t]*USER[ \t])
+
+  - id: aetheus.dockerfile.apt-without-no-install-recommends
+    languages: [generic]
+    paths:
+      include:
+        - "Dockerfile*"
+        - "*.Dockerfile"
+    severity: INFO
+    message: >-
+      apt-get install without --no-install-recommends pulls packages nobody asked for, and every one
+      of them is attack surface and scanner noise in the image.
+    metadata:
+      cwe: CWE-1104
+      category: security
+    # The logical line (backslash continuations included) must carry the flag somewhere.
+    pattern-regex: (?m)apt-get[ \t]+(?:-\S+[ \t]+)*install\b(?:(?!--no-install-recommends)(?:[^\\\n]|\\\r?\n))*$
+
+  - id: aetheus.dockerfile.add-remote-url
+    languages: [generic]
+    paths:
+      include:
+        - "Dockerfile*"
+        - "*.Dockerfile"
+    severity: ERROR
+    message: >-
+      ADD with a URL downloads at build time with no checksum. Download in a RUN step that verifies a
+      pinned digest, or use ADD --checksum.
+    metadata:
+      cwe: CWE-494
+      category: security
+    pattern-regex: (?mi)^[ \t]*ADD[ \t]+(?:--(?!checksum)\S+[ \t]+)*https?://
+
+  - id: aetheus.dockerfile.latest-base-image
+    languages: [generic]
+    paths:
+      include:
+        - "Dockerfile*"
+        - "*.Dockerfile"
+    severity: WARNING
+    message: >-
+      A base image tagged latest changes under the build without notice: the same commit no longer
+      produces the same image. Pin a version, and a digest for anything that ships.
+    metadata:
+      cwe: CWE-1357
+      category: security
+    pattern-regex: (?mi)^[ \t]*FROM[ \t]+(?:--\S+[ \t]+)*[^\s:@]+:latest\b
+
+  - id: aetheus.dockerfile.secret-in-arg-or-env
+    languages: [generic]
+    paths:
+      include:
+        - "Dockerfile*"
+        - "*.Dockerfile"
+    severity: ERROR
+    message: >-
+      A secret given a value in ARG or ENV is written into the image history, readable by anyone who
+      can pull the image. Pass it at run time, or through a build secret mount.
+    metadata:
+      cwe: CWE-538
+      category: security
+    # Only a declaration that carries a value: `ARG NUGET_TOKEN` alone bakes nothing in.
+    pattern-regex: (?mi)^[ \t]*(?:ARG|ENV)[ \t]+[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY|APIKEY|PRIVATE_KEY)[A-Z0-9_]*[ \t]*=[ \t]*[^\s$"']

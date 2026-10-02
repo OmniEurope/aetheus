@@ -11,17 +11,16 @@ public class DialogConventionGuardTests
                 "PermissionsChangedDialog requires acknowledgement because the active permission model is stale."
         };
 
-    private static readonly IReadOnlyDictionary<string, string> NonRadzenDialogComponents =
+    private static readonly IReadOnlyDictionary<string, string> NonLibraryDialogComponents =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [Path.Combine("Layout", "ConnectionLostDialog.razor")] = "Framework connection-loss overlay.",
-            [Path.Combine("Shared", "ConfirmDialog.razor")] = "Custom overlay with Escape and explicit cancel callbacks.",
-            [Path.Combine("Shared", "PermissionsChangedDialog.razor")] = "Blocking acknowledgement dialog.",
-            [Path.Combine("Shared", "WizardDialog.razor")] = "Custom overlay with its own Escape and cancel contract."
+            [Path.Combine("Components", "Shared", "PermissionsChangedDialog.razor")] = "Blocking acknowledgement dialog.",
+            [Path.Combine("Components", "Shared", "WizardDialog.razor")] = "Custom overlay with its own Escape and cancel contract."
         };
 
     /// <summary>
-    /// Radzen focuses the first form field when a dialog opens, which makes a screen reader announce
+    /// A dialog that focuses its first form field on open makes a screen reader announce
     /// that field before the dialog's own title - the user hears "Name, edit" with no idea what they
     /// are naming. Every dialog therefore opts out, so focus lands on the dialog itself.
     /// </summary>
@@ -36,18 +35,18 @@ public class DialogConventionGuardTests
                                     || path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)))
         {
             var source = File.ReadAllText(file);
-            var declared = System.Text.RegularExpressions.Regex.Matches(source, @"new DialogOptions\b").Count;
+            var declared = System.Text.RegularExpressions.Regex.Matches(source, @"new OmniDialogOptions\b").Count;
             if (declared == 0) continue;
 
             var optedOut = System.Text.RegularExpressions.Regex
                 .Matches(source, @"AutoFocusFirstElement\s*=\s*false").Count;
             if (optedOut < declared)
-                violations.Add($"{Path.GetRelativePath(frontDir, file)} ({declared} DialogOptions, {optedOut} opted out)");
+                violations.Add($"{Path.GetRelativePath(frontDir, file)} ({declared} OmniDialogOptions, {optedOut} opted out)");
         }
 
         Assert.True(violations.Count == 0,
-            "Every DialogOptions must set AutoFocusFirstElement = false so the dialog title is "
-            + "announced before its first field (claude-ui-patterns.md):\n  "
+            "Every OmniDialogOptions must set AutoFocusFirstElement = false so the dialog title is "
+            + "announced before its first field (docs/contracts/ui-patterns.md):\n  "
             + string.Join("\n  ", violations.Order(StringComparer.Ordinal)));
     }
 
@@ -93,25 +92,25 @@ public class DialogConventionGuardTests
         foreach (var file in RepositoryScan.Enumerate(frontDir, "*Dialog.razor"))
         {
             var relative = Path.GetRelativePath(frontDir, file);
-            if (NonRadzenDialogComponents.ContainsKey(relative)) continue;
+            if (NonLibraryDialogComponents.ContainsKey(relative)) continue;
 
             var source = File.ReadAllText(file);
             var codeBehind = File.Exists(file + ".cs") ? File.ReadAllText(file + ".cs") : string.Empty;
             var combined = source + codeBehind;
-            var hasSharedAction = source.Contains("<Aetheus.Front.Shared.DialogFooter", StringComparison.Ordinal)
+            var hasSharedAction = source.Contains("<Aetheus.Front.Components.Shared.DialogFooter", StringComparison.Ordinal)
                                   || source.Contains("<DialogFooter", StringComparison.Ordinal)
-                                  || source.Contains("<Aetheus.Front.Shared.DialogCloseButton", StringComparison.Ordinal)
+                                  || source.Contains("<Aetheus.Front.Components.Servers.DialogCloseButton", StringComparison.Ordinal)
                                   || source.Contains("<DialogCloseButton", StringComparison.Ordinal);
-            var hasExplicitAction = source.Contains("<RadzenButton", StringComparison.Ordinal)
+            var hasExplicitAction = source.Contains("<OmniButton", StringComparison.Ordinal)
                                     && (combined.Contains("Dialog.Close", StringComparison.Ordinal)
-                                        || combined.Contains("DialogService.Close", StringComparison.Ordinal));
+                                        || combined.Contains("OmniDialogService.Close", StringComparison.Ordinal));
 
             if (!hasSharedAction && !hasExplicitAction) violations.Add(relative);
         }
 
         Assert.True(violations.Count == 0,
-            "Every DialogService component must expose DialogFooter, DialogCloseButton, or an explicit "
-            + "RadzenButton wired to Dialog.Close:\n  " + string.Join("\n  ", violations));
+            "Every OmniDialogService component must expose DialogFooter, DialogCloseButton, or an explicit "
+            + "OmniButton wired to Dialog.Close:\n  " + string.Join("\n  ", violations));
     }
 
     private static string FrontDirectory() => Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");

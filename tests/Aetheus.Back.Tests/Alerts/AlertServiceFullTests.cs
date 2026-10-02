@@ -3,8 +3,6 @@ using Aetheus.Back.Components.Alerts;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 

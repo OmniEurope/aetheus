@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Tests.TestDoubles;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Shared;
 
 public sealed class AppIngestionSettingsBehaviorTests : BunitContext
 {
     private readonly BunitTestHelper.TestHandler _handler;
+    private readonly ImmediateDialogService _dialog;
 
     public AppIngestionSettingsBehaviorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         _handler.SetJsonResponse(
             "web-analytics/configuration",
             new AppWebAnalyticsConfigurationDto
@@ -25,6 +26,8 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
                 AllowedOrigins = ["https://example.test"],
                 StorageBudgetBytes = 104_857_600
             });
+        // Recette R2-007: the storage line under the budget field reads the audience summary.
+        _handler.SetJsonResponse("/web-analytics?days=30", new AppWebAnalyticsSummaryDto());
     }
 
     [Fact]
@@ -47,6 +50,39 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
     }
 
     [Fact]
+    public void R2007_TheAudienceStorage_IsOneLineUnderTheBudgetField()
+    {
+        _handler.SetJsonResponse("api/appmonitoring/apps/7/thresholds", new List<AppMetricThresholdDto>());
+        _handler.SetJsonResponse("/web-analytics?days=30", new AppWebAnalyticsSummaryDto
+        {
+            EstimatedStorageBytes = 1_048_576,
+            StorageBudgetBytes = 2_097_152,
+            StorageUsagePercent = 50,
+            RejectedEvents = 3
+        });
+
+        var cut = Render<AppIngestionSettings>(p => p.Add(x => x.AppId, 7).Add(x => x.CanWrite, true));
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".web-analytics-storage-usage")));
+        Assert.Contains("AnalyticsStorageUsageLine", cut.Find(".web-analytics-storage-usage").TextContent, StringComparison.Ordinal);
+        // Next to the budget it is measured against, in the same field group.
+        Assert.True(cut.Markup.IndexOf("web-analytics-storage-usage", StringComparison.Ordinal)
+                    > cut.Markup.IndexOf("analytics-storage-budget", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void R2007_AnUnreadableAudienceSummary_LeavesTheStorageLineOut()
+    {
+        _handler.SetJsonResponse("api/appmonitoring/apps/7/thresholds", new List<AppMetricThresholdDto>());
+        _handler.SetResponse(HttpMethod.Get, "/web-analytics?days=30", HttpStatusCode.InternalServerError);
+
+        var cut = Render<AppIngestionSettings>(p => p.Add(x => x.AppId, 7).Add(x => x.CanWrite, true));
+
+        cut.WaitForAssertion(() => Assert.Contains("analytics-storage-budget", cut.Markup, StringComparison.Ordinal));
+        Assert.Empty(cut.FindAll(".web-analytics-storage-usage"));
+    }
+
+    [Fact]
     public async Task GenerateKey_ShowsPlaintextOnce_NotifiesAndRaisesChanged()
     {
         _handler.SetJsonResponse("api/appmonitoring/apps/7/thresholds", new List<AppMetricThresholdDto>());
@@ -61,12 +97,66 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
         await InvokeAsync(cut, "GenerateKeyAsync");
         cut.Render();
 
+        // The first generation replaces no key: nothing to confirm.
+        Assert.Equal(0, _dialog.OpenCount);
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.EndsWith("api/appmonitoring/apps/7/ingest-key", StringComparison.Ordinal));
         Assert.Contains("aetheus-secret-once", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("OTEL_EXPORTER_OTLP_HEADERS", cut.Markup, StringComparison.Ordinal);
         Assert.Equal(1, changes);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Success);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Success);
+    }
+
+    [Fact]
+    public async Task RegenerateKey_Confirmed_AsksARedRegenerateThenReplacesTheKey()
+    {
+        _handler.SetJsonResponse("api/appmonitoring/apps/7/thresholds", new List<AppMetricThresholdDto>());
+        _handler.SetJsonResponse(HttpMethod.Post, "api/appmonitoring/apps/7/ingest-key",
+            new IngestKeyResponse { Key = "aetheus-new-key", CreatedAt = DateTime.UtcNow });
+        _dialog.ConfirmResult = true;
+        var changes = 0;
+        var cut = Render<AppIngestionSettings>(p => p
+            .Add(x => x.AppId, 7)
+            .Add(x => x.App, new MonitoredAppDto { Id = 7, Name = "API", HasIngestKey = true })
+            .Add(x => x.CanWrite, true)
+            .Add(x => x.OnChanged, () => changes++));
+
+        await InvokeAsync(cut, "GenerateKeyAsync");
+        cut.Render();
+
+        Assert.Equal(1, _dialog.OpenCount);
+        Assert.Equal("RegenerateIngestKeyConfirm", _dialog.LastConfirmMessage);
+        var options = Assert.IsType<OmniConfirmOptions>(_dialog.LastConfirmOptions);
+        Assert.True(options.Destructive);
+        Assert.Equal("Regenerate", options.OkButtonText);
+        Assert.Equal("GoBack", options.CancelButtonText);
+        Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.EndsWith("api/appmonitoring/apps/7/ingest-key", StringComparison.Ordinal));
+        Assert.Contains("aetheus-new-key", cut.Markup, StringComparison.Ordinal);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task RegenerateKey_Dismissed_CallsNothing()
+    {
+        _handler.SetJsonResponse("api/appmonitoring/apps/7/thresholds", new List<AppMetricThresholdDto>());
+        _handler.SetJsonResponse(HttpMethod.Post, "api/appmonitoring/apps/7/ingest-key",
+            new IngestKeyResponse { Key = "aetheus-new-key", CreatedAt = DateTime.UtcNow });
+        _dialog.ConfirmResult = false;
+        var changes = 0;
+        var cut = Render<AppIngestionSettings>(p => p
+            .Add(x => x.AppId, 7)
+            .Add(x => x.App, new MonitoredAppDto { Id = 7, Name = "API", HasIngestKey = true })
+            .Add(x => x.CanWrite, true)
+            .Add(x => x.OnChanged, () => changes++));
+
+        await InvokeAsync(cut, "GenerateKeyAsync");
+        cut.Render();
+
+        Assert.Equal(1, _dialog.OpenCount);
+        Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST");
+        Assert.DoesNotContain("aetheus-new-key", cut.Markup, StringComparison.Ordinal);
+        Assert.Equal(0, changes);
+        Assert.Empty(Services.Toasts());
     }
 
     [Fact]
@@ -83,8 +173,8 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
         await InvokeAsync(cut, "GenerateKeyAsync");
 
         Assert.Equal(0, changes);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
     }
 
     [Fact]
@@ -97,8 +187,8 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
 
         await InvokeAsync(cut, "AddThresholdAsync");
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST");
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Warning);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Warning);
 
         var request = (CreateMetricThresholdRequest)typeof(AppIngestionSettings)
             .GetField("_newThreshold", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
@@ -207,8 +297,10 @@ public sealed class AppIngestionSettingsBehaviorTests : BunitContext
             && request.Url.EndsWith(
                 "api/appmonitoring/apps/7/web-analytics/configuration",
                 StringComparison.Ordinal));
-        Assert.Contains("\"siteId\":\"portfolio-prod\"", _handler.LastRequestBody, StringComparison.Ordinal);
-        Assert.DoesNotContain("pseudonym", _handler.LastRequestBody, StringComparison.OrdinalIgnoreCase);
+        // Recette R2-007: the save is followed by a read of the storage line, so the PUT is looked up by method.
+        var body = _handler.RequestDetails.Last(request => request.Method == "PUT").Body;
+        Assert.Contains("\"siteId\":\"portfolio-prod\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("pseudonym", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, changes);
     }
 

@@ -7,38 +7,29 @@ namespace Aetheus.Front.Tests.Architecture;
 /// Keeps presentation in app.css. An inline <c>style="..."</c> cannot be themed, is not reachable by
 /// the dark palette, and is invisible to every other audit the project runs.
 ///
-/// This guard matches the HTML attribute only. It deliberately does NOT match Radzen's typed
-/// parameters - <c>ButtonStyle=</c>, <c>TextStyle=</c>, <c>BadgeStyle=</c>, <c>AlertStyle=</c> and
+/// This guard matches the HTML attribute only. It deliberately does NOT match the library's typed
+/// parameters - <c>ButtonStyle=</c>, <c>TextStyle=</c>, <c>OmniTone=</c>, <c>AlertStyle=</c> and
 /// friends - which are enum bindings, not CSS. That distinction matters: a naive
-/// <c>grep 'Style="'</c> reports ~1810 hits on this codebase and every one but four is a Radzen
+/// <c>grep 'Style="'</c> reports ~1810 hits on this codebase and every one but four is a component
 /// parameter. The phase-10 plan was written against that inflated number.
 ///
-/// The exemptions below are the four real cases, and all four are the same case: a value computed per
-/// instance and handed to CSS as a custom property. A class cannot express a per-node coordinate or a
-/// per-row fill percentage, so these are correct as written rather than debt to migrate.
+/// Since PLAN-008 lot 44 there is no exemption left: the last case, a per-node coordinate, now rides
+/// as a data attribute and is applied through the CSSOM (<c>Aetheus.applyNodePositions</c>), the one
+/// path a strict <c>style-src-attr</c> leaves open. A style attribute in markup would put
+/// <c>'unsafe-inline'</c> back into the production policy, so the list below stays empty.
 /// </summary>
 public class InlineStyleAuditTests
 {
     /// <summary>
-    /// Files allowed to set the style attribute, with the reason. Anything else is a violation.
+    /// Files allowed to set the style attribute, with the reason. Empty on purpose: an entry here
+    /// re-introduces a dependency on <c>style-src-attr 'unsafe-inline'</c> in production, so it needs
+    /// the policy to be revisited in the same change.
     /// </summary>
     private static readonly Dictionary<string, string> JustifiedInlineStyles =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Pages/Pipelines/StageNode.razor"] =
-                "--node-x/--node-y: the graph node's coordinates are computed per node from the layout "
-                + "pass; a class cannot carry a per-instance position.",
-            ["Pages/Servers/ContactAgentDialog.razor"] =
-                "--fill-width: token-budget bar width is a percentage of a live value.",
-            ["Layout/ServerDetailLayout.razor"] =
-                "Visibility toggled from a null check while the server loads, to hold layout geometry "
-                + "without a second render pass.",
-            ["Shared/WizardDialog.razor"] =
-                "Dialog sizing is interpolated from the wizard's declared step width.",
-        };
+        new(StringComparer.OrdinalIgnoreCase);
 
-    // The HTML attribute, not Radzen's typed *Style= parameters: require a non-identifier char before
-    // "style", so ButtonStyle=/TextStyle=/BadgeStyle= do not match.
+    // The HTML attribute, not the library's typed *Style= parameters: require a non-identifier char before
+    // "style", so ButtonStyle=/TextStyle=/OmniTone= do not match.
     private static readonly Regex InlineStyleAttribute =
         new(@"(?<![\w-])[Ss]tyle\s*=\s*""", RegexOptions.Compiled);
 
@@ -61,7 +52,7 @@ public class InlineStyleAuditTests
         }
 
         Assert.True(offenders.Count == 0,
-            "Inline style attributes belong in app.css as a class (claude-ui-patterns.md). If the value "
+            "Inline style attributes belong in app.css as a class (docs/contracts/ui-patterns.md). If the value "
             + "is genuinely computed per instance, add the file to JustifiedInlineStyles with the "
             + "reason:" + Environment.NewLine + string.Join(Environment.NewLine, offenders.Order(StringComparer.Ordinal)));
     }
@@ -83,6 +74,26 @@ public class InlineStyleAuditTests
         Assert.True(stale.Count == 0,
             "These files no longer use an inline style - drop their exemption so the list keeps meaning "
             + "something:" + Environment.NewLine + string.Join(Environment.NewLine, stale));
+    }
+
+    /// <summary>
+    /// The per-node coordinates that used to justify the only inline style now travel as data
+    /// attributes and are applied through the CSSOM. Both halves are checked: the markup carries the
+    /// attributes, and the script that reads them uses <c>setProperty</c>, never <c>setAttribute</c>.
+    /// </summary>
+    [Fact]
+    public void NodeCoordinates_AreAppliedThroughTheCssom()
+    {
+        var front = FrontRoot();
+        var markup = File.ReadAllText(Path.Combine(front, "Components", "Pipelines", "StageNode.razor"));
+        var script = File.ReadAllText(Path.Combine(front, "wwwroot", "js", "visual-pipeline.js"));
+
+        Assert.Contains("data-node-x=", markup, StringComparison.Ordinal);
+        Assert.Contains("data-node-y=", markup, StringComparison.Ordinal);
+        Assert.Contains("applyNodePositions", script, StringComparison.Ordinal);
+        Assert.Contains("setProperty('--node-x'", script, StringComparison.Ordinal);
+        Assert.Contains("setProperty('--node-y'", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("setAttribute('style'", script, StringComparison.Ordinal);
     }
 
     private static string FrontRoot() => Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");

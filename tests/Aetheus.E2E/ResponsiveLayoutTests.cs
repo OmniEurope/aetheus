@@ -117,8 +117,17 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         => await AuditMobilePathsAsync(PrimaryMobilePaths, 375);
 
     [Test]
+    [Category("Servers")]
     public async Task ServerMobilePages_RemainReadableInsideTheViewport()
         => await AuditMobilePathsAsync(SecondaryMobilePaths.Where(path => path.StartsWith("/servers/", StringComparison.Ordinal)), 375);
+
+    [Test]
+    public async Task MailMobileTabs_RemainReadableInsideTheViewport()
+        => await AuditMobilePathsAsync([
+            "/servers/1/mail?tab=spam",
+            "/servers/1/mail?tab=queue",
+            "/servers/1/mail?tab=diagnostics"
+        ], 375);
 
     [Test]
     public async Task ProjectMobilePages_RemainReadableInsideTheViewport()
@@ -155,6 +164,36 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
     }
 
     [Test]
+    public async Task R503_PagesMadeOfTabs_DoNotScrollSidewaysOnADesktop()
+    {
+        // The tab row of OE ended 4px past its strip, and the content area scrolls sideways: every page
+        // made of tabs had a scrollbar. Measured, not read: the content is no wider than what is shown.
+        await Page.SetViewportSizeAsync(1280, 900);
+        var failures = new List<string>();
+        var pagesWithTabs = 0;
+        foreach (var path in new[] { "/servers/1/services", "/servers/1/docker", "/servers/1/mail", "/projects/3/quality", "/projects/3/monitoring" })
+        {
+            await NavigateToAsync(path);
+            await WaitForNoSpinnerAsync();
+            var measure = await Page.EvaluateAsync<string>("""
+                () => {
+                    const content = document.querySelector('.blade-content');
+                    if (!content) return 'missing';
+                    const tabs = content.querySelector('.omni-tabs__viewport') ? 'tabs' : 'plain';
+                    return content.scrollWidth > content.clientWidth
+                        ? 'overflow:' + content.scrollWidth + '>' + content.clientWidth
+                        : tabs;
+                }
+                """);
+            if (measure == "tabs") pagesWithTabs++;
+            else if (measure != "plain") failures.Add($"{path}: {measure}");
+        }
+
+        Assert.That(failures, Is.Empty, "Pages whose content area is wider than what it shows:\n" + string.Join("\n", failures));
+        Assert.That(pagesWithTabs, Is.GreaterThan(0), "None of the pages measured had tabs: the test proved nothing.");
+    }
+
+    [Test]
     public async Task RepresentativePages_RemainReadableAcrossCommonWidths()
     {
         var representativePaths = new[] { "/", "/servers", "/projects", "/pipelines", "/settings" };
@@ -166,23 +205,23 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
     public async Task TabletBand_UsesCompactOverlayAtEveryBoundaryWidth()
     {
         var representativePaths = new[] { "/", "/admin/audit", "/pipelines/1" };
-        foreach (var viewportWidth in new[] { 767, 769, 800, 1024 })
+        foreach (var viewportWidth in new[] { 767, 769, 800, 1023 })
             await AuditMobilePathsAsync(representativePaths, viewportWidth);
     }
 
     [Test]
     public async Task AboveTabletBreakpoint_RestoresDesktopRail()
     {
-        await Page.SetViewportSizeAsync(1025, 812);
+        await Page.SetViewportSizeAsync(1024, 812);
         await NavigateToAsync("/");
         await WaitForNoSpinnerAsync();
 
-        var sidebar = Page.Locator(".rz-sidebar");
+        var sidebar = Page.Locator(".omni-sidebar");
         await Expect(sidebar).ToBeVisibleAsync();
-        await Expect(sidebar).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex("rz-sidebar-collapsed"));
+        await Expect(sidebar).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex("omni-sidebar--closed"));
         var width = await sidebar.EvaluateAsync<double>("element => element.getBoundingClientRect().width");
         Assert.That(width, Is.GreaterThan(200));
-        await Expect(Page.Locator(".sidebar-backdrop")).ToHaveCountAsync(0);
+        await Expect(Page.Locator(".omni-sidebar__backdrop")).ToHaveCountAsync(0);
     }
 
     [Test]
@@ -193,7 +232,7 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         await Page.AddInitScriptAsync("""
             window.__aetheusColdLoadViolations = [];
             requestAnimationFrame(function sampleColdLoadFrame() {
-                const backdrop = document.querySelector('.sidebar-backdrop');
+                const backdrop = document.querySelector('.omni-sidebar__backdrop');
                 if (backdrop) {
                     const style = getComputedStyle(backdrop);
                     const rect = backdrop.getBoundingClientRect();
@@ -203,11 +242,11 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
                     }
                 }
 
-                const sidebar = document.querySelector('.rz-sidebar');
+                const sidebar = document.querySelector('.omni-sidebar');
                 if (sidebar) {
                     const style = getComputedStyle(sidebar);
                     const rect = sidebar.getBoundingClientRect();
-                    if (!sidebar.classList.contains('rz-sidebar-collapsed')
+                    if (!sidebar.classList.contains('omni-sidebar--closed')
                         && style.visibility !== 'hidden' && rect.width > 1) {
                         window.__aetheusColdLoadViolations.push('open drawer');
                     }
@@ -238,17 +277,17 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         await Page.SetViewportSizeAsync(390, 812);
         await NavigateToAsync("/");
         await Page.Locator("[aria-label='Toggle sidebar']").ClickAsync();
-        await Expect(Page.Locator(".sidebar-backdrop")).ToBeVisibleAsync();
+        await Expect(Page.Locator(".omni-sidebar__backdrop")).ToBeVisibleAsync();
 
         const int exposedBackdropX = 350;
         const int exposedBackdropY = 400;
         var targetClass = await Page.EvaluateAsync<string>(
             "() => document.elementFromPoint(350, 400)?.getAttribute('class') ?? ''");
-        Assert.That(targetClass, Does.Contain("sidebar-backdrop"));
+        Assert.That(targetClass, Does.Contain("omni-sidebar__backdrop"));
 
         await Page.Mouse.ClickAsync(exposedBackdropX, exposedBackdropY);
 
-        await Expect(Page.Locator(".sidebar-backdrop")).ToHaveCountAsync(0);
+        await Expect(Page.Locator(".omni-sidebar__backdrop")).ToHaveCountAsync(0);
     }
 
     [Test]
@@ -257,11 +296,14 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         await Page.SetViewportSizeAsync(390, 812);
         await NavigateToAsync("/");
         await Page.Locator("[aria-label='Toggle sidebar']").ClickAsync();
-        await Expect(Page.Locator(".sidebar-backdrop")).ToBeVisibleAsync();
+        await Expect(Page.Locator(".omni-sidebar__backdrop")).ToBeVisibleAsync();
+        await Page.WaitForFunctionAsync("""
+            () => document.querySelector('.omni-sidebar__panel')?.getBoundingClientRect().width >= 240
+            """);
 
         await SidebarNavItem("Dashboard").ClickAsync();
 
-        await Expect(Page.Locator(".sidebar-backdrop")).ToHaveCountAsync(0);
+        await Expect(Page.Locator(".omni-sidebar__backdrop")).ToHaveCountAsync(0);
     }
 
     [Test]
@@ -278,7 +320,7 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         {
             await Page.SetViewportSizeAsync(viewport.Width, viewport.Height);
             await Page.GotoAsync($"{FrontendUrl}/login", new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-            await Expect(Page.Locator("input[name='Username']")).ToBeVisibleAsync();
+            await Expect(Page.Locator("#Username")).ToBeVisibleAsync();
             var widths = await Page.EvaluateAsync<int[]>(
                 "() => [document.documentElement.scrollWidth, window.innerWidth]");
             Assert.That(widths[0], Is.LessThanOrEqualTo(widths[1]),
@@ -379,43 +421,78 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         await Page.SetViewportSizeAsync(viewportWidth, viewportHeight);
         await NavigateToAsync(path);
         await WaitForNoSpinnerAsync();
-        await Page.WaitForSelectorAsync(".sidebar-backdrop", new()
+        await Page.WaitForSelectorAsync(".omni-sidebar__backdrop", new()
         {
             State = WaitForSelectorState.Detached,
             Timeout = 5000
         });
         await Page.WaitForFunctionAsync("""
-            () => [...document.querySelectorAll('.rz-data-grid-loading, .rz-datatable-loading')]
+            () => (document.querySelector('.omni-sidebar')?.getBoundingClientRect().width ?? 0) <= 1
+            """, null, new() { Timeout = 5000 });
+        await Page.WaitForFunctionAsync("""
+            () => [...document.querySelectorAll(".omni-data-grid[aria-busy='true']")]
                 .every(element => {
                     const style = getComputedStyle(element);
                     return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
                 })
             """, null, new() { Timeout = 30000 });
 
-        var collapsedSidebarState = await Page.Locator(".rz-sidebar").EvaluateAsync<string[]>("""
+        var collapsedSidebarState = await Page.Locator(".omni-sidebar").EvaluateAsync<string[]>("""
             element => {
                 const style = getComputedStyle(element);
                 const rect = element.getBoundingClientRect();
-                return [element.className, `${rect.width}`, style.overflowX];
+                return [
+                    element.className,
+                    `${rect.width}`,
+                    `${element.hidden}`,
+                    element.getAttribute('aria-hidden') ?? '',
+                    `${element.inert}`
+                ];
             }
             """);
 
         Assert.Multiple(() =>
         {
-            Assert.That(collapsedSidebarState[0], Does.Contain("rz-sidebar-collapsed"),
+            Assert.That(collapsedSidebarState[0], Does.Contain("omni-sidebar--closed"),
                 $"{path} must collapse the mobile drawer after a viewport change.");
             Assert.That(double.Parse(collapsedSidebarState[1], System.Globalization.CultureInfo.InvariantCulture),
                 Is.LessThanOrEqualTo(1), $"{path} must leave no visible drawer width.");
-            Assert.That(collapsedSidebarState[2], Is.EqualTo("hidden"),
-                $"{path} must clip the collapsed drawer contents.");
+            Assert.That(collapsedSidebarState[2], Is.EqualTo("true"),
+                $"{path} must remove the collapsed drawer from layout.");
+            Assert.That(collapsedSidebarState[3], Is.EqualTo("true"),
+                $"{path} must hide the collapsed drawer from assistive technology.");
+            Assert.That(collapsedSidebarState[4], Is.EqualTo("true"),
+                $"{path} must make the collapsed drawer inert.");
         });
 
         var widths = await Page.EvaluateAsync<int[]>("""
-            () => [document.documentElement.scrollWidth, window.innerWidth]
+            () => [document.body.scrollWidth, window.innerWidth]
             """);
-
+        var overflowingElements = await Page.EvaluateAsync<string[]>("""
+            () => [...document.querySelectorAll('body *')]
+                .filter(element => {
+                    const style = getComputedStyle(element);
+                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+                    if (element.classList.contains('monaco-aria-container')) return false;
+                    const rect = element.getBoundingClientRect();
+                    if (rect.width <= 0 || (rect.right <= window.innerWidth + 1 && rect.left >= -1)) return false;
+                    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+                        const overflow = getComputedStyle(parent).overflowX;
+                        if (overflow === 'auto' || overflow === 'scroll' || overflow === 'hidden') return false;
+                    }
+                    return true;
+                })
+                .slice(0, 12)
+                .map(element => {
+                    const rect = element.getBoundingClientRect();
+                    const name = element.id ? `#${element.id}` : `.${[...element.classList].join('.')}`;
+                    return `${element.tagName.toLowerCase()}${name} [${Math.round(rect.left)}, ${Math.round(rect.right)}]`;
+                })
+            """);
         Assert.That(widths[0], Is.LessThanOrEqualTo(widths[1]),
-            $"{path} must keep horizontal scrolling inside tabs, badges or data grids.");
+            $"{path} must keep horizontal scrolling inside tabs, badges or data grids. Overflow: {string.Join("; ", overflowingElements)}");
+        Assert.That(overflowingElements, Is.Empty,
+            $"{path} must not expose visible content outside the viewport.");
 
         var clippedInteractiveElements = await Page.EvaluateAsync<string[]>("""
             () => [...document.querySelectorAll('a, button, input, select, textarea, [role="button"]')]
@@ -439,7 +516,7 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
 
         var obscuredHeaderControls = await Page.EvaluateAsync<string[]>("""
             () => {
-                const modalIsVisible = [...document.querySelectorAll('.rz-dialog-wrapper, .rz-dialog-mask')]
+                const modalIsVisible = [...document.querySelectorAll('.omni-overlay')]
                     .some(element => {
                         const style = getComputedStyle(element);
                         const rect = element.getBoundingClientRect();
@@ -447,8 +524,9 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
                     });
                 if (modalIsVisible) return [];
 
-                return ['.app-home-link', '.header-user-btn'].flatMap(selector => {
-                    const elements = [...document.querySelectorAll(selector)];
+                return ['.app-home-link', '.omni-app-menu__trigger'].flatMap(selector => {
+                    // The drawer header repeats the logo link; it is hidden while the drawer is closed.
+                    const elements = [...document.querySelectorAll(selector)].filter(element => !element.closest('.sidebar-drawer-header'));
                     return elements.length === 0 ? [{ missingSelector: selector }] : elements;
                 })
                 .filter(element => {
@@ -507,11 +585,73 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
     {
         await NavigateToAsync("/admin/settings");
         await Page.SetViewportSizeAsync(375, 812);
-        var tabs = Page.Locator(".url-synced-tabs > .rz-tabview-nav");
+        var tabs = Page.Locator(".url-synced-tabs .omni-tabs__viewport");
         await Expect(tabs).ToBeVisibleAsync();
 
         var overflowX = await tabs.EvaluateAsync<string>("element => getComputedStyle(element).overflowX");
         Assert.That(overflowX, Is.EqualTo("auto"));
+    }
+
+    [Test]
+    [Category("Pipelines")]
+    public async Task MobileRunLogs_ScrollInsideTheTerminal()
+    {
+        // Run 1 of the demo dataset, served with one finished step whose task has 400 log lines, so
+        // the terminal always has more content than the phone can show. Everything else stays real.
+        const int taskId = 987654;
+        await Page.RouteAsync("**/api/pipelines/runs/1", async route =>
+        {
+            var response = await route.FetchAsync();
+            var run = System.Text.Json.Nodes.JsonNode.Parse(await response.TextAsync())!.AsObject();
+            var finishedAt = DateTime.UtcNow;
+            run["status"] = "Success";
+            run["completedAt"] = finishedAt;
+            run["steps"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+            {
+                ["id"] = taskId,
+                ["stageName"] = "build",
+                ["stepName"] = "long-log",
+                ["status"] = "Success",
+                ["taskId"] = taskId,
+                ["startedAt"] = finishedAt.AddMinutes(-1),
+                ["completedAt"] = finishedAt
+            });
+            await route.FulfillAsync(new() { Response = response, Body = run.ToJsonString() });
+        });
+        await Page.RouteAsync($"**/api/logs/task/{taskId}", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/json",
+            Body = System.Text.Json.JsonSerializer.Serialize(Enumerable.Range(1, 400).Select(line => new
+            {
+                id = line,
+                taskId,
+                level = "Info",
+                message = $"log line {line}",
+                timestamp = DateTime.UtcNow
+            }))
+        }));
+
+        await Page.SetViewportSizeAsync(375, 812);
+        await NavigateToAsync("/pipelines/runs/1?tab=logs");
+
+        var terminal = Page.Locator(".run-split-logs .run-logs-terminal");
+        await Expect(terminal.Locator(".run-log-line").First).ToBeVisibleAsync(new() { Timeout = 15000 });
+        await terminal.ScrollIntoViewIfNeededAsync();
+
+        var size = await terminal.EvaluateAsync<double[]>("element => [element.scrollHeight, element.clientHeight]");
+        Assert.That(size[1], Is.GreaterThan(0), "The terminal must have a visible height on a phone.");
+        Assert.That(size[0], Is.GreaterThan(size[1] + 1), "The terminal must hold more lines than it shows.");
+
+        // The step opens at its tail (auto-follow): scroll up, then check the terminal itself moved.
+        var before = await terminal.EvaluateAsync<double>("element => element.scrollTop");
+        var box = await terminal.BoundingBoxAsync();
+        Assert.That(box, Is.Not.Null);
+        await Page.Mouse.MoveAsync(box!.X + (box.Width / 2), box.Y + (box.Height / 2));
+        await Page.Mouse.WheelAsync(0, before > 0 ? -600 : 600);
+        await Page.WaitForFunctionAsync(
+            "([selector, start]) => Math.abs(document.querySelector(selector).scrollTop - start) > 50",
+            new object[] { ".run-split-logs .run-logs-terminal", before });
     }
 
     [Test]
@@ -521,8 +661,10 @@ public sealed class ResponsiveLayoutTests : E2ETestBase
         await NavigateToAsync("/projects/3/edit");
         await Page.SetViewportSizeAsync(375, 812);
 
-        var settings = Page.Locator(".project-ci-settings-row .rz-form-field");
+        var settings = Page.Locator(".project-ci-settings-row .omni-form-field");
         await Expect(settings).ToHaveCountAsync(3);
+        await Page.WaitForFunctionAsync(
+            "() => document.querySelector('.project-ci-settings-row .omni-form-field')?.getBoundingClientRect().width >= 280");
         var settingWidths = await settings.EvaluateAllAsync<double[]>(
             "elements => elements.map(element => element.getBoundingClientRect().width)");
         Assert.That(settingWidths, Has.Length.EqualTo(3));

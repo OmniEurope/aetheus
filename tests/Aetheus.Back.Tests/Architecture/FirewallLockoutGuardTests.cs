@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.Architecture;
 

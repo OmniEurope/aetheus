@@ -12,8 +12,21 @@ public readonly record struct AppUptimeWindowCounts(
     int Up90d,
     int Total90d);
 
+/// <summary>Recette R-441: the fleet server whose enabled Apache virtual host serves a probe URL host.</summary>
+public readonly record struct AppHostingServer(int ServerId, string ServerName);
+
 public interface IAppMonitoringRepository
 {
+    /// <summary>
+    /// Recette R-441: maps each lower-case host name to the one fleet server of the project's
+    /// organization that serves it through an enabled Apache virtual host. A host served by several
+    /// servers, or by none, is left out: the hosting server is then unknown rather than guessed.
+    /// </summary>
+    Task<Dictionary<string, AppHostingServer>> GetVirtualHostServersAsync(
+        int projectId,
+        IReadOnlyCollection<string> hostNames,
+        CancellationToken ct = default);
+
     Task<List<MonitoredApp>> GetAppsByProjectAsync(int projectId, CancellationToken ct = default);
     Task<MonitoredApp?> GetAppAsync(int id, CancellationToken ct = default);
     Task<MonitoredApp?> GetAppForUpdateAsync(int id, CancellationToken ct = default);
@@ -50,6 +63,15 @@ public interface IAppMonitoringRepository
         DateTime activeAfterUtc,
         CancellationToken ct = default);
     Task<long> GetTelemetryStorageBytesAsync(CancellationToken ct = default);
+
+    /// <summary>Recette R-468: the audience aggregates of the current day, week and month, added up over
+    /// the given applications; one entry per period that has any.</summary>
+    Task<List<AppAudiencePeriodTotal>> GetAudienceTotalsAsync(
+        IReadOnlyCollection<int> appIds,
+        DateOnly todayUtc,
+        DateOnly weekStartUtc,
+        DateOnly monthStartUtc,
+        CancellationToken ct = default);
 
     Task AddAppAsync(MonitoredApp app, CancellationToken ct = default);
     Task RemoveAppAsync(MonitoredApp app, CancellationToken ct = default);
@@ -88,7 +110,8 @@ public interface IAppMonitoringRepository
     Task<MonitoredApp?> GetDeployTargetAppAsync(int projectId, int? environmentId, CancellationToken ct = default);
 
     // --- retention ---
-    Task<int> AggregateRawIntoHourlyAsync(DateTime currentHourStartUtc, DateTime rawFloorUtc, CancellationToken ct = default);
+    /// <summary>R2-020: rolls up one completed hour, application by application; a no-op for the rolled-up ones.</summary>
+    Task<int> AggregateHourAsync(DateTime hourUtc, CancellationToken ct = default);
     Task<int> PurgeRawOlderThanAsync(DateTime cutoff, CancellationToken ct = default);
     Task<int> PurgeHourlyOlderThanAsync(DateTime cutoff, CancellationToken ct = default);
 }

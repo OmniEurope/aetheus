@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Portsentry;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -51,7 +50,7 @@ public class PortsentryServiceTests
     {
         _repo.AddTaskAsync(Arg.Any<ServerTask>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
-        await _sut.ExecuteActionAsync(1, new PortsentryActionRequest { Action = Aetheus.Shared.Enums.PortsentryAction.Start }, ct: TestContext.Current.CancellationToken);
+        await _sut.ExecuteActionAsync(1, new PortsentryActionRequest { Action = Aetheus.Shared.Components.Portsentry.PortsentryAction.Start }, ct: TestContext.Current.CancellationToken);
 
         await _repo.Received(1).AddTaskAsync(Arg.Any<ServerTask>(), Arg.Any<CancellationToken>());
         await _audit.Received(1).LogAsync(Arg.Any<string>(), "Portsentry", 1, Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -67,8 +66,8 @@ public class PortsentryServiceTests
 
         await _repo.Received(1).AddTaskAsync(
             Arg.Is<ServerTask>(t => t.ServerId == 1
-                && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-                && t.Operation == Aetheus.Shared.Enums.OperationKind.PortsentrySetup
+                && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+                && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.PortsentrySetup
                 && t.Command == "atcp"                 // scan mode carried in the task target
                 && t.TimeoutSeconds == 120
                 && t.EnvironmentVariables.Contains("22,80")
@@ -91,8 +90,8 @@ public class PortsentryServiceTests
 
         await _repo.Received(1).AddTaskAsync(
             Arg.Is<ServerTask>(t => t.ServerId == 1
-                && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-                && t.Operation == Aetheus.Shared.Enums.OperationKind.PortsentryGetLogs
+                && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+                && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.PortsentryGetLogs
                 && t.TimeoutSeconds == 15),
             Arg.Any<CancellationToken>());
     }

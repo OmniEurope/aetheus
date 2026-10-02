@@ -3,14 +3,10 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
-using Radzen.Blazor;
-using BackupsPage = Aetheus.Front.Pages.Backups.Backups;
+using BackupsPage = Aetheus.Front.Components.AppBackups.Backups;
 
 namespace Aetheus.Front.Tests.Pages.Backups;
 
@@ -30,7 +26,7 @@ public sealed class BackupsPageActionTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         _handler.SetJsonResponse(HttpMethod.Get, "api/projects", new PaginatedResult<ProjectDto>
         {
             Items = [new ProjectDto { Id = 1, Name = "aetheus" }],
@@ -70,27 +66,32 @@ public sealed class BackupsPageActionTests : BunitContext
         _handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/backups", policies);
 
     private static IElement Button(IRenderedComponent<BackupsPage> cut, string text) =>
-        cut.FindAll("button").First(button => button.TextContent.Contains(text, StringComparison.Ordinal));
+        cut.FindAll("button").First(button => button.Names().Contains(text, StringComparison.Ordinal));
 
     private static IElement FormInput(IRenderedComponent<BackupsPage> cut, string name) =>
-        cut.Find($"input[name='{name}']");
+        name switch
+        {
+            "Name" => cut.Find("input#oe-pages-backups-backups-1"),
+            "ScheduleCron" => cut.Find("input#oe-pages-backups-backups-11"),
+            _ => cut.Find($"input[name='{name}']")
+        };
 
     /// <summary>
-    /// The page renders several forms (each Radzen grid filter is one), so the policy panel is
+    /// The page renders several forms (each grid filter is one), so the policy panel is
     /// located from its own Name field rather than by taking whichever form comes first.
     /// </summary>
     private static IElement PolicyForm(IRenderedComponent<BackupsPage> cut) =>
         FormInput(cut, "Name").Closest("form")!;
 
     /// <summary>
-    /// Project and server are required by the form's own validation, and a Radzen dropdown cannot be
+    /// Project and server are required by the form's own validation, and a dropdown cannot be
     /// driven from raw markup, so the two owner pickers are set through their bound value. Without
     /// this the template form refuses to submit, which is the correct production behaviour.
     /// </summary>
     private static async Task PickOwnersAsync(
         IRenderedComponent<BackupsPage> cut, int? projectId, int serverId)
     {
-        var dropdowns = cut.FindComponents<RadzenDropDown<int>>();
+        var dropdowns = cut.FindComponents<OmniDropDown<int>>();
         if (projectId is { } project)
         {
             await cut.InvokeAsync(() => dropdowns[0].Instance.ValueChanged.InvokeAsync(project));
@@ -122,11 +123,11 @@ public sealed class BackupsPageActionTests : BunitContext
         _handler.SetJsonResponse(HttpMethod.Post, "api/backups", Policy());
         var cut = Render<BackupsPage>();
 
-        Button(cut, "BackupNewPolicy").Click();
-        FormInput(cut, "Name").Change("nightly-db");
-        FormInput(cut, "ScheduleCron").Change("0 4 * * *");
+        Button(cut, "Create").Click();
+        FormInput(cut, "Name").Input("nightly-db");
+        FormInput(cut, "ScheduleCron").Input("0 4 * * *");
         await PickOwnersAsync(cut, 1, 2);
-        cut.Find("textarea").Change("/srv/app/uploads\n\n  /etc/app.conf  \n");
+        cut.Find("textarea").Input("/srv/app/uploads\n\n  /etc/app.conf  \n");
         PolicyForm(cut).Submit();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/backups")), TimeSpan.FromSeconds(2));
@@ -143,8 +144,8 @@ public sealed class BackupsPageActionTests : BunitContext
         _handler.SetJsonResponse(HttpMethod.Post, "api/backups", Policy());
         var cut = Render<BackupsPage>(parameters => parameters.Add(page => page.ProjectId, 7));
 
-        Button(cut, "BackupNewPolicy").Click();
-        FormInput(cut, "Name").Change("scoped");
+        Button(cut, "Create").Click();
+        FormInput(cut, "Name").Input("scoped");
         await PickOwnersAsync(cut, null, 2);
         PolicyForm(cut).Submit();
 
@@ -160,8 +161,8 @@ public sealed class BackupsPageActionTests : BunitContext
             HttpMethod.Post, "api/backups", (BackupPolicyDto?)null, HttpStatusCode.BadRequest);
         var cut = Render<BackupsPage>();
 
-        Button(cut, "BackupNewPolicy").Click();
-        FormInput(cut, "Name").Change("nightly-db");
+        Button(cut, "Create").Click();
+        FormInput(cut, "Name").Input("nightly-db");
         await PickOwnersAsync(cut, 1, 2);
         PolicyForm(cut).Submit();
 
@@ -176,11 +177,11 @@ public sealed class BackupsPageActionTests : BunitContext
         WirePolicies();
         var cut = Render<BackupsPage>();
 
-        Button(cut, "BackupNewPolicy").Click();
+        Button(cut, "Create").Click();
         Assert.NotNull(PolicyForm(cut));
         Button(cut, "Cancel").Click();
 
-        Assert.Empty(cut.FindAll("input[name='Name']"));
+        Assert.Empty(cut.FindAll("input#oe-pages-backups-backups-1"));
         Assert.False(Sent("POST", "api/backups"));
     }
 
@@ -197,7 +198,7 @@ public sealed class BackupsPageActionTests : BunitContext
 
         Assert.Equal("nightly-db", FormInput(cut, "Name").GetAttribute("value"));
         Assert.Equal("0 3 * * *", FormInput(cut, "ScheduleCron").GetAttribute("value"));
-        Assert.Contains("/srv/app/uploads", cut.Find("textarea").GetAttribute("value")!, StringComparison.Ordinal);
+        Assert.Contains("/srv/app/uploads", cut.Find("textarea").GetAttribute("value"), StringComparison.Ordinal);
 
         PolicyForm(cut).Submit();
 
@@ -331,7 +332,7 @@ public sealed class BackupsPageActionTests : BunitContext
         var cut = Render<BackupsPage>();
 
         cut.FindAll("button")
-            .Where(button => button.TextContent.Contains("BackupRuns", StringComparison.Ordinal))
+            .Where(button => button.Names().Contains("BackupRuns", StringComparison.Ordinal))
             .ElementAt(1)
             .Click();
 

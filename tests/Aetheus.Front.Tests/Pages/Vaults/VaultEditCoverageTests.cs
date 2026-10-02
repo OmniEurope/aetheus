@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -148,14 +147,14 @@ public class VaultEditCoverageTests : BunitContext
         var cut = Render<VaultEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(VaultEdit).GetMethod("CopyKeyReference", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["MY_KEY"])!);
 
         // Clipboard interop is fired and the user is notified of the successful copy.
         Assert.Contains(JSInterop.Invocations, i => i.Identifier == "navigator.clipboard.writeText");
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
     }
 
     // ── OnSubmit – null response does not navigate ─────────────────────────────
@@ -192,8 +191,8 @@ public class VaultEditCoverageTests : BunitContext
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", PrivStatic)!;
         // daysLeft <= 0 -> Danger
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddHours(-1)])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddHours(-1)])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     // ── ExportKeys with detail set ────────────────────────────────────────────
@@ -207,13 +206,13 @@ public class VaultEditCoverageTests : BunitContext
         var cut = Render<VaultEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(VaultEdit).GetMethod("ExportKeys", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // Export serializes the two keys, triggers a file download, and shows a success toast.
         Assert.Contains(JSInterop.Invocations, i => i.Identifier == "downloadFile");
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
     }
 }

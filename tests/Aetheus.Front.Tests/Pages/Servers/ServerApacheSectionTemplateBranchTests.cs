@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -264,7 +261,7 @@ public class ServerApacheSectionTemplateBranchTests : BunitContext
     }
 
     // ── TEST 15: Config editor dialog content (hardened rule #4) ──────────────
-    // The config-editor form now lives in ApacheConfigEditorDialog, rendered by DialogService
+    // The config-editor form now lives in ApacheConfigEditorDialog, rendered by OmniDialogService
     // in a SEPARATE host. Render it DIRECTLY (in-render-tree, no separate-host hang) and assert
     // the form renders the model's content and that Save/Cancel are clickable WITHOUT throwing.
     [Fact]
@@ -277,10 +274,10 @@ public class ServerApacheSectionTemplateBranchTests : BunitContext
         };
         var cut = Render<ApacheConfigEditorDialog>(p => p.Add(x => x.Model, model));
 
-        Assert.Contains("config-editor-textarea", cut.Markup);
+        Assert.Contains("omni-code-editor", cut.Markup);
         Assert.Contains("example.com", cut.Markup);
         cut.FindAll("button").First(b => b.TextContent.Contains("Save")).Click();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Cancel")).Click();
+        cut.FindAll("button").First(b => b.TextContent.Contains("GoBack")).Click();
     }
 
     // The dialog shows the loading indicator while the SignalR config text is in flight.

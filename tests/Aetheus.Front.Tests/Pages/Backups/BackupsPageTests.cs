@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http;
-using Aetheus.Front.Pages.Backups;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.AppBackups;
 using Bunit;
-using BackupsPage = Aetheus.Front.Pages.Backups.Backups;
+using BackupsPage = Aetheus.Front.Components.AppBackups.Backups;
 
 namespace Aetheus.Front.Tests.Pages.Backups;
 
@@ -66,7 +64,7 @@ public class BackupsPageTests : BunitContext
             request.Method == "GET"
             && request.Url.Contains("api/backups", StringComparison.Ordinal)
             && request.Url.Contains("projectId=7", StringComparison.Ordinal)));
-        cut.FindAll("button").First(button => button.TextContent.Contains("BackupNewPolicy")).Click();
+        cut.FindAll("button").First(button => button.TextContent.Contains("Create")).Click();
 
         Assert.DoesNotContain(">Project<", cut.Markup, StringComparison.Ordinal);
     }
@@ -77,7 +75,7 @@ public class BackupsPageTests : BunitContext
         Wire();
         var cut = Render<BackupsPage>();
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("BackupNewPolicy")).Click();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Create")).Click();
 
         // A form-only field label appears once the create panel is open.
         Assert.Contains("BackupScheduleCron", cut.Markup);
@@ -95,7 +93,7 @@ public class BackupsPageTests : BunitContext
         });
 
         var cut = Render<BackupsPage>();
-        cut.FindAll("button").Single(button => button.TextContent.Contains("BackupRuns")).Click();
+        cut.FindAll("button").Single(button => button.Names().Contains("BackupRuns", StringComparison.Ordinal)).Click();
 
         Assert.Contains("BackupRestoreVerified", cut.Markup);
         Assert.Contains("BackupRestoreFailed", cut.Markup);

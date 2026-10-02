@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -24,7 +21,7 @@ public sealed class ServerTeamspeakSectionActionTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
     }
 
     private static ServerDetailDto Server(bool installed = true, bool running = true) => new()
@@ -60,7 +57,7 @@ public sealed class ServerTeamspeakSectionActionTests : BunitContext
     }
 
     private static IElement? TryButton(IRenderedComponent<ServerTeamspeakSection> cut, string label) =>
-        cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains(label, StringComparison.Ordinal));
+        cut.FindAll("button").FirstOrDefault(b => b.Names().Contains(label, StringComparison.Ordinal));
 
     [Fact]
     public void AnInstalledServerOffersItsManagementToolbar()
@@ -90,7 +87,7 @@ public sealed class ServerTeamspeakSectionActionTests : BunitContext
         // A wrong host here sends the operator's TeamSpeak client to somebody else's server.
         var cut = RenderSection();
 
-        var link = cut.FindAll("button").First(b => b.TextContent.Contains("QuickConnect", StringComparison.Ordinal));
+        var link = cut.FindAll("button").Single(b => b.TextContent.Trim() == "Connect");
         Assert.Contains("10.0.0.5", link.GetAttribute("title") ?? string.Empty, StringComparison.Ordinal);
         Assert.StartsWith("ts3server://", link.GetAttribute("title") ?? string.Empty, StringComparison.Ordinal);
     }

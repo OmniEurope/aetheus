@@ -1,0 +1,22 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* S-TECH-Z3MP: shared footer for section dialogs - the right-aligned action row + the standard
+   Light "Cancel" button (the part that genuinely repeats). Each dialog's primary action(s) - which
+   legitimately vary (Submit vs Click, icon, busy, disabled) - go in ChildContent. Recette R-335: the
+   action(s) come first and Cancel closes the row on the far right, as OE OmniConfirmFooter does. *@
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+           Justify="@(SecondaryContent is null ? OmniJustification.End : OmniJustification.Between)"
+           Gap="OmniSpacing.Small" Class="dialog-footer">
+    @if (SecondaryContent is not null)
+    {
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+            @SecondaryContent
+        </OmniStack>
+    }
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+        @ChildContent
+        <OmniButton Variant="@OmniCancelVariant" OnClick="@(_ => OnCancel.InvokeAsync())">
+            <OmniIcon Name="OmniIconName.Close" /> @(CancelText ?? L["GoBack"])
+        </OmniButton>
+    </OmniStack>
+</OmniStack>

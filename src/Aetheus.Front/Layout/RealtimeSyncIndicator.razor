@@ -1,0 +1,11 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* The short catch-up after the page comes back to the foreground: a small notification at the bottom of
+   the screen, no veil, nothing to click. The connection-lost overlay wins whenever it is up. *@
+@if (Visible)
+{
+    <div class="realtime-sync-indicator" data-testid="realtime-sync-indicator">
+        <OmniNotification Message="@L["RealtimeSyncInProgress"]"
+                          Severity="OmniSeverity.Info"
+                          Dismissible="false" />
+    </div>
+}

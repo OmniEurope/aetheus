@@ -7,7 +7,12 @@ public sealed class TeamspeakChecksumAuditTests
     [Fact]
     public void LinuxInstaller_FailsClosedWhenTeamspeakChecksumIsMissing()
     {
-        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", "install-agent-linux.sh"));
+        // R-249: the helper is the teamspeak/teamspeak-setup template the installer renders.
+        Assert.Contains(
+            "render_host_config teamspeak/teamspeak-setup \"$TEAMSPEAK_SETUP_HELPER_PATH\"",
+            File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", "install-agent-linux.sh")),
+            StringComparison.Ordinal);
+        var script = LinuxHostConfigTemplates.Read("teamspeak/teamspeak-setup");
 
         Assert.Contains("TS_CHECKSUM_FILE=\"/etc/aetheus-agent/teamspeak.sha256\"", script, StringComparison.Ordinal);
         Assert.Contains("TS_SHA256=\"$(tr -d '[:space:]' < \"$TS_CHECKSUM_FILE\")\"", script, StringComparison.Ordinal);

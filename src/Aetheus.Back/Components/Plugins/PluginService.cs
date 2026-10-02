@@ -12,13 +12,16 @@ public class PluginService(IPluginRepository repo, IAuditService audit, IOrganiz
         return plugins.Select(MapToDto).ToList();
     }
 
+    public async Task<PluginFilterValuesDto> GetFilterValuesAsync(CancellationToken ct = default) =>
+        new() { Authors = await repo.GetAuthorsAsync(ct).ConfigureAwait(false) };
+
     public async Task<PaginatedResult<PluginRegistrationDto>> GetPluginsPageAsync(
         PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetPageAsync(
             request.Search, request.SortBy, request.SortDescending,
-            page, pageSize, ct).ConfigureAwait(false);
+            page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PluginRegistrationDto>
         {
             Items = items.Select(MapToDto).ToList(),

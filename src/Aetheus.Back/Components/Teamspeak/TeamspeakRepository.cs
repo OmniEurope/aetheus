@@ -16,7 +16,7 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
 
     public async Task<(List<TeamspeakChannel> Items, int Total)> GetChannelsPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.TeamspeakChannels
             .AsNoTracking()
@@ -26,6 +26,9 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
             var pattern = $"%{search.Trim()}%";
             query = query.Where(channel => EF.Functions.ILike(channel.Name, pattern));
         }
+
+        // Recette R-210: the header filters, after the server scope and before the count.
+        query = TeamspeakListQuery.ChannelColumns.ApplyFilters(query, filters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -43,7 +46,7 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
 
     public async Task<(List<TeamspeakClient> Items, int Total)> GetClientsPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.TeamspeakClients
             .AsNoTracking()
@@ -57,11 +60,16 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
                 EF.Functions.ILike(client.Platform, pattern));
         }
 
+        // Recette R-210: the header filters, after the server scope and before the count.
+        query = TeamspeakListQuery.ClientColumns.ApplyFilters(query, filters);
+
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {
             ("channelid", false) => query.OrderBy(client => client.ChannelId).ThenBy(client => client.Nickname),
             ("channelid", true) => query.OrderByDescending(client => client.ChannelId).ThenBy(client => client.Nickname),
+            ("channelname", false) => query.OrderBy(client => client.ChannelName).ThenBy(client => client.Nickname),
+            ("channelname", true) => query.OrderByDescending(client => client.ChannelName).ThenBy(client => client.Nickname),
             ("platform", false) => query.OrderBy(client => client.Platform).ThenBy(client => client.Nickname),
             ("platform", true) => query.OrderByDescending(client => client.Platform).ThenBy(client => client.Nickname),
             (_, true) => query.OrderByDescending(client => client.Nickname).ThenBy(client => client.ClientId),
@@ -73,7 +81,7 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
 
     public async Task<(List<TeamspeakBan> Items, int Total)> GetBansPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.TeamspeakBans
             .AsNoTracking()
@@ -88,6 +96,9 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
                 EF.Functions.ILike(ban.Reason, pattern));
         }
 
+        // Recette R-210: the header filters, after the server scope and before the count.
+        query = TeamspeakListQuery.BanColumns.ApplyFilters(query, filters);
+
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {
@@ -100,6 +111,19 @@ public class TeamspeakRepository(AppDbContext db) : ITeamspeakRepository
         };
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct).ConfigureAwait(false);
         return (items, total);
+    }
+
+    public async Task<List<string>> GetClientPlatformsAsync(int serverId, CancellationToken ct = default)
+    {
+        var platforms = await db.TeamspeakClients
+            .Where(client => client.ServerId == serverId && !client.IsServerQuery)
+            .Select(client => client.Platform)
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. platforms
+            .Where(platform => !string.IsNullOrWhiteSpace(platform))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
     }
 
     public Task AddTaskAsync(ServerTask task, CancellationToken ct = default) =>

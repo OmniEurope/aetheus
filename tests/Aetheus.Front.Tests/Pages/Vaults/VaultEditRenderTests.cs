@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -137,9 +136,9 @@ public class VaultEditRenderTests : BunitContext
         var warningResult = method.Invoke(null, [DateTime.UtcNow.AddDays(7)]);
         var lightResult = method.Invoke(null, [DateTime.UtcNow.AddDays(30)]);
 
-        Assert.Equal(Radzen.BadgeStyle.Danger, dangerResult);
-        Assert.Equal(Radzen.BadgeStyle.Warning, warningResult);
-        Assert.Equal(Radzen.BadgeStyle.Light, lightResult);
+        Assert.Equal(OmniTone.Danger, dangerResult);
+        Assert.Equal(OmniTone.Warning, warningResult);
+        Assert.Equal(OmniTone.Neutral, lightResult);
     }
 
     [Fact]

@@ -46,6 +46,8 @@ builder.Services.AddAetheusTelemetry(builder.Configuration, options =>
 
 // --- Time ---
 builder.Services.AddSingleton(TimeProvider.System);
+// Recette R-457: RequestErrorLoggingMiddleware counts the refused requests that match no route.
+builder.Services.AddSingleton<UnmatchedRequestCounter>();
 
 // --- Data Protection ---
 // Persist keys to a known directory so cookie/token protectors survive container
@@ -75,10 +77,24 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "For local development, run the dev database via 'docker compose -f deploy/compose/dev-db.compose.yml up -d' " +
         "and set ConnectionStrings:Default in appsettings.Development.json or via environment variable.");
 }
-builder.Services.AddDbContext<AppDbContext>(options =>
+// The E2E schema reset (/api/dev/reset-db, Development only) closes this gate; the interceptor that
+// holds the other commands back while it is closed is only added in Development.
+builder.Services.AddSingleton<Aetheus.Back.Components.Dev.SchemaResetGate>();
+builder.Services.AddSingleton<Aetheus.Back.Components.Dev.SchemaResetInterceptor>();
+var addSchemaResetInterceptor = builder.Environment.IsDevelopment();
+builder.Services.AddDbContext<AppDbContext>((services, options) =>
+{
+    if (addSchemaResetInterceptor)
+        options.AddInterceptors(services.GetRequiredService<Aetheus.Back.Components.Dev.SchemaResetInterceptor>());
     options.UseNpgsql(connectionString)
         .ConfigureWarnings(w => w.Ignore(
-            Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
+            Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning,
+            // PLAN-004 R-11: the retired-server filter sits on the required end of ~40 relationships
+            // (metrics, tasks, project-servers...). EF warns that such dependents vanish from joins with
+            // their filtered principal; for a retired server that is exactly the intended behaviour,
+            // and the paths that must still see those rows opt out with ServerQueryFilters.ExcludeRetired.
+            Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
+});
 
 // --- Authentication ---
 // F-37: bind strongly typed options for the Auth section (consumers can inject IOptions<T>).
@@ -401,9 +417,11 @@ await using (var scope = app.Services.CreateAsyncScope())
             || string.Equals(Environment.GetEnvironmentVariable("AETHEUS_SKIP_MIGRATIONS"), "1", StringComparison.Ordinal);
         if (skipMigrations)
         {
-            startupLogger.LogWarning(
-                "Database:SkipMigrations is set - skipping MigrateAsync. This instance assumes the schema " +
-                "is owned by the canonical instance. Unset this flag on the primary node.");
+            // R-464: expected on both blue-green colours, whose schema the migration-only job applies
+            // before they start; the former "Unset this flag on the primary node" wrongly read as a fault.
+            startupLogger.LogInformation(
+                "Database:SkipMigrations is set: this instance does not apply EF migrations. The schema is " +
+                "migrated by its owner (the blue-green migration job, or the canonical development instance).");
         }
         else
         {
@@ -418,6 +436,13 @@ await using (var scope = app.Services.CreateAsyncScope())
     // Reconcile the canonical catalog last: optional demo seeders must not be able to
     // recreate active non-canonical templates after the legacy archival pass.
     await scope.ServiceProvider.GetRequiredService<DeliveryPipelineTemplateSeeder>().SeedAsync();
+
+    // PLAN-005 lot 6: carries the two port fields that predate the registry into it. Idempotent, and
+    // non-destructive - a port already held by somebody else is left to its holder and reported.
+    await Aetheus.Back.Components.PortRegistry.IsolatedPortBackfill.RunAsync(
+        db,
+        scope.ServiceProvider.GetRequiredService<Aetheus.Back.Components.PortRegistry.IPortRegistryService>(),
+        startupLogger);
 
     // Audit 360 lot A: one-shot, idempotent re-encryption of any residual plaintext webhook secrets
     // written before secrets were encrypted at rest. Lets WebhookService decrypt strictly afterwards.
@@ -454,8 +479,11 @@ app.UseForwardedHeaders(forwardedHeadersOptions);
 
 // The public application and Git smart-HTTP endpoint are HTTPS-only in production. Forwarded
 // headers above make this work correctly behind Apache; local development deliberately keeps its
-// HTTP listener for the agent and test topology.
-if (!app.Environment.IsDevelopment())
+// HTTP listener for the agent and test topology. R-464: the middleware runs only where it can find an
+// HTTPS port; in the production container (HTTP behind Apache's TLS) it redirected nothing and logged
+// "Failed to determine the https port for redirect" on every plain request. The public HTTP to HTTPS
+// redirect is Apache's.
+if (!app.Environment.IsDevelopment() && HttpsPortConfiguration.IsKnown(app.Configuration))
     app.UseHttpsRedirection();
 
 // S-FEAT-27: serve the OpenAPI spec in every environment so the in-app API Reference page can render

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Collectors;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Linux.Collectors;
 

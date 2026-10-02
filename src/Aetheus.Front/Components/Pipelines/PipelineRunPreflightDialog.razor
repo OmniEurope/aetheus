@@ -1,0 +1,40 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* The previous gate concatenated one full sentence per unresolved stage into a plain Confirm, so a
+   pipeline with eleven stages produced eleven copies of the same reason and nothing was readable.
+   Stages are grouped by their reason here: the cause is stated once, the affected stages are listed
+   compactly, and each cause carries the action that actually fixes it. *@
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large" Class="preflight-dialog">
+    <OmniAlert Severity="OmniSeverity.Warning">
+        @string.Format(L["PreflightBlockedSummary"], Unresolved.Count)
+    </OmniAlert>
+
+    @foreach (var group in Groups)
+    {
+        <OmniCard Class="preflight-cause">
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">@group.Reason</OmniText>
+
+            <OmniRow Gap="OmniSpacing.XLarge" Class="omni-u-mb-sm">
+                @foreach (var stage in group.Stages)
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@stage</OmniBadge>
+                }
+            </OmniRow>
+
+            @if (group.Remediation is { } fix)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <OmniIcon Name="OmniIconName.Wrench" />
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@fix.Explanation</OmniText>
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => GoAsync(fix.Href))"><OmniIcon Name="@MaterialIconMap.Resolve(fix.ActionIcon)" /> <span>@fix.ActionLabel</span></OmniButton>
+                </OmniStack>
+            }
+        </OmniCard>
+    }
+
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End">
+        @* Icon/style pairs are imposed by the shared semantic family (ButtonFamilyAndGridNavigationAuditTests). *@
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Dialog.Close(true))" title="@L["RunAnyway"]"><OmniIcon Name="OmniIconName.Play" /> <span>@L["Launch"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => Dialog.Close(false))"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+    </OmniStack>
+</OmniStack>

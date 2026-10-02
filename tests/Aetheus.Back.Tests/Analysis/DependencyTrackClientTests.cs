@@ -2,7 +2,6 @@
 using System.Net;
 using System.Text;
 using Aetheus.Back.Components.Analysis;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Back.Tests.Analysis;

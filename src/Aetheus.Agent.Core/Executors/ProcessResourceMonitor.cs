@@ -73,7 +73,7 @@ public static class ProcessResourceMonitor
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        catch (InvalidOperationException) { }
+        catch (InvalidOperationException) { } // the process exited between two samples; the final capture below closes the series
         accumulator.Add(CaptureTree(process));
         return accumulator.Build();
     }
@@ -152,7 +152,9 @@ public static class ProcessResourceMonitor
         }
         catch (Exception error) when (error is InvalidOperationException or IOException
             or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-        { }
+        {
+            // The process exited or its /proc entry vanished while it was read: it drops out of this sample.
+        }
     }
 
     private static long ParseProcKilobytes(string line) => checked(ParseProcBytes(line) * 1024);

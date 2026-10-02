@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Agent.Core.Operations;
 

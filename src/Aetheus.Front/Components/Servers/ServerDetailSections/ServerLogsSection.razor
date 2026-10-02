@@ -1,0 +1,30 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Recette R-202: the common grid (AetheusDataGrid, shared settings), full height and virtualized, no
+   pager. Recette R-210 / R-224: the grid reads the log from the API block by block as it scrolls, and
+   its header filters (level, time range, message) and sort travel with each request, so they apply to
+   the whole log of the server and not only to the entries already loaded. *@
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">
+        @L["LoadFailed"]
+    </OmniAlert>
+}
+<AetheusDataGrid @ref="_grid" TItem="TaskLogDto" Data="@_logs" Count="@_totalCount" IsLoading="@_loading"
+    LoadData="@LoadLogsAsync" PageSize="50" Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<TaskLogDto>(_logs, _totalCount))"
+    FullHeight="true" class="aetheus-grid-fullheight">
+    <EmptyTemplate>
+        <EmptyState Icon="article" Title="@L["NoLogs"]" />
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="TaskLogDto" Property="Timestamp" Title="@L["Time"]" FormatString="{0:G}" Width="11.25rem"
+            Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+        <OmniDataGridColumn TItem="TaskLogDto" Property="Level" Title="@L["Level"]" Width="6.25rem"
+            Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@LevelText">
+            <Template Context="log">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@GetLevelBadge(log.Level)">@L.Localize(log.Level)</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="TaskLogDto" Property="Message" Title="@L["Message"]" Filterable="true" />
+    </Columns>
+</AetheusDataGrid>

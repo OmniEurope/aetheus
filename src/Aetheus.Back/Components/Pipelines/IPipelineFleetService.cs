@@ -10,6 +10,12 @@ public interface IPipelineFleetService
         IReadOnlyCollection<int>? accessiblePipelineIds,
         CancellationToken ct = default);
     Task<PipelineFleetItemDto> GetItemAsync(int pipelineId, CancellationToken ct = default);
+
+    /// <summary>Recette R-224: the values the fleet's checkable column filters offer.</summary>
+    Task<PipelineFleetFilterValuesDto> GetFilterValuesAsync(
+        IReadOnlyCollection<int>? organizationIds,
+        IReadOnlyCollection<int>? accessiblePipelineIds,
+        CancellationToken ct = default);
     Task<PipelineFleetUpdatePreviewDto> PreviewUpdateAsync(
         int pipelineId, int targetVersion, CancellationToken ct = default);
     Task<PipelineDto> UpdateAsync(

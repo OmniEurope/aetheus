@@ -1,0 +1,48 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/monitoring"
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+@* PLAN-003 lot 28: every supervised application, all projects together, with its status, the people
+   online and the last event received. The facts were already there, one project at a time; nothing
+   showed that Aetheus itself had stopped reporting on 28/08. *@
+<PageTitle>@L["Supervision"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Supervision"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("monitor_heart")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="supervision" />
+    </Badges>
+</OmniPageHeader>
+
+<OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mb-md">@L["SupervisionDescription"]</OmniText>
+
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">
+        @L["GridLoadFailed"]
+    </OmniAlert>
+}
+else
+{
+    @* Recette R-468: everything at a glance, all applications together, above their list. *@
+    @if (_summary is not null)
+    {
+        <div class="supervision-totals omni-u-mb-md">
+            <OmniStatTile Value="@Number(_summary.TotalCount)" Label="@L["MonitoredApps"]" Detail="@AppsDetail" />
+            @if (_summary.Audience is { } audience)
+            {
+                <OmniStatTile Value="@Number(audience.OnlineVisitors)" Label="@L["CurrentVisitors"]" />
+                <OmniStatTile Value="@Number(audience.VisitorsToday)" Label="@L["UniqueVisitorsToday"]" />
+                <OmniStatTile Value="@Number(audience.VisitorsThisWeek)" Label="@L["UniqueVisitorsThisWeek"]" />
+                <OmniStatTile Value="@Number(audience.VisitorsThisMonth)" Label="@L["UniqueVisitorsThisMonth"]" />
+                <OmniStatTile Value="@Number(audience.SessionsThisMonth)" Label="@L["SessionsThisMonth"]" />
+                <OmniStatTile Value="@Number(audience.PageViewsThisMonth)" Label="@L["PageViewsThisMonth"]" />
+            }
+        </div>
+        @if (_summary.Audience is { ApplicationCount: > 1 })
+        {
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-mb-md supervision-totals-note">@L["SupervisionAudienceNote"]</OmniText>
+        }
+    }
+    <MonitoredAppsStatusGrid Applications="@_summary?.Applications" IsLoading="@(_summary is null)" ShowLastEvent="true" />
+}

@@ -7,7 +7,7 @@ public class RoleRepository(AppDbContext db) : IRoleRepository
 {
     public async Task<(List<RoleDto> Items, int Total)> GetRolesPagedAsync(
         string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.Roles
             .AsNoTracking()
@@ -26,6 +26,9 @@ public class RoleRepository(AppDbContext db) : IRoleRepository
                 EF.Functions.ILike(role.Name, pattern) ||
                 (role.Description != null && EF.Functions.ILike(role.Description, pattern)));
         }
+
+        // Recette R-210: the header filters, before the count.
+        query = RoleListQuery.Columns.ApplyFilters(query, filters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -155,6 +158,24 @@ public class RoleRepository(AppDbContext db) : IRoleRepository
             .ConfigureAwait(false);
     }
 
+    public async Task<List<EffectivePermissionDto>> GetEffectivePermissionsForRolesAsync(
+        IReadOnlyCollection<string> roleNames, CancellationToken ct = default)
+    {
+        return await (
+            from role in db.Roles.AsNoTracking()
+            join rp in db.ResourcePermissions.AsNoTracking() on role.Id equals rp.RoleId
+            where roleNames.Contains(role.Name)
+            select new EffectivePermissionDto
+            {
+                ResourceType = rp.ResourceType,
+                ResourceId = rp.ResourceId,
+                Permission = rp.Permission,
+                GrantedByRole = role.Name
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     public async Task<List<ResourcePermissionDto>> GetUserPermissionsAsync(string username, CancellationToken ct = default)
     {
         return await db.Users
@@ -197,13 +218,15 @@ public class RoleRepository(AppDbContext db) : IRoleRepository
 
     public Task<(List<RoleUserDto> Items, int Total)> GetUsersInRolePagedAsync(
         int roleId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.UserRoles
             .AsNoTracking()
             .Where(userRole => userRole.RoleId == roleId)
             .Select(userRole => new RoleUserDto(
                 userRole.User.Id, userRole.User.Username, userRole.User.Email, userRole.User.IsActive));
+        // Recette R-210: the header filters, before PageUsersAsync counts the page.
+        query = RoleListQuery.UserColumns.ApplyFilters(query, filters);
         return PageUsersAsync(query, search, page, pageSize, sortBy, sortDescending, ct);
     }
 

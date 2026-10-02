@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
 using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Services;
 
@@ -13,7 +13,7 @@ namespace Aetheus.Front.Tests.Services;
 /// </summary>
 public class UiActionsApiStatusTests
 {
-    private readonly NotificationService _notification = new();
+    private readonly OmniOverlayService _overlay = new(new FakeTimeProvider());
     private readonly NotifyHelper _toast;
     private readonly UiActions _sut;
 
@@ -22,7 +22,7 @@ public class UiActionsApiStatusTests
         var localizer = Substitute.For<IStringLocalizer<AppStrings>>();
         localizer[Arg.Any<string>()]
             .Returns(ci => new LocalizedString((string)ci[0], (string)ci[0]));
-        _toast = new NotifyHelper(_notification, localizer);
+        _toast = new NotifyHelper(_overlay, localizer);
         _sut = new UiActions(_toast);
     }
 
@@ -36,8 +36,8 @@ public class UiActionsApiStatusTests
             "Saved");
 
         Assert.True(result);
-        var message = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Success, message.Severity);
+        var message = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Success, message.Severity);
         Assert.Equal("Saved", message.Summary);
     }
 
@@ -74,8 +74,8 @@ public class UiActionsApiStatusTests
             "Deleted");
 
         Assert.False(result);
-        var message = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Error, message.Severity);
+        var message = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Danger, message.Severity);
         Assert.Equal("SaveFailed", message.Detail);
     }
 
@@ -99,7 +99,7 @@ public class UiActionsApiStatusTests
             "Deleted");
 
         Assert.False(result);
-        Assert.Equal(NotificationSeverity.Error, Assert.Single(_notification.Messages).Severity);
+        Assert.Equal(OmniSeverity.Danger, Assert.Single(_overlay.Toasts()).Severity);
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class UiActionsApiStatusTests
             "Saved");
 
         Assert.False(result);
-        Assert.Equal(NotificationSeverity.Error, Assert.Single(_notification.Messages).Severity);
+        Assert.Equal(OmniSeverity.Danger, Assert.Single(_overlay.Toasts()).Severity);
     }
 
     // ── Custom keys ──────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ public class UiActionsApiStatusTests
             successTitleKey: "CustomSuccTitle");
 
         Assert.True(result);
-        var message = Assert.Single(_notification.Messages);
+        var message = Assert.Single(_overlay.Toasts());
         Assert.Equal("CustomSuccTitle", message.Summary);
         Assert.Equal("CustomSuccess", message.Detail);
     }

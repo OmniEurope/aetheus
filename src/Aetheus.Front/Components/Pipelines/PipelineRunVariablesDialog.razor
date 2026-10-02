@@ -1,0 +1,29 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.End" Class="omni-u-mb-sm" Gap="OmniSpacing.Large">
+    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CopyAllAsync"><OmniIcon Name="OmniIconName.Copy" /> <span>@L["Copy"]</span></OmniButton>
+</OmniStack>
+<OmniDataGrid Items="@VariableList" TItem="KeyValuePair<string, string>" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="KeyValuePair<string, string>" Property="Key" Title="@L["Key"]" Filterable="true" />
+        <OmniDataGridColumn TItem="KeyValuePair<string, string>" Title="@L["Source"]" Width="7rem" Sortable="false">
+            <Template Context="kv">
+                @if (IsSystemVariable(kv.Key))
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@L["VarSourceSystem"]</OmniBadge>
+                }
+                else
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@L["VarSourceResolved"]</OmniBadge>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="KeyValuePair<string, string>" Property="Value" Title="@L["Value"]" Filterable="true">
+            <Template Context="kv">
+                <code>@kv.Value</code>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</OmniDataGrid>
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Justify="OmniJustification.End" Class="omni-u-mt-md" Gap="OmniSpacing.Large">
+    <Aetheus.Front.Components.Servers.DialogCloseButton />
+</OmniStack>

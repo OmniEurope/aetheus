@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -19,7 +17,7 @@ public sealed class WorkItemEditDialogBehaviorTests : BunitContext
     public WorkItemEditDialogBehaviorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
     }
@@ -76,8 +74,8 @@ public sealed class WorkItemEditDialogBehaviorTests : BunitContext
         await InvokeSubmitAsync(cut);
 
         Assert.False(Spy.Closed);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
     }
 
     [Fact]
@@ -92,7 +90,7 @@ public sealed class WorkItemEditDialogBehaviorTests : BunitContext
         Assert.Equal(false, Spy.LastResult);
     }
 
-    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
     private static object Model(WorkItemEditDialog instance) => typeof(WorkItemEditDialog)
         .GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
     private static void Set(object model, string property, object? value) => model.GetType().GetProperty(property)!.SetValue(model, value);

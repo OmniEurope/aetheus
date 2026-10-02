@@ -14,7 +14,10 @@ public interface ISystemLogService
         DateTime? dateTo,
         int page,
         int pageSize,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? sortBy = null,
+        bool sortDescending = true,
+        IReadOnlyList<GridFilter>? filters = null);
 
     Task<Stream> DownloadLogFileAsync(string fileName, CancellationToken ct = default);
 

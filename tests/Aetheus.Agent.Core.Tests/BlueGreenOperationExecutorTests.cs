@@ -3,8 +3,6 @@ using System.Net;
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;

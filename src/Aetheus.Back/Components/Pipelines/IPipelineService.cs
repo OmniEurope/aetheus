@@ -6,9 +6,19 @@ public interface IPipelineService
 {
     Task<PaginatedResult<PipelineDto>> GetPipelinesAsync(PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
     Task<PipelineDto?> GetPipelineAsync(int id, CancellationToken ct = default);
+
+    /// <summary>Project a project-server row belongs to, or null when it does not exist. Lets a caller
+    /// authorize a pipeline owned by a project server, for which there is no resource type of its own.</summary>
+    Task<int?> GetProjectServerProjectIdAsync(int projectServerId, CancellationToken ct = default);
     Task<PipelineSourceDto?> GetPipelineSourceAsync(int projectId, string pipelineName, CancellationToken ct = default,
         string? sourceBranch = null, int? sourceRepositoryId = null);
-    Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default);
+
+    /// <summary>Recette R-483: the source of a pipeline from its four source columns. <c>Found</c> is
+    /// false for an unknown pipeline; <c>Source</c> is null for one no project owns or with no repository.</summary>
+    Task<(bool Found, PipelineSourceDto? Source)> GetPipelineSourceByIdAsync(int id, CancellationToken ct = default);
+    Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(
+        List<int>? accessibleIds = null, int? serverId = null, int? projectId = null,
+        CancellationToken ct = default);
     Task<PaginatedResult<PipelineDependencyDto>> GetDependencyPageAsync(PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
     Task<PipelineDto> CreatePipelineAsync(CreatePipelineRequest request, CancellationToken ct = default);
     Task<PipelineDto?> UpdatePipelineAsync(int id, UpdatePipelineRequest request, CancellationToken ct = default);

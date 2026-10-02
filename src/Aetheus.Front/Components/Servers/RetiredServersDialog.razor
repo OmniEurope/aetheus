@@ -1,0 +1,44 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniAlert Severity="OmniSeverity.Info" Class="omni-u-mb-sm">
+    @L["RetiredServersHint"]
+</OmniAlert>
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+            <OmniText Element="OmniTextElement.Paragraph">@L["LoadFailed"]</OmniText>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+        </OmniStack>
+    </OmniAlert>
+}
+<AetheusDataGrid @ref="_grid" Data="@_servers" Count="@_totalCount" TItem="RetiredServerDto"
+                IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="25" EmptyText="@L["NoRetiredServers"]"
+                Virtualize="@AetheusGrid.RemoteVirtualization"
+                VirtualData="@(() => new OmniDataGridResult<RetiredServerDto>(_servers, _totalCount))">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="RetiredServerDto" Property="Name" Title="@L["Name"]" MinWidth="160px" Filterable="true" />
+        <OmniDataGridColumn TItem="RetiredServerDto" Property="Hostname" Title="@L["Hostname"]" MinWidth="150px" Filterable="true" />
+        <OmniDataGridColumn TItem="RetiredServerDto" Property="RetiredAt" Title="@L["RetiredAt"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+        <OmniDataGridColumn TItem="RetiredServerDto" Property="HasMachineIdentity" Title="@L["MachineIdentity"]" Width="150px" Sortable="false" Filterable="false">
+            <Template Context="server">
+                @if (server.HasMachineIdentity)
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success" title="@L["MachineIdentityKnownHint"]">@L["MachineIdentityKnown"]</OmniBadge>
+                }
+                else
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral" title="@L["MachineIdentityHostnameOnlyHint"]">@L["MachineIdentityHostnameOnly"]</OmniBadge>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="RetiredServerDto" Title="" Width="80px" Sortable="false" Filterable="false" TextAlign="OmniDataGridTextAlign.Center">
+            <Template Context="server">
+                @if (Permissions.CanAdmin(ResourceType.Server, server.Id))
+                {
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnPurgeServer(server))" Class="@(_purgingIds.Contains(server.Id) ? "btn-busy" : null)" Busy="@(_purgingIds.Contains(server.Id))" title="@L["PurgeServer"]" Label="@L["PurgeServer"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                }
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+<DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

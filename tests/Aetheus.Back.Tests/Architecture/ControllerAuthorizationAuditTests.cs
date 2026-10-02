@@ -41,6 +41,10 @@ public class ControllerAuthorizationAuditTests
         // application, declared origins are checked, identifiers are HMAC-derived server-side, and
         // the route is protected by a dedicated per-site/per-address limiter and a 4 KiB body cap.
         "Aetheus.Back.Components.AppMonitoring.PublicWebAnalyticsController",
+        // A CSP violation report is posted by the browser itself, with no session and no way to carry
+        // one. It writes nothing and reads nothing: it only logs what the policy refused, bounded by a
+        // dedicated per-address limiter and an 8 KiB body cap.
+        "Aetheus.Back.Components.Security.CspReportController",
     };
 
     /// <summary>
@@ -57,6 +61,10 @@ public class ControllerAuthorizationAuditTests
         "Aetheus.Back.Components.Auth.AuthController.Login",
         "Aetheus.Back.Components.Auth.AuthController.ExternalLogin",
         "Aetheus.Back.Components.Auth.AuthController.RefreshToken",
+        // PLAN-005 lot 9: the reason a client ended a session, sent once the session is gone (so no
+        // JWT exists). Accepts only a known reason code and a [A-Za-z0-9-] correlation id, writes one
+        // log line, echoes nothing, and shares the auth-token rate limiter.
+        "Aetheus.Back.Components.Auth.AuthController.SessionEnded",
         // Public login-page metadata. Returns one boolean only, contains no secret or user data,
         // and must be available before authentication so credentials can be explained on the demo.
         "Aetheus.Back.Components.Auth.AuthController.GetPublicDemoInfo",

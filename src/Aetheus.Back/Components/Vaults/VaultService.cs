@@ -6,18 +6,23 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.Vaults;
 
-public class VaultService(IVaultRepository repo, IEncryptionService encryption, IDbTransactionScope transaction, IAuditService audit, IEntityChangeNotifier notifier, TimeProvider timeProvider, IMemoryCache cache) : IVaultService
+public class VaultService(IVaultRepository repo, IEncryptionService encryption, IDbTransactionScope transaction, IAuditService audit, IEntityChangeNotifier notifier, TimeProvider timeProvider, IMemoryCache cache, IHttpContextAccessor? httpContextAccessor = null) : IVaultService
 {
     private const string VaultNamesCachePrefix = "vaults:names:";
     private static readonly TimeSpan CacheDuration = BackendRuntimeDefaults.ReferenceDataCacheDuration;
     private readonly ConcurrentDictionary<string, byte> _activeNameKeys = new();
+
+    /// <summary>Recette R-210: the project names the vaults list's checkable filter offers.</summary>
+    public Task<VaultFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default) =>
+        repo.GetFilterValuesAsync(accessibleIds, ct);
+
     public async Task<PaginatedResult<VaultDto>> GetVaultsAsync(int? projectId, int? environmentId = null, int? projectServerId = null, PaginationRequest? request = null, List<int>? accessibleIds = null, CancellationToken ct = default)
     {
         request ??= new PaginationRequest();
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetVaultsPagedAsync(
             request.Search, projectId, environmentId, projectServerId, page, pageSize, accessibleIds, ct,
-            request.SortBy, request.SortDescending).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, request.Filters).ConfigureAwait(false);
 
         return new PaginatedResult<VaultDto>
         {
@@ -207,6 +212,20 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         await audit.LogAsync(auditAction, "VaultSecret", secret.Id, secret.Key, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Recette R-292: the clear value of one secret, so an operator can copy it. The value never goes
+    /// into the audit entry; the entry records who read which key, so every copy leaves a trace.
+    /// </summary>
+    public async Task<string?> RevealSecretValueAsync(int vaultId, int secretId, CancellationToken ct = default)
+    {
+        var secret = await repo.FindSecretAsync(secretId, ct).ConfigureAwait(false);
+        if (secret is null || secret.VaultId != vaultId) return null;
+
+        var value = encryption.DecryptValue(secret.EncryptedValue);
+        await audit.LogAsync("RevealedSecret", "VaultSecret", secret.Id, secret.Key, ct).ConfigureAwait(false);
+        return value;
+    }
+
     public async Task<bool> DeleteSecretAsync(int vaultId, int secretId, CancellationToken ct = default)
     {
         var secret = await repo.FindSecretAsync(secretId, ct).ConfigureAwait(false);
@@ -219,7 +238,8 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
             {
                 VaultSecretId = secret.Id,
                 Key = secret.Key,
-                EncryptedValue = secret.EncryptedValue,
+                ChangedBy = CurrentUserName,
+                ChangedAt = timeProvider.GetUtcNow().UtcDateTime,
                 Version = version,
                 ChangeType = ChangeType.Deleted
             }, ct).ConfigureAwait(false);
@@ -244,7 +264,8 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
             Version = v.Version,
             Key = v.Key,
             ChangedAt = v.ChangedAt,
-            ChangeType = v.ChangeType
+            ChangeType = v.ChangeType,
+            ChangedBy = v.ChangedBy
         }).ToList();
     }
 
@@ -305,6 +326,9 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         return (MergeVaultsWithPrecedence(vaults), foundNames);
     }
 
+    /// <summary>Recette R-287: the author of a history entry, as the audit log names it.</summary>
+    private string CurrentUserName => httpContextAccessor?.HttpContext?.User?.Identity?.Name ?? "system";
+
     private async Task AddSecretVersionAsync(VaultSecret secret, ChangeType changeType, CancellationToken ct)
     {
         var version = await repo.GetNextVersionAsync(secret.Id, ct).ConfigureAwait(false);
@@ -312,7 +336,8 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
         {
             VaultSecretId = secret.Id,
             Key = secret.Key,
-            EncryptedValue = secret.EncryptedValue,
+            ChangedBy = CurrentUserName,
+            ChangedAt = timeProvider.GetUtcNow().UtcDateTime,
             Version = version,
             ChangeType = changeType
         }, ct).ConfigureAwait(false);
@@ -376,7 +401,8 @@ public class VaultService(IVaultRepository repo, IEncryptionService encryption, 
             {
                 VaultSecretId = secret.Id,
                 Key = secret.Key,
-                EncryptedValue = secret.EncryptedValue,
+                ChangedBy = CurrentUserName,
+                ChangedAt = timeProvider.GetUtcNow().UtcDateTime,
                 Version = 1,
                 ChangeType = ChangeType.Created
             }).ToList();

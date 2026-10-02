@@ -7,7 +7,8 @@ public class ServiceConnectionRepository(AppDbContext db) : IServiceConnectionRe
 {
     public async Task<(List<ServiceConnection> Items, int TotalCount)> GetPagedAsync(
         string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false)
+        string? sortBy = null, bool sortDescending = false,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.ServiceConnections.AsNoTracking().AsQueryable();
 
@@ -20,6 +21,9 @@ public class ServiceConnectionRepository(AppDbContext db) : IServiceConnectionRe
         if (projectId.HasValue)
             query = query.Where(sc => sc.ProjectId == projectId);
 
+        // Recette R-224: the grid's column header filters, after the scope and before the count.
+        query = ServiceConnectionListQuery.Columns.ApplyFilters(query, columnFilters);
+
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
         var items = await query
@@ -30,6 +34,14 @@ public class ServiceConnectionRepository(AppDbContext db) : IServiceConnectionRe
             .ToListAsync(ct).ConfigureAwait(false);
 
         return (items, totalCount);
+    }
+
+    public Task<List<string>> GetProjectNamesAsync(List<int>? accessibleIds, CancellationToken ct = default)
+    {
+        var query = db.ServiceConnections.AsNoTracking().Where(sc => sc.Project != null);
+        if (accessibleIds is not null)
+            query = query.Where(sc => accessibleIds.Contains(sc.Id));
+        return query.Select(sc => sc.Project!.Name).Distinct().OrderBy(name => name).ToListAsync(ct);
     }
 
     public async Task<ServiceConnection?> GetDetailAsync(int id, CancellationToken ct = default)

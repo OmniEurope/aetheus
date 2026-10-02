@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Analysis;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Back.Components.Analysis;
@@ -47,30 +46,8 @@ public sealed class AnalysisService(
         if (await repository.GetRunContextAsync(runId, ct).ConfigureAwait(false) is null)
             throw new NotFoundException("Pipeline run not found or not owned by a project.");
         var gate = await repository.GetRunGateAsync(runId, scope, ct).ConfigureAwait(false);
-        if (!_dependencyTrackOptions.Enabled || !_dependencyTrackOptions.Required
-            || AnalysisGateScopes.Normalize(scope) == AnalysisGateScopes.Quality)
-            return gate;
-
-        var tracking = await repository.GetDependencyTrackGateStateAsync(runId, ct).ConfigureAwait(false);
-        if (!tracking.HasSbom)
-            return gate;
-        var dependencyTrackState = tracking.Statuses.Count == 0
-            ? "dependency-track:missing"
-            : tracking.Statuses.Any(status =>
-                string.Equals(status, DependencyTrackOutboxStatuses.Failed, StringComparison.Ordinal))
-                ? "dependency-track:failed"
-                : tracking.Statuses.All(status =>
-                    string.Equals(status, DependencyTrackOutboxStatuses.Succeeded, StringComparison.Ordinal))
-                    ? null
-                    : "dependency-track:pending";
-        if (dependencyTrackState is null)
-            return gate;
-
-        return gate with
-        {
-            Status = AnalysisGateStatus.Error,
-            MissingProducers = [.. gate.MissingProducers, dependencyTrackState]
-        };
+        return await DependencyTrackGateVerdict.ApplyAsync(
+            gate, runId, scope, _dependencyTrackOptions, repository, ct).ConfigureAwait(false);
     }
 
     public Task<AnalysisRunGateDto> GetRunGateAsync(
@@ -153,6 +130,11 @@ public sealed class AnalysisService(
         CancellationToken ct = default) =>
         repository.GetPortfolioProjectsAsync(accessibleProjectIds, ct);
 
+    public Task<AnalysisPortfolioFilterValuesDto> GetPortfolioFilterValuesAsync(
+        IReadOnlyCollection<int>? accessibleProjectIds,
+        CancellationToken ct = default) =>
+        repository.GetPortfolioFilterValuesAsync(accessibleProjectIds, ct);
+
     public async Task<List<AnalysisPolicyDto>> GetPoliciesAsync(int projectId, CancellationToken ct = default)
     {
         var organizationId = await RequireProjectOrganizationAsync(projectId, ct).ConfigureAwait(false);
@@ -179,9 +161,7 @@ public sealed class AnalysisService(
         UpsertAnalysisPolicyRequest request,
         CancellationToken ct = default)
     {
-        AnalysisPolicyRequestValidator.Validate(request);
-        var policy = await repository.GetPolicyAsync(policyId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("Analysis policy not found.");
+        var policy = await GetPolicyForUpdateAsync(policyId, request, ct).ConfigureAwait(false);
         if (policy.ProjectId != projectId)
             throw new NotFoundException("Analysis policy not found for this project.");
         return await UpdatePolicyCoreAsync(
@@ -221,14 +201,21 @@ public sealed class AnalysisService(
         UpsertAnalysisPolicyRequest request,
         CancellationToken ct = default)
     {
-        AnalysisPolicyRequestValidator.Validate(request);
-        var policy = await repository.GetPolicyAsync(policyId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("Analysis policy not found.");
+        var policy = await GetPolicyForUpdateAsync(policyId, request, ct).ConfigureAwait(false);
         if (policy.ProjectId.HasValue || policy.OrganizationId != organizationId)
             throw new NotFoundException("Analysis policy not found in the selected scope.");
         var auditScope = organizationId.HasValue ? $"scope=organization:{organizationId}" : "scope=global";
         return await UpdatePolicyCoreAsync(
             policy, projectId: null, request, auditScope, ct).ConfigureAwait(false);
+    }
+
+    // Validates the request before loading, so an invalid update never reads the policy.
+    private async Task<AnalysisPolicy> GetPolicyForUpdateAsync(
+        int policyId, UpsertAnalysisPolicyRequest request, CancellationToken ct)
+    {
+        AnalysisPolicyRequestValidator.Validate(request);
+        return await repository.GetPolicyAsync(policyId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException("Analysis policy not found.");
     }
 
     private async Task<AnalysisPolicyDto> CreatePolicyCoreAsync(
@@ -456,46 +443,6 @@ public sealed class AnalysisService(
             await audit.LogAsync("AnalysisExceptionRevoked", nameof(AnalysisPolicyException), exception.Id,
                 $"project={projectId};actor={actor}", ct).ConfigureAwait(false);
         }
-    }
-
-    public async Task<List<AnalysisFindingDecisionDto>> GetFindingDecisionsAsync(
-        int findingId,
-        CancellationToken ct = default) =>
-        (await repository.GetFindingDecisionsAsync(findingId, ct).ConfigureAwait(false)).Select(AnalysisMapper.ToDto).ToList();
-
-    public async Task<AnalysisFindingDecisionDto> CreateFindingDecisionAsync(
-        int findingId,
-        CreateAnalysisFindingDecisionRequest request,
-        string actor,
-        CancellationToken ct = default)
-    {
-        if (request.Status is AnalysisFindingStatus.Open or AnalysisFindingStatus.Fixed)
-            throw new BadRequestException("Manual decisions are limited to Accepted, FalsePositive or Mitigated.");
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        if (request.ExpiresAt.HasValue && request.ExpiresAt.Value <= now)
-            throw new BadRequestException("A finding decision expiration must be in the future.");
-        var finding = await repository.GetTrackedFindingAsync(findingId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("Analysis finding not found.");
-        foreach (var active in finding.Decisions.Where(decision => decision.RevokedAt == null))
-            active.RevokedAt = now;
-        finding.Status = request.Status;
-        finding.ResolvedAt = null;
-        finding.UpdatedAt = now;
-        var decision = new AnalysisFindingDecision
-        {
-            OrganizationId = finding.OrganizationId,
-            ProjectId = finding.ProjectId,
-            AnalysisFindingId = finding.Id,
-            Status = request.Status,
-            Reason = request.Reason.Trim(),
-            CreatedByUsername = actor,
-            ExpiresAt = request.ExpiresAt,
-            CreatedAt = now
-        };
-        await repository.SaveFindingDecisionAsync(finding, decision, ct).ConfigureAwait(false);
-        await audit.LogAsync("AnalysisFindingDecisionCreated", nameof(AnalysisFinding), finding.Id,
-            $"status={request.Status};expires={request.ExpiresAt:O}", ct).ConfigureAwait(false);
-        return AnalysisMapper.ToDto(decision);
     }
 
     public async Task<PaginatedResult<AnalysisMetricDto>> GetMetricsAsync(

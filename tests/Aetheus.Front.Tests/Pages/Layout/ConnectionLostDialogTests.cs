@@ -14,8 +14,7 @@ public class ConnectionLostDialogTests : BunitContext
     {
         var cut = Render<ConnectionLostDialog>(ps => ps.Add(p => p.Visible, false));
 
-        Assert.DoesNotContain("connection-lost-mask", cut.Markup);
-        Assert.DoesNotContain("cloud_off", cut.Markup);
+        Assert.Empty(cut.FindAll(".omni-connection-overlay"));
     }
 
     [Fact]
@@ -23,25 +22,29 @@ public class ConnectionLostDialogTests : BunitContext
     {
         var cut = Render<ConnectionLostDialog>(ps => ps.Add(p => p.Visible, true));
 
-        Assert.Contains("connection-lost-mask", cut.Markup);
-        Assert.Contains("cloud_off", cut.Markup);
+        Assert.Single(cut.FindAll(".omni-connection-overlay"));
+        Assert.Single(cut.FindAll(".omni-connection-overlay__icon svg"));
+        Assert.Equal("alertdialog", cut.Find(".omni-connection-overlay__card").GetAttribute("role"));
         // StubLocalizer echoes the resource key, so the presence of these keys proves the strings render.
         Assert.Contains("ConnectionLost", cut.Markup);
-        Assert.Contains("ManualReconnect", cut.Markup);
+        Assert.Single(cut.FindAll(".omni-connection-overlay__action"));
     }
 
     [Fact]
-    public void Countdown_RendersOnlyWhenPositive()
+    public void Countdown_ShowsOnlyWhenPositive_InASlotThatStays()
     {
         var atZero = Render<ConnectionLostDialog>(ps => ps
             .Add(p => p.Visible, true)
             .Add(p => p.ReconnectCountdown, 0));
-        Assert.DoesNotContain("ReconnectIn", atZero.Markup);
+        // Recette R-129: the slot stays so the card does not move; at zero it holds no text.
+        var slot = atZero.Find(".omni-connection-overlay__countdown");
+        Assert.Equal("true", slot.GetAttribute("aria-hidden"));
+        Assert.DoesNotContain("0", slot.TextContent, StringComparison.Ordinal);
 
         var counting = Render<ConnectionLostDialog>(ps => ps
             .Add(p => p.Visible, true)
             .Add(p => p.ReconnectCountdown, 5));
-        Assert.Contains("ReconnectIn", counting.Markup);
+        Assert.Contains("5", counting.Find(".omni-connection-overlay__countdown").TextContent);
     }
 
     [Fact]
@@ -52,7 +55,7 @@ public class ConnectionLostDialogTests : BunitContext
             .Add(p => p.Visible, true)
             .Add(p => p.OnManualReconnect, EventCallback.Factory.Create(this, () => clicked = true)));
 
-        cut.Find("button").Click();
+        cut.Find(".omni-connection-overlay__action").Click();
 
         Assert.True(clicked);
     }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -45,11 +44,13 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
-    public void Renders_One_Global_Breadcrumb_Slot()
+    public void Renders_No_Breadcrumb_Of_Its_Own()
     {
         var cut = Render<MainLayout>();
 
-        Assert.Single(cut.FindAll("nav[data-testid='app-breadcrumb']"));
+        // PLAN-003 lot 1: the shell stopped stacking a trail above the page. The trail is line 1 of
+        // the page header, so exactly one component draws it and every page starts at the same Y.
+        Assert.Empty(cut.FindAll(".omni-page-header__trail, .omni-breadcrumb"));
     }
 
     [Fact]
@@ -66,16 +67,6 @@ public class MainLayoutTests : BunitContext
     {
         var cut = Render<MainLayout>();
         await cut.Instance.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task ToggleDarkMode_TogglesState()
-    {
-        var cut = Render<MainLayout>();
-
-        await cut.Instance.ToggleDarkMode();
-
-        Assert.False(cut.Instance._darkMode); // was true, toggled to false
     }
 
     [Fact]
@@ -105,17 +96,6 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
-    public async Task ToggleDarkMode_TwiceRestoresState()
-    {
-        var cut = Render<MainLayout>();
-        Assert.True(cut.Instance._darkMode);
-        await cut.InvokeAsync(async () => await cut.Instance.ToggleDarkMode());
-        Assert.False(cut.Instance._darkMode);
-        await cut.InvokeAsync(async () => await cut.Instance.ToggleDarkMode());
-        Assert.True(cut.Instance._darkMode);
-    }
-
-    [Fact]
     public async Task OnLogout_NavigatesToLogin()
     {
         var cut = Render<MainLayout>();
@@ -123,7 +103,9 @@ public class MainLayoutTests : BunitContext
 
         await cut.InvokeAsync(async () => await cut.Instance.OnLogout());
 
-        Assert.Contains("login", nav.Uri);
+        // A voluntary logout keeps no return address (PLAN-005 lot 8): the next person to sign in on
+        // this browser must not land on the page the previous one left.
+        Assert.Equal(nav.BaseUri + "login", nav.Uri);
     }
 
     [Fact]

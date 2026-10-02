@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Releases;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Releases;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages.Releases;
 
@@ -12,7 +11,12 @@ public class ReleaseDetailTests : BunitContext
 {
     private readonly BunitTestHelper.TestHandler _handler;
 
-    public ReleaseDetailTests() => _handler = BunitTestHelper.RegisterServices(this);
+    public ReleaseDetailTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+        // Recette R-373: the project has no repository unless a test says otherwise.
+        _handler.SetPaginatedJsonResponse("api/git/repos", Array.Empty<GitLightRepoDto>());
+    }
 
     private static ReleaseDto Sample(int id = 7) => new()
     {
@@ -39,6 +43,22 @@ public class ReleaseDetailTests : BunitContext
 
         cut.WaitForState(() => cut.Markup.Contains("v2.3.0"));
         Assert.Contains("v2.3.0", cut.Markup);
+    }
+
+    [Fact]
+    public void Breadcrumb_ShowsTheShortVersion_LikeEveryOtherReleaseName()
+    {
+        // D39: a pipeline release is "c-" plus a 40-character SHA; written in full, the breadcrumb
+        // pushes the rest of the header off a phone screen.
+        var full = "c-0123456789abcdef0123456789abcdef01234567";
+        _handler.SetJsonResponse("api/releases/7", Sample() with { Version = full, TagName = null });
+        var breadcrumb = Services.GetRequiredService<Aetheus.Front.Layout.BreadcrumbService>();
+
+        var cut = Render<ReleaseDetail>(p => p.Add(c => c.ReleaseId, 7));
+
+        cut.WaitForAssertion(() => Assert.Equal(4, breadcrumb.Items.Count));
+        Assert.Equal(Aetheus.Front.Components.Releases.ReleaseHelper.ShortVersion(full), breadcrumb.Items[^1].Text);
+        Assert.NotEqual(full, breadcrumb.Items[^1].Text);
     }
 
     [Fact]
@@ -115,6 +135,70 @@ public class ReleaseDetailTests : BunitContext
             Assert.Contains("href=\"/git-repositories/branches/11\"", cut.Markup);
             Assert.Contains("href=\"/git-repositories/commits/22\"", cut.Markup);
             Assert.DoesNotContain("href=\"/git/", cut.Markup);
+            // Recette R-373: the tag leads to the commit it points at, the release's own commit.
+            var tag = cut.Find(".short-id[title='v2.3.0'] a.short-id__text");
+            Assert.Equal("/git-repositories/commits/22", tag.GetAttribute("href"));
+        });
+    }
+
+    [Fact]
+    public void ABareCommitHash_AndTheTag_StayText_WhenTheRepositoryCannotBeTold()
+    {
+        // Recette R-373: without a linked commit and with no project repository the release's URL names,
+        // the commit and the tag are text: never a list of repositories to search in, never a guess.
+        _handler.SetJsonResponse("api/releases/7", Sample());
+
+        var cut = Render<ReleaseDetail>(parameters => parameters.Add(component => component.ReleaseId, 7));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("abcdef12", cut.Find(".short-id[title='abcdef1234567890']").TextContent.Trim());
+            Assert.Empty(cut.FindAll(".short-id[title='abcdef1234567890'] a"));
+            Assert.Empty(cut.FindAll(".short-id[title='v2.3.0'] a"));
+        });
+    }
+
+    [Fact]
+    public void AnInternalCloneUrl_LeadsToTheCommitPage_WhateverHostItWasRehomedTo()
+    {
+        // Recette R-373: an internal repository's clone URL is re-homed per environment (the release
+        // recorded the agents' host), so it is matched by project and slug, not by its whole text.
+        _handler.SetJsonResponse("api/releases/7", Sample() with
+        {
+            RepositoryUrl = "https://host.docker.internal:5301/git/1/demo.git"
+        });
+        _handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/git/repos",
+        [
+            new GitLightRepoDto { Id = 4, ProjectId = 1, Slug = "other", CloneUrl = "https://localhost:5301/git/1/other.git" },
+            new GitLightRepoDto { Id = 6, ProjectId = 1, Slug = "demo", CloneUrl = "https://localhost:5301/git/1/demo.git" }
+        ]);
+
+        var cut = Render<ReleaseDetail>(parameters => parameters.Add(component => component.ReleaseId, 7));
+
+        cut.WaitForAssertion(() => Assert.Equal("/git-repositories/6/commits/abcdef1234567890",
+            cut.Find(".short-id[title='abcdef1234567890'] a.short-id__text").GetAttribute("href")));
+    }
+
+    [Fact]
+    public void ABareCommitHash_AndTheTag_LeadToTheCommitPage_WhenTheRepositoryIsKnown()
+    {
+        // Recette R-373: the project's repository cloned from the release's URL holds the commit, so the
+        // link goes to the commit itself rather than to the list of repositories.
+        _handler.SetJsonResponse("api/releases/7", Sample());
+        _handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/git/repos",
+        [
+            new GitLightRepoDto { Id = 5, CloneUrl = "https://github.com/acme/other.git" },
+            new GitLightRepoDto { Id = 9, CloneUrl = "https://github.com/acme/demo" }
+        ]);
+
+        var cut = Render<ReleaseDetail>(parameters => parameters.Add(component => component.ReleaseId, 7));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("/git-repositories/9/commits/abcdef1234567890",
+                cut.Find(".short-id[title='abcdef1234567890'] a.short-id__text").GetAttribute("href"));
+            Assert.Equal("/git-repositories/9/commits/abcdef1234567890",
+                cut.Find(".short-id[title='v2.3.0'] a.short-id__text").GetAttribute("href"));
         });
     }
 
@@ -183,5 +267,83 @@ public class ReleaseDetailTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.Contains("Deployed", cut.Markup));
         Assert.Equal(requestCount, _handler.Requests.Count);
+    }
+
+    private static ReleaseRunRefDto RunRef(int runId, int pipelineId, string pipelineName) => new()
+    {
+        RunId = runId,
+        BuildNumber = runId,
+        PipelineId = pipelineId,
+        PipelineName = pipelineName,
+        Status = PipelineStatus.Success,
+        StartedAt = new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc)
+    };
+
+    [Fact]
+    public void Provenance_ShowsTheCreatorApartFromLaterUses_AndBuildInputsApartFromDeliverables()
+    {
+        // Recette R-366/R-367.
+        _handler.SetJsonResponse("api/releases/7", Sample() with { PipelineRunId = 300 });
+        _handler.SetJsonResponse("api/releases/7/provenance", new ReleaseProvenanceDto
+        {
+            CreatedBy = RunRef(100, 2, "candidate"),
+            BuildRuns = [RunRef(99, 1, "build")],
+            Uses = [new ReleaseUseDto { Run = RunRef(300, 3, "deploy-prod"), Kind = ReleaseUseKind.Deploy }],
+            ArtifactInputs =
+            [
+                new ReleaseArtifactInputDto
+                {
+                    ConsumerRunId = 100, StepName = "restore", Kind = ArtifactInputKind.Restore, ArtifactId = 55,
+                    ArtifactName = "base-image", Sha256 = new string('c', 64), SourcePipelineRunId = 50
+                }
+            ],
+            Packages = [new ReleasePackageInputDto { Name = "Serilog", Version = "4.0.0", PackageUrl = "pkg:nuget/Serilog@4.0.0", IsDirect = true, PipelineRunId = 100 }],
+            PackageTotalCount = 1
+        });
+
+        var cut = Render<ReleaseDetail>(p => p.Add(c => c.ReleaseId, 7));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("ReleaseCreatedByPipeline", cut.Markup);
+            Assert.Contains("href=\"/pipelines/2\"", cut.Markup);
+            Assert.Contains("href=\"/pipelines/runs/100\"", cut.Markup);
+            Assert.Contains("ReleaseDeliverablesBuiltBy", cut.Markup);
+            Assert.Contains("href=\"/pipelines/runs/99\"", cut.Markup);
+            Assert.Contains("ReleaseUses", cut.Markup);
+            Assert.Contains("href=\"/pipelines/runs/300\"", cut.Markup);
+            Assert.Contains("ReleaseBuildInputs", cut.Markup);
+            Assert.Contains("href=\"/artifacts/55\"", cut.Markup);
+            // Recette R-373: the consumed artifact's short digest links to that artifact too.
+            var digest = cut.Find($".short-id[title='{new string('c', 64)}'] a.short-id__text");
+            Assert.Equal("/artifacts/55", digest.GetAttribute("href"));
+            Assert.Equal("cccccccc", digest.TextContent);
+            Assert.Contains("href=\"/pipelines/runs/50\"", cut.Markup);
+            Assert.Contains("pkg:nuget/Serilog@4.0.0", cut.Markup);
+            // The deployment that last recorded the release is a use, not a creation.
+            Assert.DoesNotContain("ReleaseLastRecordedBy", cut.Markup);
+        });
+    }
+
+    [Fact]
+    public void Provenance_WithoutRecordedCreator_SaysSo_AndLabelsTheLastRecordingRunAsSuch()
+    {
+        _handler.SetJsonResponse("api/releases/7", Sample() with { PipelineRunId = 300 });
+        _handler.SetJsonResponse("api/releases/7/provenance", new ReleaseProvenanceDto
+        {
+            LastRecordedBy = RunRef(300, 3, "deploy-prod")
+        });
+
+        var cut = Render<ReleaseDetail>(p => p.Add(c => c.ReleaseId, 7));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("ReleaseCreatorNotRecorded", cut.Markup);
+            Assert.Contains("ReleaseLastRecordedBy", cut.Markup);
+            Assert.Contains("href=\"/pipelines/runs/300\"", cut.Markup);
+            Assert.DoesNotContain("ReleaseCreatedByPipeline", cut.Markup);
+            Assert.Contains("ReleaseUsesEmpty", cut.Markup);
+            Assert.Contains("ReleaseInputPackagesEmpty", cut.Markup);
+        });
     }
 }

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -158,7 +155,7 @@ public class VisualPipelineEditorTests : BunitContext
             .Add(x => x.AvailableLibraries, new List<string>())
             .Add(x => x.AvailableVaults, new List<string>()));
 
-        var addButton = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("AddStage"));
+        var addButton = cut.FindAll("button").FirstOrDefault(b => b.Names().Contains("AddStage"));
         // The AddStage toolbar button must be present for valid YAML; guarantee it outside any branch
         // so a missing button fails the test instead of silently passing.
         Assert.NotNull(addButton);
@@ -231,8 +228,8 @@ public class VisualPipelineEditorTests : BunitContext
     public void IsCollapsed_InitiallyTrue()
     {
         var cut = RenderEditor(ValidYaml, ["server-1"]);
-        var collapsed = (bool)typeof(VisualPipelineEditor).GetField("_settingsCollapsed", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        Assert.True(collapsed);
+        var expanded = (bool)typeof(VisualPipelineEditor).GetField("_settingsExpanded", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        Assert.False(expanded);
     }
 
     // --- OnStageSelected ---
@@ -349,8 +346,8 @@ public class VisualPipelineEditorTests : BunitContext
     public void SettingsCollapsed_DefaultTrue()
     {
         var cut = RenderEditor(ValidYaml);
-        var collapsed = (bool)typeof(VisualPipelineEditor).GetField("_settingsCollapsed", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        Assert.True(collapsed);
+        var expanded = (bool)typeof(VisualPipelineEditor).GetField("_settingsExpanded", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
+        Assert.False(expanded);
     }
 
     // --- Trigger options ---

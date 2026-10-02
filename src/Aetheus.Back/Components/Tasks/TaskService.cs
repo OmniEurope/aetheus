@@ -2,10 +2,9 @@
 using System.Text.Json;
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Logs;
-using Aetheus.Back.Components.Releases;
+using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Services.DomainEvents;
 using Microsoft.AspNetCore.SignalR;
 
@@ -25,7 +24,7 @@ public class TaskService(ITaskRepository repo, ILogService logService, IHubConte
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetTasksPagedAsync(
             request.Search, page, pageSize, request.Status, accessibleServerIds, request.ServerId, ct,
-            request.SortBy, request.SortDescending).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, request.Filters).ConfigureAwait(false);
 
         return new PaginatedResult<ServerTaskDto>
         {
@@ -35,6 +34,9 @@ public class TaskService(ITaskRepository repo, ILogService logService, IHubConte
             PageSize = pageSize
         };
     }
+
+    public Task<TaskFilterValuesDto> GetTaskFilterValuesAsync(List<int>? accessibleServerIds, int? serverId, CancellationToken ct = default)
+        => repo.GetTaskFilterValuesAsync(accessibleServerIds, serverId, ct);
 
     public async Task<ServerTaskDto?> GetTaskAsync(int id, CancellationToken ct = default)
     {

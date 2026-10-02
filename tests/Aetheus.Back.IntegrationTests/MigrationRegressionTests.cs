@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics.CodeAnalysis;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -46,6 +46,27 @@ public sealed class MigrationRegressionTests(PostgresFixture fixture)
     /// </summary>
     private static async Task<int> SeededOrganizationIdAsync(AppDbContext db) =>
         await db.Organizations.OrderBy(o => o.Id).Select(o => o.Id).FirstAsync();
+
+    /// <summary>
+    /// Reads a single integer with the raw connection, for the tests that drive the database at an
+    /// older migration point than the entities describe. Going through EF there would select columns
+    /// that migration has not created yet.
+    /// </summary>
+    [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "Test-only helper; every caller passes a literal query in this file and binds its values through NpgsqlParameter.")]
+    private static async Task<int> ScalarAsync(AppDbContext db, string sql, params NpgsqlParameter[] parameters)
+    {
+        await using var command = new NpgsqlCommand(sql);
+        command.Connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (command.Connection.State != System.Data.ConnectionState.Open)
+        {
+            await command.Connection.OpenAsync(TestContext.Current.CancellationToken);
+        }
+
+        command.Parameters.AddRange(parameters);
+        var value = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+        return Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// All migrations apply cleanly on an EMPTY database. This is the "fresh install" path.
@@ -297,6 +318,7 @@ public sealed class MigrationRegressionTests(PostgresFixture fixture)
 
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync(migrations[targetIndex - 1], TestContext.Current.CancellationToken);
+
         var project = new Project
         {
             Name = "Release invariant",
@@ -305,44 +327,53 @@ public sealed class MigrationRegressionTests(PostgresFixture fixture)
         };
         db.Projects.Add(project);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var projectId = project.Id;
 
-        var older = new Release
-        {
-            ProjectId = project.Id,
-            Version = "1.0.0",
-            Status = ReleaseStatus.Deployed,
-            PublishedAt = new DateTime(2026, 7, 19, 8, 0, 0, DateTimeKind.Utc)
-        };
-        var newer = new Release
-        {
-            ProjectId = project.Id,
-            Version = "1.1.0",
-            Status = ReleaseStatus.Deployed,
-            PublishedAt = new DateTime(2026, 7, 20, 8, 0, 0, DateTimeKind.Utc)
-        };
-        db.Releases.AddRange(older, newer);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        // Releases, unlike Projects, is written in SQL rather than through the entity. The database
+        // sits at a 2026-07 migration while Release describes today's schema, so an EF insert or
+        // query emits every column added since - AssuranceGrade among them - and PostgreSQL answers
+        // 42703 for a column this migration point does not have yet. Naming the columns that existed
+        // then is what makes this test about the migration instead of about the current model, and
+        // keeps it from breaking again the next time a release column is added.
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO "Releases" ("ProjectId", "Version", "BranchName", "Status", "DetectedAt", "PublishedAt")
+            VALUES
+              (@projectId, '1.0.0', 'main', @deployed, @olderAt, @olderAt),
+              (@projectId, '1.1.0', 'main', @deployed, @newerAt, @newerAt);
+            """,
+            [
+                new NpgsqlParameter("projectId", projectId),
+                new NpgsqlParameter("deployed", (int)ReleaseStatus.Deployed),
+                new NpgsqlParameter("olderAt", new DateTime(2026, 7, 19, 8, 0, 0, DateTimeKind.Utc)),
+                new NpgsqlParameter("newerAt", new DateTime(2026, 7, 20, 8, 0, 0, DateTimeKind.Utc))
+            ],
+            TestContext.Current.CancellationToken);
 
         await migrator.MigrateAsync(targetMigration, TestContext.Current.CancellationToken);
-        db.ChangeTracker.Clear();
 
-        var normalized = await db.Releases.OrderBy(release => release.Version)
-            .ToListAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(ReleaseStatus.Published, normalized[0].Status);
-        Assert.Equal(ReleaseStatus.Deployed, normalized[1].Status);
+        // The migration must demote every deployed release but the most recent one.
+        var olderStatus = await ScalarAsync(db,
+            """SELECT "Status" FROM "Releases" WHERE "Version" = '1.0.0';""");
+        var newerStatus = await ScalarAsync(db,
+            """SELECT "Status" FROM "Releases" WHERE "Version" = '1.1.0';""");
+        Assert.Equal((int)ReleaseStatus.Published, olderStatus);
+        Assert.Equal((int)ReleaseStatus.Deployed, newerStatus);
 
-        db.Releases.Add(new Release
-        {
-            ProjectId = project.Id,
-            Version = "1.2.0",
-            Status = ReleaseStatus.Deployed,
-            PublishedAt = DateTime.UtcNow
-        });
-        var exception = await Assert.ThrowsAsync<DbUpdateException>(
-            () => db.SaveChangesAsync(TestContext.Current.CancellationToken));
-        var postgres = Assert.IsType<PostgresException>(exception.InnerException);
-        Assert.Equal(PostgresErrorCodes.UniqueViolation, postgres.SqlState);
-        Assert.Equal("IX_Releases_ProjectId", postgres.ConstraintName);
+        // And the index it creates must refuse a second deployed release from then on.
+        var exception = await Assert.ThrowsAsync<PostgresException>(
+            () => db.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "Releases" ("ProjectId", "Version", "BranchName", "Status", "DetectedAt", "PublishedAt")
+                VALUES (@projectId, '1.2.0', 'main', @deployed, now(), now());
+                """,
+                [
+                    new NpgsqlParameter("projectId", projectId),
+                    new NpgsqlParameter("deployed", (int)ReleaseStatus.Deployed)
+                ],
+                TestContext.Current.CancellationToken));
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, exception.SqlState);
+        Assert.Equal("IX_Releases_ProjectId", exception.ConstraintName);
     }
 
     /// <summary>

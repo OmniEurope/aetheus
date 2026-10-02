@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Validation;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -16,6 +15,7 @@ public class PipelinesController(
     IPipelineApprovalService approvalService,
     IPipelineArtifactService artifactService,
     IPipelineWebhookService webhookService,
+    IPipelineOwnerAuthorization ownerAuthz,
     IResourceAuthorizationService authz) : ControllerBase
 {
     [HttpGet]
@@ -29,11 +29,11 @@ public class PipelinesController(
 
     [HttpGet("dependencies")]
     public async Task<ActionResult<PipelineDependencyGroupsDto>> GetDependencies(
-        CancellationToken ct, [FromQuery] int? serverId = null)
+        CancellationToken ct, [FromQuery] int? serverId = null, [FromQuery] int? projectId = null)
     {
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Pipeline, Permission.Read, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new PipelineDependencyGroupsDto());
-        return Ok(await pipelineService.GetDependencyGroupsAsync(accessibleIds, serverId, ct));
+        return Ok(await pipelineService.GetDependencyGroupsAsync(accessibleIds, serverId, projectId, ct));
     }
 
     [HttpGet("runs/active")]
@@ -70,12 +70,9 @@ public class PipelinesController(
         if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, id, Permission.Read, ct))
             return Forbid();
 
-        var pipeline = await pipelineService.GetPipelineAsync(id, ct);
-        if (pipeline is null) return NotFound();
-        if (pipeline.ProjectId is not { } projectId) return NoContent();
-
-        var source = await pipelineService.GetPipelineSourceAsync(
-            projectId, pipeline.Name, ct, pipeline.SourceBranch, pipeline.SourceRepositoryId);
+        // Recette R-483: four columns of the pipeline, not the pipeline with its YAML and runs.
+        var (found, source) = await pipelineService.GetPipelineSourceByIdAsync(id, ct);
+        if (!found) return NotFound();
         return source is null ? NoContent() : Ok(source);
     }
 
@@ -84,8 +81,7 @@ public class PipelinesController(
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, null, Permission.Write, ct))
             return Forbid();
-        if (request.ProjectId is { } projectId
-            && !await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Write, ct))
+        if (!await ownerAuthz.CanOwnAsync(User, request.ProjectId, request.EnvironmentId, request.ProjectServerId, ct))
             return Forbid();
 
         // Reject invalid YAML at save time with the concrete errors (same contract as
@@ -108,11 +104,11 @@ public class PipelinesController(
         var existing = await pipelineService.GetPipelineAsync(id, ct);
         if (existing is null) return NotFound();
 
-        foreach (var projectId in new int?[] { existing.ProjectId, request.ProjectId }.OfType<int>().Distinct())
-        {
-            if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Write, ct))
-                return Forbid();
-        }
+        // Both owners: the one left behind and the one moved to. Checking only the incoming one would let
+        // a pipeline be walked out of an environment the caller cannot touch, only the existing one into.
+        if (!await ownerAuthz.CanOwnAsync(User, existing.ProjectId, existing.EnvironmentId, existing.ProjectServerId, ct)
+            || !await ownerAuthz.CanOwnAsync(User, request.ProjectId, request.EnvironmentId, request.ProjectServerId, ct))
+            return Forbid();
 
         var validation = await pipelineService.ValidateYamlStrictAsync(
             request.YamlDefinition, request.ProjectId, request.EnvironmentId, request.ProjectServerId, ct: ct)

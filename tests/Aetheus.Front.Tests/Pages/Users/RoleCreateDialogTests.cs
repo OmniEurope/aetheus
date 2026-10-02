@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Users;
+using Aetheus.Front.Components.Users;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Users;
 
 /// <summary>
 /// Behavioural tests for RoleCreateDialog.razor.cs: the form renders the name/description fields,
 /// and a valid OnSubmit issues the real POST and closes the dialog with the created role
-/// (captured by a spy DialogService).
+/// (captured by a spy OmniDialogService).
 /// </summary>
 public class RoleCreateDialogTests : BunitContext
 {
@@ -27,11 +25,11 @@ public class RoleCreateDialogTests : BunitContext
     }
 
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     private static void SetModel(IRenderedComponent<RoleCreateDialog> cut, string prop, object? value)
     {

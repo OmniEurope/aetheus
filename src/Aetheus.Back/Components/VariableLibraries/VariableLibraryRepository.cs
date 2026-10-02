@@ -5,9 +5,41 @@ namespace Aetheus.Back.Components.VariableLibraries;
 
 public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryRepository
 {
+    /// <summary>Recette R-210 / R-224: the header filters of the variable libraries list.</summary>
+    internal static readonly GridQueryMap<VariableLibrary> Columns = new GridQueryMap<VariableLibrary>()
+        .Text("Name", vl => vl.Name)
+        .Text("ProjectName", vl => vl.Project != null ? vl.Project.Name : null)
+        .Text("Description", vl => vl.Description)
+        .Number("EntryCount", vl => vl.Entries.Count)
+        .Date("CreatedAt", vl => vl.CreatedAt)
+        .Date("UpdatedAt", vl => vl.UpdatedAt);
+
+    /// <summary>Recette R-210: the header filters of a library's entries grid.</summary>
+    internal static readonly GridQueryMap<VariableLibraryEntry> EntryColumns = new GridQueryMap<VariableLibraryEntry>()
+        .Text("Key", entry => entry.Key)
+        .Text("Value", entry => entry.Value);
+
+    /// <summary>Recette R-210 / R-224: the header filters of an entry's version history grid.</summary>
+    internal static readonly GridQueryMap<VariableLibraryEntryVersion> EntryVersionColumns = new GridQueryMap<VariableLibraryEntryVersion>()
+        .Number("Version", version => version.Version)
+        .Text("Key", version => version.Key)
+        .Text("Value", version => version.Value)
+        .Enum("ChangeType", version => version.ChangeType)
+        .Date("ChangedAt", version => version.ChangedAt);
+
+    /// <summary>Recette R-210: the project names present across the libraries the caller can read.</summary>
+    public async Task<VariableLibraryFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default)
+    {
+        var query = db.VariableLibraries.AsNoTracking().Where(vl => vl.Project != null);
+        if (accessibleIds is not null)
+            query = query.Where(vl => accessibleIds.Contains(vl.Id));
+        var names = await query.Select(vl => vl.Project!.Name).Distinct().ToListAsync(ct).ConfigureAwait(false);
+        return new VariableLibraryFilterValuesDto { ProjectNames = [.. names.Order(StringComparer.OrdinalIgnoreCase)] };
+    }
+
     public async Task<(List<VariableLibrary> Items, int TotalCount)> GetLibrariesPagedAsync(
         string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false)
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.VariableLibraries.AsNoTracking().AsQueryable();
 
@@ -24,14 +56,27 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(vl => vl.Name.Contains(search) || vl.Description.Contains(search));
 
+        query = Columns.ApplyFilters(query, columnFilters);
+
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
-        var items = await query
+        var rows = query
             .Include(vl => vl.Project)
             .Include(vl => vl.Environment)
             .Include(vl => vl.ProjectServer)
-            .Include(vl => vl.Entries)
-            .OrderByProperty(sortBy, sortDescending, vl => vl.Name, fallbackDescending: false)
+            .Include(vl => vl.Entries);
+
+        // The list shows the owning project as its own column, but ProjectName is not a property of
+        // the entity: resolved by name it would miss and fall back to Name, so the sort header would
+        // move the arrow and leave the rows untouched. Mapped to the navigation, as BackupRepository
+        // and GitLightRepository already do for the same column.
+        IQueryable<VariableLibrary> ordered = string.Equals(sortBy, "ProjectName", StringComparison.OrdinalIgnoreCase)
+            ? sortDescending
+                ? rows.OrderByDescending(vl => vl.Project!.Name)
+                : rows.OrderBy(vl => vl.Project!.Name)
+            : rows.OrderByProperty(sortBy, sortDescending, vl => vl.Name, fallbackDescending: false);
+
+        var items = await ordered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsSplitQuery()
@@ -60,7 +105,7 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
 
     public async Task<(List<VariableLibraryEntry> Items, int TotalCount)> GetEntriesPagedAsync(
         int libraryId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.VariableLibraryEntries
             .AsNoTracking()
@@ -72,6 +117,7 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
                 EF.Functions.ILike(entry.Key, pattern) || EF.Functions.ILike(entry.Value, pattern));
         }
 
+        query = EntryColumns.ApplyFilters(query, columnFilters);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         query = query.Include(entry => entry.Versions);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -224,7 +270,7 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
 
     public async Task<(List<VariableLibraryEntryVersion> Items, int TotalCount)> GetEntryVersionsPagedAsync(
         int entryId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.VariableLibraryEntryVersions
             .AsNoTracking()
@@ -236,6 +282,7 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
                 EF.Functions.ILike(version.Key, pattern) || EF.Functions.ILike(version.Value, pattern));
         }
 
+        query = EntryVersionColumns.ApplyFilters(query, columnFilters);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {

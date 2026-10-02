@@ -196,20 +196,30 @@ public static class DbInitializer
                         depends_on: [Compile]
                         steps:
                           - name: Run Back Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Front Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Agent Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                       - name: Coverage
                         group: Build
                         depends_on: [Tests]
                         steps:
                           - name: Collect Coverage
-                            shell: "dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage ; dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage ; dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage"
+                            shell: |
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage
+                              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage
+                              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage
+                              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                              # coverlet.MTP stamps its report; give it the coverage.cobertura.xml layout the readers expect.
+                              Get-ChildItem -Path $(WORKSPACE)/coverage -Filter 'coverage.cobertura.*.xml' | ForEach-Object { $dir = Join-Path $_.DirectoryName ($_.BaseName -replace '^coverage\.cobertura\.', ''); New-Item -ItemType Directory -Force -Path $dir | Out-Null; Move-Item $_.FullName (Join-Path $dir 'coverage.cobertura.xml') }
+                              $reports = @(Get-ChildItem -Path $(WORKSPACE)/coverage -Recurse -Filter coverage.cobertura.xml)
+                              if ($reports.Count -ne 3) { Write-Error "Expected exactly 3 coverage reports, found $($reports.Count)."; exit 1 }
                             timeout_seconds: 300
                           - name: Publish Coverage
                             type: coverage
@@ -288,20 +298,30 @@ public static class DbInitializer
                         depends_on: [Compile]
                         steps:
                           - name: Run Back Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Front Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Agent Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                       - name: Coverage
                         group: Build
                         depends_on: [Tests]
                         steps:
                           - name: Collect Coverage
-                            shell: "dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage ; dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage ; dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage"
+                            shell: |
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage
+                              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage
+                              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage
+                              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                              # coverlet.MTP stamps its report; give it the coverage.cobertura.xml layout the readers expect.
+                              Get-ChildItem -Path $(WORKSPACE)/coverage -Filter 'coverage.cobertura.*.xml' | ForEach-Object { $dir = Join-Path $_.DirectoryName ($_.BaseName -replace '^coverage\.cobertura\.', ''); New-Item -ItemType Directory -Force -Path $dir | Out-Null; Move-Item $_.FullName (Join-Path $dir 'coverage.cobertura.xml') }
+                              $reports = @(Get-ChildItem -Path $(WORKSPACE)/coverage -Recurse -Filter coverage.cobertura.xml)
+                              if ($reports.Count -ne 3) { Write-Error "Expected exactly 3 coverage reports, found $($reports.Count)."; exit 1 }
                             timeout_seconds: 300
                           - name: Publish Coverage
                             type: coverage
@@ -379,20 +399,24 @@ public static class DbInitializer
                         depends_on: [Compile]
                         steps:
                           - name: Run Back Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Front Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Agent Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                       - name: Coverage
                         group: Build
                         depends_on: [Tests]
                         steps:
                           - name: Collect Coverage
-                            shell: "dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage && dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage && dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage"
+                            shell: >-
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+                              sh $(WORKSPACE)/deploy/scripts/normalize-coverage-report.sh $(WORKSPACE)/coverage
                             timeout_seconds: 300
                           - name: Publish Coverage
                             type: coverage
@@ -469,20 +493,24 @@ public static class DbInitializer
                         depends_on: [Compile]
                         steps:
                           - name: Run Back Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Front Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                           - name: Run Agent Tests
-                            shell: dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+                            shell: dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --output Detailed
                             timeout_seconds: 300
                       - name: Coverage
                         group: Build
                         depends_on: [Tests]
                         steps:
                           - name: Collect Coverage
-                            shell: "dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage && dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage && dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:\"XPlat Code Coverage\" --results-directory $(WORKSPACE)/coverage"
+                            shell: >-
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+                              dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+                              sh $(WORKSPACE)/deploy/scripts/normalize-coverage-report.sh $(WORKSPACE)/coverage
                             timeout_seconds: 300
                           - name: Publish Coverage
                             type: coverage

@@ -107,12 +107,12 @@ public sealed class DependencyTrackClient(
         return element.ValueKind == JsonValueKind.String ? element.GetString() : null;
     }
 
-    private static Aetheus.Shared.Enums.AnalysisSeverity ParseSeverity(string? value) => value?.ToUpperInvariant() switch
+    private static Aetheus.Shared.Components.Analysis.AnalysisSeverity ParseSeverity(string? value) => value?.ToUpperInvariant() switch
     {
-        "CRITICAL" => Aetheus.Shared.Enums.AnalysisSeverity.Critical,
-        "HIGH" => Aetheus.Shared.Enums.AnalysisSeverity.High,
-        "MEDIUM" => Aetheus.Shared.Enums.AnalysisSeverity.Medium,
-        "LOW" => Aetheus.Shared.Enums.AnalysisSeverity.Low,
-        _ => Aetheus.Shared.Enums.AnalysisSeverity.Info
+        "CRITICAL" => Aetheus.Shared.Components.Analysis.AnalysisSeverity.Critical,
+        "HIGH" => Aetheus.Shared.Components.Analysis.AnalysisSeverity.High,
+        "MEDIUM" => Aetheus.Shared.Components.Analysis.AnalysisSeverity.Medium,
+        "LOW" => Aetheus.Shared.Components.Analysis.AnalysisSeverity.Low,
+        _ => Aetheus.Shared.Components.Analysis.AnalysisSeverity.Info
     };
 }

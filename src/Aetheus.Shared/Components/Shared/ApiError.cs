@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: EUPL-1.2
+namespace Aetheus.Shared.Components.Shared;
+
+public sealed record ApiError
+{
+    public string Message { get; init; } = string.Empty;
+    public string? Detail { get; init; }
+    public Dictionary<string, string[]>? Errors { get; init; }
+    public string? CorrelationId { get; init; }
+
+    /// <summary>A machine-readable reason, when an endpoint defines them (e.g. <c>RefreshRejectionCodes</c>).</summary>
+    public string? Code { get; init; }
+}

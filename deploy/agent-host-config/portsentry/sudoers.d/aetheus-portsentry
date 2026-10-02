@@ -1,0 +1,9 @@
+# Aetheus Agent - portsentry management (Phase 3). Two root-owned helpers, each the security
+# boundary: unblock-ip validates + removes ONE IP from iptables/ip6tables + /etc/hosts.deny;
+# portsentry-setup validates + installs/configures portsentry. noexec is intentionally omitted (the
+# helpers are vetted scripts that must exec iptables/grep/apt-get/sed/systemctl).
+Cmnd_Alias AETHEUS_PORTSENTRY = #{UNBLOCK_HELPER_PATH}#, #{PORTSENTRY_SETUP_HELPER_PATH}#
+Defaults!AETHEUS_PORTSENTRY timestamp_timeout=0
+Defaults!AETHEUS_PORTSENTRY env_reset
+Defaults!AETHEUS_PORTSENTRY secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_PORTSENTRY

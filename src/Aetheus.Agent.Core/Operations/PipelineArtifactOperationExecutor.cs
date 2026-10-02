@@ -5,23 +5,19 @@ namespace Aetheus.Agent.Core.Operations;
 public sealed class PipelineArtifactOperationExecutor(
     IServerApiClient apiClient,
     ILogger<PipelineArtifactOperationExecutor> logger,
-    TimeProvider timeProvider) : IOperationExecutor
+    TimeProvider timeProvider) : EnvironmentOperationExecutor
 {
-    public bool CanHandle(OperationKind kind) => kind is
+    public override bool CanHandle(OperationKind kind) => kind is
         OperationKind.PipelineCollectArtifacts or
         OperationKind.PipelineCreateRelease or
         OperationKind.PipelineSubstituteVariables or
         OperationKind.PipelinePublishCoverage or
         OperationKind.PipelinePublishLint or
         OperationKind.PipelinePublishComplexity or
+        OperationKind.PipelinePublishMutation or
         OperationKind.PipelineRestoreArtifacts;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {
@@ -39,6 +35,8 @@ public sealed class PipelineArtifactOperationExecutor(
                 apiClient, logger, timeProvider, target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             OperationKind.PipelinePublishComplexity => await PipelineQualityPublisher.PublishComplexityAsync(
                 apiClient, logger, timeProvider, envVars, onOutput, cancellationToken).ConfigureAwait(false),
+            OperationKind.PipelinePublishMutation => await PipelineMutationPublisher.PublishAsync(
+                apiClient, logger, timeProvider, target, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             OperationKind.PipelineRestoreArtifacts => await PipelineArtifactRestorer.RestoreAsync(
                 apiClient, logger, envVars, onOutput, cancellationToken).ConfigureAwait(false),
             _ => new ExecutorResult(-1, false)

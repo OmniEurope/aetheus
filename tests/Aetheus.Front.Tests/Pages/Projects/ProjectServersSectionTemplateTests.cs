@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -103,12 +100,12 @@ public class ProjectServersSectionTemplateTests : BunitContext
     }
 
     [Theory]
-    [InlineData(ProjectServerType.AgentServer, BadgeStyle.Info)]
-    [InlineData(ProjectServerType.ExternalHost, BadgeStyle.Warning)]
-    public void GetTypeBadge_ReturnsExpected(ProjectServerType type, BadgeStyle expected)
+    [InlineData(ProjectServerType.AgentServer, OmniTone.Accent)]
+    [InlineData(ProjectServerType.ExternalHost, OmniTone.Warning)]
+    public void GetTypeBadge_ReturnsExpected(ProjectServerType type, OmniTone expected)
     {
         var method = SectionType.GetMethod("GetTypeBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [type])!;
+        var result = (OmniTone)method.Invoke(null, [type])!;
         Assert.Equal(expected, result);
     }
 
@@ -116,17 +113,17 @@ public class ProjectServersSectionTemplateTests : BunitContext
     public void GetTypeBadge_Unknown_ReturnsLight()
     {
         var method = SectionType.GetMethod("GetTypeBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ProjectServerType)99])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(ProjectServerType)99])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Theory]
-    [InlineData(ServerStatus.Online, BadgeStyle.Success)]
-    [InlineData(ServerStatus.Offline, BadgeStyle.Danger)]
-    public void GetStatusBadge_ReturnsExpected(ServerStatus status, BadgeStyle expected)
+    [InlineData(ServerStatus.Online, OmniTone.Success)]
+    [InlineData(ServerStatus.Offline, OmniTone.Danger)]
+    public void GetStatusBadge_ReturnsExpected(ServerStatus status, OmniTone expected)
     {
         var method = SectionType.GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)status])!;
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)status])!;
         Assert.Equal(expected, result);
     }
 
@@ -134,8 +131,8 @@ public class ProjectServersSectionTemplateTests : BunitContext
     public void GetStatusBadge_Null_ReturnsLight()
     {
         var method = SectionType.GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)null])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)null])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Fact]

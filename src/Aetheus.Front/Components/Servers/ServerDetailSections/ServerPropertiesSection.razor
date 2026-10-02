@@ -1,0 +1,66 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniCard>
+    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Medium">
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["ServerId"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.Id</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Name"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.Name</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Hostname"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.Hostname</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["IpAddress"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.IpAddress</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["OperatingSystem"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.OsDescription</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["AgentVersion"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@(string.IsNullOrWhiteSpace(Server.AgentVersion) ? "-" : $"v{Server.AgentVersion}")</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Type"]</OmniText></OmniColumn>
+            <OmniColumn Span="8">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                    <OmniIcon Name="@MaterialIconMap.Resolve(ServerTypeHelper.GetIcon(Server.Type))" Class="icon-sm" />
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@ServerTypeHelper.GetBadgeStyle(Server.Type)">@L.Localize(Server.Type)</OmniBadge>
+                </OmniStack>
+            </OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Status"]</OmniText></OmniColumn>
+            <OmniColumn Span="8">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@(Server.Status == ServerStatus.Online ? OmniTone.Success : OmniTone.Danger)">@L.Localize(Server.Status)</OmniBadge>
+            </OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Created"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.CreatedAt.ToString("g")</OmniText></OmniColumn>
+        </OmniRow>
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["LastHeartbeat"]</OmniText></OmniColumn>
+            <OmniColumn Span="8"><OmniText Element="OmniTextElement.Paragraph">@Server.LastHeartbeat.ToString("g")</OmniText></OmniColumn>
+        </OmniRow>
+        @if (Server.Tags.Count > 0)
+        {
+            <OmniRow Gap="OmniSpacing.Large">
+                <OmniColumn Span="4"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Tags"]</OmniText></OmniColumn>
+                <OmniColumn Span="8">
+                    <OmniRow Gap="OmniSpacing.XSmall">
+                        @foreach (var tag in Server.Tags)
+                        {
+                            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@tag</OmniBadge>
+                        }
+                    </OmniRow>
+                </OmniColumn>
+            </OmniRow>
+        }
+    </OmniStack>
+</OmniCard>

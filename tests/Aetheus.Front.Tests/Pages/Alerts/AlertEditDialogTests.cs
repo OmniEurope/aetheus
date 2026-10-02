@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Alerts;
+using Aetheus.Front.Components.Alerts;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.AlertsDeep;
 
@@ -21,16 +19,16 @@ public class AlertEditDialogTests : BunitContext
     public AlertEditDialogTests() => _handler = BunitTestHelper.RegisterServices(this);
 
     /// <summary>
-    /// Registers a spy DialogService (lazy factory so the provider isn't built early) that records the
-    /// Close payload. SubmitAsync routes its success close through the injected DialogService, so we can
+    /// Registers a spy OmniDialogService (lazy factory so the provider isn't built early) that records the
+    /// Close payload. SubmitAsync routes its success close through the injected OmniDialogService, so we can
     /// assert the dialog closed with <c>true</c> (signalling the caller to reload the list).
     /// </summary>
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     [Fact]
     public void Renders_CreateForm_WhenNoAlert()
@@ -71,7 +69,7 @@ public class AlertEditDialogTests : BunitContext
     public void Renders_CancelButton()
     {
         var cut = Render<AlertEditDialog>();
-        Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("Cancel"));
+        Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("GoBack"));
     }
 
     [Fact]
@@ -98,7 +96,7 @@ public class AlertEditDialogTests : BunitContext
 
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/alerts"));
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "PUT");
-        Assert.Contains(Notifications.Messages, m => m.Severity == NotificationSeverity.Success);
+        Assert.Contains(Notifications.Toasts(), m => m.Severity == OmniSeverity.Success);
     }
 
     [Fact]
@@ -122,7 +120,7 @@ public class AlertEditDialogTests : BunitContext
 
         Assert.Contains(_handler.Requests, r => r.Method == "PUT" && r.Url.Contains("api/alerts/7"));
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST");
-        Assert.Contains(Notifications.Messages, m => m.Severity == NotificationSeverity.Success);
+        Assert.Contains(Notifications.Toasts(), m => m.Severity == OmniSeverity.Success);
     }
 
     // The API returning no rule (null) must surface as the error branch, not a silent success.
@@ -136,11 +134,11 @@ public class AlertEditDialogTests : BunitContext
         await InvokeSubmit(cut);
 
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/alerts"));
-        Assert.Contains(Notifications.Messages, m => m.Severity == NotificationSeverity.Error);
-        Assert.DoesNotContain(Notifications.Messages, m => m.Severity == NotificationSeverity.Success);
+        Assert.Contains(Notifications.Toasts(), m => m.Severity == OmniSeverity.Danger);
+        Assert.DoesNotContain(Notifications.Toasts(), m => m.Severity == OmniSeverity.Success);
     }
 
-    private NotificationService Notifications => Services.GetRequiredService<NotificationService>();
+    private OmniOverlayService Notifications => Services.GetRequiredService<OmniOverlayService>();
 
     private static void SetModelName(AlertEditDialog instance, string name)
     {
@@ -160,7 +158,7 @@ public class AlertEditDialogTests : BunitContext
     {
         var cut = Render<AlertEditDialog>();
         var field = typeof(AlertEditDialog).GetField("_metricTypes", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        Assert.NotEmpty((List<object>)field.GetValue(cut.Instance)!);
+        Assert.NotEmpty((System.Collections.IList)field.GetValue(cut.Instance)!);
     }
 
     [Fact]
@@ -168,7 +166,7 @@ public class AlertEditDialogTests : BunitContext
     {
         var cut = Render<AlertEditDialog>();
         var field = typeof(AlertEditDialog).GetField("_severityTypes", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        Assert.NotEmpty((List<object>)field.GetValue(cut.Instance)!);
+        Assert.NotEmpty((System.Collections.IList)field.GetValue(cut.Instance)!);
     }
 
     [Fact]

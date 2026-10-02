@@ -1,0 +1,30 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectPagedSectionBase<TaskLogDto>
+@if (_result is null)
+{
+    <AetheusLoader />
+}
+else
+{
+    @* Recette R-186: same rule as the other project sections, the breadcrumb leaf is the title and the
+       grid header filters search; virtualized, no pager (R-049). Recette R-212: each header filter is a
+       real column filter of the project's logs endpoint. *@
+    <AetheusDataGrid FullHeight="true" @ref="_grid" Data="@_result.Items" TItem="TaskLogDto"
+        Count="@_result.TotalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
+        PageSize="25" EmptyText="@L["NoLogs"]"
+        Virtualize="@AetheusGrid.RemoteVirtualization"
+        VirtualData="@(() => new OmniDataGridResult<TaskLogDto>(_result.Items, _result.TotalCount))">
+        <EmptyTemplate>
+            <EmptyState Icon="article" Title="@L["NoLogs"]" />
+        </EmptyTemplate>
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="TaskLogDto" Property="Timestamp" Title="@L["Time"]" FormatString="{0:G}" Width="180px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+            <OmniDataGridColumn TItem="TaskLogDto" Property="Level" Title="@L["Level"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@LevelText" >
+                <Template Context="log">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@GetLevelBadge(log.Level)">@L[log.Level.ToString()]</OmniBadge>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="TaskLogDto" Property="Message" Title="@L["Message"]" MinWidth="18rem" Filterable="true" />
+        </Columns>
+    </AetheusDataGrid>
+}

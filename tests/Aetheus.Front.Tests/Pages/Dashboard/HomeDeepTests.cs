@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Dashboard;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Dashboards;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
-using Radzen.Blazor;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Dashboard;
 
@@ -22,6 +19,7 @@ public class HomeDeepTests : BunitContext
             HttpMethod.Get,
             "api/appmonitoring/summary",
             new AppMonitoringSummaryDto());
+        BunitTestHelper.SetOnboardingWizardResponses(_handler);
     }
 
     private static DashboardOverviewDto MakeDashboard(int servers = 3, int online = 2) =>
@@ -77,9 +75,14 @@ public class HomeDeepTests : BunitContext
             Assert.Equal(degraded, summary.DegradedCount);
         }, TimeSpan.FromSeconds(2));
 
-        // BadgeStyle.Warning is unique to the Degraded badge in the app-summary row (Up=Success, Down=Danger,
-        // Unknown=Light), so its presence/absence tracks the conditional exactly.
-        Assert.Equal(expectBadge, cut.Markup.Contains("rz-badge-warning", StringComparison.Ordinal));
+        // OmniTone.Warning is unique to the Degraded badge in the app-summary row (Up=Success, Down=Danger,
+        // Unknown=Neutral). Matched on its own label so the first-run onboarding card, which also renders
+        // warning badges, cannot satisfy the assertion in its place.
+        var degradedBadge = cut.FindAll(".omni-badge--warning")
+            .SingleOrDefault(badge => badge.TextContent.Contains("AppHealthDegraded", StringComparison.Ordinal));
+        Assert.Equal(expectBadge, degradedBadge is not null);
+        if (expectBadge)
+            Assert.Equal($"{degraded} AppHealthDegraded", degradedBadge!.TextContent.Trim());
     }
 
     [Fact]
@@ -109,8 +112,8 @@ public class HomeDeepTests : BunitContext
         var cut = Render<Home>();
         cut.WaitForAssertion(() => Assert.Contains("healthy-with-analytics", cut.Markup));
 
-        var grid = Assert.Single(cut.FindComponents<RadzenDataGrid<MonitoredAppStatusDto>>());
-        Assert.Equal(2, grid.Instance.Data!.Count());
+        var grid = Assert.Single(cut.FindComponents<OmniDataGrid<MonitoredAppStatusDto>>());
+        Assert.Equal(2, grid.Instance.Items.Count);
         Assert.Contains("healthy-without-analytics", cut.Markup);
         Assert.Contains("CurrentVisitors", cut.Markup);
         // Scoped to the monitored-apps grid: this asserts that grid's column order, and the dashboard
@@ -177,16 +180,16 @@ public class HomeDeepTests : BunitContext
     public void GetRunBadge_Success_ReturnsBadgeStyle()
     {
         var method = typeof(Home).GetMethod("GetRunBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [PipelineStatus.Success])!;
-        Assert.Equal(BadgeStyle.Success, result);
+        var result = (OmniTone)method.Invoke(null, [PipelineStatus.Success])!;
+        Assert.Equal(OmniTone.Success, result);
     }
 
     [Fact]
     public void GetRunBadge_Failed_ReturnsDanger()
     {
         var method = typeof(Home).GetMethod("GetRunBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [PipelineStatus.Failed])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [PipelineStatus.Failed])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]

@@ -2,11 +2,8 @@
 using System.Net;
 using System.Reflection;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
 using Aetheus.Front.Tests.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 using Bunit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,6 +29,14 @@ public class MainLayoutMethodCoverageTests : BunitContext
         _handler = BunitTestHelper.RegisterServices(this);
     }
 
+    // The start-up loads now go through MainLayoutBootstrapLoader, the one the layout calls itself.
+    private Task LoadPermissionsAsync() => MainLayoutBootstrapLoader.LoadPermissionsAsync(
+        Services.GetRequiredService<ApiClient>(), Services.GetRequiredService<PermissionService>(),
+        Services.GetRequiredService<AuthStateProvider>(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+    private Task LoadOrganizationsAsync() => MainLayoutBootstrapLoader.LoadOrganizationsAsync(
+        Services.GetRequiredService<ActiveOrganizationService>(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
     // ── LoadPermissionsAsync ───────────────────────────────────────────────────
 
     [Fact]
@@ -52,10 +57,9 @@ public class MainLayoutMethodCoverageTests : BunitContext
         };
         _handler.SetJsonResponse("api/users/me/permissions", summary);
 
-        var cut = Render<MainLayout>();
+        Render<MainLayout>();
         _handler.Requests.Clear();
-        var method = LayoutType.GetMethod("LoadPermissionsAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        await LoadPermissionsAsync();
 
         // LoadPermissionsAsync fetches the user's effective permissions and feeds them to PermissionService.
         Assert.Contains(_handler.Requests, r => r.Url.Contains("api/users/me/permissions"));
@@ -67,12 +71,11 @@ public class MainLayoutMethodCoverageTests : BunitContext
     {
         _handler.SetResponse("api/users/me/permissions", HttpStatusCode.InternalServerError);
 
-        var cut = Render<MainLayout>();
+        Render<MainLayout>();
         _handler.Requests.Clear();
-        var method = LayoutType.GetMethod("LoadPermissionsAsync", Priv)!;
 
         // Should swallow the exception (logs a warning and returns) after attempting the fetch.
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        await LoadPermissionsAsync();
         Assert.Contains(_handler.Requests, r => r.Url.Contains("api/users/me/permissions"));
     }
 
@@ -83,15 +86,14 @@ public class MainLayoutMethodCoverageTests : BunitContext
         // would deserialize to a non-null DTO and wrongly trip SetPermissions).
         _handler.SetJsonResponse<UserPermissionSummaryDto?>("api/users/me/permissions", null);
 
-        var cut = Render<MainLayout>();
+        Render<MainLayout>();
         _handler.Requests.Clear();
         // A null permissions payload must NOT re-trigger SetPermissions (which raises OnPermissionsChanged).
         var permissions = Services.GetRequiredService<PermissionService>();
         var changedFired = false;
         permissions.OnPermissionsChanged += () => changedFired = true;
 
-        var method = LayoutType.GetMethod("LoadPermissionsAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        await LoadPermissionsAsync();
 
         Assert.Contains(_handler.Requests, r => r.Url.Contains("api/users/me/permissions"));
         Assert.False(changedFired);
@@ -105,10 +107,9 @@ public class MainLayoutMethodCoverageTests : BunitContext
         // GetMyOrganizationsAsync endpoint
         _handler.SetJsonResponse("api/organizations/me", new List<object>());
 
-        var cut = Render<MainLayout>();
+        Render<MainLayout>();
         _handler.Requests.Clear();
-        var method = LayoutType.GetMethod("LoadOrganizationsAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        await LoadOrganizationsAsync();
 
         // LoadOrganizationsAsync delegates to ActiveOrganizationService.RefreshAsync → GET api/organizations/me.
         Assert.Contains(_handler.Requests, r => r.Url.Contains("api/organizations/me"));
@@ -119,11 +120,10 @@ public class MainLayoutMethodCoverageTests : BunitContext
     {
         _handler.SetResponse("api/organizations/me", HttpStatusCode.InternalServerError);
 
-        var cut = Render<MainLayout>();
+        Render<MainLayout>();
         _handler.Requests.Clear();
-        var method = LayoutType.GetMethod("LoadOrganizationsAsync", Priv)!;
         // Swallows the 500 after attempting the fetch.
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        await LoadOrganizationsAsync();
         Assert.Contains(_handler.Requests, r => r.Url.Contains("api/organizations/me"));
     }
 
@@ -179,6 +179,46 @@ public class MainLayoutMethodCoverageTests : BunitContext
     }
 
     [Fact]
+    public async Task CheckForNewVersionAsync_DifferentVersion_AnnouncesTheBackendWasReplacedOnce()
+    {
+        // Run 2458: the reload banner is the one moment the front knows a blue-green switch happened, and
+        // the open sockets are still on the previous colour. The realtime owners must be told once.
+        var cut = Render<MainLayout>();
+        var announced = 0;
+        Services.GetRequiredService<HubConnectionFactory>().BackendReplaced += () => announced++;
+        LayoutType.GetField("_version", Priv)!.SetValue(cut.Instance, "1.0.0");
+        var fakeClient = new HttpClient(new StaticResponseHandler("{\"App\":{\"Version\":\"2.0.0\"}}"))
+        {
+            BaseAddress = new Uri("http://test/")
+        };
+
+        var method = LayoutType.GetMethod("CheckForNewVersionAsync", Priv)!;
+        await cut.InvokeAsync(async () =>
+            await (Task<bool>)method.Invoke(cut.Instance, [fakeClient, CancellationToken.None])!);
+
+        Assert.Equal(1, announced);
+    }
+
+    [Fact]
+    public async Task CheckForNewVersionAsync_SameVersion_AnnouncesNothing()
+    {
+        var cut = Render<MainLayout>();
+        var announced = 0;
+        Services.GetRequiredService<HubConnectionFactory>().BackendReplaced += () => announced++;
+        LayoutType.GetField("_version", Priv)!.SetValue(cut.Instance, "1.0.0");
+        var fakeClient = new HttpClient(new StaticResponseHandler("{\"App\":{\"Version\":\"1.0.0\"}}"))
+        {
+            BaseAddress = new Uri("http://test/")
+        };
+
+        var method = LayoutType.GetMethod("CheckForNewVersionAsync", Priv)!;
+        await cut.InvokeAsync(async () =>
+            await (Task<bool>)method.Invoke(cut.Instance, [fakeClient, CancellationToken.None])!);
+
+        Assert.Equal(0, announced);
+    }
+
+    [Fact]
     public async Task CheckForNewVersionAsync_MissingAppSection_ReturnsFalse()
     {
         var cut = Render<MainLayout>();
@@ -216,33 +256,31 @@ public class MainLayoutMethodCoverageTests : BunitContext
         Assert.False(result);
     }
 
-    // ── ToggleLanguage ────────────────────────────────────────────────────────
+    // ── OnLanguageChanged (the application menu's language row) ──────────────
 
     [Fact]
-    public async Task ToggleLanguage_ClosesUserMenu()
+    public async Task OnLanguageChanged_StoresTheLanguageAndReloadsInIt()
     {
         var cut = Render<MainLayout>();
+        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+        var other = MainLayout.CurrentLanguage == "en" ? "fr-FR" : "en";
 
-        // Open user menu first
-        LayoutType.GetField("_userMenuOpen", Priv)!.SetValue(cut.Instance, true);
+        await cut.InvokeAsync(() => cut.Instance.OnLanguageChanged(other));
 
-        var method = LayoutType.GetMethod("ToggleLanguage", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-
-        // _userMenuOpen should be false after ToggleLanguage runs
-        var menuOpen = (bool)LayoutType.GetField("_userMenuOpen", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(menuOpen);
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "localStorage.setItem"
+            && Equals(i.Arguments[0], StorageKeys.Lang) && Equals(i.Arguments[1], other));
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "Aetheus.setLang" && Equals(i.Arguments[0], other));
+        Assert.Contains(nav.History, entry => entry.Options.ForceLoad);
     }
 
     [Fact]
-    public async Task ToggleLanguage_StillInvokesJs()
+    public async Task OnLanguageChanged_SameLanguage_ChangesNothing()
     {
         var cut = Render<MainLayout>();
-        var method = LayoutType.GetMethod("ToggleLanguage", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
-        // ToggleLanguage persists the new culture and applies it through the JS interop layer.
-        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "Aetheus.setLang");
+        await cut.InvokeAsync(() => cut.Instance.OnLanguageChanged(MainLayout.CurrentLanguage));
+
+        Assert.DoesNotContain(JSInterop.Invocations, i => i.Identifier == "Aetheus.setLang");
     }
 
     // ── OnNeedsLogin ──────────────────────────────────────────────────────────
@@ -260,6 +298,10 @@ public class MainLayoutMethodCoverageTests : BunitContext
             [new EffectivePermissionDto { ResourceType = ResourceType.Project, Permission = Permission.Read }],
             isAdmin: false);
         cache.Set("dashboard:overview", new DashboardOverviewDto { TotalServers = 1 });
+        // PLAN-005 lot 8 / D47: a session that expires in the middle of a page keeps that page.
+        nav.NavigateTo("http://localhost/servers/3?tab=docker");
+        // PLAN-005 lot 9 / D48: the session ended for a reason, which the layout reports.
+        await cut.InvokeAsync(() => Services.GetRequiredService<AuthStateProvider>().EndSessionAsync(Aetheus.Shared.Components.Auth.RefreshRejectionCodes.Replay));
 
         var method = LayoutType.GetMethod("OnNeedsLogin", Priv)!;
         // Await the dispatch so the assertion runs after OnNeedsLogin's internal InvokeAsync completes.
@@ -270,20 +312,22 @@ public class MainLayoutMethodCoverageTests : BunitContext
         });
 
         // Not on the login page, so the 401 funnel redirects to /login.
-        Assert.Contains("login", nav.Uri);
+        Assert.Equal("http://localhost/login?returnUrl=%2Fservers%2F3%3Ftab%3Ddocker", nav.Uri);
         cut.WaitForAssertion(() => Assert.Equal(1, factory.StopAllCount));
         Assert.False(permissions.IsLoaded);
         Assert.False(cache.TryGet<DashboardOverviewDto>("dashboard:overview", out _));
+        cut.WaitForAssertion(() => Assert.Contains(_handler.RequestDetails, request =>
+            request.Method == "POST" && request.Url.EndsWith("api/auth/session-ended", StringComparison.Ordinal)
+            && request.Body!.Contains("refresh_replay", StringComparison.Ordinal)));
     }
 
     // ── OnSettingsMenuClick ───────────────────────────────────────────────────
 
     [Fact]
-    public async Task OnSettingsMenuClick_ClosesMenuAndNavigatesToSettings()
+    public async Task OnSettingsMenuClick_NavigatesToSettings()
     {
         var cut = Render<MainLayout>();
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
-        LayoutType.GetField("_userMenuOpen", Priv)!.SetValue(cut.Instance, true);
 
         var method = LayoutType.GetMethod("OnSettingsMenuClick", Priv)!;
         await cut.InvokeAsync(() =>
@@ -292,32 +336,10 @@ public class MainLayoutMethodCoverageTests : BunitContext
             return Task.CompletedTask;
         });
 
-        // The click closes the user menu AND navigates to the settings route. Assert on the navigation
-        // history (not the final Uri): MainLayout's unauthenticated-redirect guard can bounce the final
-        // location to /login after the settings navigation, but the /settings navigation still happened.
-        var menuOpen = (bool)LayoutType.GetField("_userMenuOpen", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(menuOpen);
+        // OmniAppMenu closes itself before raising OnSettings. Assert on the navigation history (not the
+        // final Uri): MainLayout's unauthenticated-redirect guard can bounce the final location to /login
+        // after the settings navigation, but the /settings navigation still happened.
         Assert.Contains(nav.History, h => h.Uri.EndsWith("/settings"));
-    }
-
-    // ── OnLogoutMenuClick ─────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task OnLogoutMenuClick_ClosesMenuAndCallsLogout()
-    {
-        UseCountingHubFactory();
-        var cut = Render<MainLayout>();
-        var factory = (CountingHubConnectionFactory)Services.GetRequiredService<HubConnectionFactory>();
-        LayoutType.GetField("_userMenuOpen", Priv)!.SetValue(cut.Instance, true);
-
-        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
-
-        var method = LayoutType.GetMethod("OnLogoutMenuClick", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-
-        // After logout the navigation should go to /login
-        Assert.Contains("login", nav.Uri);
-        Assert.Equal(1, factory.StopAllCount);
     }
 
     private void UseCountingHubFactory() =>

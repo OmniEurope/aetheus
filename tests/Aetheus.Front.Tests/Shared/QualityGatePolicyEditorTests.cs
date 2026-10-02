@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -61,7 +58,7 @@ public sealed class QualityGatePolicyEditorTests : BunitContext
         Assert.Contains("QualityGateRecommended", cut.Markup);
         Assert.Contains("QualityGateStrict", cut.Markup);
         Assert.Contains("QualityGateOptionalTitle", cut.Markup);
-        Assert.Contains("QualityGateCopyYaml", cut.Markup);
+        Assert.NotNull(cut.Find(".omni-code-block.quality-gate-yaml-panel figcaption button")); // R-516: the YAML example and its copy button
         Assert.Contains("analysis_preset: recommended", cut.Markup);
         Assert.Contains(">Import<", cut.Markup, StringComparison.Ordinal);
         Assert.Contains(">Export<", cut.Markup, StringComparison.Ordinal);
@@ -76,7 +73,7 @@ public sealed class QualityGatePolicyEditorTests : BunitContext
             .Add(component => component.InitialPolicies, []));
 
         cut.FindAll("button")
-            .Single(button => button.TextContent.Contains("QualityGateAddRule", StringComparison.Ordinal))
+            .Single(button => button.Names().Contains("QualityGateAddRule", StringComparison.Ordinal))
             .Click();
 
         var expectedLabels = new[]

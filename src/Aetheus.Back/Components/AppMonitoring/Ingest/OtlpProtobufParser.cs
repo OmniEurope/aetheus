@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.Json;
+using Aetheus.Back.Data.Entities;
 using Google.Protobuf.Collections;
 using OpenTelemetry.Proto.Collector.Logs.V1;
 using OpenTelemetry.Proto.Collector.Metrics.V1;
@@ -31,9 +32,9 @@ public static class OtlpProtobufParser
                     if (string.IsNullOrWhiteSpace(metric.Name))
                         continue;
                     if (metric.Gauge is not null)
-                        AddNumberPoints(result, metric.Name, metric.Unit, metric.Gauge.DataPoints);
+                        AddNumberPoints(result, metric.Name, metric.Unit, metric.Gauge.DataPoints, MetricKind.Gauge);
                     else if (metric.Sum is not null)
-                        AddNumberPoints(result, metric.Name, metric.Unit, metric.Sum.DataPoints);
+                        AddNumberPoints(result, metric.Name, metric.Unit, metric.Sum.DataPoints, MetricKind.Sum);
                     else if (metric.Histogram is not null)
                         AddHistogramPoints(result, metric.Name, metric.Unit, metric.Histogram.DataPoints);
                 }
@@ -56,7 +57,9 @@ public static class OtlpProtobufParser
                         (int)record.SeverityNumber,
                         EmptyToNull(record.SeverityText),
                         ReadAnyValue(record.Body) ?? string.Empty,
-                        ReadAttributes(record.Attributes)));
+                        ReadAttributes(record.Attributes),
+                        ReadAttributeDictionary(record.Attributes).GetValueOrDefault("exception.type"),
+                        EmptyToNull(scope.Scope?.Name)));
                 }
         return result;
     }
@@ -98,7 +101,8 @@ public static class OtlpProtobufParser
         List<ParsedMetricPoint> result,
         string name,
         string? unit,
-        RepeatedField<NumberDataPoint> points)
+        RepeatedField<NumberDataPoint> points,
+        MetricKind kind)
     {
         foreach (var point in points)
         {
@@ -119,7 +123,8 @@ public static class OtlpProtobufParser
                 value,
                 EmptyToNull(unit),
                 ReadUnixNano(point.TimeUnixNano),
-                ReadAttributes(point.Attributes)));
+                ReadAttributes(point.Attributes),
+                kind));
         }
     }
 
@@ -138,7 +143,8 @@ public static class OtlpProtobufParser
                 value,
                 EmptyToNull(unit),
                 ReadUnixNano(point.TimeUnixNano),
-                ReadAttributes(point.Attributes)));
+                ReadAttributes(point.Attributes),
+                MetricKind.Histogram));
         }
     }
 

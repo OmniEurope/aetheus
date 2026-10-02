@@ -1,0 +1,40 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits Aetheus.Front.Components.Shared.EntityEditDialogBase
+@* X4D8: create/edit alert rule form, extracted out of the Alerts list page into a dialog so the
+   list reads as a true full-height list-page (no inline form pushing the grid up). *@
+<OmniTemplateForm TModel="UpdateAlertRuleRequest" Model="@_model" OnValidSubmit="@SubmitAsync">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField For="oe-pages-alerts-alerteditdialog-1" Class="omni-u-w-100"><LabelContent>@L["AlertName"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="_model.Name" Id="oe-pages-alerts-alerteditdialog-1" />
+            </ChildContent></OmniFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Metric"]" Class="omni-u-w-100" For="oe-formfield-pages-alerts-alerteditdialog-1">
+                <OmniDropDown Id="oe-formfield-pages-alerts-alerteditdialog-1" @bind-Value="_model.Metric" Options="@_metricTypes" />
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField For="oe-pages-alerts-alerteditdialog-numeric-1"><LabelContent>@L["Threshold"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.Threshold" Id="oe-pages-alerts-alerteditdialog-numeric-1" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField For="oe-pages-alerts-alerteditdialog-numeric-2"><LabelContent>@L["SustainedSeconds"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.SustainedSeconds" Id="oe-pages-alerts-alerteditdialog-numeric-2" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Severity"]" Class="omni-u-w-100" For="oe-formfield-pages-alerts-alerteditdialog-2">
+                <OmniDropDown Id="oe-formfield-pages-alerts-alerteditdialog-2" @bind-Value="_model.Severity" Options="@_severityTypes" />
+            </OmniFormField>
+        </OmniColumn>
+        @if (IsEdit)
+        {
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniSwitch @bind-Value="_model.IsEnabled">@L["Active"]</OmniSwitch>
+            </OmniColumn>
+        }
+    </OmniRow>
+    <DialogFooter OnCancel="@Cancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="@MaterialIconMap.Resolve((IsEdit ? "save" : "add"))" /> <span>@(IsEdit ? L["Save"] : L["Create"])</span></OmniButton>
+    </DialogFooter>
+</OmniTemplateForm>

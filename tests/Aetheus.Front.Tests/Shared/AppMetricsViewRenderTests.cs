@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Tests.Shared;
 
 /// <summary>
-/// The metrics chart was reworked (unsmoothed line, min/max band, dashed P95, thinned category axis,
-/// headline figures) and shipped on a build alone. Rendering it through bUnit is not possible:
-/// RadzenChart measures a real viewport in OnAfterRenderAsync and throws a NullReferenceException
-/// without one, the same class of limitation the grid Virtualization note in BunitTestHelper records.
-/// What the rework actually added is the projection: the band/marker/step decisions and the headline
-/// figures. Those are computed in the code-behind and are asserted here, including the single-point
-/// series the rework exists to fix, since the previous view rendered nothing below two points.
+/// Verifies the metrics projection independently from the chart renderer: proportional time-axis data,
+/// per-point band/P95 decisions and headline figures are computed in the code-behind and asserted here.
 /// </summary>
 public class AppMetricsViewRenderTests
 {
@@ -30,7 +23,7 @@ public class AppMetricsViewRenderTests
         }).ToList()
     };
 
-    /// <summary>Runs the real projection the component uses, without rendering Radzen.</summary>
+    /// <summary>Runs the real projection the component uses, without rendering the chart.</summary>
     private static AppMetricsView Project(MetricSeriesDto series, int hours = 24)
     {
         var view = new AppMetricsView();
@@ -52,11 +45,18 @@ public class AppMetricsViewRenderTests
             .GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(view)!;
 
+    private static T GetProperty<T>(AppMetricsView view, string property)
+        => (T)typeof(AppMetricsView)
+            .GetProperty(property, BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(view)!;
+
+    private static int Count(AppMetricsView view, string field)
+        => Get<System.Collections.IEnumerable>(view, field).Cast<object>().Count();
+
     [Fact]
     public void SinglePointSeriesIsPlotted()
     {
-        // The regression the rework targets: the old view required two points and showed
-        // "not enough data" instead, which is what most live metrics actually look like.
+        // A lone point is what most live metrics actually look like; it must still be plotted.
         var view = Project(Series(1, band: false, p95: false));
 
         Assert.Single(Get<System.Collections.IEnumerable>(view, "_points").Cast<object>());
@@ -64,39 +64,40 @@ public class AppMetricsViewRenderTests
     }
 
     [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void BandAndP95AreOnlyPlottedWhenEveryPointCarriesThem(bool band, bool p95)
+    [InlineData(true, true, 10, 10)]
+    [InlineData(false, false, 0, 0)]
+    public void BandAndP95PointCountsMatchHowManyPointsCarryThem(
+        bool band, bool p95, int expectedBandPoints, int expectedP95Points)
     {
         var view = Project(Series(10, band, p95));
 
-        Assert.Equal(band, Get<bool>(view, "_hasBand"));
-        Assert.Equal(p95, Get<bool>(view, "_hasP95"));
+        Assert.Equal(expectedBandPoints, Count(view, "_bandPoints"));
+        Assert.Equal(expectedP95Points, Count(view, "_p95Points"));
     }
 
     [Fact]
-    public void PartialBandIsNotPlotted()
+    public void PartialBandOnlyDropsThePointsMissingIt()
     {
-        // Binding a nullable series containing nulls makes Radzen path maths throw, so a band is
-        // plotted only when every point has both bounds.
+        // Binding a nullable series containing nulls makes the chart's path maths throw, so the band/P95
+        // series are pre-filtered - one point missing the value must not blank the whole band/P95 line,
+        // only that one point drops out of it.
         var series = Series(5, band: true, p95: true);
         var points = series.Points.ToList();
         points[2] = points[2] with { Min = null, P95 = null };
 
         var view = Project(series with { Points = points });
 
-        Assert.False(Get<bool>(view, "_hasBand"));
-        Assert.False(Get<bool>(view, "_hasP95"));
+        Assert.Equal(4, Count(view, "_bandPoints"));
+        Assert.Equal(4, Count(view, "_p95Points"));
+        Assert.Equal(5, Count(view, "_points")); // the raw value line itself is untouched
     }
 
     [Fact]
-    public void DenseSeriesDropsMarkersAndThinsTheAxis()
+    public void DenseSeriesDropsMarkers()
     {
         var view = Project(Series(200, band: true, p95: true));
 
         Assert.False(Get<bool>(view, "_showMarkers"), "200 markers render as a solid blob.");
-        // About ten ticks, whatever the window holds.
-        Assert.Equal(20d, Get<double>(view, "_labelStep"));
     }
 
     [Fact]
@@ -110,18 +111,24 @@ public class AppMetricsViewRenderTests
     }
 
     [Fact]
-    public void LabelFormatFollowsTheSelectedWindow()
+    public void TimeAxisFormatFollowsTheSelectedWindow()
     {
-        Assert.All(
-            Labels(Project(Series(2, false, false), hours: 24)),
-            label => Assert.Matches(@"^\d{2}:\d{2}$", label));
-        Assert.All(
-            Labels(Project(Series(2, false, false), hours: 168)),
-            label => Assert.Matches(@"^\d{2}-\d{2} \d{2}:\d{2}$", label));
+        Assert.Equal("{0:HH:mm}", GetProperty<string>(Project(Series(2, false, false), hours: 24), "TimeFormatString"));
+        Assert.Equal("{0:MM-dd HH:mm}", GetProperty<string>(Project(Series(2, false, false), hours: 168), "TimeFormatString"));
     }
 
-    private static IEnumerable<string> Labels(AppMetricsView view)
-        => Get<System.Collections.IEnumerable>(view, "_points")
+    [Fact]
+    public void PointsCarryARealTimestamp_NotAFormattedStringCategory()
+    {
+        // The x-axis is bound to this property directly, so points must space proportionally to elapsed
+        // time instead of being spaced evenly by index like the old formatted-string category did.
+        var view = Project(Series(3, false, false));
+        var timestamps = Get<System.Collections.IEnumerable>(view, "_points")
             .Cast<object>()
-            .Select(point => (string)point.GetType().GetProperty("Label")!.GetValue(point)!);
+            .Select(point => (DateTime)point.GetType().GetProperty("Timestamp")!.GetValue(point)!)
+            .ToList();
+
+        Assert.Equal(3, timestamps.Count);
+        Assert.Equal(TimeSpan.FromMinutes(1), timestamps[1] - timestamps[0]);
+    }
 }

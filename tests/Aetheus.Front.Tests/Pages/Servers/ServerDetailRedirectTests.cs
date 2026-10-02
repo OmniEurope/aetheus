@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers;
+using Aetheus.Front.Components.Servers;
 using Bunit;
 using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;

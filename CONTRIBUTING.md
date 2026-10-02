@@ -8,11 +8,11 @@ started and what standards to follow.
 1. **Read [`AGENTS.md`](AGENTS.md)** -- it is the single source of truth for
    architecture rules, coding standards, and interdictions. `CLAUDE.md` is a
    pointer to it and deliberately holds no rules of its own.
-2. Browse `docs/claudes/` for detailed guidance on security, deployment, and
+2. Browse `docs/contracts/` for detailed guidance on security, deployment, and
    UI patterns.
-3. Set up the dev environment (see [`claude-deployment.md`](docs/claudes/claude-deployment.md)):
-   - A stable .NET 10 SDK, version 10.0.202 or later (`global.json` accepts a
-     newer feature band when 10.0.2xx is unavailable)
+3. Set up the dev environment (see [`docs/contracts/deployment.md`](docs/contracts/deployment.md)):
+   - A stable .NET 10 SDK, version 10.0.100 or later (`global.json` is a floor with
+     `rollForward: latestFeature`, ADR-048)
    - Docker (for the local PostgreSQL container)
    - Run `launch-windows.ps1 -s` (Windows) or `launch-linux.sh -s` (Linux) to start the
      backend, frontend, and required local dependencies, including PostgreSQL.
@@ -70,7 +70,7 @@ refactor(module): what changed structurally
 chore(module): maintenance task
 ```
 
-## Pre-commit Hooks
+## Git Hooks
 
 This project uses [Husky.NET](https://alirezanet.github.io/Husky.Net/) to run
 checks before each commit. After cloning, restore the tooling and install the
@@ -91,6 +91,15 @@ The pre-commit hook (`dotnet husky run --group pre-commit`) runs three tasks:
    (passwords, keys, tokens) in `appsettings.json` / `appsettings.Development.json`.
 
 If any task fails, the commit is blocked. Fix the issue and retry.
+
+The pre-push hook (`dotnet husky run --group pre-push`) additionally runs the four unit suites the
+CI gate blocks on -- `test-backend`, `test-agent-core`, `test-front`, `test-analyzers` -- so a red
+test surfaces before the code reaches a shared branch rather than hours later in nightly. Expect a
+push to take several minutes.
+
+The hook starts by unsetting `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE` and `GIT_PREFIX`. `git`
+exports those to its hooks, and without the reset every `git` command the test suites spawn in their
+own temporary repositories silently targets *this* repository instead. Do not remove that line.
 
 ## Security
 

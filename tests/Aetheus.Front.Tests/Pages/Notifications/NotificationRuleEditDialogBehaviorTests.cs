@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Notifications;
+using Aetheus.Front.Components.Notifications;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Notifications;
 
@@ -19,7 +17,7 @@ public sealed class NotificationRuleEditDialogBehaviorTests : BunitContext
     public NotificationRuleEditDialogBehaviorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
     }
@@ -81,8 +79,8 @@ public sealed class NotificationRuleEditDialogBehaviorTests : BunitContext
         await InvokeSubmitAsync(cut);
 
         Assert.False(Spy.Closed);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
     }
 
     [Fact]
@@ -95,7 +93,7 @@ public sealed class NotificationRuleEditDialogBehaviorTests : BunitContext
         Assert.Equal(false, Spy.LastResult);
     }
 
-    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
     private static object Model(NotificationRuleEditDialog instance) => typeof(NotificationRuleEditDialog)
         .GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
     private static void Set(object model, string property, object? value) => model.GetType().GetProperty(property)!.SetValue(model, value);

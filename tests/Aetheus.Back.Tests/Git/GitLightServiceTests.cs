@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Git;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
@@ -731,7 +729,7 @@ public class GitLightServiceTests
             .Returns(Task.CompletedTask);
         _lightRepoMock.GetBranchProtectionRulesAsync(1, TestContext.Current.CancellationToken).Returns([]);
 
-        var result = await _sut.DeleteBranchProtectionRuleAsync(1, ct: TestContext.Current.CancellationToken);
+        var result = await _sut.DeleteBranchProtectionRuleAsync(1, 1, ct: TestContext.Current.CancellationToken);
         Assert.True(result);
     }
 
@@ -741,8 +739,27 @@ public class GitLightServiceTests
         _lightRepoMock.FindBranchProtectionRuleAsync(99, TestContext.Current.CancellationToken)
             .Returns((BranchProtectionRule?)null);
 
-        var result = await _sut.DeleteBranchProtectionRuleAsync(99, ct: TestContext.Current.CancellationToken);
+        var result = await _sut.DeleteBranchProtectionRuleAsync(1, 99, ct: TestContext.Current.CancellationToken);
         Assert.False(result);
+    }
+
+    /// <summary>
+    /// F-001. The caller is authorized on the repository in the route, never on the rule id, so a
+    /// rule belonging to another repository must be refused here. Without this an admin of repo 1
+    /// could delete the prevent-force-push and require-pull-request rules of repo 2, in a project
+    /// they have no access to at all.
+    /// </summary>
+    [Fact]
+    public async Task DeleteBranchProtectionRuleAsync_RuleOfAnotherRepository_RefusesAndDeletesNothing()
+    {
+        var foreignRule = new BranchProtectionRule { Id = 5, GitInternalRepoId = 2, Pattern = "main" };
+        _lightRepoMock.FindBranchProtectionRuleAsync(5, TestContext.Current.CancellationToken).Returns(foreignRule);
+
+        var result = await _sut.DeleteBranchProtectionRuleAsync(1, 5, ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result);
+        await _lightRepoMock.DidNotReceive().RemoveBranchProtectionRuleAsync(
+            Arg.Any<BranchProtectionRule>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -1,0 +1,126 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git-repositories"
+
+<PageTitle>@L["GitRepositories"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["GitRepositories"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="git-repositories" />
+    </Badges>
+    <Actions>
+        @* Recette R-181 / R-185: no Refresh, the list follows the git hub (RepositoryChanged...). *@
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ShowCreateDialog" Disabled="@(!_projectFilter.HasValue || !_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    </Actions>
+</OmniPageHeader>
+
+@* Recette R-185: inside a project the project is known and the grid's header filters search, so
+   neither the project picker nor the search box show there. *@
+@if (!ProjectId.HasValue)
+{
+<div class="pipeline-list-toolbar">
+    <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+        <OmniTextBox aria-label="@L["Search"]" Placeholder="@L["Search"]" @bind-Value="_search" @bind-Value:after="ResetAndReloadAsync"
+            Class="pipeline-list-search" />
+        <OmniDropDown aria-label="@L["SelectProject"]" TValue="int?" Options="@(_projects.ToOptions(item => (int?)item.Id, item => item.Name))"
+            Placeholder="@L["SelectProject"]" AllowEmpty="true" @bind-Value="_projectFilter" @bind-Value:after="@(() => OnProjectFilterChanged(new object()))" />
+        @if (_projectFilter.HasValue)
+        {
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ClearFilters"><OmniIcon Name="OmniIconName.Close" /> <span>@L["ClearFilters"]</span></OmniButton>
+        }
+    </OmniRow>
+</div>
+}
+
+@* Recette R-318: inside a project, its internal repositories and its external repository are two
+   tabs (?tab=internal|external) instead of a grid followed by a section further down. *@
+@if (_projectFilter.HasValue)
+{
+    <UrlSyncedTabs Slugs="@RepositoryTabSlugs" @bind-SelectedIndex="_repositoryTab" class="git-repository-tabs">
+        <Tabs>
+            <OmniTabsItem Key="internal" Title="@L["InternalRepositories"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon></OmniTabsItem>
+            <OmniTabsItem Key="external" Title="@L["ExternalRepo"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve("open_in_new")" /></Icon></OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}
+
+@if (ShowsExternalTab && _projectFilter is { } externalProjectId)
+{
+    <section id="external-repository" class="git-external-repository-panel">
+        <Aetheus.Front.Components.Projects.ProjectDetailSections.ProjectExternalRepoSection ProjectId="@externalProjectId" />
+    </section>
+}
+else
+{
+@* Keep the grid mounted while loading. Replacing an empty grid with a spinner causes the grid to
+   fire LoadData again every time the grid is recreated, producing an infinite reload loop. *@
+<AetheusDataGrid @ref="_grid" TItem="GitLightRepoDto" Data="@_repos"
+    Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync" PageSize="20"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<GitLightRepoDto>(_repos, _totalCount))"
+    EmptyText="@L["NoRepositoriesFound"]" class="@GitGridClass" FullHeight="true"
+    RowClick="@(r => Nav.NavigateTo($"git-repositories/{r.Id}?projectId={r.ProjectId}"))">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="GitLightRepoDto" Property="Name" Title="@L["Name"]" Width="auto" Filterable="true" >
+                <Template Context="r">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                        <a href="@($"git-repositories/{r.Id}?projectId={r.ProjectId}")" class="pipeline-name-link" @onclick:stopPropagation="true">@r.Name</a>
+                    </OmniStack>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="GitLightRepoDto" Property="ProjectName" Title="@L["Project"]" Width="180px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_projectNames" FilterSearchable="true" >
+                <Template Context="r">
+                    <a href="@($"projects/{r.ProjectId}")" class="pipeline-name-link" @onclick:stopPropagation="true">@r.ProjectName</a>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="GitLightRepoDto" Property="Description" Title="@L["Description"]" Width="auto" Filterable="true" />
+            <OmniDataGridColumn TItem="GitLightRepoDto" Property="DefaultBranch" Title="@L["DefaultBranch"]" Width="130px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.DefaultBranches" FilterSearchable="true" >
+                <Template Context="r">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@r.DefaultBranch</OmniBadge>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="GitLightRepoDto" Key="IsEmpty" Title="@L["Status"]" Width="100px" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@EmptyText" >
+                <Template Context="r">
+                    @if (r.IsEmpty)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["Empty"]</OmniBadge>
+                    }
+                    else
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@L["Active"]</OmniBadge>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="GitLightRepoDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+            <OmniDataGridColumn TItem="GitLightRepoDto" Property="LastPushAt" Title="@L["LastPush"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+            <OmniDataGridColumn TItem="GitLightRepoDto" Title="@L["Actions"]" MinWidth="14rem" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                <Template Context="r">
+                    <span @onclick:stopPropagation="true">
+                        @* R2-037 (2026-10-01): Ouvrir is the row's main action, blue by the user's choice (R-533). *@
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Nav.NavigateTo($"git-repositories/{r.Id}?projectId={r.ProjectId}"))" title="@L["View"]" Label="@L["View"]"><OmniIcon Name="OmniIconName.Eye" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteRepo(r))" Disabled="@(!_canWrite)" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                    </span>
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+</AetheusDataGrid>
+
+@if (!_loading && _totalCount == 0)
+{
+    <EmptyState Icon="commit" Title="@(ExternalRepositoryUrl is null ? L["NoRepositoriesFound"] : L["ExternalRepositoryOnly"])"
+        Description="@(ExternalRepositoryUrl is not null ? L["ExternalRepositoryOnlyHint"] : _projectFilter.HasValue ? L["EmptyRepositoriesHint"] : L["SelectProjectToCreateRepository"])">
+        <ActionContent>
+            @* Recette R-296: a project built from an external repository says so and links to it. *@
+            @if (ExternalRepositoryUrl is { } externalUrl)
+            {
+                <OmniLink Href="@externalUrl" NewTab="true" Class="git-external-repository-link">@externalUrl</OmniLink>
+            }
+            else if (_projectFilter.HasValue && _canWrite)
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ShowCreateDialog"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+            }
+        </ActionContent>
+    </EmptyState>
+}
+
+}

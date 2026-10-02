@@ -2,9 +2,6 @@
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Analysis;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 
@@ -253,8 +250,8 @@ public sealed class AnalysisInsightsRepositoryTests : IDisposable
             Tracking(1, 10, syncStatus: "Error", lastError: "401 from Dependency-Track"),
             Tracking(2, 11, active: false));
         _db.Servers.AddRange(
-            new Server { Id = 1, Name = "scanner", Hostname = "scanner", ScannerCapabilitiesJson = "[\"trivy\"]" },
-            new Server { Id = 2, Name = "plain", Hostname = "plain" });
+            new Server { Id = 1, Name = "scanner", Hostname = "scanner", ScannerCapabilitiesJson = "[\"trivy\"]", LastHeartbeat = NowUtc.AddMinutes(-5) },
+            new Server { Id = 2, Name = "plain", Hostname = "plain", LastHeartbeat = NowUtc.AddMinutes(-5) });
         await SaveAsync();
         // Oldest first: the fake clock only moves forward, and report 3 must fall outside the window.
         await SaveAtAsync(NowUtc.AddHours(-2), Report(3, 10, contentSize: 999));
@@ -272,6 +269,40 @@ public sealed class AnalysisInsightsRepositoryTests : IDisposable
         var storage = Assert.Single(snapshot.Storage);
         Assert.Equal(2, storage.ReportCount);
         Assert.Equal(300, storage.ContentBytes);
+    }
+
+    /// <summary>
+    /// The capabilities column keeps whatever the agent last said and is never cleared, so a runner that
+    /// stopped reporting would otherwise raise the same operational alert forever, about a workspace that
+    /// may no longer exist and that no operator can act on.
+    /// </summary>
+    [Fact]
+    public async Task GetOperationalSnapshotAsync_IgnoresAServerThatStoppedReporting()
+    {
+        _db.Servers.AddRange(
+            new Server
+            {
+                Id = 1,
+                Name = "live",
+                Hostname = "live",
+                ScannerCapabilitiesJson = "[\"scanner-cleanup:degraded:2 residual workspaces\"]",
+                LastHeartbeat = NowUtc.AddMinutes(-5)
+            },
+            new Server
+            {
+                Id = 2,
+                Name = "retired",
+                Hostname = "retired",
+                ScannerCapabilitiesJson = "[\"scanner-cleanup:degraded:2 residual workspaces\"]",
+                LastHeartbeat = NowUtc.AddDays(-30)
+            });
+        await SaveAsync();
+        _db.ChangeTracker.Clear();
+
+        var snapshot = await _repository.GetOperationalSnapshotAsync(NowUtc.AddHours(-1), Ct);
+
+        var server = Assert.Single(snapshot.Servers);
+        Assert.Equal("live", server.ServerName);
     }
 
     // ---------- cross-scanner reconciliation ----------
@@ -418,7 +449,12 @@ public sealed class AnalysisInsightsRepositoryTests : IDisposable
         _db.AnalysisReports.Add(Report(1, 10, branch: "main", pipelineRunId: 5));
         _db.AnalysisMetrics.Add(new AnalysisMetric
         {
-            Id = 1, OrganizationId = 7, ProjectId = 10, AnalysisReportId = 1, Key = "coverage", Value = 80
+            Id = 1,
+            OrganizationId = 7,
+            ProjectId = 10,
+            AnalysisReportId = 1,
+            Key = "coverage",
+            Value = 80
         });
         await SaveAsync();
         _db.ChangeTracker.Clear();

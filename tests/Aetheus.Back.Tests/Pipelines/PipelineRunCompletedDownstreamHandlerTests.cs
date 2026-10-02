@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Pipelines.Events;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -50,6 +49,35 @@ public sealed class PipelineRunCompletedDownstreamHandlerTests
 
         await _runService.Received(1).TriggerChainedRunAsync(2,
             Arg.Is<Dictionary<string, string>>(v => v["UPSTREAM_CHAIN"] == "1"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(PipelineStatus.Partial)]
+    [InlineData(PipelineStatus.Failed)]
+    [InlineData(PipelineStatus.Cancelled)]
+    public async Task Does_not_trigger_downstream_for_a_non_success(PipelineStatus status)
+    {
+        // PLAN-003 D13: a Partial run finished, but something failed inside it. Handing its output
+        // to the next pipeline would propagate a result nobody vouched for.
+        Arrange(runPipelineId: 1, additionalVarsJson: "{}", targetB: new Pipeline { Id = 2, Name = "B" });
+
+        await _sut.HandleAsync(new PipelineRunCompletedEvent(99, status), ct: TestContext.Current.CancellationToken);
+
+        await _runService.DidNotReceive().TriggerChainedRunAsync(
+            Arg.Any<int>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Labels_the_downstream_run_with_the_run_that_started_it()
+    {
+        // PLAN-007 lot 7: without this the child reads the static trigger of its own definition.
+        Arrange(runPipelineId: 1, additionalVarsJson: "{}", targetB: new Pipeline { Id = 2, Name = "B" });
+
+        await _sut.HandleAsync(new PipelineRunCompletedEvent(99, PipelineStatus.Success), ct: TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).TriggerChainedRunAsync(2,
+            Arg.Is<Dictionary<string, string>>(v => v["BUILD_TRIGGEREDBY"] == "on_success:A#99"),
             Arg.Any<CancellationToken>());
     }
 

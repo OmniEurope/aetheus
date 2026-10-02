@@ -13,3 +13,10 @@ Expose l’état et les opérations de gestion de la pile mail d’un serveur.
 ## Limites
 
 Les contrôleurs restent minces et délèguent aux services. Les échanges inter-modules passent par les interfaces publiques et les DTOs de `Aetheus.Shared`; aucun autre module ne doit accéder directement aux détails de persistance de ce dossier.
+
+## PLAN-005 : adoption et exploitation de la pile
+
+- `MailInventoryReconciliationHandler` reçoit `MailInventoryReportedEvent` (publié par le module Servers à chaque heartbeat) et délègue à `MailStateReconciler`, qui crée les lignes adoptées et désactive, sans jamais supprimer, celles que le serveur ne remonte plus.
+- `MailStackController` expose certificat TLS, antispam rspamd, test de livraison, file d’attente, usage des boîtes, vérification DNS et diagnostic ; chaque opération renvoie l’identifiant de sa tâche.
+- `MailDnsVerifier` (DnsClient) et `MailDnsRefreshService` tiennent à jour les indicateurs SPF, DKIM et DMARC.
+- Les helpers root `mail-setup` et `mail-manage` sont prouvés par `tests/mail-stack/run.sh` (conteneur systemd, Debian 12, Debian 13, Ubuntu 24.04).

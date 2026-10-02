@@ -29,6 +29,15 @@ public sealed class AetheusWebAnalyticsOptions
     public string HostingDescription { get; set; } = string.Empty;
     public string PrivacyNoticeVersion { get; set; } = "2026-07-23";
     public IReadOnlyList<string> ExcludedIpNetworks { get; set; } = [];
+    /// <summary>
+    /// Recette R-471: lets the browser event name the signed-in visitor by an opaque identifier
+    /// (<c>authenticatedUserId</c>). Off by default: a host that authenticates its visitors keeps
+    /// reading the identity from its own session (<see cref="AuthenticatedUserIdResolver"/>). For a
+    /// host that serves a single-page application and never sees who is signed in, it is the only way
+    /// to tell two signed-in visitors apart.
+    /// </summary>
+    public bool AcceptDeclaredUserId { get; set; }
+
     public Func<HttpContext, string?> AuthenticatedUserIdResolver { get; set; } = context =>
         context.User.FindFirstValue(ClaimTypes.NameIdentifier);
     public Func<HttpContext, ValueTask<bool>>? AuthenticatedOptOutResolver { get; set; }

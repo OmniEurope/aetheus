@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Components.Projects;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -104,9 +103,15 @@ public sealed class ProjectListInsightsIntegrationTests(PostgresFixture fixture)
             TestContext.Current.CancellationToken);
 
         var insight = Assert.Single(insights).Value;
-        Assert.Equal(childRunId, insight.LastRunId);
-        Assert.Equal(parentRunId, insight.ParentRunId);
-        Assert.Equal("parent", insight.ParentRunName);
+        // PLAN-003 lot 8 / D24, on real PostgreSQL: the child is the newest run, the insight still names
+        // the root. This is the check that the NOT EXISTS filter translates, not just that it compiles.
+        Assert.Equal(parentRunId, insight.LastRunId);
+        Assert.Equal("parent", insight.LastRunName);
+        Assert.NotEqual(childRunId, insight.LastRunId);
+        // PLAN-005 lot 7 / D45: the conditional sort and the current-step subquery translate too, and
+        // cost no extra command: the running root is in progress, on its running step.
+        Assert.True(insight.LastRunIsActive);
+        Assert.Equal("orchestrate · child", insight.LastRunCurrentStep);
         Assert.InRange(counter.Count, 1, 4);
     }
 

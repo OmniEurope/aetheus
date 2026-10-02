@@ -1,0 +1,10 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (Value is not null)
+{
+    <span title="@L[$"AgentCompatibility_{Value.Status}"]">
+        <OmniBadge Fill="OmniFill.Solid" Tone="@BadgeVariantFor(Value.Status)">
+            @L[$"AgentCompatibility_{Value.Status}"]
+        </OmniBadge>
+    </span>
+}

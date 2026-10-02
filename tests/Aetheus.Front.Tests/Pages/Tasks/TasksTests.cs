@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Tasks;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Tasks;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
-using TasksPage = Aetheus.Front.Pages.Tasks.Tasks;
+using TasksPage = Aetheus.Front.Components.Tasks.Tasks;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -41,7 +38,7 @@ public class TasksTests : BunitContext
         });
 
         var cut = Render<TasksPage>();
-        // RadzenDataGrid LoadData requires JS interop; verify page renders without error
+        // The data grid's LoadData requires JS interop; verify page renders without error
         Assert.Contains("Tasks", cut.Markup);
     }
 
@@ -72,20 +69,20 @@ public class TasksTests : BunitContext
         });
 
         var cut = Render<TasksPage>();
-        // RadzenDataGrid LoadData requires JS interop; verify page renders
+        // The data grid's LoadData requires JS interop; verify page renders
         Assert.Contains("Tasks", cut.Markup);
     }
 
     // Status-badge styling now lives on the shared TaskListView component used by both task views.
     [Theory]
-    [InlineData(TaskExecutionStatus.Success, BadgeStyle.Success)]
-    [InlineData(TaskExecutionStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Timeout, BadgeStyle.Danger)]
-    [InlineData(TaskExecutionStatus.Running, BadgeStyle.Info)]
-    [InlineData(TaskExecutionStatus.Cancelled, BadgeStyle.Warning)]
-    [InlineData(TaskExecutionStatus.Pending, BadgeStyle.Light)]
-    [InlineData(TaskExecutionStatus.Assigned, BadgeStyle.Light)]
-    public void GetTaskBadge_ReturnsExpectedStyle(TaskExecutionStatus status, BadgeStyle expected)
+    [InlineData(TaskExecutionStatus.Success, OmniTone.Success)]
+    [InlineData(TaskExecutionStatus.Failed, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Timeout, OmniTone.Danger)]
+    [InlineData(TaskExecutionStatus.Running, OmniTone.Accent)]
+    [InlineData(TaskExecutionStatus.Cancelled, OmniTone.Warning)]
+    [InlineData(TaskExecutionStatus.Pending, OmniTone.Neutral)]
+    [InlineData(TaskExecutionStatus.Assigned, OmniTone.Neutral)]
+    public void GetTaskBadge_ReturnsExpectedStyle(TaskExecutionStatus status, OmniTone expected)
     {
         var result = TaskListView.GetTaskBadge(status);
         Assert.Equal(expected, result);

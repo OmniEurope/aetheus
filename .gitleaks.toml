@@ -1,7 +1,7 @@
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Generated outputs and pinned third-party frontend assets"
 paths = [
   '''(^|/)(bin|obj|node_modules)/''',
@@ -11,3 +11,9 @@ paths = [
   '''(^|/)coverage[^/]*/''',
   '''(^|/)src/Aetheus\.Front/wwwroot/lib/'''
 ]
+
+[[allowlists]]
+description = "Dovecot names its password hashing scheme, not a credential"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = ['''^\s*default_password_scheme\s*=\s*[A-Z0-9-]+\s*$''']

@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -46,8 +43,8 @@ public class ProjectEditTests : BunitContext
         form.Submit();
 
         // Name is [Required]; submitting the empty form fails validation, so no create call is made
-        // and the localized required-field message is rendered instead.
-        cut.WaitForAssertion(() => Assert.Contains("Validation_Required", cut.Markup));
+        // and the required-field message is rendered instead.
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".validation-message")));
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/projects"));
     }
 

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -114,31 +112,30 @@ public class ServerConfigSectionTests : BunitContext
     }
 
     [Theory]
-    [InlineData("pull", BadgeStyle.Success)]
-    [InlineData("create", BadgeStyle.Success)]
-    [InlineData("deploy", BadgeStyle.Success)]
-    [InlineData("enable", BadgeStyle.Success)]
-    [InlineData("update", BadgeStyle.Info)]
-    [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("unknown", BadgeStyle.Light)]
-    public void GetChangeBadgeStyle_ReturnsCorrectStyle(string action, BadgeStyle expected)
+    [InlineData("pull", OmniTone.Success)]
+    [InlineData("create", OmniTone.Success)]
+    [InlineData("deploy", OmniTone.Success)]
+    [InlineData("enable", OmniTone.Success)]
+    [InlineData("update", OmniTone.Accent)]
+    [InlineData("unchanged", OmniTone.Neutral)]
+    [InlineData("unknown", OmniTone.Neutral)]
+    public void GetChangeBadgeStyle_ReturnsCorrectStyle(string action, OmniTone expected)
     {
         var method = typeof(ServerConfigSection).GetMethod("GetChangeBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [action])!;
+        var result = (OmniTone)method.Invoke(null, [action])!;
         Assert.Equal(expected, result);
     }
 
     [Fact]
-    public async Task CopyConfigToClipboardAsync_InvokesJS()
+    public void R516_TheConfiguration_IsATitledCodeBlockWithItsOwnCopyButton()
     {
         var cut = RenderConfigSection();
         typeof(ServerConfigSection).GetField("_configYaml", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cut.Instance, "test yaml");
+        cut.Render();
 
-        var method = typeof(ServerConfigSection).GetMethod("CopyConfigToClipboardAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await (Task)method.Invoke(cut.Instance, [])!;
-
-        // The current YAML is written to the clipboard via the JS interop call.
-        var clip = Assert.Single(JSInterop.Invocations, i => i.Identifier == "navigator.clipboard.writeText");
-        Assert.Equal("test yaml", clip.Arguments[0]);
+        var block = cut.Find(".omni-code-block.config-yaml-block");
+        Assert.Contains("CurrentConfiguration", block.TextContent, StringComparison.Ordinal);
+        Assert.Contains("test yaml", block.QuerySelector("pre")!.TextContent, StringComparison.Ordinal);
+        Assert.NotNull(block.QuerySelector("figcaption button"));
     }
 }

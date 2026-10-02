@@ -1,0 +1,65 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* The breadcrumb leaf already reads "Artifacts" - no need to repeat it as a section title.
+       Recette R-181: no Refresh, a finished pipeline run reloads the list (pipelines hub). *@
+
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mb-md">
+        <OmniDropDown aria-label="@L["AllTypes"]" TValue="ArtifactRetentionPolicy?" @bind-Value="@_selectedPolicy" @bind-Value:after="OnPolicyChangedAsync"
+            Placeholder="@L["AllTypes"]" AllowEmpty="true" Options="@(_policyOptions.ToOptions(item => (ArtifactRetentionPolicy?)item.Value, item => item.Label))" Class="artifact-policy-filter" />
+    </OmniStack>
+
+    <AetheusDataGrid @ref="_grid" IsLoading="@_loading" FullHeight="true" Data="@_artifacts" TItem="PipelineArtifactDto"
+        Count="@_totalCount" PageSize="@_pageSize"
+        LoadData="@OnLoadData" EmptyText="@L["NoArtifactsFound"]" class="aetheus-clickable-rows"
+        RowClick="@OnRowClick" AllowSorting="true" AllowFiltering="true" FilterMode="OmniDataGridFilterMode.Simple" AllowColumnResize="true" Virtualize="@AetheusGrid.RemoteVirtualization" VirtualizationOverscanCount="3"
+        VirtualData="@(() => new OmniDataGridResult<PipelineArtifactDto>(_artifacts, _totalCount))">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="PipelineArtifactDto" Title="" Width="50px" Sortable="false" Filterable="false">
+                <Template Context="a">
+                    <span @onclick:stopPropagation="true">
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => DownloadArtifact(a))" title="@L["Download"]"><OmniIcon Name="OmniIconName.Download" /></OmniButton>
+                    </span>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Property="Name" Title="@L["Name"]" Width="200px" Filterable="true" >
+                <Template Context="a">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                        <a href="/artifacts/@a.Id" class="pipeline-name-link" @onclick:stopPropagation="true">@a.Name</a>
+                    </OmniStack>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Property="PipelineName" Title="@L["Pipeline"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.PipelineNames" FilterSearchable="true" >
+                <Template Context="a">
+                    <a href="/pipelines/runs/@a.PipelineRunId" class="pipeline-name-link" @onclick:stopPropagation="true">@a.PipelineName</a>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Property="RetentionPolicy" Title="@L["Type"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@PolicyText" >
+                <Template Context="a">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@GetPolicyBadge(a.RetentionPolicy)">@L.Localize(a.RetentionPolicy)</OmniBadge>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Property="EnvironmentName" Title="@L["Environment"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.EnvironmentNames" FilterSearchable="true" >
+                <Template Context="a">
+                    @if (!string.IsNullOrEmpty(a.EnvironmentName))
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@a.EnvironmentName</OmniBadge>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Title="@L["Release"]" Width="100px" Sortable="false" Filterable="false" >
+                <Template Context="a">
+                    <OmniRow Gap="OmniSpacing.XSmall">
+                        @foreach (var rel in a.Releases)
+                        {
+                            <ShortId Value="@rel.Version" Href="@($"/releases/{rel.Id}")" Copyable="false" Class="release-version" />
+                        }
+                    </OmniRow>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Property="SizeBytes" Title="@L["Size"]" Width="90px" Filterable="false" >
+                <Template Context="a">
+                    @FormatSize(a.SizeBytes)
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineArtifactDto" Property="CreatedAt" Title="@L["Date"]" FormatString="{0:g}" Width="140px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+        </Columns>
+    </AetheusDataGrid>

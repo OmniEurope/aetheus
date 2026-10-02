@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Compose definitions (PLAN-006 lot 6), next to the privileged-container and Docker-socket rules of
+# aetheus-delivery.yml. Tests: tests/security-rules/aetheus-compose.yml.
+rules:
+  - id: aetheus.compose.host-network
+    languages: [yaml]
+    paths:
+      include:
+        - "*compose*.yml"
+        - "*compose*.yaml"
+      exclude:
+        # The local VPS simulators, never deployed (same exclusion as the privileged rule).
+        - "*vpssim*"
+    severity: ERROR
+    message: >-
+      network_mode host removes the container's network isolation: every port it opens is opened on
+      the host, next to everything else the host runs. Publish the ports it needs instead.
+    metadata:
+      cwe: CWE-668
+      category: security
+    pattern: |
+      network_mode: host
+
+  - id: aetheus.compose.added-capability
+    languages: [yaml]
+    paths:
+      include:
+        - "*compose*.yml"
+        - "*compose*.yaml"
+      exclude:
+        - "*vpssim*"
+    severity: WARNING
+    message: >-
+      cap_add hands the container a kernel capability on top of Docker's default set. Name why in a
+      comment next to it, and prefer changing the image so it is not needed.
+    metadata:
+      cwe: CWE-250
+      category: security
+    pattern: |
+      cap_add: $CAPS
+
+  - id: aetheus.compose.port-on-all-interfaces
+    languages: [yaml]
+    paths:
+      include:
+        - "*compose*.yml"
+        - "*compose*.yaml"
+    severity: WARNING
+    message: >-
+      A port published on 0.0.0.0 is reachable from every network the host is on, the Internet
+      included. Behind a reverse proxy, publish on 127.0.0.1.
+    metadata:
+      cwe: CWE-668
+      category: security
+    pattern-regex: (?m)^\s*-\s*["']?0\.0\.0\.0:\d

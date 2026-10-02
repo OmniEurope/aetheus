@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -115,7 +113,7 @@ public class ServerTeamspeakSectionTests : BunitContext
         var cut = RenderSection();
         var load = typeof(ServerTeamspeakSection).GetMethod(
             "LoadClientsDataAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(() => (Task)load.Invoke(cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+        await cut.InvokeAsync(() => (Task)load.Invoke(cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
         cut.WaitForAssertion(() =>
         {
             Assert.Contains("Player1", cut.Markup);
@@ -132,7 +130,7 @@ public class ServerTeamspeakSectionTests : BunitContext
         var cut = RenderSection();
         var load = typeof(ServerTeamspeakSection).GetMethod(
             "LoadChannelsDataAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(() => (Task)load.Invoke(cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+        await cut.InvokeAsync(() => (Task)load.Invoke(cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
         cut.WaitForAssertion(() =>
         {
             Assert.Contains("Default", cut.Markup);
@@ -228,9 +226,9 @@ public class ServerTeamspeakSectionTests : BunitContext
 
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [TeamspeakAction.Restart])!);
 
-        var messages = Services.GetRequiredService<NotificationService>().Messages.ToList();
-        Assert.Contains(messages, message => message.Severity == NotificationSeverity.Error);
-        Assert.DoesNotContain(messages, message => message.Severity == NotificationSeverity.Success);
+        var messages = Services.Toasts();
+        Assert.Contains(messages, message => message.Severity == OmniSeverity.Danger);
+        Assert.DoesNotContain(messages, message => message.Severity == OmniSeverity.Success);
     }
 
     [Fact]

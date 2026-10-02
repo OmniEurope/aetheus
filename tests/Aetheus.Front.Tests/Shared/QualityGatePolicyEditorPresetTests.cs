@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using AngleSharp.Dom;
 using Bunit;
 
@@ -12,8 +9,8 @@ namespace Aetheus.Front.Tests.Shared;
 /// exporting. A preset rewrites the whole gate in one call, so sending it to the wrong scope or losing
 /// the id of an existing rule would either duplicate rules or silently retarget another project.
 ///
-/// bUnit notes: a RadzenTemplateForm does not submit from a click on its button, use
-/// <c>Find("form").Submit()</c>; and Radzen text inputs answer onchange, so use <c>.Change()</c>.
+/// bUnit notes: a templated form does not submit from a click on its button, use
+/// <c>Find("form").Submit()</c>; and its text inputs answer onchange, so use <c>.Change()</c>.
 /// </summary>
 public sealed class QualityGatePolicyEditorPresetTests : BunitContext
 {
@@ -56,7 +53,7 @@ public sealed class QualityGatePolicyEditorPresetTests : BunitContext
     }
 
     private static IElement Button(IRenderedComponent<QualityGatePolicyEditor> cut, string label) =>
-        cut.FindAll("button").First(b => b.TextContent.Contains(label, StringComparison.Ordinal));
+        cut.FindAll("button").First(b => b.Names().Contains(label, StringComparison.Ordinal));
 
     [Fact]
     public void ApplyingTheRecommendedPreset_SendsOneBatchToTheProjectScope()

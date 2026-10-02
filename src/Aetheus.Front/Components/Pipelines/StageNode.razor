@@ -1,0 +1,82 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using System.Globalization
+
+@*
+    PLAN-008 lot 44: the node's coordinates are runtime data (layout pass plus drag positions), so a
+    class cannot carry them. They ride as data attributes and `Aetheus.applyNodePositions` copies
+    them into `--node-x`/`--node-y` through the CSSOM, which a strict `style-src-attr` allows while
+    a style attribute in markup would be refused. Values are formatted with InvariantCulture so a
+    comma-decimal UI locale (fr-FR) cannot corrupt the CSS.
+*@
+<div id="@ElementId" class="vp-node stage-node-positioned @(IsSelected ? "vp-node-selected" : "") @(ReadOnly ? "vp-provenance-inherited" : "")"
+     data-node-x="@(X.ToString(CultureInfo.InvariantCulture))" data-node-y="@(Y.ToString(CultureInfo.InvariantCulture))"
+     role="button" tabindex="0" aria-label="@Stage.Name"
+     @onclick="OnSelectClicked" @onclick:stopPropagation="true" @onkeydown="OnNodeKeyDownAsync">
+    <div class="vp-node-header">
+        <span class="vp-node-drag-handle" title="@L["Move"]" aria-hidden="true">
+            <OmniIcon Name="OmniIconName.DotsThreeVertical" Class="icon-sm-app" />
+        </span>
+        <OmniIcon Name="OmniIconName.Rows" Class="icon-sm-app" />
+        <span class="vp-node-header-title" title="@Stage.Name">@Stage.Name</span>
+        @if (!string.IsNullOrWhiteSpace(Provenance))
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="@(Provenance == L["Overridden"] ? OmniTone.Warning : OmniTone.Accent)">@Provenance</OmniBadge>
+        }
+        @if (Warnings.Count > 0)
+        {
+            <span class="vp-node-warning" title="@string.Join("\n", Warnings)">
+                <OmniIcon Name="OmniIconName.Warning" Class="icon-warn-sm" />
+            </span>
+        }
+        @if (!ReadOnly)
+        {
+            <span @onclick="OnDuplicateClicked" @onclick:stopPropagation="true" class="vp-node-action-btn"
+                  role="button" tabindex="0" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await OnDuplicateClicked(); })" @onkeydown:stopPropagation="true"
+                  title="@L["Duplicate"]">
+                <OmniIcon Name="OmniIconName.Copy" Class="icon-sm-app" />
+            </span>
+            <span @onclick="OnDeleteClicked" @onclick:stopPropagation="true" class="vp-node-action-btn"
+                  role="button" tabindex="0" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await OnDeleteClicked(); })" @onkeydown:stopPropagation="true"
+                  title="@L["Delete"]">
+                <OmniIcon Name="OmniIconName.Delete" Class="icon-sm-app" />
+            </span>
+        }
+    </div>
+    @if (!string.IsNullOrEmpty(Stage.Agent))
+    {
+        <div class="vp-node-agent">
+            <OmniIcon Name="OmniIconName.Database" Class="icon-xxs" /> @Stage.Agent
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Stage.Os))
+    {
+        <div class="vp-node-agent">
+            <OmniIcon Name="@MaterialIconMap.Resolve(Stage.Os.Equals("windows", StringComparison.OrdinalIgnoreCase) ? "window" : "terminal")" Class="icon-xxs" /> @Stage.Os
+        </div>
+    }
+    <div class="vp-node-steps">
+        @for (var i = 0; i < Stage.Steps.Count; i++)
+        {
+            var step = Stage.Steps[i];
+            var index = i;
+            <div class="vp-node-step">
+                <span class="vp-node-step-number">@(index + 1).</span>
+                <span class="vp-node-step-name" title="@step.Name">@step.Name</span>
+                @if (!ReadOnly)
+                {
+                    <span @onclick="@(() => OnEditStepClicked(index))" @onclick:stopPropagation="true" class="vp-node-step-edit"
+                          role="button" tabindex="0" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await OnEditStepClicked(index); })" @onkeydown:stopPropagation="true"
+                          title="@L["Edit"]">
+                        <OmniIcon Name="OmniIconName.Edit" Class="icon-inherit" />
+                    </span>
+                }
+            </div>
+        }
+    </div>
+    @if (!ReadOnly)
+    {
+        <div class="vp-node-footer">
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnAddStepClicked"><OmniIcon Name="OmniIconName.Add" /> <span>@AddStepText</span></OmniButton>
+        </div>
+    }
+</div>

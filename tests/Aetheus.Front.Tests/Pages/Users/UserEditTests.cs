@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
-using Radzen.Blazor;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -208,8 +203,8 @@ public class UserEditTests : BunitContext
         Assert.Equal(["Viewer", "Admin"], roles);
         Assert.True((bool)typeof(UserEdit).GetField("_rolesSaved", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Warning
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Warning
                        && message.Detail == "UserRolesSavedPermissionRefreshUnauthorized");
     }
 
@@ -242,8 +237,8 @@ public class UserEditTests : BunitContext
             .GetValue(cut.Instance)!;
         var roles = (List<string>)model.GetType().GetProperty("Roles")!.GetValue(model)!;
         Assert.Equal(["Viewer", "Admin"], roles);
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Warning
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Warning
                        && message.Detail == "UserRolesSavedPermissionRefreshFailed");
     }
 
@@ -285,14 +280,17 @@ public class UserEditTests : BunitContext
         SetupMocks();
         var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
-        var activeToggle = cut.FindAll("input.labeled-toggle-native-input")[0];
-        var dialog = Services.GetRequiredService<DialogService>();
-        var change = activeToggle.TriggerEventAsync("onchange", new ChangeEventArgs { Value = false });
+        var activeToggle = cut.FindComponents<OmniSwitch<bool>>()
+            .Single(toggle => toggle.Find("button").TextContent.Contains("Active", StringComparison.Ordinal));
+        var dialog = Services.GetRequiredService<OmniDialogService>();
+        var change = cut.InvokeAsync(() => activeToggle.Instance.ValueChanged.InvokeAsync(false));
         await cut.InvokeAsync(() => dialog.Close(false));
         await change;
 
         Assert.DoesNotContain(_handler.Requests, request => request.Method == "PUT");
-        Assert.True(cut.FindAll("input.labeled-toggle-native-input")[0].HasAttribute("checked"));
+        Assert.Equal("true", cut.FindAll("button.omni-switch")
+            .Single(toggle => toggle.TextContent.Contains("Active", StringComparison.Ordinal))
+            .GetAttribute("aria-checked"));
     }
 
     [Fact]
@@ -301,9 +299,10 @@ public class UserEditTests : BunitContext
         SetupMocks();
         var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
-        var dialog = Services.GetRequiredService<DialogService>();
-        var change = cut.FindAll("input.labeled-toggle-native-input")[0]
-            .TriggerEventAsync("onchange", new ChangeEventArgs { Value = false });
+        var dialog = Services.GetRequiredService<OmniDialogService>();
+        var activeToggle = cut.FindComponents<OmniSwitch<bool>>()
+            .Single(toggle => toggle.Find("button").TextContent.Contains("Active", StringComparison.Ordinal));
+        var change = cut.InvokeAsync(() => activeToggle.Instance.ValueChanged.InvokeAsync(false));
         await cut.InvokeAsync(() => dialog.Close(true));
         await change;
 
@@ -315,17 +314,17 @@ public class UserEditTests : BunitContext
     public void OrganizationsDeepLink_LoadsEveryServerPage()
     {
         SetupMocks();
-        _handler.SetJsonResponse("api/users/1/organizations", new List<Aetheus.Shared.DTOs.Organizations.UserOrganizationDto>());
-        _handler.SetJsonResponse("api/organizations?page=1&pageSize=200", new PaginatedResult<Aetheus.Shared.DTOs.Organizations.OrganizationDto>
+        _handler.SetJsonResponse("api/users/1/organizations", new List<Aetheus.Shared.Components.Organizations.UserOrganizationDto>());
+        _handler.SetJsonResponse("api/organizations?page=1&pageSize=200", new PaginatedResult<Aetheus.Shared.Components.Organizations.OrganizationDto>
         {
-            Items = [new Aetheus.Shared.DTOs.Organizations.OrganizationDto(10, "First", "first", "", 0, 0, default, default)],
+            Items = [new Aetheus.Shared.Components.Organizations.OrganizationDto(10, "First", "first", "", 0, 0, default, default)],
             TotalCount = 201,
             Page = 1,
             PageSize = 200
         });
-        _handler.SetJsonResponse("api/organizations?page=2&pageSize=200", new PaginatedResult<Aetheus.Shared.DTOs.Organizations.OrganizationDto>
+        _handler.SetJsonResponse("api/organizations?page=2&pageSize=200", new PaginatedResult<Aetheus.Shared.Components.Organizations.OrganizationDto>
         {
-            Items = [new Aetheus.Shared.DTOs.Organizations.OrganizationDto(11, "Last", "last", "", 0, 0, default, default)],
+            Items = [new Aetheus.Shared.Components.Organizations.OrganizationDto(11, "Last", "last", "", 0, 0, default, default)],
             TotalCount = 201,
             Page = 2,
             PageSize = 200
@@ -349,7 +348,7 @@ public class UserEditTests : BunitContext
         var cut = Render<UserEdit>(parameters => parameters.Add(component => component.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(2));
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var method = typeof(UserEdit).GetMethod("OnDelete", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         var task = cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
@@ -359,8 +358,8 @@ public class UserEditTests : BunitContext
         Assert.Contains(_handler.Requests, request =>
             request.Method == "DELETE" && request.Url.EndsWith("api/users/1", StringComparison.Ordinal));
         Assert.False(nav.Uri.EndsWith("/users", StringComparison.Ordinal));
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
     }
 
     // --- OnChangePassword ---
@@ -389,8 +388,8 @@ public class UserEditTests : BunitContext
 
         cut.Find("form").Submit();
 
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Warning);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Warning);
         Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("change-password"));
     }
 
@@ -407,7 +406,7 @@ public class UserEditTests : BunitContext
         password.Input("correct-horse-battery");
 
         cut.WaitForAssertion(() =>
-            Assert.Contains("rz-color-success", cut.Find(".rz-color-success").ClassList));
+            Assert.Contains("omni-u-text-success", cut.Find(".omni-u-text-success").ClassList));
         Assert.Equal("correct-horse-battery",
             GetFormValue<string>(cut.Instance, "_passwordChange", "NewPassword"));
     }
@@ -415,13 +414,13 @@ public class UserEditTests : BunitContext
     // --- GetPermissionBadgeStyle ---
 
     [Theory]
-    [InlineData(Permission.Admin, BadgeStyle.Danger)]
-    [InlineData(Permission.Write, BadgeStyle.Warning)]
-    [InlineData(Permission.Read, BadgeStyle.Info)]
-    public void GetPermissionBadgeStyle_ReturnsExpected(Permission perm, BadgeStyle expected)
+    [InlineData(Permission.Admin, OmniTone.Danger)]
+    [InlineData(Permission.Write, OmniTone.Warning)]
+    [InlineData(Permission.Read, OmniTone.Accent)]
+    public void GetPermissionBadgeStyle_ReturnsExpected(Permission perm, OmniTone expected)
     {
         var method = typeof(UserEdit).GetMethod("GetPermissionBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [perm])!;
+        var result = (OmniTone)method.Invoke(null, [perm])!;
         Assert.Equal(expected, result);
     }
 

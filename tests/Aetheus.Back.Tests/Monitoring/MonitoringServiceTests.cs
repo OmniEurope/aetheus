@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Monitoring;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -21,16 +19,17 @@ public class MonitoringServiceTests
     [Fact]
     public async Task GetDashboardAsync_AggregatesAllData()
     {
-        var servers = new List<Server>
+        var servers = new List<ServerDto>
         {
             new() { Id = 1, Name = "S1", Hostname = "h1", Status = ServerStatus.Online, Type = ServerType.Normal },
             new() { Id = 2, Name = "S2", Hostname = "h2", Status = ServerStatus.Offline, Type = ServerType.Docker },
             new() { Id = 3, Name = "S3", Hostname = "h3", Status = ServerStatus.Online, Type = ServerType.Build }
         };
-        _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(servers);
+        _repoMock.GetDashboardServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(servers);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(5);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(2);
-        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.CountProjectsAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(14);
+        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -39,27 +38,28 @@ public class MonitoringServiceTests
         Assert.Equal(1, result.OfflineServers);
         Assert.Equal(5, result.PendingTasks);
         Assert.Equal(2, result.RunningPipelines);
+        // The tile badge counts every readable project, not only the ten recent ones listed (recette R-068).
+        Assert.Equal(14, result.TotalProjects);
         Assert.Equal(3, result.Servers.Count);
     }
 
     [Fact]
     public async Task GetDashboardAsync_MapsRecentRuns()
     {
-        _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetDashboardServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
 
-        var runs = new List<PipelineRun>
+        var runs = new List<PipelineRunDto>
         {
             new()
             {
-                Id = 1, PipelineId = 10, Status = PipelineStatus.Success,
+                Id = 1, PipelineId = 10, PipelineName = "CI", Status = PipelineStatus.Success,
                 StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow,
-                Pipeline = new Pipeline { Id = 10, Name = "CI" },
-                StepRuns = [new PipelineStepRun { Id = 1, StepName = "Build", StageName = "build", Status = TaskExecutionStatus.Success, TriggeredRunId = 2 }]
+                Steps = [new PipelineStepRunDto { Id = 1, StepName = "Build", StageName = "build", Status = TaskExecutionStatus.Success, TriggeredRunId = 2 }]
             }
         };
-        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
+        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -73,10 +73,10 @@ public class MonitoringServiceTests
     [Fact]
     public async Task GetDashboardAsync_EmptyServers_ReturnsZeroCounts()
     {
-        _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetDashboardServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
-        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -91,14 +91,14 @@ public class MonitoringServiceTests
     public async Task GetDashboardAsync_MapsServerFields()
     {
         var now = DateTime.UtcNow;
-        var servers = new List<Server>
+        var servers = new List<ServerDto>
         {
             new() { Id = 5, Name = "Web", Hostname = "web.local", OsDescription = "Ubuntu", Status = ServerStatus.Online, Type = ServerType.Docker, LastHeartbeat = now, CreatedAt = now }
         };
-        _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(servers);
+        _repoMock.GetDashboardServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(servers);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
-        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 
@@ -154,15 +154,15 @@ public class MonitoringServiceTests
     [Fact]
     public async Task GetDashboardAsync_NullPipelineName_FallsBackToEmpty()
     {
-        _repoMock.GetAllServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.GetDashboardServersAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns([]);
         _repoMock.CountPendingTasksAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
         _repoMock.CountRunningPipelinesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(0);
 
-        var runs = new List<PipelineRun>
+        var runs = new List<PipelineRunDto>
         {
-            new() { Id = 1, PipelineId = 1, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow, Pipeline = null!, StepRuns = [] }
+            new() { Id = 1, PipelineId = 1, Status = PipelineStatus.Running, StartedAt = DateTime.UtcNow, PipelineName = string.Empty, Steps = [] }
         };
-        _repoMock.GetRecentRunsAsync(100, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
+        _repoMock.GetRecentRunsAsync(10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>()).Returns(runs);
 
         var result = await _sut.GetDashboardAsync(ct: TestContext.Current.CancellationToken);
 

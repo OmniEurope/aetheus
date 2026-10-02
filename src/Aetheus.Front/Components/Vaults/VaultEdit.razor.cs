@@ -1,0 +1,394 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Text.Json;
+using Aetheus.Front.Components.Pipelines;
+
+namespace Aetheus.Front.Components.Vaults;
+
+public partial class VaultEdit
+{
+    private DateOnly? NewSecretExpiryDate
+    {
+        get => _newSecret.ExpiresAt is { } value ? DateOnly.FromDateTime(value) : null;
+        set => _newSecret.ExpiresAt = value?.ToDateTime(TimeOnly.MinValue);
+    }
+    [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+    [Inject] private NotifyHelper Toast { get; set; } = default!;
+    [Inject] private OmniDialogService Dialog { get; set; } = default!;
+    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+    [Inject] private ClipboardService Clipboard { get; set; } = default!;
+    [Inject] private BreadcrumbService Breadcrumb { get; set; } = default!;
+    [Inject] private ProjectNavContextService ProjectNav { get; set; } = default!;
+    [Inject] private ListCacheService Cache { get; set; } = default!;
+
+    [Parameter] public int? Id { get; set; }
+
+    [SupplyParameterFromQuery] public int? ProjectId { get; set; }
+    [SupplyParameterFromQuery] public int? EnvironmentId { get; set; }
+    [SupplyParameterFromQuery] public int? ProjectServerId { get; set; }
+
+    private VaultDetailDto? _detail;
+    private VaultModel _model = new();
+    private List<ProjectDto> _projects = [];
+    private bool _isNew => Id is null or 0;
+    private bool _saving;
+    private (int? Id, int? ProjectId, int? EnvironmentId, int? ProjectServerId)? _previousKey;
+    private int _loadGeneration;
+
+    private NewSecretModel _newSecret = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = (Id, ProjectId, EnvironmentId, ProjectServerId);
+        if (key == _previousKey) return;
+        _previousKey = key;
+        var generation = ++_loadGeneration;
+        var isNew = key.Id is null or 0;
+
+        _detail = null;
+        _model = new VaultModel();
+
+        var projects = await Api.Projects.GetAllProjectsAsync();
+        VaultDetailDto? detail = null;
+
+        if (!isNew)
+        {
+            detail = await Api.Variables.GetVaultDetailAsync(key.Id!.Value);
+        }
+        if (generation != _loadGeneration || key != (Id, ProjectId, EnvironmentId, ProjectServerId)) return;
+
+        _projects = projects;
+        _detail = detail;
+        if (detail is not null)
+        {
+            _model = new VaultModel
+            {
+                Name = detail.Name,
+                Description = detail.Description,
+                ProjectId = detail.ProjectId,
+                EnvironmentId = detail.EnvironmentId,
+                ProjectServerId = detail.ProjectServerId
+            };
+        }
+        else if (isNew)
+        {
+            if (key.ProjectId is > 0 && projects.Any(p => p.Id == key.ProjectId.Value))
+                _model.ProjectId = key.ProjectId;
+            else if (key.EnvironmentId is > 0)
+                _model.EnvironmentId = key.EnvironmentId;
+            else if (key.ProjectServerId is > 0)
+                _model.ProjectServerId = key.ProjectServerId;
+        }
+
+        // Publish the parent project so the NavMenu keeps the project's submenu open
+        // while we're editing one of its vaults.
+        ProjectNav.Set(_model.ProjectId);
+
+        ReassertBreadcrumb(isNew);
+    }
+
+    private void ReassertBreadcrumb(bool isNew)
+    {
+        var current = new BreadcrumbItem(isNew ? L["NewVault"] : _detail?.Name ?? L["Vault"]);
+        Breadcrumb.SetProjectResource(
+            _model.ProjectId, _detail?.ProjectName, _projects,
+            L["Projects"], L["Project"], L["Vaults"],
+            "vaults", "/vaults", current);
+    }
+
+    private async Task OnSubmit()
+    {
+        _saving = true;
+        if (_isNew)
+        {
+            var created = await Api.Variables.CreateVaultAsync(new CreateVaultRequest
+            {
+                Name = _model.Name,
+                Description = _model.Description,
+                ProjectId = _model.ProjectId,
+                EnvironmentId = _model.EnvironmentId,
+                ProjectServerId = _model.ProjectServerId
+            });
+            if (created is not null)
+            {
+                Toast.Success("Created", "VaultCreated");
+                Nav.NavigateTo($"/vaults/{created.Id}");
+            }
+        }
+        else
+        {
+            var updated = await Api.Variables.UpdateVaultAsync(Id!.Value, new UpdateVaultRequest
+            {
+                Name = _model.Name,
+                Description = _model.Description,
+                ProjectId = _model.ProjectId,
+                EnvironmentId = _model.EnvironmentId,
+                ProjectServerId = _model.ProjectServerId,
+                RowVersion = _detail?.RowVersion ?? Guid.Empty
+            });
+            if (updated is not null)
+            {
+                Toast.Success("Saved", "VaultSaved");
+                _editingProperties = false;
+                await ReloadDetail();
+            }
+        }
+        _saving = false;
+    }
+
+    private async Task OnDelete()
+    {
+        var confirmed = await Dialog.Confirm(L["DeleteVaultConfirm"].Value, L["Delete"].Value,
+            new OmniConfirmOptions { Destructive = true, OkButtonText = L["Delete"].Value, CancelButtonText = L["GoBack"].Value });
+        if (confirmed != true) return;
+
+        var status = await Api.Variables.DeleteVaultAsync(Id!.Value);
+        if (!status.Success)
+        {
+            Toast.Error("Error", "DeleteFailed");
+            return;
+        }
+        // S-TECH-SWIV: drop cached vault pages so the list doesn't briefly re-seed the deleted row.
+        Cache.InvalidatePrefix("vaults:");
+        Toast.Success("Deleted", "Deleted");
+        Nav.NavigateTo("/vaults");
+    }
+
+    /// <summary>
+    /// Fills the value field with a cryptographically secure value shaped by the typed key, so the
+    /// well-known deployment secrets get exactly the recipe their host scripts would have produced.
+    /// </summary>
+    private void GenerateNewSecretValue()
+    {
+        _newSecret.Value = VaultSecretGenerator.Generate(_newSecret.Key);
+        Toast.Success("Generated", VaultSecretGenerator.IsKnownKey(_newSecret.Key)
+            ? "SecretValueGeneratedForKey"
+            : "SecretValueGenerated");
+    }
+
+    /// <summary>Recette R-437: one of the other ways to generate, from the Generate button's menu.</summary>
+    private void GenerateNewSecretValueWith(SecretGenerationChoices.Choice choice)
+    {
+        _newSecret.Value = choice.Generate();
+        Toast.Success("Generated", "SecretValueGenerated");
+    }
+
+    /// <summary>Tooltip naming the recipe that the generate button would apply to the current key.</summary>
+    private string GenerateHint(string? key)
+    {
+        var profile = VaultSecretGenerator.ProfileFor(key);
+        return profile.Key.Length > 0
+            ? string.Format(L["GenerateSecretValueForKey"], profile.Key)
+            : L["GenerateSecretValue"];
+    }
+
+    private async Task AddSecret(NewSecretModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.Key) || string.IsNullOrWhiteSpace(model.Value))
+            return;
+
+        var secret = await Api.Variables.CreateVaultSecretAsync(Id!.Value, new CreateVaultSecretRequest
+        {
+            Key = model.Key,
+            Value = model.Value,
+            ExpiresAt = model.ExpiresAt
+        });
+        if (secret is not null)
+        {
+            _newSecret = new NewSecretModel();
+            Toast.Success("Added", "SecretAdded");
+            await ReloadDetail();
+        }
+    }
+
+    private async Task OnSecretCellKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e, VaultSecretDto secret)
+    {
+        if (e.Key is "Enter" or " ")
+            await UpdateSecret(secret);
+    }
+
+    private async Task UpdateSecret(VaultSecretDto secret)
+    {
+        var newValue = await Dialog.OpenAsync<SecretValueDialog>(
+            string.Format(L["UpdateSecretValue"], secret.Key),
+            new Dictionary<string, object?> { { "SecretKey", secret.Key } },
+            new OmniDialogOptions { Width = "400px", AutoFocusFirstElement = false });
+
+        if (newValue is string value && !string.IsNullOrEmpty(value))
+        {
+            await Api.Variables.UpdateVaultSecretAsync(Id!.Value, secret.Id, new UpdateVaultSecretRequest
+            {
+                Key = secret.Key,
+                Value = value
+            });
+            Toast.Success("Saved", "SecretUpdated");
+            await ReloadDetail();
+        }
+    }
+
+    private async Task RotateSecret(VaultSecretDto secret)
+    {
+        // Rotation = same key, new value, audit-trailed as "Rotated" rather than "Updated".
+        // Reuses SecretValueDialog because the input shape is identical.
+        var confirmed = await Dialog.Confirm(
+            string.Format(L["RotateSecretConfirm"], secret.Key),
+            L["Rotate"].Value,
+            new OmniConfirmOptions { OkButtonText = L["Rotate"].Value, CancelButtonText = L["GoBack"].Value });
+        if (confirmed != true) return;
+
+        var newValue = await Dialog.OpenAsync<SecretValueDialog>(
+            string.Format(L["RotateSecretValue"], secret.Key),
+            new Dictionary<string, object?> { { "SecretKey", secret.Key } },
+            new OmniDialogOptions { Width = "400px", AutoFocusFirstElement = false });
+
+        if (newValue is string value && !string.IsNullOrEmpty(value))
+        {
+            await Api.Variables.RotateVaultSecretAsync(Id!.Value, secret.Id, new RotateVaultSecretRequest
+            {
+                Value = value,
+                ExpiresAt = secret.ExpiresAt
+            });
+            Toast.Success("Rotated", "SecretRotated");
+            await ReloadDetail();
+        }
+    }
+
+    private async Task DeleteSecret(int secretId)
+    {
+        var confirmed = await Dialog.Confirm(L["DeleteSecretConfirm"].Value, L["DeleteSecret"].Value,
+            new OmniConfirmOptions { Destructive = true, OkButtonText = L["Delete"].Value, CancelButtonText = L["GoBack"].Value });
+        if (confirmed != true) return;
+
+        await Api.Variables.DeleteVaultSecretAsync(Id!.Value, secretId);
+        Toast.Success("Deleted", "SecretDeleted");
+        await ReloadDetail();
+    }
+
+    private async Task ShowVersions(VaultSecretDto secret)
+    {
+        var versions = await Api.Variables.GetVaultSecretVersionsAsync(Id!.Value, secret.Id);
+        await Dialog.OpenAsync<SecretVersionHistoryDialog>(
+            string.Format(L["VersionHistory"], secret.Key),
+            new Dictionary<string, object?> { { "Versions", versions } },
+            new OmniDialogOptions { Width = "500px", AutoFocusFirstElement = false });
+    }
+
+    private async Task ExportKeys()
+    {
+        var keys = await Api.Variables.ExportVaultSecretKeysAsync(Id!.Value);
+        var json = JsonSerializer.Serialize(keys, new JsonSerializerOptions { WriteIndented = true });
+        await JS.InvokeVoidAsync("downloadFile", $"{_detail?.Name ?? "vault"}-keys.json", json, "application/json");
+        Toast.Success("Exported", "KeysExported", keys.Count);
+    }
+
+    private async Task ImportSecrets()
+    {
+        var json = await Dialog.OpenAsync<ImportJsonDialog>(
+            L["ImportSecrets"].Value,
+            new Dictionary<string, object?>(),
+            new OmniDialogOptions { Width = "500px", AutoFocusFirstElement = false });
+
+        if (json is not string content || string.IsNullOrWhiteSpace(content)) return;
+
+        List<CreateVaultSecretRequest>? secrets;
+        try
+        {
+            secrets = JsonSerializer.Deserialize<List<CreateVaultSecretRequest>>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            Toast.Error("Error", "InvalidJsonFormat");
+            return;
+        }
+
+        if (secrets is null or { Count: 0 }) return;
+
+        var result = await Api.Variables.ImportVaultSecretsAsync(Id!.Value, secrets);
+        if (result is not null)
+        {
+            Toast.Success("Imported", "SecretsImported", result.ImportedCount);
+            await ReloadDetail();
+        }
+    }
+
+    /// <summary>Recette R-287 (as R-284 for libraries): the vault's properties form, shown from the ⋮ menu.</summary>
+    private bool _editingProperties;
+
+    private void EditProperties() => _editingProperties = true;
+
+    private void CancelPropertiesEdit()
+    {
+        _editingProperties = false;
+        if (_detail is not null)
+        {
+            _model = new VaultModel
+            {
+                Name = _detail.Name,
+                Description = _detail.Description,
+                ProjectId = _detail.ProjectId,
+                EnvironmentId = _detail.EnvironmentId,
+                ProjectServerId = _detail.ProjectServerId
+            };
+        }
+    }
+
+    /// <summary>Recette R-292: the key itself; the $(KEY) reference keeps its own button.</summary>
+    private Task CopyKey(string key) => Clipboard.CopyAsync(key);
+
+    /// <summary>
+    /// Recette R-292: the value goes from the server straight to the clipboard; it is never kept in a
+    /// field, never rendered, and the server audits each read.
+    /// </summary>
+    private async Task CopySecretValue(VaultSecretDto secret)
+    {
+        RevealedSecretValueDto? revealed;
+        try
+        {
+            revealed = await Api.Variables.RevealVaultSecretValueAsync(Id!.Value, secret.Id);
+        }
+        catch (HttpRequestException)
+        {
+            revealed = null;
+        }
+        if (revealed is null)
+        {
+            Toast.Error("Error", "OperationFailed");
+            return;
+        }
+        await Clipboard.CopyAsync(revealed.Value);
+    }
+
+    private async Task CopyKeyReference(string key)
+    {
+        await Clipboard.CopyAsync($"$({key})", string.Format(L["KeyReferenceCopied"], key));
+    }
+
+    private async Task ReloadDetail()
+    {
+        _detail = await Api.Variables.GetVaultDetailAsync(Id!.Value);
+    }
+
+    private static OmniTone GetExpiryBadge(DateTime expiresAt)
+    {
+        var daysLeft = (expiresAt - DateTime.Now).TotalDays;
+        if (daysLeft <= 0) return OmniTone.Danger;
+        if (daysLeft <= 14) return OmniTone.Warning;
+        return OmniTone.Neutral;
+    }
+
+    private sealed class NewSecretModel
+    {
+        [Required, StringLength(200)]
+        public string Key { get; set; } = string.Empty;
+
+        [Required, StringLength(KeyValueRequest.MaxValueLength)]
+        public string Value { get; set; } = string.Empty;
+
+        public DateTime? ExpiresAt { get; set; }
+    }
+
+    private sealed class VaultModel : ScopedResourceFormModel
+    {
+    }
+}

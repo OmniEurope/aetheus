@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -17,6 +14,8 @@ public class ServerPortsentrySectionTests : BunitContext
     public ServerPortsentrySectionTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        // Recette R-210: the section also reads the protocols its Protocol header filter offers.
+        _handler.SetJsonResponse("portsentry/filter-values", new PortsentryFilterValuesDto());
     }
 
     private void SetupPortsentryApi(List<PortsentryWhitelistIpDto>? whitelist = null)
@@ -84,8 +83,9 @@ public class ServerPortsentrySectionTests : BunitContext
         var cut = Render<ServerPortsentrySection>(p => p
             .Add(x => x.ServerId, 50)
             .Add(x => x.Ps, ps));
-        Assert.Contains("PortSentry", cut.Markup);
-        Assert.Contains("NotInstalled", cut.Markup);
+        Assert.Contains("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("PortsentrySetup", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("PortSentry", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class ServerPortsentrySectionTests : BunitContext
             .Add(x => x.Ps, ps));
         var load = typeof(ServerPortsentrySection).GetMethod("LoadWhitelistAsync", Priv)!;
         await cut.InvokeAsync(async () =>
-            await (Task)load.Invoke(cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+            await (Task)load.Invoke(cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
         var whitelist = (List<PortsentryWhitelistIpDto>)typeof(ServerPortsentrySection)
             .GetField("_whitelist", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;

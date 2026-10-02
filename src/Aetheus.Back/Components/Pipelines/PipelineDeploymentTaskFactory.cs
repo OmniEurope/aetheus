@@ -7,8 +7,6 @@ using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
-using Aetheus.Shared.Validation;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -80,6 +78,8 @@ public sealed class PipelineDeploymentTaskFactory(
             Operation = OperationKind.PipelineDeploy
         };
         repo.TrackTask(deployTask);
+        ArtifactInputRecorder.Track(repo, runId, stepRun, source.Artifact!, ArtifactInputKind.Deploy,
+            source.ReleaseId, timeProvider.GetUtcNow().UtcDateTime);
         MarkStepDispatched(stepRun, deployTask);
     }
 

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Auth;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Auth;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -70,7 +69,7 @@ public class LoginOnSubmitTests : BunitContext
 
         cut.Render();
         cut.Find(".totp-mode-toggle button").Click();
-        cut.Find("input[name='RecoveryCode']").Change("ABCDE-12345");
+        cut.Find("input#oe-pages-auth-login-3").Input("ABCDE-12345");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() =>
@@ -125,15 +124,19 @@ public class LoginOnSubmitTests : BunitContext
     }
 
     [Fact]
-    public void ToggleShowPassword_Flips()
+    public void PasswordField_HasASingleRevealToggle_ThatRevealsTheField()
     {
+        // Recette R-002: the page used to add its own eye beside the package's one, two buttons.
         var cut = Render<Login>();
-        var m = typeof(Login).GetMethod("ToggleShowPassword", Priv)!;
-        m.Invoke(cut.Instance, []);
-        var shown = (bool)typeof(Login).GetField("_showPassword", Priv)!.GetValue(cut.Instance)!;
-        Assert.True(shown);
-        m.Invoke(cut.Instance, []);
-        Assert.False((bool)typeof(Login).GetField("_showPassword", Priv)!.GetValue(cut.Instance)!);
+        var toggles = cut.FindAll("button[aria-controls='Password']");
+        Assert.Single(toggles);
+        var revealName = toggles[0].GetAttribute("aria-label");
+        Assert.Single(cut.FindAll("button"), b => b.GetAttribute("aria-label") == revealName);
+        Assert.Equal("password", cut.Find("#Password").GetAttribute("type"));
+
+        toggles[0].Click();
+
+        Assert.Equal("text", cut.Find("#Password").GetAttribute("type"));
     }
 
     private static string MakeJwt()

@@ -3,6 +3,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Aetheus.Back.Components.Auth;
+using Aetheus.Back.Components.Shared;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Aetheus.Back.Tests;

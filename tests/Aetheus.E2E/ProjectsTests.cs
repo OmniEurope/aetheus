@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Playwright;
 
 namespace Aetheus.E2E;
 
@@ -24,8 +25,9 @@ public class ProjectsTests : E2ETestBase
         await Expect(Page.GetByText("Projects").First).ToBeVisibleAsync(new() { Timeout = 10000 });
         await Expect(Page).ToHaveTitleAsync(new System.Text.RegularExpressions.Regex("Projects"));
 
-        // Scope to the toolbar - the empty-state also renders a "New Project" CTA when the list is empty.
-        var newButton = Page.Locator(".project-list-toolbar").GetByText("New Project");
+        // Scope to the page header's actions - the empty-state also renders a create CTA when the list
+        // is empty. PLAN-003 lot 1 moved the button into the header; recette R-220 named it "Create".
+        var newButton = Page.Locator(".omni-page-header__actions").GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true });
         await Expect(newButton).ToBeVisibleAsync(new() { Timeout = 10000 });
         var searchBox = Page.Locator(".project-list-search");
         await Expect(searchBox).ToBeVisibleAsync(new() { Timeout = 10000 });
@@ -41,12 +43,15 @@ public class ProjectsTests : E2ETestBase
 
         Assert.That(cardsCount > 0 || emptyVisible, Is.True, "Should show project cards or empty state");
 
-        var dropdown = Page.Locator(".rz-dropdown").First;
+        var dropdown = Page.Locator("select.omni-drop-down").First;
         await Expect(dropdown).ToBeVisibleAsync();
-        var refreshButton = Page.Locator("button[title='Refresh']");
-        await Expect(refreshButton).ToBeVisibleAsync();
-        var badge = Page.Locator(".rz-badge").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex(@"\d+\s*total", System.Text.RegularExpressions.RegexOptions.IgnoreCase) });
-        await Expect(badge.First).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // PLAN-003 lot 6 took the "N total" badge and the Refresh button out of this header: the list
+        // already reloads itself on every project change (EntityChanged on the entities hub). The
+        // header is held to that decision rather than left unchecked.
+        var header = Page.Locator(".omni-page-header");
+        await Expect(header.Locator("button[title='Refresh']")).ToHaveCountAsync(0);
+        await Expect(header.Locator(".omni-badge").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex(@"\d+\s*total", System.Text.RegularExpressions.RegexOptions.IgnoreCase) }))
+            .ToHaveCountAsync(0);
     }
 
     [Test]
@@ -56,17 +61,17 @@ public class ProjectsTests : E2ETestBase
         await NavigateToAsync("projects");
         try
         {
-            await Page.Locator(".project-list-toolbar").GetByText("New Project").ClickAsync();
-            var createDialog = Page.Locator(".rz-dialog");
+            await Page.Locator(".omni-page-header__actions").GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
+            var createDialog = Page.Locator(".omni-dialog");
             await Expect(createDialog).ToBeVisibleAsync(new() { Timeout = 10000 });
             await createDialog.Locator("#project-form-name").FillAsync(projectName);
-            await createDialog.Locator("textarea[name='Description']").FillAsync("E2E persistence probe");
+            await createDialog.Locator("#Description").FillAsync("E2E persistence probe");
             await createDialog.GetByRole(AriaRole.Button, new()
             {
                 NameRegex = new System.Text.RegularExpressions.Regex("Create$")
             }).ClickAsync();
 
-            var createdDialog = Page.Locator(".rz-dialog").Filter(new() { HasText = "Project created" });
+            var createdDialog = Page.Locator(".omni-dialog").Filter(new() { HasText = "Project created" });
             await Expect(createdDialog).ToBeVisibleAsync(new() { Timeout = 10000 });
             await createdDialog.GetByRole(AriaRole.Button, new()
             {
@@ -81,12 +86,12 @@ public class ProjectsTests : E2ETestBase
             var projectId = int.Parse(idMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
 
             await NavigateToAsync($"projects/{projectId}/edit");
-            await Expect(Page.Locator("input[name='Name']")).ToHaveValueAsync(projectName, new() { Timeout = 10000 });
+            await Expect(Page.Locator("#oe-pages-projects-projectdetailsections-projecteditsection-1")).ToHaveValueAsync(projectName, new() { Timeout = 10000 });
             await Page.GetByRole(AriaRole.Button, new()
             {
                 NameRegex = new System.Text.RegularExpressions.Regex("Delete$")
             }).ClickAsync();
-            var deleteDialog = Page.GetByRole(AriaRole.Alertdialog, new() { Name = "Delete", Exact = true });
+            var deleteDialog = Page.GetByRole(AriaRole.Dialog, new() { Name = "Delete", Exact = true });
             await Expect(deleteDialog).ToBeVisibleAsync(new() { Timeout = 5000 });
             await deleteDialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
 
@@ -128,30 +133,34 @@ public class ProjectsTests : E2ETestBase
     public async Task Projects_NavigateFromSidebar_Works()
     {
         await NavigateToAsync("");
-        var nav = Page.Locator(".rz-panel-menu");
+        var nav = Page.Locator(".omni-panel-menu");
         await nav.GetByText("Projects").ClickAsync();
 
         await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex("/projects"), new() { Timeout = 5000 });
     }
 
     [Test]
+    [NewSinceDeployedBaseline("R-455")]
     public async Task TotoMonitoring_ShowsPersistedTelemetryAudienceAndPerformance()
     {
         var evidence = await SeedTotoMonitoringEvidenceAsync();
 
         await NavigateToAsync($"projects/{evidence.ProjectId}/monitoring?tab=telemetry");
-        await Expect(Page.GetByRole(AriaRole.Heading, new() { Name = evidence.ProjectName, Exact = true }))
+        // PLAN-003 D7: a project section is titled by the section, and the project it belongs to is
+        // its ancestor in the trail, a link back to the project.
+        await Expect(Page.GetByRole(AriaRole.Heading, new() { Name = "Monitoring", Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10000 });
+        // R-395: the trail is OmniPageHeader's own, an OmniBreadcrumb navigation landmark named by OE.
+        var projectCrumb = Page.GetByRole(AriaRole.Navigation, new() { Name = "Breadcrumb", Exact = true })
+            .GetByRole(AriaRole.Link, new() { Name = evidence.ProjectName, Exact = true });
+        await Expect(projectCrumb).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Expect(projectCrumb).ToHaveAttributeAsync("href", $"/projects/{evidence.ProjectId}/overview");
         await Expect(Page.GetByText("Telemetry", new() { Exact = true }).Last)
             .ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        var applicationDropdown = Page.Locator(".rz-dropdown").First;
-        await applicationDropdown.ClickAsync();
-        await Page.Locator(".rz-dropdown-panel:visible .rz-dropdown-item")
-            .Filter(new() { HasText = evidence.ApplicationName })
-            .ClickAsync();
-        await Expect(applicationDropdown.GetByText(evidence.ApplicationName, new() { Exact = true }))
-            .ToBeVisibleAsync();
+        var applicationDropdown = Page.Locator("select.omni-drop-down").First;
+        await applicationDropdown.SelectOptionAsync(new SelectOptionValue { Label = evidence.ApplicationName });
+        await Expect(applicationDropdown).ToHaveValueAsync(new System.Text.RegularExpressions.Regex(".+"));
 
         await Expect(Page.GetByText("Unique visitors today", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10000 });
@@ -159,16 +168,40 @@ public class ProjectsTests : E2ETestBase
             .ToBeVisibleAsync();
         await Expect(Page.GetByText("Average browser navigation", new() { Exact = true }))
             .ToBeVisibleAsync();
-        await Expect(Page.GetByText("/e2e/real-observability", new() { Exact = true }))
-            .ToBeVisibleAsync();
 
-        await Page.GetByRole(AriaRole.Tab, new() { Name = "Metrics", Exact = true }).ClickAsync();
-        await Expect(Page.GetByText("aetheus.e2e.real.browser", new() { Exact = true }).First)
-            .ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(Page.Locator(".rz-chart").First).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // The month's top pages moved to their own sub-tab (R-355): asserted by
+        // TotoMonitoring_TopPagesHaveTheirOwnTelemetryTab, so this test stays valid on a V-1 without it.
+
+        // R-455: the Performance tab replaced Metrics; the metric chart lives in its "Explore a metric"
+        // disclosure, rendered only once opened.
+        await Page.GetByRole(AriaRole.Tab, new() { Name = "Performance", Exact = true }).ClickAsync();
+        await Page.Locator("summary.omni-fieldset__summary", new() { HasText = "Explore a metric" }).ClickAsync();
+        var metricChart = Page.Locator(".omni-chart:visible").First;
+        await Expect(metricChart.Locator("title[id$='-title']")).ToHaveTextAsync(
+            "aetheus.e2e.real.browser",
+            new() { Timeout = 10000 });
+        await Expect(metricChart).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         await Page.GetByRole(AriaRole.Tab, new() { Name = "Logs", Exact = true }).ClickAsync();
         await Expect(Page.GetByText(evidence.LogMarker, new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+    }
+
+    [Test]
+    [NewSinceDeployedBaseline("R-355")]
+    public async Task TotoMonitoring_TopPagesHaveTheirOwnTelemetryTab()
+    {
+        var evidence = await SeedTotoMonitoringEvidenceAsync();
+
+        await NavigateToAsync($"projects/{evidence.ProjectId}/monitoring?tab=telemetry");
+        var applicationDropdown = Page.Locator("select.omni-drop-down").First;
+        await Expect(applicationDropdown).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await applicationDropdown.SelectOptionAsync(new SelectOptionValue { Label = evidence.ApplicationName });
+        await Expect(Page.GetByText("Unique visitors today", new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10000 });
+
+        await Page.GetByRole(AriaRole.Tab, new() { Name = "Top pages", Exact = true }).ClickAsync();
+        await Expect(Page.GetByText("/e2e/real-observability", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10000 });
     }
 

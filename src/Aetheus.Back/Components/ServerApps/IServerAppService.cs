@@ -7,6 +7,7 @@ public interface IServerAppService
     Task<List<ServerAppDto>> GetByServerIdAsync(int serverId, CancellationToken ct = default);
     Task<PaginatedResult<ServerAppDto>> GetPageAsync(
         int serverId, PaginationRequest request, CancellationToken ct = default);
+    Task<ServerAppFilterValuesDto> GetFilterValuesAsync(int serverId, CancellationToken ct = default);
     Task<ServerAppDto?> GetByIdAsync(int serverId, int id, CancellationToken ct = default);
     Task<ServerAppDto> CreateAsync(int serverId, CreateServerAppRequest request, CancellationToken ct = default);
     Task<ServerAppDto?> UpdateAsync(int serverId, int id, UpdateServerAppRequest request, CancellationToken ct = default);

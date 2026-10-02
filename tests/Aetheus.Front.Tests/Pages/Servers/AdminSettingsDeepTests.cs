@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Settings;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Settings;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;

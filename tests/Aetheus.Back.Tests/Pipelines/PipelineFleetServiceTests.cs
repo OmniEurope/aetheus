@@ -5,7 +5,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -388,6 +387,11 @@ public sealed class PipelineFleetServiceTests
     private sealed class FakePipelineFleetRepository : IPipelineFleetRepository
     {
         public List<PipelineFleetRow> Rows { get; set; } = [];
+
+        public Task<List<string>> GetTemplateNamesAsync(
+            IReadOnlyCollection<int>? organizationIds,
+            IReadOnlyCollection<int>? accessiblePipelineIds,
+            CancellationToken ct) => Task.FromResult(new List<string>());
 
         public Task<PaginatedResult<PipelineFleetItemDto>> GetPageAsync(
             PipelineFleetPaginationRequest request,

@@ -1,0 +1,24 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* Recette R-276 / R-373: a long identifier (a commit SHA, a c-/vc- release name, an artifact digest, a
+   release tag) in one short form everywhere: its prefix and the first eight characters; the whole value
+   on hover and in the clipboard. A short value is shown as it is, and gets no copy button unless it was
+   shortened or the host asks for one. With an Href the short form is the link to the identified object
+   (ShortIdentifierLinkAuditTests requires one); a null Href means no page is known and renders text. *@
+<span class="@CssClass" title="@Value">
+    @if (string.IsNullOrEmpty(Href))
+    {
+        <span class="short-id__text">@Shortened</span>
+    }
+    else
+    {
+        <a href="@Href" class="short-id__text" @onclick:stopPropagation="true">@Shortened</a>
+    }
+    @if (ShowCopy)
+    {
+        <span @onclick:stopPropagation="true" class="short-id__copy">
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CopyAsync" Class="short-id__copy-btn"
+                        title="@L["Copy"]" Label="@L["Copy"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+        </span>
+    }
+</span>

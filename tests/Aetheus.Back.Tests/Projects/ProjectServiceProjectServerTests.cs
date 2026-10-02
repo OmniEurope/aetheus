@@ -6,8 +6,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 
@@ -23,7 +21,8 @@ public class ProjectServiceProjectServerTests
         var orgService = Substitute.For<IOrganizationService>();
         orgService.GetDefaultOrganizationIdAsync(Arg.Any<CancellationToken>()).Returns(1);
         _sut = new ProjectService(_repo, Substitute.For<IAuditService>(), Substitute.For<IEntityChangeNotifier>(),
-            orgService, Substitute.For<IServerLifecycleService>(), TimeProvider.System, Substitute.For<IMemoryCache>());
+            orgService, Substitute.For<IServerLifecycleService>(), TimeProvider.System, Substitute.For<IMemoryCache>(), Substitute.For<Aetheus.Back.Components.PortRegistry.IPortRegistryService>(),
+            Substitute.For<Aetheus.Back.Components.Notifications.IUserNotificationService>());
     }
 
     private static ProjectServer Entity(int id = 1) =>

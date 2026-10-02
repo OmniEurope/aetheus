@@ -14,7 +14,8 @@ public interface IUserRepository
     /// </summary>
     Task<(List<UserDto> Items, int TotalCount)> GetUsersPagedProjectedAsync(
         string? search, int page, int pageSize, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false);
+        string? sortBy = null, bool sortDescending = false,
+        IReadOnlyList<GridFilter>? filters = null);
 
     Task<User?> GetUserDetailAsync(int id, CancellationToken ct = default);
 

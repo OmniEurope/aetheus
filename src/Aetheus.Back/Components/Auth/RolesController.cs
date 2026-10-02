@@ -123,7 +123,7 @@ public class RolesController(IRoleService roleService) : ControllerBase
     {
         var username = User.Identity?.Name;
         if (string.IsNullOrEmpty(username)) return Unauthorized();
-        var summary = await roleService.GetMyPermissionsAsync(username, ct);
+        var summary = await roleService.GetMyPermissionsAsync(User, ct);
         if (summary is null) return NotFound();
         return Ok(summary);
     }

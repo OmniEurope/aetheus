@@ -89,7 +89,7 @@ internal static class BackupBundleRestorer
         }
 
         await using (var input = File.OpenRead(entry.Extracted))
-        await using (var output = new FileStream(entry.Staged, CreatePrivateFileOptions()))
+        await using (var output = new FileStream(entry.Staged, BackupFilesystemMetadata.CreatePrivateFileOptions()))
             await input.CopyToAsync(output, ct).ConfigureAwait(false);
         BackupFilesystemMetadata.Copy(entry.Extracted, entry.Staged);
     }
@@ -118,8 +118,8 @@ internal static class BackupBundleRestorer
     private static void TryDeleteIfExists(string path, bool directory)
     {
         try { DeleteIfExists(path, directory); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException) { } // best-effort cleanup: a leftover directory must not replace the outcome being reported
+        catch (UnauthorizedAccessException) { } // same: best-effort cleanup
     }
 
     private static async Task CopyDirectoryAsync(string source, string target, CancellationToken ct)
@@ -135,7 +135,7 @@ internal static class BackupBundleRestorer
             var destination = Path.Combine(target, Path.GetRelativePath(source, file));
             BackupFilesystemMetadata.CreatePrivateDirectory(Path.GetDirectoryName(destination)!);
             await using var input = File.OpenRead(file);
-            await using (var output = new FileStream(destination, CreatePrivateFileOptions()))
+            await using (var output = new FileStream(destination, BackupFilesystemMetadata.CreatePrivateFileOptions()))
                 await input.CopyToAsync(output, ct).ConfigureAwait(false);
             BackupFilesystemMetadata.Copy(file, destination);
         }
@@ -148,20 +148,6 @@ internal static class BackupBundleRestorer
                 Path.Combine(target, Path.GetRelativePath(source, directory)));
         }
         BackupFilesystemMetadata.Copy(source, target);
-    }
-
-    private static FileStreamOptions CreatePrivateFileOptions()
-    {
-        var options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-            BufferSize = 81920,
-            Options = FileOptions.Asynchronous | FileOptions.SequentialScan
-        };
-        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = BackupFilesystemMetadata.PrivateFileMode;
-        return options;
     }
 
     private sealed class RestoreEntry(

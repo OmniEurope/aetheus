@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniFormField For="oe-pages-git-gitbranchprotectiondialog-1"><LabelContent>@L["Pattern"]</LabelContent><ChildContent>
+        <OmniTextBox @bind-Value="_pattern" Placeholder="@L["PlaceholderBranchPattern"]" Id="oe-pages-git-gitbranchprotectiondialog-1" />
+    </ChildContent></OmniFormField>
+    <OmniCheckBox @bind-Value="_preventDeletion">@L["PreventDeletion"]</OmniCheckBox>
+    <OmniCheckBox @bind-Value="_preventForcePush">@L["PreventForcePush"]</OmniCheckBox>
+    <OmniCheckBox @bind-Value="_requirePr">@L["RequirePR"]</OmniCheckBox>
+    <DialogFooter OnCancel="@(() => Dialog.Close(false))">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@Save"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text;
 using System.Text.Encodings.Web;
+using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.PersonalAccessTokens;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;

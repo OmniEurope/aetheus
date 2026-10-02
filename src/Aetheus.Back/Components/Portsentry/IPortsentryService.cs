@@ -15,6 +15,7 @@ public interface IPortsentryService
         int serverId, PaginationRequest request, CancellationToken ct = default);
     Task<PaginatedResult<PortsentryWhitelistIpDto>> GetWhitelistAsync(
         int serverId, PaginationRequest request, CancellationToken ct = default);
+    Task<PortsentryFilterValuesDto> GetFilterValuesAsync(int serverId, CancellationToken ct = default);
     Task<PortsentryWhitelistIpDto> AddWhitelistIpAsync(int serverId, AddPortsentryWhitelistRequest request, CancellationToken ct = default);
     Task<bool> RemoveWhitelistIpAsync(int serverId, int id, CancellationToken ct = default);
 }

@@ -1,0 +1,175 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/backups"
+
+@if (!ProjectId.HasValue)
+{
+    <PageTitle>@L["Backups"] - Aetheus</PageTitle>
+    <OmniPageHeader Title="@L["Backups"]" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("backup")" /></Icon>
+        <Actions>
+            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@NewPolicy"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        </Actions>
+    </OmniPageHeader>
+}
+else
+{
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.End" Class="omni-u-mb-md">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@NewPolicy"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    </OmniStack>
+}
+
+<OmniText Element="OmniTextElement.Paragraph" Class="omni-u-mb-lg">@L["BackupPageDescription"]</OmniText>
+
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-md">
+    <OmniTextBox aria-label="@L["Search"]" @bind-Value="_policySearch" @bind-Value:after="ResetPoliciesAsync"
+        Placeholder="@L["Search"]" Class="pipeline-list-search" />
+</OmniStack>
+
+@if (_form is not null)
+{
+    <OmniCard Class="omni-u-mb-lg">
+        <OmniTemplateForm TModel="PolicyForm" Model="@_form" OnValidSubmit="@SaveAsync">
+            <OmniDataAnnotationsValidator Localizer="@L" />
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+                <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@(_form.Id == 0 ? L["BackupNewPolicy"] : L["BackupEditPolicy"])</OmniHeading>
+                <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.Start">
+                    <OmniFormField For="oe-pages-backups-backups-1"><LabelContent>@L["BackupName"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_form.Name" maxlength="120" Id="oe-pages-backups-backups-1" />
+                        <ValidationMessage For="@(() => _form.Name)" />
+                    </ChildContent></OmniFormField>
+                    @if (!ProjectId.HasValue)
+                    {
+                        <OmniFormField Label="@L["Project"]" For="oe-formfield-pages-backups-backups-1">
+                            <OmniDropDown Id="oe-formfield-pages-backups-backups-1" TValue="int" @bind-Value="_form.ProjectId" Options="@(_projects.ToOptions(item => (int)item.Id, item => item.Name))" Disabled="@(_form.Id != 0)" />
+                            <ValidationMessage For="@(() => _form.ProjectId)" />
+                        </OmniFormField>
+                    }
+                    <OmniFormField Label="@L["Server"]" For="oe-formfield-pages-backups-backups-2">
+                        <OmniDropDown Id="oe-formfield-pages-backups-backups-2" TValue="int" @bind-Value="_form.ServerId" Options="@(_servers.ToOptions(item => (int)item.Id, item => item.Name))" Disabled="@(_form.Id != 0)" />
+                        <ValidationMessage For="@(() => _form.ServerId)" />
+                    </OmniFormField>
+                    <OmniFormField Label="@L["BackupEngine"]" For="oe-formfield-pages-backups-backups-3">
+                        <OmniDropDown Id="oe-formfield-pages-backups-backups-3" TValue="BackupDbEngine" @bind-Value="_form.DbEngine" Options="@(_engineOptions.ToOptions(item => (BackupDbEngine)item.Value, item => item.Text))" />
+                    </OmniFormField>
+                </OmniRow>
+
+                @if (_form.DbEngine != BackupDbEngine.None)
+                {
+                    <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.Start">
+                        <OmniFormField For="oe-pages-backups-backups-5"><LabelContent>@L["BackupDbHost"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.DbHost" maxlength="255" Id="oe-pages-backups-backups-5" />
+                        </ChildContent></OmniFormField>
+                        <OmniFormField For="oe-pages-backups-backups-numeric-1"><LabelContent>@L["BackupDbPort"]</LabelContent><ChildContent><OmniNumeric TValue="int?" @bind-Value="_form.DbPort" Minimum="1" Maximum="65535" Id="oe-pages-backups-backups-numeric-1" /></ChildContent></OmniFormField>
+                        <OmniFormField For="oe-pages-backups-backups-7"><LabelContent>@L["BackupDbName"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.DbName" maxlength="120" Id="oe-pages-backups-backups-7" />
+                        </ChildContent></OmniFormField>
+                        <OmniFormField For="oe-pages-backups-backups-8"><LabelContent>@L["BackupDbUser"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.DbUser" maxlength="120" Id="oe-pages-backups-backups-8" />
+                        </ChildContent></OmniFormField>
+                        <OmniFormField Label="@(_form.Id == 0 ? L["BackupDbPassword"] : L["BackupDbPasswordKeep"])" For="oe-formfield-pages-backups-backups-4">
+                            <OmniPassword Id="oe-formfield-pages-backups-backups-4" @bind-Value="_form.DbPassword" />
+                        </OmniFormField>
+                    </OmniRow>
+                }
+
+                <OmniFormField For="oe-pages-backups-backups-10"><LabelContent>@L["BackupFilePaths"]</LabelContent><ChildContent>
+                    <OmniTextArea @bind-Value="_form.FilePathsText" Rows="3" Id="oe-pages-backups-backups-10" />
+                </ChildContent></OmniFormField>
+
+                <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.Start">
+                    <OmniFormField For="oe-pages-backups-backups-11"><LabelContent>@L["BackupScheduleCron"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_form.ScheduleCron" maxlength="120" Id="oe-pages-backups-backups-11" />
+                        <ValidationMessage For="@(() => _form.ScheduleCron)" />
+                    </ChildContent></OmniFormField>
+                    <OmniFormField For="oe-pages-backups-backups-numeric-2"><LabelContent>@L["BackupRetention"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_form.RetentionCount" Minimum="1" Maximum="365" Id="oe-pages-backups-backups-numeric-2" /></ChildContent></OmniFormField>
+                    <OmniFormField For="oe-pages-backups-backups-13"><LabelContent>@L["BackupRestoreCheckCron"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_form.RestoreCheckCron" maxlength="120" Id="oe-pages-backups-backups-13" />
+                    </ChildContent></OmniFormField>
+                    @if (_form.Id != 0)
+                    {
+                        <OmniSwitch @bind-Value="_form.Enabled">@L["BackupEnabled"]</OmniSwitch>
+                    }
+                </OmniRow>
+
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                    <OmniButton Busy="@_saving" ButtonType="OmniButtonType.Submit" Variant="OmniButtonVariant.Primary"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CancelForm"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+                </OmniStack>
+            </OmniStack>
+        </OmniTemplateForm>
+    </OmniCard>
+}
+
+<AetheusDataGrid @ref="_policyGrid" Data="@_policies" TItem="BackupPolicyDto"
+    Count="@_policiesTotalCount" IsLoading="@_loading" LoadData="@OnLoadPoliciesAsync"
+    PageSize="25" Density="OmniDensity.Compact" FullHeight="true"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<BackupPolicyDto>(_policies, _policiesTotalCount))">
+    <EmptyTemplate>
+        <EmptyState Icon="backup" Title="@L["BackupEmptyTitle"]" Description="@L["BackupEmptyDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="BackupPolicyDto" Property="Name" Title="@L["BackupName"]" MinWidth="10rem" Filterable="true" />
+        @if (!ProjectId.HasValue)
+        {
+            <OmniDataGridColumn TItem="BackupPolicyDto" Key="ProjectName" Title="@L["Project"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_projectNames" FilterSearchable="true" >
+                <Template Context="p">@ProjectName(p.ProjectId)</Template>
+            </OmniDataGridColumn>
+        }
+        <OmniDataGridColumn TItem="BackupPolicyDto" Key="ServerName" Title="@L["Server"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_serverNames" FilterSearchable="true" >
+            <Template Context="p">@ServerName(p.ServerId)</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="BackupPolicyDto" Property="DbEngine" Title="@L["BackupEngine"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@EngineText" >
+            <Template Context="p">@L.Localize(p.DbEngine)</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="BackupPolicyDto" Property="ScheduleCron" Title="@L["BackupScheduleCron"]" Width="140px" Filterable="true" />
+        <OmniDataGridColumn TItem="BackupPolicyDto" Property="RetentionCount" Title="@L["BackupRetention"]" Width="110px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+        <OmniDataGridColumn TItem="BackupPolicyDto" Property="LastRunAt" Title="@L["BackupLastRun"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+            <Template Context="p">@(p.LastRunAt?.ToString("g") ?? L["BackupNever"])</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="BackupPolicyDto" Property="Enabled" Title="@L["BackupEnabled"]" Width="110px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@EnabledText" >
+            <Template Context="p">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@(p.Enabled ? OmniTone.Success : OmniTone.Neutral)">@(p.Enabled ? L["BackupEnabledYes"] : L["BackupEnabledNo"])</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="BackupPolicyDto" Title="@L["Actions"]" MinWidth="32rem" Sortable="false" Filterable="false" >
+            <Template Context="p">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowRunsAsync(p))" title="@L["BackupRuns"]" Label="@L["BackupRuns"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => RunNowAsync(p))" title="@L["BackupRunNow"]" Label="@L["BackupRunNow"]"><OmniIcon Name="OmniIconName.Play" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => EditPolicy(p))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeletePolicyAsync(p))" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+
+@if (_runsFor is not null)
+{
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mt-2xl omni-u-mb-sm">@string.Format(L["BackupRunsFor"], _runsFor.Name)</OmniHeading>
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+        <OmniTextBox aria-label="@L["Search"]" @bind-Value="_runsSearch" @bind-Value:after="ResetRunsAsync"
+            Placeholder="@L["Search"]" Class="pipeline-list-search" />
+    </OmniStack>
+    <AetheusDataGrid @ref="_runsGrid" Data="@_runs" TItem="BackupRunDto"
+        Count="@_runsTotalCount" IsLoading="@_runsLoading" LoadData="@OnLoadRunsAsync"
+        Density="OmniDensity.Compact" PageSize="10"
+        Virtualize="@AetheusGrid.RemoteVirtualization"
+        VirtualData="@(() => new OmniDataGridResult<BackupRunDto>(_runs, _runsTotalCount))">
+        <EmptyTemplate>
+            <EmptyState Icon="history" Title="@L["BackupNoRuns"]" Description="@L["BackupNoRunsDescription"]" />
+        </EmptyTemplate>
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="BackupRunDto" Property="StartedAt" Title="@L["BackupStartedAt"]" Width="170px" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+            <OmniDataGridColumn TItem="BackupRunDto" Property="Status" Title="@L["BackupStatus"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@RunStatusText" >
+                <Template Context="r"><OmniBadge Fill="OmniFill.Solid" Tone="@RunStatusStyle(r.Status)">@L.Localize(r.Status)</OmniBadge></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="BackupRunDto" Property="RestoreCheckStatus" Title="@L["BackupRestoreCheck"]" Width="150px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@RestoreText" >
+                <Template Context="r"><OmniBadge Fill="OmniFill.Solid" Tone="@RestoreStyle(r.RestoreCheckStatus)">@RestoreLabel(r.RestoreCheckStatus)</OmniBadge></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="BackupRunDto" Property="SizeBytes" Title="@L["BackupSize"]" Width="110px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+            <OmniDataGridColumn TItem="BackupRunDto" Property="Message" Title="@L["BackupMessage"]" Filterable="true" />
+        </Columns>
+    </AetheusDataGrid>
+}

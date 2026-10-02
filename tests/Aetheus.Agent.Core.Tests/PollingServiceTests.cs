@@ -4,10 +4,6 @@ using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -142,6 +138,49 @@ public class PollingServiceTests
     }
 
     [Fact]
+    public void NextPollDelay_IdleAgentKeepsTheConfiguredInterval()
+    {
+        var service = CreateService(
+            timeProvider: new FakeTimeProvider(new DateTimeOffset(2026, 9, 12, 8, 0, 0, TimeSpan.Zero)),
+            options: TenSecondPolling);
+
+        Assert.Equal(TimeSpan.FromSeconds(10), service.NextPollDelay());
+    }
+
+    [Fact]
+    public async Task NextPollDelay_PollsFastWhileARunIsActiveThenFallsBackAfterTheWindow()
+    {
+        // PLAN-007 lot 7: the next stage of a run is created as soon as the previous one completes;
+        // a 10 s poll made every stage boundary wait for it.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 12, 8, 0, 0, TimeSpan.Zero));
+        var gate = new TaskCompletionSource();
+        _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([new PendingTaskDto { Id = 7, Name = "stage", Command = "echo", Executor = ExecutorType.Shell }], []);
+        _executorMock.ExecuteAsync(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>(), Arg.Any<int>(),
+                Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => { await gate.Task; return new ExecutorResult(0, false); });
+        var service = CreateService(timeProvider: time, options: TenSecondPolling);
+
+        await service.PollOnceAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(AgentRuntimeDefaults.ActivePollingInterval, service.NextPollDelay());
+
+        gate.SetResult();
+        await service.DrainRunningTasksAsync();
+        time.Advance(AgentRuntimeDefaults.ActivePollingWindow - TimeSpan.FromSeconds(1));
+        Assert.Equal(AgentRuntimeDefaults.ActivePollingInterval, service.NextPollDelay());
+
+        time.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(TimeSpan.FromSeconds(10), service.NextPollDelay());
+    }
+
+    private static readonly IOptions<AetheusAgentOptions> TenSecondPolling = Options.Create(new AetheusAgentOptions
+    {
+        ServerUrl = "http://localhost:5301",
+        PollingIntervalSeconds = 10,
+        MaxConcurrentTasks = 2
+    });
+
+    [Fact]
     public async Task SendLogBatchAsync_CancelsAnUnresponsiveBackendWithinItsOwnBudget()
     {
         _apiClientMock.AppendLogBatchAsync(Arg.Any<List<AppendLogRequest>>(), Arg.Any<CancellationToken>())
@@ -189,6 +228,11 @@ public class PollingServiceTests
                 Arg.Any<CancellationToken>());
         Assert.Equal(_options.Value.WorkDirectory,
             pendingTask.EnvironmentVariables["AETHEUS_AGENT_WORK_DIRECTORY"]);
+        // PLAN-003 2.1: deployment scripts read the helper directory from the agent, not a literal.
+        if (OperatingSystem.IsLinux())
+            Assert.Equal("/usr/local/lib/aetheus", pendingTask.EnvironmentVariables["AGENT_HELPERS_DIR"]);
+        else
+            Assert.False(pendingTask.EnvironmentVariables.ContainsKey("AGENT_HELPERS_DIR"));
     }
 
     [Fact]
@@ -312,13 +356,21 @@ public class PollingServiceTests
         var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var occupying = new PendingTaskDto
         {
-            Id = 71, Name = "occupies-the-only-slot", Command = "sleep", Executor = ExecutorType.Shell,
-            EnvironmentVariables = [], TimeoutSeconds = 30
+            Id = 71,
+            Name = "occupies-the-only-slot",
+            Command = "sleep",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = [],
+            TimeoutSeconds = 30
         };
         var stranded = new PendingTaskDto
         {
-            Id = 72, Name = "claimed-with-no-slot", Command = "echo", Executor = ExecutorType.Shell,
-            EnvironmentVariables = [], TimeoutSeconds = 30
+            Id = 72,
+            Name = "claimed-with-no-slot",
+            Command = "echo",
+            Executor = ExecutorType.Shell,
+            EnvironmentVariables = [],
+            TimeoutSeconds = 30
         };
         _executorMock.ExecuteAsync(
                 occupying.Command, Arg.Any<Dictionary<string, string>>(), Arg.Any<int>(),
@@ -1199,12 +1251,15 @@ public class PollingServiceTests
         _apiClientMock.GetPendingTasksAsync(1, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<PendingTaskDto> { pendingTask });
 
-        var service = CreateService([operationExecutorMock]);
+        var health = new AgentRuntimeHealth(TimeProvider.System);
+        var service = CreateService([operationExecutorMock], runtimeHealth: health);
         await PollAndDrainAsync(service);
 
         await _apiClientMock.Received(1).CompleteTaskAsync(102,
             Arg.Is<TaskResultDto>(r => r.Status == TaskExecutionStatus.Failed && r.ExitCode == 1),
             Arg.Any<CancellationToken>());
+        // Recette R-508: a finished service action asks for a heartbeat, so the page sees the new state.
+        Assert.True(health.WaitForHeartbeatRequestAsync(TestContext.Current.CancellationToken).IsCompletedSuccessfully);
     }
 
     [Fact]

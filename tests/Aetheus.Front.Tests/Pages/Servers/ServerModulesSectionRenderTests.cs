@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -160,13 +157,13 @@ public class ServerModulesSectionRenderTests : BunitContext
     // ── GetModuleStatusBadge - all enum arms ──────────────────────────────────
 
     [Theory]
-    [InlineData(ServerModuleStatus.Active, BadgeStyle.Success)]
-    [InlineData(ServerModuleStatus.Inactive, BadgeStyle.Light)]
-    [InlineData(ServerModuleStatus.Error, BadgeStyle.Danger)]
-    public void GetModuleStatusBadge_KnownStatus_ReturnsExpected(ServerModuleStatus status, BadgeStyle expected)
+    [InlineData(ServerModuleStatus.Active, OmniTone.Success)]
+    [InlineData(ServerModuleStatus.Inactive, OmniTone.Neutral)]
+    [InlineData(ServerModuleStatus.Error, OmniTone.Danger)]
+    public void GetModuleStatusBadge_KnownStatus_ReturnsExpected(ServerModuleStatus status, OmniTone expected)
     {
         var method = typeof(ServerModulesSection).GetMethod("GetModuleStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)status])!;
+        var result = (OmniTone)method.Invoke(null, [(object)status])!;
         Assert.Equal(expected, result);
     }
 
@@ -174,8 +171,8 @@ public class ServerModulesSectionRenderTests : BunitContext
     public void GetModuleStatusBadge_UnknownStatus_ReturnsWarning()
     {
         var method = typeof(ServerModulesSection).GetMethod("GetModuleStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)(ServerModuleStatus)999])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [(object)(ServerModuleStatus)999])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     // ── _moduleTypes static field ─────────────────────────────────────────────

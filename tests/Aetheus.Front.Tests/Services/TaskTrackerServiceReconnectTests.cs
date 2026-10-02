@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -150,5 +147,166 @@ public class TaskTrackerServiceReconnectTests : BunitContext
         Assert.Equal(3, connectCalls);
         Assert.Equal([0, 0, 0], announcedDelays);
         Assert.Equal([42], seededTaskIds);
+    }
+
+    // ── wake: the browser says the network is back ────────────────────────────
+
+    [Fact]
+    public async Task RetryLoop_Wake_CutsAnHourLongBackoffShort()
+    {
+        // Without the wake the loop would sleep a full hour before its first attempt; the bounded
+        // wait below turns that into a failure instead of a hung test.
+        var connectCalls = 0;
+
+        var connected = await TaskTrackerService.RetryUntilConnectedAsync(
+            _ => { connectCalls++; return Task.FromResult(true); },
+            [TimeSpan.FromHours(1)],
+            _ => { },
+            () => true,
+            Xunit.TestContext.Current.CancellationToken,
+            armWake: () => Task.CompletedTask)
+            .WaitAsync(TimeSpan.FromSeconds(10), Xunit.TestContext.Current.CancellationToken);
+
+        Assert.True(connected);
+        Assert.Equal(1, connectCalls);
+    }
+
+    [Fact]
+    public async Task RetryLoop_WakeDuringFailedAttempt_CutsTheNextBackoffShort()
+    {
+        var sut = CreateService();
+        var connectCalls = 0;
+        var waits = 0;
+
+        Task ArmWake() => ++waits == 1
+            ? Task.CompletedTask
+            : (Task)typeof(TaskTrackerService).GetMethod("ArmWake", Priv)!.Invoke(sut, null)!;
+
+        var connected = await TaskTrackerService.RetryUntilConnectedAsync(
+            _ =>
+            {
+                if (++connectCalls == 1)
+                {
+                    sut.RequestImmediateReconnect();
+                    return Task.FromResult(false);
+                }
+                return Task.FromResult(true);
+            },
+            [TimeSpan.FromHours(1)],
+            _ => { },
+            () => true,
+            Xunit.TestContext.Current.CancellationToken,
+            armWake: ArmWake)
+            .WaitAsync(TimeSpan.FromSeconds(10), Xunit.TestContext.Current.CancellationToken);
+
+        Assert.True(connected);
+        Assert.Equal(2, connectCalls);
+    }
+
+    [Fact]
+    public async Task RetryLoop_Wake_DoesNotRestartTheScheduleFromZero()
+    {
+        // A wake that does not actually fix connectivity must keep climbing the schedule, or a flapping
+        // "online" event would hammer a backend that is genuinely down at the zero-delay step.
+        var connectCalls = 0;
+        var announcedDelays = new List<int>();
+
+        var connected = await TaskTrackerService.RetryUntilConnectedAsync(
+            _ => Task.FromResult(++connectCalls == 4),
+            [TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)],
+            announcedDelays.Add,
+            () => true,
+            Xunit.TestContext.Current.CancellationToken,
+            armWake: () => Task.CompletedTask)
+            .WaitAsync(TimeSpan.FromSeconds(10), Xunit.TestContext.Current.CancellationToken);
+
+        Assert.True(connected);
+        Assert.Equal([0, 5, 30, 30], announcedDelays);
+    }
+
+    [Fact]
+    public void RequestImmediateReconnect_WithNothingRetrying_IsHarmless()
+    {
+        var sut = CreateService();
+
+        var ex = Record.Exception(sut.RequestImmediateReconnect);
+
+        Assert.Null(ex);
+    }
+
+    // ── what the connection-lost dialog is told ───────────────────────────────
+
+    [Fact]
+    public async Task StartAsync_ConnectFails_ExposesTheReasonForTheDialog()
+    {
+        // The harness hub always fails to connect, exactly like a backend that is down at login.
+        var sut = CreateService();
+
+        await sut.StartAsync(Xunit.TestContext.Current.CancellationToken);
+
+        Assert.False(string.IsNullOrWhiteSpace(sut.LastFailureReason));
+
+        await sut.StopAsync();
+    }
+
+    [Fact]
+    public async Task ReconnectAsync_SessionGone_SaysSoAndLeavesTheConnectionAlone()
+    {
+        var sut = CreateService();
+        await sut.StartAsync(Xunit.TestContext.Current.CancellationToken);
+        var hubBefore = GetPrivate(sut, "_hub");
+        await Services.GetRequiredService<AuthStateProvider>().LogoutAsync();
+
+        var outcome = await sut.ReconnectAsync(Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskTrackerService.ReconnectOutcome.SessionExpired, outcome);
+        Assert.Null(sut.LastFailureReason);
+        Assert.Same(hubBefore, GetPrivate(sut, "_hub"));
+
+        await sut.StopAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_ConnectAttemptNeverAnswers_GivesUpAtItsDeadlineAndKeepsRetrying()
+    {
+        // A negotiate that never answers used to hold the attempt with no deadline: no failure reason,
+        // no next attempt, no countdown - the overlay of 2026-09-13, backend online.
+        var auth = Services.GetRequiredService<AuthStateProvider>();
+        var sut = new TaskTrackerService(
+            Services.GetRequiredService<ApiClient>(),
+            auth,
+            new BunitTestHelper.BlockingHubConnectionFactory(Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(), auth),
+            NullLogger<TaskTrackerService>.Instance)
+        {
+            ConnectAttemptTimeout = TimeSpan.FromMilliseconds(200)
+        };
+        var attempts = new System.Collections.Concurrent.ConcurrentQueue<int>();
+        sut.OnReconnectAttempt += attempts.Enqueue;
+
+        await sut.StartAsync(Xunit.TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(10), Xunit.TestContext.Current.CancellationToken);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (attempts.Count < 3 && DateTime.UtcNow < deadline)
+            await Task.Delay(50, Xunit.TestContext.Current.CancellationToken);
+
+        // The third announcement follows the second retry's failure: that retry was a real attempt on
+        // the same hub (not a "connection is not Disconnected" refusal) and it timed out too.
+        Assert.True(attempts.Count >= 3, $"expected the loop to keep scheduling attempts, saw {attempts.Count}");
+        Assert.Contains("did not answer", sut.LastFailureReason, StringComparison.Ordinal);
+
+        await sut.StopAsync();
+    }
+
+    [Fact]
+    public async Task ReconnectAsync_ConnectStillFails_ReportsRetrying()
+    {
+        var sut = CreateService();
+        await sut.StartAsync(Xunit.TestContext.Current.CancellationToken);
+
+        var outcome = await sut.ReconnectAsync(Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskTrackerService.ReconnectOutcome.Retrying, outcome);
+
+        await sut.StopAsync();
     }
 }

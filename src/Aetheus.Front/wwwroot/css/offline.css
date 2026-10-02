@@ -1,0 +1,50 @@
+:root {
+    color-scheme: dark;
+    font-family: system-ui, sans-serif;
+    background: #101723;
+    color: #f4f7fc;
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    display: grid;
+    place-items: center;
+}
+
+.offline-card {
+    width: min(32rem, calc(100% - 3rem));
+    padding: 1.5rem;
+    border: 0.0625rem solid #40526c;
+    border-radius: 0.75rem;
+    background: #1a2535;
+}
+
+h1 {
+    margin-top: 0;
+    font-size: 1.5rem;
+}
+
+p {
+    line-height: 1.5;
+}
+
+button {
+    padding: 0.625rem 1rem;
+    border: 0;
+    border-radius: 0.375rem;
+    background: #60a5fa;
+    color: #101723;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+button:focus-visible {
+    outline: 0.1875rem solid #f4f7fc;
+    outline-offset: 0.1875rem;
+}
+
+[hidden] {
+    display: none;
+}

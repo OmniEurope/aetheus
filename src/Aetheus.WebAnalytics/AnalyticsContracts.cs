@@ -30,6 +30,26 @@ public sealed record AnalyticsBrowserEvent
     [StringLength(32, MinimumLength = 1)]
     [RegularExpression("^[a-z0-9_]+$")]
     public string? ErrorType { get; init; }
+
+    /// <summary>
+    /// The host app says the visitor is signed in, and nothing more: no account, no token. The static
+    /// front server cannot authenticate the visitor itself (the app talks to the API with a bearer
+    /// token), so this yes/no is the only way a signed-in visit is counted. It is a declaration, not a
+    /// proof, which is acceptable for a count and never used for anything else.
+    /// </summary>
+    public bool? SignedIn { get; init; }
+
+    /// <summary>
+    /// Recette R-471: the opaque identifier the host application holds for the signed-in visitor (the
+    /// <c>authenticatedUserId</c> of the v1 contract). Never an account name or an e-mail address, and
+    /// never stored: it only feeds the pseudonym derivation, so two signed-in people behind one
+    /// network count as two. Read only when the host enables
+    /// <see cref="AetheusWebAnalyticsOptions.AcceptDeclaredUserId"/> and does not authenticate the
+    /// visitor itself. Like <see cref="SignedIn"/>, a declaration and not a proof.
+    /// </summary>
+    [StringLength(256, MinimumLength = 1)]
+    [RegularExpression("^[A-Za-z0-9_-]+$")]
+    public string? AuthenticatedUserId { get; init; }
 }
 
 internal sealed record AnalyticsExportEvent

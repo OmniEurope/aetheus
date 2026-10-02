@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Git;
+using Aetheus.Back.Components.Pipelines;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
+using Environment = Aetheus.Back.Data.Entities.Environment;
+
+namespace Aetheus.Back.Tests.Pipelines;
+
+/// <summary>
+/// The pre-creation readiness check, which answers what the setup wizard is about to create against
+/// what the project actually has.
+///
+/// Every case here defends one property: the findings are DERIVED from the selected templates (a
+/// template that stops invoking a script stops requiring it), and an unread repository is reported
+/// as unread rather than as a clean bill of health.
+/// </summary>
+public sealed class PipelineSetupReadinessServiceTests
+{
+    private readonly IPipelineTemplateService _templates = Substitute.For<IPipelineTemplateService>();
+    private readonly IPipelineRepository _repo = Substitute.For<IPipelineRepository>();
+    private readonly IGitLightService _git = Substitute.For<IGitLightService>();
+
+    private const string CiTemplate = """
+        name: application-ci-template
+        stages:
+          - name: Build
+            execution_role: build
+            steps:
+              - name: Run project CI adapter
+                shell: |
+                  set -eu
+                  test -f .pipeline/scripts/ci.sh
+                  sh .pipeline/scripts/ci.sh
+        """;
+
+    private const string DeployTemplate = """
+        name: application-deploy-prod-template
+        stages:
+          - name: DeployProduction
+            execution_role: deploy
+            steps:
+              - name: Run project production deployment adapter
+                shell: |
+                  set -eu
+                  test -f .pipeline/scripts/deploy-prod.sh
+                  sh .pipeline/scripts/deploy-prod.sh
+        """;
+
+    private readonly IPipelineRequirementsChecker _requirements = Substitute.For<IPipelineRequirementsChecker>();
+
+    private PipelineSetupReadinessService BuildSut() => new(
+        _templates, _repo, _git, _requirements,
+        Substitute.For<ILogger<PipelineSetupReadinessService>>());
+
+    private void Template(int id, string name, string yaml)
+    {
+        _templates.GetTemplatesAsync(Arg.Any<CancellationToken>()).Returns(call =>
+            new List<PipelineTemplateSummaryDto> { new() { Id = id, Name = name, Version = 1 } });
+        _templates.GetTemplateAsync(id, Arg.Any<CancellationToken>())
+            .Returns(new PipelineTemplateDto { Id = id, Name = name, YamlContent = yaml });
+    }
+
+    private void Runners(params int[] ids)
+        => _repo.FindCandidateTargetServerIdsAsync(
+                Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<OsType>(),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(ids.ToList());
+
+    private void Repository(bool empty = false, string branch = "main")
+        => _git.GetRepositoriesAsync(7, Arg.Any<CancellationToken>()).Returns(
+            new List<GitLightRepoDto> { new() { Id = 4, ProjectId = 7, Name = "app", DefaultBranch = branch, IsEmpty = empty } });
+
+    private void AdapterDirectory(params string[] fileNames)
+        => _git.GetTreeAsync(4, Arg.Any<string?>(), ".pipeline/scripts", Arg.Any<CancellationToken>())
+            .Returns([.. fileNames.Select(name => new GitLightTreeEntryDto
+            {
+                Name = name,
+                Path = $".pipeline/scripts/{name}",
+                Type = GitTreeEntryType.Blob
+            })]);
+
+    private Task<PipelineSetupReadinessDto> RunAsync(params string[] templateNames)
+        => BuildSut().CheckAsync(7, templateNames, organizationId: 3, CancellationToken.None);
+
+    [Fact]
+    public async Task AdapterScriptTheTemplateInvokes_IsReportedWhenTheBranchDoesNotCarryIt()
+    {
+        Template(1, "application-ci", CiTemplate);
+        Runners(11);
+        Repository();
+        AdapterDirectory("quality.sh");
+
+        var readiness = await RunAsync("application-ci");
+
+        var check = Assert.Single(readiness.Checks);
+        Assert.Equal(PipelineSetupReadinessKind.MissingAdapterScripts, check.Kind);
+        Assert.Equal([".pipeline/scripts/ci.sh"], check.Items);
+        Assert.True(readiness.HasBlocking);
+        Assert.True(readiness.RepositoryInspected);
+        Assert.Equal("main", readiness.InspectedBranch);
+    }
+
+    [Fact]
+    public async Task AdapterScriptPresentOnTheBranch_ProducesNoFinding()
+    {
+        Template(1, "application-ci", CiTemplate);
+        Runners(11);
+        Repository();
+        AdapterDirectory("ci.sh");
+
+        var readiness = await RunAsync("application-ci");
+
+        Assert.Empty(readiness.Checks);
+        Assert.False(readiness.HasBlocking);
+        Assert.True(readiness.RepositoryInspected);
+    }
+
+    [Fact]
+    public async Task ProjectWithoutRepository_SaysTheFilesWereNotInspectedRatherThanNothingIsMissing()
+    {
+        Template(1, "application-ci", CiTemplate);
+        Runners(11);
+        _git.GetRepositoriesAsync(7, Arg.Any<CancellationToken>()).Returns(new List<GitLightRepoDto>());
+
+        var readiness = await RunAsync("application-ci");
+
+        Assert.Equal(PipelineSetupReadinessKind.NoRepository, Assert.Single(readiness.Checks).Kind);
+        // The distinction the panel depends on: no adapter finding was produced, and the caller is
+        // told why, instead of an empty list reading as a pass.
+        Assert.False(readiness.RepositoryInspected);
+    }
+
+    [Fact]
+    public async Task EmptyRepository_NamesTheBranchAndStopsBeforeClaimingAnythingAboutFiles()
+    {
+        Template(1, "application-ci", CiTemplate);
+        Runners(11);
+        Repository(empty: true, branch: "develop");
+
+        var readiness = await RunAsync("application-ci");
+
+        var check = Assert.Single(readiness.Checks);
+        Assert.Equal(PipelineSetupReadinessKind.EmptyBranch, check.Kind);
+        Assert.Equal(["develop"], check.Items);
+        Assert.False(readiness.RepositoryInspected);
+    }
+
+    [Fact]
+    public async Task NoServerAtAll_IsReportedOnceRatherThanAsBothAMissingRunnerAndAMissingTarget()
+    {
+        Template(2, "application-deploy-prod", DeployTemplate);
+        Runners();
+        Repository();
+        AdapterDirectory("deploy-prod.sh");
+
+        var readiness = await RunAsync("application-deploy-prod");
+
+        Assert.Equal(PipelineSetupReadinessKind.NoRunnerConfigured, Assert.Single(readiness.Checks).Kind);
+    }
+
+    [Fact]
+    public async Task DeployStageWithoutADeploymentCapableServer_NamesTheStagesThatWouldStall()
+    {
+        Template(2, "application-deploy-prod", DeployTemplate);
+        // A build runner exists; the deployment-capable query is the one that comes back empty.
+        _repo.FindCandidateTargetServerIdsAsync(
+                Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<OsType>(),
+                Arg.Any<int?>(), false, Arg.Any<CancellationToken>())
+            .Returns(new List<int> { 11 });
+        _repo.FindCandidateTargetServerIdsAsync(
+                Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<OsType>(),
+                Arg.Any<int?>(), true, Arg.Any<CancellationToken>())
+            .Returns(new List<int>());
+        Repository();
+        AdapterDirectory("deploy-prod.sh");
+
+        var readiness = await RunAsync("application-deploy-prod");
+
+        var check = Assert.Single(readiness.Checks);
+        Assert.Equal(PipelineSetupReadinessKind.NoDeployRunnerConfigured, check.Kind);
+        Assert.Equal(["DeployProduction"], check.Items);
+    }
+
+    [Fact]
+    public async Task EnvironmentNamedByTheTemplate_IsReportedWhenTheProjectDoesNotHaveIt()
+    {
+        Template(3, "application-qa", """
+            name: application-qa-template
+            stages:
+              - name: QA
+                environment: qa
+                steps:
+                  - name: Run
+                    shell: make qa
+            """);
+        Runners(11);
+        Repository();
+        _repo.FindEnvironmentByNameForProjectAsync("qa", 7, Arg.Any<CancellationToken>())
+            .Returns((Environment?)null);
+
+        var readiness = await RunAsync("application-qa");
+
+        var check = Assert.Single(readiness.Checks);
+        Assert.Equal(PipelineSetupReadinessKind.MissingEnvironments, check.Kind);
+        Assert.Equal(["qa"], check.Items);
+    }
+
+    [Fact]
+    public async Task EnvironmentStillWrittenAsAVariable_IsNotGuessedAtAndProducesNoFinding()
+    {
+        Template(3, "application-qa", """
+            name: application-qa-template
+            stages:
+              - name: QA
+                environment: $(APPLICATION_ENVIRONMENT)
+                steps:
+                  - name: Run
+                    shell: make qa
+            """);
+        Runners(11);
+        Repository();
+
+        var readiness = await RunAsync("application-qa");
+
+        Assert.Empty(readiness.Checks);
+        await _repo.DidNotReceive().FindEnvironmentByNameForProjectAsync(
+            Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TemplateTheInstanceDoesNotHave_IsSkippedInsteadOfBecomingAnUnclearableFinding()
+    {
+        Template(1, "application-ci", CiTemplate);
+        Runners(11);
+        Repository();
+        AdapterDirectory("ci.sh");
+
+        var readiness = await RunAsync("application-ci", "application-does-not-exist");
+
+        Assert.Empty(readiness.Checks);
+    }
+}

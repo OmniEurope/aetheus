@@ -4,6 +4,7 @@ namespace Aetheus.Back.Components.VariableLibraries;
 
 public interface IVariableLibraryService
 {
+    Task<VariableLibraryFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default);
     Task<PaginatedResult<VariableLibraryDto>> GetLibrariesAsync(int? projectId, int? environmentId = null, int? projectServerId = null, PaginationRequest? request = null, List<int>? accessibleIds = null, CancellationToken ct = default);
     Task<VariableLibraryDetailDto?> GetLibraryDetailAsync(int id, CancellationToken ct = default);
     Task<PaginatedResult<VariableEntryDto>> GetEntriesAsync(int libraryId, PaginationRequest request, CancellationToken ct = default);

@@ -1,0 +1,114 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Mode == MailDialogMode.DnsRecords)
+{
+    @if (DnsRecords is not null)
+    {
+        <OmniStack Gap="OmniSpacing.Medium">
+            @foreach (var record in DnsRecordList)
+            {
+                @* R-516: each record in OE's code block (its name, the copy button, then the value). *@
+                <OmniCodeBlock Code="@record.Value" Title="@record.Label" Wrap="true" />
+            }
+        </OmniStack>
+    }
+    <DialogFooter CancelText="@L["Close"]" OnCancel="@(() => Dialog.Close())" />
+}
+else
+{
+    <OmniTemplateForm TModel="MailDialogModel" Model="@_model" OnValidSubmit="@((EditContext context) => Submit((MailDialogModel)context.Model))">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        @if (Mode == MailDialogMode.Setup)
+        {
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Justify="OmniJustification.Center" Class="omni-u-mb-lg" Gap="OmniSpacing.Small">
+                @for (var index = 1; index <= 3; index++)
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@(_setupStep == index ? OmniTone.Accent : (_setupStep > index ? OmniTone.Success : OmniTone.Neutral))">@index.ToString()</OmniBadge>
+                    @if (index < 3) { <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0 omni-u-text-muted">-</OmniText> }
+                }
+            </OmniStack>
+        }
+        <OmniStack Gap="OmniSpacing.Medium">
+            @if (Mode == MailDialogMode.AddDomain)
+            {
+                <OmniFormField Label="@L["DomainName"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-1"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-1" @bind-Value="_model.Domain" Placeholder="@L["PlaceholderDomain"]" /></OmniFormField><ValidationMessage For="@(() => _model.Domain)" />
+                <OmniFormField Label="@L["DkimSelector"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-2"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-2" @bind-Value="_model.DkimSelector" Placeholder="default" /></OmniFormField>
+            }
+            else if (Mode == MailDialogMode.AddAccount)
+            {
+                <OmniFormField Label="@L["Email"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-3"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-3" @bind-Value="_model.Email" Placeholder="user@example.com" /></OmniFormField><ValidationMessage For="@(() => _model.Email)" />
+                <OmniFormField Label="@L["Password"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-4"><OmniPassword Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-4" @bind-Value="_model.Password" /></OmniFormField><ValidationMessage For="@(() => _model.Password)" />
+                <OmniFormField For="oe-pages-servers-serverdetailsections-mailoperationdialog-numeric-1"><LabelContent>@($"{L["Quota"]} (MB)")</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.QuotaMb" Minimum="10" Maximum="102400" Id="oe-pages-servers-serverdetailsections-mailoperationdialog-numeric-1" /></ChildContent></OmniFormField>
+            }
+            else if (Mode == MailDialogMode.AddAlias)
+            {
+                <OmniFormField Label="@L["Source"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-5"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-5" @bind-Value="_model.Source" Placeholder="alias@example.com" /></OmniFormField><ValidationMessage For="@(() => _model.Source)" />
+                <OmniFormField Label="@L["Destination"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-6"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-6" @bind-Value="_model.Destination" Placeholder="user@example.com" /></OmniFormField><ValidationMessage For="@(() => _model.Destination)" />
+                <OmniFormField Label="@L["DomainName"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-7"><OmniDropDown Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-7" Options="@(Domains.ToOptions(item => (int)item.Id, item => item.Name))" @bind-Value="_model.DomainId" TValue="int" /></OmniFormField>
+            }
+            else if (Mode == MailDialogMode.RotateDkim)
+            {
+                <OmniAlert Severity="OmniSeverity.Warning">@L["DkimRotationWarning"]</OmniAlert>
+                <OmniFormField Label="@L["DomainName"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-8"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-8" Value="@_model.Domain" ReadOnly="true"  ValueExpression="@(() => _model.Domain)"/></OmniFormField>
+                <OmniFormField Label="@L["CurrentSelector"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-9"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-9" Value="@_model.CurrentSelector" ReadOnly="true"  ValueExpression="@(() => _model.CurrentSelector)"/></OmniFormField>
+                <OmniFormField Label="@L["NewSelector"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-10"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-10" @bind-Value="_model.NewSelector" Placeholder="mail2025" /></OmniFormField><ValidationMessage For="@(() => _model.NewSelector)" />
+            }
+            else if (Mode == MailDialogMode.RequestCertificate)
+            {
+                <OmniAlert Severity="OmniSeverity.Info">@string.Format(L["MailCertificateHint"], _model.Hostname)</OmniAlert>
+                <OmniFormField Label="@L["MailAcmeEmail"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-16"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-16" @bind-Value="_model.Email" Placeholder="admin@example.com" /></OmniFormField><ValidationMessage For="@(() => _model.Email)" />
+            }
+            else if (Mode == MailDialogMode.SpamThresholds)
+            {
+                <OmniFormField Label="@L["MailGreylistScore"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-17"><OmniNumeric Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-17" @bind-Value="_model.GreylistScore" Minimum="0" Maximum="999" Step="0.5" /></OmniFormField>
+                <OmniFormField Label="@L["MailAddHeaderScore"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-18"><OmniNumeric Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-18" @bind-Value="_model.AddHeaderScore" Minimum="0" Maximum="999" Step="0.5" /></OmniFormField>
+                <OmniFormField Label="@L["MailRejectScore"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-19"><OmniNumeric Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-19" @bind-Value="_model.RejectScore" Minimum="0" Maximum="999" Step="0.5" /></OmniFormField><ValidationMessage For="@(() => _model.RejectScore)" />
+            }
+            else if (Mode == MailDialogMode.LearnSpam)
+            {
+                <OmniCheckBox @bind-Value="_model.IsSpam">@L["MailIsSpam"]</OmniCheckBox>
+                <OmniFormField Label="@L["MailRawMessage"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-20"><OmniTextArea Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-20" @bind-Value="_model.RawMessage" Rows="10" /></OmniFormField><ValidationMessage For="@(() => _model.RawMessage)" />
+            }
+            else if (Mode == MailDialogMode.TestDelivery)
+            {
+                <OmniFormField Label="@L["Sender"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-21"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-21" @bind-Value="_model.Source" Placeholder="admin@example.com" /></OmniFormField><ValidationMessage For="@(() => _model.Source)" />
+                <OmniFormField Label="@L["Recipient"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-22"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-22" @bind-Value="_model.Destination" Placeholder="someone@example.org" /></OmniFormField><ValidationMessage For="@(() => _model.Destination)" />
+            }
+            else if (Mode == MailDialogMode.Setup && _setupStep == 1)
+            {
+                <OmniFormField Label="@L["Hostname"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-11"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-11" @bind-Value="_model.Hostname" Placeholder="@L["PlaceholderMailHost"]" /></OmniFormField>
+                <OmniFormField Label="@L["DomainName"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-12"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-12" @bind-Value="_model.Domain" Placeholder="@L["PlaceholderDomain"]" /></OmniFormField>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CheckMxAsync" Disabled="@(_checkingMx || !CanCheckMx)" Busy="@_checkingMx"><OmniIcon Name="OmniIconName.Database" /> <span>@L["MailCheckCurrentRouting"]</span></OmniButton>
+                @if (_checkingMx) { <AetheusLoader Size="OmniControlSize.Small" /> }
+                @if (MxFailureMatchesDomain || (PreviewMatchesDomain && _mxPreview!.Verdict == MailCheckVerdict.Unknown))
+                {
+                    <OmniAlert Severity="OmniSeverity.Warning">@L["MailRoutingCheckFailed"]</OmniAlert>
+                }
+                else if (PreviewMatchesDomain && _mxPreview!.Verdict == MailCheckVerdict.Missing)
+                {
+                    <OmniAlert Severity="OmniSeverity.Info">@L["MailNoCurrentMx"]</OmniAlert>
+                }
+                else if (PreviewMatchesDomain)
+                {
+                    <OmniAlert Severity="OmniSeverity.Info">@string.Format(L["MailCurrentMxHosts"], string.Join(", ", _mxPreview!.Hosts))</OmniAlert>
+                }
+                <OmniFormField Label="@L["DkimSelector"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-13"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-13" @bind-Value="_model.DkimSelector" Placeholder="default" /></OmniFormField>
+            }
+            else if (Mode == MailDialogMode.Setup && _setupStep == 2)
+            {
+                <OmniFormField Label="@L["AdminEmail"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-14"><OmniTextBox Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-14" @bind-Value="_model.Email" Placeholder="admin@example.com" /></OmniFormField>
+                <OmniFormField Label="@L["AdminPassword"]" For="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-15"><OmniPassword Id="oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-15" @bind-Value="_model.Password" /></OmniFormField>
+            }
+            else if (Mode == MailDialogMode.Setup)
+            {
+                <OmniFormField For="oe-pages-servers-serverdetailsections-mailoperationdialog-numeric-2"><LabelContent>@($"{L["Quota"]} (MB)")</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.QuotaMb" Minimum="10" Maximum="102400" Id="oe-pages-servers-serverdetailsections-mailoperationdialog-numeric-2" /></ChildContent></OmniFormField>
+                <OmniCheckBox @bind-Value="_model.EnableSpamFilter">@L["MailSetupSpamFilter"]</OmniCheckBox>
+                <OmniAlert Severity="OmniSeverity.Info">@L["MailSetupSummary"]: @_model.Hostname / @_model.Domain / @_model.Email</OmniAlert>
+            }
+        </OmniStack>
+        <DialogFooter OnCancel="@(() => Dialog.Close())">
+            @if (Mode == MailDialogMode.Setup && _setupStep > 1) { <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _setupStep--)"><OmniIcon Name="OmniIconName.ArrowLeft" /> <span>@L["Previous"]</span></OmniButton> }
+            @if (Mode == MailDialogMode.Setup && _setupStep < 3) { <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => _setupStep++)"><OmniIcon Name="OmniIconName.ArrowRight" /> <span>@L["Next"]</span></OmniButton> }
+            else { <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit"><OmniIcon Name="OmniIconName.Check" /> <span>@SubmitText</span></OmniButton> }
+        </DialogFooter>
+    </OmniTemplateForm>
+}

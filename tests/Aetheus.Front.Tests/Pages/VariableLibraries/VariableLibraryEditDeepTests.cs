@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.VariableLibraries;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.VariableLibraries;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.VarLibDeepCoverage;
 
@@ -218,13 +217,13 @@ public class VariableLibraryEditDeepTests : BunitContext
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(VariableLibraryEdit).GetMethod("OnSubmit", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // Update succeeded → busy flag released and a "Saved" success toast surfaced.
         Assert.False((bool)typeof(VariableLibraryEdit).GetField("_saving", Priv)!.GetValue(cut.Instance)!);
-        Assert.Contains(notif.Messages, m => m.Severity == NotificationSeverity.Success);
+        Assert.Contains(notif.Toasts(), m => m.Severity == OmniSeverity.Success);
     }
 
     [Fact]
@@ -239,8 +238,8 @@ public class VariableLibraryEditDeepTests : BunitContext
         var method = typeof(VariableLibraryEdit).GetMethod("OnSubmit", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
 
-        Assert.DoesNotContain(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Success);
+        Assert.DoesNotContain(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Success);
         Assert.False((bool)typeof(VariableLibraryEdit).GetField("_saving", Priv)!.GetValue(cut.Instance)!);
     }
 
@@ -253,7 +252,7 @@ public class VariableLibraryEditDeepTests : BunitContext
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var method = typeof(VariableLibraryEdit).GetMethod("OnDelete", Priv)!;
 
         var task = cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
@@ -261,10 +260,10 @@ public class VariableLibraryEditDeepTests : BunitContext
         await task;
 
         Assert.False(nav.Uri.EndsWith("/variable-libraries", StringComparison.Ordinal));
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
-        Assert.DoesNotContain(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Success);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
+        Assert.DoesNotContain(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Success);
     }
 
     [Fact]
@@ -315,14 +314,14 @@ public class VariableLibraryEditDeepTests : BunitContext
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         SetFormValue(cut.Instance, "_newEntry", "Key", "   ");
         SetFormValue(cut.Instance, "_newEntry", "Value", "v");
         await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
 
         // Whitespace/empty key → guard returns: value preserved, no toast.
         Assert.Equal("v", GetFormValue<string>(cut.Instance, "_newEntry", "Value"));
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
     }
 
     // ── AddEntry - with key ───────────────────────────────────────────────────
@@ -336,15 +335,15 @@ public class VariableLibraryEditDeepTests : BunitContext
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         SetFormValue(cut.Instance, "_newEntry", "Key", "MY_KEY");
         SetFormValue(cut.Instance, "_newEntry", "Value", "my_value");
         await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
 
         // Entry created → key/value inputs reset and a success toast surfaces.
         Assert.Equal(string.Empty, GetFormValue<string>(cut.Instance, "_newEntry", "Key"));
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
     }
 
     // ── EditEntry - sets edit fields ──────────────────────────────────────────
@@ -376,14 +375,14 @@ public class VariableLibraryEditDeepTests : BunitContext
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var entry = new VariableEntryDto { Id = 10, Key = "K", Value = "V" };
         var method = typeof(VariableLibraryEdit).GetMethod("OnEntryUpdate", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [entry])!);
 
         // OnEntryUpdate persists then raises a "Saved" success toast.
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
     }
 
     [Fact]
@@ -402,10 +401,10 @@ public class VariableLibraryEditDeepTests : BunitContext
 
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [entry])!);
 
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
-        Assert.DoesNotContain(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Success);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
+        Assert.DoesNotContain(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Success);
     }
 
     [Fact]
@@ -419,17 +418,17 @@ public class VariableLibraryEditDeepTests : BunitContext
             System.Net.HttpStatusCode.Conflict);
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar"), TimeSpan.FromSeconds(3));
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var method = typeof(VariableLibraryEdit).GetMethod("DeleteEntry", Priv)!;
 
-        var task = cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [10])!);
+        var task = cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new VariableEntryDto { Id = 10, Key = "DB_URL", Value = "postgres://localhost" }])!);
         await cut.InvokeAsync(() => dialog.Close(true));
         await task;
 
-        Assert.Contains(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Error);
-        Assert.DoesNotContain(Services.GetRequiredService<NotificationService>().Messages,
-            message => message.Severity == NotificationSeverity.Success);
+        Assert.Contains(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Danger);
+        Assert.DoesNotContain(Services.Toasts(),
+            message => message.Severity == OmniSeverity.Success);
     }
 
     // ── ReloadDetail ──────────────────────────────────────────────────────────

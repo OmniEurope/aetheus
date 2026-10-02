@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -100,26 +98,6 @@ public class ServerCronSectionExtendedTests : BunitContext
         var job = new CronJobDto { Id = "j1", User = "root", Schedule = "0 * * * *", Command = "backup" };
         await (Task)typeof(ServerCronSection).GetMethod("DeleteJobAsync", Priv)!.Invoke(cut.Instance, [job])!;
         Assert.False((bool)typeof(ServerCronSection).GetField("_actionRunning", Priv)!.GetValue(cut.Instance)!);
-    }
-
-    [Fact]
-    public void ShowConfirm_SetsState()
-    {
-        var cut = RenderSection();
-        typeof(ServerCronSection).GetMethod("ShowConfirm", Priv)!.Invoke(cut.Instance, ["T", "M", (Func<Task>)(() => Task.CompletedTask)]);
-        Assert.True((bool)typeof(ServerCronSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-    }
-
-    [Fact]
-    public async Task ConfirmAccepted_ExecutesAndHides()
-    {
-        var cut = RenderSection();
-        var ran = false;
-        typeof(ServerCronSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerCronSection).GetField("_confirmAction", Priv)!.SetValue(cut.Instance, (Func<Task>)(() => { ran = true; return Task.CompletedTask; }));
-        await (Task)typeof(ServerCronSection).GetMethod("ConfirmAccepted", Priv)!.Invoke(cut.Instance, [])!;
-        Assert.False((bool)typeof(ServerCronSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-        Assert.True(ran);
     }
 
     [Fact]

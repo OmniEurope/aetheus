@@ -1,24 +1,46 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Hubs;
+using Aetheus.Back.Services;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Artifacts;
 
 /// <summary>
 /// Measures the physical artifact volume, not only database metadata, and raises a throttled alert
-/// when its configured budget or normalized growth trajectory is exceeded. It never deletes data.
+/// when its configured budget is exceeded or when its growth, measured over at least 24 hours, would
+/// reach that budget soon. It never deletes data.
 /// </summary>
 public sealed class ArtifactStorageMonitorService(
     IConfiguration configuration,
     IHubContext<AlertHub> alertHub,
     TimeProvider timeProvider,
-    ILogger<ArtifactStorageMonitorService> logger) : BackgroundService
+    ILogger<ArtifactStorageMonitorService> logger,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
-    private long? _previousBytes;
-    private DateTime? _previousAt;
+    /// <summary>R2-016: one backend measures and alerts. Without a lease both blue-green colours raised
+    /// the same alert, 0.4 s apart.</summary>
+    internal const string LeaseName = "aetheus:artifact-storage-monitor";
+
+    /// <summary>R2-016: growth is measured over at least this window. One hour times 24 turned a single
+    /// 2 GB upload into 48.8 GB per day against a 5 GB per day threshold.</summary>
+    internal static readonly TimeSpan GrowthWindow = TimeSpan.FromHours(24);
+
+    /// <summary>A growth over the threshold is a risk only when it would reach the budget within this
+    /// horizon (or when no budget is configured).</summary>
+    internal static readonly TimeSpan BudgetHorizon = TimeSpan.FromDays(7);
+
+    private readonly List<(DateTime At, long Bytes)> _history = [];
     private DateTime? _lastAlertAt;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (leaderLease is null)
+            await RunLeaderLoopAsync(stoppingToken).ConfigureAwait(false);
+        else
+            await leaderLease.RunAsLeaderAsync(LeaseName, RunLeaderLoopAsync, stoppingToken).ConfigureAwait(false);
+    }
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         do
         {
@@ -48,19 +70,16 @@ public sealed class ArtifactStorageMonitorService(
         var budgetBytes = Math.Max(0, configuration.GetValue("ArtifactStorage:VolumeBudgetBytes", 53_687_091_200L));
         var growthWarningBytesPerDay = Math.Max(0, configuration.GetValue("ArtifactStorage:GrowthWarningBytesPerDay", 5_368_709_120L));
 
-        double? normalizedGrowthPerDay = null;
-        if (_previousBytes is { } previousBytes && _previousAt is { } previousAt && now > previousAt)
-        {
-            var elapsedDays = (now - previousAt).TotalDays;
-            normalizedGrowthPerDay = Math.Max(0, currentBytes - previousBytes) / elapsedDays;
-        }
+        var growthPerDay = GrowthBytesPerDay(_history, now, currentBytes);
+        var daysUntilBudget = DaysUntilBudget(currentBytes, budgetBytes, growthPerDay);
 
         logger.LogInformation(
-            "Artifact storage inventory: path={Path}, bytes={Bytes}, budgetBytes={BudgetBytes}, growthBytesPerDay={GrowthBytesPerDay}",
-            basePath, currentBytes, budgetBytes, normalizedGrowthPerDay);
+            "Artifact storage inventory: path={Path}, bytes={Bytes}, budgetBytes={BudgetBytes}, growthBytesPerDay={GrowthBytesPerDay}, daysUntilBudget={DaysUntilBudget}",
+            basePath, currentBytes, budgetBytes, growthPerDay, daysUntilBudget);
 
         var overBudget = budgetBytes > 0 && currentBytes >= budgetBytes;
-        var growingTooFast = growthWarningBytesPerDay > 0 && normalizedGrowthPerDay >= growthWarningBytesPerDay;
+        var growingTooFast = growthWarningBytesPerDay > 0 && growthPerDay >= growthWarningBytesPerDay
+            && (budgetBytes == 0 || daysUntilBudget <= BudgetHorizon.TotalDays);
         var alertCooldown = TimeSpan.FromHours(6);
         if ((overBudget || growingTooFast)
             && (_lastAlertAt is null || now - _lastAlertAt >= alertCooldown))
@@ -68,8 +87,8 @@ public sealed class ArtifactStorageMonitorService(
             _lastAlertAt = now;
             var cause = overBudget ? "budget dépassé" : "croissance trop rapide";
             logger.LogWarning(
-                "Artifact storage alert: {Cause}; bytes={Bytes}, budgetBytes={BudgetBytes}, growthBytesPerDay={GrowthBytesPerDay}",
-                cause, currentBytes, budgetBytes, normalizedGrowthPerDay);
+                "Artifact storage alert: {Cause}; bytes={Bytes}, budgetBytes={BudgetBytes}, growthBytesPerDay={GrowthBytesPerDay}, daysUntilBudget={DaysUntilBudget}",
+                cause, currentBytes, budgetBytes, growthPerDay, daysUntilBudget);
             await alertHub.Clients.Group(HubGroups.Alerts).SendAsync("AlertTriggered", new AlertTriggeredDto
             {
                 RuleName = "ArtifactStorage",
@@ -81,8 +100,39 @@ public sealed class ArtifactStorageMonitorService(
             }, ct).ConfigureAwait(false);
         }
 
-        _previousBytes = currentBytes;
-        _previousAt = now;
+        Record(_history, now, currentBytes);
+    }
+
+    /// <summary>
+    /// Growth per day between the newest measurement at least <see cref="GrowthWindow"/> old and now; null
+    /// until the history spans that window. A shrinking volume counts as no growth.
+    /// </summary>
+    internal static double? GrowthBytesPerDay(IReadOnlyList<(DateTime At, long Bytes)> history, DateTime now, long currentBytes)
+    {
+        (DateTime At, long Bytes)? baseline = null;
+        foreach (var measurement in history)
+        {
+            if (now - measurement.At >= GrowthWindow)
+                baseline = measurement;
+        }
+        if (baseline is not { } reference) return null;
+        return Math.Max(0, currentBytes - reference.Bytes) / (now - reference.At).TotalDays;
+    }
+
+    /// <summary>Days before the budget is reached at the measured growth; null without a budget or a growth.</summary>
+    internal static double? DaysUntilBudget(long currentBytes, long budgetBytes, double? growthBytesPerDay)
+    {
+        if (budgetBytes <= 0 || growthBytesPerDay is not > 0) return null;
+        return Math.Max(0, budgetBytes - currentBytes) / growthBytesPerDay.Value;
+    }
+
+    /// <summary>Appends the measurement and keeps only what a later growth needs: the measurements of the
+    /// last <see cref="GrowthWindow"/> and the newest one older than it.</summary>
+    private static void Record(List<(DateTime At, long Bytes)> history, DateTime now, long bytes)
+    {
+        history.Add((now, bytes));
+        while (history.Count > 1 && now - history[1].At >= GrowthWindow)
+            history.RemoveAt(0);
     }
 
     internal static long MeasureDirectoryBytes(string path)

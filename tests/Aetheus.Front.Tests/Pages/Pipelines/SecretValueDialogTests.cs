@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -30,12 +27,35 @@ public class SecretValueDialogTests : BunitContext
         Assert.True(saveBtn.HasAttribute("disabled"));
     }
 
+    /// <summary>Recette R-437: rotating or updating a secret offers Generate again, a text button with a
+    /// menu; its click applies the key's recipe (DB_PASSWORD: 24 bytes as 48 hex characters) and fills
+    /// the field, which enables Save.</summary>
+    [Fact]
+    public async Task Generate_FillsTheValueWithTheKeysRecipe_AndOffersOtherWays()
+    {
+        var cut = Render<SecretValueDialog>(p => p.Add(x => x.SecretKey, "DB_PASSWORD"));
+
+        var split = cut.Find(".omni-split-button");
+        Assert.Contains("Generate", split.TextContent);
+        await cut.Find(".omni-split-button__main").ClickAsync(new());
+
+        var value = cut.Find("#secret-value-input").GetAttribute("value");
+        Assert.Matches("^[0-9a-f]{48}$", value);
+        Assert.False(cut.FindAll("button").Single(b => b.TextContent.Contains("Save")).HasAttribute("disabled"));
+
+        await cut.Find(".omni-split-button__toggle").ClickAsync(new());
+        var choices = cut.FindAll(".omni-split-button__menu [role='menuitem'], .omni-split-button__menu button");
+        Assert.Contains(choices, item => item.TextContent.Contains("SecretGenerateCharacters32"));
+        Assert.Contains(choices, item => item.TextContent.Contains("SecretGenerateCharacters64"));
+        Assert.Contains(choices, item => item.TextContent.Contains("SecretGenerateHex32Bytes"));
+    }
+
     [Fact]
     public void Renders_CancelButton()
     {
         var cut = Render<SecretValueDialog>(p => p.Add(x => x.SecretKey, "KEY"));
         var buttons = cut.FindAll("button");
-        var cancelBtn = buttons.FirstOrDefault(b => b.TextContent.Contains("Cancel"));
+        var cancelBtn = buttons.FirstOrDefault(b => b.TextContent.Contains("GoBack"));
         Assert.NotNull(cancelBtn);
     }
 
@@ -49,14 +69,19 @@ public class SecretValueDialogTests : BunitContext
     }
 
     [Fact]
-    public void SecretInput_IsPasswordType_AndValueNeverRenderedAsPlaintext()
+    public void SecretInput_IsMasked_AndValueNeverRenderedAsPlaintext()
     {
         const string secret = "sup3r-s3cret-value";
         var cut = Render<SecretValueDialog>(p => p.Add(x => x.SecretKey, "MY_SECRET"));
 
         var input = cut.Find("#secret-value-input");
-        // The value field must be a password input so the secret is masked on screen.
-        Assert.Equal("password", input.GetAttribute("type"));
+        // Recette R-290: a masked text field, not a password field, so no password manager offers to
+        // save it or fills the login around it (OE OmniPassword IgnorePasswordManagers). The mask is the
+        // stylesheet class of the unrevealed input.
+        Assert.Equal("text", input.GetAttribute("type"));
+        Assert.Equal("off", input.GetAttribute("autocomplete"));
+        Assert.Equal("true", input.GetAttribute("data-lpignore"));
+        Assert.Contains("omni-password__input--masked", input.ClassList);
 
         // Type a secret, then confirm it never leaks into any visible text node (label, span, ...).
         // A password input masks its own value attribute in the browser, so the only safe surface is

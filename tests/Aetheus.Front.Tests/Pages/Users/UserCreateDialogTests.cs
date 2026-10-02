@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Users;
+using Aetheus.Front.Components.Users;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Users;
 
 /// <summary>
 /// Behavioural tests for UserCreateDialog.razor.cs: the password-generate button mutates and
 /// reveals the model password, the must-change-password checkbox binds, and a valid OnSubmit
-/// issues the real POST and closes the dialog with the created DTO (captured by a spy DialogService).
+/// issues the real POST and closes the dialog with the created DTO (captured by a spy OmniDialogService).
 /// </summary>
 public class UserCreateDialogTests : BunitContext
 {
@@ -27,11 +25,11 @@ public class UserCreateDialogTests : BunitContext
     }
 
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     private static object Model(IRenderedComponent<UserCreateDialog> cut) =>
         typeof(UserCreateDialog).GetField("_model", Priv)!.GetValue(cut.Instance)!;
@@ -48,11 +46,21 @@ public class UserCreateDialogTests : BunitContext
     // ── Password generation reveals a usable password ────────────────────────
 
     [Fact]
+    public void PasswordField_HasOnlyTheDialogsRevealToggle()
+    {
+        // Recette R-002: OmniPassword's own eye is off, the dialog's toggle (which Generate also uses) stays.
+        var cut = Render<UserCreateDialog>(p => p.Add(c => c.AvailableRoles, ["Admin"]));
+
+        Assert.Empty(cut.FindAll("button[aria-controls='Password']"));
+        Assert.Single(cut.FindAll("button"), b => b.GetAttribute("aria-label") == "ShowPassword");
+    }
+
+    [Fact]
     public void GeneratePassword_PopulatesAndRevealsPassword()
     {
         var cut = Render<UserCreateDialog>(p => p.Add(c => c.AvailableRoles, ["Admin"]));
 
-        // Initially the password field is masked (RadzenPassword, no plain value).
+        // Initially the password field is masked (a password control, no plain value).
         Assert.True(string.IsNullOrEmpty(GetModel<string>(cut, "Password")));
 
         typeof(UserCreateDialog).GetMethod("GeneratePassword", Priv)!.Invoke(cut.Instance, []);

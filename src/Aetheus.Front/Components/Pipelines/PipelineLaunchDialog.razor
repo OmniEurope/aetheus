@@ -1,0 +1,34 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniTemplateForm TModel="object" Model="@_formModel" OnValidSubmit="@OnSubmit">
+    <div class="run-params-dialog">
+        @if (Branches.Count > 0)
+        {
+            <div class="run-params-field">
+    <OmniLabel For="launch-branch" Class="omni-u-mb-xs run-params-label">@L["Branch"]</OmniLabel>
+                <OmniDropDown Id="launch-branch" TValue="string" Value="@_branch" ValueExpression="@(() => _branch)" name="launch-branch"
+                                ValueChanged="@(async (string value) => await OnBranchChangedAsync(value))"
+                                Options="@(Branches.ToOptions(item => (string)item.Name, item => item.Name))"
+                                Disabled="@_reloading"
+                                Class="run-params-input" />
+            </div>
+        }
+
+        <RunParameterFields @key="_parametersRevision" @ref="_fields"
+                            Parameters="@_parameters" AvailableReleases="@AvailableReleases" AvailableReleaseTotal="@AvailableReleaseTotal" />
+
+        @if (Branches.Count == 0 && _parameters.Count == 0)
+        {
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["NoRunOptions"]</OmniText>
+        }
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">@_error</OmniAlert>
+        }
+
+        <DialogFooter OnCancel="@OnCancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" Disabled="@_reloading" ButtonType="OmniButtonType.Submit"><OmniIcon Name="OmniIconName.Play" /> <span>@L["Run"]</span></OmniButton>
+        </DialogFooter>
+    </div>
+</OmniTemplateForm>

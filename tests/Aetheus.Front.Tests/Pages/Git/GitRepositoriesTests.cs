@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -30,7 +28,9 @@ public class GitRepositoriesTests : BunitContext
 
         // The page renders its toolbar (New Repository action + project filter) and, with no repos,
         // the empty grid state (no longer a "select a project first" gate).
-        Assert.Contains("NewRepository", cut.Markup);
+        // PLAN-003 lot 5: the button says "Create"; the page title carries the context.
+        Assert.Contains("GitRepositories", cut.Markup);
+        Assert.Contains(">Create<", cut.Markup);
         Assert.Contains("SelectProject", cut.Markup);
         Assert.Contains("NoRepositoriesFound", cut.Markup);
     }
@@ -154,7 +154,7 @@ public class GitRepositoriesTests : BunitContext
         // Count the repo loads issued so far (the init-time cross-project list). Creating a repo needs a
         // target project, so with no filter ShowCreateDialog must RETURN before opening the dialog - which
         // means it never reaches the post-dialog reload, so the api/git/repos GET count stays unchanged.
-        // (If it reached the real DialogService.OpenAsync, the awaited Task would never resolve and this
+        // (If it reached the real OmniDialogService.OpenAsync, the awaited Task would never resolve and this
         // test would hang - so completing AND not reloading is the meaningful signal it returned early.)
         var reposLoadsBefore = _handler.Requests.Count(r => r.Method == "GET" && r.Url.Contains("api/git/repos"));
 
@@ -163,5 +163,25 @@ public class GitRepositoriesTests : BunitContext
 
         var reposLoadsAfter = _handler.Requests.Count(r => r.Method == "GET" && r.Url.Contains("api/git/repos"));
         Assert.Equal(reposLoadsBefore, reposLoadsAfter);
+    }
+
+    /// <summary>R2-037 (2026-10-01): Open is the row's main action, blue by the user's choice (R-533);
+    /// Delete stays red.</summary>
+    [Fact]
+    public void RepositoryRow_OpenIsBlue_DeleteStaysRed()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
+        _handler.SetPaginatedJsonResponse("api/git/repos", new List<GitLightRepoDto>
+        {
+            new() { Id = 10, Name = "repo", ProjectId = 3, ProjectName = "Zeta", DefaultBranch = "main" }
+        });
+
+        var cut = Render<GitRepositories>();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("omni-button--primary", cut.FindAll("button[title='View']").Single().ClassName, StringComparison.Ordinal);
+            Assert.Contains("omni-button--danger", cut.FindAll("button[title='Delete']").Single().ClassName, StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(3));
     }
 }

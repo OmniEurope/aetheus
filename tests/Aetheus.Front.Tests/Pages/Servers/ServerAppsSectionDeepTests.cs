@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -74,8 +71,8 @@ public class ServerAppsSectionDeepTests : BunitContext
         var cut = RenderSection(2);
         var method = typeof(ServerAppsSection).GetMethod("GetAppStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ServerAppStatus.Running])!;
-        Assert.Equal(BadgeStyle.Success, result);
+        var result = (OmniTone)method.Invoke(null, [ServerAppStatus.Running])!;
+        Assert.Equal(OmniTone.Success, result);
     }
 
     // ── Test 3: GetAppStatusBadge - Stopped ──────────────────────────────────
@@ -86,8 +83,8 @@ public class ServerAppsSectionDeepTests : BunitContext
         var cut = RenderSection(3);
         var method = typeof(ServerAppsSection).GetMethod("GetAppStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ServerAppStatus.Stopped])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [ServerAppStatus.Stopped])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── Test 4: GetAppStatusBadge - Error ────────────────────────────────────
@@ -98,8 +95,8 @@ public class ServerAppsSectionDeepTests : BunitContext
         var cut = RenderSection(4);
         var method = typeof(ServerAppsSection).GetMethod("GetAppStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ServerAppStatus.Error])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [ServerAppStatus.Error])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     // ── Test 5: GetAppStatusBadge - Unknown falls through to Warning ──────────
@@ -110,8 +107,8 @@ public class ServerAppsSectionDeepTests : BunitContext
         var cut = RenderSection(5);
         var method = typeof(ServerAppsSection).GetMethod("GetAppStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ServerAppStatus.Unknown])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [ServerAppStatus.Unknown])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     // ── Test 6: _addVisible panel shows add form ─────────────────────────────

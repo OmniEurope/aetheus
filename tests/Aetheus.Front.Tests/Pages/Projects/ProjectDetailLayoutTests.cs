@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,5 +35,38 @@ public sealed class ProjectDetailLayoutTests : BunitContext
             Assert.Equal("Atlas", owner.Text);
             Assert.False(owner.IsLoading);
         });
+    }
+
+    /// <summary>
+    /// Recette R-431: the header menu opened on "Edit" alone, then "Follow" appeared above it once its
+    /// own request returned, at every opening. The follow state is now read once with the project, so
+    /// the menu shows both entries, Follow first, the moment it opens, and reopening asks nothing.
+    /// </summary>
+    [Fact]
+    public async Task HeaderMenu_ShowsFollowBeforeEdit_AtOnce_WithOneReadOfTheState()
+    {
+        _handler.SetJsonResponse("api/projects/42", new ProjectDetailDto
+        {
+            Id = 42,
+            Name = "Atlas",
+            Status = ProjectStatus.Active
+        });
+        _handler.SetJsonResponse("api/releases", new PaginatedResult<ReleaseDto>());
+        var loader = Services.GetRequiredService<ProjectDetailLoader>();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/projects/42/overview");
+
+        var cut = Render<ProjectDetailLayout>(parameters => parameters
+            .Add(layout => layout.Body, builder => builder.AddMarkupContent(0, "<div/>")));
+        await cut.InvokeAsync(() => loader.EnsureLoadedAsync(42));
+        cut.WaitForAssertion(() => Assert.Single(_handler.Requests, request => request.Url.Contains("api/notifications/me/subscriptions")));
+
+        cut.WaitForElement(".omni-overflow-menu__trigger").Click();
+        var labels = cut.FindAll(".omni-menu__item .omni-menu__label").Select(label => label.TextContent.Trim()).ToList();
+        Assert.Equal(["Subscribe", "Edit"], labels);
+
+        cut.Find(".omni-overflow-menu__trigger").Click();
+        cut.Find(".omni-overflow-menu__trigger").Click();
+        Assert.Equal(2, cut.FindAll(".omni-menu__item").Count);
+        Assert.Single(_handler.Requests, request => request.Url.Contains("api/notifications/me/subscriptions"));
     }
 }

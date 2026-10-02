@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Repositories;
@@ -270,6 +268,25 @@ public class RoleRepositoryTests : IDisposable
 
         Assert.Single(result);
         Assert.Equal("Dev", result[0].GrantedByRole);
+    }
+
+    [Fact]
+    public async Task R2_014_GetEffectivePermissionsForRolesAsync_ReturnsOnlyTheNamedRolesGrants()
+    {
+        var dev = new Role { Name = "Dev", Description = "" };
+        var ops = new Role { Name = "Ops", Description = "" };
+        _db.Roles.AddRange(dev, ops);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.ResourcePermissions.AddRange(
+            new ResourcePermission { RoleId = dev.Id, ResourceType = ResourceType.Pipeline, Permission = Permission.Read },
+            new ResourcePermission { RoleId = ops.Id, ResourceType = ResourceType.Server, Permission = Permission.Admin });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetEffectivePermissionsForRolesAsync(["Dev", "Unknown"], TestContext.Current.CancellationToken);
+
+        var permission = Assert.Single(result);
+        Assert.Equal(ResourceType.Pipeline, permission.ResourceType);
+        Assert.Equal("Dev", permission.GrantedByRole);
     }
 
     [Fact]

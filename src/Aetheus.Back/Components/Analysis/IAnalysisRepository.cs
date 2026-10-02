@@ -39,6 +39,9 @@ public interface IAnalysisRepository
     Task<List<AnalysisPortfolioProjectDto>> GetPortfolioProjectsAsync(
         IReadOnlyCollection<int>? accessibleProjectIds,
         CancellationToken ct = default);
+    Task<AnalysisPortfolioFilterValuesDto> GetPortfolioFilterValuesAsync(
+        IReadOnlyCollection<int>? accessibleProjectIds,
+        CancellationToken ct = default);
     Task<AnalysisProjectSummaryDto> GetProjectSummaryAsync(int projectId, CancellationToken ct = default);
     Task<int?> GetProjectOrganizationIdAsync(int projectId, CancellationToken ct = default);
     Task<bool> OrganizationExistsAsync(int organizationId, CancellationToken ct = default);
@@ -60,6 +63,8 @@ public interface IAnalysisRepository
     Task<AnalysisFinding?> GetTrackedFindingAsync(int findingId, CancellationToken ct = default);
     Task<List<AnalysisFindingDecision>> GetFindingDecisionsAsync(int findingId, CancellationToken ct = default);
     Task SaveFindingDecisionAsync(AnalysisFinding finding, AnalysisFindingDecision decision, CancellationToken ct = default);
+    /// <summary>Saves the changes made to an entity read with <see cref="GetTrackedFindingAsync"/>.</summary>
+    Task SaveTrackedChangesAsync(CancellationToken ct = default);
     Task ReopenExpiredFindingDecisionsAsync(int projectId, DateTime now, CancellationToken ct = default);
     Task MarkMissingFindingsFixedAsync(int projectId, string scannerKey, AnalysisCategory category, string? branchName,
         IReadOnlyCollection<string> observedFingerprints, DateTime now, CancellationToken ct = default);
@@ -84,6 +89,9 @@ public interface IAnalysisRepository
     Task<AnalysisRunGateDto> GetRunGateAsync(
         int runId, string? scope = null, CancellationToken ct = default);
     Task<AnalysisRunGateDto> GetRunGateAsync(int runId, CancellationToken ct = default);
+    /// <summary>Recette R-485: the run result the run page reads: every count, the most severe
+    /// <paramref name="findingLimit"/> findings (the rest are read page by page).</summary>
+    Task<AnalysisRunGateDto> GetRunResultSummaryAsync(int runId, int findingLimit, CancellationToken ct = default);
     Task<int?> GetLatestProjectRunIdAsync(int projectId, CancellationToken ct = default);
     Task<DependencyTrackGateState> GetDependencyTrackGateStateAsync(
         int runId,

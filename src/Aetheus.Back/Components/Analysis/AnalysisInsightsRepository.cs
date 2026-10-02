@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Back.Components.Analysis;
 
@@ -72,8 +71,13 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
                 item.OrganizationId, item.ProjectId, item.SyncStatus, item.LastSyncAt, item.LastError))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        // Only servers whose report is still current. The capabilities column holds whatever the agent
+        // last said, and it is never cleared: without this, a runner that has been offline for weeks -
+        // or retired from the fleet - keeps raising the same operational alert forever, on a workspace
+        // that may no longer exist. An alert about a machine nobody is running is noise, and the
+        // operator has no way to make it stop.
         var servers = await db.Servers.AsNoTracking()
-            .Where(server => server.ScannerCapabilitiesJson != null)
+            .Where(server => server.ScannerCapabilitiesJson != null && server.LastHeartbeat >= since)
             .Select(server => new AnalysisServerHealthRow(
                 server.OrganizationId, server.Id, server.Name, server.ScannerCapabilitiesJson))
             .ToListAsync(ct)
@@ -250,10 +254,14 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
         return (await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct).ConfigureAwait(false), total);
     }
 
+    /// <param name="findingLimit">Recette R-485: when set, only the most severe findings are listed and
+    /// the counts are worked out by the database over all of them (the run page reads the rest page by
+    /// page); unset, every finding is listed, as the agent's gate report needs.</param>
     public async Task<AnalysisRunGateDto> GetRunGateAsync(
         int runId,
         string? scope,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? findingLimit = null)
     {
         var normalizedScope = AnalysisGateScopes.Normalize(scope);
         var categoryFilter = AnalysisGateScopes.IsValid(normalizedScope)
@@ -264,7 +272,8 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
                 && (task.Operation == OperationKind.PipelineRunScanner
                     || task.Operation == OperationKind.PipelinePublishCoverage
                     || task.Operation == OperationKind.PipelinePublishLint
-                    || task.Operation == OperationKind.PipelinePublishComplexity))
+                    || task.Operation == OperationKind.PipelinePublishComplexity
+                    || task.Operation == OperationKind.PipelinePublishMutation))
             .OrderBy(task => task.Id)
             .Select(task => new ExpectedAnalysisProducer(task.Id, task.Operation, task.Command, task.Name))
             .ToListAsync(ct)
@@ -309,37 +318,16 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
         if (categoryFilter is not null)
             findingQuery = findingQuery.Where(occurrence =>
                 categoryFilter.Contains(occurrence.AnalysisReport.Category));
-        var findings = await findingQuery
-            .GroupBy(occurrence => new
-            {
-                occurrence.AnalysisFindingId,
-                occurrence.AnalysisFinding.RuleId,
-                occurrence.AnalysisFinding.Title,
-                occurrence.AnalysisFinding.Message,
-                occurrence.AnalysisFinding.Category,
-                occurrence.AnalysisFinding.Status,
-                occurrence.AnalysisFinding.Severity
-            })
-            .Select(group => new AnalysisRunGateFindingDto
-            {
-                FindingId = group.Key.AnalysisFindingId,
-                RuleId = group.Key.RuleId,
-                Title = group.Key.Title,
-                Message = group.Key.Message,
-                Category = group.Key.Category,
-                Severity = group.Key.Severity,
-                Status = group.Key.Status,
-                FilePath = group.OrderByDescending(occurrence => occurrence.CreatedAt)
-                    .Select(occurrence => occurrence.FilePath)
-                    .FirstOrDefault(),
-                StartLine = group.OrderByDescending(occurrence => occurrence.CreatedAt)
-                    .Select(occurrence => occurrence.StartLine)
-                    .FirstOrDefault(),
-                IsNew = group.Any(occurrence => occurrence.IsNew)
-            })
+        var orderedFindings = AnalysisRunResultRepository.GroupFindings(findingQuery)
             .OrderByDescending(finding => finding.Severity)
-            .ThenBy(finding => finding.FindingId)
+            .ThenBy(finding => finding.FindingId);
+        var findings = await (findingLimit is { } limit ? orderedFindings.Take(limit) : orderedFindings)
             .ToListAsync(ct).ConfigureAwait(false);
+        var findingCounts = findingLimit is null
+            ? (Open: findings.Count(finding => finding.Status == AnalysisFindingStatus.Open),
+                NewOpen: findings.Count(finding => finding.IsNew && finding.Status == AnalysisFindingStatus.Open),
+                Decided: findings.Count(finding => finding.Status != AnalysisFindingStatus.Open))
+            : await AnalysisRunResultRepository.CountFindingsAsync(findingQuery, ct).ConfigureAwait(false);
         var evaluationQuery = db.AnalysisEvaluations.AsNoTracking()
             .Where(evaluation => evaluation.PipelineRunId == runId);
         if (categoryFilter is not null)
@@ -359,20 +347,7 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
             pipelineRunId: runId);
 
         var missingProducers = FindMissingProducers(expectedProducers, reports);
-        var hasOperationalError = reports.Count == 0 || missingProducers.Count > 0 || reports.Any(report =>
-            report.ReportStatus is AnalysisReportStatus.Error or AnalysisReportStatus.TimedOut or AnalysisReportStatus.Unavailable
-            || report.GateStatus is null or AnalysisGateStatus.Error)
-            || grade?.Completeness == AnalysisGradeCompleteness.Incomplete;
-        var gradeBlocks = grade?.OverallGrade.HasValue == true
-            && grade.MinimumGrade.HasValue
-            && grade.OverallGrade.Value > grade.MinimumGrade.Value;
-        var status = hasOperationalError
-            ? AnalysisGateStatus.Error
-            : reports.Any(report => report.GateStatus == AnalysisGateStatus.Blocked) || gradeBlocks
-                ? AnalysisGateStatus.Blocked
-                : reports.Any(report => report.GateStatus == AnalysisGateStatus.Warning)
-                    ? AnalysisGateStatus.Warning
-                    : AnalysisGateStatus.Passed;
+        var status = ResolveGateStatus(reports, missingProducers, grade);
         return new AnalysisRunGateDto
         {
             PipelineRunId = runId,
@@ -381,8 +356,11 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
             // The gate grid materializes findings, not occurrences. A finding can be reported by
             // several producers in the same run, so report-level totals would overstate the number
             // of rows visible to the user. Occurrences remain available from the finding detail.
-            FindingCount = findings.Count,
-            NewFindingCount = findings.Count(finding => finding.IsNew),
+            // Recette R-527: a finding someone decided on (accepted, false positive, mitigated) is not
+            // something left to do; it is counted apart and the page hides it until asked.
+            FindingCount = findingCounts.Open,
+            NewFindingCount = findingCounts.NewOpen,
+            DecidedFindingCount = findingCounts.Decided,
             ComponentCount = reports.Sum(report => report.ComponentCount),
             MetricCount = reports.Sum(report => report.MetricCount),
             BlockerCount = reports.Sum(report => report.BlockerCount),
@@ -395,11 +373,35 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
         };
     }
 
+    /// <summary>The run's gate verdict: an operational error (no report, a missing or failed producer,
+    /// an incomplete grade) wins over a block, a block (a blocking report or a grade below the minimum)
+    /// over a warning. Extracted from <see cref="GetRunGateAsync"/> to keep it under the complexity budget.</summary>
+    private static AnalysisGateStatus ResolveGateStatus(
+        List<AnalysisRunGateReportDto> reports,
+        List<string> missingProducers,
+        AnalysisGradeSummaryDto? grade)
+    {
+        var hasOperationalError = reports.Count == 0 || missingProducers.Count > 0 || reports.Any(report =>
+            report.ReportStatus is AnalysisReportStatus.Error or AnalysisReportStatus.TimedOut or AnalysisReportStatus.Unavailable
+            || report.GateStatus is null or AnalysisGateStatus.Error)
+            || grade?.Completeness == AnalysisGradeCompleteness.Incomplete;
+        if (hasOperationalError) return AnalysisGateStatus.Error;
+        var gradeBlocks = grade?.OverallGrade.HasValue == true
+            && grade.MinimumGrade.HasValue
+            && grade.OverallGrade.Value > grade.MinimumGrade.Value;
+        if (gradeBlocks || reports.Any(report => report.GateStatus == AnalysisGateStatus.Blocked))
+            return AnalysisGateStatus.Blocked;
+        return reports.Any(report => report.GateStatus == AnalysisGateStatus.Warning)
+            ? AnalysisGateStatus.Warning
+            : AnalysisGateStatus.Passed;
+    }
+
     private static bool IsProducerForScope(ExpectedAnalysisProducer producer, string scope)
     {
         if (producer.Operation is OperationKind.PipelinePublishCoverage
             or OperationKind.PipelinePublishLint
-            or OperationKind.PipelinePublishComplexity)
+            or OperationKind.PipelinePublishComplexity
+            or OperationKind.PipelinePublishMutation)
             return scope == AnalysisGateScopes.Quality;
         if (producer.Operation != OperationKind.PipelineRunScanner) return false;
         return AnalysisGateScopes.ForScannerCategory(
@@ -447,6 +449,7 @@ internal sealed class AnalysisInsightsRepository(AppDbContext db)
                 OperationKind.PipelinePublishComplexity =>
                     ["roslyn-metrics", "dotnet-architecture-metrics", "dotnet-architecture"],
                 OperationKind.PipelinePublishCoverage => [],
+                OperationKind.PipelinePublishMutation => ["stryker-mutation"],
                 _ => []
             };
             if (producer.Operation == OperationKind.PipelinePublishCoverage)

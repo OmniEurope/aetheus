@@ -1,0 +1,50 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git/commits/{CommitId:int}"
+@page "/git-repositories/commits/{CommitId:int}"
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+<PageTitle>@L["Commit"] - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else if (_commit is { } commit)
+{
+    @* Recette R-319: a commit known to the project but held by no internal repository. *@
+    <OmniPageHeader Title="@DisplayFormatting.ShortSha(commit.Sha)"
+        ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon>
+    </OmniPageHeader>
+    <OmniAlert Severity="OmniSeverity.Info" Class="commit-outside-repositories">
+        <Icon><OmniIcon Name="OmniIconName.Info" /></Icon>
+        <ChildContent>
+            <OmniText Element="OmniTextElement.Span">@L["CommitOutsideInternalRepositories"]</OmniText>
+            @if (!string.IsNullOrWhiteSpace(commit.RepositoryUrl))
+            {
+                <OmniText Element="OmniTextElement.Span" Class="text-mono omni-u-ms-sm">@commit.RepositoryUrl</OmniText>
+            }
+        </ChildContent>
+    </OmniAlert>
+    <OmniCard Class="omni-u-mt-md">
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniText Element="OmniTextElement.Span" Class="text-mono" title="@commit.Sha">@commit.Sha</OmniText>
+            @if (!string.IsNullOrWhiteSpace(commit.Message))
+            {
+                <OmniText Element="OmniTextElement.Span">@commit.Message</OmniText>
+            }
+            @if (ExternalHref is { } externalHref)
+            {
+                <OmniLink Href="@externalHref" NewTab="true" Class="commit-external-link">@L["OpenCommitAtProvider"]</OmniLink>
+            }
+        </OmniStack>
+    </OmniCard>
+}
+else
+{
+    <OmniPageHeader Title="@L["Commit"]"
+        ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon>
+    </OmniPageHeader>
+    <OmniAlert Severity="OmniSeverity.Warning">@L["NotFound"]</OmniAlert>
+}

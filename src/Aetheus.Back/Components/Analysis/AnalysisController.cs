@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Back.Components.Analysis;
 
@@ -9,6 +8,8 @@ namespace Aetheus.Back.Components.Analysis;
 [Authorize]
 public sealed class AnalysisController(
     IAnalysisService service,
+    IAnalysisFindingDecisionService decisions,
+    IAnalysisRunResultService runResults,
     IPipelineRunService pipelineRunService,
     IResourceAuthorizationService authz) : ControllerBase
 {
@@ -163,7 +164,24 @@ public sealed class AnalysisController(
         if (pipelineId is null) return NotFound();
         if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
             return Forbid();
-        return Ok(await service.GetRunGateAsync(runId, ct));
+        return Ok(await runResults.GetRunResultAsync(runId, ct));
+    }
+
+    /// <summary>Recette R-485: one page of the findings a run and the runs it triggered observed, with
+    /// the counts of the whole set. Every run of the set must be readable.</summary>
+    [HttpGet("runs/findings")]
+    public async Task<ActionResult<AnalysisRunFindingsPageDto>> GetRunFindings(
+        [FromQuery] AnalysisRunFindingsRequest request,
+        CancellationToken ct)
+    {
+        foreach (var runId in request.RunIds.Distinct())
+        {
+            var pipelineId = await pipelineRunService.GetPipelineIdForRunAsync(runId, ct);
+            if (pipelineId is null) return NotFound();
+            if (!await authz.HasPermissionAsync(User, ResourceType.Pipeline, pipelineId.Value, Permission.Read, ct))
+                return Forbid();
+        }
+        return Ok(await runResults.GetRunFindingsAsync(request, ct));
     }
 
     [HttpGet("projects/{projectId:int}/findings")]
@@ -185,6 +203,16 @@ public sealed class AnalysisController(
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(
             User, ResourceType.Project, Permission.Read, ct);
         return Ok(await service.GetPortfolioAsync(accessibleIds, request, ct));
+    }
+
+    /// <summary>Recette R-224: the organizations, projects and scanners the portfolio's column filters offer.</summary>
+    [HttpGet("portfolio/filter-values")]
+    public async Task<ActionResult<AnalysisPortfolioFilterValuesDto>> GetPortfolioFilterValues(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(
+            User, ResourceType.Project, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new AnalysisPortfolioFilterValuesDto());
+        return Ok(await service.GetPortfolioFilterValuesAsync(accessibleIds, ct));
     }
 
     [HttpGet("portfolio/projects")]
@@ -391,7 +419,7 @@ public sealed class AnalysisController(
         if (!projectId.HasValue) return NotFound();
         if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId.Value, Permission.Read, ct))
             return Forbid();
-        return Ok(await service.GetFindingDecisionsAsync(findingId, ct));
+        return Ok(await decisions.GetFindingDecisionsAsync(findingId, ct));
     }
 
     [HttpPost("findings/{findingId:int}/decisions")]
@@ -404,8 +432,25 @@ public sealed class AnalysisController(
         if (!projectId.HasValue) return NotFound();
         if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId.Value, Permission.Admin, ct))
             return Forbid();
-        var decision = await service.CreateFindingDecisionAsync(findingId, request, Actor(), ct);
+        var decision = await decisions.CreateFindingDecisionAsync(findingId, request, Actor(), ct);
         return CreatedAtAction(nameof(GetFindingDecisions), new { findingId }, decision);
+    }
+
+    /// <summary>Recette R2-027: reverts the active decision of the finding (kept in its history,
+    /// audited); the finding is open again. The same permission as deciding.</summary>
+    [HttpDelete("findings/{findingId:int}/decisions/active")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RevokeFindingDecision(int findingId, CancellationToken ct)
+    {
+        var projectId = await service.GetFindingProjectIdAsync(findingId, ct);
+        if (!projectId.HasValue) return NotFound();
+        if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId.Value, Permission.Admin, ct))
+            return Forbid();
+        await decisions.RevokeActiveFindingDecisionAsync(findingId, Actor(), ct);
+        return NoContent();
     }
 
     private string Actor() => User.Identity?.Name ?? "unknown";

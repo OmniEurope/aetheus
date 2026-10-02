@@ -2,8 +2,6 @@
 using System.Security.Claims;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -518,7 +516,7 @@ public class GitLightControllerTests
     [Fact]
     public async Task DeleteBranchProtectionRule_Found_ReturnsNoContent()
     {
-        _serviceMock.DeleteBranchProtectionRuleAsync(1, TestContext.Current.CancellationToken).Returns(true);
+        _serviceMock.DeleteBranchProtectionRuleAsync(1, 1, TestContext.Current.CancellationToken).Returns(true);
 
         var result = await _sut.DeleteBranchProtectionRule(1, 1, TestContext.Current.CancellationToken);
 
@@ -528,7 +526,7 @@ public class GitLightControllerTests
     [Fact]
     public async Task DeleteBranchProtectionRule_NotFound_Returns404()
     {
-        _serviceMock.DeleteBranchProtectionRuleAsync(99, TestContext.Current.CancellationToken).Returns(false);
+        _serviceMock.DeleteBranchProtectionRuleAsync(1, 99, TestContext.Current.CancellationToken).Returns(false);
 
         var result = await _sut.DeleteBranchProtectionRule(1, 99, TestContext.Current.CancellationToken);
 

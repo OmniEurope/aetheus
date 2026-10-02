@@ -4,8 +4,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.Tests;
@@ -197,6 +195,9 @@ public class RolesControllerIntegrationTests : IClassFixture<CustomWebApplicatio
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(summary);
         Assert.Contains("Admin", summary.Roles);
+        // Recette R2-014: the test token is the bootstrap identity's ("bootstrap" subject); its summary
+        // now comes from its role claims, not from a user row looked up by name.
+        Assert.Equal(0, summary.UserId);
     }
 
     [Fact]

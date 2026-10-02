@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -165,6 +163,33 @@ public class PipelineArtifactServiceTrendTests
         Assert.Equal(2, result.Page);
         Assert.Single(result.Items);
         Assert.Equal("C", result.Items[0].Name);
+    }
+
+    [Fact]
+    public async Task GetCoverageAssembliesAsync_FilesWithoutPackage_AreGroupedByTheProjectTheirPathNames()
+    {
+        // Recette R-428: a report stored without package names used to give an empty table.
+        _repo.GetCoverageResultsAsync(1, Arg.Any<CancellationToken>()).Returns(
+        [
+            new CoverageResult
+            {
+                PipelineRunId = 1,
+                LinesValid = 60,
+                FilesJson = "[{\"File\":\"src/Aetheus.Back/A.cs\",\"LinesCovered\":10,\"LinesValid\":20},"
+                    + "{\"File\":\"src/Aetheus.Back/Sub/B.cs\",\"LinesCovered\":20,\"LinesValid\":20},"
+                    + "{\"File\":\"src/Aetheus.Front/C.razor\",\"LinesCovered\":5,\"LinesValid\":20}]"
+            }
+        ]);
+
+        var result = await _sut.GetCoverageAssembliesAsync(1, new PaginationRequest { Page = 1, PageSize = 10 },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.TotalCount);
+        var back = Assert.Single(result.Items, item => item.Name == "Aetheus.Back");
+        Assert.Equal(30, back.LinesCovered);
+        Assert.Equal(40, back.LinesValid);
+        var front = Assert.Single(result.Items, item => item.Name == "Aetheus.Front");
+        Assert.Equal(0.25, front.LineRate, 3);
     }
 
     [Fact]

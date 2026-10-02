@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Settings;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
 

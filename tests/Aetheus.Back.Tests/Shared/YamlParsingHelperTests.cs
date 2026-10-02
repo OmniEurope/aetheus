@@ -155,6 +155,49 @@ public class YamlParsingHelperTests
     }
 
     [Fact]
+    public void ParseAndValidate_UnknownTopLevelAndStepKeys_AreSkipped()
+    {
+        // Recette R2-041: a key added for a newer backend must not make the whole definition invalid.
+        var yaml = """
+            name: deploy
+            new_top_level_option: true
+            stages:
+              - name: build
+                agent: linux-01
+                steps:
+                  - name: compile
+                    shell: dotnet build
+                    new_step_option: 3
+            """;
+
+        var result = YamlParsingHelper.ParseAndValidate(yaml);
+
+        Assert.NotNull(result);
+        Assert.Equal("dotnet build", Assert.Single(Assert.Single(result!.Stages).Steps).Shell);
+    }
+
+    [Fact]
+    public void ParseAndValidate_KnownKeyWithTheWrongShape_ReturnsNull()
+    {
+        var yaml = """
+            name: deploy
+            stages:
+              - name: build
+                steps:
+                  name: not-a-list
+            """;
+
+        Assert.Null(YamlParsingHelper.ParseAndValidate(yaml));
+    }
+
+    [Fact]
+    public void ServerConfigDeserializer_StaysStrict_OnAnUnknownKey()
+    {
+        Assert.ThrowsAny<YamlDotNet.Core.YamlException>(() =>
+            YamlParsingHelper.ServerConfigDeserializer.Deserialize<ServerConfigYaml>("unknown_section: 1"));
+    }
+
+    [Fact]
     public void ParseAndValidate_InvalidYaml_ReturnsNull()
     {
         var result = YamlParsingHelper.ParseAndValidate("{{invalid yaml: [");

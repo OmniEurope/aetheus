@@ -1,0 +1,148 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectWritableSectionBase
+
+@* The breadcrumb leaf already reads "External Repo" - no need to repeat it as a section title. *@
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_repo is not null)
+{
+    @* Attached: show mirror status + actions. *@
+    <OmniCard>
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Gap="OmniSpacing.Large">
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">
+                    @_repo.ProviderType / @_repo.OwnerOrGroup / @_repo.RepositoryName
+                </OmniText>
+                <OmniBadge Fill="OmniFill.Solid" Tone="@MirrorBadge(_repo.MirrorStatus)">@L.Localize(_repo.MirrorStatus)</OmniBadge>
+            </OmniStack>
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["LastFetched"]</OmniText>
+                <OmniText Element="OmniTextElement.Paragraph">@(_repo.LastFetchedAt?.ToString("g") ?? "-")</OmniText>
+            </OmniStack>
+            @if (!string.IsNullOrEmpty(_repo.LastFetchError))
+            {
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-danger">@_repo.LastFetchError</OmniText>
+            }
+            @if (!string.IsNullOrEmpty(_repo.CloneUrl))
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Url"]</OmniText>
+                    <OmniText Element="OmniTextElement.Paragraph" Class="text-mono">@_repo.CloneUrl</OmniText>
+                </OmniStack>
+            }
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["ExternalRepoRole"]</OmniText>
+                <OmniText Element="OmniTextElement.Paragraph">@L[_repo.IsProjectSource ? "ExternalRepoRoleProjectSource" : "ExternalRepoRoleAdditionalSource"]</OmniText>
+            </OmniStack>
+            @if (_repo.IsProjectSource)
+            {
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["ExternalRepoCloneHint"]</OmniText>
+            }
+            else
+            {
+                @* Recette R-534: beside the project's repository, the mirror is a source a pipeline names. *@
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["ExternalRepoAdditionalSourceHint"]</OmniText>
+                <OmniCodeBlock Code="@PipelineSourceYaml" Title="@L["ExternalRepoPipelineYaml"]" Language="yaml" />
+            }
+            @if (_canWrite)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-sm">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SyncNowAsync" Class="@(_syncing ? "btn-busy" : null)" Busy="@(_syncing)"><OmniIcon Name="OmniIconName.Sync" /> <span>@L["SyncNow"]</span></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@DetachAsync"><OmniIcon Name="OmniIconName.LinkBreak" /> <span>@L["Detach"]</span></OmniButton>
+                </OmniStack>
+            }
+        </OmniStack>
+    </OmniCard>
+}
+else if (_canWrite)
+{
+    @* Not attached: attach form. *@
+    <OmniCard>
+        <OmniTemplateForm TModel="AttachModel" Model="@_model" OnValidSubmit="@AttachAsync">
+            <OmniDataAnnotationsValidator Localizer="@L" />
+            <OmniRow Gap="OmniSpacing.Large">
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniFormField Label="@L["Provider"]" Class="omni-u-w-100" For="oe-formfield-pages-projects-projectdetailsections-projectexternalreposection-1">
+                        <OmniDropDown Id="oe-formfield-pages-projects-projectdetailsections-projectexternalreposection-1" @bind-Value="_model.ProviderType" Options="@_providers" />
+                    </OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="8">
+                    <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-2" Class="omni-u-w-100"><LabelContent>@L["BaseUrl"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_model.BaseUrl" Placeholder="@L["PlaceholderGitServerUrl"]" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-2" />
+                    </ChildContent></OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-3" Class="omni-u-w-100"><LabelContent>@L["OwnerOrGroup"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_model.OwnerOrGroup" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-3" />
+                    </ChildContent></OmniFormField>
+                    <ValidationMessage For="@(() => _model.OwnerOrGroup)" />
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-4" Class="omni-u-w-100"><LabelContent>@L["RepositoryName"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_model.RepositoryName" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-4" />
+                    </ChildContent></OmniFormField>
+                    <ValidationMessage For="@(() => _model.RepositoryName)" />
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-5" Class="omni-u-w-100"><LabelContent>@L["DefaultBranch"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_model.DefaultBranch" Placeholder="main" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-5" />
+                    </ChildContent></OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniFormField Label="@L["AuthType"]" Class="omni-u-w-100" For="oe-formfield-pages-projects-projectdetailsections-projectexternalreposection-2">
+                        <OmniDropDown Id="oe-formfield-pages-projects-projectdetailsections-projectexternalreposection-2" @bind-Value="_model.AuthType" Options="@_authTypes" />
+                    </OmniFormField>
+                </OmniColumn>
+                @if (_model.AuthType == GitAuthType.HttpsToken)
+                {
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-7" Class="omni-u-w-100"><LabelContent>@L["Username"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_model.Username" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-7" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-8" Class="omni-u-w-100" Description="@L["ExternalRepoTokenHint"]"><LabelContent>@L["Token"]</LabelContent><ChildContent>
+                            <OmniPassword @bind-Value="_model.Token" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-8" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                }
+                else
+                {
+                    <OmniColumn Span="12">
+                        <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-9" Class="omni-u-w-100"><LabelContent>@L["PrivateKey"]</LabelContent><ChildContent>
+                            <OmniTextArea @bind-Value="_model.PrivateKeyPem" Rows="3" Class="text-mono" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-9" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="6">
+                        <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-10" Class="omni-u-w-100"><LabelContent>@L["Passphrase"]</LabelContent><ChildContent>
+                            <OmniPassword @bind-Value="_model.Passphrase" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-10" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="6">
+                        <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-11" Class="omni-u-w-100"><LabelContent>@L["KnownHosts"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_model.KnownHosts" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-11" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                }
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniFormField For="oe-pages-projects-projectdetailsections-projectexternalreposection-numeric-1"><LabelContent>@L["FetchIntervalMinutes"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.FetchIntervalMinutes" Minimum="1" Maximum="1440" Id="oe-pages-projects-projectdetailsections-projectexternalreposection-numeric-1" /></ChildContent></OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniSwitch Class="omni-u-mt-lg" @bind-Value="_model.AutoSyncEnabled">@L["AutoSync"]</OmniSwitch>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="4">
+                    <OmniSwitch Class="omni-u-mt-lg" @bind-Value="_model.WriteEnabled">@L["WriteEnabled"]</OmniSwitch>
+                </OmniColumn>
+            </OmniRow>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-mt-sm">@L["ExternalRepoCloneHint"]</OmniText>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["ExternalRepoAttachBesideHint"]</OmniText>
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@("omni-u-mt-md" + (_busy ? " btn-busy" : null))" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Link" /> <span>@L["Attach"]</span></OmniButton>
+        </OmniTemplateForm>
+    </OmniCard>
+}
+else
+{
+    <EmptyState Icon="link_off" Title="@L["NoExternalRepo"]" Description="@L["NoExternalRepoDescription"]" />
+}

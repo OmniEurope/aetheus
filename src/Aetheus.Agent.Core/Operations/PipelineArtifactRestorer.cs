@@ -52,6 +52,7 @@ internal static class PipelineArtifactRestorer
         envVars.TryGetValue("AETHEUS_WORKING_DIR", out var workingDir);
         envVars.TryGetValue("AETHEUS_RESTORE_TARGET_DIR", out var targetDirectory);
         envVars.TryGetValue("AETHEUS_RESTORE_RELEASE_SELECTOR", out var releaseSelector);
+        envVars.TryGetValue("AETHEUS_RESTORE_EXPECTED_SOURCE_COMMIT", out var expectedSourceCommit);
         var artifactIdValid = int.TryParse(artifactIdText, out var artifactId) && artifactId > 0;
         var runIdValid = int.TryParse(runIdText, out var runId) && runId > 0;
         var valid = artifactIdValid
@@ -64,7 +65,7 @@ internal static class PipelineArtifactRestorer
             : 0;
         request = new ArtifactRestoreRequest(
             artifactId, runId, expectedSha256 ?? string.Empty, expectedSize,
-            workingDir ?? string.Empty, targetDirectory, releaseSelector);
+            workingDir ?? string.Empty, targetDirectory, releaseSelector, expectedSourceCommit);
         return valid;
     }
 
@@ -113,6 +114,13 @@ internal static class PipelineArtifactRestorer
         var extraction = Stopwatch.StartNew();
         DeployLayout.ExtractSafely(archive, restoreDirectory);
         extraction.Stop();
+
+        if (VerifyProvenance(restoreDirectory, request.ExpectedSourceCommit) is { } provenanceFailure)
+        {
+            await onOutput(provenanceFailure, TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(1, false);
+        }
+
         var downloadDuration = ArtifactDownloadTelemetry.TryGet(zip, out var measured)
             ? measured.DownloadDuration
             : download.Elapsed;
@@ -124,6 +132,54 @@ internal static class PipelineArtifactRestorer
                 restoreDirectory, request.ReleaseSelector!, onOutput, ct).ConfigureAwait(false);
         return new ExecutorResult(0, false);
     }
+
+    /// <summary>
+    /// D-04: proves the restored artifact was built from the revision this run was launched on.
+    ///
+    /// The archive's SHA-256 above proves it arrived intact; it says nothing about WHICH build it is.
+    /// Without this, a consumer restores a previous run's artifacts and then scans, grades or ships a
+    /// revision it never looked at, which is exactly the class of defect the sealed delivery contract
+    /// exists to prevent. Every consumer used to rewrite the comparison in shell afterwards, so a
+    /// consumer that forgot the stage got no warning at all.
+    ///
+    /// Returns null when there is nothing to check (a release selector deliberately restores another
+    /// commit) or when the artifact checks out; otherwise the reason to refuse it.
+    /// </summary>
+    private static string? VerifyProvenance(string restoreDirectory, string? expectedSourceCommit)
+    {
+        if (string.IsNullOrWhiteSpace(expectedSourceCommit)) return null;
+
+        var metadata = Path.Combine(restoreDirectory, ".pipeline-artifacts");
+        var commitPath = Path.Combine(metadata, "source-commit");
+        if (!File.Exists(commitPath))
+            return "Artifact provenance refused: the restored artifact carries no "
+                + ".pipeline-artifacts/source-commit, so the revision it was built from cannot be proved.";
+
+        // Bounded on purpose: this file holds one commit id, and anything else is not evidence.
+        var info = new FileInfo(commitPath);
+        if (info.Length is <= 0 or > 256)
+            return "Artifact provenance refused: .pipeline-artifacts/source-commit is empty or "
+                + "implausibly large.";
+
+        var actual = File.ReadAllText(commitPath).Trim();
+        if (!string.Equals(actual, expectedSourceCommit.Trim(), StringComparison.OrdinalIgnoreCase))
+            return $"Artifact provenance refused: built from {actual}, but this run was launched on "
+                + $"{expectedSourceCommit}.";
+
+        foreach (var required in RequiredProvenanceFiles)
+        {
+            var path = Path.Combine(metadata, required);
+            if (!File.Exists(path) || new FileInfo(path).Length <= 0)
+                return $"Artifact provenance refused: .pipeline-artifacts/{required} is missing or empty.";
+        }
+
+        return null;
+    }
+
+    /// <summary>The delivery contract and the provenance manifest travel with every artifact built by
+    /// the pipelines; an artifact missing either is not one a consumer can attest anything about.</summary>
+    private static readonly string[] RequiredProvenanceFiles =
+        ["delivery-contract.json", "artifact-provenance.json"];
 
     private static bool IsDeployedReleaseSelector(string? selector) =>
         string.Equals(selector, "previous-deployed", StringComparison.OrdinalIgnoreCase)
@@ -162,7 +218,8 @@ internal static class PipelineArtifactRestorer
         long ExpectedSize,
         string WorkingDirectory,
         string? TargetDirectory,
-        string? ReleaseSelector);
+        string? ReleaseSelector,
+        string? ExpectedSourceCommit);
 
     private sealed record ArtifactHashResult(string Sha256, TimeSpan Duration, long Bytes);
 

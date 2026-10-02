@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -32,7 +29,7 @@ public class GitRepositoryCreateDialogTests : BunitContext
         var cut = Render<GitRepositoryCreateDialog>(p => p.Add(x => x.ProjectId, 1));
 
         Assert.Contains("Create", cut.Markup);
-        Assert.Contains("Cancel", cut.Markup);
+        Assert.Contains("GoBack", cut.Markup);
     }
 
     [Fact]
@@ -53,9 +50,9 @@ public class GitRepositoryCreateDialogTests : BunitContext
 
         var cut = Render<GitRepositoryCreateDialog>(p => p.Add(x => x.ProjectId, 42));
 
-        cut.Find("input[name='Name']").Input("new-repo");
-        cut.Find("textarea[name='Description']").Input("Local Portfolio test repository.");
-        cut.Find("input[name='DefaultBranch']").Input("develop");
+        cut.Find("input#Name").Input("new-repo");
+        cut.Find("textarea#Description").Input("Local Portfolio test repository.");
+        cut.Find("input#DefaultBranch").Input("develop");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(

@@ -17,6 +17,15 @@ public class VaultsController(IVaultService service, IResourceAuthorizationServi
         return Ok(await service.GetVaultsAsync(projectId, environmentId, projectServerId, request, accessibleIds, ct));
     }
 
+    /// <summary>Recette R-210: the project names the vaults list's column filter offers.</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<VaultFilterValuesDto>> GetFilterValues(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Vault, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new VaultFilterValuesDto());
+        return Ok(await service.GetFilterValuesAsync(accessibleIds, ct));
+    }
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<VaultDetailDto>> GetVault(int id, CancellationToken ct)
     {
@@ -109,6 +118,24 @@ public class VaultsController(IVaultService service, IResourceAuthorizationServi
         var deleted = await service.DeleteSecretAsync(id, secretId, ct);
         if (!deleted) return NotFound();
         return NoContent();
+    }
+
+    /// <summary>
+    /// Recette R-292: the clear value of one secret, for the copy button. POST so no URL, proxy log or
+    /// browser history ever carries it; Write permission (the right to change the value), never Read;
+    /// no-store so no cache keeps it; audited by the service.
+    /// </summary>
+    [HttpPost("{id:int}/secrets/{secretId:int}/reveal")]
+    public async Task<ActionResult<RevealedSecretValueDto>> RevealSecretValue(int id, int secretId, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Vault, id, Permission.Write, ct))
+            return Forbid();
+
+        var value = await service.RevealSecretValueAsync(id, secretId, ct);
+        if (value is null) return NotFound();
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
+        return Ok(new RevealedSecretValueDto { Value = value });
     }
 
     [HttpGet("{id:int}/secrets/{secretId:int}/versions")]

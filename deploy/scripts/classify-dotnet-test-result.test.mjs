@@ -36,6 +36,20 @@ test("classifies failed assertions as advisory evidence", () => {
   assert.equal(classifyDotnetTestResult(1, proof.trx, proof.coverageDirectory), 1);
 });
 
+// Microsoft.Testing.Platform exits 2 when tests fail, where VSTest exited 1: the TRX decides.
+test("classifies failed assertions under Microsoft.Testing.Platform as advisory evidence", () => {
+  const proof = evidence({ failed: 1, outcome: "Failed" });
+  assert.equal(classifyDotnetTestResult(2, proof.trx, proof.coverageDirectory), 1);
+});
+
+// Exit 8 is Microsoft.Testing.Platform's "zero tests ran": a filter or a build that lost the tests
+// must never read as a pass.
+test("rejects a Microsoft.Testing.Platform run that executed no test", () => {
+  const proof = evidence();
+  writeFileSync(proof.trx, `<TestRun><ResultSummary outcome="Completed"><Counters total="0" executed="0" passed="0" failed="0" error="0" timeout="0" aborted="0" disconnected="0" /></ResultSummary></TestRun>`);
+  assert.throws(() => classifyDotnetTestResult(8, proof.trx, proof.coverageDirectory), /no executed test/);
+});
+
 test("rejects an aborted test run as incomplete evidence", () => {
   const proof = evidence({ outcome: "Aborted" });
   assert.throws(() => classifyDotnetTestResult(1, proof.trx, proof.coverageDirectory), /incomplete/);

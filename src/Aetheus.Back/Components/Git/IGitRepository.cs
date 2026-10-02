@@ -12,8 +12,12 @@ public interface IGitRepository
     Task RemoveConnectionAsync(GitConnection connection, CancellationToken ct = default);
     Task<(List<PullRequest> Items, int TotalCount)> GetPullRequestsPagedAsync(
         int gitConnectionId, string? search, int page, int pageSize,
-        Aetheus.Shared.Enums.PullRequestStatus? status = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true);
+        Aetheus.Shared.Components.Git.PullRequestStatus? status = null, CancellationToken ct = default,
+        string? sortBy = null, bool sortDescending = true,
+        IReadOnlyList<GridFilter>? columnFilters = null);
+
+    /// <summary>Recette R-224: the distinct authors of a connection's pull requests.</summary>
+    Task<List<string>> GetPullRequestAuthorsAsync(int gitConnectionId, CancellationToken ct = default);
     Task<PullRequest?> FindPullRequestByExternalIdAsync(int gitConnectionId, int externalId, CancellationToken ct = default);
     Task AddPullRequestAsync(PullRequest pr, CancellationToken ct = default);
     Task<List<BranchPolicy>> GetBranchPoliciesAsync(int gitConnectionId, CancellationToken ct = default);

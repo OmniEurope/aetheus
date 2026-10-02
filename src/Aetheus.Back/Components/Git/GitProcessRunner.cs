@@ -12,6 +12,9 @@ namespace Aetheus.Back.Components.Git;
 /// </summary>
 public class GitProcessRunner(ILogger<GitProcessRunner> logger)
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MissingDirectoriesReported =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly TimeSpan DefaultTimeout = BackendRuntimeDefaults.GitProcessTimeout;
 
     public async Task<(int ExitCode, string Output, string Error)> RunGitAsync(
@@ -55,8 +58,16 @@ public class GitProcessRunner(ILogger<GitProcessRunner> logger)
         // non-zero result that the callers already degrade on (empty tree/commits, surfaced error on writes).
         if (!Directory.Exists(workDir))
         {
-            logger.LogWarning("git {Args} skipped - working directory does not exist: {Dir}",
-                string.Join(' ', args), workDir);
+            // Recette R-126: a page that lists the repository runs several git reads on every visit, so
+            // the same missing folder filled the log with dozens of identical warnings. The absence is
+            // a state, not a fault of the request: said once per folder at Information while the process
+            // runs, the repeats stay at Debug.
+            if (MissingDirectoriesReported.TryAdd(workDir, 0))
+                logger.LogInformation("git {Args} skipped - working directory does not exist: {Dir} (reported once per folder)",
+                    string.Join(' ', args), workDir);
+            else
+                logger.LogDebug("git {Args} skipped - working directory does not exist: {Dir}",
+                    string.Join(' ', args), workDir);
             return (-1, string.Empty, $"Repository directory not found: {workDir}", false);
         }
 
@@ -78,9 +89,10 @@ public class GitProcessRunner(ILogger<GitProcessRunner> logger)
             (output, outputTruncated) = await outputTask.ConfigureAwait(false);
             error = await errorTask.ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             SafeKill(process);
+            ct.ThrowIfCancellationRequested();
             logger.LogWarning("git {Args} timed out in {Dir}", string.Join(' ', args), workDir);
             return (-1, string.Empty, "Timeout", false);
         }

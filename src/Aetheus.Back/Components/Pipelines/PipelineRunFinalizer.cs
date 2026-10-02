@@ -62,14 +62,20 @@ public sealed class PipelineRunFinalizer(
     public async Task CompleteRunAsync(int pipelineRunId, PipelineStatus status, CancellationToken ct)
     {
         await repo.UpdatePipelineRunStatusAsync(pipelineRunId, status, ct).ConfigureAwait(false);
+        // PLAN-005 lot 3 / D34: an ended run leaves nothing to approve.
+        if (status.IsTerminal())
+            await repo.CloseApprovalsOfEndedRunsAsync(
+                pipelineRunId, timeProvider.GetUtcNow().UtcDateTime, EndedRunApprovals.Reason, ct).ConfigureAwait(false);
         await domainEvents.DispatchAsync(new PipelineRunCompletedEvent(pipelineRunId, status), ct).ConfigureAwait(false);
         secretMasking.EvictCache(pipelineRunId);
 
-        if (status == PipelineStatus.Failed)
+        // Partial and RolledBack are completions like Failed: the page has to stop showing a running
+        // run. Only the status carried in the message differs, so the client paints its own colour.
+        if (status is PipelineStatus.Failed or PipelineStatus.Partial or PipelineStatus.RolledBack)
         {
             var pipelineId = await repo.GetPipelineIdForRunAsync(pipelineRunId, ct).ConfigureAwait(false);
             var groups = HubGroups.PipelineRunUpdates(pipelineRunId, pipelineId);
-            await pipelineHub.Clients.Groups(groups).SendAsync("PipelineRunCompleted", pipelineRunId, PipelineStatus.Failed, ct).ConfigureAwait(false);
+            await pipelineHub.Clients.Groups(groups).SendAsync("PipelineRunCompleted", pipelineRunId, status, ct).ConfigureAwait(false);
         }
         else if (status == PipelineStatus.Cancelled)
         {

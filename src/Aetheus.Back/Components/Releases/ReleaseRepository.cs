@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Releases;
@@ -7,18 +8,22 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
 {
     public async Task<(List<Release> Items, int TotalCount)> GetReleasesPagedAsync(
         string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true)
+        string? sortBy = null, bool sortDescending = true, bool deployableOnly = false,
+        IReadOnlyList<GridFilter>? columnFilters = null, IReadOnlyCollection<int>? releaseIds = null)
     {
-        var query = db.Releases.AsNoTracking().AsQueryable();
-
-        if (accessibleIds is not null)
-            query = query.Where(r => accessibleIds.Contains(r.Id));
-
-        if (projectId.HasValue)
-            query = query.Where(r => r.ProjectId == projectId.Value);
+        var query = ScopedReleases(projectId, accessibleIds);
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(r => r.Version.Contains(search) || r.BranchName.Contains(search));
+
+        // D40, R-10: what a restore by release name accepts. The same-commit rule no longer applies to a
+        // release restore (dffb4549a) and the commit ancestry and grade are checked by the deployment
+        // itself; what is left is a payload that still exists, whatever the status - an earlier
+        // production (Superseded) included. The picker shows the status beside it.
+        if (deployableOnly)
+            query = query.Where(r => r.Artifacts.Any());
+
+        query = ApplyColumnFilters(query, columnFilters, releaseIds);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
@@ -43,6 +48,41 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
             .ConfigureAwait(false);
 
         return (items, totalCount);
+    }
+
+    private IQueryable<Release> ScopedReleases(int? projectId, List<int>? accessibleIds)
+    {
+        var query = db.Releases.AsNoTracking().AsQueryable();
+
+        if (accessibleIds is not null)
+            query = query.Where(r => accessibleIds.Contains(r.Id));
+
+        if (projectId.HasValue)
+            query = query.Where(r => r.ProjectId == projectId.Value);
+
+        return query;
+    }
+
+    /// <summary>
+    /// Recette R-224: the header filters, after the scope and before the count. The source pipeline
+    /// filter arrives already resolved to <paramref name="releaseIds"/>.
+    /// </summary>
+    private static IQueryable<Release> ApplyColumnFilters(
+        IQueryable<Release> query, IReadOnlyList<GridFilter>? columnFilters, IReadOnlyCollection<int>? releaseIds)
+    {
+        if (releaseIds is not null)
+            query = query.Where(r => releaseIds.Contains(r.Id));
+        return ReleaseListQuery.Columns.ApplyFilters(query, columnFilters);
+    }
+
+    public async Task<List<ReleaseFilterFact>> GetReleaseFilterFactsAsync(
+        int? projectId, List<int>? accessibleIds, int? serverId, CancellationToken ct = default)
+    {
+        var query = serverId is { } server ? ReleasesForServerQuery(server) : ScopedReleases(projectId, accessibleIds);
+        return await query
+            .Select(r => new ReleaseFilterFact(r.Id, r.Project.Name, r.PipelineRunId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
     }
 
     public async Task<List<Release>> GetProjectReleasesAsync(int projectId, CancellationToken ct = default)
@@ -86,10 +126,85 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+    /// <summary>The template a "Revenir à N-1" pipeline extends.</summary>
+    internal const string RevertTemplateName = "host-bluegreen-revert";
+
+    public async Task<Dictionary<int, ReleaseRedeployTarget>> GetRedeployTargetsAsync(
+        IReadOnlyCollection<int> projectIds, CancellationToken ct = default)
+    {
+        if (projectIds.Count == 0) return [];
+        // Superseded means "was deployed, then replaced", so the newest of them is the release
+        // production ran just before the live one: the same order the retention window uses.
+        var previous = (await db.Releases.AsNoTracking()
+                .Where(release => projectIds.Contains(release.ProjectId) && release.Status == ReleaseStatus.Superseded)
+                .Select(release => new { release.Id, release.ProjectId, At = release.PublishedAt ?? release.DetectedAt })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .GroupBy(release => release.ProjectId)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(release => release.At).First().Id);
+        if (previous.Count == 0) return [];
+
+        // A deploy step rewrites the live release's PipelineRunId to the run that deployed it.
+        var projects = previous.Keys.ToList();
+        var liveRuns = await db.Releases.AsNoTracking()
+            .Where(release => projects.Contains(release.ProjectId)
+                && release.Status == ReleaseStatus.Deployed && release.PipelineRunId != null)
+            .Select(release => new { release.ProjectId, RunId = release.PipelineRunId!.Value })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var runIds = liveRuns.Select(run => run.RunId).ToList();
+        var deployPipelines = await db.PipelineRuns.AsNoTracking()
+            .Where(run => runIds.Contains(run.Id) && run.ParametersJson != null
+                && run.ParametersJson.Contains("candidateVersion"))
+            .Select(run => new { run.Id, run.PipelineId })
+            .ToDictionaryAsync(run => run.Id, run => run.PipelineId, ct).ConfigureAwait(false);
+
+        // PLAN-003 2.7: the project's quick-return pipeline, recognised by the template it extends.
+        var revertPipelines = (await db.Pipelines.AsNoTracking()
+                .Where(pipeline => pipeline.ProjectId != null && projects.Contains(pipeline.ProjectId.Value)
+                    && pipeline.TemplateReferenceName == RevertTemplateName)
+                .Select(pipeline => new { ProjectId = pipeline.ProjectId!.Value, pipeline.Id })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .GroupBy(pipeline => pipeline.ProjectId)
+            .ToDictionary(group => group.Key, group => group.Min(pipeline => pipeline.Id));
+
+        return previous.ToDictionary(
+            entry => entry.Key,
+            entry =>
+            {
+                var liveRun = liveRuns.FirstOrDefault(run => run.ProjectId == entry.Key);
+                int? pipelineId = liveRun is not null && deployPipelines.TryGetValue(liveRun.RunId, out var id) ? id : null;
+                return new ReleaseRedeployTarget(
+                    entry.Value, pipelineId, revertPipelines.TryGetValue(entry.Key, out var revert) ? revert : null);
+            });
+    }
+
     public async Task AddReleaseAsync(Release release, CancellationToken ct = default)
     {
         db.Releases.Add(release);
+        StampCreators();
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Recette R-366: the run that first publishes a release is its creator, stamped once and never
+    /// moved. PipelineRunId cannot say it: every later run that records the release (a deployment
+    /// confirming it) overwrites it. Done here, on the way to the database, so both paths that publish
+    /// (a new row, or a row first detected from a branch) are covered without a second rule elsewhere.
+    /// A release already published before this column existed is never stamped by a later run: its
+    /// creator is unknown, and a later deployment must not claim it.
+    /// </summary>
+    private void StampCreators()
+    {
+        foreach (var entry in db.ChangeTracker.Entries<Release>())
+        {
+            var release = entry.Entity;
+            if (release.CreatedByPipelineRunId is not null
+                || release.PipelineRunId is not { } runId
+                || release.PublishedAt is null)
+                continue;
+            if (entry.State == EntityState.Added
+                || entry.Property(r => r.PublishedAt).OriginalValue is null)
+                release.CreatedByPipelineRunId = runId;
+        }
     }
 
     public async Task<Release?> FindByPipelineRunIdAsync(int pipelineRunId, CancellationToken ct = default)
@@ -159,9 +274,18 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
 
     public async Task<List<Release>> GetByPipelineRunIdAsync(int pipelineRunId, CancellationToken ct = default)
     {
+        // Recette R-365: Release.PipelineRunId names the LAST run that recorded the release, and the
+        // deploy run rewrites it (see GetRedeployTargetsAsync), so the candidate run that published the
+        // release lost it. Its release step still carries the RELEASE_ID output the server returned.
+        var publishedIds = await PublishedReleaseIdsAsync(pipelineRunId, ct).ConfigureAwait(false);
+        var runProjectId = await db.PipelineRuns.AsNoTracking()
+            .Where(run => run.Id == pipelineRunId)
+            .Select(run => run.Pipeline.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         return await db.Releases
             .AsNoTracking()
-            .Where(r => r.PipelineRunId == pipelineRunId)
+            .Where(r => r.PipelineRunId == pipelineRunId
+                || (publishedIds.Contains(r.Id) && r.ProjectId == runProjectId))
             .Include(r => r.Project)
             .Include(r => r.Artifacts)
             // Keep unpublished (null PublishedAt) releases LAST - see GetReleasesPagedAsync.
@@ -170,6 +294,22 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
             .ThenByDescending(r => r.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>The ids of the releases a successful step of this run created, read from the
+    /// <c>RELEASE_ID</c> output variable the agent's release step publishes.</summary>
+    private async Task<List<int>> PublishedReleaseIdsAsync(int pipelineRunId, CancellationToken ct)
+    {
+        var outputs = await db.PipelineStepRuns.AsNoTracking()
+            .Where(step => step.PipelineRunId == pipelineRunId
+                && step.Status == TaskExecutionStatus.Success && step.OutputVariablesJson != null)
+            .Select(step => step.OutputVariablesJson)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. outputs
+            .Select(json => PipelineRunHelpers.DeserializeResolvedVariables(json)
+                .TryGetValue("RELEASE_ID", out var id) && int.TryParse(id, out var releaseId) ? releaseId : 0)
+            .Where(releaseId => releaseId > 0)
+            .Distinct()];
     }
 
     public async Task<int> GetMaxBuildNumberAsync(int projectId, CancellationToken ct = default)
@@ -188,9 +328,10 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
     /// </summary>
     public async Task<(List<Release> Items, int TotalCount)> GetReleasesForServerPagedAsync(
         int serverId, int page, int pageSize, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true)
+        string? sortBy = null, bool sortDescending = true,
+        IReadOnlyList<GridFilter>? columnFilters = null, IReadOnlyCollection<int>? releaseIds = null)
     {
-        var query = ReleasesForServerQuery(serverId);
+        var query = ApplyColumnFilters(ReleasesForServerQuery(serverId), columnFilters, releaseIds);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         var items = await query.OrderByProperty(sortBy, sortDescending, OrderForDisplay)
             .Skip((page - 1) * pageSize)
@@ -207,24 +348,9 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
     /// the pipeline each release came from. The query is about releases, so it belongs here: Releases
     /// already sits above Pipelines and already performs that enrichment for its own views.
     /// </summary>
-    public async Task<List<Release>> GetReleasesForServerAsync(int serverId, CancellationToken ct = default)
-    {
-        var executedProjectIds = db.PipelineStepRuns
-            .Where(step => step.ServerId == serverId)
-            .Select(step => step.PipelineRun.Pipeline.ProjectId)
-            .Where(projectId => projectId != null)
-            .Select(projectId => projectId!.Value);
-        var linkedProjectIds = db.ProjectServers
-            .Where(projectServer => projectServer.ServerId == serverId)
-            .Select(projectServer => projectServer.ProjectId);
-        var projectIds = executedProjectIds.Union(linkedProjectIds).Distinct();
-
-        return await OrderForDisplay(db.Releases
-                .Where(release => projectIds.Contains(release.ProjectId))
-                .Include(release => release.Project)
-                .AsNoTracking())
+    public async Task<List<Release>> GetReleasesForServerAsync(int serverId, CancellationToken ct = default) =>
+        await OrderForDisplay(ReleasesForServerQuery(serverId))
             .ToListAsync(ct).ConfigureAwait(false);
-    }
 
     /// <summary>The projects a server is linked to, or has ever executed a pipeline for.</summary>
     private IQueryable<Release> ReleasesForServerQuery(int serverId)
@@ -257,6 +383,7 @@ public class ReleaseRepository(AppDbContext db) : IReleaseRepository
 
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
+        StampCreators();
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

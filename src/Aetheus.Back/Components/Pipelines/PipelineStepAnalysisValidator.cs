@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -21,6 +20,14 @@ internal static class PipelineStepAnalysisValidator
                  || step.AnalysisGrading is not null)
         {
             errors.Add($"Step '{step.Name}' in {context} analysis gate fields require type analysis-gate.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(step.AnalysisCategory))
+        {
+            if (!string.Equals(step.Type, "lint", StringComparison.OrdinalIgnoreCase))
+                errors.Add($"Step '{step.Name}' in {context} analysis_category is only valid on a lint step.");
+            else if (!LintAnalysisCategories.TryParse(step.AnalysisCategory, out _))
+                errors.Add($"Step '{step.Name}' in {context} analysis_category must be code-quality or accessibility.");
         }
 
         if (!string.Equals(step.Type, "scanner", StringComparison.OrdinalIgnoreCase)) return;

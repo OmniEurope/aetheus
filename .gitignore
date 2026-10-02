@@ -23,9 +23,6 @@ mono_crash.*
 [Rr]elease/
 [Rr]eleases/
 !**/Components/Releases/
-!**/Pages/Releases/
-!**/DTOs/Releases/
-!**/Enums/Releases/
 !tests/**/Releases/
 x64/
 x86/
@@ -38,9 +35,6 @@ bld/
 [Ll]og/
 [Ll]ogs/
 !**/Components/Logs/
-!**/Pages/Logs/
-!**/DTOs/Logs/
-!**/Enums/Logs/
 !tests/**/Logs/
 !src/Aetheus.Back/Protos/opentelemetry/proto/collector/logs/
 !src/Aetheus.Back/Protos/opentelemetry/proto/collector/logs/**
@@ -305,6 +299,10 @@ node_modules/
 /.analysis-coverage/
 /.analysis-duplication/
 /.analysis-duplication-batch*/
+/.analysis-duplication-current/
+# PLAN-006 lot 6.6: per-project Roslyn SARIF and the merged security report, written by a build with
+# -p:AetheusRoslynSarif=true. Run output, never source.
+/analysis/
 /coverage-quality/
 /coverage-quality-merged/
 
@@ -430,9 +428,6 @@ FodyWeavers.xsd
 deploy/scripts/.jwt-key-local
 .jwt-key-dev
 
-# Git commit template (auto-generated per session, not shareable)
-.gitmessage
-
 # SSH target for remote agent tunnel (machine-specific)
 .remoteagent
 
@@ -451,7 +446,7 @@ src/Aetheus.Back/Data/artifacts/
 
 **/wwwroot/downloads/*
 
-# Deployment config (version + secrets) shared between deploy.sh and ybaunch.sh
+# Deployment config (version + secrets) shared between deploy.sh and launch-linux.sh
 .env-prod
 .env-accept
 # Legacy local version tracking — kept for one release cycle for migration
@@ -515,3 +510,23 @@ src/Aetheus.Agent.Windows/appsettings.Development.json
 
 # Per-checkout process markers created by local Codex/launcher verification.
 /.codex-runtime/
+
+# Host publish consumed by deploy/docker/Dockerfile.back and Dockerfile.front; a build output,
+# never a source, and large enough that committing it would be an accident nobody notices.
+/.pipeline-publish/
+
+# Coverage dumps of a 360 audit weigh tens of MB; the Markdown registers are the canonical evidence.
+/.claude/audit/*/artefacts/metrics/coverage/
+# Every other tool output of an audit (json/trx/diag reports, harness projects and their lock files) is
+# regenerable and was scanned as product dependencies by the candidate security gate (run 2421); only
+# the Markdown registers and the harness sources (.cs) under artefacts/ stay versioned.
+/.claude/audit/*/artefacts/**
+!/.claude/audit/*/artefacts/**/
+!/.claude/audit/*/artefacts/**/*.md
+!/.claude/audit/*/artefacts/**/*.cs
+# Generated build intermediates of those harness projects are never sources.
+/.claude/audit/*/artefacts/**/obj/
+/.claude/audit/*/artefacts/**/bin/
+# Raw shard dumps of the security audit; its Markdown registers are the canonical record.
+/.claude/audit-secu/raw/
+/.claude/audit-secu/raw2/

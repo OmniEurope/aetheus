@@ -11,6 +11,10 @@ public interface IAlertRepository
     Task<AlertRule?> FindAsync(int id, CancellationToken ct = default);
     Task AddAsync(AlertRule rule, CancellationToken ct = default);
     Task AddRangeAsync(IEnumerable<AlertRule> rules, CancellationToken ct = default);
+    /// <summary>Every server's id and name, ordered by name: an own read of the shared Servers table (the
+    /// Servers module sits above Alerts, layer guard 2026-09-25).</summary>
+    Task<List<(int Id, string Name)>> GetServerIdNamePairsAsync(CancellationToken ct = default);
+
     Task<int> AddProvisionedRulesIfMissingAsync(
         IReadOnlyCollection<AlertRule> rules,
         CancellationToken ct = default);

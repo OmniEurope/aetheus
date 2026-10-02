@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -90,7 +87,7 @@ public class ServerCertbotSectionComplexTests : BunitContext
     public async Task OpenCreateDialog_OpensDialog()
     {
         var cut = RenderSection();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 
@@ -113,48 +110,14 @@ public class ServerCertbotSectionComplexTests : BunitContext
         Assert.Contains("UseWebroot", cut.Markup);
     }
 
-    // Dialog Cancel button is wired and clickable (closes via DialogService in the real flow).
+    // Dialog Cancel button is wired and clickable (closes via OmniDialogService in the real flow).
     [Fact]
     public void CreateDialog_CancelButtonWired()
     {
         var cut = Render<ServerCertbotCreateDialog>(p => p.Add(x => x.ServerId, 1));
-        cut.FindAll("button").First(b => b.TextContent.Contains("Cancel")).Click();
+        cut.FindAll("button").First(b => b.TextContent.Contains("GoBack")).Click();
         // Cancel closes the dialog without submitting - no create POST is ever issued.
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("certbot/create"));
-    }
-
-    [Fact]
-    public void ShowConfirm_SetsProperties()
-    {
-        var cut = RenderSection();
-        var method = typeof(ServerCertbotSection).GetMethod("ShowConfirm", Priv)!;
-        Func<Task> action = () => Task.CompletedTask;
-        method.Invoke(cut.Instance, ["Renew", "Renew cert?", action]);
-        var visible = (bool)typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!;
-        Assert.True(visible);
-    }
-
-    [Fact]
-    public async Task ConfirmAccepted_ExecutesAction()
-    {
-        var cut = RenderSection();
-        var executed = false;
-        typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerCertbotSection).GetField("_confirmAction", Priv)!.SetValue(cut.Instance, (Func<Task>)(() => { executed = true; return Task.CompletedTask; }));
-        var method = typeof(ServerCertbotSection).GetMethod("ConfirmAccepted", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-        Assert.True(executed);
-    }
-
-    [Fact]
-    public void ConfirmCancelled_HidesDialog()
-    {
-        var cut = RenderSection();
-        typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        var method = typeof(ServerCertbotSection).GetMethod("ConfirmCancelled", Priv)!;
-        method.Invoke(cut.Instance, []);
-        var visible = (bool)typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(visible);
     }
 
     [Fact]

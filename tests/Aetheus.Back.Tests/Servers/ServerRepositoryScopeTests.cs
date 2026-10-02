@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Environment = Aetheus.Back.Data.Entities.Environment;
@@ -15,7 +14,7 @@ namespace Aetheus.Back.Tests.Servers;
 /// pipelines, libraries and vaults that follow from either link. Also covers the token-bearing load,
 /// the stale-offline compare-and-set and the paged project listing.
 ///
-/// The PostgreSQL-only paths (the ExecuteDelete cascade in <c>RemoveServerAsync</c>, the ILike
+/// The PostgreSQL-only paths (the ExecuteDelete cascade of the purge, the ILike
 /// search) are proved against a real database in the integration suite, not faked here.
 /// </summary>
 public sealed class ServerRepositoryScopeTests : IDisposable
@@ -86,18 +85,6 @@ public sealed class ServerRepositoryScopeTests : IDisposable
         Assert.Equal(2, server!.Tokens.Count);
         Assert.Empty(_db.ChangeTracker.Entries<Server>());
         Assert.Null(await _repository.FindServerWithTokensAsync(404, Ct));
-    }
-
-    [Fact]
-    public async Task RemoveServerAsync_DeletesTheServerOnANonRelationalStore()
-    {
-        var server = Server(1, "runner");
-        _db.Servers.Add(server);
-        await SaveAsync();
-
-        await _repository.RemoveServerAsync(server, Ct);
-
-        Assert.Empty(_db.Servers);
     }
 
     [Fact]
@@ -391,7 +378,9 @@ public sealed class ServerRepositoryScopeTests : IDisposable
             new ServerTask { Id = 3, ServerId = 1, Status = TaskExecutionStatus.Success },
             new ServerTask
             {
-                Id = 4, ServerId = 1, Status = TaskExecutionStatus.Running,
+                Id = 4,
+                ServerId = 1,
+                Status = TaskExecutionStatus.Running,
                 Operation = OperationKind.AgentSelfUpdate
             },
             new ServerTask { Id = 5, ServerId = 2, Status = TaskExecutionStatus.Running });

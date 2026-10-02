@@ -1,0 +1,8 @@
+# Aetheus Agent - TeamSpeak install. The helper is the security boundary: root-owned,
+# agent-non-writable, re-validates every argument, and installs exactly one TS3 server. noexec is
+# intentionally omitted (the helper must exec apt-get / curl / tar / systemctl / useradd).
+Cmnd_Alias AETHEUS_TEAMSPEAK = #{TEAMSPEAK_SETUP_HELPER_PATH}#
+Defaults!AETHEUS_TEAMSPEAK timestamp_timeout=0
+Defaults!AETHEUS_TEAMSPEAK env_reset
+Defaults!AETHEUS_TEAMSPEAK secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_TEAMSPEAK

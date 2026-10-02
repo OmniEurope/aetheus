@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Front.Components.Servers.ServerDetailSections;
+using Aetheus.Front.Resources;
+using Microsoft.Extensions.Localization;
+using NSubstitute;
+
+namespace Aetheus.Front.Tests.Pages.Servers;
+
+/// <summary>PLAN-005: split-button routing, quota colouring and code localisation of the mail section.</summary>
+public sealed class MailSectionHelpersTests
+{
+    private static readonly IStringLocalizer<AppStrings> L = CreateLocalizer();
+
+    private static IStringLocalizer<AppStrings> CreateLocalizer()
+    {
+        var localizer = Substitute.For<IStringLocalizer<AppStrings>>();
+        localizer[Arg.Any<string>()].Returns(call => new LocalizedString(call.Arg<string>(), call.Arg<string>() + ":{0}"));
+        return localizer;
+    }
+
+    [Theory]
+    [InlineData("postfix", "start", MailAction.StartPostfix)]
+    [InlineData("postfix", "stop", MailAction.StopPostfix)]
+    [InlineData("postfix", "reload", MailAction.ReloadPostfix)]
+    [InlineData("postfix", "restart", MailAction.RestartPostfix)]
+    [InlineData("dovecot", "start", MailAction.StartDovecot)]
+    [InlineData("dovecot", "stop", MailAction.StopDovecot)]
+    [InlineData("dovecot", "reload", MailAction.ReloadDovecot)]
+    [InlineData("dovecot", "restart", MailAction.RestartDovecot)]
+    public void SplitButtonItems_MapToTheirOwnAction(string unit, string verb, MailAction expected)
+        => Assert.Equal(expected, ServerMailSection.ServiceAction(unit, verb));
+
+    [Theory]
+    [InlineData(1000, 500, OmniTone.Success)]
+    [InlineData(1000, 700, OmniTone.Warning)]
+    [InlineData(1000, 900, OmniTone.Warning)]
+    [InlineData(1000, 950, OmniTone.Danger)]
+    public void QuotaColour_FollowsTheUsageBands(int quota, int used, OmniTone expected)
+        => Assert.Equal(expected, ServerMailSection.QuotaStyle(new MailAccountDto { QuotaMb = quota, UsedMb = used }));
+
+    [Fact]
+    public void UnmanagedQuota_HasNoPercentage()
+        => Assert.Equal(0, ServerMailSection.UsagePercent(new MailAccountDto { QuotaMb = 0, UsedMb = 300 }));
+
+    [Theory]
+    [InlineData("aliases-skipped|3", "MailFindingAliasesSkipped:3")]
+    [InlineData("unreadable|/etc/postfix/vmailbox", "MailFindingUnreadable:/etc/postfix/vmailbox")]
+    [InlineData("brand-new-code|x", "brand-new-code|x")]
+    public void CollectorFindings_AreLocalisedOrShownVerbatim(string finding, string expected)
+        => Assert.Equal(expected, MailUiText.Finding(L, finding));
+
+    [Fact]
+    public void DiagnosticLabels_AndDetails_UseTheirResources()
+    {
+        Assert.Equal("MailDiagMx:example.com", MailUiText.DiagnosticLabel(L, "mx:example.com"));
+        Assert.Equal("MailDiagTls:{0}", MailUiText.DiagnosticLabel(L, "tls"));
+        Assert.Equal("MailDetailKeyMismatch:{0}", MailUiText.Detail(L, "key-mismatch"));
+        Assert.Equal("mail.example.com", MailUiText.Detail(L, "mail.example.com"));
+        Assert.Equal(OmniTone.Danger, MailUiText.VerdictStyle(MailCheckVerdict.Missing));
+    }
+
+}

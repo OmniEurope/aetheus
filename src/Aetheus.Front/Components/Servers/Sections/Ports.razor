@@ -1,0 +1,18 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerTaskAwareSectionBase
+@page "/servers/{Id:int}/ports"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@implements IDisposable
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - @L["PortRegistryTitle"] - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Components.Servers.ServerDetailSections.ServerPortsSection
+        @ref="_section"
+        ServerId="@Id"
+        PortObservationAvailable="@Loader.Server.PortObservationAvailable"
+        PortsObservedAt="@Loader.Server.PortsObservedAt"
+        AgentOnline="@(Loader.Server.Status == Aetheus.Shared.Components.Servers.ServerStatus.Online)" />
+}

@@ -2,8 +2,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
-using Aetheus.Front.Pages.Ai;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.AiTasks;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
@@ -55,13 +54,13 @@ public sealed class AiDialogTests : BunitContext
     }
 
     /// <summary>
-    /// Neither dialog gives its Radzen inputs a <c>name</c>, so a field is addressed the way a user
-    /// sees it: by the label its <c>RadzenFormField</c> renders. Both controls bind on <c>change</c>.
+    /// Neither dialog gives its inputs a <c>name</c>, so a field is addressed the way a user
+    /// sees it: by the label its <c>OmniFormField</c> renders. Both controls bind on <c>change</c>.
     /// </summary>
     private static IElement Field<TComponent>(
         IRenderedComponent<TComponent> cut, string label, string tag = "input")
         where TComponent : IComponent =>
-        cut.FindAll(".rz-form-field")
+        cut.FindAll(".rz-form-field, .omni-form-field")
             .First(field => field.QuerySelector("label")?.TextContent.Trim() == label)
             .QuerySelector(tag)!;
 
@@ -90,9 +89,9 @@ public sealed class AiDialogTests : BunitContext
         var cut = Render<AiTaskDialog>();
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
-        Field(cut, "Name").Change("review");
-        Field(cut, "PromptTemplate", "textarea").Change("Review {diff}");
-        Field(cut, "EventTypes").Change(" pipeline.completed , release.created ,, ");
+        Field(cut, "Name").Input("review");
+        Field(cut, "PromptTemplate", "textarea").Input("Review {diff}");
+        Field(cut, "EventTypes").Input(" pipeline.completed , release.created ,, ");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/ai/tasks")), TimeSpan.FromSeconds(2));
@@ -113,9 +112,9 @@ public sealed class AiDialogTests : BunitContext
         var cut = Render<AiTaskDialog>();
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
-        Field(cut, "Name").Change("review");
-        Field(cut, "PromptTemplate", "textarea").Change("Review");
-        Field(cut, "Schedule").Change("   ");
+        Field(cut, "Name").Input("review");
+        Field(cut, "PromptTemplate", "textarea").Input("Review");
+        Field(cut, "Schedule").Input("   ");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/ai/tasks")), TimeSpan.FromSeconds(2));
@@ -133,8 +132,8 @@ public sealed class AiDialogTests : BunitContext
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
         Assert.DoesNotContain("OwnerType", cut.Markup);
-        Field(cut, "Name").Change("review");
-        Field(cut, "PromptTemplate", "textarea").Change("Review");
+        Field(cut, "Name").Input("review");
+        Field(cut, "PromptTemplate", "textarea").Input("Review");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/ai/tasks")), TimeSpan.FromSeconds(2));
@@ -210,10 +209,10 @@ public sealed class AiDialogTests : BunitContext
         var cut = Render<AiRunnerProfileDialog>();
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
-        Field(cut, "Name").Change("claude");
-        Field(cut, "Binary").Change("/usr/bin/claude");
-        Field(cut, "ArgumentTemplate", "textarea").Change("-p\n\n{prompt_file}\n");
-        Field(cut, "EnvironmentVariables", "textarea").Change("KEY=value\nURL=https://x/y?a=b\n");
+        Field(cut, "Name").Input("claude");
+        Field(cut, "Binary").Input("/usr/bin/claude");
+        Field(cut, "ArgumentTemplate", "textarea").Input("-p\n\n{prompt_file}\n");
+        Field(cut, "EnvironmentVariables", "textarea").Input("KEY=value\nURL=https://x/y?a=b\n");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/ai/profiles")), TimeSpan.FromSeconds(2));
@@ -231,9 +230,9 @@ public sealed class AiDialogTests : BunitContext
         var cut = Render<AiRunnerProfileDialog>();
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
-        Field(cut, "Name").Change("claude");
-        Field(cut, "Binary").Change("/usr/bin/claude");
-        Field(cut, "EnvironmentVariables", "textarea").Change("NOT_A_PAIR");
+        Field(cut, "Name").Input("claude");
+        Field(cut, "Binary").Input("/usr/bin/claude");
+        Field(cut, "EnvironmentVariables", "textarea").Input("NOT_A_PAIR");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(
@@ -247,9 +246,9 @@ public sealed class AiDialogTests : BunitContext
         var cut = Render<AiRunnerProfileDialog>();
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
-        Field(cut, "Name").Change("claude");
-        Field(cut, "Binary").Change("/usr/bin/claude");
-        Field(cut, "EnvironmentVariables", "textarea").Change("=orphan");
+        Field(cut, "Name").Input("claude");
+        Field(cut, "Binary").Input("/usr/bin/claude");
+        Field(cut, "EnvironmentVariables", "textarea").Input("=orphan");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(
@@ -317,8 +316,8 @@ public sealed class AiDialogTests : BunitContext
         var cut = Render<AiRunnerProfileDialog>();
         cut.WaitForAssertion(() => cut.Find("form"), TimeSpan.FromSeconds(2));
 
-        Field(cut, "Name").Change("claude");
-        Field(cut, "Binary").Change("/usr/bin/claude");
+        Field(cut, "Name").Input("claude");
+        Field(cut, "Binary").Input("/usr/bin/claude");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/ai/profiles")), TimeSpan.FromSeconds(2));

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -98,7 +95,7 @@ public class ModuleLinksTabTests : BunitContext
 
         var method = typeof(ModuleLinksTab).GetMethod("OnLoadDataAsync", flags)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25 }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25 }])!);
 
         var links = (List<LinkedResourceDto>)typeof(ModuleLinksTab)
             .GetField("_links", flags)!.GetValue(cut.Instance)!;
@@ -109,10 +106,10 @@ public class ModuleLinksTabTests : BunitContext
     }
 
     [Theory]
-    [InlineData(ModuleLinkType.Docker, BadgeStyle.Primary)]
-    [InlineData(ModuleLinkType.Apache, BadgeStyle.Warning)]
-    [InlineData(ModuleLinkType.Certbot, BadgeStyle.Success)]
-    public void GetTypeBadge_ReturnsExpected(ModuleLinkType type, BadgeStyle expected)
+    [InlineData(ModuleLinkType.Docker, OmniTone.Accent)]
+    [InlineData(ModuleLinkType.Apache, OmniTone.Warning)]
+    [InlineData(ModuleLinkType.Certbot, OmniTone.Success)]
+    public void GetTypeBadge_ReturnsExpected(ModuleLinkType type, OmniTone expected)
     {
         var result = ModuleLinksTab.GetTypeBadge(type);
         Assert.Equal(expected, result);
@@ -170,7 +167,7 @@ public class ModuleLinksTabTests : BunitContext
         // Rule 1-3: never WaitForState on dialog content; start OpenAsync un-awaited,
         // assert OnOpen fired, then close immediately and await the captured task.
         var cut = RenderTab();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 

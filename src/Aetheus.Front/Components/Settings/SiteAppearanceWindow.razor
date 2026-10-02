@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Settings
+@* Recette R-390: the user menu's "Theme" opens OE's appearance window, the small draggable window that
+   holds theme and palette above the scales. Every row it shows is one Aetheus stores and applies
+   (SiteAppearanceState): theme, palette, text size, density and control size. No theme is OE's own
+   default, Essentiel (user decision 2026-09-29: no separate "Aetheus" theme). *@
+<OmniAppearanceWindow Open="_open" OpenChanged="@(open => _open = open)"
+                      Title="@L["Theme"]"
+                      Preset="Appearance.Preset" PresetChanged="Appearance.SetPresetAsync"
+                      Palette="Appearance.Palette" PaletteChanged="Appearance.SetPaletteAsync"
+                      TextSizeLevel="Appearance.TextSizeLevel" TextSizeLevelChanged="Appearance.SetTextSizeLevelAsync"
+                      Density="Appearance.Density" DensityChanged="Appearance.SetDensityAsync"
+                      ControlSizeLevel="Appearance.ControlSizeLevel" ControlSizeLevelChanged="Appearance.SetControlSizeLevelAsync" />

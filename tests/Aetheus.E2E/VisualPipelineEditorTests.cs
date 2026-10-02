@@ -22,7 +22,7 @@ public sealed class VisualPipelineEditorTests : E2ETestBase
             new System.Text.RegularExpressions.Regex(@"/pipelines/\d+"),
             new() { Timeout = 10000 });
 
-        // Radzen prefixes the accessible name with the icon text
+        // The button prefixes the accessible name with the icon text
         // ("account_tree Visual"), so locate the tab by its exact visible label.
         var visualTab = Page.GetByRole(AriaRole.Tab)
             .Filter(new() { Has = Page.GetByText("Visual", new() { Exact = true }) });
@@ -84,7 +84,7 @@ public sealed class VisualPipelineEditorTests : E2ETestBase
         Assert.That(canvasBox, Is.Not.Null, "The visual canvas must have a measurable viewport.");
         var transformBeforePan = await inner.EvaluateAsync<string>("element => element.style.transform");
         // Start in the empty top-left canvas margin. The bottom-right point can
-        // fall on Radzen's scrollbars, which consume the pointer sequence before
+        // fall on the component scrollbars, which consume the pointer sequence before
         // visualPipeline's canvas handler sees it.
         await Page.Mouse.MoveAsync(canvasBox!.X + 18, canvasBox.Y + 18);
         await Page.Mouse.DownAsync();

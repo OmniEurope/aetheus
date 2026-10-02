@@ -18,6 +18,15 @@ public class ServiceConnectionsController(
         return Ok(await service.GetConnectionsAsync(projectId, request, accessibleIds, ct));
     }
 
+    /// <summary>Recette R-224: the project names the list's Project column filter offers.</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<ServiceConnectionFilterValuesDto>> GetFilterValues(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.ServiceConnection, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new ServiceConnectionFilterValuesDto());
+        return Ok(await service.GetFilterValuesAsync(accessibleIds, ct));
+    }
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ServiceConnectionDetailDto>> GetConnection(int id, CancellationToken ct)
     {

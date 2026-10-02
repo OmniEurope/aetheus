@@ -1,0 +1,12 @@
+[Unit]
+Description=Aetheus agent binary and integration-posture upgrade
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=#{AGENT_UPDATE_WORKER_PATH}#
+TimeoutStartSec=900
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true

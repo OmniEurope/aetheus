@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Analysis;
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Back.Tests.Analysis;
 
@@ -37,6 +36,42 @@ public sealed class AnalysisOperationalMonitorServiceTests
         Assert.Contains(issues, issue => issue.EventType == "analysis.operational.workspace-residual");
         Assert.Contains(issues, issue => issue.EventType == "analysis.operational.scanner-unavailable");
         Assert.Contains(issues, issue => issue.EventType == "analysis.operational.storage-drift");
+    }
+
+    /// <summary>
+    /// The probe says "unavailable" both for a scanner that is broken and for one this host will never
+    /// be able to run. Only the first is an operator's problem: a Windows or arm64 runner cannot grow
+    /// x64 Linux support, so alerting on it repeats every cooldown with nothing to do, which is how an
+    /// alert channel stops being read. The capability stays reported on the server either way.
+    /// </summary>
+    [Fact]
+    public void DetectIssues_AScannerTheHostCanNeverRun_IsNotAnOperationalAlert()
+    {
+        var now = new DateTimeOffset(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
+        var snapshot = new AnalysisOperationalSnapshot(
+            [],
+            [new AnalysisServerHealthRow(1, 20, "runner", """
+                [
+                  "scanner:opengrep:1.22.0:unavailable:verified binary supports Linux x64 only",
+                  "scanner:trivy:0.60.0:unavailable:docker daemon or socket unavailable"
+                ]
+                """)],
+            []);
+        var options = new AnalysisPlatformOptions
+        {
+            ProjectDailyReportLimit = 1000,
+            ProjectDailyBytesLimit = 2_000_000,
+            StorageWarningPercent = 80,
+            ScannerManifestMaxAgeDays = 45
+        };
+        var manifest = new ScannerManifest { SchemaVersion = 1, UpdatedAt = now.UtcDateTime };
+
+        var issues = AnalysisOperationalMonitorService.DetectIssues(snapshot, manifest, options, now);
+
+        // The broken one still alerts: this filters a platform fact, it does not silence the family.
+        var alert = Assert.Single(issues, issue => issue.EventType == "analysis.operational.scanner-unavailable");
+        Assert.Contains("docker daemon", alert.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(issues, issue => issue.Message.Contains("Linux x64 only", StringComparison.Ordinal));
     }
 
     [Fact]

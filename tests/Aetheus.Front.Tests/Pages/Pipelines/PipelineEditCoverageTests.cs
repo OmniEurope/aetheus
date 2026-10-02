@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -190,8 +187,8 @@ public class PipelineEditCoverageTests : BunitContext
         var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, (int?)null));
         cut.WaitForState(() => cut.Markup.Length > 100, TimeSpan.FromSeconds(2));
 
-        cut.Find("input[name='Name']").Input("template-qa");
-        cut.Find("input[name='Description']").Input("Local template reuse validation.");
+        cut.Find("input#Name").Input("template-qa");
+        cut.Find("input#Description").Input("Local template reuse validation.");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(
@@ -274,6 +271,40 @@ public class PipelineEditCoverageTests : BunitContext
         var yaml = (string)model.GetType().GetProperty("YamlDefinition")!.GetValue(model)!;
         Assert.Contains("extends: Basic CI@3", yaml);
         Assert.DoesNotContain("stages:\n- name:", yaml);
+    }
+
+    /// <summary>
+    /// PLAN-005 lot 6 / D42 on the template parameters of a new pipeline: a described parameter has
+    /// the help icon and the field points to the hidden description; no caption under the field.
+    /// </summary>
+    [Fact]
+    public void TemplateParameters_CarryTheirDescriptionInTheHelpIcon_NotACaption()
+    {
+        const string description = "Where the application is published.";
+        const string templateYaml =
+            "name: basic-ci\ntrigger: manual\nparameters:\n" +
+            "  - name: target\n    display_name: Target\n    type: string\n    description: " + description + "\n" +
+            "  - name: plain\n    type: string\nstages: []";
+        _handler.SetJsonResponse("api/pipelines/templates/1", new PipelineTemplateDto
+        {
+            Id = 1,
+            Name = "Basic CI",
+            Version = 3,
+            YamlContent = templateYaml
+        });
+        _handler.SetJsonResponse("api/pipelines/templates/1/resolve?version=3", templateYaml);
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://test/pipelines/new?projectId=1&templateId=1");
+
+        var cut = Render<PipelineEdit>(p => p.Add(x => x.Id, (int?)null));
+
+        var help = cut.WaitForElements(".param-help");
+        Assert.Single(help);
+        Assert.Equal(description, help[0].GetAttribute("aria-label"));
+        var descriptionId = ParameterHelpRow.DescribedBy("tpl-param", "target", description)!;
+        Assert.Equal(description, cut.Find($"#{descriptionId}").TextContent);
+        Assert.Single(cut.FindAll($"[aria-describedby='{descriptionId}']"));
+        Assert.DoesNotContain(cut.FindAll(".rz-text-caption"), caption => caption.TextContent.Contains(description));
     }
 
     [Fact]

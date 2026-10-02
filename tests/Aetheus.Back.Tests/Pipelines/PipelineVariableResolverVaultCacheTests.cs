@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.VariableLibraries;
 using Aetheus.Back.Components.Vaults;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
 

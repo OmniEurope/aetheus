@@ -1,0 +1,20 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Task log viewer opened from TaskListView.ViewLogs. *@
+@namespace Aetheus.Front.Components.Tasks
+<div class="task-log-viewer">
+    @if (Logs is null || Logs.Count == 0)
+    {
+        <OmniText Element="OmniTextElement.Paragraph" Tone="OmniTextTone.Muted">@L["NoLogsAvailable"]</OmniText>
+    }
+    else
+    {
+        @foreach (var log in Logs)
+        {
+            <div class="log-entry log-level-@log.Level.ToString().ToLowerInvariant()">
+                <span class="log-timestamp">[@log.Timestamp.ToString("HH:mm:ss")]</span>
+                <span>[@L.Localize(log.Level)]</span> @log.Message
+            </div>
+        }
+    }
+</div>
+<DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

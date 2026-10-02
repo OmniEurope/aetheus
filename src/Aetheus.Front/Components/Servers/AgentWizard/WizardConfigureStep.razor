@@ -1,0 +1,28 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Configure step: token + verify-service code lines. *@
+<OmniStack Gap="OmniSpacing.Large">
+    <p>@L["WizardConfigureDescription"]</p>
+    @if (IsLinux)
+    {
+        <OmniAlert Severity="OmniSeverity.Info">
+            <p class="omni-u-m-0">@L["WizardConfigureLinuxAutomated"]</p>
+        </OmniAlert>
+        <p class="omni-u-mb-xs">@L["WizardConfigurePromptTokenLabel"]</p>
+        <WizardTokenBlock Token="@Token" />
+        <WizardCodeBlock Code="@($"RegistrationToken={Token}")" Label="@L["WizardConfigureTokenLineLabel"]" InlineLine="true" />
+        <div class="omni-u-mt-lg">
+            <WizardCodeBlock Code="@("sudo systemctl start aetheus-agent\nsudo systemctl status aetheus-agent")" Label="@L["WizardConfigureVerifyLabel"]" InlineLine="true" />
+        </div>
+    }
+    else
+    {
+        <OmniAlert Severity="OmniSeverity.Info">
+            <p class="omni-u-m-0">@L["WizardConfigureWindowsAutomated"]</p>
+        </OmniAlert>
+        <p class="omni-u-mb-xs">@L["WizardConfigurePromptTokenLabel"]</p>
+        <WizardTokenBlock Token="@Token" />
+        <div class="omni-u-mt-lg">
+            <WizardCodeBlock Code="@("Start-Service AetheusAgent\nGet-Service -Name AetheusAgent | Select-Object Status")" Label="@L["WizardConfigureVerifyLabel"]" InlineLine="true" />
+        </div>
+    }
+</OmniStack>

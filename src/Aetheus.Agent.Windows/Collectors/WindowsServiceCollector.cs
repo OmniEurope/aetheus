@@ -2,7 +2,6 @@
 using System.Runtime.Versioning;
 using System.ServiceProcess;
 using Aetheus.Agent.Core.Collectors;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Agent.Windows.Collectors;
 
@@ -21,7 +20,7 @@ public sealed class WindowsServiceCollector(ILogger<WindowsServiceCollector> log
                     services.Add(new ServiceInfoDto
                     {
                         Name = sc.ServiceName,
-                        Type = Aetheus.Shared.Enums.ServiceType.WindowsService,
+                        Type = Aetheus.Shared.Components.Servers.ServiceType.WindowsService,
                         Status = sc.Status.ToString(),
                         IsRunning = sc.Status == ServiceControllerStatus.Running,
                         IsManageable = sc.StartType != ServiceStartMode.Disabled

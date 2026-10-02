@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.TestDoubles;
 
 /// <summary>
 /// Shared dialog spy used across the dialog component tests. Records that the dialog was closed and the
 /// payload it was closed with (<see cref="Closed"/> / <see cref="LastResult"/>), then delegates to the
-/// real <see cref="DialogService.Close"/>. Delegating matters for tests that drive a page which
+/// real <see cref="OmniDialogService.Close"/>. Delegating matters for tests that drive a page which
 /// <c>await</c>s <c>Dialog.OpenAsync&lt;T&gt;()</c> and rely on <c>Close</c> to complete that task (the
 /// Dashboards tests); for the direct-render dialog-component tests there is no open dialog, so the base
 /// call is a harmless no-op and only the recording is observed.
 /// </summary>
-internal sealed class SpyDialogService(NavigationManager nav, IJSRuntime js) : DialogService(nav, js)
+internal sealed class SpyDialogService : OmniDialogService
 {
+    private SpyDialogService(OmniOverlayService overlay) : base(new AppDialogs(overlay, new BunitTestHelper.StubLocalizer()), overlay) { }
+
+    internal SpyDialogService(NavigationManager _, IJSRuntime __) : this(new OmniOverlayService()) { }
+
     public bool Closed { get; private set; }
 
     public object? LastResult { get; private set; }
@@ -26,7 +30,7 @@ internal sealed class SpyDialogService(NavigationManager nav, IJSRuntime js) : D
 
     public string? LastOpenedComponent { get; private set; }
 
-    public override Task<dynamic?> OpenAsync<T>(string title, Dictionary<string, object?>? parameters = null, DialogOptions? options = null)
+    public override Task<object?> OpenAsync<T>(string title, Dictionary<string, object?>? parameters = null, OmniDialogOptions? options = null)
     {
         OpenCount++;
         LastOpenedComponent = typeof(T).Name;

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -43,10 +41,12 @@ public class ServerRkhunterExtendedTests : BunitContext
     }
 
     [Fact]
-    public void Renders_InstalledState_ShowsRkhunterHeading()
+    public void Renders_InstalledState_ShowsInstalledBadge_WithoutTitleHeading()
     {
         var cut = RenderInstalled();
-        Assert.Contains("RKHunter", cut.Markup);
+        Assert.Contains(cut.FindAll(".omni-badge"), badge => badge.TextContent.Trim() == "Installed");
+        Assert.DoesNotContain("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("RKHunter", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -57,14 +57,16 @@ public class ServerRkhunterExtendedTests : BunitContext
     }
 
     [Fact]
-    public void Renders_NotInstalled_ShowsRkhunterHeading()
+    public void Renders_NotInstalled_ShowsNotInstalledBadgeAndNoScanActions()
     {
         _handler.SetJsonResponse("api/servers/50/rkhunter/warnings", new List<RkhunterWarningDto>());
         var rk = new RkhunterDataDto { IsInstalled = false };
         var cut = Render<ServerRkhunterSection>(p => p
             .Add(x => x.ServerId, 50)
             .Add(x => x.Rk, rk));
-        Assert.Contains("RKHunter", cut.Markup);
+        Assert.Contains("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("RunScan", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("RKHunter", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,6 +105,7 @@ public class ServerRkhunterExtendedTests : BunitContext
             .GetField("_scheduleCron", Priv)!.GetValue(cut.Instance));
 
         _handler.SetJsonResponse("api/servers/51/rkhunter/warnings", new List<RkhunterWarningDto>());
+        _handler.SetJsonResponse("api/servers/51/rkhunter/history", new List<RkhunterScanResultDto>());
         cut.Render(parameters => parameters
             .Add(component => component.ServerId, 51)
             .Add(component => component.Rk, new RkhunterDataDto
@@ -154,24 +157,26 @@ public class ServerRkhunterExtendedTests : BunitContext
     public async Task HandleTaskCompletedAsync_RkhunterTask_RefreshesData()
     {
         var cut = RenderInstalled();
+        var before = _handler.Requests.Count(r => r.Url.Contains("api/servers/50/rkhunter/history"));
 
         var notification = new TaskCompletedNotification { TaskName = "Run RKHunter Scan", ServerId = 50 };
         await cut.Instance.HandleTaskCompletedAsync(notification);
 
-        // A RKHunter task triggers a refresh: scan-history is (re)fetched (it is not loaded on init).
-        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/servers/50/rkhunter/history"));
+        // A RKHunter task triggers a refresh: scan-history is fetched again (R-181: also loaded on init).
+        Assert.Equal(before + 1, _handler.Requests.Count(r => r.Url.Contains("api/servers/50/rkhunter/history")));
     }
 
     [Fact]
     public async Task HandleTaskCompletedAsync_UnrelatedTask_IgnoresIt()
     {
         var cut = RenderInstalled();
+        var before = _handler.Requests.Count(r => r.Url.Contains("api/servers/50/rkhunter/history"));
 
         var notification = new TaskCompletedNotification { TaskName = "Deploy App", ServerId = 50 };
         await cut.Instance.HandleTaskCompletedAsync(notification);
 
-        // A non-RKHunter task short-circuits before any refresh - scan-history is never fetched.
-        Assert.DoesNotContain(_handler.Requests, r => r.Url.Contains("api/servers/50/rkhunter/history"));
+        // A non-RKHunter task short-circuits before any refresh - scan-history is not fetched again.
+        Assert.Equal(before, _handler.Requests.Count(r => r.Url.Contains("api/servers/50/rkhunter/history")));
     }
 
     [Fact]

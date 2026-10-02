@@ -38,6 +38,14 @@ public interface IPipelineAnalysisTaskFactory
     void CreateComplexityTask(
         int runId, Server legServer, PipelineStepRun stepRun, PipelineStepDefinition stepDef,
         Dictionary<string, string> legVars, PipelineStageDefinition stageDef);
+
+    void CreateMutationTask(
+        int runId, Server legServer, PipelineStepRun stepRun, PipelineStepDefinition stepDef,
+        Dictionary<string, string> legVars, PipelineStageDefinition stageDef);
+
+    void CreateCollectArtifactsTask(
+        int runId, Server legServer, PipelineStepRun stepRun, PipelineStepDefinition stepDef,
+        Dictionary<string, string> legVars, PipelineStageDefinition stageDef);
 }
 
 /// <inheritdoc cref="IPipelineAnalysisTaskFactory"/>
@@ -101,10 +109,42 @@ public sealed class PipelineAnalysisTaskFactory(IPipelineStepTaskBuilder taskBui
         Dictionary<string, string> legVars, PipelineStageDefinition stageDef)
     {
         var variables = CreateAnalysisVariables(runId, legVars, stageDef);
+        if (LintAnalysisCategories.TryParse(stepDef.AnalysisCategory, out var category))
+            variables[LintAnalysisCategories.VariableName] = category.ToString();
         var command = JsonSerializer.Serialize(
             stepDef.TargetFiles.Count > 0 ? stepDef.TargetFiles : new List<string> { "**/*.sarif" });
         taskBuilder.TrackTypedTask(
             runId, legServer, stepRun, stepDef, command, variables, OperationKind.PipelinePublishLint);
+    }
+
+    /// <summary>PLAN-003 2.4: the Stryker mutation score, published as a metric.</summary>
+    public void CreateMutationTask(
+        int runId, Server legServer, PipelineStepRun stepRun, PipelineStepDefinition stepDef,
+        Dictionary<string, string> legVars, PipelineStageDefinition stageDef)
+    {
+        var variables = CreateAnalysisVariables(runId, legVars, stageDef);
+        var command = JsonSerializer.Serialize(
+            stepDef.TargetFiles.Count > 0 ? stepDef.TargetFiles : new List<string> { "**/mutation-report.json" });
+        taskBuilder.TrackTypedTask(
+            runId, legServer, stepRun, stepDef, command, variables, OperationKind.PipelinePublishMutation);
+    }
+
+    /// <summary>
+    /// PLAN-003 2.2 (4.5): one artifact per step. It is the same collection the stage-level
+    /// <c>artifacts:</c> dispatches after a stage, run as a step instead, so the stage only completes
+    /// once its artifacts are uploaded and a consumer downstream can never race the collection.
+    /// </summary>
+    public void CreateCollectArtifactsTask(
+        int runId, Server legServer, PipelineStepRun stepRun, PipelineStepDefinition stepDef,
+        Dictionary<string, string> legVars, PipelineStageDefinition stageDef)
+    {
+        var variables = CreateAnalysisVariables(runId, legVars, stageDef);
+        variables["AETHEUS_ARTIFACT_NAME"] = stepDef.ArtifactName!.Trim();
+        variables["AETHEUS_WORKSPACE_MODE"] = "process";
+        var command = JsonSerializer.Serialize(
+            stepDef.TargetFiles.Select(pattern => SubstituteVariables(pattern, legVars)).ToList());
+        taskBuilder.TrackTypedTask(
+            runId, legServer, stepRun, stepDef, command, variables, OperationKind.PipelineCollectArtifacts);
     }
 
     public void CreateComplexityTask(

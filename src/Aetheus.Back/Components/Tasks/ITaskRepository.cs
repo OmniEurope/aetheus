@@ -10,7 +10,10 @@ public interface ITaskRepository
 
     Task<(List<ServerTask> Items, int TotalCount)> GetTasksPagedAsync(
         string? search, int page, int pageSize, TaskExecutionStatus? status = null, List<int>? accessibleServerIds = null, int? serverId = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true);
+        string? sortBy = null, bool sortDescending = true, IReadOnlyList<GridFilter>? columnFilters = null);
+
+    /// <summary>Recette R-212: the server names across the tasks of a scope, for the Server column filter.</summary>
+    Task<TaskFilterValuesDto> GetTaskFilterValuesAsync(List<int>? accessibleServerIds, int? serverId, CancellationToken ct = default);
 
     Task<(List<ServerTask> Items, int TotalCount)> GetTasksByStatusesPagedAsync(
         string? search, int page, int pageSize, List<TaskExecutionStatus> statuses, List<int>? accessibleServerIds = null, CancellationToken ct = default);

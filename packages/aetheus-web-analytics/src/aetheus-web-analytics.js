@@ -1,4 +1,7 @@
 const DEFAULT_ENDPOINT = "/aetheus-analytics/v1/events";
+const HEARTBEAT_INTERVAL_MS = 75_000;
+// Most events kept while waiting for the identity (holdUntilIdentified); later ones are dropped.
+const MAX_HELD_EVENTS = 50;
 
 export function normalizeRoute(pathname) {
   if (typeof pathname !== "string"
@@ -56,17 +59,57 @@ export function createAetheusAnalytics(configuration = {}) {
   const respectDoNotTrack = configuration.respectDoNotTrack !== false;
   const captureErrors = configuration.captureErrors === true;
   const capturePerformance = configuration.capturePerformance === true;
+  // Whether the visitor is signed in, as a plain yes/no asked of the host app at send time. Nothing
+  // identifies the account: the collector counts signed-in visits under the same network-prefix
+  // pseudonym as anonymous ones. Only used when no authenticatedUserId is known.
+  const isSignedIn = typeof configuration.isSignedIn === "function" ? configuration.isSignedIn : undefined;
+  // Recette R2-008: with holdUntilIdentified, the events of the first moments (the first page view and
+  // the navigations before the host app knows who is signed in) are kept in memory, then sent with the
+  // identity at the first identify() call. Installing at once no longer loses those navigations, and
+  // waiting for the identity no longer counts the same person twice (anonymous, then signed in).
+  let holding = configuration.holdUntilIdentified === true;
+  const held = [];
   let stopped = false;
   let installed = false;
-  let previousRoute = "";
+  // Recette R2-008: the last page address counted (path and query, never the fragment). Only the same
+  // address twice in a row is one view: another entity of the same route, or another ?tab= of the same
+  // page, is a navigation and counts, under the page's route label.
+  let previousLocation;
   let originalPushState;
   let originalReplaceState;
   let pushStateWrapper;
   let replaceStateWrapper;
+  let heartbeatIntervalId;
+  let authenticatedUserId = typeof window !== "undefined"
+    && typeof window.__AETHEUS_ANALYTICS_USER__ === "string"
+    && window.__AETHEUS_ANALYTICS_USER__.length > 0
+    ? window.__AETHEUS_ANALYTICS_USER__
+    : undefined;
+
+  function identify(userId) {
+    authenticatedUserId = typeof userId === "string" && userId.length > 0 ? userId : undefined;
+    release();
+  }
+
+  /** Sends the held events, with the identity known now; later events go out at once. */
+  function release() {
+    holding = false;
+    for (const pending of held.splice(0)) {
+      send(pending);
+    }
+  }
 
   function privacySignalEnabled() {
     return navigator.globalPrivacyControl === true
       || (respectDoNotTrack && (navigator.doNotTrack === "1" || window.doNotTrack === "1"));
+  }
+
+  function signedIn() {
+    try {
+      return isSignedIn?.() === true;
+    } catch {
+      return false;
+    }
   }
 
   function currentRoute() {
@@ -90,12 +133,33 @@ export function createAetheusAnalytics(configuration = {}) {
       return;
     }
 
+    // The route and the time are those of the moment; the identity is added when the event leaves.
+    const pending = {
+      envelope: {
+        schemaVersion: 1,
+        eventId: crypto.randomUUID(),
+        occurredAtUtc: new Date().toISOString(),
+        kind,
+        route
+      },
+      details
+    };
+    if (holding) {
+      if (held.length < MAX_HELD_EVENTS) {
+        held.push(pending);
+      }
+      return;
+    }
+    send(pending);
+  }
+
+  function send({ envelope, details }) {
+    if (stopped || privacySignalEnabled()) {
+      return;
+    }
     const event = JSON.stringify({
-      schemaVersion: 1,
-      eventId: crypto.randomUUID(),
-      occurredAtUtc: new Date().toISOString(),
-      kind,
-      route,
+      ...envelope,
+      ...(authenticatedUserId ? { authenticatedUserId } : signedIn() ? { signedIn: true } : {}),
       ...details
     });
     if (event.length > 1024) {
@@ -117,12 +181,18 @@ export function createAetheusAnalytics(configuration = {}) {
   }
 
   function emitPageView() {
-    const route = currentRoute();
-    if (!route || route === previousRoute) {
+    const location = currentLocation();
+    if (location === previousLocation) {
       return;
     }
-    previousRoute = route;
+    // Kept even when the address is not measured, so coming back to a measured page counts again.
+    previousLocation = location;
     emit("page_view");
+  }
+
+  function currentLocation() {
+    const { pathname, search } = window.location;
+    return `${pathname}${typeof search === "string" ? search : ""}`;
   }
 
   function emitScriptError() {
@@ -145,6 +215,15 @@ export function createAetheusAnalytics(configuration = {}) {
       return;
     }
     emit("browser_performance", { durationMs: Math.round(durationMs) });
+  }
+
+  function emitHeartbeat() {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+    // Bypasses the address dedup in emitPageView: a heartbeat must fire on schedule
+    // even while the visitor stays on the same route, to keep LastSeenAtUtc fresh server-side.
+    emit("heartbeat");
   }
 
   function emitNavigationPerformance() {
@@ -186,16 +265,22 @@ export function createAetheusAnalytics(configuration = {}) {
         window.addEventListener("load", emitNavigationPerformance);
       }
     }
+    heartbeatIntervalId = setInterval(emitHeartbeat, HEARTBEAT_INTERVAL_MS);
     emitPageView();
   }
 
   function stop() {
     stopped = true;
+    held.length = 0;
     installed = false;
     window.removeEventListener("popstate", emitPageView);
     window.removeEventListener("error", emitScriptError);
     window.removeEventListener("unhandledrejection", emitUnhandledRejection);
     window.removeEventListener("load", emitNavigationPerformance);
+    if (heartbeatIntervalId !== undefined) {
+      clearInterval(heartbeatIntervalId);
+      heartbeatIntervalId = undefined;
+    }
     if (history.pushState === pushStateWrapper) {
       history.pushState = originalPushState;
     }
@@ -207,6 +292,7 @@ export function createAetheusAnalytics(configuration = {}) {
   return {
     install,
     stop,
+    identify,
     trackPageView: emitPageView,
     trackPerformance: emitPerformance
   };

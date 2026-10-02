@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
 using Aetheus.Back.Tests.Architecture;
-using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Tests;
 
@@ -112,13 +111,18 @@ public class VaultSecretGeneratorTests
     {
         var repositoryRoot = RepositoryScan.Root;
         var deployScript = File.ReadAllText(Path.Combine(repositoryRoot, "deploy", "scripts", "deploy.sh"));
-        var prepareScript = File.ReadAllText(
-            Path.Combine(repositoryRoot, "deploy", "scripts", "prod-deploy-prepare.sh"));
+        // R-248: the production recipe is declared by the versioned template and executed by the
+        // renderer prod-deploy-prepare.sh calls: #{SECRET_HEX_<N>}# is `openssl rand -hex <N>`.
+        var productionTemplate = File.ReadAllText(
+            Path.Combine(repositoryRoot, "deploy", "env", "prod.env.sample"));
+        var renderScript = File.ReadAllText(
+            Path.Combine(repositoryRoot, "deploy", "scripts", "render-env-sample.sh"));
 
         Assert.Contains("ensure_env_secret JWT_KEY", deployScript, StringComparison.Ordinal);
         Assert.Contains("ensure_env_secret ENCRYPTION_KEY", deployScript, StringComparison.Ordinal);
         Assert.Contains("ensure_env_secret ENCRYPTION_SALT", deployScript, StringComparison.Ordinal);
-        Assert.Matches(new Regex(@"DB_PASSWORD=\$\(openssl rand -hex 24\)"), prepareScript);
+        Assert.Matches(new Regex(@"(?m)^DB_PASSWORD=#\{SECRET_HEX_24\}#$"), productionTemplate);
+        Assert.Contains("openssl rand -hex \"$length\"", renderScript, StringComparison.Ordinal);
 
         // JWT_KEY and ENCRYPTION_KEY: 48 bytes, base64, tr -d "/+=".
         foreach (var key in new[] { "JWT_KEY", "ENCRYPTION_KEY" })
@@ -143,5 +147,25 @@ public class VaultSecretGeneratorTests
         var dbPassword = VaultSecretGenerator.ProfileFor("DB_PASSWORD");
         Assert.Equal(24, dbPassword.RandomBytes);
         Assert.Equal(VaultSecretGenerator.Encoding.Hex, dbPassword.Encoding);
+    }
+
+    /// <summary>Recette R-437: "32 characters" in the Generate menu is exactly that many letters and
+    /// digits, a fresh value each time.</summary>
+    [Theory]
+    [InlineData(32)]
+    [InlineData(64)]
+    public void GenerateCharacters_ReturnsExactlyThatManyLettersAndDigits(int length)
+    {
+        var first = VaultSecretGenerator.GenerateCharacters(length);
+        var second = VaultSecretGenerator.GenerateCharacters(length);
+
+        Assert.Matches($"^[A-Za-z0-9]{{{length}}}$", first);
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void GenerateCharacters_RefusesAnEmptyLength()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => VaultSecretGenerator.GenerateCharacters(0));
     }
 }

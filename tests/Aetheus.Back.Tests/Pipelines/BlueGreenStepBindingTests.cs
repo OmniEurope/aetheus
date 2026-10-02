@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.Pipelines;
 
@@ -181,14 +179,141 @@ public sealed class BlueGreenStepBindingTests
     /// Compose substitutes its own default for a variable it cannot see, so a name the run does not
     /// define would start the placeholder image and still report a successful cutover.
     /// </summary>
-    [Fact]
-    public void ComposeEnv_RefusesANameTheRunDoesNotDefine()
+    [Theory]
+    [InlineData(OperationKind.BlueGreenUp)]
+    [InlineData(OperationKind.BlueGreenMigrate)]
+    public void ComposeEnv_AStepThatStartsAContainer_RefusesANameTheRunDoesNotDefine(OperationKind operation)
     {
         var step = ValidStep() with { ComposeEnv = "AETHEUS_BACK_IMAGE" };
 
-        Assert.False(Bind(
-            OperationKind.BlueGreenUp, step, new Dictionary<string, string>(), out _, out var error));
+        Assert.False(Bind(operation, step, new Dictionary<string, string>(), out _, out var error));
         Assert.Contains("AETHEUS_BACK_IMAGE", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// D-01: one list for every step. Switch, commit, rollback and retire act on containers that
+    /// already exist, so a name the run does not define at that point is not forwarded - and is
+    /// reported, never dropped silently. The rollback is the case that forced the issue: it fires on
+    /// <c>failed()</c>, including a failure before the image tags were ever published.
+    /// </summary>
+    [Theory]
+    [InlineData(OperationKind.BlueGreenSwitch)]
+    [InlineData(OperationKind.BlueGreenCommit)]
+    [InlineData(OperationKind.BlueGreenRollback)]
+    [InlineData(OperationKind.BlueGreenRetire)]
+    public void ComposeEnv_AStepActingOnExistingContainers_ForwardsWhatResolvesAndReportsTheRest(OperationKind operation)
+    {
+        var runVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["APP_VERSION"] = "1.1.7",
+            ["SOURCE_COMMIT"] = ""
+        };
+        var step = ValidStep() with { ComposeEnv = "AETHEUS_BACK_IMAGE,APP_VERSION,SOURCE_COMMIT" };
+
+        Assert.True(Bind(operation, step, runVariables, out var binding, out var error), error);
+        Assert.Equal("1.1.7", binding!.Variables[BlueGreenStepBinding.ComposeEnvPrefix + "APP_VERSION"]);
+        Assert.DoesNotContain(BlueGreenStepBinding.ComposeEnvPrefix + "AETHEUS_BACK_IMAGE", binding.Variables.Keys);
+        Assert.Equal("", binding.Variables[BlueGreenStepBinding.ComposeEnvPrefix + "SOURCE_COMMIT"]);
+        Assert.Equal(["AETHEUS_BACK_IMAGE"], binding.SkippedComposeEnv);
+    }
+
+    /// <summary>
+    /// PLAN-003 2.1: a library may define a value as empty on purpose (a host prefix, a version
+    /// suffix). Defined-and-empty is forwarded as such on every step, the starting ones included;
+    /// only a name the run does not define at all is refused there.
+    /// </summary>
+    [Theory]
+    [InlineData(OperationKind.BlueGreenUp)]
+    [InlineData(OperationKind.BlueGreenMigrate)]
+    [InlineData(OperationKind.BlueGreenSwitch)]
+    public void ComposeEnv_ADefinedEmptyValue_IsForwardedAsEmpty(OperationKind operation)
+    {
+        var runVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["VERSION_SUFFIX"] = "" };
+        var step = ValidStep() with { ComposeEnv = "VERSION_SUFFIX" };
+
+        Assert.True(Bind(operation, step, runVariables, out var binding, out var error), error);
+        Assert.Equal("", binding!.Variables[BlueGreenStepBinding.ComposeEnvPrefix + "VERSION_SUFFIX"]);
+        Assert.Empty(binding.SkippedComposeEnv);
+    }
+
+    /// <summary>
+    /// The bootstrap identity is derived for bluegreen-up alone. Every other step - the migrate step
+    /// included, strict as it is - drops it by design, without a warning on every healthy run.
+    /// </summary>
+    [Theory]
+    [InlineData(OperationKind.BlueGreenMigrate)]
+    [InlineData(OperationKind.BlueGreenSwitch)]
+    [InlineData(OperationKind.BlueGreenCommit)]
+    [InlineData(OperationKind.BlueGreenRollback)]
+    public void ComposeEnv_TheStartOnlyIdentity_IsDroppedByEveryOtherStep(OperationKind operation)
+    {
+        var runVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["APP_VERSION"] = "1.1.7" };
+        var step = ValidStep() with { ComposeEnv = "APP_VERSION," + string.Join(',', BlueGreenStepBinding.StartOnlyNames) };
+
+        Assert.True(Bind(operation, step, runVariables, out var binding, out var error), error);
+        Assert.Empty(binding!.SkippedComposeEnv);
+        Assert.Equal(
+            [BlueGreenStepBinding.ComposeEnvPrefix + "APP_VERSION"],
+            binding.Variables.Keys.Where(key => key.StartsWith(BlueGreenStepBinding.ComposeEnvPrefix, StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// The production list names the telemetry and analytics variables, which the control plane
+    /// derives for bluegreen-up alone. The strict migrate step must drop them like the bootstrap
+    /// identity, or one v5 list could never get past Migrate.
+    /// </summary>
+    [Fact]
+    public void ComposeEnv_TheMigrateStep_DropsTheTelemetryNamesOnlyUpReceives()
+    {
+        var runVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["APP_VERSION"] = "1.1.7" };
+        var step = ValidStep() with
+        {
+            ComposeEnv = "APP_VERSION,AETHEUS_TELEMETRY_ENABLED,OTEL_EXPORTER_OTLP_HEADERS,AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY"
+        };
+
+        Assert.True(Bind(OperationKind.BlueGreenMigrate, step, runVariables, out var binding, out var error), error);
+        Assert.Empty(binding!.SkippedComposeEnv);
+        Assert.False(Bind(OperationKind.BlueGreenUp, step, runVariables, out _, out var upError));
+        Assert.Contains("AETHEUS_TELEMETRY_ENABLED", upError, StringComparison.Ordinal);
+    }
+
+    /// <summary>PLAN-003 2.7: the switch arms the host-side confirmation window, nothing else does.</summary>
+    [Fact]
+    public void ConfirmMinutes_OnTheSwitch_ReachesTheAgent()
+    {
+        Assert.True(Bind(OperationKind.BlueGreenSwitch, ValidStep() with { ConfirmMinutes = "10" }, out var binding, out var error), error);
+        Assert.Equal("10", binding!.Variables["AETHEUS_BG_CONFIRM_MINUTES"]);
+
+        Assert.True(Bind(OperationKind.BlueGreenSwitch, ValidStep() with { ConfirmMinutes = "0" }, out var none, out _));
+        Assert.False(none!.Variables.ContainsKey("AETHEUS_BG_CONFIRM_MINUTES"));
+    }
+
+    [Theory]
+    [InlineData(OperationKind.BlueGreenSwitch, "241")]
+    [InlineData(OperationKind.BlueGreenSwitch, "ten")]
+    [InlineData(OperationKind.BlueGreenCommit, "10")]
+    public void ConfirmMinutes_OutOfRangeOrOnAnotherStep_IsRefused(OperationKind operation, string minutes)
+    {
+        Assert.False(Bind(operation, ValidStep() with { ConfirmMinutes = minutes }, out _, out var error));
+        Assert.Contains("confirm_minutes", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Revert_NeedsTheUpstreamAndASafeReloadHelper()
+    {
+        Assert.Equal(OperationKind.BlueGreenRevert, BlueGreenStepBinding.OperationFor("bluegreen-revert"));
+        Assert.True(Bind(OperationKind.BlueGreenRevert, ValidStep(), out _, out var error), error);
+        Assert.False(Bind(OperationKind.BlueGreenRevert, ValidStep() with { UpstreamConf = "" }, out _, out _));
+        Assert.False(Bind(OperationKind.BlueGreenRevert, ValidStep() with { ReloadHelper = "reload; rm -rf /" }, out _, out _));
+    }
+
+    [Fact]
+    public void ComposeEnv_TheStartingStep_StillRefusesAMissingIdentity()
+    {
+        var step = ValidStep() with { ComposeEnv = "DEPLOYMENT_BOOTSTRAP_PASSWORD" };
+
+        Assert.False(Bind(OperationKind.BlueGreenUp, step, new Dictionary<string, string>(), out _, out var error));
+        Assert.Contains("DEPLOYMENT_BOOTSTRAP_PASSWORD", error, StringComparison.Ordinal);
     }
 
     [Theory]

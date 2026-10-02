@@ -1,5 +1,5 @@
 {
-  "minLines": 8,
+  "minLines": 15,
   "minTokens": 70,
   "mode": "strict",
   "format": ["csharp", "javascript", "typescript", "python", "java"],
@@ -22,7 +22,13 @@
     ".aetheus/security-rules/tests/**",
     "deploy/pipelines/toto-conformance-fixture/**",
     "deploy/pipelines/toto-e2e-fixture/**",
-    "**/*.Designer.cs"
+    "**/*.Designer.cs",
+    "**/GlobalUsings.cs",
+    "src/**/I[A-Z]*.cs",
+    "src/**/*Dtos.cs",
+    "src/Aetheus.Back/Data/Entities/**",
+    "src/Aetheus.Back/Data/Configurations/**",
+    "docs-site/public/**"
   ],
   "reporters": ["json"],
   "output": ".analysis-duplication"

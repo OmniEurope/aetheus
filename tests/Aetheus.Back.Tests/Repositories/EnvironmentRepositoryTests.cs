@@ -22,6 +22,49 @@ public class EnvironmentRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetEnvironmentsPagedAsync_AppliesColumnFilters_BeforeTheCount()
+    {
+        // Recette R-224: type list, approval yes/no and name text are column filters of the query.
+        _db.Environments.AddRange(
+            new Environment { Name = "prod-eu", Type = EnvironmentType.Production, RequireApproval = true },
+            new Environment { Name = "prod-us", Type = EnvironmentType.Production, RequireApproval = false },
+            new Environment { Name = "staging", Type = EnvironmentType.Staging, RequireApproval = true });
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetEnvironmentsPagedAsync(null, null, 1, 10, ct: TestContext.Current.CancellationToken,
+            columnFilters:
+            [
+                new GridFilter { Field = "Type", Operator = GridFilterOperator.In, Value = $"Production{GridFilter.ListSeparator}Testing" },
+                new GridFilter { Field = "RequireApproval", Operator = GridFilterOperator.Equals, Value = "True" },
+                new GridFilter { Field = "Name", Operator = GridFilterOperator.Contains, Value = "PROD" }
+            ]);
+
+        Assert.Equal(1, total);
+        Assert.Equal("prod-eu", Assert.Single(items).Name);
+    }
+
+    [Fact]
+    public void UpdatedAtRange_Filters()
+    {
+        var environments = new List<Environment>
+        {
+            new() { Name = "old", UpdatedAt = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Name = "new", UpdatedAt = new DateTime(2026, 9, 5, 0, 0, 0, DateTimeKind.Utc) }
+        }.AsQueryable();
+
+        var matching = EnvironmentListQuery.Columns.ApplyFilters(environments,
+        [
+            new GridFilter
+            {
+                Field = "UpdatedAt", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-01",
+                SecondOperator = GridFilterOperator.LessThan, SecondValue = "2026-09-10"
+            }
+        ]).ToList();
+
+        Assert.Equal("new", Assert.Single(matching).Name);
+    }
+
+    [Fact]
     public async Task GetEnvironmentsPagedAsync_ReturnsPagedResults()
     {
         var project = new Project { Name = "P" };

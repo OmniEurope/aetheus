@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.Sections;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.Sections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 /// <summary>
-/// Tests for the thin routing-layer section pages under Pages/Servers/Sections/.
+/// Tests for the thin routing-layer section pages under Components/Servers/Sections/.
 /// These pages delegate to ServerDetailLoader (cascading parameter) and forward
 /// task-completed notifications to their child sections. The observable behaviour
 /// asserted here is the real subscribe-on-parameters / unsubscribe-on-dispose
@@ -228,15 +226,15 @@ public class SectionsTests : BunitContext
     [Fact]
     public void ServicesSection_Id_Parameter_IsSet()
     {
-        var component = new Aetheus.Front.Pages.Servers.Sections.Services();
-        typeof(Aetheus.Front.Pages.Servers.Sections.Services).GetProperty("Id")!.SetValue(component, 11);
+        var component = new Aetheus.Front.Components.Servers.Sections.Services();
+        typeof(Aetheus.Front.Components.Servers.Sections.Services).GetProperty("Id")!.SetValue(component, 11);
         Assert.Equal(11, component.Id);
     }
 
     [Fact]
     public void ServicesSection_Dispose_WhenNotSubscribed_DoesNotThrow()
     {
-        var component = new Aetheus.Front.Pages.Servers.Sections.Services();
+        var component = new Aetheus.Front.Components.Servers.Sections.Services();
         component.Dispose();
     }
 
@@ -244,7 +242,7 @@ public class SectionsTests : BunitContext
     public async Task ServicesSection_SubscribesOnParameters_AndUnsubscribesOnDispose()
     {
         var loader = CreateLoader();
-        var component = new Aetheus.Front.Pages.Servers.Sections.Services();
+        var component = new Aetheus.Front.Components.Servers.Sections.Services();
         await SubscribeViaParametersAsync(component, loader, 11);
         Assert.Equal(1, SubscriberCount(loader));
 

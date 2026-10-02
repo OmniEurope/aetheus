@@ -1,0 +1,69 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_apps is null)
+{
+    <AetheusLoader />
+}
+else
+{
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Class="omni-u-mb-lg" Gap="OmniSpacing.Large">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => _addVisible = true)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+    </OmniStack>
+
+    <OmniTextBox aria-label="@L["Search"]" Placeholder="@L["Search"]" @bind-Value="_search" @bind-Value:after="OnSearchChangedAsync"
+        Class="pipeline-list-search omni-u-mb-sm" />
+    <AetheusDataGrid @ref="_grid" Data="@_apps" TItem="ServerAppDto"
+        Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
+        PageSize="25" EmptyText="@L["NoRecords"]"
+        Virtualize="@AetheusGrid.RemoteVirtualization"
+        VirtualData="@(() => new OmniDataGridResult<ServerAppDto>(_apps ?? [], _totalCount))">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="ServerAppDto" Property="Name" Title="@L["Name"]" Filterable="true" />
+            <OmniDataGridColumn TItem="ServerAppDto" Property="Status" Title="@L["Status"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText" >
+                <Template Context="a">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@GetAppStatusBadge(a.Status)">@L[a.Status.ToString()]</OmniBadge>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="ServerAppDto" Property="Version" Title="@L["Version"]" Width="100px" Filterable="true" />
+            <OmniDataGridColumn TItem="ServerAppDto" Property="Port" Title="@L["Port"]" Width="80px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" FilterOperator="OmniDataGridFilterOperator.Equals" />
+            <OmniDataGridColumn TItem="ServerAppDto" Property="Source" Title="@L["Source"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_sourceValues" FilterSearchable="true" />
+            <OmniDataGridColumn TItem="ServerAppDto" Title="@L["Actions"]" Width="80px" TextAlign="OmniDataGridTextAlign.Center" Sortable="false" Filterable="false" >
+                <Template Context="a">
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteAppAsync(a))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+
+    @if (_addVisible)
+    {
+        <OmniCard Class="omni-u-mt-lg">
+            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["AddApplication"]</OmniHeading>
+            <OmniRow Gap="OmniSpacing.Large">
+                <OmniColumn Span="12" MediumSpan="3">
+                    <OmniFormField For="oe-pages-servers-serverdetailsections-serverappssection-1"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_addName" maxlength="100" Id="oe-pages-servers-serverdetailsections-serverappssection-1" />
+                    </ChildContent></OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="6" MediumSpan="2">
+                    <OmniFormField For="oe-pages-servers-serverdetailsections-serverappssection-2"><LabelContent>@L["Version"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_addVersion" maxlength="50" Id="oe-pages-servers-serverdetailsections-serverappssection-2" />
+                    </ChildContent></OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="6" MediumSpan="2">
+                    <OmniFormField For="oe-pages-servers-serverdetailsections-serverappssection-numeric-1"><LabelContent>@L["Port"]</LabelContent><ChildContent><OmniNumeric TValue="int?" @bind-Value="_addPort" Id="oe-pages-servers-serverdetailsections-serverappssection-numeric-1" /></ChildContent></OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="6" MediumSpan="3">
+                    <OmniFormField Label="@L["Source"]" For="oe-formfield-pages-servers-serverdetailsections-serverappssection-1">
+                        <OmniDropDown Id="oe-formfield-pages-servers-serverdetailsections-serverappssection-1" TValue="string" Options="@(_sources.ToOptions(item => (string)item, item => item))" @bind-Value="_addSource" />
+                    </OmniFormField>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="2">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-xl">
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@AddAppAsync" Class="@(_addSaving ? "btn-busy" : null)" Busy="@(_addSaving)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _addVisible = false)"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+                    </OmniStack>
+                </OmniColumn>
+            </OmniRow>
+        </OmniCard>
+    }
+}

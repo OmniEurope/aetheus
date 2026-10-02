@@ -1,0 +1,31 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplateExtractionBase
+
+<EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Large">
+        <OmniFormField For="oe-pages-pipelines-extractpipelinetemplatedialog-1"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_model.TemplateName" Id="oe-pages-pipelines-extractpipelinetemplatedialog-1" />
+        </ChildContent></OmniFormField>
+        <ValidationMessage For="@(() => _model.TemplateName)" />
+        <OmniFormField For="oe-pages-pipelines-extractpipelinetemplatedialog-2"><LabelContent>@L["Category"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_model.Category" Id="oe-pages-pipelines-extractpipelinetemplatedialog-2" />
+        </ChildContent></OmniFormField>
+        <OmniFormField For="oe-pages-pipelines-extractpipelinetemplatedialog-3"><LabelContent>@L["Description"]</LabelContent><ChildContent>
+            <OmniTextArea @bind-Value="_model.Description" Rows="3" Id="oe-pages-pipelines-extractpipelinetemplatedialog-3" />
+        </ChildContent></OmniFormField>
+        <OmniAlert Severity="OmniSeverity.Info">@L["ExtractionParametersHelp"]</OmniAlert>
+        <OmniText Element="OmniTextElement.Strong">@L["NewTemplateYaml"]</OmniText>
+        <MonacoEditor Value="@_model.TemplateYamlContent" ValueChanged="@(value => _model.TemplateYamlContent = value)" />
+        <ValidationMessage For="@(() => _model.TemplateYamlContent)" />
+        <OmniCheckBox @bind-Value="_model.RewritePipeline">@L["RewritePipelineToPin"]</OmniCheckBox>
+        @if (_model.RewritePipeline)
+        {
+            <OmniText Element="OmniTextElement.Strong">@L["RewrittenPipelineYaml"]</OmniText>
+            <MonacoEditor Value="@_model.RewrittenPipelineYaml" ValueChanged="@(value => _model.RewrittenPipelineYaml = value)" />
+        }
+        <DialogFooter OnCancel="@Cancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Extract"]</span></OmniButton>
+        </DialogFooter>
+    </OmniStack>
+</EditForm>

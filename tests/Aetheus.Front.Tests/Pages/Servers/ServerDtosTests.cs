@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -113,11 +112,11 @@ public class ServerDtosTests
         {
             Name = "new-name",
             Tags = ["tag1", "tag2"],
-            Status = Aetheus.Shared.Enums.ServerStatus.Online,
-            Type = Aetheus.Shared.Enums.ServerType.Normal
+            Status = Aetheus.Shared.Components.Servers.ServerStatus.Online,
+            Type = Aetheus.Shared.Components.Servers.ServerType.Normal
         };
         Assert.Equal("new-name", req.Name);
         Assert.Equal(2, req.Tags!.Count);
-        Assert.Equal(Aetheus.Shared.Enums.ServerType.Normal, req.Type);
+        Assert.Equal(Aetheus.Shared.Components.Servers.ServerType.Normal, req.Type);
     }
 }

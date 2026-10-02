@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Git;
-using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -109,16 +108,7 @@ public sealed class PipelineGitService(
         try
         {
             var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
-            if (repo is null || repo.IsEmpty) return null;
-
-            var diskPath = SafeDiskPath(projectId, repo);
-            if (diskPath is null || !Directory.Exists(diskPath)) return null;
-
-            var branch = string.IsNullOrWhiteSpace(sourceBranch)
-                ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "HEAD" : repo.DefaultBranch
-                : sourceBranch;
-            var commits = await cli.GetCommitsAsync(diskPath, branch, skip: 0, take: 1, ct: ct).ConfigureAwait(false);
-            return commits.FirstOrDefault()?.Sha;
+            return await GetHeadCommitShaAsync(projectId, repo, sourceBranch, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -133,18 +123,50 @@ public sealed class PipelineGitService(
         }
     }
 
+    /// <summary>The head commit of a repository already read: the branch asked for, else its default.</summary>
+    private async Task<string?> GetHeadCommitShaAsync(
+        int projectId, GitLightRepoDto? repo, string? sourceBranch, CancellationToken ct)
+    {
+        if (repo is null || repo.IsEmpty) return null;
+
+        var diskPath = SafeDiskPath(projectId, repo);
+        if (diskPath is null || !Directory.Exists(diskPath)) return null;
+
+        var branch = string.IsNullOrWhiteSpace(sourceBranch)
+            ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "HEAD" : repo.DefaultBranch
+            : sourceBranch;
+        var commits = await cli.GetCommitsAsync(diskPath, branch, skip: 0, take: 1, ct: ct).ConfigureAwait(false);
+        return commits.FirstOrDefault()?.Sha;
+    }
+
     public async Task<PipelineSourceDto?> GetPipelineSourceAsync(
         int projectId, string pipelineName, CancellationToken ct = default,
         string? sourceBranch = null, int? sourceRepositoryId = null)
     {
-        var repo = await GetProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
+        // Recette R-483: a read, so the stored repository row (no default-branch detection, which is
+        // two git processes and a possible write), read once and reused for the head commit below.
+        var repo = await GetStoredProjectRepoAsync(projectId, sourceRepositoryId, ct).ConfigureAwait(false);
         if (repo is null) return null;
 
         var branch = string.IsNullOrWhiteSpace(sourceBranch)
             ? string.IsNullOrWhiteSpace(repo.DefaultBranch) ? "main" : repo.DefaultBranch
             : sourceBranch;
-        var commit = await GetHeadCommitShaAsync(
-            projectId, ct, sourceBranch, sourceRepositoryId).ConfigureAwait(false);
+        string? commit;
+        try
+        {
+            commit = await GetHeadCommitShaAsync(projectId, repo, sourceBranch, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Mandatory, as in the public lookup: an unreadable head is an unresolved source the
+            // caller handles (workspace pipelines fail closed on it), never a failed page.
+            logger.LogWarning(ex, "Could not resolve head commit for project {ProjectId}", projectId);
+            commit = null;
+        }
         return new PipelineSourceDto
         {
             RepositoryId = repo.Id,
@@ -326,17 +348,37 @@ public sealed class PipelineGitService(
     // Falling back to the first alphabetical repository made the YAML source and checkout source
     // diverge, which can run a valid pipeline against an empty or unrelated workspace.
     private async Task<GitLightRepoDto?> GetProjectRepoAsync(
-        int projectId, int? sourceRepositoryId, CancellationToken ct)
+        int projectId, int? sourceRepositoryId, CancellationToken ct) =>
+        SelectProjectRepo(
+            await gitService.GetRepositoriesAsync(projectId, ct).ConfigureAwait(false),
+            projectId, sourceRepositoryId);
+
+    /// <summary>
+    /// Recette R-483: the project's repository as stored, without the default-branch detection
+    /// <see cref="IGitLightService.GetRepositoriesAsync"/> runs on every call (two git processes per
+    /// repository, and a write when it drifts). A read of the source names the stored default branch,
+    /// which a push (<c>GitSmartHttpService</c>) and the nightly maintenance keep in step with the disk.
+    /// </summary>
+    private async Task<GitLightRepoDto?> GetStoredProjectRepoAsync(
+        int projectId, int? sourceRepositoryId, CancellationToken ct) =>
+        SelectProjectRepo(
+            await gitService.GetAccessibleRepositoriesAsync([projectId], ct).ConfigureAwait(false),
+            projectId, sourceRepositoryId);
+
+    private static GitLightRepoDto? SelectProjectRepo(
+        List<GitLightRepoDto> repos, int projectId, int? sourceRepositoryId)
     {
-        var repos = await gitService.GetRepositoriesAsync(projectId, ct).ConfigureAwait(false);
         if (sourceRepositoryId is { } repositoryId)
             return repos.FirstOrDefault(repo => repo.Id == repositoryId)
                 ?? throw new BadRequestException(
                     $"Source repository {repositoryId} does not belong to project {projectId}.");
-        return repos.Count switch
+        // Recette R-534: the mirror of an external repository attached beside the project's repository
+        // is a source a pipeline names (source: repository:), never where a definition is read by default.
+        var own = repos.Where(repo => !repo.IsAdditionalSource).ToList();
+        return own.Count switch
         {
             0 => null,
-            1 => repos[0],
+            1 => own[0],
             _ => throw new BadRequestException(
                 $"Project {projectId} has multiple repositories; select an explicit pipeline source repository.")
         };

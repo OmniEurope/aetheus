@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: EUPL-1.2
+using System.Net.Http;
+using System.Text.Json;
+
+namespace Aetheus.Front.Components.Pipelines;
+
+public partial class PipelineRunLineageTile
+{
+    [Inject] private ApiClient Api { get; set; } = default!;
+    [Inject] private IStringLocalizer<AppStrings> L { get; set; } = default!;
+    [Inject] private OmniDialogService Dialog { get; set; } = default!;
+
+    /// <summary>Recette R2-026: the follow-up runs named in the tile; more open in a dialog.</summary>
+    internal const int MaxShown = 3;
+
+    [Parameter, EditorRequired] public PipelineRunDto Run { get; set; } = default!;
+    [Parameter] public int? ProjectId { get; set; }
+    [Parameter] public int? ServerId { get; set; }
+
+    private PipelineRunLineageDto? _lineage;
+    private (int RunId, PipelineStatus Status)? _loadedFor;
+
+    private string? ParentPipeline => PipelineRunFormatting.UpstreamPipeline(Run.ResolvedVariables);
+    private int? ParentRunId => PipelineRunFormatting.UpstreamRunId(Run.ResolvedVariables);
+
+    /// <summary>The account that launched the run; "automatic" when nobody did, or while it is read.</summary>
+    private string ActorText => _lineage?.TriggeredBy ?? L["RunLaunchedAutomatically"];
+
+    /// <summary>Read when the run is first shown and again when its status changes: a run starts the
+    /// next one of its chain as it ends, so the list is only complete then.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = (Run.Id, Run.Status);
+        if (_loadedFor == key) return;
+        _loadedFor = key;
+        try
+        {
+            _lineage = await Api.Pipelines.GetPipelineRunLineageAsync(Run.Id);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            // The tile still says what the run's own variables tell (its parent); only the person
+            // and the runs it started are missing.
+            _lineage = null;
+        }
+    }
+
+    private Task ShowAllAsync() =>
+        _lineage is null
+            ? Task.CompletedTask
+            : Dialog.OpenAsync<PipelineRunLineageDialog>(
+                L["RunFollowUps"].Value,
+                new Dictionary<string, object?>
+                {
+                    [nameof(PipelineRunLineageDialog.Runs)] = _lineage.Downstream,
+                    [nameof(PipelineRunLineageDialog.ProjectId)] = ProjectId,
+                    [nameof(PipelineRunLineageDialog.ServerId)] = ServerId
+                },
+                new OmniDialogOptions { Width = "560px", AutoFocusFirstElement = false });
+}

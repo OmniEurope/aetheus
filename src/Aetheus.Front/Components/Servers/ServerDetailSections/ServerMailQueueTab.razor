@@ -1,0 +1,41 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniRow Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+    <OmniBadge Fill="OmniFill.Solid" Tone="@(QueueSize > 0 ? OmniTone.Warning : OmniTone.Success)">@QueueSize.ToString()</OmniBadge>
+    @if (_pendingTaskId is not null)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@L["MailWaitingForTask"]</OmniText>
+    }
+    <div class="blade-content-spacer"></div>
+    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@LoadAsync" Disabled="@(_pendingTaskId is not null)"><OmniIcon Name="OmniIconName.Eye" /> <span>@L["MailQueueLoad"]</span></OmniButton>
+    @if (CanManage)
+    {
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@FlushAsync"><OmniIcon Name="OmniIconName.PaperPlaneRight" /> <span>@L["FlushQueue"]</span></OmniButton>
+    }
+</OmniRow>
+@if (_loaded && _items.Count == 0)
+{
+    <OmniText Element="OmniTextElement.Paragraph">@L["MailQueueEmpty"]</OmniText>
+}
+else
+{
+    <OmniDataGrid @ref="_grid" FillAvailableHeight="true" Items="@_items" TItem="MailQueueItemDto" KeyOf="@(row => row.Id)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" EmptyText="@L["NoRecords"]" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="MailQueueItemDto" Property="Id" Title="ID" Width="7.5rem" Filterable="true" />
+            <OmniDataGridColumn TItem="MailQueueItemDto" Property="Sender" Title="@L["Sender"]" Width="12.5rem" Filterable="true" />
+            <OmniDataGridColumn TItem="MailQueueItemDto" Property="Recipient" Title="@L["Recipient"]" Width="13.75rem" Filterable="true" />
+            <OmniDataGridColumn TItem="MailQueueItemDto" Title="@L["Size"]" Width="5.625rem" Sortable="false">
+                <Template Context="q"><OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@FormatBytes(q.SizeBytes)</OmniText></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="MailQueueItemDto" Property="Status" Title="@L["Status"]" Width="20rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true" />
+            @if (CanManage)
+            {
+                <OmniDataGridColumn TItem="MailQueueItemDto" Title="@L["Actions"]" Width="7.5rem" Sortable="false">
+                    <Template Context="q">
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteAsync(q.Id))" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                    </Template>
+                </OmniDataGridColumn>
+            }
+        </Columns>
+    </OmniDataGrid>
+}

@@ -1,0 +1,58 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@inherits EntityEditDialogBase
+@* ADR-021: create/edit a monitored app. Closes with `true` on success so the caller reloads. *@
+<OmniTemplateForm TModel="UpdateMonitoredAppRequest" Model="@_model" OnValidSubmit="@SubmitAsync">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["MonitoredAppName"]" Class="omni-u-w-100" For="Name">
+                <OmniTextBox @bind-Value="_model.Name"
+
+                    Id="Name" />
+            </OmniFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["ProbeUrl"]" Class="omni-u-w-100" For="ProbeUrl">
+                <OmniTextBox @bind-Value="_model.ProbeUrl"
+
+                    Id="ProbeUrl" Placeholder="@L["PlaceholderProbeUrl"]" />
+            </OmniFormField>
+            <ValidationMessage For="@(() => _model.ProbeUrl)" />
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["HostingServer"]" Class="omni-u-w-100" For="oe-formfield-shared-monitoredappformdialog-3">
+                <OmniDropDown Id="oe-formfield-shared-monitoredappformdialog-3" TValue="int?" @bind-Value="_model.ServerId" Options="@(_servers.ToOptions(item => (int?)item.Id, item => item.Name))"
+                                AllowEmpty="true" Placeholder="@L["OffFleetBackendProbe"]" />
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Environment"]" Class="omni-u-w-100" For="oe-formfield-shared-monitoredappformdialog-4">
+                <OmniDropDown Id="oe-formfield-shared-monitoredappformdialog-4" TValue="int?" @bind-Value="_model.EnvironmentId" Options="@(_environments.ToOptions(item => (int?)item.Id, item => item.Name))"
+                                AllowEmpty="true" Placeholder="@L["None"]" />
+            </OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="oe-shared-monitoredappformdialog-numeric-1"><LabelContent>@L["ProbeIntervalSeconds"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.ProbeIntervalSeconds" Minimum="15" Maximum="3600" Id="oe-shared-monitoredappformdialog-numeric-1" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="oe-shared-monitoredappformdialog-numeric-2"><LabelContent>@L["ProbeTimeoutSeconds"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.ProbeTimeoutSeconds" Minimum="1" Maximum="120" Id="oe-shared-monitoredappformdialog-numeric-2" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="oe-shared-monitoredappformdialog-numeric-3"><LabelContent>@L["ExpectedStatusCode"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.ExpectedStatusCode" Minimum="100" Maximum="599" Id="oe-shared-monitoredappformdialog-numeric-3" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="oe-shared-monitoredappformdialog-numeric-4"><LabelContent>@L["FailureThreshold"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.FailureThreshold" Minimum="1" Maximum="20" Id="oe-shared-monitoredappformdialog-numeric-4" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="oe-shared-monitoredappformdialog-numeric-5"><LabelContent>@L["RecoveryThreshold"]</LabelContent><ChildContent><OmniNumeric @bind-Value="_model.RecoveryThreshold" Minimum="1" Maximum="20" Id="oe-shared-monitoredappformdialog-numeric-5" /></ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniSwitch @bind-Value="_model.Enabled">@L["Enabled"]</OmniSwitch>
+        </OmniColumn>
+    </OmniRow>
+    <DialogFooter OnCancel="@Cancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="@MaterialIconMap.Resolve((IsEdit ? "save" : "add"))" /> <span>@(IsEdit ? L["Save"] : L["Create"])</span></OmniButton>
+    </DialogFooter>
+</OmniTemplateForm>

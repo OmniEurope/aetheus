@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -19,6 +16,8 @@ public class ServerPortsentrySectionRenderTests : BunitContext
     public ServerPortsentrySectionRenderTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        // Recette R-210: the section also reads the protocols its Protocol header filter offers.
+        _handler.SetJsonResponse("portsentry/filter-values", new PortsentryFilterValuesDto());
         BunitTestHelper.UseImmediateDialogs(this);
     }
 
@@ -83,10 +82,12 @@ public class ServerPortsentrySectionRenderTests : BunitContext
     }
 
     [Fact]
-    public void Renders_NotInstalled_ShowsPortSentryHeading()
+    public void Renders_NotInstalled_ShowsSetupButton_WithoutTitleHeading()
     {
         var cut = RenderNotInstalled();
-        Assert.Contains("PortSentry", cut.Markup);
+        Assert.Contains("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("PortsentrySetup", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("PortSentry", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -117,7 +118,7 @@ public class ServerPortsentrySectionRenderTests : BunitContext
         // Force whitelist load via reflection to avoid timing issues
         var method = typeof(ServerPortsentrySection).GetMethod("LoadWhitelistAsync", Priv)!;
         await cut.InvokeAsync(async () =>
-            await (Task)method.Invoke(cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+            await (Task)method.Invoke(cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
 
         var whitelist = (List<PortsentryWhitelistIpDto>)typeof(ServerPortsentrySection)
             .GetField("_whitelist", Priv)!
@@ -170,15 +171,6 @@ public class ServerPortsentrySectionRenderTests : BunitContext
             .GetField("_actionRunning", Priv)!.GetValue(cut.Instance)!);
     }
 
-    [Theory]
-    [InlineData("start", PortsentryAction.Start)]
-    [InlineData("stop", PortsentryAction.Stop)]
-    [InlineData("restart", PortsentryAction.Restart)]
-    public void ResolveAction_UsesSelectedSplitButtonValue(string value, PortsentryAction expected)
-    {
-        Assert.Equal(expected, ServerPortsentrySection.ResolveAction(value));
-    }
-
     [Fact]
     public async Task ServerChange_ClearsWhitelistFromPreviousServer()
     {
@@ -191,7 +183,7 @@ public class ServerPortsentrySectionRenderTests : BunitContext
             .Add(component => component.Ps, new PortsentryDataDto { IsInstalled = true }));
         var load = typeof(ServerPortsentrySection).GetMethod("LoadWhitelistAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)load.Invoke(
-            cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+            cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
 
         StubPortsentryApi(51);
         cut.Render(parameters => parameters
@@ -235,7 +227,7 @@ public class ServerPortsentrySectionRenderTests : BunitContext
 
         var method = typeof(ServerPortsentrySection).GetMethod("LoadWhitelistAsync", Priv)!;
         await cut.InvokeAsync(async () =>
-            await (Task)method.Invoke(cut.Instance, [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+            await (Task)method.Invoke(cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
 
         var whitelist = (List<PortsentryWhitelistIpDto>)typeof(ServerPortsentrySection)
             .GetField("_whitelist", Priv)!
@@ -311,7 +303,7 @@ public class ServerPortsentrySectionRenderTests : BunitContext
         var whitelistField = typeof(ServerPortsentrySection).GetField("_whitelist", Priv)!;
         whitelistField.SetValue(cut.Instance, new List<PortsentryWhitelistIpDto> { entry });
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.ConfirmResult = true;
 
         var method = typeof(ServerPortsentrySection).GetMethod("RemoveWhitelistIpAsync", Priv)!;
@@ -325,14 +317,14 @@ public class ServerPortsentrySectionRenderTests : BunitContext
     // ── Static helpers ────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData(0, BadgeStyle.Success)]
-    [InlineData(3, BadgeStyle.Warning)]
-    [InlineData(5, BadgeStyle.Warning)]
-    [InlineData(10, BadgeStyle.Danger)]
-    public void GetBlockedCountBadgeStyle_ReturnsExpected(int count, BadgeStyle expected)
+    [InlineData(0, OmniTone.Success)]
+    [InlineData(3, OmniTone.Warning)]
+    [InlineData(5, OmniTone.Warning)]
+    [InlineData(10, OmniTone.Danger)]
+    public void GetBlockedCountBadgeStyle_ReturnsExpected(int count, OmniTone expected)
     {
         var method = typeof(ServerPortsentrySection).GetMethod("GetBlockedCountBadgeStyle", StaticPriv)!;
-        var result = (BadgeStyle)method.Invoke(null, [count])!;
+        var result = (OmniTone)method.Invoke(null, [count])!;
         Assert.Equal(expected, result);
     }
 
@@ -356,7 +348,7 @@ public class ServerPortsentrySectionRenderTests : BunitContext
     public async Task UnblockIpAsync_Confirmed_PostsUnblockRequest()
     {
         var cut = RenderInstalled();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.ConfirmResult = true;
         var method = typeof(ServerPortsentrySection).GetMethod("UnblockIpAsync", Priv)!;
 

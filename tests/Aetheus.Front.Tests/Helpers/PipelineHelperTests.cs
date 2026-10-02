@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Radzen;
 
 namespace Aetheus.Front.Tests;
 
 public class PipelineHelperTests
 {
     [Theory]
-    [InlineData(PipelineStatus.Success, BadgeStyle.Success)]
-    [InlineData(PipelineStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(PipelineStatus.Running, BadgeStyle.Info)]
-    [InlineData(PipelineStatus.Cancelled, BadgeStyle.Warning)]
-    public void GetRunBadge_ReturnsCorrectStyle(PipelineStatus status, BadgeStyle expected)
+    [InlineData(PipelineStatus.Success, OmniTone.Success)]
+    [InlineData(PipelineStatus.Failed, OmniTone.Danger)]
+    [InlineData(PipelineStatus.Running, OmniTone.Accent)]
+    // PLAN-003 D13: amber is now Partial (finished with a swallowed failure); a cancelled run is a
+    // non-event, so it takes the neutral grey.
+    [InlineData(PipelineStatus.Cancelled, OmniTone.Info)]
+    [InlineData(PipelineStatus.Partial, OmniTone.Warning)]
+    [InlineData(PipelineStatus.RolledBack, OmniTone.Warning)]
+    public void GetRunBadge_ReturnsCorrectStyle(PipelineStatus status, OmniTone expected)
     {
         Assert.Equal(expected, PipelineHelper.GetRunBadge(status));
     }
@@ -21,7 +21,7 @@ public class PipelineHelperTests
     [Fact]
     public void GetRunBadge_UnknownStatus_ReturnsLight()
     {
-        Assert.Equal(BadgeStyle.Light, PipelineHelper.GetRunBadge((PipelineStatus)999));
+        Assert.Equal(OmniTone.Neutral, PipelineHelper.GetRunBadge((PipelineStatus)999));
     }
 
     [Theory]

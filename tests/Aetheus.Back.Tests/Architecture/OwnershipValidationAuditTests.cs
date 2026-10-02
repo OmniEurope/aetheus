@@ -14,8 +14,8 @@ public class OwnershipValidationAuditTests
     [Fact]
     public void AllOwnedEntityDtos_HaveAtMostOneOwnerAttribute()
     {
-        var sharedAssembly = typeof(Aetheus.Shared.DTOs.PaginatedResult<>).Assembly;
-        var attributeType = typeof(Aetheus.Shared.Validation.AtMostOneOwnerAttribute);
+        var sharedAssembly = typeof(Aetheus.Shared.Components.Shared.PaginatedResult<>).Assembly;
+        var attributeType = typeof(Aetheus.Shared.Components.Shared.AtMostOneOwnerAttribute);
         var offenders = new List<string>();
 
         foreach (var entityName in OwnedEntityNames)
@@ -53,7 +53,7 @@ public class OwnershipValidationAuditTests
     [Fact]
     public void AtMostOneOwnerAttribute_AcceptsZeroOwners()
     {
-        var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
+        var dto = new Aetheus.Shared.Components.VariableLibraries.CreateVariableLibraryRequest
         {
             Name = "test",
             Description = "test"
@@ -69,7 +69,7 @@ public class OwnershipValidationAuditTests
     [Fact]
     public void AtMostOneOwnerAttribute_RejectsMultipleOwners()
     {
-        var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
+        var dto = new Aetheus.Shared.Components.VariableLibraries.CreateVariableLibraryRequest
         {
             Name = "test",
             Description = "test",
@@ -87,7 +87,7 @@ public class OwnershipValidationAuditTests
     [Fact]
     public void AtMostOneOwnerAttribute_AcceptsSingleOwner()
     {
-        var dto = new Aetheus.Shared.DTOs.CreateVariableLibraryRequest
+        var dto = new Aetheus.Shared.Components.VariableLibraries.CreateVariableLibraryRequest
         {
             Name = "test",
             Description = "test",
@@ -104,11 +104,11 @@ public class OwnershipValidationAuditTests
     [Fact]
     public void FormerAttributeName_RemainsACompatibilityAlias()
     {
-        var sharedAssembly = typeof(Aetheus.Shared.Validation.AtMostOneOwnerAttribute).Assembly;
-        var formerType = sharedAssembly.GetType("Aetheus.Shared.Validation.ExactlyOneOwnerAttribute");
+        var sharedAssembly = typeof(Aetheus.Shared.Components.Shared.AtMostOneOwnerAttribute).Assembly;
+        var formerType = sharedAssembly.GetType("Aetheus.Shared.Components.Shared.ExactlyOneOwnerAttribute");
 
         Assert.NotNull(formerType);
-        Assert.True(formerType.IsSubclassOf(typeof(Aetheus.Shared.Validation.AtMostOneOwnerAttribute)));
+        Assert.True(formerType.IsSubclassOf(typeof(Aetheus.Shared.Components.Shared.AtMostOneOwnerAttribute)));
         Assert.NotNull(formerType.GetCustomAttributes(typeof(ObsoleteAttribute), inherit: false).SingleOrDefault());
     }
 }

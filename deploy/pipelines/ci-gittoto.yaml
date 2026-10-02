@@ -23,9 +23,9 @@ stages:
     steps:
       - name: Run All Tests
         shell: >-
-          dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed" &&
-          dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed" &&
-          dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v normal --logger "console;verbosity=detailed"
+          dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --output Detailed &&
+          dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --output Detailed &&
+          dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --output Detailed
         timeout_seconds: 300
 
   - name: Coverage
@@ -36,9 +36,10 @@ stages:
     steps:
       - name: Collect Coverage
         shell: >-
-          dotnet test $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage &&
-          dotnet test $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage &&
-          dotnet test $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release -v q --collect:"XPlat Code Coverage" --results-directory $(WORKSPACE)/coverage
+          dotnet test --project $(WORKSPACE)/tests/Aetheus.Back.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+          dotnet test --project $(WORKSPACE)/tests/Aetheus.Front.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+          dotnet test --project $(WORKSPACE)/tests/Aetheus.Agent.Core.Tests --no-build -c Release --coverlet --results-directory $(WORKSPACE)/coverage &&
+          sh $(WORKSPACE)/deploy/scripts/normalize-coverage-report.sh $(WORKSPACE)/coverage
         timeout_seconds: 300
       - name: Publish Coverage
         type: coverage

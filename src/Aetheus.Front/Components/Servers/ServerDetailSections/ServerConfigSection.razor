@@ -1,0 +1,68 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ExportConfigAsync" Class="@(_configExporting ? "btn-busy" : null)" Busy="@(_configExporting)" title="@L["ExportYaml"]"><OmniIcon Name="OmniIconName.Download" /> <span>@L["Export"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _configImportVisible = true)" title="@L["ImportYaml"]"><OmniIcon Name="OmniIconName.Upload" /> <span>@L["Import"]</span></OmniButton>
+    </OmniStack>
+
+    @if (!string.IsNullOrEmpty(_configYaml))
+    {
+        @* R-516: the configuration in OE's code block, whose copy button sits at the end of its title. *@
+        <OmniCodeBlock Code="@_configYaml" Title="@L["CurrentConfiguration"]" Language="yaml" Wrap="true" Class="config-yaml-block code-block-bounded" />
+    }
+
+    @if (_configImportVisible)
+    {
+        <OmniCard>
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">@L["ImportYamlConfiguration"]</OmniText>
+            <OmniTextArea aria-label="@L["ImportYamlConfiguration"]" @bind-Value="_configImportYaml" Rows="15" Class="config-yaml-editor" />
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-md">
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ValidateConfigAsync" Class="@(_configValidating ? "btn-busy" : null)" Busy="@(_configValidating)"><OmniIcon Name="OmniIconName.CheckCircle" /> <span>@L["ValidateYaml"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@PreviewConfigAsync" Class="@(_configPreviewing ? "btn-busy" : null)" Busy="@(_configPreviewing)"><OmniIcon Name="OmniIconName.Eye" /> <span>@L["Preview"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@DeployConfigAsync" Disabled="@string.IsNullOrWhiteSpace(_configImportYaml)" Class="@(_configDeploying ? "btn-busy" : null)" Busy="@(_configDeploying)"><OmniIcon Name="OmniIconName.RocketLaunch" /> <span>@L["Deploy"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => { _configImportVisible = false; _configPreview = null; })"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+            </OmniStack>
+
+            @if (_configValidation is not null)
+            {
+                <OmniAlert Severity="@(_configValidation.IsValid ? OmniSeverity.Success : OmniSeverity.Danger)"
+                    Class="omni-u-mt-md">
+                    @if (_configValidation.IsValid)
+                    {
+                        <span>@L["ConfigurationValid"]</span>
+                    }
+                    else
+                    {
+                        <ul class="omni-u-m-0">
+                            @foreach (var error in _configValidation.Errors)
+                            {
+                                <li>@error</li>
+                            }
+                        </ul>
+                    }
+                </OmniAlert>
+            }
+
+            @if (_configPreview is not null)
+            {
+                <OmniCard Class="omni-u-mt-md">
+                    <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">
+                        @string.Format(L["TasksPlanned"], _configPreview.TaskCount)
+                    </OmniText>
+                    <OmniDataGrid FillAvailableHeight="true" Items="@_configPreview.Changes" TItem="ServerConfigChange" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+                        <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="ServerConfigChange" Property="Category" Title="@L["Category"]" Width="10rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                            <OmniDataGridColumn TItem="ServerConfigChange" Property="Action" Title="@L["Action"]" Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect">
+                                <Template Context="change">
+                                    <OmniBadge Fill="OmniFill.Solid"
+                                        Tone="@GetChangeBadgeStyle(change.Action)">@change.Action</OmniBadge>
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="ServerConfigChange" Property="Description" Title="@L["Description"]"  Filterable="true"/>
+                        </Columns>
+                    </OmniDataGrid>
+                </OmniCard>
+            }
+        </OmniCard>
+    }
+</OmniStack>

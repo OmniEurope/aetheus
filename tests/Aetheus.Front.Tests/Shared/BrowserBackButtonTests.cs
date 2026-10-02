@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Layout;
-using Aetheus.Front.Shared;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,10 +8,11 @@ namespace Aetheus.Front.Tests.Shared;
 
 public class BrowserBackButtonTests : BunitContext
 {
+    public BrowserBackButtonTests() => BunitTestHelper.RegisterServices(this);
+
     [Fact]
     public void Click_WithBreadcrumbParent_NavigatesToParentInsteadOfBrowserHistory()
     {
-        Services.AddScoped<BreadcrumbService>();
         var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
         breadcrumb.Set(
             new BreadcrumbItem("Projects", "/projects"),
@@ -32,7 +32,6 @@ public class BrowserBackButtonTests : BunitContext
     [Fact]
     public void Click_WithoutBreadcrumbParent_UsesBrowserHistoryBack()
     {
-        Services.AddScoped<BreadcrumbService>();
         Services.GetRequiredService<BreadcrumbService>()
             .Set(new BreadcrumbItem("Current page"));
         JSInterop.SetupVoid("Aetheus.goBack");

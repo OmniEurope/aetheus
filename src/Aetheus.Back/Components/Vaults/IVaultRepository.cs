@@ -7,7 +7,9 @@ public interface IVaultRepository
 {
     Task<(List<Vault> Items, int TotalCount)> GetVaultsPagedAsync(
         string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false);
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null);
+
+    Task<VaultFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default);
 
     Task<Vault?> GetVaultDetailAsync(int id, CancellationToken ct = default);
 

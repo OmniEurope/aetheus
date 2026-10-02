@@ -3,9 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.PackageFeeds;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;

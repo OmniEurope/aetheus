@@ -1,0 +1,38 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+            <OmniText Element="OmniTextElement.Paragraph">@L["LoadFailed"]</OmniText>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+        </OmniStack>
+    </OmniAlert>
+}
+@* Recette R-286: no change-type column (the version number already orders the changes), the date in
+   local time, and each version but the current one can be restored. *@
+<AetheusDataGrid @ref="_grid" Data="@_versions" Count="@_totalCount" TItem="VariableEntryVersionDto"
+                IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="25"
+                Virtualize="@AetheusGrid.RemoteVirtualization"
+                VirtualData="@(() => new OmniDataGridResult<VariableEntryVersionDto>(_versions, _totalCount))">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="VariableEntryVersionDto" Property="Version" Title="#" Width="4.5rem" Filterable="false" />
+        <OmniDataGridColumn TItem="VariableEntryVersionDto" Property="Key" Title="@L["Key"]" Filterable="true" />
+        <OmniDataGridColumn TItem="VariableEntryVersionDto" Property="Value" Title="@L["Value"]" Filterable="true" />
+        <OmniDataGridColumn TItem="VariableEntryVersionDto" Property="ChangedAt" Value="@LocalChangedAt" Title="@L["Date"]" Width="10rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+            <Template Context="v">
+                @* Versions written before the date was recorded have none (0001-01-01): nothing rather than year 1. *@
+                @(v.ChangedAt.Year > 2000 ? v.ChangedAt.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture) : string.Empty)
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="VariableEntryVersionDto" Title="@L["Actions"]" Width="5rem" Sortable="false" Filterable="false">
+            <Template Context="v">
+                @if (v.Version != _currentVersion && v.ChangeType != ChangeType.Deleted)
+                {
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RestoreAsync(v))" Class="@(_restoring ? "btn-busy" : null)"
+                                title="@L["RestoreVersion"]" Label="@L["RestoreVersion"]"><OmniIcon Name="OmniIconName.ArrowUUpLeft" /></OmniButton>
+                }
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+<DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

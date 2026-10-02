@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.Enums;
-using Radzen;
 
 namespace Aetheus.Front.Tests;
 
 public class ReleaseHelperTests
 {
     [Theory]
-    [InlineData(ReleaseStatus.Detected, BadgeStyle.Info)]
-    [InlineData(ReleaseStatus.Building, BadgeStyle.Warning)]
-    [InlineData(ReleaseStatus.Published, BadgeStyle.Success)]
-    [InlineData(ReleaseStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(ReleaseStatus.RolledBack, BadgeStyle.Light)]
-    [InlineData(ReleaseStatus.Promoted, BadgeStyle.Primary)]
-    [InlineData(ReleaseStatus.Superseded, BadgeStyle.Light)]
-    public void GetReleaseBadge_ReturnsCorrectStyle(ReleaseStatus status, BadgeStyle expected)
+    [InlineData(ReleaseStatus.Detected, OmniTone.Accent)]
+    [InlineData(ReleaseStatus.Building, OmniTone.Warning)]
+    [InlineData(ReleaseStatus.Published, OmniTone.Success)]
+    [InlineData(ReleaseStatus.Failed, OmniTone.Danger)]
+    [InlineData(ReleaseStatus.RolledBack, OmniTone.Neutral)]
+    [InlineData(ReleaseStatus.Promoted, OmniTone.Accent)]
+    [InlineData(ReleaseStatus.Superseded, OmniTone.Neutral)]
+    public void GetReleaseBadge_ReturnsCorrectStyle(ReleaseStatus status, OmniTone expected)
     {
         Assert.Equal(expected, ReleaseHelper.GetReleaseBadge(status));
     }
@@ -23,6 +20,6 @@ public class ReleaseHelperTests
     [Fact]
     public void GetReleaseBadge_UnknownStatus_ReturnsLight()
     {
-        Assert.Equal(BadgeStyle.Light, ReleaseHelper.GetReleaseBadge((ReleaseStatus)999));
+        Assert.Equal(OmniTone.Neutral, ReleaseHelper.GetReleaseBadge((ReleaseStatus)999));
     }
 }

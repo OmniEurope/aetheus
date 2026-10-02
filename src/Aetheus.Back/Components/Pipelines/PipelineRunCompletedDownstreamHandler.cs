@@ -18,6 +18,12 @@ public sealed class PipelineRunCompletedDownstreamHandler(
     ILogger<PipelineRunCompletedDownstreamHandler> logger)
     : IDomainEventHandler<PipelineRunCompletedEvent>
 {
+    /// <summary>Selector accepted on an <c>on_success.release</c> entry meaning "the release this same
+    /// run just published" (see the F3 flow where <c>aetheus-candidate</c> chains into
+    /// <c>aetheus-deploy-prod</c> without hand-typing the version). Resolved here, not left as the
+    /// literal string, because downstream <c>candidateVersion</c> derivation needs a real version.</summary>
+    private const string LatestReleaseSelector = "latest";
+
     public async Task HandleAsync(PipelineRunCompletedEvent domainEvent, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(domainEvent);
@@ -77,7 +83,7 @@ public sealed class PipelineRunCompletedDownstreamHandler(
             return;
         }
 
-        var vars = BuildDownstreamVariables(trigger, run, chain);
+        var vars = await BuildDownstreamVariablesAsync(trigger, run, chain, ct).ConfigureAwait(false);
         var child = await runService.TriggerChainedRunAsync(target.Id, vars, ct).ConfigureAwait(false);
         if (child is null)
         {
@@ -87,18 +93,45 @@ public sealed class PipelineRunCompletedDownstreamHandler(
         logger.LogInformation("Downstream pipeline {TargetId} triggered after run {RunId} succeeded", target.Id, run.Id);
     }
 
-    private static Dictionary<string, string> BuildDownstreamVariables(
-        PipelineDownstreamTrigger trigger, PipelineRun run, IReadOnlyCollection<int> chain)
+    private async Task<Dictionary<string, string>> BuildDownstreamVariablesAsync(
+        PipelineDownstreamTrigger trigger, PipelineRun run, IReadOnlyCollection<int> chain, CancellationToken ct)
     {
         var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["UPSTREAM_RUN_ID"] = run.Id.ToString(),
             ["UPSTREAM_PIPELINE"] = run.Pipeline!.Name,
-            ["UPSTREAM_CHAIN"] = string.Join(",", chain)
+            ["UPSTREAM_CHAIN"] = string.Join(",", chain),
+            // The system value is the definition's static `trigger:` (usually "manual"), so deploy
+            // #2334, started by candidate #2328's on_success, read "manual" (PLAN-007 lot 7). Additional
+            // variables override system ones, and this one names the run that actually started it.
+            ["BUILD_TRIGGEREDBY"] = $"on_success:{run.Pipeline!.Name}#{run.Id}"
         };
-        if (!string.IsNullOrWhiteSpace(trigger.Release)) vars["UPSTREAM_RELEASE"] = trigger.Release.Trim();
-        if (run.CommitHash is { Length: 40 or 64 } && run.CommitHash.All(Uri.IsHexDigit)) vars["AETHEUS_SOURCE_COMMIT"] = run.CommitHash;
-        if (!string.IsNullOrWhiteSpace(run.BranchName)) vars["AETHEUS_RUN_BRANCH"] = run.BranchName;
+        var release = trigger.Release?.Trim();
+        if (string.Equals(release, LatestReleaseSelector, StringComparison.OrdinalIgnoreCase))
+        {
+            // The run that just succeeded may itself have published the release ("latest" = "what this
+            // run published"), e.g. the candidate's own `type: release` step. A run publishes at most
+            // one release per pipeline definition, so the run id resolves it unambiguously.
+            var publishedVersion = await repo.FindPublishedReleaseVersionByRunIdAsync(run.Id, ct).ConfigureAwait(false);
+            if (publishedVersion is not null) vars["UPSTREAM_RELEASE"] = publishedVersion;
+            else logger.LogWarning("Downstream trigger: run {RunId} declared release: latest but published no release of its own", run.Id);
+        }
+        else if (!string.IsNullOrWhiteSpace(release))
+        {
+            vars["UPSTREAM_RELEASE"] = release;
+        }
+        // A release-selecting trigger deploys an immutable published artifact, decoupled on purpose
+        // from whatever branch/commit built it (that is the entire point of publishing a release
+        // first). Forwarding the upstream branch here would override the target's own configured
+        // `source_branch` - e.g. it would make aetheus-deploy-prod resolve to `develop` (the
+        // candidate's branch) instead of its declared `main`, and its own prod-deploy-prepare.sh
+        // refuses outright when BUILD_SOURCEBRANCH isn't main. Only a non-release chain (a target that
+        // wants to build/validate the exact same commit the upstream just built) inherits them.
+        if (string.IsNullOrWhiteSpace(release))
+        {
+            if (run.CommitHash is { Length: 40 or 64 } && run.CommitHash.All(Uri.IsHexDigit)) vars["AETHEUS_SOURCE_COMMIT"] = run.CommitHash;
+            if (!string.IsNullOrWhiteSpace(run.BranchName)) vars["AETHEUS_RUN_BRANCH"] = run.BranchName;
+        }
         return vars;
     }
 

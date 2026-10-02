@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
+using System.Text.Json;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using System.Text.Json;
 
 namespace Aetheus.Front.Tests.Pages.Pipelines;
 
@@ -23,6 +21,7 @@ public sealed class PipelineSetupWizardTests : BunitContext
             new ProjectDto { Id = 7, Name = "Atlas", DefaultBranch = "develop" }
         ]);
         _handler.SetJsonResponse("api/pipelines/templates", TemplateCatalog());
+        NothingMissing();
 
         Services.GetRequiredService<NavigationManager>()
             .NavigateTo("http://localhost/pipelines/setup?projectId=7");
@@ -52,6 +51,7 @@ public sealed class PipelineSetupWizardTests : BunitContext
         ]);
         _handler.SetJsonResponse("api/pipelines/templates", TemplateCatalog());
         _handler.SetJsonResponse(HttpMethod.Post, "api/pipelines", new PipelineDto { Id = 91 });
+        NothingMissing();
         Services.GetRequiredService<NavigationManager>()
             .NavigateTo("http://localhost/pipelines/setup?projectId=7");
         var cut = Render<PipelineSetupWizard>();
@@ -61,7 +61,8 @@ public sealed class PipelineSetupWizardTests : BunitContext
         await cut.InvokeAsync(wizard.Instance.NextStep);
         await cut.InvokeAsync(wizard.Instance.NextStep);
         await cut.InvokeAsync(wizard.Instance.NextStep);
-        await cut.Find("button.rz-primary").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+        await cut.Find(".omni-wizard__actions button.omni-wizard__finish")
+            .ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(6, _handler.RequestDetails.Count(request =>
             request.Method == HttpMethod.Post.Method
@@ -88,6 +89,103 @@ public sealed class PipelineSetupWizardTests : BunitContext
         Assert.Contains("APPLICATION_SECURITY_ENABLED: \"true\"", requests[4].YamlDefinition, StringComparison.Ordinal);
         Assert.Contains("extends: application-deploy-prod@1", requests[5].YamlDefinition, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Wizard_SummaryStep_ShowsWhatWouldStopThesePipelinesFromRunning()
+    {
+        _handler.SetPaginatedJsonResponse("api/projects",
+        [
+            new ProjectDto { Id = 7, Name = "Atlas", DefaultBranch = "develop" }
+        ]);
+        _handler.SetJsonResponse("api/pipelines/templates", TemplateCatalog());
+        _handler.SetJsonResponse(HttpMethod.Post, "api/pipelines/setup/readiness", new PipelineSetupReadinessDto
+        {
+            RepositoryInspected = true,
+            InspectedBranch = "develop",
+            Checks =
+            [
+                new PipelineSetupReadinessCheckDto
+                {
+                    Kind = PipelineSetupReadinessKind.MissingAdapterScripts,
+                    Severity = PipelineSetupReadinessSeverity.Blocking,
+                    Items = [".pipeline/scripts/ci.sh"]
+                }
+            ]
+        });
+
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/pipelines/setup?projectId=7");
+        var cut = Render<PipelineSetupWizard>();
+        cut.WaitForAssertion(() => Assert.Contains("Atlas", cut.Markup, StringComparison.Ordinal));
+        var wizard = cut.FindComponent<WizardDialog>();
+
+        await cut.InvokeAsync(wizard.Instance.NextStep);
+        await cut.InvokeAsync(wizard.Instance.NextStep);
+        // The check runs only on reaching the summary: the selection it depends on is settled there.
+        Assert.DoesNotContain(_handler.RequestDetails, request =>
+            request.Url.EndsWith("api/pipelines/setup/readiness", StringComparison.OrdinalIgnoreCase));
+
+        await cut.InvokeAsync(wizard.Instance.NextStep);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Single(cut.FindAll("[data-testid='setup-readiness-check']"));
+            Assert.Contains("ReadinessMissingAdapterScripts", cut.Markup, StringComparison.Ordinal);
+            Assert.Contains(".pipeline/scripts/ci.sh", cut.Markup, StringComparison.Ordinal);
+            // Remediation points at the repository the author has to commit into.
+            Assert.Contains("/git-repositories?projectId=7", cut.Markup, StringComparison.Ordinal);
+            Assert.DoesNotContain("PipelineSetupReadinessFilesNotChecked", cut.Markup, StringComparison.Ordinal);
+        });
+
+        // A blocking finding informs, it does not lock the wizard: writing the adapter after wiring
+        // the pipelines is a legitimate order of work.
+        Assert.False(cut.Find(".omni-wizard__actions button.omni-wizard__finish").HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public async Task Wizard_SummaryStep_SaysTheFilesWereNotCheckedRatherThanImplyingTheyAreThere()
+    {
+        _handler.SetPaginatedJsonResponse("api/projects",
+        [
+            new ProjectDto { Id = 7, Name = "Atlas", DefaultBranch = "develop" }
+        ]);
+        _handler.SetJsonResponse("api/pipelines/templates", TemplateCatalog());
+        _handler.SetJsonResponse(HttpMethod.Post, "api/pipelines/setup/readiness", new PipelineSetupReadinessDto
+        {
+            RepositoryInspected = false,
+            Checks =
+            [
+                new PipelineSetupReadinessCheckDto
+                {
+                    Kind = PipelineSetupReadinessKind.NoRepository,
+                    Severity = PipelineSetupReadinessSeverity.Blocking
+                }
+            ]
+        });
+
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo("http://localhost/pipelines/setup?projectId=7");
+        var cut = Render<PipelineSetupWizard>();
+        cut.WaitForAssertion(() => Assert.Contains("Atlas", cut.Markup, StringComparison.Ordinal));
+        var wizard = cut.FindComponent<WizardDialog>();
+
+        await cut.InvokeAsync(wizard.Instance.NextStep);
+        await cut.InvokeAsync(wizard.Instance.NextStep);
+        await cut.InvokeAsync(wizard.Instance.NextStep);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("ReadinessNoRepository", cut.Markup, StringComparison.Ordinal);
+            Assert.Contains("PipelineSetupReadinessFilesNotChecked", cut.Markup, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>Reaching the summary now asks the backend for readiness; a clean verdict keeps the
+    /// cases that are about the summary itself about the summary.</summary>
+    private void NothingMissing() => _handler.SetJsonResponse(
+        HttpMethod.Post,
+        "api/pipelines/setup/readiness",
+        new PipelineSetupReadinessDto { RepositoryInspected = true, InspectedBranch = "develop" });
 
     private static List<PipelineTemplateSummaryDto> TemplateCatalog() =>
     [

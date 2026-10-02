@@ -19,6 +19,8 @@ internal static class AnalysisDefaultPolicyCatalog
         Finding(-8, "system.quality.new-medium.coverage", AnalysisCategory.Coverage, AnalysisSeverity.Medium, AnalysisGateBehavior.Warn),
         Finding(-9, "system.quality.new-medium.duplication", AnalysisCategory.Duplication, AnalysisSeverity.Medium, AnalysisGateBehavior.Warn),
         Finding(-10, "system.quality.new-medium.architecture", AnalysisCategory.Architecture, AnalysisSeverity.Medium, AnalysisGateBehavior.Warn),
+        // PLAN-003 2.4: serious and critical are what the accessibility suite already refuses.
+        Finding(-18, "system.quality.new-high.accessibility", AnalysisCategory.Accessibility, AnalysisSeverity.High, AnalysisGateBehavior.Warn),
         // A360-74, raised from 75 to 80 on the user's decision of 2026-08-21. The finding described this
         // as "min_coverage: 0 in the CI yaml", which was the wrong place twice over: that zero is
         // deliberate and guarded (a threshold is versioned here, never in pipeline YAML), and the real

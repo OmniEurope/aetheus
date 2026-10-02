@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Users;
+using Aetheus.Front.Components.Users;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Users;

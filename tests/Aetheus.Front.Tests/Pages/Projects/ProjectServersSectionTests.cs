@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -112,8 +109,8 @@ public class ProjectServersSectionExtendedTests : BunitContext
 
         var method = typeof(ProjectServersSection)
             .GetMethod("GetTypeBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ProjectServerType.AgentServer])!;
-        Assert.Equal(BadgeStyle.Info, result);
+        var result = (OmniTone)method.Invoke(null, [ProjectServerType.AgentServer])!;
+        Assert.Equal(OmniTone.Accent, result);
     }
 
     [Fact]
@@ -124,8 +121,8 @@ public class ProjectServersSectionExtendedTests : BunitContext
 
         var method = typeof(ProjectServersSection)
             .GetMethod("GetTypeBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [ProjectServerType.ExternalHost])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [ProjectServerType.ExternalHost])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
@@ -137,8 +134,8 @@ public class ProjectServersSectionExtendedTests : BunitContext
         var method = typeof(ProjectServersSection)
             .GetMethod("GetTypeBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
         // Pass an enum value outside known cases
-        var result = (BadgeStyle)method.Invoke(null, [(ProjectServerType)99])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(ProjectServerType)99])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Fact]
@@ -149,8 +146,8 @@ public class ProjectServersSectionExtendedTests : BunitContext
 
         var method = typeof(ProjectServersSection)
             .GetMethod("GetStatusBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)ServerStatus.Online])!;
-        Assert.Equal(BadgeStyle.Success, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)ServerStatus.Online])!;
+        Assert.Equal(OmniTone.Success, result);
     }
 
     [Fact]
@@ -161,8 +158,8 @@ public class ProjectServersSectionExtendedTests : BunitContext
 
         var method = typeof(ProjectServersSection)
             .GetMethod("GetStatusBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)ServerStatus.Offline])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)ServerStatus.Offline])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
@@ -173,8 +170,8 @@ public class ProjectServersSectionExtendedTests : BunitContext
 
         var method = typeof(ProjectServersSection)
             .GetMethod("GetStatusBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerStatus?)null])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerStatus?)null])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Fact]
@@ -228,5 +225,40 @@ public class ProjectServersSectionExtendedTests : BunitContext
         // After OnInitializedAsync the field holds the two servers seeded by SetupWithServers.
         Assert.NotNull(servers);
         Assert.Equal(2, servers.Count);
+    }
+
+    [Fact]
+    public async Task HeaderFilters_AreColumnFilters_NotASearchTerm()
+    {
+        // Recette R-212: the Type list, the Name and Host texts and the Port number are real column
+        // filters of the project's servers endpoint; the first typed value is no longer a search term.
+        SetupWithServers();
+        var cut = Render<ProjectServersSection>(p => p.Add(x => x.ProjectId, 10));
+        cut.WaitForState(() => cut.Markup.Contains("Server 1"), TimeSpan.FromSeconds(2));
+        var grid = cut.FindComponent<AetheusDataGrid<ProjectServerDto>>();
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(ProjectServerDto.Type), "ExternalHost", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(ProjectServerDto.DisplayName), "web", OmniDataGridFilterOperator.Contains),
+                new GridFilterDescriptor(nameof(ProjectServerDto.Host), "10.0", OmniDataGridFilterOperator.StartsWith),
+                new GridFilterDescriptor(nameof(ProjectServerDto.Port), "22", OmniDataGridFilterOperator.Equals)
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/projects/10/servers?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=Type", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Value=ExternalHost", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=DisplayName", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Field=Host", StringComparison.Ordinal)
+                && url.Contains("Filters[3].Field=Port", StringComparison.Ordinal)
+                && url.Contains("Filters[3].Value=22", StringComparison.Ordinal)
+                && !url.Contains("search=", StringComparison.Ordinal);
+        }));
     }
 }

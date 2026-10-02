@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Artifacts;
@@ -99,6 +98,22 @@ public class ArtifactRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetByProjectPagedAsync_SortsByNameBeforePaging()
+    {
+        await _repo.AddAsync(MakeArtifact(name: "alpha"), ct: TestContext.Current.CancellationToken);
+        await _repo.AddAsync(MakeArtifact(name: "gamma"), ct: TestContext.Current.CancellationToken);
+        await _repo.AddAsync(MakeArtifact(name: "beta"), ct: TestContext.Current.CancellationToken);
+
+        var first = await _repo.GetByProjectPagedAsync(1, null, null, 1, 2,
+            ct: TestContext.Current.CancellationToken, sortBy: "Name", sortDescending: true);
+        var second = await _repo.GetByProjectPagedAsync(1, null, null, 2, 2,
+            ct: TestContext.Current.CancellationToken, sortBy: "Name", sortDescending: true);
+
+        Assert.Equal(["gamma", "beta"], first.Items.Select(artifact => artifact.Name));
+        Assert.Equal(["alpha"], second.Items.Select(artifact => artifact.Name));
+    }
+
+    [Fact]
     public async Task GetByPipelineAndProjectAsync_MatchesAllThree()
     {
         await _repo.AddAsync(MakeArtifact(pipelineId: 1, projectId: 1, policy: ArtifactRetentionPolicy.Deployed), ct: TestContext.Current.CancellationToken);
@@ -173,6 +188,45 @@ public class ArtifactRepositoryTests : IDisposable
             ct: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(result, item => item.Id == artifact.Id);
+    }
+
+    [Fact]
+    public async Task GetExpiredAsync_KeepsTheLastThreeDeployedReleasesAndFreesTheFourth()
+    {
+        // PLAN-007 lot 5: N-1 must stay redeployable. After a fourth deployment, the deployed release
+        // and the two it superseded keep their payloads; only the oldest superseded one ages out.
+        var expired = new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+        var artifacts = new List<PipelineArtifact>();
+        for (var index = 0; index < 4; index++)
+        {
+            var artifact = MakeArtifact(expiresAt: expired, name: $"payload-{index}");
+            await _repo.AddAsync(artifact, ct: TestContext.Current.CancellationToken);
+            artifacts.Add(artifact);
+            _db.Releases.Add(new Release
+            {
+                ProjectId = 1,
+                Version = $"1.0.{index}",
+                Status = index == 3 ? ReleaseStatus.Deployed : ReleaseStatus.Superseded,
+                PublishedAt = new DateTime(2026, 1, 1 + index, 0, 0, 0, DateTimeKind.Utc),
+                Artifacts = [artifact]
+            });
+        }
+        // Another project's deployments must not push this project's releases out of the window.
+        _db.Releases.Add(new Release
+        {
+            ProjectId = 2,
+            Version = "9.9.9",
+            Status = ReleaseStatus.Deployed,
+            PublishedAt = new DateTime(2026, 1, 20, 0, 0, 0, DateTimeKind.Utc)
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetExpiredAsync(
+            new DateTime(2026, 1, 31, 0, 0, 0, DateTimeKind.Utc),
+            10,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(artifacts[0].Id, Assert.Single(result).Id);
     }
 
     [Fact]
@@ -258,9 +312,21 @@ public class ArtifactRepositoryTests : IDisposable
         var a = MakeArtifact();
         await _repo.AddAsync(a, ct: TestContext.Current.CancellationToken);
 
-        await _repo.RemoveAsync(a, ct: TestContext.Current.CancellationToken);
+        Assert.True(await _repo.RemoveAsync(a, ct: TestContext.Current.CancellationToken));
 
         Assert.Equal(0, await _db.PipelineArtifacts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task R463_RemoveAsync_AnArtifactAnotherPathAlreadyRemoved_IsNotAFailure()
+    {
+        var a = MakeArtifact();
+        await _repo.AddAsync(a, ct: TestContext.Current.CancellationToken);
+        var stale = new PipelineArtifact { Id = a.Id, FilePath = a.FilePath };
+        Assert.True(await _repo.RemoveAsync(a, ct: TestContext.Current.CancellationToken));
+
+        // The copy selected before the other path deleted the row: no concurrency exception, just false.
+        Assert.False(await _repo.RemoveAsync(stale, ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -300,6 +366,56 @@ public class ArtifactRepositoryTests : IDisposable
             7, "aetheus-ci", expectedCommit, "failed", ct: TestContext.Current.CancellationToken));
         Assert.Null(await _repo.FindSuccessfulPipelineArtifactByCommitAsync(
             7, "aetheus-ci", expectedCommit, "other-commit", ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task FindLatestSuccessfulPipelineArtifactAsync_IgnoresTheCommitButNothingElse()
+    {
+        // The selector drops the commit constraint and only that one: the run must still have
+        // succeeded, and the artifact must still come from that pipeline, that name, that project.
+        _db.Projects.AddRange(
+            new Project { Id = 9, Name = "Nightly project" },
+            new Project { Id = 10, Name = "Other project" });
+        _db.Pipelines.AddRange(
+            new Pipeline { Id = 6, Name = "aetheus-nightly", ProjectId = 9 },
+            new Pipeline { Id = 7, Name = "aetheus-security", ProjectId = 9 },
+            new Pipeline { Id = 8, Name = "aetheus-nightly", ProjectId = 10 });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 6, PipelineId = 6, Status = PipelineStatus.Success },
+            new PipelineRun { Id = 7, PipelineId = 6, Status = PipelineStatus.Success },
+            new PipelineRun { Id = 8, PipelineId = 6, Status = PipelineStatus.Failed },
+            new PipelineRun { Id = 9, PipelineId = 7, Status = PipelineStatus.Success },
+            new PipelineRun { Id = 11, PipelineId = 8, Status = PipelineStatus.Success });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var january = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        await _repo.AddAsync(
+            MakeArtifact(pipelineId: 6, projectId: 9, runId: 6, createdAt: january, name: "evidence"),
+            ct: TestContext.Current.CancellationToken);
+        await _repo.AddAsync(
+            MakeArtifact(pipelineId: 6, projectId: 9, runId: 7, createdAt: january.AddDays(30), name: "evidence"),
+            ct: TestContext.Current.CancellationToken);
+        // Newest of them all, but its run failed.
+        await _repo.AddAsync(
+            MakeArtifact(pipelineId: 6, projectId: 9, runId: 8, createdAt: january.AddDays(60), name: "evidence"),
+            ct: TestContext.Current.CancellationToken);
+        // Newer still, same project and name, but another pipeline produced it.
+        await _repo.AddAsync(
+            MakeArtifact(pipelineId: 7, projectId: 9, runId: 9, createdAt: january.AddDays(90), name: "evidence"),
+            ct: TestContext.Current.CancellationToken);
+        await _repo.AddAsync(
+            MakeArtifact(pipelineId: 8, projectId: 10, runId: 11, createdAt: january.AddDays(120), name: "evidence"),
+            ct: TestContext.Current.CancellationToken);
+
+        var artifact = await _repo.FindLatestSuccessfulPipelineArtifactAsync(
+            9, "aetheus-nightly", "evidence", ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(artifact);
+        Assert.Equal(7, artifact.PipelineRunId);
+        Assert.Null(await _repo.FindLatestSuccessfulPipelineArtifactAsync(
+            9, "aetheus-nightly", "another-artifact", ct: TestContext.Current.CancellationToken));
+        var otherProject = await _repo.FindLatestSuccessfulPipelineArtifactAsync(
+            10, "aetheus-nightly", "evidence", ct: TestContext.Current.CancellationToken);
+        Assert.Equal(11, otherProject?.PipelineRunId);
     }
 
     [Fact]

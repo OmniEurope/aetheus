@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 
@@ -23,6 +21,12 @@ public sealed class PipelineRunPreflightDedupTests
 
     private PipelineRunPreflightService BuildSut(IPipelineEnvironmentCheckGuard checks)
         => new(_repo, new PipelineDispatchServerResolver(_repo), checks,
+            SilentPortGuard(),
+            new PipelineChildPipelineResolver(
+                Substitute.For<IPipelineTemplateResolver>(), Substitute.For<IPipelineVariableResolver>()),
+            Substitute.For<IPipelineRequirementsChecker>(),
+            new PipelineScannerManifestPreflight(_repo, new PipelineDispatchServerResolver(_repo)),
+            new PipelineReleaseArtifactPreflight(Substitute.For<Aetheus.Back.Components.Artifacts.IArtifactRepository>()),
             Substitute.For<ILogger<PipelineRunPreflightService>>());
 
     private static IPipelineEnvironmentCheckGuard Admits(bool verdict)
@@ -52,11 +56,23 @@ public sealed class PipelineRunPreflightDedupTests
             Steps = steps.Length > 0 ? [.. steps] : [new() { Name = "run", Shell = "make" }]
         };
 
-    private Task<IReadOnlyList<string>> RunAsync(
+    private async Task<IReadOnlyList<string>> RunAsync(
         PipelineYamlDefinition definition, IPipelineEnvironmentCheckGuard? checks = null)
-        => BuildSut(checks ?? Admits(true)).FindBlockingProblemsAsync(
+        => (await BuildSut(checks ?? Admits(true)).FindBlockingProblemsAsync(
             definition, new Dictionary<string, string>(), organizationId: 3, projectId: 7,
-            CancellationToken.None);
+            CancellationToken.None)).Problems;
+
+    /// <summary>A registry with nothing to say: these tests are about the OTHER preflight checks, and an
+    /// unconfigured substitute would return a null report instead of an empty one.</summary>
+    private static IPipelinePortRegistryGuard SilentPortGuard()
+    {
+        var guard = Substitute.For<IPipelinePortRegistryGuard>();
+        guard.FindPortConflictsAsync(
+                Arg.Any<PipelineYamlDefinition>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(PortConflictReport.Empty);
+        return guard;
+    }
 
     [Fact]
     public async Task StagesSharingOneSelector_QueryTheFleetOnce_NotOncePerStage()

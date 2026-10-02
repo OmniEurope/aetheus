@@ -12,7 +12,7 @@ internal sealed class PackageRegistryAdminService(
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repository.GetPagedAsync(
-            kind, request.Search, page, pageSize, ct, request.SortBy, request.SortDescending).ConfigureAwait(false);
+            kind, request.Search, page, pageSize, ct, request.SortBy, request.SortDescending, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PackageRegistryPackageDto>
         {
             Items = items,

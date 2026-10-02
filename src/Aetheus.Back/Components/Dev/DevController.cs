@@ -17,7 +17,8 @@ public class DevController(
     IConfiguration config,
     IMemoryCache cache,
     TimeProvider timeProvider,
-    DemoContentSeeder demoContentSeeder) : ControllerBase
+    DemoContentSeeder demoContentSeeder,
+    SchemaResetGate resetGate) : ControllerBase
 {
     /// <summary>
     /// F-035: Recreates the isolated E2E schema, applies every EF migration and re-seeds. E2E tests
@@ -50,20 +51,25 @@ public class DevController(
         // an in-development migration can have been applied before its final Down shape existed,
         // leaving history and physical columns inconsistent. The database-name guard above is the
         // authorization boundary for this destructive schema operation.
-        await db.Database.ExecuteSqlRawAsync(
-            "DROP SCHEMA public CASCADE; CREATE SCHEMA public;", ct).ConfigureAwait(false);
-        await db.Database.MigrateAsync(ct).ConfigureAwait(false);
-        // Pass config so DbInitializer seeds the admin USER (it requires Auth:AdminPassword;
-        // without config the seed throws and the DB is left user-less, forcing the bootstrap
-        // login path whose token has no DB user - which 404s GET api/users/me/permissions and
-        // strands every permission-gated button as disabled). Mirrors Program.cs startup seeding.
-        await DbInitializer.SeedAsync(db, config).ConfigureAwait(false);
-        if (config.GetValue("Seed:Demo", false))
+        // The gate holds every other database command (background services polling) until the
+        // schema is rebuilt and seeded, so none of them meets a half-migrated schema.
+        await resetGate.RunClosedAsync(async () =>
         {
-            var seed = await DemoDataSeeder.SeedDemoAsync(db, timeProvider).ConfigureAwait(false);
-            if (seed is not null)
-                await demoContentSeeder.SeedAsync(seed, ct).ConfigureAwait(false);
-        }
+            await db.Database.ExecuteSqlRawAsync(
+                "DROP SCHEMA public CASCADE; CREATE SCHEMA public;", ct).ConfigureAwait(false);
+            await db.Database.MigrateAsync(ct).ConfigureAwait(false);
+            // Pass config so DbInitializer seeds the admin USER (it requires Auth:AdminPassword;
+            // without config the seed throws and the DB is left user-less, forcing the bootstrap
+            // login path whose token has no DB user - which 404s GET api/users/me/permissions and
+            // strands every permission-gated button as disabled). Mirrors Program.cs startup seeding.
+            await DbInitializer.SeedAsync(db, config).ConfigureAwait(false);
+            if (config.GetValue("Seed:Demo", false))
+            {
+                var seed = await DemoDataSeeder.SeedDemoAsync(db, timeProvider).ConfigureAwait(false);
+                if (seed is not null)
+                    await demoContentSeeder.SeedAsync(seed, ct).ConfigureAwait(false);
+            }
+        }, ct).ConfigureAwait(false);
 
         // The DB was wiped and re-seeded out-of-band, so any cached DB-derived state is stale.
         // Critically, the security-stamp cache (sec-stamp:{userId}, 30s TTL) - populated by THIS

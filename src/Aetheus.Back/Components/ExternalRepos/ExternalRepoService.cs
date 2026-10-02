@@ -23,48 +23,36 @@ public sealed class ExternalRepoService(
     IEntityChangeNotifier notifier,
     IHttpContextAccessor httpContextAccessor,
     IConfiguration configuration,
-    IOptions<FeatureFlagsOptions> features,
     TimeProvider timeProvider,
     ILogger<ExternalRepoService> logger) : IExternalRepoService
 {
-    public bool IsEnabled => features.Value.ExternalRepos;
-
     public async Task<ExternalRepoDto?> GetForProjectAsync(int projectId, CancellationToken ct = default)
     {
-        var project = await projectRepo.FindProjectAsync(projectId, ct).ConfigureAwait(false);
-        if (project?.GitConnectionId is null)
+        if (await FindAttachedAsync(projectId, ct).ConfigureAwait(false) is not { } attached)
         {
             return null;
         }
 
-        var connection = await gitRepo.FindConnectionAsync(project.GitConnectionId.Value, ct).ConfigureAwait(false);
-        if (connection is null)
-        {
-            return null;
-        }
-
-        var mirrorRepo = await FindMirrorAsync(projectId, connection.Id, ct).ConfigureAwait(false);
-        return Map(connection, mirrorRepo, project.RepositoryUrl, await ResolveAuthTypeAsync(connection, ct).ConfigureAwait(false));
+        var (project, connection, mirrorRepo) = attached;
+        return Map(project, connection, mirrorRepo, await ResolveAuthTypeAsync(connection, ct).ConfigureAwait(false));
     }
 
     public async Task<ExternalRepoDto> AttachAsync(AttachExternalRepoRequest request, CancellationToken ct = default)
     {
-        EnsureEnabled();
 
         var project = await projectRepo.FindProjectAsync(request.ProjectId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException($"Project {request.ProjectId} not found.");
 
-        // XOR source guard: a project is either internal (has an internal repo / RepositoryUrl) or
-        // external (GitConnectionId). Reject attaching a second source.
-        if (project.GitConnectionId is not null)
+        // One external repository per project. On a project without any repository it becomes the
+        // project's source, as before. On a project that has its internal repository it is attached
+        // beside it (recette R-534): an additional source for the pipelines that name it, which leaves
+        // the project's own source, default branch and clone URL untouched.
+        var existing = await lightRepo.GetByProjectAsync(request.ProjectId, ct).ConfigureAwait(false);
+        if (project.GitConnectionId is not null || existing.Any(GitLightMapper.IsAdditionalSource))
         {
             throw new ConflictException("This project already has an external repository attached.");
         }
-        var existingInternal = await lightRepo.GetByProjectAsync(request.ProjectId, ct).ConfigureAwait(false);
-        if (existingInternal.Count > 0)
-        {
-            throw new ConflictException("This project already has an internal repository; detach it before attaching an external one.");
-        }
+        var besideInternalRepository = existing.Count > 0;
 
         var credential = BuildCredential(request);
         ValidateCredential(credential);
@@ -106,6 +94,14 @@ public sealed class ExternalRepoService(
         await gitRepo.AddConnectionAsync(connection, ct).ConfigureAwait(false);
 
         var slug = Slugify(request.RepositoryName);
+        if (existing.Any(repo => string.Equals(repo.Slug, slug, StringComparison.OrdinalIgnoreCase)))
+        {
+            // The mirror is named after the remote repository; two repositories of one project cannot
+            // share a slug, and a pipeline names its source by that slug.
+            slug = Slugify($"{request.OwnerOrGroup}-{request.RepositoryName}");
+            if (existing.Any(repo => string.Equals(repo.Slug, slug, StringComparison.OrdinalIgnoreCase)))
+                throw new ConflictException($"This project already has a repository named '{slug}'.");
+        }
         var mirrorRepo = new GitInternalRepo
         {
             ProjectId = request.ProjectId,
@@ -124,34 +120,28 @@ public sealed class ExternalRepoService(
         await gitRepo.SaveChangesAsync(ct).ConfigureAwait(false);
         await lightRepo.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // Mark the project's source as external and point pipelines/browse at the mirror's smart-HTTP
-        // URL. The external credential never leaves the backend; the agent clones the mirror instead.
-        project.GitConnectionId = connection.Id;
-        project.RepositoryUrl = BuildMirrorCloneUrl(request.ProjectId, slug);
-        project.DefaultBranch = mirrorRepo.DefaultBranch;
-        project.UpdatedAt = now;
-        await projectRepo.SaveChangesAsync(ct).ConfigureAwait(false);
+        if (!besideInternalRepository)
+        {
+            // Mark the project's source as external and point pipelines/browse at the mirror's smart-HTTP
+            // URL. The external credential never leaves the backend; the agent clones the mirror instead.
+            project.GitConnectionId = connection.Id;
+            project.RepositoryUrl = BuildMirrorCloneUrl(request.ProjectId, slug);
+            project.DefaultBranch = mirrorRepo.DefaultBranch;
+            project.UpdatedAt = now;
+            await projectRepo.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
 
         await audit.LogAsync("Attached", "ExternalRepo", connection.Id,
-            $"{request.ProviderType}: {request.OwnerOrGroup}/{request.RepositoryName}", ct).ConfigureAwait(false);
+            $"{request.ProviderType}: {request.OwnerOrGroup}/{request.RepositoryName}"
+            + (besideInternalRepository ? " (additional source)" : string.Empty), ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, request.ProjectId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
 
-        return Map(connection, mirrorRepo, project.RepositoryUrl, request.AuthType);
+        return Map(project, connection, mirrorRepo, request.AuthType);
     }
 
     public async Task<ExternalRepoDto?> SyncNowAsync(int projectId, CancellationToken ct = default)
     {
-        EnsureEnabled();
-
-        var project = await projectRepo.FindProjectAsync(projectId, ct).ConfigureAwait(false);
-        if (project?.GitConnectionId is null)
-        {
-            return null;
-        }
-
-        var connection = await gitRepo.FindConnectionAsync(project.GitConnectionId.Value, ct).ConfigureAwait(false);
-        var mirrorRepo = await FindMirrorAsync(projectId, project.GitConnectionId.Value, ct).ConfigureAwait(false);
-        if (connection is null || mirrorRepo is null)
+        if (await FindAttachedAsync(projectId, ct).ConfigureAwait(false) is not ({ } project, { } connection, { } mirrorRepo))
         {
             return null;
         }
@@ -161,28 +151,26 @@ public sealed class ExternalRepoService(
         await lightRepo.SaveChangesAsync(ct).ConfigureAwait(false);
         await notifier.BroadcastAsync(ResourceType.Project, projectId, EntityChangeOps.Updated, ct).ConfigureAwait(false);
 
-        return Map(connection, mirrorRepo, project.RepositoryUrl, await ResolveAuthTypeAsync(connection, ct).ConfigureAwait(false));
+        return Map(project, connection, mirrorRepo, await ResolveAuthTypeAsync(connection, ct).ConfigureAwait(false));
     }
 
     public async Task<bool> DetachAsync(int projectId, CancellationToken ct = default)
     {
-        EnsureEnabled();
-
-        var project = await projectRepo.FindProjectAsync(projectId, ct).ConfigureAwait(false);
-        if (project?.GitConnectionId is null)
+        if (await FindAttachedAsync(projectId, ct).ConfigureAwait(false) is not ({ } project, { } connection, var mirrorRepo))
         {
             return false;
         }
 
-        var connectionId = project.GitConnectionId.Value;
-        var connection = await gitRepo.FindConnectionAsync(connectionId, ct).ConfigureAwait(false);
-        var mirrorRepo = await FindMirrorAsync(projectId, connectionId, ct).ConfigureAwait(false);
-
-        // Null the back-reference first (NoAction FK) so the connection can be removed.
-        project.GitConnectionId = null;
-        project.RepositoryUrl = null;
-        project.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await projectRepo.SaveChangesAsync(ct).ConfigureAwait(false);
+        var connectionId = connection.Id;
+        if (project.GitConnectionId == connectionId)
+        {
+            // The project's own source: null the back-reference first (NoAction FK) so the connection
+            // can be removed. An additional source never touched these fields.
+            project.GitConnectionId = null;
+            project.RepositoryUrl = null;
+            project.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+            await projectRepo.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
 
         if (mirrorRepo is not null)
         {
@@ -191,20 +179,17 @@ public sealed class ExternalRepoService(
             await lightRepo.SaveChangesAsync(ct).ConfigureAwait(false);
         }
 
-        if (connection is not null)
-        {
-            var serviceConnectionId = connection.ServiceConnectionId;
-            await gitRepo.RemoveConnectionAsync(connection, ct).ConfigureAwait(false);
-            await gitRepo.SaveChangesAsync(ct).ConfigureAwait(false);
+        var serviceConnectionId = connection.ServiceConnectionId;
+        await gitRepo.RemoveConnectionAsync(connection, ct).ConfigureAwait(false);
+        await gitRepo.SaveChangesAsync(ct).ConfigureAwait(false);
 
-            if (serviceConnectionId is not null)
+        if (serviceConnectionId is not null)
+        {
+            var sc = await serviceConnectionRepo.FindAsync(serviceConnectionId.Value, ct).ConfigureAwait(false);
+            if (sc is not null)
             {
-                var sc = await serviceConnectionRepo.FindAsync(serviceConnectionId.Value, ct).ConfigureAwait(false);
-                if (sc is not null)
-                {
-                    await serviceConnectionRepo.RemoveAsync(sc, ct).ConfigureAwait(false);
-                    await serviceConnectionRepo.SaveChangesAsync(ct).ConfigureAwait(false);
-                }
+                await serviceConnectionRepo.RemoveAsync(sc, ct).ConfigureAwait(false);
+                await serviceConnectionRepo.SaveChangesAsync(ct).ConfigureAwait(false);
             }
         }
 
@@ -213,12 +198,37 @@ public sealed class ExternalRepoService(
         return true;
     }
 
-    private void EnsureEnabled()
+    // The project's external connection and its mirror (null when the mirror row is missing), or null
+    // when the project is unknown, has no external repository, or its connection row is gone. The
+    // connection is the project's own source (GitConnectionId) or, beside an internal repository, the
+    // one behind its additional source.
+    private async Task<(Project Project, GitConnection Connection, GitInternalRepo? Mirror)?> FindAttachedAsync(
+        int projectId, CancellationToken ct)
     {
-        if (!IsEnabled)
+        var project = await projectRepo.FindProjectAsync(projectId, ct).ConfigureAwait(false);
+        if (project is null)
         {
-            throw new NotFoundException("External repositories are not enabled.");
+            return null;
         }
+
+        var connectionId = project.GitConnectionId;
+        if (connectionId is null)
+        {
+            var repos = await lightRepo.GetByProjectAsync(projectId, ct).ConfigureAwait(false);
+            connectionId = repos.FirstOrDefault(GitLightMapper.IsAdditionalSource)?.GitConnectionId;
+        }
+        if (connectionId is null)
+        {
+            return null;
+        }
+
+        var connection = await gitRepo.FindConnectionAsync(connectionId.Value, ct).ConfigureAwait(false);
+        if (connection is null)
+        {
+            return null;
+        }
+
+        return (project, connection, await FindMirrorAsync(projectId, connection.Id, ct).ConfigureAwait(false));
     }
 
     private async Task<GitInternalRepo?> FindMirrorAsync(int projectId, int connectionId, CancellationToken ct)
@@ -250,10 +260,8 @@ public sealed class ExternalRepoService(
 
     private static void ValidateCredential(GitCredentialPayload credential)
     {
-        if (credential.AuthType == GitAuthType.HttpsToken && string.IsNullOrWhiteSpace(credential.Token))
-        {
-            throw new BadRequestException("An access token is required for HTTPS authentication.");
-        }
+        // HTTPS without a token is an anonymous read: a public repository. The connectivity probe that
+        // follows is what refuses a private one, with the remote's own answer.
 
         if (credential.AuthType == GitAuthType.Ssh)
         {
@@ -307,8 +315,10 @@ public sealed class ExternalRepoService(
         return string.IsNullOrEmpty(slug) ? "repo" : slug;
     }
 
-    private static ExternalRepoDto Map(GitConnection connection, GitInternalRepo? mirror, string? cloneUrl, GitAuthType authType) => new()
+    private ExternalRepoDto Map(Project project, GitConnection connection, GitInternalRepo? mirror, GitAuthType authType) => new()
     {
+        Slug = mirror?.Slug,
+        IsProjectSource = project.GitConnectionId == connection.Id,
         GitConnectionId = connection.Id,
         ProjectId = connection.ProjectId,
         ProviderType = connection.ProviderType,
@@ -323,6 +333,9 @@ public sealed class ExternalRepoService(
         FetchIntervalMinutes = connection.FetchIntervalMinutes,
         WriteEnabled = connection.WriteEnabled,
         DefaultBranch = mirror?.DefaultBranch,
-        CloneUrl = cloneUrl
+        // The project's own source shows the URL the project clones; an additional source shows its mirror's.
+        CloneUrl = project.GitConnectionId == connection.Id || mirror is null
+            ? project.RepositoryUrl
+            : BuildMirrorCloneUrl(project.Id, mirror.Slug)
     };
 }

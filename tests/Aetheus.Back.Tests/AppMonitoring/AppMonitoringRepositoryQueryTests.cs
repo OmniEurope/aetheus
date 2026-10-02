@@ -463,23 +463,58 @@ public sealed class AppMonitoringRepositoryQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task R2_013_ResolveIngestKeyHashAsync_AcceptsTheSecondPreviousKeyUntilItsOwnDeadline()
+    {
+        var graceEnd = Now.AddHours(2);
+        _db.MonitoredApps.Add(new MonitoredApp
+        {
+            Id = 1,
+            Name = "web",
+            ProjectId = 10,
+            IngestKeyHash = "current",
+            IngestKeyExpiresAt = Now.AddDays(1),
+            PreviousIngestKeyHash = "previous",
+            PreviousIngestKeyValidUntil = Now.AddHours(6),
+            SecondPreviousIngestKeyHash = "second-previous",
+            SecondPreviousIngestKeyValidUntil = graceEnd
+        });
+        await SaveAsync();
+
+        var resolution = await _repository.ResolveIngestKeyHashAsync("second-previous", Now, Ct);
+
+        Assert.Equal(1, resolution!.Value.AppId);
+        Assert.Equal(graceEnd, resolution.Value.ValidUntilUtc);
+        Assert.Null(await _repository.ResolveIngestKeyHashAsync("second-previous", graceEnd.AddSeconds(1), Ct));
+    }
+
+    [Fact]
     public async Task ResolveIngestKeyHashAsync_RejectsExpiredKeysAndDisabledApps()
     {
         _db.MonitoredApps.AddRange(
             new MonitoredApp
             {
-                Id = 1, Name = "expired", ProjectId = 10,
-                IngestKeyHash = "expired-key", IngestKeyExpiresAt = Now.AddMinutes(-1)
+                Id = 1,
+                Name = "expired",
+                ProjectId = 10,
+                IngestKeyHash = "expired-key",
+                IngestKeyExpiresAt = Now.AddMinutes(-1)
             },
             new MonitoredApp
             {
-                Id = 2, Name = "grace-over", ProjectId = 10,
-                PreviousIngestKeyHash = "stale-key", PreviousIngestKeyValidUntil = Now.AddMinutes(-1)
+                Id = 2,
+                Name = "grace-over",
+                ProjectId = 10,
+                PreviousIngestKeyHash = "stale-key",
+                PreviousIngestKeyValidUntil = Now.AddMinutes(-1)
             },
             new MonitoredApp
             {
-                Id = 3, Name = "disabled", ProjectId = 10, Enabled = false,
-                IngestKeyHash = "disabled-key", IngestKeyExpiresAt = Now.AddDays(1)
+                Id = 3,
+                Name = "disabled",
+                ProjectId = 10,
+                Enabled = false,
+                IngestKeyHash = "disabled-key",
+                IngestKeyExpiresAt = Now.AddDays(1)
             });
         await SaveAsync();
 
@@ -509,23 +544,34 @@ public sealed class AppMonitoringRepositoryQueryTests : IDisposable
         _db.MonitoredApps.AddRange(
             new MonitoredApp
             {
-                Id = 1, Name = "pending", ProjectId = 10,
-                AnalyticsVaultName = "vault", AnalyticsPendingPseudonymKeyVersion = 2,
+                Id = 1,
+                Name = "pending",
+                ProjectId = 10,
+                AnalyticsVaultName = "vault",
+                AnalyticsPendingPseudonymKeyVersion = 2,
                 AnalyticsPseudonymKeyCreatedAt = Now
             },
             new MonitoredApp
             {
-                Id = 2, Name = "aged", ProjectId = 10,
-                AnalyticsVaultName = "vault", AnalyticsPseudonymKeyCreatedAt = Now.AddDays(-90)
+                Id = 2,
+                Name = "aged",
+                ProjectId = 10,
+                AnalyticsVaultName = "vault",
+                AnalyticsPseudonymKeyCreatedAt = Now.AddDays(-90)
             },
             new MonitoredApp
             {
-                Id = 3, Name = "fresh", ProjectId = 10,
-                AnalyticsVaultName = "vault", AnalyticsPseudonymKeyCreatedAt = Now
+                Id = 3,
+                Name = "fresh",
+                ProjectId = 10,
+                AnalyticsVaultName = "vault",
+                AnalyticsPseudonymKeyCreatedAt = Now
             },
             new MonitoredApp
             {
-                Id = 4, Name = "no-vault", ProjectId = 10,
+                Id = 4,
+                Name = "no-vault",
+                ProjectId = 10,
                 AnalyticsPseudonymKeyCreatedAt = Now.AddDays(-90)
             });
         await SaveAsync();
@@ -541,13 +587,19 @@ public sealed class AppMonitoringRepositoryQueryTests : IDisposable
         _db.MonitoredApps.AddRange(
             new MonitoredApp
             {
-                Id = 1, Name = "first", ProjectId = 10,
-                AnalyticsVaultName = "vault", AnalyticsPendingPseudonymKeyVersion = 2
+                Id = 1,
+                Name = "first",
+                ProjectId = 10,
+                AnalyticsVaultName = "vault",
+                AnalyticsPendingPseudonymKeyVersion = 2
             },
             new MonitoredApp
             {
-                Id = 2, Name = "second", ProjectId = 10,
-                AnalyticsVaultName = "vault", AnalyticsPendingPseudonymKeyVersion = 2
+                Id = 2,
+                Name = "second",
+                ProjectId = 10,
+                AnalyticsVaultName = "vault",
+                AnalyticsPendingPseudonymKeyVersion = 2
             });
         await SaveAsync();
 

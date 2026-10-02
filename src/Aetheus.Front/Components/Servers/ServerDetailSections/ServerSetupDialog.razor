@@ -1,0 +1,18 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniTemplateForm TModel="ServerSetupDialogModel" Model="@_model" OnValidSubmit="@((EditContext context) => Submit((ServerSetupDialogModel)context.Model))">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Large">
+        @if (Kind == ServerSetupKind.Portsentry)
+        {
+            <OmniFormField For="oe-pages-servers-serverdetailsections-serversetupdialog-1"><LabelContent>@L["Mode"]</LabelContent><ChildContent><OmniTextBox @bind-Value="_model.Mode" Id="oe-pages-servers-serverdetailsections-serversetupdialog-1" /></ChildContent></OmniFormField>
+            <OmniFormField For="oe-pages-servers-serverdetailsections-serversetupdialog-2"><LabelContent>@L["TcpPorts"]</LabelContent><ChildContent><OmniTextBox @bind-Value="_model.TcpPorts" Id="oe-pages-servers-serverdetailsections-serversetupdialog-2" /></ChildContent></OmniFormField>
+            <OmniFormField For="oe-pages-servers-serverdetailsections-serversetupdialog-3"><LabelContent>@L["UdpPorts"]</LabelContent><ChildContent><OmniTextBox @bind-Value="_model.UdpPorts" Id="oe-pages-servers-serverdetailsections-serversetupdialog-3" /></ChildContent></OmniFormField>
+        }
+        else
+        {
+            <OmniFormField For="oe-pages-servers-serverdetailsections-serversetupdialog-4"><LabelContent>@L["MailOnWarning"]</LabelContent><ChildContent><OmniTextBox @bind-Value="_model.MailOnWarning" Placeholder="admin@example.com" Id="oe-pages-servers-serverdetailsections-serversetupdialog-4" /></ChildContent></OmniFormField>
+            <ValidationMessage For="@(() => _model.MailOnWarning)" />
+        }
+    </OmniStack>
+    <DialogFooter OnCancel="@(() => Dialog.Close())"><OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit"><OmniIcon Name="OmniIconName.Monitor" /> <span>@L["Install"]</span></OmniButton></DialogFooter>
+</OmniTemplateForm>

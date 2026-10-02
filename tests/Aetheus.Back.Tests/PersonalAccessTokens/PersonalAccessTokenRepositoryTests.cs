@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.PersonalAccessTokens;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.PersonalAccessTokens;
@@ -88,6 +87,23 @@ public class PersonalAccessTokenRepositoryTests : IDisposable
         var token = Assert.Single(tokens);
         Assert.Equal(11, token.Id);
         Assert.Equal(1, token.UserId);
+    }
+
+    [Fact]
+    public async Task GetForUserPaged_AppliesColumnFilters_InsideTheOwnersTokens()
+    {
+        // Recette R-224: the scope list and the expiry range are column filters; the owner scope stays.
+        var (tokens, total) = await _repo.GetForUserPagedAsync(
+            userId: 1, search: null, page: 1, pageSize: 10, sortBy: null, sortDescending: true,
+            ct: TestContext.Current.CancellationToken,
+            columnFilters:
+            [
+                new GridFilter { Field = "Scope", Operator = GridFilterOperator.In, Value = "ReadWrite" },
+                new GridFilter { Field = "ExpiresAt", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-07-09T12:00:00Z" }
+            ]);
+
+        Assert.Equal(1, total);
+        Assert.Equal(11, Assert.Single(tokens).Id);
     }
 
     [Fact]

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.AgentWizard;
-
+using Aetheus.Front.Components.Servers.AgentWizard;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 public sealed class AgentInstallFlagsTests

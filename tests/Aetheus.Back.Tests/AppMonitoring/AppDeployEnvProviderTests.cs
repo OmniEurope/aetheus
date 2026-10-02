@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.Extensions.Caching.Memory;
 using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.AppMonitoring.Ingest;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Components.Vaults;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
@@ -37,7 +37,9 @@ public class AppDeployEnvProviderTests : IDisposable
 
     public void Dispose() => _db.Dispose();
 
-    private AppDeployEnvProvider Build(string? baseUrl)
+    private static readonly DateTimeOffset T0 = new(2026, 1, 10, 12, 0, 0, TimeSpan.Zero);
+
+    private AppDeployEnvProvider Build(string? baseUrl, DateTimeOffset? now = null)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -51,8 +53,7 @@ public class AppDeployEnvProviderTests : IDisposable
             _audit,
             _vaults,
             config,
-            new MemoryCache(new MemoryCacheOptions()),
-            new FakeTimeProvider(new DateTimeOffset(2026, 1, 10, 12, 0, 0, TimeSpan.Zero)));
+            new FakeTimeProvider(now ?? T0));
     }
 
     [Fact]
@@ -94,6 +95,23 @@ public class AppDeployEnvProviderTests : IDisposable
         // One rotation for the whole run, so the key handed to the container stays the current one.
         var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(a => a.Id == 1, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, app.IngestKeyVersion);
+    }
+
+    [Fact]
+    public async Task SameRun_AfterTheBackendRestarted_ReusesTheKeyWithoutRotating()
+    {
+        // A production deployment restarts the backend it runs on. The key used to live in process
+        // memory, so the new colour rotated again within the same run (audit log: run 2334 twice, run
+        // 1979 nine times) and the containers were left on a key that dies with the overlap window.
+        var beforeRestart = await Build("https://obs.example.com")
+            .GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
+        var afterRestart = await Build("https://obs.example.com")
+            .GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(beforeRestart["AETHEUS_INGEST_KEY"], afterRestart["AETHEUS_INGEST_KEY"]);
+        var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(a => a.Id == 1, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(1, app.IngestKeyVersion);
+        Assert.Equal(_hasher.Hash(afterRestart["AETHEUS_INGEST_KEY"]), app.IngestKeyHash);
     }
 
     [Fact]
@@ -194,5 +212,68 @@ public class AppDeployEnvProviderTests : IDisposable
             env["AETHEUS_WEB_ANALYTICS_INGEST_ENDPOINT"]);
         Assert.Equal("3", env["AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION"]);
         Assert.Equal(2, _masking.ReceivedCalls().Count());
+        // The blue-green binding drops exactly these names on the steps that do not start a colour:
+        // one emitted here and missing from the list would make the strict migrate step refuse it.
+        Assert.Empty(env.Keys.Except(AppDeployEnvProvider.DerivedNames, StringComparer.Ordinal));
+        Assert.Empty(AppDeployEnvProvider.DerivedNames.Except(env.Keys, StringComparer.Ordinal));
     }
+
+    private async Task<int?> ResolveAsync(string plaintext, DateTimeOffset at) =>
+        (await new AppMonitoringRepository(_db).ResolveIngestKeyHashAsync(
+            _hasher.Hash(plaintext), at.UtcDateTime, TestContext.Current.CancellationToken))?.AppId;
+
+    [Fact]
+    public async Task R2_013_TheIdleColourKey_StaysValid_WhileTheNextRunRotates()
+    {
+        // Run 7 started blue, run 8 started green. When run 9 rotates, green (active) holds run 8's key
+        // and blue (idle, still running until run 9 replaces it) holds run 7's: both must still resolve.
+        var provider = Build("https://obs.example.com");
+        var ct = TestContext.Current.CancellationToken;
+        var blue = (await provider.GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: ct))["AETHEUS_INGEST_KEY"];
+        var green = (await provider.GetDeployEnvAsync(1, null, pipelineRunId: 8, ct: ct))["AETHEUS_INGEST_KEY"];
+        var next = (await provider.GetDeployEnvAsync(1, null, pipelineRunId: 9, ct: ct))["AETHEUS_INGEST_KEY"];
+
+        Assert.Equal(1, await ResolveAsync(blue, T0));
+        Assert.Equal(1, await ResolveAsync(green, T0));
+        Assert.Equal(1, await ResolveAsync(next, T0));
+    }
+
+    [Fact]
+    public async Task R2_013_AKeyThreeRunsOld_IsRefused_AndLeavesTheCache()
+    {
+        // Run 9 replaced the colour run 7 started: run 10's rotation drops run 7's key.
+        var provider = Build("https://obs.example.com");
+        var ct = TestContext.Current.CancellationToken;
+        var oldest = (await provider.GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: ct))["AETHEUS_INGEST_KEY"];
+        await provider.GetDeployEnvAsync(1, null, pipelineRunId: 8, ct: ct);
+        await provider.GetDeployEnvAsync(1, null, pipelineRunId: 9, ct: ct);
+        _ingest.ClearReceivedCalls();
+
+        await provider.GetDeployEnvAsync(1, null, pipelineRunId: 10, ct: ct);
+
+        Assert.Null(await ResolveAsync(oldest, T0));
+        _ingest.Received(1).InvalidateKeyCache(_hasher.Hash(oldest));
+    }
+
+    [Fact]
+    public async Task R2_013_TheKeptKey_KeepsTheDeadlineItWasGiven_NotANewOne()
+    {
+        // A key never lives longer than the overlap window it received when it stopped being current.
+        var ct = TestContext.Current.CancellationToken;
+        var first = (await Build("https://obs.example.com", T0).GetDeployEnvAsync(1, null, pipelineRunId: 7, ct: ct))["AETHEUS_INGEST_KEY"];
+        await Build("https://obs.example.com", T0.AddDays(1)).GetDeployEnvAsync(1, null, pipelineRunId: 8, ct: ct);
+        await Build("https://obs.example.com", T0.AddDays(2)).GetDeployEnvAsync(1, null, pipelineRunId: 9, ct: ct);
+
+        var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(a => a.Id == 1, ct);
+        var deadline = T0.AddDays(1 + AppMonitoringDefaults.DefaultIngestKeyOverlapDays);
+        Assert.Equal(_hasher.Hash(first), app.SecondPreviousIngestKeyHash);
+        Assert.Equal(deadline.UtcDateTime, app.SecondPreviousIngestKeyValidUntil);
+        Assert.Equal(1, await ResolveAsync(first, deadline));
+        Assert.Null(await ResolveAsync(first, deadline.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void EveryDerivedName_IsDroppedFromTheMigrateStepByTheBlueGreenBinding() =>
+        Assert.All(AppDeployEnvProvider.DerivedNames,
+            name => Assert.Contains(name, Aetheus.Back.Components.Pipelines.BlueGreenStepBinding.StartOnlyNames));
 }

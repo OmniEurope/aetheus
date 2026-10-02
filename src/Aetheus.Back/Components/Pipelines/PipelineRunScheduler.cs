@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Pipelines.Events;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Helpers;
 using Aetheus.Back.Services.DomainEvents;
 using Microsoft.AspNetCore.SignalR;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
@@ -29,6 +28,14 @@ public interface IPipelineRunScheduler
     /// <summary>Serialized stage advance after a task completed.</summary>
     Task AdvanceStageAsync(
         int pipelineRunId, string completedStageName, IPipelineChildRunLauncher launcher, CancellationToken ct);
+
+    /// <summary>
+    /// PLAN-003 2.7: a stage whose own confirmation was refused or ran out fails like a failed step, so
+    /// its <c>failed()</c> handlers (the blue-green Rollback) run instead of the run just closing.
+    /// Returns false when the run was not waiting on it, or the stage has nothing left to fail.
+    /// </summary>
+    Task<bool> FailUnconfirmedStageAsync(
+        int pipelineRunId, string stageName, IPipelineChildRunLauncher launcher, CancellationToken ct);
 
     /// <summary>Periodic reconcile pass for a run whose completions may have been missed.</summary>
     Task ReconcileRunAsync(int pipelineRunId, IPipelineChildRunLauncher launcher, CancellationToken ct);
@@ -79,6 +86,33 @@ public sealed class PipelineRunScheduler(
                 await AdvanceStageLockedAsync(pipelineRunId, completedStageName, launcher, lockToken).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> FailUnconfirmedStageAsync(
+        int pipelineRunId, string stageName, IPipelineChildRunLauncher launcher, CancellationToken ct)
+    {
+        var failed = false;
+        await operationLock.RunSerializedAsync(
+            $"pipeline-run-advance:{pipelineRunId}",
+            async lockToken =>
+            {
+                using var runLock = await RunAdvanceLock.Shared.AcquireAsync(pipelineRunId, lockToken).ConfigureAwait(false);
+                var steps = (await repo.GetPendingStepRunsAsync(pipelineRunId, lockToken).ConfigureAwait(false))
+                    .Where(step => string.Equals(step.StageName, stageName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                // Nothing to fail would advance the run as if the stage had passed: the caller closes it instead.
+                if (steps.Count == 0) return;
+                // Failed BEFORE the run leaves WaitingForApproval, so no pass can dispatch them in between.
+                finalizer.MarkStepsAs(steps, TaskExecutionStatus.Failed);
+                await repo.SaveChangesAsync(lockToken).ConfigureAwait(false);
+                if (!await repo.TryTransitionPipelineRunStatusAsync(
+                        pipelineRunId, PipelineStatus.WaitingForApproval, PipelineStatus.Running, lockToken).ConfigureAwait(false))
+                    return;
+                failed = true;
+                await AdvanceStageLockedAsync(pipelineRunId, stageName, launcher, lockToken).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+        return failed;
     }
 
     public async Task<bool> ResolveCompletedTriggerStepAsync(
@@ -243,6 +277,56 @@ public sealed class PipelineRunScheduler(
         return true;
     }
 
+    /// <summary>
+    /// The terminal status of a run whose steps have all settled (PLAN-003 D13).
+    ///
+    /// A run whose only failures carried <c>continue_on_error</c> used to finish green, which said
+    /// the opposite of what happened: something broke, it was just allowed not to stop the run.
+    /// That is <see cref="PipelineStatus.Partial"/> - finished, nothing blocking broke, but not a
+    /// success either. It matters beyond the badge: PipelineRunCompletedDownstreamHandler chains
+    /// only on Success, so a Partial deliberately stops an <c>on_success</c> chain instead of
+    /// handing the next pipeline a result nobody vouched for.
+    /// </summary>
+    private static PipelineStatus DecideFinalStatus(bool cancelled, bool blockingFailure, bool swallowedFailure, bool rolledBack = false)
+    {
+        if (cancelled) return PipelineStatus.Cancelled;
+        if (blockingFailure) return rolledBack ? PipelineStatus.RolledBack : PipelineStatus.Failed;
+        return swallowedFailure ? PipelineStatus.Partial : PipelineStatus.Success;
+    }
+
+    /// <summary>
+    /// R-14: the stages that undo a deployment - a failure handler (<c>condition: failed()</c>) that
+    /// runs a <c>bluegreen-rollback</c> step. Recognised by that step rather than by a name, so a
+    /// failure handler that only notifies never turns a failed run into a rolled-back one.
+    /// </summary>
+    internal static List<string> RollbackStageNames(PipelineYamlDefinition definition) =>
+        StagesRunning(definition, "bluegreen-rollback", failureHandlersOnly: true);
+
+    /// <summary>The stages that start the new colour (a <c>bluegreen-up</c> step).</summary>
+    internal static List<string> StartStageNames(PipelineYamlDefinition definition) =>
+        StagesRunning(definition, "bluegreen-up", failureHandlersOnly: false);
+
+    private static List<string> StagesRunning(PipelineYamlDefinition definition, string stepType, bool failureHandlersOnly) =>
+        [.. YamlParsingHelper.FlattenJobs(definition)
+            .Where(stage => !failureHandlersOnly
+                || string.Equals(stage.Condition?.Trim(), "failed()", StringComparison.OrdinalIgnoreCase))
+            .Where(stage => stage.Steps.Any(step => string.Equals(step.Type, stepType, StringComparison.OrdinalIgnoreCase)))
+            .Select(stage => stage.Name)];
+
+    /// <summary>
+    /// True when something was deployed and then undone: the new colour was started (its start stage
+    /// succeeded) and a rollback stage then succeeded entirely. Deploy-prod 2383 failed at Verify
+    /// candidate, before starting anything; its rollback had nothing to undo and the run stays Failed.
+    /// </summary>
+    private async Task<bool> WasRolledBackAsync(int pipelineRunId, PipelineYamlDefinition definition, CancellationToken ct)
+    {
+        var rollback = RollbackStageNames(definition);
+        var started = StartStageNames(definition);
+        return rollback.Count > 0 && started.Count > 0
+            && await repo.DidStagesAllSucceedAsync(pipelineRunId, started, ct).ConfigureAwait(false)
+            && await repo.DidStagesAllSucceedAsync(pipelineRunId, rollback, ct).ConfigureAwait(false);
+    }
+
     private static bool HasNonContinuableFailures(List<PipelineStepRun> failedSteps)
     {
         return failedSteps.Count > 0 && !failedSteps.All(s => s.ContinueOnError);
@@ -324,11 +408,13 @@ public sealed class PipelineRunScheduler(
             var pendingSteps = await repo.GetPendingStepRunsAsync(pipelineRunId, ct).ConfigureAwait(false);
             if (pendingSteps.Count == 0)
             {
-                var finalStatus = HasCancellationRequest(run.AdditionalVariablesJson)
-                    ? PipelineStatus.Cancelled
-                    : await repo.HasAnyFailedStepInRunAsync(pipelineRunId, ct).ConfigureAwait(false)
-                        ? PipelineStatus.Failed
-                        : PipelineStatus.Success;
+                var blockingFailure = await repo.HasAnyFailedStepInRunAsync(pipelineRunId, ct).ConfigureAwait(false);
+                var finalStatus = DecideFinalStatus(
+                    cancelled: HasCancellationRequest(run.AdditionalVariablesJson),
+                    blockingFailure: blockingFailure,
+                    swallowedFailure: await repo
+                        .HasAnyContinuableFailedStepInRunAsync(pipelineRunId, ct).ConfigureAwait(false),
+                    rolledBack: blockingFailure && await WasRolledBackAsync(pipelineRunId, definition, ct).ConfigureAwait(false));
                 await finalizer.CompleteRunAsync(pipelineRunId, finalStatus, ct).ConfigureAwait(false);
                 if (finalStatus == PipelineStatus.Success)
                     await pipelineHub.Clients.Groups(HubGroups.PipelineRunUpdates(pipelineRunId, run.Pipeline.Id)).SendAsync("PipelineRunCompleted", pipelineRunId, PipelineStatus.Success, ct).ConfigureAwait(false);
@@ -382,7 +468,9 @@ public sealed class PipelineRunScheduler(
 
         var artifactVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["AETHEUS_ARTIFACT_NAME"] = $"{stageName}-artifacts",
+            // The stage's declared artifact_name when it has one, so a stage can be renamed without
+            // breaking the pipelines and retained releases that restore its output by name.
+            ["AETHEUS_ARTIFACT_NAME"] = StageArtifactName(stageDef),
             ["AETHEUS_RUN_ID"] = runId.ToString(),
             ["AETHEUS_STAGE_NAME"] = stageName,
             ["AETHEUS_WORKING_DIR"] = workspace,
@@ -413,6 +501,16 @@ public sealed class PipelineRunScheduler(
         PipelineYamlDefinition definition, int? projectId, Dictionary<string, string>? additionalVariables, CancellationToken ct,
         int? pipelineId = null, int? runId = null, string? pipelineName = null, int? buildNumber = null)
         => variableResolver.ResolveVariablesWithWarningsAsync(definition, projectId, additionalVariables, ct, pipelineId, runId, pipelineName, buildNumber);
+
+    /// <summary>
+    /// The name a stage's artifact bundle is stored under. `{stage}-artifacts` unless the stage
+    /// declares `artifact_name`, which is what lets a stage be renamed without breaking the
+    /// pipelines and retained releases that restore its output by name.
+    /// </summary>
+    internal static string StageArtifactName(PipelineStageDefinition stage) =>
+        string.IsNullOrWhiteSpace(stage.ArtifactName)
+            ? $"{stage.Name}-artifacts"
+            : stage.ArtifactName.Trim();
 
     private static void InjectStageSystemVariables(
         Dictionary<string, string> stageVars, string stageName, Server server)

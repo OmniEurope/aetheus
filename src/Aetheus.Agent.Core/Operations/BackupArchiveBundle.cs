@@ -52,15 +52,7 @@ internal static class BackupArchiveBundle
 
         try
         {
-            var archiveOptions = new FileStreamOptions
-            {
-                Mode = FileMode.CreateNew,
-                Access = FileAccess.ReadWrite,
-                Share = FileShare.None,
-                BufferSize = 81920,
-                Options = FileOptions.Asynchronous | FileOptions.SequentialScan
-            };
-            if (!OperatingSystem.IsWindows()) archiveOptions.UnixCreateMode = BackupFilesystemMetadata.PrivateFileMode;
+            var archiveOptions = BackupFilesystemMetadata.CreatePrivateFileOptions(FileAccess.ReadWrite);
             await using (var output = new FileStream(temporaryArchive, archiveOptions))
             using (var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
             {
@@ -296,12 +288,12 @@ internal static class BackupArchiveBundle
         string entryRoot,
         string relativePath,
         string sourcePath) => new()
-    {
-        EntryRoot = entryRoot,
-        RelativePath = relativePath,
-        LastWriteTimeUtcTicks = Directory.GetLastWriteTimeUtc(sourcePath).Ticks,
-        UnixMode = BackupFilesystemMetadata.GetUnixMode(sourcePath)
-    };
+        {
+            EntryRoot = entryRoot,
+            RelativePath = relativePath,
+            LastWriteTimeUtcTicks = Directory.GetLastWriteTimeUtc(sourcePath).Ticks,
+            UnixMode = BackupFilesystemMetadata.GetUnixMode(sourcePath)
+        };
 
     private static async Task<BackupBundleFile> AddFileAsync(
         ZipArchive zip,
@@ -347,15 +339,7 @@ internal static class BackupArchiveBundle
         var destinationPath = GetSafeExtractionPath(extractionRoot, expected.EntryName);
         BackupFilesystemMetadata.CreatePrivateDirectory(Path.GetDirectoryName(destinationPath)!);
         await using var input = entry.Open();
-        var outputOptions = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-            BufferSize = 81920,
-            Options = FileOptions.Asynchronous | FileOptions.SequentialScan
-        };
-        if (!OperatingSystem.IsWindows()) outputOptions.UnixCreateMode = BackupFilesystemMetadata.PrivateFileMode;
+        var outputOptions = BackupFilesystemMetadata.CreatePrivateFileOptions();
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[81920];
         long length = 0;

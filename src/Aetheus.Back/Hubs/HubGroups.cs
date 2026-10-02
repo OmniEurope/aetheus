@@ -35,10 +35,10 @@ public static class HubGroups
     // aggregate group. Non-admin org members now also join the org group below, and lifecycle
     // broadcasts target it - org membership grants Read on every org resource, so this leaks nothing.
     public static string ServerOrg(int organizationId) => $"server-org-{organizationId}";
-    public static string EntityOrg(Aetheus.Shared.Enums.ResourceType type, int organizationId) => $"entity-{type}-org-{organizationId}";
+    public static string EntityOrg(Aetheus.Shared.Components.Auth.ResourceType type, int organizationId) => $"entity-{type}-org-{organizationId}";
 
     // Generic entity change groups, used by EntityHub to broadcast CRUD events for resources
     // that don't have their own dedicated hub (Project, Vault, VariableLibrary, ...).
-    public static string EntityAll(Aetheus.Shared.Enums.ResourceType type) => $"entity-{type}-all";
-    public static string Entity(Aetheus.Shared.Enums.ResourceType type, int id) => $"entity-{type}-{id}";
+    public static string EntityAll(Aetheus.Shared.Components.Auth.ResourceType type) => $"entity-{type}-all";
+    public static string Entity(Aetheus.Shared.Components.Auth.ResourceType type, int id) => $"entity-{type}-{id}";
 }

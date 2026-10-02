@@ -40,7 +40,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.202'
+          global-json-file: global.json
 
       - name: Restore dependencies
         run: dotnet restore --locked-mode -p:Configuration=Release
@@ -51,24 +51,20 @@ jobs:
       - name: Verify optional observability variants
         run: DOTNET=dotnet sh deploy/scripts/verify-optional-observability.sh
 
-      # Suites are named explicitly rather than filtered: the E2E project needs a running
-      # application, and a --filter argument would override the platform exclusion that
-      # tests/Directory.Build.props applies by default (Platform!=windows on this runner).
       - name: Unit tests
+        # By project: global.json runs `dotnet test` on Microsoft.Testing.Platform, where a
+        # solution-wide category filter would leave the E2E module with zero tests, a failure there.
         run: |
-          for project in \
-            tests/Aetheus.Back.Tests/Aetheus.Back.Tests.csproj \
-            tests/Aetheus.Front.Tests/Aetheus.Front.Tests.csproj \
-            tests/Aetheus.Agent.Core.Tests/Aetheus.Agent.Core.Tests.csproj \
-            tests/Aetheus.Analyzers.Tests/Aetheus.Analyzers.Tests.csproj \
-            tests/Aetheus.Telemetry.Tests/Aetheus.Telemetry.Tests.csproj \
-            tests/Aetheus.WebAnalytics.Tests/Aetheus.WebAnalytics.Tests.csproj
-          do
-            name="$(basename "$project" .csproj)"
-            dotnet test "$project" -c Release --no-build \
-              --logger "trx;LogFileName=$name.trx" \
-              --results-directory ./test-results
+          set -u
+          status=0
+          for project in tests/Aetheus.Back.Tests tests/Aetheus.Front.Tests tests/Aetheus.Agent.Core.Tests \
+            tests/Aetheus.Analyzers.Tests tests/Aetheus.Telemetry.Tests tests/Aetheus.WebAnalytics.Tests; do
+            name="$(basename "$project")"
+            dotnet test --project "$project" -c Release --no-build --no-progress \
+              --report-trx --report-trx-filename "$name.trx" --results-directory ./test-results || status=1
+            test -s "./test-results/$name.trx" || { echo "No TRX produced for $project." >&2; status=1; }
           done
+          exit "$status"
 
       - name: Integration tests
         env:
@@ -76,9 +72,8 @@ jobs:
             Host=localhost;Port=5432;Database=aetheus_test;
             Username=dbaetheus_test;Password=test_password
         run: >-
-          dotnet test tests/Aetheus.Back.IntegrationTests/Aetheus.Back.IntegrationTests.csproj
-          -c Release --no-build
-          --logger "trx;LogFileName=integration-results.trx"
+          dotnet test --project tests/Aetheus.Back.IntegrationTests -c Release --no-build --no-progress
+          --report-trx --report-trx-filename integration-results.trx
           --results-directory ./test-results
 
       - name: Upload test results
@@ -98,7 +93,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.202'
+          global-json-file: global.json
 
       - name: Check for vulnerable packages
         run: dotnet list package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
@@ -127,6 +122,16 @@ jobs:
             build_args: ''
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # The two Dockerfiles copy a host publish instead of compiling; without this step they build
+      # an image with no application in it, which their own COPY assertions refuse.
+      - name: Publish the application on the host
+        run: DOTNET=dotnet APP_VERSION=0.0.0 sh deploy/scripts/publish-application.sh .pipeline-publish
 
       - name: Build production image
         run: >-

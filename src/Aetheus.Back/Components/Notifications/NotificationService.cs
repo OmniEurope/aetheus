@@ -4,7 +4,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Aetheus.Back.Components.Notifications.Events;
-using Aetheus.Back.Components.Webhooks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services.DomainEvents;
 
@@ -19,14 +18,15 @@ public class NotificationService(
     IHttpClientFactory httpClientFactory,
     ILogger<NotificationService> logger,
     IEncryptionService encryption,
-    TimeProvider timeProvider) : INotificationService
+    TimeProvider timeProvider,
+    IUserNotificationService userNotifications) : INotificationService
 {
     public async Task<PaginatedResult<NotificationChannelDto>> GetChannelsAsync(
         PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (channels, total) = await repo.GetChannelsPagedAsync(
-            request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<NotificationChannelDto>
         {
             Items = channels.Select(MapChannelToDto).ToList(),
@@ -90,12 +90,18 @@ public class NotificationService(
         return true;
     }
 
+    public async Task<NotificationAdminFilterValuesDto> GetRuleFilterValuesAsync(CancellationToken ct = default)
+    {
+        var (eventTypes, channels) = await repo.GetRuleFilterValuesAsync(ct).ConfigureAwait(false);
+        return new NotificationAdminFilterValuesDto { EventTypes = eventTypes, Channels = channels };
+    }
+
     public async Task<PaginatedResult<NotificationRuleDto>> GetRulesAsync(
         PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (rules, total) = await repo.GetRulesPagedAsync(
-            request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<NotificationRuleDto>
         {
             Items = rules.Select(MapRuleToDto).ToList(),
@@ -211,10 +217,27 @@ public class NotificationService(
                 "AI trigger dispatch failed for event {EventType}; normal notification delivery continues",
                 eventType);
         }
+        var jsonPayload = JsonSerializer.Serialize(payload);
+        try
+        {
+            // Per-user record of a project event, for the project's subscribers. Observer semantics like
+            // the dispatch above: a failure here must not stop the admin channels below.
+            await userNotifications.RecordProjectEventAsync(eventType, jsonPayload, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Recording user notifications failed for event {EventType}; channel delivery continues",
+                eventType);
+        }
+
         var rules = await repo.GetRulesForEventAsync(eventType, ct).ConfigureAwait(false);
         if (rules.Count == 0) return;
-
-        var jsonPayload = JsonSerializer.Serialize(payload);
 
         foreach (var rule in rules)
         {

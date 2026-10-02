@@ -93,6 +93,37 @@ internal sealed record BlueGreenContext
     }
 
     /// <summary>
+    /// The part of a context that putting traffic back needs - state directory and ports - for the
+    /// confirmation watchdog (PLAN-003 2.7), which acts when the backend that dispatches tasks is gone
+    /// and may find the run's workspace, and so its Compose files, already reaped. Compose operations
+    /// on such a context fail and say so; the upstream restore and the journal do not need them.
+    /// </summary>
+    internal static bool TryCreateForRecovery(
+        string project, IReadOnlyDictionary<string, string> env, out BlueGreenContext? context, out string error)
+    {
+        if (TryCreate(project, env, out context, out error)) return true;
+        context = null;
+        var stateDir = env.GetValueOrDefault("AETHEUS_BG_STATE_DIR", string.Empty).Trim();
+        if (!TryStateDirectory(stateDir, out error) || !TryPorts(env, out var ports, out error)) return false;
+        context = new BlueGreenContext
+        {
+            Project = project,
+            StateDir = stateDir,
+            EnvFile = env.GetValueOrDefault("AETHEUS_BG_ENV_FILE", string.Empty).Trim(),
+            ComposeFiles = [],
+            FrontBlue = ports[0],
+            BackBlue = ports[1],
+            FrontGreen = ports[2],
+            BackGreen = ports[3],
+            DatabaseContainer = string.Empty,
+            DatabaseUser = string.Empty,
+            DatabaseName = string.Empty,
+            ComposeEnvironment = ReadComposeEnvironment(env)
+        };
+        return true;
+    }
+
+    /// <summary>
     /// Collects the prefixed task variables and strips the prefix. Only these reach the Compose child
     /// process: the task environment also carries vault secrets and orchestration values that have no
     /// business being visible to the containers Compose starts.

@@ -1,0 +1,24 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-007 lot 7: every approval still waiting, on the home page, each one linking to its run. Absent
+   when nothing waits. *@
+
+@if (Approvals.Items.Count > 0)
+{
+<OmniAlert Severity="OmniSeverity.Warning"
+    Title="@string.Format(L["PendingApprovalsTooltip"].Value, Approvals.Items.Count)"
+    Class="pending-approvals-panel omni-u-mb-lg">
+        <ul class="pending-approvals-list">
+            @foreach (var approval in Approvals.Items)
+            {
+                <li>
+                    <OmniLink Href="@($"/pipelines/runs/{approval.PipelineRunId}")">@($"{approval.PipelineName} #{approval.PipelineRunId}")</OmniLink>
+                    <span class="omni-u-text-muted">
+                        @(approval.Scope == ApprovalScope.Pipeline
+                            ? string.Format(L["PendingPipelineApprovalLine"].Value, approval.StageName, approval.RequestedAt.ToLocalTime().ToString("g"))
+                            : string.Format(L["PendingApprovalLine"].Value, approval.StageName, approval.EnvironmentName, approval.RequestedAt.ToLocalTime().ToString("g")))
+                    </span>
+                </li>
+            }
+        </ul>
+</OmniAlert>
+}

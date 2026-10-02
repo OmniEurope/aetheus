@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers;
-
+using Aetheus.Front.Components.Servers;
 namespace Aetheus.Front.Layout;
 
 public partial class ServerDetailLayout : IDisposable
 {
     [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
+    [Inject] private OmniDialogService Dialog { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
 
@@ -31,6 +30,9 @@ public partial class ServerDetailLayout : IDisposable
         // reactivate the moment permissions land.
         Permissions.OnPermissionsChanged += OnPermissionsChanged;
         RefreshCanWrite();
+        // PLAN-003 lot 1: the entity name now lives ONLY in the trail, so it has to be set on mount
+        // too - a loader that already holds the entity fires no change event to trigger it later.
+        ReassertBreadcrumb();
     }
 
     private void OnLoaderChanged()
@@ -42,8 +44,47 @@ public partial class ServerDetailLayout : IDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
         ReassertBreadcrumb();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Recette R2-035: where the server stands, for OE's detail frame.</summary>
+    internal OmniDetailState DetailState => Loader.Server is not null
+        ? OmniDetailState.Found
+        : Loader.InitialLoadCompleted ? OmniDetailState.NotFound : OmniDetailState.Loading;
+
+    /// <summary>Recette R-199: /servers/{id} and /servers/{id}/overview show the server's own actions.</summary>
+    internal bool IsOverview => IsOverviewPath(Nav.ToBaseRelativePath(Nav.Uri));
+
+    internal static bool IsOverviewPath(string relativePath)
+    {
+        var segments = relativePath.Split('?', '#')[0].Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 2 && segments[0] == "servers"
+            || segments.Length == 3 && segments[0] == "servers" && segments[2] == "overview";
+    }
+
+    /// <summary>Recette R-275: the header shows the section's icon, the same one as the side menu.</summary>
+    internal string SectionIcon => SectionIconFor(Nav.ToBaseRelativePath(Nav.Uri));
+
+    internal static string SectionIconFor(string relativePath)
+    {
+        var segments = relativePath.Split('?', '#')[0].Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return (segments.Length > 2 ? segments[2] : "overview") switch
+        {
+            "services" => "engineering",
+            "projects" => "folder",
+            "pipelines" => "account_tree",
+            "libraries" => "library_books",
+            "vaults" => "lock",
+            "releases" => "new_releases",
+            "ports" => "lan",
+            "tasks" => "task_alt",
+            "logs" => "receipt_long",
+            _ => "dns",
+        };
+    }
 
     private void ReassertBreadcrumb()
     {
@@ -69,44 +110,45 @@ public partial class ServerDetailLayout : IDisposable
         return Dialog.OpenAsync<ContactAgentDialog>(
             L["ContactAgent"],
             new Dictionary<string, object?> { { "ServerId", Loader.Server.Id }, { "ServerName", Loader.Server.Name } },
-            new DialogOptions { Width = "480px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
+            new OmniDialogOptions { Width = "480px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
+    }
+
+    private Task OpenPortCheckDialog()
+    {
+        if (Loader.Server is null) return Task.CompletedTask;
+        return Dialog.OpenAsync<PortCheckDialog>(
+            L["CheckPorts"],
+            new Dictionary<string, object?> { { "ServerId", Loader.Server.Id } },
+            new OmniDialogOptions { Width = "640px", CloseDialogOnOverlayClick = false, AutoFocusFirstElement = false });
+    }
+
+    // The YAML import/export already lives in the Configuration section, complete with its validate and
+    // preview steps. The menu entries make it discoverable from the header instead of duplicating it.
+    private void GoToConfiguration()
+    {
+        if (Loader.Server is null) return;
+        Nav.NavigateTo($"/servers/{Loader.Server.Id}/configuration");
     }
 
     private async Task UpdateAgentAsync()
     {
         if (Loader.Server is null) return;
-        var sourceVersion = Loader.Server.AgentVersion;
-        var targetVersion = Loader.Server.AgentCompatibility?.TargetVersion
-            ?? Loader.Server.AgentUpdateRequest?.TargetVersion
-            ?? L["Unknown"].Value;
-        var confirmed = await Dialog.Confirm(
-            string.Format(L["UpdateAgentConfirm"], Loader.Server.Name, sourceVersion, targetVersion),
-            L["UpdateAgent"],
-            new ConfirmOptions { OkButtonText = L["UpdateAgent"], CancelButtonText = L["Cancel"] });
-        if (confirmed != true) return;
-
-        var result = await Api.Servers.UpdateAgentAsync(Loader.Server.Id);
-        if (result?.Outcome == AgentUpdateQueueOutcome.AlreadyUpToDate)
-            Toast.Info("UpdateAgent", "AgentAlreadyUpToDate", result.SourceVersion);
-        else if (result is not null)
-            Toast.Success("UpdateAgent", "UpdateAgentQueued", Loader.Server.Name);
-        else
-            Toast.Error("Error", "UpdateAgentFailed");
+        await new AgentUpdateRequester(Api, Dialog, Toast, L).RequestAsync(Loader.Server);
     }
 
-    private async Task OnDeleteServer()
+    private async Task OnRetireServer()
     {
         if (Loader.Server is null || _deleteBusy) return;
         var confirmed = await Dialog.Confirm(
-            string.Format(L["DeleteServerConfirm"], Loader.Server.Name),
-            L["DeleteServer"],
-            new ConfirmOptions { OkButtonText = L["Delete"], CancelButtonText = L["Cancel"] });
+            string.Format(L["RetireServerConfirm"], Loader.Server.Name),
+            L["RetireServer"],
+            new OmniConfirmOptions { Destructive = true, OkButtonText = L["Retire"], CancelButtonText = L["GoBack"] });
         if (confirmed != true) return;
 
-        await DeleteServerConfirmedAsync();
+        await RetireServerConfirmedAsync();
     }
 
-    internal async Task DeleteServerConfirmedAsync()
+    internal async Task RetireServerConfirmedAsync()
     {
         if (Loader.Server is null || _deleteBusy) return;
 
@@ -114,24 +156,20 @@ public partial class ServerDetailLayout : IDisposable
         StateHasChanged();
         try
         {
-            var deleted = await Api.Servers.DeleteServerAsync(Loader.Server.Id);
-            if (deleted)
+            var retired = await Api.Servers.RetireServerAsync(Loader.Server.Id);
+            if (retired)
             {
-                Toast.Success(L["ServerDeleted"]);
+                Toast.Success(L["ServerRetired"]);
                 Nav.NavigateTo("/servers");
             }
             else
             {
-                Toast.Error("Error", "DeleteFailed");
+                Toast.Error("Error", "ServerRetireFailed");
             }
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            Toast.Error("Error", "DeleteFailed");
-        }
-        catch (TaskCanceledException)
-        {
-            Toast.Error("Error", "DeleteFailed");
+            Toast.Error("Error", "ServerRetireFailed");
         }
         finally
         {

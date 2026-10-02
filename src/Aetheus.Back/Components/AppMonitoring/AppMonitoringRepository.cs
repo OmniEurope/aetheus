@@ -21,6 +21,28 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
         return result is long bytes ? bytes : Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    public async Task<Dictionary<string, AppHostingServer>> GetVirtualHostServersAsync(
+        int projectId,
+        IReadOnlyCollection<string> hostNames,
+        CancellationToken ct = default)
+    {
+        if (hostNames.Count == 0) return [];
+        var organizationIds = db.Projects.Where(project => project.Id == projectId).Select(project => project.OrganizationId);
+        var rows = await db.ApacheVirtualHosts
+            .AsNoTracking()
+            .Where(vhost => vhost.IsEnabled
+                && hostNames.Contains(vhost.ServerName.ToLower())
+                && vhost.Server.DeletedAt == null
+                && organizationIds.Contains(vhost.Server.OrganizationId))
+            .Select(vhost => new { Host = vhost.ServerName.ToLower(), vhost.ServerId, vhost.Server.Name })
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+        return rows
+            .GroupBy(row => row.Host)
+            .Where(group => group.Select(row => row.ServerId).Distinct().Count() == 1)
+            .ToDictionary(group => group.Key, group => new AppHostingServer(group.First().ServerId, group.First().Name));
+    }
+
     public async Task<List<MonitoredApp>> GetAppsByProjectAsync(int projectId, CancellationToken ct = default)
     {
         return await db.MonitoredApps
@@ -128,6 +150,33 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
                 Count = group.Select(session => session.SessionPseudonym).Distinct().Count()
             })
             .ToDictionaryAsync(item => item.AppId, item => item.Count, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<List<AppAudiencePeriodTotal>> GetAudienceTotalsAsync(
+        IReadOnlyCollection<int> appIds,
+        DateOnly todayUtc,
+        DateOnly weekStartUtc,
+        DateOnly monthStartUtc,
+        CancellationToken ct = default)
+    {
+        if (appIds.Count == 0)
+            return [];
+
+        return await db.AppAnalyticsAggregates
+            .AsNoTracking()
+            .Where(item => appIds.Contains(item.MonitoredAppId)
+                && ((item.PeriodKind == AnalyticsPeriodKind.Day && item.PeriodStartUtc == todayUtc)
+                    || (item.PeriodKind == AnalyticsPeriodKind.Week && item.PeriodStartUtc == weekStartUtc)
+                    || (item.PeriodKind == AnalyticsPeriodKind.Month && item.PeriodStartUtc == monthStartUtc)))
+            .GroupBy(item => item.PeriodKind)
+            .Select(group => new AppAudiencePeriodTotal(
+                group.Key,
+                group.Sum(item => item.UniqueVisitors),
+                group.Sum(item => item.AuthenticatedUniqueVisitors),
+                group.Sum(item => item.Sessions),
+                group.Sum(item => item.PageViews)))
+            .ToListAsync(ct)
             .ConfigureAwait(false);
     }
 
@@ -281,19 +330,25 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
                         && ((a.IngestKeyHash == ingestKeyHash
                              && a.IngestKeyExpiresAt >= nowUtc)
                             || (a.PreviousIngestKeyHash == ingestKeyHash
-                                && a.PreviousIngestKeyValidUntil >= nowUtc)))
+                                && a.PreviousIngestKeyValidUntil >= nowUtc)
+                            || (a.SecondPreviousIngestKeyHash == ingestKeyHash
+                                && a.SecondPreviousIngestKeyValidUntil >= nowUtc)))
             .Select(a => new
             {
                 a.Id,
                 IsCurrent = a.IngestKeyHash == ingestKeyHash,
-                a.PreviousIngestKeyValidUntil
+                IsPrevious = a.PreviousIngestKeyHash == ingestKeyHash,
+                a.PreviousIngestKeyValidUntil,
+                a.SecondPreviousIngestKeyValidUntil
             })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        return match is null
-            ? null
-            : new IngestKeyResolution(
-                match.Id,
-                match.IsCurrent ? null : match.PreviousIngestKeyValidUntil);
+        if (match is null)
+            return null;
+        return new IngestKeyResolution(
+            match.Id,
+            match.IsCurrent ? null
+            : match.IsPrevious ? match.PreviousIngestKeyValidUntil
+            : match.SecondPreviousIngestKeyValidUntil);
     }
 
     public async Task<MonitoredApp?> GetAppByAnalyticsSiteIdAsync(
@@ -353,40 +408,41 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task<int> AggregateRawIntoHourlyAsync(DateTime currentHourStartUtc, DateTime rawFloorUtc, CancellationToken ct = default)
+    public async Task<int> AggregateHourAsync(DateTime hourUtc, CancellationToken ct = default)
     {
-        // Load the raw samples in the retention window that belong to completed hours, plus the hours
-        // already aggregated, then insert one AppHealthHourly row per (app, hour) bucket not yet present.
-        var raw = await db.AppHealthSamples
+        // R2-020: one completed hour, one application at a time. The sweep used to load every raw sample
+        // of its whole lookback (48 hours on the startup catch-up) for every application at once.
+        var next = hourUtc.AddHours(1);
+        var sampledApps = await db.AppHealthSamples
             .AsNoTracking()
-            .Where(s => s.Timestamp >= rawFloorUtc && s.Timestamp < currentHourStartUtc)
-            .Select(s => new { s.MonitoredAppId, s.Timestamp, s.IsUp, s.ResponseTimeMs })
+            .Where(s => s.Timestamp >= hourUtc && s.Timestamp < next)
+            .Select(s => s.MonitoredAppId)
+            .Distinct()
             .ToListAsync(ct).ConfigureAwait(false);
-
-        if (raw.Count == 0)
+        if (sampledApps.Count == 0)
             return 0;
 
-        var existing = await db.AppHealthHourly
+        var rolledUpApps = await db.AppHealthHourly
             .AsNoTracking()
-            .Where(h => h.HourUtc >= rawFloorUtc && h.HourUtc < currentHourStartUtc)
-            .Select(h => new { h.MonitoredAppId, h.HourUtc })
+            .Where(h => h.HourUtc == hourUtc)
+            .Select(h => h.MonitoredAppId)
             .ToListAsync(ct).ConfigureAwait(false);
-        var existingKeys = existing.Select(e => (e.MonitoredAppId, e.HourUtc)).ToHashSet();
-
-        var buckets = raw
-            .GroupBy(s => (s.MonitoredAppId, Hour: TruncateToHour(s.Timestamp)))
-            .Where(g => !existingKeys.Contains((g.Key.MonitoredAppId, g.Key.Hour)));
 
         var toInsert = new List<AppHealthHourly>();
-        foreach (var bucket in buckets)
+        foreach (var appId in sampledApps.Except(rolledUpApps))
         {
-            var responseTimes = bucket.Where(s => s.ResponseTimeMs.HasValue).Select(s => (double)s.ResponseTimeMs!.Value).ToList();
+            var samples = await db.AppHealthSamples
+                .AsNoTracking()
+                .Where(s => s.MonitoredAppId == appId && s.Timestamp >= hourUtc && s.Timestamp < next)
+                .Select(s => new { s.IsUp, s.ResponseTimeMs })
+                .ToListAsync(ct).ConfigureAwait(false);
+            var responseTimes = samples.Where(s => s.ResponseTimeMs.HasValue).Select(s => (double)s.ResponseTimeMs!.Value).ToList();
             toInsert.Add(new AppHealthHourly
             {
-                MonitoredAppId = bucket.Key.MonitoredAppId,
-                HourUtc = bucket.Key.Hour,
-                SampleCount = bucket.Count(),
-                UpCount = bucket.Count(s => s.IsUp),
+                MonitoredAppId = appId,
+                HourUtc = hourUtc,
+                SampleCount = samples.Count,
+                UpCount = samples.Count(s => s.IsUp),
                 AvgResponseTimeMs = responseTimes.Count > 0 ? responseTimes.Average() : 0,
                 P95ResponseTimeMs = Percentile(responseTimes, 0.95)
             });
@@ -435,9 +491,6 @@ public sealed class AppMonitoringRepository(AppDbContext db) : IAppMonitoringRep
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return expired.Count;
     }
-
-    private static DateTime TruncateToHour(DateTime t) =>
-        new(t.Year, t.Month, t.Day, t.Hour, 0, 0, DateTimeKind.Utc);
 
     private static double Percentile(List<double> values, double percentile)
     {

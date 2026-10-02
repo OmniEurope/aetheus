@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using AlertsPage = Aetheus.Front.Pages.Alerts.Alerts;
+using AlertsPage = Aetheus.Front.Components.Alerts.Alerts;
 
 namespace Aetheus.Front.Tests.Pages.AlertsDeep;
 
@@ -57,6 +55,6 @@ public class AlertsDeepTests : BunitContext
         var cut = Render<AlertsPage>();
         cut.WaitForState(() => cut.Markup.Contains("CPU High"));
         // Each row exposes a pencil (edit) action that opens AlertEditDialog.
-        Assert.Contains("edit", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Edit);
     }
 }

@@ -1,0 +1,151 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (!CanManagePackages)
+{
+    @* Capability notice + live heartbeat as two aligned tiles. The capability self-heals on the next
+       heartbeat (re-install with --enable-package-manage); the notice clears itself once a beat lands
+       reporting the aetheus-package sudoers grant, no manual reload needed. *@
+    <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.Stretch" Class="omni-u-mb-lg">
+        <OmniCard Class="flex-spacer capability-warning-tile">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Medium" Align="OmniAlignment.Center">
+                <OmniIcon Name="OmniIconName.Lock" Class="capability-warning-icon" />
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["ServiceInstallCapabilityDisabled"]</OmniText>
+            </OmniStack>
+        </OmniCard>
+        <OmniCard Class="heartbeat-tile">
+            <HeartbeatPulse Server="Server" />
+        </OmniCard>
+    </OmniRow>
+}
+
+<UrlSyncedTabs Slugs="@(new[] { "manageable", "other", "system" })">
+    <Tabs>
+        <OmniTabsItem Key="manageable" Title="@($"{L["Manageable"]} ({ModuleCount})")"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("build"))" /></Icon><ChildContent>
+            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["InstalledServices"] (@ModuleInstalled.Count())</OmniHeading>
+            @if (!ModuleInstalled.Any())
+            {
+                <EmptyState Icon="build" Title="@L["NoServicesToDisplay"]" />
+            }
+            else
+            {
+                <ManageableServiceGrid Services="@ModuleInstalled" Installed="true" ShowModuleLink="true"
+                    CanManagePackages="@CanManagePackages" ActionStateOf="@ActionStateOf" ServerOnline="@ServerOnline" ServerId="@ServerId"
+                    OnStart="@(n => ExecuteActionAsync(ServiceAction.Start, n))"
+                    OnStop="@(n => ConfirmAndExecuteAsync(ServiceAction.Stop, n))"
+                    OnRestart="@(n => ConfirmAndExecuteAsync(ServiceAction.Restart, n))"
+                    OnLogs="@ViewServiceLogsAsync" OnUninstall="@UninstallServiceAsync"
+                    OnOpenModule="@OpenServiceModule" OnBulk="@BulkActionAsync" />
+            }
+
+            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mt-2xl omni-u-mb-sm">@L["AvailableServices"] (@ModuleNotInstalled.Count())</OmniHeading>
+            @if (!ModuleNotInstalled.Any())
+            {
+                <OmniAlert Severity="OmniSeverity.Success">
+                    @L["AllServicesInstalled"]
+                </OmniAlert>
+            }
+            else
+            {
+                <ManageableServiceGrid Services="@ModuleNotInstalled" Installed="false"
+                    CanManagePackages="@CanManagePackages" CanInstallTeamspeak="@Server.TeamspeakSetupAvailable" ActionStateOf="@ActionStateOf" ServerOnline="@ServerOnline" ServerId="@ServerId"
+                    OnInstall="@InstallServiceAsync" OnBulk="@BulkActionAsync" />
+            }
+        </ChildContent></OmniTabsItem>
+
+        <OmniTabsItem Key="other" Title="@($"{L["OtherServices"]} ({OtherCount})")"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("apps"))" /></Icon><ChildContent>
+            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["InstalledServices"] (@OtherInstalled.Count())</OmniHeading>
+            @if (!OtherInstalled.Any())
+            {
+                <EmptyState Icon="build" Title="@L["NoServicesToDisplay"]" />
+            }
+            else
+            {
+                <ManageableServiceGrid Services="@OtherInstalled" Installed="true" ShowModuleLink="false"
+                    CanManagePackages="@CanManagePackages" ActionStateOf="@ActionStateOf" ServerOnline="@ServerOnline" ServerId="@ServerId"
+                    OnStart="@(n => ExecuteActionAsync(ServiceAction.Start, n))"
+                    OnStop="@(n => ConfirmAndExecuteAsync(ServiceAction.Stop, n))"
+                    OnRestart="@(n => ConfirmAndExecuteAsync(ServiceAction.Restart, n))"
+                    OnLogs="@ViewServiceLogsAsync" OnUninstall="@UninstallServiceAsync" OnBulk="@BulkActionAsync" />
+            }
+
+            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mt-2xl omni-u-mb-sm">@L["AvailableServices"] (@OtherNotInstalled.Count())</OmniHeading>
+            @if (!OtherNotInstalled.Any())
+            {
+                <OmniAlert Severity="OmniSeverity.Success">
+                    @L["AllServicesInstalled"]
+                </OmniAlert>
+            }
+            else
+            {
+                <ManageableServiceGrid Services="@OtherNotInstalled" Installed="false"
+                    CanManagePackages="@CanManagePackages" CanInstallTeamspeak="@Server.TeamspeakSetupAvailable" ActionStateOf="@ActionStateOf" ServerOnline="@ServerOnline" ServerId="@ServerId"
+                    OnInstall="@InstallServiceAsync" OnBulk="@BulkActionAsync" />
+            }
+        </ChildContent></OmniTabsItem>
+
+        <OmniTabsItem Key="system" Title="@($"{L["System"]} ({SystemCount})")"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("settings"))" /></Icon><ChildContent>
+            @if (!SystemServices.Any())
+            {
+                <EmptyState Icon="build" Title="@L["NoServicesToDisplay"]" />
+            }
+            else
+            {
+                <OmniDataGrid @ref="_systemGrid" Items="@SystemServices.ToList()" TItem="ServiceInfoDto" KeyOf="@(row => row.Name)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+                    <Columns>
+                        <OmniDataGridColumn Frozen="true" TItem="ServiceInfoDto" Property="Name" Title="@L["Service"]" Filterable="true" />
+                        <OmniDataGridColumn TItem="ServiceInfoDto" Property="Type" Title="@L["Type"]" Width="7.5rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@TypeText">
+                            <Template Context="svc">
+                                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@ManageableServiceGrid.FormatType(svc.Type)</OmniBadge>
+                            </Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ServiceInfoDto" Property="Status" Title="@L["Status"]" Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText">
+                            <Template Context="svc"><span title="@svc.Status">@StatusText(svc.Status)</span></Template>
+                        </OmniDataGridColumn>
+                        <OmniDataGridColumn TItem="ServiceInfoDto" Property="IsRunning" Title="@L["Running"]" Width="6.25rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@YesNoText">
+                            <Template Context="svc">
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@(svc.IsRunning ? OmniTone.Success : OmniTone.Neutral)">@(svc.IsRunning ? L["Yes"] : L["No"])</OmniBadge>
+                            </Template>
+                        </OmniDataGridColumn>
+                    </Columns>
+                </OmniDataGrid>
+            }
+        </ChildContent></OmniTabsItem>
+    </Tabs>
+</UrlSyncedTabs>
+
+@if (_logsVisible)
+{
+    <OmniCard Class="omni-u-mt-lg">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["Logs"] - @_logsServiceName</OmniText>
+            <div class="flex-spacer"></div>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-m-0">@L["LogLines"]</OmniText>
+            <OmniDropDown aria-label="@L["LogLines"]" TValue="int" Value="@_logLines" Options="@(LineOptions.ToOptions(item => (int)item, item => item))" ValueChanged="@(v => OnLogLinesChanged((int)v))"
+                ValueExpression="@(() => _logLines)" Class="log-lines-select" />
+            <OmniSwitch TValue="bool" TextFirst="true" Value="_logFollow" ValueExpression="@(() => _logFollow)" ValueChanged="@(v => OnFollowChangedAsync(v))" Class="omni-u-text-muted">@L["FollowLogs"]</OmniSwitch>
+            @* R-181: no Refresh button. Auto-refresh (on by default) reads the last lines again every 30 s
+               while this viewer is open. *@
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CloseLogsAsync" title="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+        </OmniStack>
+        @if (_logsLoading && string.IsNullOrEmpty(_logsContent))
+        {
+            <AetheusLoader Size="OmniControlSize.Small" />
+        }
+        else
+        {
+            @if (HasInsufficientJournalPermissions)
+            {
+                <OmniAlert Severity="OmniSeverity.Warning" Class="omni-u-mb-sm">
+                    @L["JournalPermissionInsufficient"]
+                </OmniAlert>
+            }
+            <OmniCodeBlock Code="@(string.IsNullOrWhiteSpace(_logsContent) ? L["NoLogsAvailable"].Value : _logsContent)" Title="@L["Output"]" Wrap="true" Class="docker-logs code-block-bounded" />
+            @if (_logFollow)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mt-sm">
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-m-0">@L["FollowingLogs"]</OmniText>
+                </OmniStack>
+            }
+        }
+    </OmniCard>
+}

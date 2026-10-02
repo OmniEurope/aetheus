@@ -1,0 +1,52 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@using Microsoft.AspNetCore.Components.Sections
+@* Recette R-218/R-221: the create action sits on the title line (the host's page header), and the
+   column header filters replace the search row. *@
+@if (IsGlobal || IsProjectScope)
+{
+    <SectionContent SectionName="@PipelinesList.HeaderActionsSection">
+        @if (IsGlobal)
+        {
+            <HelpLink PageKey="variable-libraries" />
+        }
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@NewLibrary" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    </SectionContent>
+}
+
+<AetheusDataGrid @ref="_grid" TItem="VariableLibraryDto" Data="@_libraries"
+    Count="@_totalCount" PageSize="20" IsLoading="@_loading" LoadData="@OnLoadData"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<VariableLibraryDto>(_libraries, _totalCount))"
+    RowClick="@(lib => Nav.NavigateTo($"/variable-libraries/{lib.Id}"))"
+    EmptyText="@L["NoVariableLibrariesFound"]" FullHeight="true">
+    <EmptyTemplate>
+        <EmptyState Icon="data_object" Title="@L["NoVariableLibrariesFound"]" Description="@L["EmptyLibrariesHint"]">
+            <ActionContent>
+                @if (_canWrite && (IsGlobal || IsProjectScope))
+                {
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@NewLibrary" title="@L["NewVariableLibrary"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                }
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="VariableLibraryDto" Property="Name" Title="@L["Name"]" MinWidth="10rem" Filterable="true" >
+            <Template Context="lib">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <a href="/variable-libraries/@lib.Id" class="pipeline-name-link">@lib.Name</a>
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+        @* PLAN-003 lot 25: the owning project is a column of its own. Squeezed under the name it was
+           truncated on every row, and there was no way to sort on it. *@
+        @if (!IsProjectScope)
+        {
+            <OmniDataGridColumn TItem="VariableLibraryDto" Property="ProjectName" Title="@L["Project"]" MinWidth="8rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.ProjectNames" FilterSearchable="true" />
+        }
+        <OmniDataGridColumn TItem="VariableLibraryDto" Property="Description" Title="@L["Description"]" MinWidth="10rem" Filterable="true" />
+        <OmniDataGridColumn TItem="VariableLibraryDto" Property="EntryCount" Title="@L["Entries"]" Width="100px" TextAlign="OmniDataGridTextAlign.Center" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+        <OmniDataGridColumn TItem="VariableLibraryDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+        <OmniDataGridColumn TItem="VariableLibraryDto" Property="UpdatedAt" Title="@L["Updated"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+    </Columns>
+</AetheusDataGrid>

@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Plugins;
+using Aetheus.Front.Components.Plugins;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Plugins;
 
@@ -21,12 +20,12 @@ public class PluginRegisterDialogTests : BunitContext
     public PluginRegisterDialogTests() => _handler = BunitTestHelper.RegisterServices(this, isAdmin: true);
 
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
-    private NotificationService Notifications => Services.GetRequiredService<NotificationService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
+    private OmniOverlayService Notifications => Services.GetRequiredService<OmniOverlayService>();
 
     private static void SetModel(PluginRegisterDialog instance, string name, string version)
     {
@@ -52,7 +51,7 @@ public class PluginRegisterDialogTests : BunitContext
         Assert.Contains("PluginName", cut.Markup);
         Assert.Contains("Version", cut.Markup);
         Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("Register"));
-        Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("Cancel"));
+        Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("GoBack"));
     }
 
     [Fact]
@@ -67,7 +66,7 @@ public class PluginRegisterDialogTests : BunitContext
         await InvokeSubmit(cut);
 
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/plugins"));
-        Assert.Contains(Notifications.Messages, m => m.Severity == NotificationSeverity.Success);
+        Assert.Contains(Notifications.Toasts(), m => m.Severity == OmniSeverity.Success);
         Assert.True(Spy().Closed);
         Assert.Equal(true, Spy().LastResult);
     }
@@ -83,8 +82,8 @@ public class PluginRegisterDialogTests : BunitContext
         await InvokeSubmit(cut);
 
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/plugins"));
-        Assert.Contains(Notifications.Messages, m => m.Severity == NotificationSeverity.Error);
-        Assert.DoesNotContain(Notifications.Messages, m => m.Severity == NotificationSeverity.Success);
+        Assert.Contains(Notifications.Toasts(), m => m.Severity == OmniSeverity.Danger);
+        Assert.DoesNotContain(Notifications.Toasts(), m => m.Severity == OmniSeverity.Success);
         Assert.False(Spy().Closed);
     }
 }

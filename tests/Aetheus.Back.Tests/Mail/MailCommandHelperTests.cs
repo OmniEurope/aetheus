@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Mail;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests;
 
@@ -69,51 +68,8 @@ public class MailCommandHelperTests
         Assert.Equal(expected, MailCommandHelper.IsValidDkimSelector(selector));
     }
 
-    // --- BuildServiceCommand ---
-
-    [Theory]
-    [InlineData(MailAction.StartPostfix, "systemctl start postfix")]
-    [InlineData(MailAction.StopPostfix, "systemctl stop postfix")]
-    [InlineData(MailAction.RestartPostfix, "systemctl restart postfix")]
-    [InlineData(MailAction.ReloadPostfix, "systemctl reload postfix")]
-    [InlineData(MailAction.StartDovecot, "systemctl start dovecot")]
-    [InlineData(MailAction.StopDovecot, "systemctl stop dovecot")]
-    [InlineData(MailAction.RestartDovecot, "systemctl restart dovecot")]
-    [InlineData(MailAction.ReloadDovecot, "systemctl reload dovecot")]
-    [InlineData(MailAction.FlushQueue, "postqueue -f")]
-    [InlineData(MailAction.ViewQueue, "postqueue -p")]
-    [InlineData(MailAction.TestConfig, "postfix check 2>&1 && echo 'Postfix config OK'")]
-    public void BuildServiceCommand_ReturnsExpected(MailAction action, string expected)
-    {
-        Assert.Equal(expected, MailCommandHelper.BuildServiceCommand(action));
-    }
-
-    [Fact]
-    public void BuildServiceCommand_InvalidAction_Throws()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            MailCommandHelper.BuildServiceCommand((MailAction)999));
-    }
-
-    // --- BuildGetLogsCommand ---
-
-    [Fact]
-    public void BuildGetLogsCommand_Postfix_UsesPostfixUnit()
-    {
-        var result = MailCommandHelper.BuildGetLogsCommand("postfix", 100);
-
-        Assert.Contains("postfix@-.service", result);
-        Assert.Contains("-n 100", result);
-    }
-
-    [Fact]
-    public void BuildGetLogsCommand_Dovecot_UsesDovecotUnit()
-    {
-        var result = MailCommandHelper.BuildGetLogsCommand("dovecot", 50);
-
-        Assert.Contains("-u dovecot", result);
-        Assert.Contains("-n 50", result);
-    }
+    // BuildServiceCommand / BuildGetLogsCommand were removed (PLAN-005): the typed operations are covered
+    // by MailManageCommandBuilderTests (agent argv) and MailServiceTests (dispatch).
 
     // Mail full setup no longer builds a shell command (BuildSetupCommand was removed): it dispatches
     // the typed OperationKind.MailSetup through the root-owned mail-setup helper so the non-root agent

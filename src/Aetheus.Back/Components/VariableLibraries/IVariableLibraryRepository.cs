@@ -7,7 +7,9 @@ public interface IVariableLibraryRepository
 {
     Task<(List<VariableLibrary> Items, int TotalCount)> GetLibrariesPagedAsync(
         string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false);
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null);
+
+    Task<VariableLibraryFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default);
 
     Task<VariableLibrary?> GetLibraryDetailAsync(int id, CancellationToken ct = default);
 
@@ -15,7 +17,7 @@ public interface IVariableLibraryRepository
 
     Task<(List<VariableLibraryEntry> Items, int TotalCount)> GetEntriesPagedAsync(
         int libraryId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default);
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
 
     Task<List<VariableLibraryEntry>> GetEntriesAsync(int libraryId, CancellationToken ct = default);
 
@@ -49,7 +51,7 @@ public interface IVariableLibraryRepository
 
     Task<(List<VariableLibraryEntryVersion> Items, int TotalCount)> GetEntryVersionsPagedAsync(
         int entryId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default);
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
 
     Task<int> GetNextVersionAsync(int entryId, CancellationToken ct = default);
 

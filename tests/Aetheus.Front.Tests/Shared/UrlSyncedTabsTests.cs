@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -8,7 +7,7 @@ namespace Aetheus.Front.Tests.Shared;
 /// <summary>
 /// Direct unit coverage for the <see cref="UrlSyncedTabs"/> slug→index mapping (the URL-sync contract).
 /// Exercises the private <c>IndexForSlug</c> via reflection so the assertions are behavioural and not
-/// tied to a RadzenTabs render (bUnit + RadzenTabs makes a rendered assertion fragile). Guards the
+/// tied to a tabs render (bUnit plus a tab strip makes a rendered assertion fragile). Guards the
 /// silent-fallback edge the challenge flagged: an unknown / typo'd / empty slug must resolve to tab 0,
 /// never throw nor land on the wrong tab.
 /// </summary>
@@ -43,7 +42,7 @@ public class UrlSyncedTabsTests : BunitContext
         => Assert.Equal(0, IndexForSlug(slug));
 
     // --- OnParametersSet state-machine regression coverage ---------------------------------------
-    // Drives the private OnParametersSet directly (no RadzenTabs render needed - it reads only Tab,
+    // Drives the private OnParametersSet directly (no tabs render needed - it reads only Tab,
     // SelectedIndex and the private index/last fields). Locks the "Generate Token" regression: a bare
     // parent re-render on a non-default tab must NOT snap an unbound page back to tab 0.
 
@@ -103,6 +102,32 @@ public class UrlSyncedTabsTests : BunitContext
         OnParametersSet(c);
 
         Assert.Equal(1, Index(c));
+    }
+
+    /// <summary>R-120: nested inside the pipelines hub, the URL carries the hub's slug (?tab=used). It
+    /// names no tab of the inner set, so the inner set's remembered tab still applies.</summary>
+    [Fact]
+    public void InitialProgrammaticSelectedIndex_IsHonoured_WhenUrlTabBelongsToAnotherTabSet()
+    {
+        var c = NewComponent();
+        SetParam(c, nameof(UrlSyncedTabs.Tab), "used");
+        SetParam(c, nameof(UrlSyncedTabs.SelectedIndex), 1);
+
+        OnParametersSet(c);
+
+        Assert.Equal(1, Index(c));
+    }
+
+    [Fact]
+    public void ExplicitUrlTab_WinsOverInitialProgrammaticSelectedIndex()
+    {
+        var c = NewComponent();
+        SetParam(c, nameof(UrlSyncedTabs.Tab), "overview");
+        SetParam(c, nameof(UrlSyncedTabs.SelectedIndex), 1);
+
+        OnParametersSet(c);
+
+        Assert.Equal(0, Index(c));
     }
 
     [Fact]

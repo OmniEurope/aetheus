@@ -1,0 +1,57 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Compose tab of the Docker section: the stack grid and the inline compose-file editor. The editor
+   content arrives asynchronously over SignalR, so the parent forwards task output here. *@
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Class="omni-u-mb-md" Gap="OmniSpacing.Small">
+    <CountBadge Value="@FilteredCompose.Count" Variant="OmniTone.Accent" />
+    <OmniTextBox aria-label="@L["FilterStacks"]" @bind-Value="_composeSearch" Placeholder="@L["FilterStacks"]" Class="docker-search" />
+</OmniStack>
+<OmniDataGrid @ref="_grid" Items="@FilteredCompose" TItem="DockerComposeStackDto" KeyOf="@(row => row.Name)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="DockerComposeStackDto" Property="Name" Title="@L["Stack"]" Filterable="true" />
+        <OmniDataGridColumn TItem="DockerComposeStackDto" Property="Status" Title="@L["Status"]" Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+        <OmniDataGridColumn TItem="DockerComposeStackDto" Title="@L["Services"]" Width="7.5rem" Sortable="false">
+            <Template Context="s">
+                @s.RunningCount / @s.TotalCount
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="DockerComposeStackDto" Property="ConfigFile" Title="@L["Config"]" Filterable="true" />
+        <OmniDataGridColumn TItem="DockerComposeStackDto" Title="@L["Actions"]" MinWidth="28rem" Sortable="false" Filterable="false">
+            <Template Context="s">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ComposeActionAsync(s.Name, DockerComposeAction.Up))" title="@L["Start"]" Label="@L["Start"]"><OmniIcon Name="OmniIconName.Play" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => ComposeActionAsync(s.Name, DockerComposeAction.Down))" title="@L["Stop"]" Label="@L["Stop"]"><OmniIcon Name="OmniIconName.Stop" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ComposeActionAsync(s.Name, DockerComposeAction.Restart))" title="@L["Restart"]" Label="@L["Restart"]"><OmniIcon Name="OmniIconName.Refresh" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OpenComposeEditorAsync(s.Name))" title="@L["EditCompose"]" Label="@L["EditCompose"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</OmniDataGrid>
+
+@if (_composeEditorVisible)
+{
+    <OmniCard Class="omni-u-mt-md">
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Large">
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["DockerCompose"] - @_composeEditorStack</OmniText>
+                <div class="flex-spacer"></div>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CloseComposeEditor" title="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+            </OmniStack>
+            @if (_composeFileLoading)
+            {
+                <AetheusLoader Size="OmniControlSize.Small" />
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["RequestingCompose"]</OmniText>
+            }
+            else
+            {
+                <OmniCodeEditor @bind-Value="_composeEditorContent" Language="yaml" Height="24rem"
+                                InteropModulePath="./js/omni-code-editor-frame.js?v=1"
+                                Label="@L["DockerCompose"]" />
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CloseComposeEditor"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SaveComposeFileAsync" Disabled="@string.IsNullOrWhiteSpace(_composeEditorContent)" Class="@(_composeDeploying ? "btn-busy" : null)" Busy="@(_composeDeploying)"><OmniIcon Name="OmniIconName.RocketLaunch" /> <span>@L["Deploy"]</span></OmniButton>
+                </OmniStack>
+            }
+        </OmniStack>
+    </OmniCard>
+}

@@ -24,7 +24,7 @@ public interface IPackageRegistryRepository
         IReadOnlyCollection<int> versionIds, CancellationToken ct = default);
     Task<(List<PackageRegistryPackageDto> Items, int Total)> GetPagedAsync(
         PackageRegistryKind? kind, string? search, int page, int pageSize, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false);
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null);
     Task AddPackageAsync(RegistryPackage package, CancellationToken ct = default);
     Task<HashSet<string>> GetStoredFilePathsAsync(CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);

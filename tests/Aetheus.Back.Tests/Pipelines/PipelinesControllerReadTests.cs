@@ -2,8 +2,6 @@
 using System.Security.Claims;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -15,13 +13,35 @@ public class PipelinesControllerReadTests
     private readonly IPipelineRunService _runService = Substitute.For<IPipelineRunService>();
     private readonly IPipelineArtifactService _artifactService = Substitute.For<IPipelineArtifactService>();
     private readonly IResourceAuthorizationService _authz = Substitute.For<IResourceAuthorizationService>();
+    private readonly IPipelineRunLineageService _lineage = Substitute.For<IPipelineRunLineageService>();
     private readonly PipelinesController _sut;
+
+    [Fact]
+    public async Task R498_GetRunLineage_IsReadOnlyByThoseWhoMayReadThePipeline()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _runService.GetPipelineIdForRunAsync(7, ct).Returns(5);
+        _lineage.GetLineageAsync(7, ct).Returns(new PipelineRunLineageDto { TriggeredBy = "sony" });
+
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, 5, Permission.Read, ct).Returns(false);
+        var sut = new PipelineRunLineageController(_runService, _lineage, _authz) { ControllerContext = _sut.ControllerContext };
+        Assert.IsType<ForbidResult>((await sut.GetRunLineage(7, ct)).Result);
+        await _lineage.DidNotReceive().GetLineageAsync(7, ct);
+
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Pipeline, 5, Permission.Read, ct).Returns(true);
+        var ok = Assert.IsType<OkObjectResult>((await sut.GetRunLineage(7, ct)).Result);
+        Assert.Equal("sony", Assert.IsType<PipelineRunLineageDto>(ok.Value).TriggeredBy);
+
+        _runService.GetPipelineIdForRunAsync(404, ct).Returns((int?)null);
+        Assert.IsType<NotFoundResult>((await sut.GetRunLineage(404, ct)).Result);
+    }
 
     public PipelinesControllerReadTests()
     {
-        _sut = new PipelinesController(Substitute.For<IPipelineService>(), _runService,
+        var service = Substitute.For<IPipelineService>();
+        _sut = new PipelinesController(service, _runService,
             Substitute.For<IPipelineApprovalService>(), _artifactService,
-            Substitute.For<IPipelineWebhookService>(), _authz);
+            Substitute.For<IPipelineWebhookService>(), new PipelineOwnerAuthorization(service, _authz), _authz);
         _sut.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext

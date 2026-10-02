@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Helpers;
 
@@ -9,42 +7,42 @@ public class LoadDataArgsExtensionsTests
     [Fact]
     public void GetPage_NoSkipNoTop_ReturnsPage1()
     {
-        var args = new LoadDataArgs();
+        var args = new GridLoadArgs();
         Assert.Equal(1, args.GetPage());
     }
 
     [Fact]
     public void GetPage_WithSkipAndTop_CalculatesCorrectly()
     {
-        var args = new LoadDataArgs { Skip = 50, Top = 25 };
+        var args = new GridLoadArgs { Skip = 50, Top = 25 };
         Assert.Equal(3, args.GetPage());
     }
 
     [Fact]
     public void GetPage_Skip0Top10_ReturnsPage1()
     {
-        var args = new LoadDataArgs { Skip = 0, Top = 10 };
+        var args = new GridLoadArgs { Skip = 0, Top = 10 };
         Assert.Equal(1, args.GetPage());
     }
 
     [Fact]
     public void GetPage_TopZero_FallsBackToDefault()
     {
-        var args = new LoadDataArgs { Skip = 0, Top = 0 };
+        var args = new GridLoadArgs { Skip = 0, Top = 0 };
         Assert.Equal(1, args.GetPage());
     }
 
     [Fact]
     public void GetPageSize_NoTop_ReturnsDefault()
     {
-        var args = new LoadDataArgs();
-        Assert.Equal(LoadDataArgsExtensions.DefaultPageSize, args.GetPageSize());
+        var args = new GridLoadArgs();
+        Assert.Equal(GridLoadArgsExtensions.DefaultPageSize, args.GetPageSize());
     }
 
     [Fact]
     public void GetPageSize_WithTop_ReturnsTop()
     {
-        var args = new LoadDataArgs { Top = 50 };
+        var args = new GridLoadArgs { Top = 50 };
         Assert.Equal(50, args.GetPageSize());
     }
 
@@ -54,21 +52,21 @@ public class LoadDataArgsExtensionsTests
     [InlineData(500, 200)]
     public void GetPageSize_OutOfRange_IsClamped(int requested, int expected)
     {
-        var args = new LoadDataArgs { Top = requested };
+        var args = new GridLoadArgs { Top = requested };
         Assert.Equal(expected, args.GetPageSize());
     }
 
     [Fact]
     public void GetPageSize_CustomDefault()
     {
-        var args = new LoadDataArgs();
+        var args = new GridLoadArgs();
         Assert.Equal(10, args.GetPageSize(10));
     }
 
     [Fact]
     public void ToPageRequest_Combined()
     {
-        var args = new LoadDataArgs { Skip = 20, Top = 10 };
+        var args = new GridLoadArgs { Skip = 20, Top = 10 };
         var (page, pageSize) = args.ToPageRequest();
         Assert.Equal(3, page);
         Assert.Equal(10, pageSize);
@@ -77,16 +75,16 @@ public class LoadDataArgsExtensionsTests
     [Fact]
     public void ToPageRequest_Defaults()
     {
-        var args = new LoadDataArgs();
+        var args = new GridLoadArgs();
         var (page, pageSize) = args.ToPageRequest();
         Assert.Equal(1, page);
-        Assert.Equal(LoadDataArgsExtensions.DefaultPageSize, pageSize);
+        Assert.Equal(GridLoadArgsExtensions.DefaultPageSize, pageSize);
     }
 
     [Fact]
     public void DefaultPageSize_Is25()
     {
-        Assert.Equal(25, LoadDataArgsExtensions.DefaultPageSize);
+        Assert.Equal(25, GridLoadArgsExtensions.DefaultPageSize);
     }
 
     private sealed record Row(string Name, int Size);
@@ -103,7 +101,7 @@ public class LoadDataArgsExtensionsTests
     [Fact]
     public void ToClientPage_SortsTheWholeCollectionBeforeCuttingThePage()
     {
-        var args = new LoadDataArgs { Skip = 0, Top = 2, OrderBy = "Size desc" };
+        var args = new GridLoadArgs { Skip = 0, Top = 2, OrderBy = "Size desc" };
 
         var page = args.ToClientPage(Rows);
 
@@ -113,11 +111,11 @@ public class LoadDataArgsExtensionsTests
     [Fact]
     public void ToClientPage_FiltersCaseInsensitively_AndCountsWhatIsReachable()
     {
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 25,
-            Filters = [new FilterDescriptor { Property = "Name", FilterValue = "A" }]
+            Filters = [new GridFilterDescriptor("Name", "A", OmniDataGridFilterOperator.Contains)]
         };
 
         var page = args.ToClientPage(Rows);
@@ -129,11 +127,11 @@ public class LoadDataArgsExtensionsTests
     [Fact]
     public void ToClientPage_NarrowsToTheMatchingRows()
     {
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 25,
-            Filters = [new FilterDescriptor { Property = "Name", FilterValue = "mm" }]
+            Filters = [new GridFilterDescriptor("Name", "mm", OmniDataGridFilterOperator.Contains)]
         };
 
         Assert.Equal("gamma", Assert.Single(args.ToClientPage(Rows)).Name);
@@ -145,15 +143,38 @@ public class LoadDataArgsExtensionsTests
     [Fact]
     public void ToClientPage_IgnoresAnUnknownProperty()
     {
-        var args = new LoadDataArgs
+        var args = new GridLoadArgs
         {
             Skip = 0,
             Top = 25,
             OrderBy = "Nope desc",
-            Filters = [new FilterDescriptor { Property = "Nope", FilterValue = "x" }]
+            Filters = [new GridFilterDescriptor("Nope", "x", OmniDataGridFilterOperator.Contains)]
         };
 
         Assert.Equal(3, args.ToClientPage(Rows).Count);
         Assert.Equal(3, args.ClientFilteredCount(Rows));
+    }
+
+    /// <summary>The ID column's number filter, as the findings routes read it: inclusive bounds and one
+    /// identifier left out; a second condition narrows the first; a non-number narrows nothing.</summary>
+    [Theory]
+    [InlineData(OmniDataGridFilterOperator.Equals, "7", null, null, 7, 7, null)]
+    [InlineData(OmniDataGridFilterOperator.NotEquals, "7", null, null, null, null, 7)]
+    [InlineData(OmniDataGridFilterOperator.GreaterThan, "7", null, null, 8, null, null)]
+    [InlineData(OmniDataGridFilterOperator.GreaterThanOrEquals, "7", null, null, 7, null, null)]
+    [InlineData(OmniDataGridFilterOperator.LessThan, "7", null, null, null, 6, null)]
+    [InlineData(OmniDataGridFilterOperator.LessThanOrEquals, "7", null, null, null, 7, null)]
+    [InlineData(OmniDataGridFilterOperator.GreaterThan, "4.5", null, null, 5, null, null)]
+    [InlineData(OmniDataGridFilterOperator.Equals, "4.5", null, null, 5, 4, null)]
+    [InlineData(OmniDataGridFilterOperator.GreaterThanOrEquals, "10", OmniDataGridFilterOperator.LessThan, "20", 10, 19, null)]
+    [InlineData(OmniDataGridFilterOperator.Equals, "abc", null, null, null, null, null)]
+    public void ColumnWholeNumberRange_TurnsTheNumberFilterIntoBounds(
+        OmniDataGridFilterOperator comparison, string value, OmniDataGridFilterOperator? second, string? secondValue,
+        int? from, int? to, int? not)
+    {
+        var args = new GridLoadArgs { Filters = [new GridFilterDescriptor("Id", value, comparison, second, secondValue)] };
+
+        Assert.Equal((from, to, not), args.ColumnWholeNumberRange("Id"));
+        Assert.Equal(((int?)null, (int?)null, (int?)null), new GridLoadArgs().ColumnWholeNumberRange("Id"));
     }
 }

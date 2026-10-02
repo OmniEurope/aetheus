@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using Aetheus.Back.Components.Git;
 
 namespace Aetheus.Back.Tests.Architecture;
 
@@ -105,6 +106,9 @@ public sealed class GitignoredSourceAuditTests
         psi.ArgumentList.Add("-c");
         psi.ArgumentList.Add($"safe.directory={workingDir.Replace('\\', '/')}");
         foreach (var a in args) psi.ArgumentList.Add(a);
+        // WHY: under a git hook (pre-push env inheritance incident) GIT_DIR/GIT_INDEX_FILE would
+        // otherwise redirect this git call to the hooking repository instead of workingDir.
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(psi);
 
         using var p = Process.Start(psi)
             ?? throw new InvalidOperationException("Could not start git - it must be on PATH on the build host.");

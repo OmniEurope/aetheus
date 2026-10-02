@@ -5,9 +5,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -254,32 +251,6 @@ public class ServerServiceTests
         Assert.Null(result);
         await _repoMock.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
         await _auditMock.DidNotReceive().LogAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
-    }
-
-    // --- DeleteServerAsync ---
-
-    [Fact]
-    public async Task DeleteServerAsync_Found_ReturnsTrue()
-    {
-        var server = new Server { Id = 1, Name = "del" };
-        _repoMock.FindServerAsync(1, Arg.Any<CancellationToken>()).Returns(server);
-        _repoMock.RemoveServerAsync(server, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-
-        var result = await _sut.DeleteServerAsync(1, ct: TestContext.Current.CancellationToken);
-
-        Assert.True(result);
-        await _repoMock.Received(1).RemoveServerAsync(server, Arg.Any<CancellationToken>());
-        await _auditMock.Received(1).LogAsync("Deleted", "Server", 1, "del", Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task DeleteServerAsync_NotFound_ReturnsFalse()
-    {
-        _repoMock.FindServerAsync(99, Arg.Any<CancellationToken>()).Returns((Server?)null);
-
-        var result = await _sut.DeleteServerAsync(99, ct: TestContext.Current.CancellationToken);
-
-        Assert.False(result);
     }
 
     // --- ProcessHeartbeatAsync ---
@@ -571,13 +542,37 @@ public class ServerServiceTests
         {
             new() { Id = 1, TaskId = 1, Level = TaskLogLevel.Info, Message = "Started" }
         };
-        _repoMock.GetLogsPagedAsync(1, 1, 10, Arg.Any<CancellationToken>())
+        _repoMock.GetLogsPagedAsync(1, 1, 10, Arg.Any<IReadOnlyList<GridFilter>?>(), Arg.Any<IReadOnlyList<GridSort>?>(), Arg.Any<CancellationToken>())
             .Returns((logs, 1));
 
         var result = await _sut.GetServerLogsAsync(1, new PaginationRequest { Page = 1, PageSize = 10 }, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, result.TotalCount);
         Assert.Equal("Started", result.Items[0].Message);
+    }
+
+    /// <summary>Recette R-210 / R-224: the grid's column filters and its single sort key reach the repository.</summary>
+    [Fact]
+    public async Task GetServerLogsAsync_PassesFiltersAndSortToTheRepository()
+    {
+        var filters = new List<GridFilter> { new() { Field = "Level", Operator = GridFilterOperator.In, Value = "Error" } };
+        _repoMock.GetLogsPagedAsync(1, 1, 50, Arg.Any<IReadOnlyList<GridFilter>?>(), Arg.Any<IReadOnlyList<GridSort>?>(), Arg.Any<CancellationToken>())
+            .Returns((new List<TaskLog>(), 0));
+
+        await _sut.GetServerLogsAsync(1, new PaginationRequest
+        {
+            Page = 1,
+            PageSize = 50,
+            Filters = filters,
+            SortBy = "Level",
+            SortDescending = true
+        }, ct: TestContext.Current.CancellationToken);
+
+        await _repoMock.Received(1).GetLogsPagedAsync(
+            1, 1, 50,
+            Arg.Is<IReadOnlyList<GridFilter>?>(sent => sent != null && sent.Single().Field == "Level"),
+            Arg.Is<IReadOnlyList<GridSort>?>(sent => sent != null && sent.Single().Field == "Level" && sent.Single().Descending),
+            Arg.Any<CancellationToken>());
     }
 
     // --- ContactAgentAsync ---

@@ -24,7 +24,7 @@ internal sealed class BackupPolicyService(
             return new PaginatedResult<BackupPolicyDto> { Page = page, PageSize = pageSize };
         var (items, totalCount) = await repo.GetPoliciesPagedAsync(
             accessibleProjectIds, request.Search, request.SortBy, request.SortDescending,
-            page, pageSize, ct).ConfigureAwait(false);
+            page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<BackupPolicyDto>
         {
             Items = items.Select(Map).ToList(),
@@ -112,7 +112,7 @@ internal sealed class BackupPolicyService(
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetRunsForPolicyPagedAsync(
             policyId, request.Search, request.SortBy, request.SortDescending,
-            page, pageSize, ct).ConfigureAwait(false);
+            page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<BackupRunDto>
         {
             Items = items.Select(MapRun).ToList(),

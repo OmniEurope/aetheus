@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.DTOs.Organizations;
 using System.Runtime.CompilerServices;
+using Aetheus.Shared.Components.Organizations;
 
 namespace Aetheus.Back.Tests.Architecture;
 

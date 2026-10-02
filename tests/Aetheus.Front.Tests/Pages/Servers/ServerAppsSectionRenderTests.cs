@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -25,10 +22,10 @@ public class ServerAppsSectionRenderTests : BunitContext
     public void Renders_WithNoApps()
     {
         var cut = Render<ServerAppsSection>(p => p.Add(x => x.ServerId, 1));
-        // After the fetch resolves, the section header and empty-grid text render.
+        // After the fetch resolves, the empty-grid text renders; the title heading is gone (page header shows it).
         cut.WaitForAssertion(() =>
         {
-            Assert.Contains("Applications", cut.Markup);
+            Assert.DoesNotContain(">Applications<", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("NoRecords", cut.Markup);
         });
     }
@@ -69,13 +66,13 @@ public class ServerAppsSectionRenderTests : BunitContext
     }
 
     [Theory]
-    [InlineData(ServerAppStatus.Running, BadgeStyle.Success)]
-    [InlineData(ServerAppStatus.Stopped, BadgeStyle.Light)]
-    [InlineData(ServerAppStatus.Error, BadgeStyle.Danger)]
-    public void GetAppStatusBadge_ReturnsExpected(ServerAppStatus status, BadgeStyle expected)
+    [InlineData(ServerAppStatus.Running, OmniTone.Success)]
+    [InlineData(ServerAppStatus.Stopped, OmniTone.Neutral)]
+    [InlineData(ServerAppStatus.Error, OmniTone.Danger)]
+    public void GetAppStatusBadge_ReturnsExpected(ServerAppStatus status, OmniTone expected)
     {
         var method = SectionType.GetMethod("GetAppStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [status])!;
+        var result = (OmniTone)method.Invoke(null, [status])!;
         Assert.Equal(expected, result);
     }
 
@@ -83,8 +80,8 @@ public class ServerAppsSectionRenderTests : BunitContext
     public void GetAppStatusBadge_Unknown_ReturnsWarning()
     {
         var method = SectionType.GetMethod("GetAppStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerAppStatus)99])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerAppStatus)99])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]

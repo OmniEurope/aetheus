@@ -5,9 +5,17 @@ namespace Aetheus.Back.Components.Releases;
 
 public interface IReleaseRepository
 {
+    /// <param name="deployableOnly">PLAN-005 lot 5 / D40, R-10: only the releases a deployment pipeline can
+    /// restore, those still carrying a retained artifact, whatever their status.</param>
     Task<(List<Release> Items, int TotalCount)> GetReleasesPagedAsync(
         string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true);
+        string? sortBy = null, bool sortDescending = true, bool deployableOnly = false,
+        IReadOnlyList<GridFilter>? columnFilters = null, IReadOnlyCollection<int>? releaseIds = null);
+
+    /// <summary>Recette R-224: the id, project and run of every release of a scope (a server's when
+    /// <paramref name="serverId"/> is set), for the list's checkable filters.</summary>
+    Task<List<ReleaseFilterFact>> GetReleaseFilterFactsAsync(
+        int? projectId, List<int>? accessibleIds, int? serverId, CancellationToken ct = default);
 
     Task<List<Release>> GetProjectReleasesAsync(int projectId, CancellationToken ct = default);
 
@@ -16,6 +24,11 @@ public interface IReleaseRepository
     Task<Release?> FindByVersionAsync(int projectId, string version, CancellationToken ct = default);
 
     Task<List<Release>> GetDeployedProjectReleasesAsync(int projectId, CancellationToken ct = default);
+
+    /// <summary>Per project: the release deployed before the live one, and the pipeline that deployed
+    /// the live one when it was launched with a <c>candidateVersion</c> (PLAN-007 lot 5).</summary>
+    Task<Dictionary<int, ReleaseRedeployTarget>> GetRedeployTargetsAsync(
+        IReadOnlyCollection<int> projectIds, CancellationToken ct = default);
 
     Task AddReleaseAsync(Release release, CancellationToken ct = default);
 
@@ -40,7 +53,8 @@ public interface IReleaseRepository
     /// <summary>One page of a server's releases, newest first, with the total count.</summary>
     Task<(List<Release> Items, int TotalCount)> GetReleasesForServerPagedAsync(
         int serverId, int page, int pageSize, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true);
+        string? sortBy = null, bool sortDescending = true,
+        IReadOnlyList<GridFilter>? columnFilters = null, IReadOnlyCollection<int>? releaseIds = null);
 
     Task SaveChangesAsync(CancellationToken ct = default);
 }

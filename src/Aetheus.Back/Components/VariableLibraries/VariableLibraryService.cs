@@ -11,13 +11,18 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
     private const string LibNamesCachePrefix = "varlibs:names:";
     private static readonly TimeSpan CacheDuration = BackendRuntimeDefaults.ReferenceDataCacheDuration;
     private readonly ConcurrentDictionary<string, byte> _activeNameKeys = new();
+
+    /// <summary>Recette R-210: the project names the variable libraries list's checkable filter offers.</summary>
+    public Task<VariableLibraryFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default) =>
+        repo.GetFilterValuesAsync(accessibleIds, ct);
+
     public async Task<PaginatedResult<VariableLibraryDto>> GetLibrariesAsync(int? projectId, int? environmentId = null, int? projectServerId = null, PaginationRequest? request = null, List<int>? accessibleIds = null, CancellationToken ct = default)
     {
         request ??= new PaginationRequest();
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetLibrariesPagedAsync(
             request.Search, projectId, environmentId, projectServerId, page, pageSize, accessibleIds, ct,
-            request.SortBy, request.SortDescending).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, request.Filters).ConfigureAwait(false);
 
         return new PaginatedResult<VariableLibraryDto>
         {
@@ -61,7 +66,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
 
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetEntriesPagedAsync(
-            libraryId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct)
+            libraryId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters)
             .ConfigureAwait(false);
         return new PaginatedResult<VariableEntryDto>
         {
@@ -226,7 +231,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
 
         var (page, pageSize) = request.Normalize();
         var (versions, totalCount) = await repo.GetEntryVersionsPagedAsync(
-            entryId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct)
+            entryId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters)
             .ConfigureAwait(false);
         return new PaginatedResult<VariableEntryVersionDto>
         {
@@ -297,6 +302,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
             VariableLibraryEntryId = entry.Id,
             Key = entry.Key,
             Value = entry.Value,
+            ChangedAt = timeProvider.GetUtcNow().UtcDateTime,
             Version = version,
             ChangeType = changeType
         }, ct).ConfigureAwait(false);
@@ -347,6 +353,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
                 VariableLibraryEntryId = entry.Id,
                 Key = entry.Key,
                 Value = entry.Value,
+                ChangedAt = timeProvider.GetUtcNow().UtcDateTime,
                 Version = 1,
                 ChangeType = ChangeType.Created
             }).ToList();

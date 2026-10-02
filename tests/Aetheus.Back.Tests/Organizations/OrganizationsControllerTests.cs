@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
 using Aetheus.Back.Components.Organizations;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;

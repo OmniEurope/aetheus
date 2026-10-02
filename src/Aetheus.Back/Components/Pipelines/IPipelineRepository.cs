@@ -8,6 +8,13 @@ public sealed record PipelineRunRootReference(int RunId, int PipelineId, string 
 public sealed record TaskQueuePosition(int Position, int Depth);
 public sealed record PipelineRunQueueReference(int StepId, int TaskId);
 
+/// <summary>A run left in WaitingForApproval although no approval is pending on it any more, with the
+/// decision that was last recorded (null when the run has no approval row at all).</summary>
+public sealed record StrandedApprovalRun(int RunId, ApprovalStatus? LastDecision);
+
+/// <summary>Recette R-483: what <c>GET api/Pipelines/{id}/source</c> reads of a pipeline.</summary>
+public sealed record PipelineSourceFields(int? ProjectId, string Name, string? SourceBranch, int? SourceRepositoryId);
+
 public interface IPipelineRepository
 {
     Task<(List<Pipeline> Items, int TotalCount)> GetPipelinesPagedAsync(
@@ -21,7 +28,9 @@ public interface IPipelineRepository
         string? search, PipelineTriggerType? triggerType, int? environmentId, int? projectServerId, int? projectId,
         int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default);
 
-    Task<List<PipelineDto>> GetPipelinesForDependencyGraphAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default);
+    Task<List<PipelineDto>> GetPipelinesForDependencyGraphAsync(
+        List<int>? accessibleIds = null, int? serverId = null, int? projectId = null,
+        CancellationToken ct = default);
     Task<(List<PipelineDto> Items, List<PipelineDto> Identities, int TotalCount)> GetPipelineDependencyPageAsync(
         PipelinePaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
 
@@ -30,6 +39,15 @@ public interface IPipelineRepository
     Task<Pipeline?> FindPipelineAsync(int id, CancellationToken ct = default);
 
     Task<Pipeline?> FindPipelineByNameAndProjectAsync(string name, int projectId, CancellationToken ct = default);
+
+    /// <summary>PLAN-003 lot 30: name and YAML of every pipeline of a project, the input of its
+    /// unmet <c>requires:</c> check. Only the two columns are read.</summary>
+    Task<List<(int Id, string Name, string Yaml)>> GetPipelineDefinitionsForProjectAsync(int projectId, CancellationToken ct = default);
+
+    /// <summary>PLAN-003 lot 20 / D26: the timed steps of the last <paramref name="take"/> SUCCESSFUL
+    /// runs of the pipeline that started before run <paramref name="runId"/>. Empty when the run is not
+    /// one of this pipeline's.</summary>
+    Task<List<StepTimingRow>> GetRecentSuccessfulStepTimingsAsync(int pipelineId, int runId, int take, CancellationToken ct = default);
 
     Task AddPipelineAsync(Pipeline pipeline, CancellationToken ct = default);
 
@@ -69,6 +87,12 @@ public interface IPipelineRepository
     /// <summary>Any online pipeline-runner, scoped to <paramref name="organizationId"/> when given.
     /// Always-runnable fallback when a stage's specific selector matches nothing.</summary>
     Task<Server?> FindAnyOnlineRunnerAsync(int? organizationId, OsType requiredOs = OsType.Unknown, CancellationToken ct = default);
+
+    /// <summary>True when at least one enrolled runner reports Docker available. Backs the only
+    /// capability a <c>requires:</c> block may declare, so the declaration is verified rather than
+    /// merely recorded. Enrolment, not being online: a runner that is briefly down still means the
+    /// installation has the capability, and refusing a launch for that would be a wait, not a defect.</summary>
+    Task<bool> HasRunnerWithDockerAsync(int? organizationId, CancellationToken ct = default);
     /// <summary>Cross-agent deploy targeting (fail-closed): pool > environment > agent precedence over
     /// DeploymentTargetAvailable servers only, with a deploy-capable org fallback. Never a plain runner.</summary>
     Task<Server?> FindOnlineDeployTargetAsync(string? pool, string? environment, string? agent, OsType requiredOs, int? organizationId, CancellationToken ct = default);
@@ -78,6 +102,8 @@ public interface IPipelineRepository
     Task<Server?> FindOnlineServerByIdAsync(int serverId, OsType requiredOs = OsType.Unknown, CancellationToken ct = default);
     Task<Server?> FindServerByIdAsync(int serverId, CancellationToken ct = default);
     Task<int?> GetRunAffinityServerIdAsync(int runId, CancellationToken ct = default);
+    /// <summary>The last reported agent facts of the named servers, for the launch preflight.</summary>
+    Task<List<PipelineRunnerFacts>> GetRunnerFactsAsync(IReadOnlyCollection<int> serverIds, CancellationToken ct = default);
     Task<int?> GetStageProducerServerIdAsync(int runId, string stageName, CancellationToken ct = default);
 
     /// <summary>Organization owning a pipeline (via Project | Environment→Project | ProjectServer→Project).
@@ -90,6 +116,21 @@ public interface IPipelineRepository
     /// <summary>Project owning a pipeline (direct ProjectId, or via Environment→ProjectId,
     /// or via ProjectServer→ProjectId). Null if unresolvable (legacy orphan).</summary>
     Task<int?> GetPipelineProjectIdAsync(Pipeline pipeline, CancellationToken ct = default);
+
+    /// <summary>R-368: the release a deployment names, read inside the run's own project (a numeric
+    /// selector is a release id, anything else an exact version, newest first - the selection the
+    /// <c>restore-artifacts</c> step makes). Null when no such release exists.</summary>
+    Task<DeploymentGateRelease?> FindDeploymentGateReleaseAsync(
+        int projectId, string releaseSelector, CancellationToken ct = default);
+
+    /// <summary>Recette R2-001: the release of <paramref name="version"/> in the project (newest first), as
+    /// a <c>type: advance-branch</c> step reads it. Null when no such release exists.</summary>
+    Task<BranchAdvanceRelease?> FindBranchAdvanceReleaseAsync(
+        int projectId, string version, CancellationToken ct = default);
+
+    /// <summary>Project a project-server row belongs to. Null when it does not exist. Authorizing a
+    /// pipeline owned by a project server goes through this: there is no ResourceType.ProjectServer.</summary>
+    Task<int?> GetProjectServerProjectIdAsync(int projectServerId, CancellationToken ct = default);
     // S-FEAT-16: project's default release version pattern, or null when unset.
     Task<string?> GetProjectReleasePatternAsync(int projectId, CancellationToken ct = default);
     // F-INF-02: username of the project's owning-organization Owner, or null when unresolvable.
@@ -109,6 +150,8 @@ public interface IPipelineRepository
 
     /// <summary>Tracks a server task on the change tracker. Caller must invoke <see cref="SaveChangesAsync"/> to flush.</summary>
     void TrackTask(ServerTask task);
+    /// <summary>Recette R-366/R-367: tracks an artifact a run consumed, flushed with the step's task.</summary>
+    void TrackArtifactInput(PipelineRunArtifactInput input);
     void TrackDastExecutionLease(DastExecutionLease lease);
 
     Task<List<PipelineRun>> GetRunsAsync(int pipelineId, int count, CancellationToken ct = default);
@@ -116,7 +159,26 @@ public interface IPipelineRepository
     Task<List<PipelineRunDto>> GetActiveRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
     Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, int? serverId = null, CancellationToken ct = default);
 
+    /// <summary>The run with its pipeline, project and steps. Recette R-484: no result rows; the test
+    /// results are counted by <see cref="GetTestResultSummaryAsync"/>, the other results are read as
+    /// figures by <see cref="GetRunResultSummariesAsync"/>.</summary>
     Task<PipelineRun?> GetRunDetailAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>Recette R-484: the coverage and lint figures, metrics and artifacts of a run's detail,
+    /// computed and projected by the database (the coverage per-file list is read on demand).</summary>
+    Task<PipelineRunResultSummaries> GetRunResultSummariesAsync(PipelineRun run, CancellationToken ct = default);
+
+    /// <summary>Recette R-483: the project, name and source binding of a pipeline; null when unknown.</summary>
+    Task<PipelineSourceFields?> GetPipelineSourceFieldsAsync(int id, CancellationToken ct = default);
+
+    /// <summary>Recette R-484: the tests of a run counted by outcome in the database; null when the run
+    /// recorded none.</summary>
+    Task<PipelineTestResultSummaryDto?> GetTestResultSummaryAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>Completes an ungraded detail run's <c>GateGrade</c> from a linked run (trigger children,
+    /// or the candidate release a deploy run restores). See <see cref="PipelineRunGradeAggregation"/>.
+    /// A no-op (returns <paramref name="run"/> unchanged) when it already carries a grade.</summary>
+    Task<PipelineRunDto> HydrateLinkedGradeAsync(PipelineRunDto run, CancellationToken ct = default);
     Task<Dictionary<int, TaskQueuePosition>> GetTaskQueuePositionsAsync(
         IReadOnlyCollection<int> taskIds, CancellationToken ct = default);
     Task<List<PipelineRunQueueReference>> GetRunQueueReferencesAsync(
@@ -180,6 +242,18 @@ public interface IPipelineRepository
     /// the per-stage failure poll when evaluating conditional expressions.</summary>
     Task<bool> HasAnyFailedStepInRunAsync(int runId, CancellationToken ct = default);
 
+    /// <summary>
+    /// True when a step failed but carried <c>continue_on_error</c>, so the run was allowed to finish.
+    /// PLAN-003 D13 turns that case into <see cref="PipelineStatus.Partial"/> instead of a plain success.
+    /// </summary>
+    Task<bool> HasAnyContinuableFailedStepInRunAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// True when the named stages ran - at least one step - and every one of their steps succeeded.
+    /// PLAN-004 R-14 reads it on the rollback stages to finish a run <see cref="PipelineStatus.RolledBack"/>.
+    /// </summary>
+    Task<bool> DidStagesAllSucceedAsync(int runId, IReadOnlyCollection<string> stageNames, CancellationToken ct = default);
+
     Task<bool> HasAnySucceededStepInRunAsync(int runId, CancellationToken ct = default);
 
     Task<List<string>> GetCompletedStageNamesAsync(int runId, CancellationToken ct = default);
@@ -206,6 +280,13 @@ public interface IPipelineRepository
     /// <see cref="GetPipelineRunWithPipelineAsync"/> (which is <c>AsNoTracking</c> - mutations there are
     /// silently dropped, leaving a failed run with no visible error message).</summary>
     Task AppendRunWarningsAsync(int runId, IReadOnlyCollection<string> warnings, CancellationToken ct = default);
+
+    /// <summary>Records why the last scheduling pass dispatched nothing, or clears it with <c>null</c>
+    /// once something moved. Writes nothing when the reason is unchanged: the scheduler re-passes over
+    /// a waiting run continuously, and an UPDATE per pass would both cost a write and reset the
+    /// "waiting since" clock the reason exists to provide.</summary>
+    /// <returns><c>true</c> when the stored reason actually changed.</returns>
+    Task<bool> SetRunWaitingReasonAsync(int runId, string? reason, CancellationToken ct = default);
 
     Task<List<PipelineTemplate>> GetTemplatesAsync(CancellationToken ct = default);
 
@@ -245,6 +326,21 @@ public interface IPipelineRepository
     Task<List<PipelineApproval>> GetApprovalsAsync(int runId, CancellationToken ct = default);
 
     Task<PipelineApproval?> FindApprovalAsync(int approvalId, CancellationToken ct = default);
+
+    Task<List<PendingApprovalDto>> GetPendingApprovalsAsync(List<int>? accessiblePipelineIds, CancellationToken ct = default);
+    Task<List<int>> GetExpiredPendingApprovalIdsAsync(DateTime now, CancellationToken ct = default);
+
+    /// <summary>Runs sitting in WaitingForApproval with no pending approval left to decide. The decision
+    /// resolves the approval row before moving the run, so an interruption between the two strands the
+    /// run: nothing is pending, so nothing is offered to approve and the timeout sweep cannot see it
+    /// either, since that one only looks at pending rows.</summary>
+    Task<List<StrandedApprovalRun>> GetStrandedApprovalRunsAsync(CancellationToken ct = default);
+
+    /// <summary>PLAN-005 lot 3 / D34: every approval still Pending although its run has ended (Success,
+    /// Failed, Cancelled or Partial) becomes Rejected with <paramref name="reason"/> and no user. Restricted
+    /// to one run when <paramref name="runId"/> is given. Returns how many were closed.</summary>
+    Task<int> CloseApprovalsOfEndedRunsAsync(int? runId, DateTime now, string reason, CancellationToken ct = default);
+    Task<string?> FindPublishedReleaseVersionByRunIdAsync(int pipelineRunId, CancellationToken ct = default);
     Task<PipelineApproval?> TryResolveApprovalAsync(int approvalId, ApprovalStatus decision, DateTime resolvedAt,
         int? resolvedByUserId, string? comments, CancellationToken ct = default);
 
@@ -261,7 +357,7 @@ public interface IPipelineRepository
 
     Task<(List<PipelineTemplateVersionSummaryDto> Items, int TotalCount)> GetTemplateVersionsPagedAsync(
         int templateId, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default);
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
 
     Task<List<string>> GetPipelineYamlDefinitionsByOrganizationAsync(
         int organizationId, CancellationToken ct = default);
@@ -310,6 +406,9 @@ public interface IPipelineRepository
     Task<bool> LockPipelineForWebhookAsync(int pipelineId, CancellationToken ct = default);
     Task<List<int>> GetActiveRunIdsAsync(int pipelineId, CancellationToken ct = default);
 
+    /// <summary>Every run still in flight, any pipeline. Feeds the agents' workspace reaper.</summary>
+    Task<List<int>> GetAllActiveRunIdsAsync(CancellationToken ct = default);
+
     Task<HashSet<int>> GetPipelineIdsWithActiveRunsAsync(CancellationToken ct = default);
 
     /// <summary>Returns the parent pipeline id for a run, or null if the run does not exist.</summary>
@@ -318,6 +417,10 @@ public interface IPipelineRepository
     /// <summary>F-06: returns true if the given server is assigned to any step run of the run.
     /// Used to authorize agent-token requests posting artifacts/test-results.</summary>
     Task<bool> IsServerAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default);
+
+    /// <summary>The stage whose step the server is running in this run, or null when it runs none or
+    /// steps of several stages at once (the stage is then not decidable from the run alone).</summary>
+    Task<string?> FindRunningStageNameAsync(int runId, int serverId, CancellationToken ct = default);
 
     /// <summary>Returns the parent pipeline id for an approval, or null if the approval does not exist.</summary>
     Task<int?> GetPipelineIdForApprovalAsync(int approvalId, CancellationToken ct = default);

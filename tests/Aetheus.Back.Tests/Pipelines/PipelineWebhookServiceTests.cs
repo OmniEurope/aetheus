@@ -2,8 +2,8 @@
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Settings;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Back.Exceptions;
+using Aetheus.Back.Services;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 
@@ -237,12 +237,8 @@ public class PipelineWebhookServiceTests
         _runServiceMock.PrepareAutomatedRunAsync(
                 10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>())
             .Returns(preparation);
-        _runServiceMock.TriggerPreparedRunAsync(
-                preparation,
-                Arg.Any<Dictionary<string, string>>(),
-                Arg.Any<Dictionary<string, string>?>(),
-                Arg.Any<CancellationToken>(),
-                Arg.Any<string?>())
+        _runServiceMock.TriggerPreparedAutomatedRunAsync(
+                preparation, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>())
             .Returns(new PipelineRunDto { Id = 42, PipelineId = 10 });
         var body =
             "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/develop\"}";
@@ -257,12 +253,51 @@ public class PipelineWebhookServiceTests
         Assert.True(result);
         await _runServiceMock.Received(1).CancelRunAsync(40, Arg.Any<CancellationToken>());
         await _runServiceMock.Received(1).CancelRunAsync(41, Arg.Any<CancellationToken>());
-        await _runServiceMock.Received(1).TriggerPreparedRunAsync(
-            preparation,
-            Arg.Any<Dictionary<string, string>>(),
-            Arg.Any<Dictionary<string, string>?>(),
-            Arg.Any<CancellationToken>(),
-            Arg.Any<string?>());
+        await _runServiceMock.Received(1).TriggerPreparedAutomatedRunAsync(
+            preparation, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_ARefusalRolledBackWithItsTransaction_IsRecordedAgainOutsideIt()
+    {
+        // Recette R-522: the launcher records a refused automated launch as a failed run, but the webhook
+        // runs in a transaction the refusal rolls back, and that record with it.
+        const string secret = "webhook-secret";
+        _settingsMock.GetSettingValueAsync("WebhookSecret", Arg.Any<CancellationToken>()).Returns(secret);
+        var pipeline = new Pipeline
+        {
+            Id = 10,
+            Name = "deploy",
+            YamlDefinition = "name: deploy\ntrigger: webhook\nstages: []",
+            Project = new Project { RepositoryUrl = "https://github.com/org/repo" }
+        };
+        _pipelineRepoMock.GetWebhookTriggeredPipelinesWithProjectAsync(Arg.Any<CancellationToken>()).Returns([pipeline]);
+        _pipelineRepoMock.LockPipelineForWebhookAsync(10, Arg.Any<CancellationToken>()).Returns(true);
+        _runServiceMock.TriggerAutomatedRunAsync(
+                10, "Webhook", Arg.Any<Dictionary<string, string>>(), Arg.Any<CancellationToken>())
+            .Returns<PipelineRunDto?>(_ => throw new BadRequestException("Source repository 'public' differs."));
+        var transaction = Substitute.For<IDbTransactionScope>();
+        transaction.IsRelational.Returns(true);
+        var sut = new PipelineWebhookService(
+            _pipelineRepoMock, _runServiceMock, _settingsMock, _loggerMock, _pipelineGitMock, transaction);
+        var body =
+            "{\"repository\":{\"html_url\":\"https://github.com/org/repo\"},\"ref\":\"refs/heads/develop\"}";
+        var signature = "sha256=" + Convert.ToHexStringLower(
+            System.Security.Cryptography.HMACSHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                System.Text.Encoding.UTF8.GetBytes(body)));
+
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            sut.HandleWebhookAsync(body, signature, ct: TestContext.Current.CancellationToken));
+
+        Received.InOrder(() =>
+        {
+            transaction.RollbackAsync(Arg.Any<CancellationToken>());
+            _runServiceMock.RecordRefusedAutomatedLaunchAsync(
+                10, "Webhook", "Source repository 'public' differs.",
+                Arg.Any<IReadOnlyDictionary<string, string>?>(), Arg.Any<CancellationToken>());
+        });
+        await transaction.DidNotReceive().CommitAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]

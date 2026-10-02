@@ -1,0 +1,59 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@foreach (var p in Parameters)
+{
+    var label = ParameterText.Pick(p.DisplayName, p.DisplayNameFr);
+    var description = ParameterText.Pick(p.Description, p.DescriptionFr);
+    var describedBy = DescriptionId(p.Name, description);
+    var stringValue = StringValue(p.Name);
+    var numberValue = NumberValue(p.Name);
+    var boolValue = BoolValue(p.Name);
+    <div class="run-params-field">
+        <ParameterHelpRow Description="@description" DescriptionId="@(describedBy ?? string.Empty)">
+            @if (string.Equals(p.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+            {
+                <OmniSwitch TValue="bool" Value="boolValue" ValueExpression="@(() => boolValue)" ValueChanged="@(value => _bools[p.Name] = value)">@($"{label}{(p.Required ? " *" : "")}")</OmniSwitch>
+            }
+            else
+            {
+                <OmniLabel For="@p.Name" Class="run-params-label">@($"{label}{(p.Required ? " *" : "")}")</OmniLabel>
+            }
+        </ParameterHelpRow>
+
+        @switch (p.Type?.ToLowerInvariant())
+        {
+            case "boolean":
+                break;
+            case "choice":
+                <OmniDropDown aria-label="@label" TValue="string" Value="@stringValue"
+                                ValueChanged="@(value => _strings[p.Name] = value)"
+                                ValueExpression="@(() => stringValue)"
+                                Options="@(p.AllowedValues.ToOptions(item => (string)item, item => item))" name="@p.Name" AriaDescribedBy="@describedBy"
+                                AllowEmpty="!p.Required" Class="run-params-input" />
+                break;
+            case "number":
+                <OmniNumeric TValue="decimal?" Value="@numberValue"
+                               ValueChanged="@(value => _numbers[p.Name] = value)"
+                               ValueExpression="@(() => numberValue)"
+                               Id="@p.Name" AriaDescribedBy="@describedBy" Class="run-params-input" />
+                break;
+            default:
+                <OmniTextBox Value="@stringValue"
+                               ValueChanged="@(value => _strings[p.Name] = value)"
+                               ValueExpression="@(() => stringValue)"
+                               Id="@p.Name" AriaDescribedBy="@describedBy" Class="run-params-input" />
+                break;
+        }
+    </div>
+}
+
+@if (AvailableReleases is not null)
+{
+    <div class="run-params-field">
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+            @(FillTargetName is not null ? L["AvailableReleasesClickToFill"] : L["AvailableReleases"])
+        </OmniText>
+        <ReleasePickerGrid Releases="@AvailableReleases" TotalCount="@AvailableReleaseTotal"
+                           Pick="@(FillTargetName is not null ? EventCallback.Factory.Create<string>(this, FillFromRelease) : default)" />
+    </div>
+}

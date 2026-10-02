@@ -20,17 +20,57 @@ public sealed class AppMonitoringService(
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var uptimes = await repo.GetUptimeWindowsAsync(
             apps.Select(app => app.Id).ToList(), now, ct).ConfigureAwait(false);
+        var hostingServers = await GetHostingServersAsync(projectId, apps, ct).ConfigureAwait(false);
         return apps.Select(app => MapWithUptime(
             app,
             uptimes.GetValueOrDefault(app.Id),
-            now)).ToList();
+            now) with
+        { HostingServer = HostingServerFor(app, hostingServers) }).ToList();
     }
 
     public async Task<MonitoredAppDto?> GetAppAsync(int id, CancellationToken ct = default)
     {
         var app = await repo.GetAppAsync(id, ct).ConfigureAwait(false);
-        return app is null ? null : await MapWithUptimeAsync(app, ct).ConfigureAwait(false);
+        if (app is null) return null;
+        var dto = await MapWithUptimeAsync(app, ct).ConfigureAwait(false);
+        var hostingServers = await GetHostingServersAsync(app.ProjectId, [app], ct).ConfigureAwait(false);
+        return dto with { HostingServer = HostingServerFor(app, hostingServers) };
     }
+
+    /// <summary>
+    /// Recette R-441: an app registered without a server is probed by the backend, but it usually
+    /// still runs on a fleet server. That server is read from the Apache virtual host serving the
+    /// probe URL's host, for display only: the probe keeps running from the backend.
+    /// </summary>
+    private async Task<Dictionary<string, AppHostingServer>> GetHostingServersAsync(
+        int projectId,
+        IEnumerable<MonitoredApp> apps,
+        CancellationToken ct)
+    {
+        var hosts = apps
+            .Where(app => app.ServerId is null)
+            .Select(app => ProbeHost(app.ProbeUrl))
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return hosts.Count == 0
+            ? []
+            : await repo.GetVirtualHostServersAsync(projectId, hosts, ct).ConfigureAwait(false);
+    }
+
+    private static MonitoredAppHostingServerDto? HostingServerFor(
+        MonitoredApp app,
+        Dictionary<string, AppHostingServer> hostingServers) =>
+        app.ServerId is null
+        && ProbeHost(app.ProbeUrl) is { } host
+        && hostingServers.TryGetValue(host, out var server)
+            ? new MonitoredAppHostingServerDto { ServerId = server.ServerId, ServerName = server.ServerName }
+            : null;
+
+    private static string? ProbeHost(string? probeUrl) =>
+        Uri.TryCreate(probeUrl, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.IdnHost)
+            ? uri.IdnHost.ToLowerInvariant()
+            : null;
 
     public Task<int?> GetAppProjectIdAsync(int id, CancellationToken ct = default) =>
         repo.GetAppProjectIdAsync(id, ct);
@@ -216,13 +256,15 @@ public sealed class AppMonitoringService(
                 LastStatusChangeAt = a.LastStatusChangeAt,
                 OnlineVisitorCount = a.AnalyticsEnabled
                     ? activeVisitorCounts.GetValueOrDefault(a.Id)
-                    : null
+                    : null,
+                LastEventAt = LatestOf(a.LastIngestAt, a.AnalyticsLastIngestAt)
             })
             .ToList();
         var troubled = applications
             .Where(app => app.CurrentStatus is AppHealthStatus.Down or AppHealthStatus.Degraded)
             .Take(10)
             .ToList();
+        var audience = await GetAudienceTotalsAsync(analyticsAppIds, activeVisitorCounts, ct).ConfigureAwait(false);
 
         return new AppMonitoringSummaryDto
         {
@@ -233,9 +275,43 @@ public sealed class AppMonitoringService(
             UnknownCount = apps.Count(a => a.CurrentStatus == AppHealthStatus.Unknown),
             TelemetryStorageBytes = telemetryStorageBytes,
             Applications = applications,
-            Troubled = troubled
+            Troubled = troubled,
+            Audience = audience
         };
     }
+
+    /// <summary>Recette R-468: the audience of the visible applications added up, from the aggregates the
+    /// ingestion already keeps per day, week and month. Null when no application measures its audience.</summary>
+    private async Task<AppAudienceTotalsDto?> GetAudienceTotalsAsync(
+        List<int> analyticsAppIds, Dictionary<int, int> activeVisitorCounts, CancellationToken ct)
+    {
+        if (analyticsAppIds.Count == 0) return null;
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var totals = await repo.GetAudienceTotalsAsync(
+            analyticsAppIds,
+            DateOnly.FromDateTime(now),
+            AppWebAnalyticsRepository.WeekStart(now),
+            new DateOnly(now.Year, now.Month, 1),
+            ct).ConfigureAwait(false);
+        var day = totals.FirstOrDefault(total => total.Kind == AnalyticsPeriodKind.Day);
+        var week = totals.FirstOrDefault(total => total.Kind == AnalyticsPeriodKind.Week);
+        var month = totals.FirstOrDefault(total => total.Kind == AnalyticsPeriodKind.Month);
+        return new AppAudienceTotalsDto
+        {
+            ApplicationCount = analyticsAppIds.Count,
+            OnlineVisitors = activeVisitorCounts.Values.Sum(),
+            VisitorsToday = day?.UniqueVisitors ?? 0,
+            VisitorsThisWeek = week?.UniqueVisitors ?? 0,
+            VisitorsThisMonth = month?.UniqueVisitors ?? 0,
+            AuthenticatedVisitorsThisMonth = month?.AuthenticatedUniqueVisitors ?? 0,
+            SessionsThisMonth = month?.Sessions ?? 0,
+            PageViewsThisMonth = month?.PageViews ?? 0
+        };
+    }
+
+    private static DateTime? LatestOf(DateTime? first, DateTime? second) =>
+        first is null ? second : second is null ? first : first > second ? first : second;
 
     private async Task FanOutTransitionsAsync(
         List<(MonitoredApp App, AppHealthStatus Previous, AppHealthStatus Next)> transitions,

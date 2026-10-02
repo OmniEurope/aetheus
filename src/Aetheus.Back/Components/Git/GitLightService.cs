@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.ExternalRepos;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Extensions;
 using Aetheus.Back.Hubs;
@@ -71,7 +70,7 @@ public class GitLightService(
 
         var (items, totalCount) = await lightRepo.GetAccessiblePagedAsync(
             accessibleProjectIds, projectId, request.Search, request.SortBy,
-            request.SortDescending, page, pageSize, ct).ConfigureAwait(false);
+            request.SortDescending, page, pageSize, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<GitLightRepoDto>
         {
             Items = items.Select(r => GitLightMapper.MapRepoToDto(
@@ -233,7 +232,8 @@ public class GitLightService(
     // ── Commits ──────────────────────────────────────────────────────
 
     public async Task<PaginatedResult<GitLightCommitDto>> GetCommitsAsync(
-        int repoId, string? refName, int page, int pageSize, string? search = null, CancellationToken ct = default)
+        int repoId, string? refName, int page, int pageSize, string? search = null, CancellationToken ct = default,
+        GitCommitLogFilter? filter = null)
     {
         var entity = await lightRepo.FindByIdAsync(repoId, ct).ConfigureAwait(false);
         if (entity is null) return new PaginatedResult<GitLightCommitDto> { Items = [], TotalCount = 0, Page = page, PageSize = pageSize };
@@ -247,8 +247,8 @@ public class GitLightService(
 
         // Page items are always fresh; the expensive total is cache-backed and
         // runs concurrently with the page walk (one git shell-out on a count hit).
-        var itemsTask = cli.GetCommitsAsync(diskPath, effectiveRef, (page - 1) * pageSize, pageSize, search, ct: ct);
-        var totalCount = await GitCommitCountCache.GetAsync(cache, cli, repoId, diskPath, effectiveRef, search, ct).ConfigureAwait(false);
+        var itemsTask = cli.GetCommitsAsync(diskPath, effectiveRef, (page - 1) * pageSize, pageSize, search, ct: ct, filter: filter);
+        var totalCount = await GitCommitCountCache.GetAsync(cache, cli, repoId, diskPath, effectiveRef, search, ct, filter).ConfigureAwait(false);
         var items = await itemsTask.ConfigureAwait(false);
 
         return new PaginatedResult<GitLightCommitDto> { Items = items, TotalCount = totalCount, Page = page, PageSize = pageSize };
@@ -419,7 +419,7 @@ public class GitLightService(
 
         var (items, totalCount) = await gitRepo.GetPullRequestsPagedAsync(
             entity.GitConnectionId.Value, request.Search, page, pageSize, request.Status, ct,
-            GitLightMapper.MapPrSortKey(request.SortBy), request.SortDescending).ConfigureAwait(false);
+            GitLightMapper.MapPrSortKey(request.SortBy), request.SortDescending, request.Filters).ConfigureAwait(false);
 
         return new PaginatedResult<InternalPullRequestDto>
         {
@@ -586,7 +586,8 @@ public class GitLightService(
         CancellationToken ct = default) => branchProtection.UpdateRuleAsync(repoId, ruleId, request, ct);
 
     public Task<bool> DeleteBranchProtectionRuleAsync(
-        int ruleId, CancellationToken ct = default) => branchProtection.DeleteRuleAsync(ruleId, ct);
+        int repoId, int ruleId, CancellationToken ct = default) =>
+        branchProtection.DeleteRuleAsync(repoId, ruleId, ct);
 
     public Task<bool> IsBranchProtectedAsync(
         int repoId, string branchName, CancellationToken ct = default) =>

@@ -1,0 +1,37 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2
+# Aetheus Agent portsentry-setup helper - root-owned, invoked via
+# /etc/sudoers.d/aetheus-portsentry (NOPASSWD). Positional args: <mode> <tcp_ports> <udp_ports>.
+set -u
+mode="${1:-}"
+tcp_ports="${2:-}"
+udp_ports="${3:-}"
+
+# Mode: 1-16 alphanumerics. Port lists: comma-separated digit groups. No shell metachars, no spaces.
+printf '%s' "$mode"      | grep -Eq '^[a-zA-Z0-9]{1,16}$'   || { echo "invalid mode" >&2; exit 1; }
+printf '%s' "$tcp_ports" | grep -Eq '^[0-9]{1,5}(,[0-9]{1,5})*$' || { echo "invalid tcp ports" >&2; exit 1; }
+printf '%s' "$udp_ports" | grep -Eq '^[0-9]{1,5}(,[0-9]{1,5})*$' || { echo "invalid udp ports" >&2; exit 1; }
+
+# Advanced UDP scan mode mirrors the mode, forced to the 'a' (advanced) family for parity with the
+# previous behaviour (e.g. mode "tcp"/"atcp" -> UDP mode "atcp").
+udp_mode="a$(printf '%s' "$mode" | sed 's/^a*//')"
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq portsentry
+
+# Scan modes live in /etc/default/portsentry; the port lists / block toggles in portsentry.conf.
+if [ -f /etc/default/portsentry ]; then
+    sed -i "s/^TCP_MODE=.*/TCP_MODE=\"$mode\"/"     /etc/default/portsentry
+    sed -i "s/^UDP_MODE=.*/UDP_MODE=\"$udp_mode\"/" /etc/default/portsentry
+fi
+if [ -f /etc/portsentry/portsentry.conf ]; then
+    sed -i "s/^TCP_PORTS=.*/TCP_PORTS=\"$tcp_ports\"/" /etc/portsentry/portsentry.conf
+    sed -i "s/^UDP_PORTS=.*/UDP_PORTS=\"$udp_ports\"/" /etc/portsentry/portsentry.conf
+    sed -i "s/^BLOCK_TCP=.*/BLOCK_TCP=\"1\"/"           /etc/portsentry/portsentry.conf
+    sed -i "s/^BLOCK_UDP=.*/BLOCK_UDP=\"1\"/"           /etc/portsentry/portsentry.conf
+fi
+
+systemctl enable portsentry
+systemctl restart portsentry
+echo "PortSentry setup completed (mode $mode)"

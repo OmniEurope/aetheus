@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectLoaderSectionBase
+@page "/projects/{Id:int}/pipelines"
+@layout Aetheus.Front.Layout.ProjectDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Project?.Name ?? L["Project"]) - @L["Pipelines"] - Aetheus</PageTitle>
+
+@if (Loader?.Project is not null)
+{
+    <Aetheus.Front.Components.Projects.ProjectDetailSections.ProjectPipelinesSection
+        Pipelines="@Loader.Project.Pipelines" ProjectId="@Id" />
+}

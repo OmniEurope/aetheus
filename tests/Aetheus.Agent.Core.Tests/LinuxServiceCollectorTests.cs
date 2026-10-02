@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Services;
 using Aetheus.Agent.Linux.Collectors;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aetheus.Agent.Core.Tests;
@@ -15,13 +13,18 @@ namespace Aetheus.Agent.Core.Tests;
 /// </summary>
 public class LinuxServiceCollectorTests
 {
-    /// <summary>Answers /bin/bash -c &lt;command&gt; from a table keyed by a substring of the command.</summary>
+    /// <summary>
+    /// Answers /bin/bash -c &lt;command&gt; from a table keyed by a substring of the command; a direct
+    /// argv launch (dpkg-query, /usr/bin/test) is matched on its program and arguments joined by spaces.
+    /// </summary>
     private sealed class ScriptedBash(params (string Match, string StdOut)[] answers) : IShellRunner
     {
         public Task<ShellExecResult> RunExecAsync(
             string fileName, IReadOnlyList<string> args, CancellationToken ct, TimeSpan? timeout = null)
         {
-            var command = args.Count > 1 ? args[1] : string.Empty;
+            var command = fileName == "/bin/bash"
+                ? args.Count > 1 ? args[1] : string.Empty
+                : string.Join(' ', [fileName, .. args]);
             foreach (var (match, stdout) in answers)
                 if (command.Contains(match, StringComparison.Ordinal))
                     return Task.FromResult(new ShellExecResult(0, stdout, string.Empty));
@@ -180,4 +183,111 @@ public class LinuxServiceCollectorTests
 
         Assert.DoesNotContain(services, s => s.Type == ServiceType.Systemd);
     }
+
+    // Recette R2-031: after `apt-get remove dovecot-core` systemd still lists dovecot.service as
+    // `not-found` (something refers to it), and the page showed a dovecot nobody could start or remove.
+    [Theory]
+    [InlineData("dovecot.service not-found inactive dead dovecot.service\n")]
+    [InlineData("● dovecot.service not-found inactive dead dovecot.service\n")]
+    public async Task NotFoundUnit_IsNotReportedInstalled(string listUnits)
+    {
+        var services = await CollectAsync(
+            ("list-unit-files", "nginx.service enabled\n"),
+            ("list-units --type=service", listUnits));
+
+        Assert.DoesNotContain(services, s => s.Name == "dovecot");
+        Assert.Contains(services, s => s.Name == "nginx" && s.IsInstalled);
+    }
+
+    // `apt-get remove` keeps /etc/init.d/dovecot; systemd-sysv-generator turns it into a loaded
+    // "generated" unit whose program is gone.
+    [Fact]
+    public async Task GeneratedUnitWhoseProgramIsGone_IsNotReported()
+    {
+        var services = await CollectAsync(
+            ("list-unit-files", "dovecot.service generated -\n"),
+            ("list-units --type=service", "dovecot.service loaded active exited LSB: Dovecot\n"));
+
+        Assert.DoesNotContain(services, s => s.Name == "dovecot");
+    }
+
+    [Fact]
+    public async Task GeneratedUnitWhoseProgramIsThere_IsKept()
+    {
+        // portsentry ships only an init script: its generated unit is the normal installed state.
+        var services = await CollectAsync(
+            ("list-unit-files", "portsentry.service generated -\n"),
+            ("list-units --type=service", "portsentry.service loaded active running LSB: portsentry\n"),
+            ("/usr/bin/test -x /usr/sbin/portsentry", string.Empty));
+
+        var portsentry = Assert.Single(services, s => s.Name == "portsentry");
+        Assert.True(portsentry.IsInstalled);
+        Assert.True(portsentry.IsRunning);
+    }
+
+    [Fact]
+    public async Task PackageLeftInRcState_IsNotReported_EvenWhenAUnitAndTheBinaryProbeRemain()
+    {
+        // `rc`: removed, configuration files kept. Whatever is left on disk, the service is not installed.
+        var services = await CollectAsync(
+            ("list-unit-files", "dovecot.service enabled\nnginx.service enabled\n"),
+            ("command -v dovecot", string.Empty),
+            ("dpkg-query", "dovecot-core\trc \nnginx\tii \nlibc6\tii \n"));
+
+        Assert.DoesNotContain(services, s => s.Name == "dovecot");
+        Assert.Contains(services, s => s.Name == "nginx");
+    }
+
+    [Fact]
+    public async Task PurgedPackage_AbsentFromDpkg_IsNotReported()
+    {
+        var services = await CollectAsync(
+            ("list-unit-files", "postfix.service enabled\n"),
+            ("dpkg-query", "libc6\tii \n"));
+
+        Assert.DoesNotContain(services, s => s.Name == "postfix");
+    }
+
+    [Fact]
+    public async Task InstalledPackage_IsReported()
+    {
+        var services = await CollectAsync(
+            ("list-unit-files", "dovecot.service enabled\n"),
+            ("list-units --type=service", "dovecot.service loaded active running Dovecot\n"),
+            ("dpkg-query", "dovecot-core\tii \n"));
+
+        var dovecot = Assert.Single(services, s => s.Name == "dovecot");
+        Assert.True(dovecot.IsInstalled);
+        Assert.True(dovecot.IsRunning);
+    }
+
+    [Fact]
+    public async Task ServiceAnotherPackageCanProvide_IsNotDecidedByTheCataloguePackage()
+    {
+        // nginx may come from nginx-core on older releases; a missing `nginx` package proves nothing.
+        var services = await CollectAsync(
+            ("list-unit-files", "nginx.service enabled\npostfix.service enabled\n"),
+            ("dpkg-query", "nginx-core\tii \npostfix\tii \n"));
+
+        Assert.Contains(services, s => s.Name == "nginx");
+    }
+
+    [Theory]
+    [InlineData("dovecot-core\tii \n", true)]
+    [InlineData("dovecot-core\thi \n", true)]   // held, installed
+    [InlineData("dovecot-core\tiF \n", true)]   // half-configured: still on disk, must stay uninstallable
+    [InlineData("dovecot-core\trc \n", false)]  // removed, configuration files kept
+    [InlineData("dovecot-core\tun \n", false)]  // not installed
+    [InlineData("dovecot-core\tpn \n", false)]  // purged
+    public void DpkgStatus_DecidesWhetherThePackageIsInstalled(string stdout, bool installed)
+    {
+        var packages = DpkgInstalledPackages.Parse(stdout);
+
+        Assert.NotNull(packages);
+        Assert.Equal(installed, packages.Contains("dovecot-core"));
+    }
+
+    [Fact]
+    public void DpkgAnswerWithoutAnyPackage_IsUnknown_NotEverythingRemoved()
+        => Assert.Null(DpkgInstalledPackages.Parse(string.Empty));
 }

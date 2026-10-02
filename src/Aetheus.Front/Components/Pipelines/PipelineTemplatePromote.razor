@@ -1,0 +1,48 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplatePromotionBase
+@page "/pipelines/{PipelineId:int}/template/promote"
+
+<PageTitle>@L["PromoteToTemplate"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["PromoteToTemplate"]" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("publish")" /></Icon>
+</OmniPageHeader>
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_forbidden)
+{
+    <OmniAlert Severity="OmniSeverity.Warning">@L["AccessDenied"]</OmniAlert>
+}
+else if (_notAvailable)
+{
+    <OmniAlert Severity="OmniSeverity.Warning">@L["PromoteUnavailable"]</OmniAlert>
+}
+else if (_loadFailed || _preview is null)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">
+        @L["LoadError"]
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadPreviewAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniAlert>
+}
+else
+{
+    <EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-md">@string.Format(L["PromoteTemplateVersion"], _preview.TemplateName, _preview.LatestVersion + 1)</OmniText>
+        <MonacoDiffViewer OriginalValue="@_preview.LatestTemplateYaml" ModifiedValue="@_preview.EffectivePipelineYaml" />
+        <OmniFormField For="oe-pages-pipelines-pipelinetemplatepromote-1" Class="omni-u-w-100 omni-u-mt-md"><LabelContent>@L["ChangelogEntry"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_model.ChangelogEntry" Class="omni-u-w-100" Id="oe-pages-pipelines-pipelinetemplatepromote-1" />
+        </ChildContent></OmniFormField>
+        <ValidationMessage For="@(() => _model.ChangelogEntry)" />
+        <OmniText Element="OmniTextElement.Strong" Class="omni-u-mt-md omni-u-mb-sm">@L["NewTemplateYaml"]</OmniText>
+        <MonacoEditor Value="@_model.YamlContent" ValueChanged="@(value => _model.YamlContent = value)" />
+        <OmniCheckBox @bind-Value="_model.RebaseSourcePipeline" Class="omni-u-mt-md">@L["RebaseSourcePipeline"]</OmniCheckBox>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Justify="OmniJustification.End" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@Cancel"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Upload" /> <span>@L["PublishVersion"]</span></OmniButton>
+        </OmniStack>
+    </EditForm>
+}

@@ -1,0 +1,61 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* Answers "is 10041 free on vps2577917?" from the UI, and since PLAN-005 lot 3 it answers with the
+   two facts that matter separately: nobody claims it in the registry, and nothing is listening on it.
+   Merging them would hide the case that broke the nightly pipeline six times - a port free in the
+   registry and occupied by something launched outside Aetheus. *@
+<OmniStack Gap="OmniSpacing.Large">
+    <OmniText Element="OmniTextElement.Paragraph">@L["PortCheckHint"]</OmniText>
+
+    @if (ServerId is null)
+    {
+        <OmniStack Gap="OmniSpacing.XSmall">
+        <OmniLabel For="port-check-server">@L["Server"]</OmniLabel>
+            <OmniDropDown Id="port-check-server" name="port-check-server" TValue="int?" Options="@(_servers.ToOptions(item => (int?)item.Id, item => item.Name))" @bind-Value="_selectedServerId" Filterable="true"
+                Placeholder="@L["Server"]" Class="w-100" />
+        </OmniStack>
+    }
+
+    <OmniStack Gap="OmniSpacing.XSmall">
+        <OmniLabel For="port-check-ports">@L["PortsToCheck"]</OmniLabel>
+        <OmniTextBox Id="port-check-ports" @bind-Value="_portsInput" maxlength="300" Class="w-100"
+            Placeholder="10041, 10042" />
+    </OmniStack>
+
+    @if (_error is not null)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning"><Icon><OmniIcon name="OmniIconName.Warning" /></Icon><ChildContent>@_error</ChildContent></OmniAlert>
+    }
+
+    @* A handful of ports is a verdict list, not a table: no sorting, filtering or paging would ever
+       be used on four rows, so this stays a plain stack rather than a data grid. *@
+    @if (_result is not null)
+    {
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@_result.ServerName</OmniText>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@ScanCaption</OmniText>
+                @if (_result.ObservationAvailable)
+                {
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RefreshScanAsync" Disabled="@_busy" Class="@(_scanning ? "btn-busy" : null)" Busy="@(_scanning)"><OmniIcon name="OmniIconName.Refresh" /> <span>@L["PortScanRefresh"]</span></OmniButton>
+                }
+            </OmniStack>
+
+            @foreach (var entry in _result.Entries)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+                    <PortVerdictBadge Entry="@entry" />
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@entry.Port</OmniText>
+
+                    @* The verdict is the sentence; this is only where the claim comes from, when there
+                       is one, and what the last scan saw. *@
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@DetailText(entry)</OmniText>
+                </OmniStack>
+            }
+        </OmniStack>
+    }
+
+    <DialogFooter OnCancel="@(() => Dialog.Close())">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@CheckAsync" Disabled="@(_scanning || EffectiveServerId is null)" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon name="OmniIconName.Check" /> <span>@L["CheckPorts"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

@@ -2,7 +2,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using Aetheus.Back.Components.Auth;
-using Aetheus.Shared.Validation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Aetheus.Back.Tests.Architecture;

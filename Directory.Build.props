@@ -3,18 +3,19 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <!-- Single SemVer source for every Aetheus assembly and distributed agent archive. -->
-    <VersionPrefix>1.1.0</VersionPrefix>
+    <VersionPrefix>1.2.0</VersionPrefix>
     <!-- Central version for production runtime images and the browser runtime packs.
          Server-side test hosts keep the runtime bundled with the pinned SDK. -->
-    <AetheusRuntimeImageVersion>10.0.11</AetheusRuntimeImageVersion>
+    <AetheusRuntimeImageVersion>10.0.12</AetheusRuntimeImageVersion>
     <!-- The IL linker pack is a build tool, not a runtime target: it executes on the SDK's own
-         shared framework, so it must track the SDK pinned by global.json (10.0.202 bundles
-         10.0.6), NOT AetheusRuntimeImageVersion. Pointing it at the production runtime made
-         `dotnet publish` fail with NETSDK1144 inside the SDK image, which has no 10.0.11.
+         shared framework, so it follows the global.json FLOOR (10.0.100 bundles 10.0.0), NOT
+         AetheusRuntimeImageVersion. A newer SDK runs it by rolling forward to its own patch; the
+         reverse fails: 10.0.12 under SDK 10.0.100 made `dotnet publish` fail with NETSDK1144
+         (checked 2026-09-25, ADR-048).
          It is pinned rather than left implicit because its version is otherwise decided by
          machine-global workload manifests and leaks into packages.lock.json, which then fails
-         locked-mode restore anywhere the manifests differ. Bump with the SDK in global.json. -->
-    <AetheusLinkerPackVersion>10.0.6</AetheusLinkerPackVersion>
+         locked-mode restore anywhere the manifests differ. Move it with the floor in global.json. -->
+    <AetheusLinkerPackVersion>10.0.0</AetheusLinkerPackVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
@@ -25,11 +26,44 @@
     <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
     <!-- Product conventions must fail builds, not merely disappear into warning logs. -->
     <WarningsAsErrors>$(WarningsAsErrors);PRM001;PRM002;PRM003</WarningsAsErrors>
+
+    <!-- PLAN-006 lot 6.6. The .NET analyzers ship a security category (CA2100/CA21xx injection and
+         P/Invoke, CA23xx unsafe deserialization, CA3xxx XML/XSS/SQL injection, CA5xxx weak crypto,
+         disabled certificate validation, insecure TLS) that is almost entirely OFF in the default
+         analysis mode. Those are precisely the rules worth having, so the security category alone is
+         raised to All; every other category keeps its default, because turning them all up produces
+         a thousand style findings and a gate nobody reads. -->
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
   </PropertyGroup>
 
-  <!-- Husky.NET: auto-install git hooks on restore (skipped in CI / Docker) -->
+  <!-- PLAN-006 lot 6.6: with -p:AetheusRoslynSarif=true, every project writes what its analyzers
+       found as SARIF 2.1, which the pipeline then publishes as findings. Off by default so a local
+       build does not litter the tree.
+
+       One file PER PROJECT, named after it: ErrorLog takes a single path, so a fixed one would have
+       every project in the solution overwrite the previous one's findings and the report would
+       describe whichever project happened to build last.
+
+       The `%2C` is a real escape, not a typo: MSBuild splits property values on commas, so a literal
+       one would truncate the value and silently drop the version selector, leaving SARIF 1.0 - which
+       the analysis parser does not read. -->
+  <PropertyGroup Condition="'$(AetheusRoslynSarif)' == 'true'">
+    <AetheusRoslynSarifDirectory>$(MSBuildThisFileDirectory)analysis/roslyn</AetheusRoslynSarifDirectory>
+    <ErrorLog>$(AetheusRoslynSarifDirectory)/$(MSBuildProjectName).sarif%2Cversion=2.1</ErrorLog>
+  </PropertyGroup>
+
+  <!-- The compiler will not create the directory it was told to write to; it fails the build with
+       CS0016 instead. Create it before compiling rather than in the calling script, so turning the
+       property on is enough wherever the build runs. -->
+  <Target Name="AetheusEnsureRoslynSarifDirectory" BeforeTargets="CoreCompile"
+          Condition="'$(AetheusRoslynSarif)' == 'true'">
+    <MakeDir Directories="$(AetheusRoslynSarifDirectory)" />
+  </Target>
+
+  <!-- Husky.NET: auto-install git hooks on restore from the primary checkout only. Linked
+       worktrees share the primary repository's hooks configuration and cannot safely rewrite it. -->
   <Target Name="HuskyInstall" BeforeTargets="Restore;CollectPackageReferences"
-          Condition="'$(MSBuildProjectName)' == 'Aetheus.Back' and '$(HUSKY)' != '0' and '$(CI)' != 'true' and '$(DOTNET_RUNNING_IN_CONTAINER)' != 'true'">
+          Condition="'$(MSBuildProjectName)' == 'Aetheus.Back' and Exists('$(MSBuildThisFileDirectory).git/config') and '$(HUSKY)' != '0' and '$(CI)' != 'true' and '$(DOTNET_RUNNING_IN_CONTAINER)' != 'true'">
     <Exec Command="dotnet tool restore" StandardOutputImportance="Low" StandardErrorImportance="High" />
     <Exec Command="dotnet husky install" StandardOutputImportance="Low" StandardErrorImportance="High"
           WorkingDirectory="$(MSBuildThisFileDirectory)" />

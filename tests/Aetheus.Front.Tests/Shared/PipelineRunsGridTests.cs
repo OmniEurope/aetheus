@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Resources;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
-using Radzen.Blazor;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Shared;
 
@@ -17,13 +14,104 @@ public class PipelineRunsGridTests : BunitContext
     public PipelineRunsGridTests() => BunitTestHelper.RegisterServices(this);
 
     [Fact]
-    public void LoadingProgressBar_HasAccessibleName()
+    public void LoadingIndicator_IsOeGridLoadingState_WithAccessibleStatus()
     {
         var cut = Render<PipelineRunsGrid>(parameters => parameters
             .Add(component => component.IsLoading, true));
 
-        var progressBar = cut.Find("[role='progressbar']");
-        Assert.False(string.IsNullOrWhiteSpace(progressBar.GetAttribute("aria-label")), cut.Markup);
+        // PLAN-003 lot 15: one loading style everywhere. Since recette R-432 (user decision of 2026-09-29)
+        // that style is OE's grid loading bar, not the Aetheus veil: the grid reads busy and its empty body
+        // announces the load as a status region with a localized text, as the shared loader did.
+        Assert.Equal("true", cut.Find(".omni-data-grid").GetAttribute("aria-busy"));
+        Assert.Single(cut.FindAll("thead > tr.omni-data-grid__progress .omni-loading-bar--active"));
+        var status = cut.Find("tr.omni-data-grid__pending [role='status']");
+        Assert.False(string.IsNullOrWhiteSpace(status.TextContent), cut.Markup);
+        Assert.Empty(cut.FindAll(".aetheus-loader"));
+        Assert.Empty(cut.FindAll("[role='progressbar']"));
+    }
+
+    /// <summary>
+    /// Recette R-373: the commit shows in the one short form (eight characters, the whole hash on hover)
+    /// and leads to the commit's page in Aetheus when the run recorded it. An internal repository's URL
+    /// is its smart-HTTP endpoint, so ".../commit/sha" on it served no page.
+    /// </summary>
+    [Fact]
+    public void TheCommit_IsShortAndLeadsToItsPage()
+    {
+        var items = new List<PipelineRunDto>
+        {
+            new()
+            {
+                Id = 10,
+                PipelineId = 1,
+                PipelineName = "ci",
+                Status = PipelineStatus.Success,
+                CommitHash = "0123456789abcdef0123456789abcdef01234567",
+                RepositoryUrl = "https://aetheus.test/git/1/aetheus.git",
+                Commits = [new CommitLinkDto { Id = 33, Sha = "0123456789abcdef0123456789abcdef01234567" }]
+            },
+            new()
+            {
+                Id = 11,
+                PipelineId = 1,
+                PipelineName = "ci",
+                Status = PipelineStatus.Success,
+                CommitHash = "fedcba9876543210fedcba9876543210fedcba98",
+                RepositoryUrl = "https://github.com/acme/demo.git"
+            }
+        };
+        var cut = Render<PipelineRunsGrid>(parameters => parameters.Add(component => component.Items, items));
+
+        cut.WaitForAssertion(() =>
+        {
+            var recorded = cut.Find(".short-id[title='0123456789abcdef0123456789abcdef01234567'] a.short-id__text");
+            Assert.Equal("01234567", recorded.TextContent);
+            Assert.Equal("/git/commits/33", recorded.GetAttribute("href"));
+            Assert.Equal("https://github.com/acme/demo/commit/fedcba9876543210fedcba9876543210fedcba98",
+                cut.Find(".short-id[title='fedcba9876543210fedcba9876543210fedcba98'] a.short-id__text").GetAttribute("href"));
+        });
+    }
+
+    /// <summary>
+    /// Recette R-373, runs without a recorded commit: an internal repository's run leads to its Aetheus
+    /// commit and branch pages through the repository the backend resolved, never to the smart-HTTP
+    /// clone URL (a host the browser cannot reach, a path that answers 404). When the repository was not
+    /// resolved, the commit and the branch stay text.
+    /// </summary>
+    [Fact]
+    public void AnInternalRepositoryRun_LeadsToItsAetheusPages_NeverToTheCloneUrl()
+    {
+        const string resolvedSha = "1111111111111111111111111111111111111111";
+        const string unresolvedSha = "2222222222222222222222222222222222222222";
+        var items = new List<PipelineRunDto>
+        {
+            new()
+            {
+                Id = 20, PipelineId = 1, PipelineName = "ci", Status = PipelineStatus.Success,
+                BranchName = "feature/x", CommitHash = resolvedSha,
+                RepositoryUrl = "https://host.docker.internal:5301/git/13/aetheus-self.git", RepositoryId = 42
+            },
+            new()
+            {
+                Id = 21, PipelineId = 1, PipelineName = "ci", Status = PipelineStatus.Success,
+                BranchName = "develop", CommitHash = unresolvedSha,
+                RepositoryUrl = "https://host.docker.internal:5301/git/13/aetheus-self"
+            }
+        };
+        var cut = Render<PipelineRunsGrid>(parameters => parameters.Add(component => component.Items, items));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal($"/git-repositories/42/commits/{resolvedSha}",
+                cut.Find($".short-id[title='{resolvedSha}'] a.short-id__text").GetAttribute("href"));
+            Assert.Equal("/git-repositories/42?tab=branches&branch=feature%2Fx",
+                cut.FindAll("a.pipeline-run-ref-link").Single(link => link.TextContent.Trim() == "feature/x").GetAttribute("href"));
+
+            Assert.Empty(cut.FindAll($".short-id[title='{unresolvedSha}'] a"));
+            Assert.Contains(cut.FindAll("span.pipeline-run-ref-link"), span => span.TextContent.Trim() == "develop");
+            Assert.DoesNotContain(cut.FindAll("a[href]"), link =>
+                link.GetAttribute("href")!.Contains("host.docker.internal", StringComparison.Ordinal));
+        });
     }
 
     [Fact]
@@ -61,11 +149,19 @@ public class PipelineRunsGridTests : BunitContext
         {
             Assert.Contains("Alpha", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("Beta", cut.Markup, StringComparison.Ordinal);
-            Assert.Contains("Build", cut.Markup, StringComparison.Ordinal);
-            Assert.Contains("Tests", cut.Markup, StringComparison.Ordinal);
-            var dataGrid = cut.FindComponent<RadzenDataGrid<PipelineRunTableItem>>().Instance;
-            Assert.True(dataGrid.AllowVirtualization);
-            Assert.False(dataGrid.AllowPaging);
+            // The status cell of a Running run shows its current step instead of a "Running" badge,
+            // so "Build" appears while the badge does not.
+            // Recette R-210: the Status header filter now lists every status by name, so the cell
+            // assertions read the rows only.
+            var rows = string.Concat(cut.FindAll("tbody tr[data-omni-row-index]").Select(row => row.OuterHtml));
+            Assert.Contains("Build", rows, StringComparison.Ordinal);
+            Assert.DoesNotContain("Enum_PipelineStatus_Running", rows, StringComparison.Ordinal);
+            // A run in any other state keeps its status badge, and therefore does not surface the
+            // step its status cell was replaced by.
+            Assert.Contains("Enum_PipelineStatus_Pending", rows, StringComparison.Ordinal);
+            Assert.DoesNotContain("Tests", rows, StringComparison.Ordinal);
+            var dataGrid = cut.FindComponent<OmniDataGrid<PipelineRunTableItem>>().Instance;
+            Assert.Equal(OmniDataGridScrollMode.Virtual, dataGrid.ScrollMode);
             Assert.False(dataGrid.AllowGrouping);
         });
     }
@@ -74,16 +170,8 @@ public class PipelineRunsGridTests : BunitContext
     public void RowClick_NavigatesToProjectScopedRun()
     {
         var run = new PipelineRunDto { Id = 42, PipelineId = 7, PipelineName = "ci", ProjectId = 3 };
-        var item = PipelineRunTableItem.FromRun(run);
         var cut = Render<PipelineRunsGrid>(parameters => parameters.Add(component => component.Items, new List<PipelineRunDto> { run }));
-
-        var args = (Radzen.DataGridRowMouseEventArgs<PipelineRunTableItem>)System.Runtime.CompilerServices.RuntimeHelpers
-            .GetUninitializedObject(typeof(Radzen.DataGridRowMouseEventArgs<PipelineRunTableItem>));
-        typeof(Radzen.DataGridRowMouseEventArgs<PipelineRunTableItem>)
-            .GetField("<Data>k__BackingField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(args, item);
-        typeof(PipelineRunsGrid).GetMethod("OnRowClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .Invoke(cut.Instance, [args]);
+        cut.Find("tr[data-omni-row-index='0']").Click();
 
         Assert.EndsWith("/pipelines/runs/42?projectId=3", Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>().Uri, StringComparison.Ordinal);
     }
@@ -193,18 +281,20 @@ public class PipelineRunsGridTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            // Column contract, in the order the run tables must keep: the id first, then the action
-            // buttons, and the current step last so the wide, live-updating column never pushes the
-            // stable identification columns off screen.
-            var columns = cut.FindComponent<RadzenDataGrid<PipelineRunTableItem>>().Instance.ColumnsCollection.ToList();
+            // Column contract, in the order the run tables must keep: the id first - now carrying the
+            // row actions inline instead of a column of its own - then the pipeline it belongs to and
+            // its status right after. The former "Current step" column is gone: it is folded into the
+            // status cell of a running run, so the wide live-updating value never costs a column.
+            var columns = cut.FindComponents<OmniDataGridColumn<PipelineRunTableItem>>()
+                .Select(column => column.Instance).ToList();
             Assert.Equal("RunId", columns[0].Property);
-            Assert.Equal("Actions", columns[1].Title);
-            Assert.Equal("PipelineName", columns[2].Property);
-            Assert.Equal("CurrentStep", columns[^1].Title);
+            Assert.Equal("pipeline-run-id-actions-column", columns[0].Class);
+            Assert.Equal("PipelineName", columns[1].Property);
+            Assert.Equal("Status", columns[2].Property);
             var titles = columns.Select(column => column.Title).ToList();
             Assert.Equal(
-                ["Status", "Started", "Completed", "Duration", "Branch", "Commit", "Server"],
-                titles.Where(title => title is "Status" or "Started" or "Completed" or "Duration" or "Branch" or "Commit" or "Server").ToList());
+                ["ID", "Pipeline", "Status", "Project", "Started", "Completed", "Duration", "Branch", "Commit", "Server"],
+                titles);
             Assert.Contains("DurationMinutesSecondsFormat", cut.Markup, StringComparison.Ordinal);
         });
     }
@@ -230,7 +320,7 @@ public class PipelineRunsGridTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            var renderedRuns = cut.FindComponent<RadzenDataGrid<PipelineRunTableItem>>().Instance.Data!.ToList();
+            var renderedRuns = cut.FindComponent<OmniDataGrid<PipelineRunTableItem>>().Instance.Items!.ToList();
             Assert.Equal(10, renderedRuns.Count);
             Assert.Equal(Enumerable.Range(2, 10).Reverse(), renderedRuns.Select(run => run.RunId));
         });
@@ -311,14 +401,14 @@ public class PipelineRunsGridTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            var grid = cut.FindComponent<RadzenDataGrid<PipelineRunTableItem>>().Instance;
-            Assert.Equal(2, (grid.Data ?? []).Count());
+            var grid = cut.FindComponent<OmniDataGrid<PipelineRunTableItem>>().Instance;
+            Assert.Equal(2, (grid.Items ?? []).Count());
             Assert.DoesNotContain("latest-child", cut.Markup, StringComparison.Ordinal);
             Assert.DoesNotContain("old-child", cut.Markup, StringComparison.Ordinal);
-            Assert.Contains("ExpandLinkedPipelineRuns", cut.Markup, StringComparison.Ordinal);
+            Assert.NotEmpty(cut.FindAll("button.omni-data-grid__expand"));
         });
 
-        cut.Find("button[aria-label='ExpandLinkedPipelineRuns']").Click();
+        cut.Find("button.omni-data-grid__expand").Click();
 
         cut.WaitForAssertion(() =>
         {
@@ -330,6 +420,13 @@ public class PipelineRunsGridTests : BunitContext
     [Fact]
     public void ExpandedLinkedRuns_RemainOpen_WhenItemsRefresh()
     {
+        // A running row with ShowDurationInCompact starts a real one-second timer on TimeProvider.System,
+        // and its re-renders can starve WaitForAssertion under a loaded suite run - the check never gets
+        // a turn, and the test fails with "Check count: 0" while the component rendered 160 times. A
+        // controlled clock fires nothing, so what is asserted here is the expansion, not the machine.
+        Services.AddSingleton<TimeProvider>(
+            new FakeTimeProvider(new DateTimeOffset(2026, 8, 5, 10, 5, 0, TimeSpan.Zero)));
+
         static List<PipelineRunDto> CreateRuns() =>
         [
             new PipelineRunDto
@@ -356,7 +453,7 @@ public class PipelineRunsGridTests : BunitContext
             .Add(component => component.Compact, true)
             .Add(component => component.ShowDurationInCompact, true));
 
-        cut.Find("button[aria-label='ExpandLinkedPipelineRuns']").Click();
+        cut.Find("button.omni-data-grid__expand").Click();
         cut.WaitForAssertion(() => Assert.Contains("child", cut.Markup, StringComparison.Ordinal));
 
         cut.Render(parameters => parameters
@@ -447,7 +544,7 @@ public class PipelineRunsGridTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.DoesNotContain("direct-child", cut.Markup, StringComparison.Ordinal));
 
-        cut.Find("button[aria-label='ExpandLinkedPipelineRuns']").Click();
+        cut.Find("button.omni-data-grid__expand").Click();
 
         cut.WaitForAssertion(() =>
         {

@@ -34,7 +34,11 @@ public class ProjectsController(IProjectService projectService, IResourceAuthori
         if (!await authz.HasPermissionAsync(User, ResourceType.Project, null, Permission.Write, ct))
             return Forbid();
 
-        var project = await projectService.CreateProjectAsync(request, ct);
+        // Recette R2-034: the creator follows the new project. An identity without a user row (the
+        // deployment identity, NameIdentifier "bootstrap") has no inbox and follows nothing.
+        var creatorUserId = int.TryParse(
+            User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId) ? userId : (int?)null;
+        var project = await projectService.CreateProjectAsync(request, creatorUserId, ct);
         return CreatedAtAction(nameof(GetProject), new { id = project.Id }, project);
     }
 
@@ -109,6 +113,16 @@ public class ProjectsController(IProjectService projectService, IResourceAuthori
             return Forbid();
 
         return Ok(await projectService.GetProjectTasksAsync(id, request, ct));
+    }
+
+    /// <summary>Recette R-212: the server names the project tasks grid's Server column filter offers.</summary>
+    [HttpGet("{id:int}/tasks/filter-values")]
+    public async Task<ActionResult<TaskFilterValuesDto>> GetProjectTaskFilterValues(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Project, id, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await projectService.GetProjectTaskFilterValuesAsync(id, ct));
     }
 
     [HttpGet("{id:int}/logs")]

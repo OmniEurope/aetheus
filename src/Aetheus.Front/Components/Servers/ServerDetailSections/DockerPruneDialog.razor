@@ -1,0 +1,12 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniTemplateForm TModel="DockerPruneDialogModel" Model="@_model" OnValidSubmit="@((EditContext context) => Submit((DockerPruneDialogModel)context.Model))">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Medium">
+        <OmniCheckBox TValue="bool" Value="@SelectAll" ValueExpression="@(() => SelectAll)" ValueChanged="@SetAll">@L["DockerPruneSelectAll"]</OmniCheckBox>
+        <OmniCheckBox @bind-Value="_model.Containers"><OmniIcon Name="OmniIconName.Archive" /> @L["DockerPruneStoppedContainers"]</OmniCheckBox>
+        <OmniCheckBox @bind-Value="_model.Images"><OmniIcon Name="OmniIconName.Image" /> @L["DockerPruneUnusedImages"]</OmniCheckBox>
+        <OmniCheckBox @bind-Value="_model.Volumes"><OmniIcon Name="OmniIconName.Database" /> @L["DockerPruneUnusedVolumes"]</OmniCheckBox>
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="prune-summary">@string.Format(L["PruneSummary"], SelectedCount)</OmniText>
+    </OmniStack>
+    <DialogFooter OnCancel="@(() => Dialog.Close())"><OmniButton Variant="OmniButtonVariant.Danger" Disabled="@(SelectedCount == 0)" ButtonType="OmniButtonType.Submit"><OmniIcon Name="OmniIconName.Broom" /> <span>@L["DockerPrune"]</span></OmniButton></DialogFooter>
+</OmniTemplateForm>

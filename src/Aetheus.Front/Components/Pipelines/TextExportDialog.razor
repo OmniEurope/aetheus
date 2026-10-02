@@ -1,0 +1,15 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Pipelines
+@*
+    PLAN-003 lot 22: an export is read before it is kept. The run's "Export" used to download a file
+    straight away, so the only way to see what it contained was to open it elsewhere. The text is
+    shown in full here, with the three things one does with it: download, copy, close.
+*@
+<OmniStack Gap="OmniSpacing.Medium">
+    <OmniTextArea Value="@Text" ReadOnly="true" Rows="18" Class="w-100 text-export-dialog-body"
+                    aria-label="@L["ExportContent"]"  ValueExpression="@(() => Text)"/>
+    <DialogFooter OnCancel="@(() => Dialog.Close())" CancelText="@L["Close"]">
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CopyAsync"><OmniIcon Name="OmniIconName.Copy" /> <span>@L["Copy"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@DownloadAsync"><OmniIcon Name="OmniIconName.Download" /> <span>@L["Download"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

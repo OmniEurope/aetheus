@@ -1,0 +1,14 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniStack Gap="OmniSpacing.Small">
+    @if (Model.Loading)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" Class="omni-u-mb-sm" />
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["LoadingConfig"]</OmniText>
+    }
+    <OmniCodeEditor @bind-Value="_content" Language="apache" Height="24rem"
+                    InteropModulePath="./js/omni-code-editor-frame.js?v=1"
+                    Label="@L["ApacheConfig"]" Disabled="@Model.Loading" />
+    <Aetheus.Front.Components.Shared.DialogFooter OnCancel="@Cancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@Save" Disabled="@Model.Loading" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+    </Aetheus.Front.Components.Shared.DialogFooter>
+</OmniStack>

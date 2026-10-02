@@ -1,0 +1,457 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2
+# aetheus-mail-helper-version: 2
+# Aetheus Agent mail-manage helper - root-owned, invoked via /etc/sudoers.d/aetheus-mail (NOPASSWD).
+# Incremental management of an already-provisioned mail stack. First argv token is a fixed
+# sub-command; every following argument is re-validated here. Passwords and learned messages arrive on
+# stdin (never argv). Never evals input.
+set -eu
+
+die() { echo "$1" >&2; exit 1; }
+valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; }
+valid_email()  { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'; }
+valid_sel()    { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_-]+$'; }
+valid_quota()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,7}$'; }
+valid_score()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,2})?$'; }
+valid_qid()    { printf '%s' "$1" | grep -Eq '^[0-9A-Za-z]{6,32}$'; }
+valid_token()  { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._@<>=-]{1,64}$'; }
+valid_lines()  { printf '%s' "$1" | grep -Eq '^[0-9]{1,4}$' && [ "$1" -ge 1 ] && [ "$1" -le 2000 ]; }
+without_space_key() { awk -v key="$1" '$1 != key' "$2" > "$2.tmp" 2>/dev/null || true; }
+without_colon_key() { awk -F: -v key="$1" '$1 != key' "$2" > "$2.tmp" 2>/dev/null || true; }
+
+read_password() {
+  IFS= read -r password || die "no password on stdin"
+  [ -n "$password" ] || die "empty password"
+  printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has control chars"
+  [ "${#password}" -ge 8 ] || die "password too short"
+}
+
+# Rewrites the Dovecot passwd-file line for one account (hash fed to doveadm over stdin).
+write_user_hash() {
+  hash="$(printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT)"
+  umask 077
+  touch /etc/dovecot/users
+  without_colon_key "$1" /etc/dovecot/users
+  printf '%s:%s\n' "$1" "$hash" >> /etc/dovecot/users.tmp
+  mv /etc/dovecot/users.tmp /etc/dovecot/users
+  chown root:dovecot /etc/dovecot/users
+  chmod 640 /etc/dovecot/users
+  umask 022
+}
+
+# Installs (or, with "force", regenerates) the DKIM key of one domain and points the KeyTable and
+# SigningTable at it. Keys live per domain so two domains may share a selector name.
+dkim_install() {
+  d="$1"; s="$2"; mode="${3:-keep}"
+  mkdir -p "/etc/opendkim/keys/$d"
+  if [ "$mode" = "force" ]; then
+    rm -f "/etc/opendkim/keys/$d/$s.private" "/etc/opendkim/keys/$d/$s.txt"
+  fi
+  if [ ! -f "/etc/opendkim/keys/$d/$s.private" ]; then
+    opendkim-genkey -s "$s" -d "$d" -D "/etc/opendkim/keys/$d/"
+  fi
+  chown -R opendkim:opendkim "/etc/opendkim/keys/$d"
+  chmod 711 /etc/opendkim/keys "/etc/opendkim/keys/$d"
+  chmod 600 "/etc/opendkim/keys/$d/$s.private"
+  chmod 644 "/etc/opendkim/keys/$d/$s.txt"
+  umask 022
+  touch /etc/opendkim/KeyTable /etc/opendkim/SigningTable
+  awk -v suffix="._domainkey.$d" \
+    'length($1) < length(suffix) || substr($1, length($1) - length(suffix) + 1) != suffix' \
+    /etc/opendkim/KeyTable > /etc/opendkim/KeyTable.tmp 2>/dev/null || true
+  printf '%s._domainkey.%s %s:%s:/etc/opendkim/keys/%s/%s.private\n' "$s" "$d" "$d" "$s" "$d" "$s" >> /etc/opendkim/KeyTable.tmp
+  mv /etc/opendkim/KeyTable.tmp /etc/opendkim/KeyTable
+  without_space_key "*@$d" /etc/opendkim/SigningTable
+  printf '*@%s %s._domainkey.%s\n' "$d" "$s" "$d" >> /etc/opendkim/SigningTable.tmp
+  mv /etc/opendkim/SigningTable.tmp /etc/opendkim/SigningTable
+  chmod 644 /etc/opendkim/KeyTable /etc/opendkim/SigningTable
+}
+
+dkim_forget() {
+  d="$1"
+  [ -f /etc/opendkim/KeyTable ] || return 0
+  awk -v suffix="._domainkey.$d" \
+    'length($1) < length(suffix) || substr($1, length($1) - length(suffix) + 1) != suffix' \
+    /etc/opendkim/KeyTable > /etc/opendkim/KeyTable.tmp 2>/dev/null || true
+  mv /etc/opendkim/KeyTable.tmp /etc/opendkim/KeyTable
+  if [ -f /etc/opendkim/SigningTable ]; then
+    without_space_key "*@$d" /etc/opendkim/SigningTable
+    mv /etc/opendkim/SigningTable.tmp /etc/opendkim/SigningTable
+  fi
+  chmod 644 /etc/opendkim/KeyTable /etc/opendkim/SigningTable 2>/dev/null || true
+}
+
+dovecot_major() { dovecot --version 2>/dev/null | cut -d. -f1-2; }
+
+# Writes the Dovecot TLS file for the installed major version (2.3 and 2.4 name the keys differently).
+write_dovecot_ssl() {
+  cert="$1"; key="$2"
+  case "$(dovecot_major)" in
+    2.3) printf '# Managed by Aetheus mail-manage install-cert.\nssl = required\nssl_cert = <%s\nssl_key = <%s\n' "$cert" "$key" > /etc/dovecot/conf.d/99-aetheus-ssl.conf ;;
+    2.4) printf '# Managed by Aetheus mail-manage install-cert.\nssl = required\nssl_server_cert_file = %s\nssl_server_key_file = %s\n' "$cert" "$key" > /etc/dovecot/conf.d/99-aetheus-ssl.conf ;;
+    *) die "unsupported dovecot version" ;;
+  esac
+  chmod 644 /etc/dovecot/conf.d/99-aetheus-ssl.conf
+}
+
+# rspamd opens its milter (11332) and controller (11334) sockets a few seconds after (re)start;
+# callers report success only once both answer.
+wait_rspamd() {
+  waited=0
+  until ss -ltnH "sport = :11332" 2>/dev/null | grep -q . && ss -ltnH "sport = :11334" 2>/dev/null | grep -q .; do
+    [ "$waited" -lt 60 ] || die "rspamd did not start listening on localhost:11332/11334"
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+
+journal_units() {
+  case "$1" in
+    postfix)  echo "postfix.service postfix@-.service" ;;
+    dovecot)  echo "dovecot.service" ;;
+    opendkim) echo "opendkim.service" ;;
+    rspamd)   echo "rspamd.service" ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd="${1:-}"
+[ -n "$cmd" ] || die "no sub-command"
+
+case "$cmd" in
+  version)
+    echo "aetheus-mail-helper-version: 2"
+    ;;
+  add-domain)
+    domain="${2:-}"; selector="${3:-}"
+    valid_domain "$domain" || die "invalid domain"
+    [ -z "$selector" ] || valid_sel "$selector" || die "invalid selector"
+    mkdir -p "/var/mail/vhosts/$domain"
+    chown -R vmail:vmail "/var/mail/vhosts/$domain"
+    cur="$(postconf -h virtual_mailbox_domains 2>/dev/null || echo '')"
+    case ", $cur, " in
+      *", $domain, "*) : ;;
+      *) if [ -n "$cur" ]; then postconf -e "virtual_mailbox_domains = $cur, $domain"; else postconf -e "virtual_mailbox_domains = $domain"; fi ;;
+    esac
+    if [ -n "$selector" ]; then
+      dkim_install "$domain" "$selector" keep
+      systemctl restart opendkim
+    fi
+    systemctl reload postfix
+    echo "Domain $domain added"
+    ;;
+  add-account)
+    email="${2:-}"; domain="${3:-}"; quota="${4:-}"
+    valid_email "$email"   || die "invalid email"
+    valid_domain "$domain" || die "invalid domain"
+    valid_quota "$quota"   || die "invalid quota"
+    case "$email" in *"@$domain") : ;; *) die "email not in domain" ;; esac
+    read_password
+    localpart="${email%@*}"
+    mkdir -p "/var/mail/vhosts/$domain/$localpart"
+    chown -R vmail:vmail "/var/mail/vhosts/$domain"
+    umask 022
+    touch /etc/postfix/vmailbox
+    without_space_key "$email" /etc/postfix/vmailbox
+    printf '%s %s/%s/\n' "$email" "$domain" "$localpart" >> /etc/postfix/vmailbox.tmp
+    mv /etc/postfix/vmailbox.tmp /etc/postfix/vmailbox
+    chmod 644 /etc/postfix/vmailbox
+    postmap /etc/postfix/vmailbox
+    write_user_hash "$email"
+    echo "Account $email added (quota ${quota}MB)"
+    ;;
+  add-alias)
+    email="${2:-}"; destination="${3:-}"
+    valid_email "$email"       || die "invalid alias"
+    valid_email "$destination" || die "invalid destination"
+    umask 022
+    touch /etc/postfix/virtual
+    without_space_key "$email" /etc/postfix/virtual
+    printf '%s %s\n' "$email" "$destination" >> /etc/postfix/virtual.tmp
+    mv /etc/postfix/virtual.tmp /etc/postfix/virtual
+    chmod 644 /etc/postfix/virtual
+    postmap /etc/postfix/virtual
+    cur="$(postconf -h virtual_alias_maps 2>/dev/null || echo '')"
+    case "$cur" in
+      *hash:/etc/postfix/virtual*) : ;;
+      *) postconf -e "virtual_alias_maps = hash:/etc/postfix/virtual" ;;
+    esac
+    systemctl reload postfix
+    echo "Alias $email -> $destination added"
+    ;;
+  dkim-rotate)
+    domain="${2:-}"; selector="${3:-}"
+    valid_domain "$domain" || die "invalid domain"
+    valid_sel "$selector"  || die "invalid selector"
+    dkim_install "$domain" "$selector" force
+    systemctl restart opendkim
+    echo "DKIM rotated for $domain (selector $selector)"
+    cat "/etc/opendkim/keys/$domain/$selector.txt"
+    ;;
+  change-password)
+    email="${2:-}"
+    valid_email "$email" || die "invalid email"
+    read_password
+    awk -F: -v key="$email" '$1 == key { found=1; exit } END { exit !found }' \
+      /etc/dovecot/users 2>/dev/null || die "account does not exist"
+    write_user_hash "$email"
+    echo "Password changed for $email"
+    ;;
+  remove-domain)
+    # Drop the domain from virtual_mailbox_domains and from the DKIM signing tables, reload.
+    # Rebuilds the list by field so no sed/regex address is interpolated. Keys stay on disk.
+    domain="${2:-}"
+    valid_domain "$domain" || die "invalid domain"
+    cur="$(postconf -h virtual_mailbox_domains 2>/dev/null || echo '')"
+    new=""
+    for d in $(printf '%s' "$cur" | tr ',' ' '); do
+      [ "$d" = "$domain" ] && continue
+      if [ -n "$new" ]; then new="$new, $d"; else new="$d"; fi
+    done
+    postconf -e "virtual_mailbox_domains = $new"
+    dkim_forget "$domain"
+    systemctl restart opendkim
+    systemctl reload postfix
+    echo "Domain $domain removed"
+    ;;
+  delete-account)
+    email="${2:-}"; domain="${3:-}"
+    valid_email "$email"   || die "invalid email"
+    valid_domain "$domain" || die "invalid domain"
+    case "$email" in *"@$domain") : ;; *) die "email not in domain" ;; esac
+    if [ -f /etc/postfix/vmailbox ]; then
+      without_space_key "$email" /etc/postfix/vmailbox
+      mv /etc/postfix/vmailbox.tmp /etc/postfix/vmailbox
+      chmod 644 /etc/postfix/vmailbox
+      postmap /etc/postfix/vmailbox
+    fi
+    if [ -f /etc/dovecot/users ]; then
+      without_colon_key "$email" /etc/dovecot/users
+      mv /etc/dovecot/users.tmp /etc/dovecot/users
+      chown root:dovecot /etc/dovecot/users
+      chmod 640 /etc/dovecot/users
+    fi
+    echo "Account $email deleted"
+    ;;
+  remove-alias)
+    email="${2:-}"
+    valid_email "$email" || die "invalid alias"
+    if [ -f /etc/postfix/virtual ]; then
+      without_space_key "$email" /etc/postfix/virtual
+      mv /etc/postfix/virtual.tmp /etc/postfix/virtual
+      chmod 644 /etc/postfix/virtual
+      postmap /etc/postfix/virtual
+      systemctl reload postfix
+    fi
+    echo "Alias $email removed"
+    ;;
+  dkim-read)
+    # dkim-read <domain> <selector> reads the per-domain key; the legacy one-argument form
+    # dkim-read <selector> reads a key generated by helper version 1 (flat keys directory).
+    if [ -n "${3:-}" ]; then
+      domain="$2"; selector="$3"
+      valid_domain "$domain" || die "invalid domain"
+      valid_sel "$selector"  || die "invalid selector"
+      keyfile="/etc/opendkim/keys/$domain/$selector.txt"
+      [ -f "$keyfile" ] || keyfile="/etc/opendkim/keys/$selector.txt"
+    else
+      selector="${2:-}"
+      valid_sel "$selector" || die "invalid selector"
+      keyfile="/etc/opendkim/keys/$selector.txt"
+    fi
+    [ -f "$keyfile" ] || die "no DKIM key for selector $selector"
+    cat "$keyfile"
+    ;;
+  service)
+    unit="${2:-}"; action="${3:-}"
+    case "$unit" in postfix|dovecot|opendkim|rspamd) : ;; *) die "invalid unit" ;; esac
+    case "$action" in start|stop|restart|reload) : ;; *) die "invalid action" ;; esac
+    systemctl "$action" "$unit"
+    case "$unit:$action" in rspamd:start|rspamd:restart|rspamd:reload) wait_rspamd ;; esac
+    echo "SERVICE	$unit	$action	$(systemctl is-active "$unit" 2>/dev/null || true)"
+    ;;
+  queue-list)
+    postqueue -j
+    ;;
+  queue-flush)
+    postqueue -f
+    echo "Queue flush requested"
+    ;;
+  queue-delete)
+    qid="${2:-}"
+    valid_qid "$qid" || die "invalid queue id"
+    postsuper -d "$qid"
+    ;;
+  check)
+    # One CHECK line per component so the UI can render a checklist; exit 1 when any check fails.
+    failed=0
+    if out="$(postfix check 2>&1)"; then echo "CHECK	postfix	ok	"; else echo "CHECK	postfix	fail	$(printf '%s' "$out" | tr '\t\n' '  ' | cut -c1-300)"; failed=1; fi
+    if out="$(doveconf -n 2>&1 >/dev/null)"; then echo "CHECK	dovecot	ok	"; else echo "CHECK	dovecot	fail	$(printf '%s' "$out" | tr '\t\n' '  ' | cut -c1-300)"; failed=1; fi
+    if [ -f /etc/opendkim.conf ]; then
+      if out="$(opendkim -n -x /etc/opendkim.conf 2>&1)"; then echo "CHECK	opendkim	ok	"; else echo "CHECK	opendkim	fail	$(printf '%s' "$out" | tr '\t\n' '  ' | cut -c1-300)"; failed=1; fi
+    fi
+    if command -v rspamadm >/dev/null 2>&1; then
+      if out="$(rspamadm configtest 2>&1)"; then echo "CHECK	rspamd	ok	"; else echo "CHECK	rspamd	fail	$(printf '%s' "$out" | tr '\t\n' '  ' | cut -c1-300)"; failed=1; fi
+    fi
+    for port in 25 587 993; do
+      if ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; then echo "CHECK	port-$port	ok	"; else echo "CHECK	port-$port	fail	not listening"; failed=1; fi
+    done
+    [ "$failed" -eq 0 ]
+    ;;
+  logs)
+    unit="${2:-}"; lines="${3:-}"; filter="${4:-}"
+    units="$(journal_units "$unit")" || die "invalid unit"
+    valid_lines "$lines" || die "invalid line count"
+    set --
+    for u in $units; do set -- "$@" -u "$u"; done
+    if [ -n "$filter" ]; then
+      valid_token "$filter" || die "invalid filter"
+      journalctl "$@" --since "-7d" --no-pager -o short-iso | grep -F -- "$filter" | tail -n "$lines" || true
+    else
+      journalctl "$@" -n "$lines" --no-pager -o short-iso
+    fi
+    ;;
+  install-cert)
+    # Points Postfix and Dovecot at the Let's Encrypt lineage of the mail hostname and installs a
+    # renewal deploy hook so both reload after every renewal. When the lineage is missing and an email
+    # is given, obtains it first with certbot: webroot through the Aetheus ACME alias when Apache holds
+    # port 80, standalone when port 80 is free, and an honest failure otherwise.
+    host="${2:-}"; email="${3:-}"
+    valid_domain "$host" || die "invalid hostname"
+    [ -z "$email" ] || valid_email "$email" || die "invalid email"
+    live="/etc/letsencrypt/live/$host"
+    if [ ! -f "$live/fullchain.pem" ]; then
+      [ -n "$email" ] || die "no certificate lineage for $host"
+      export DEBIAN_FRONTEND=noninteractive
+      command -v certbot >/dev/null 2>&1 || { apt-get update -qq || true; apt-get install -y -qq certbot; }
+      if ss -ltnH "sport = :80" 2>/dev/null | grep -q .; then
+        [ -f /etc/apache2/conf-enabled/aetheus-acme-webroot.conf ] \
+          || die "port 80 is busy and the Aetheus ACME alias is not enabled: obtain the certificate from the Certbot tab, then install it"
+        mkdir -p #{ACME_WEBROOT}#/.well-known/acme-challenge
+        certbot certonly --webroot --webroot-path #{ACME_WEBROOT}# --non-interactive --agree-tos \
+          --keep-until-expiring -m "$email" -d "$host" || die "certbot ACME validation failed for $host"
+      else
+        certbot certonly --standalone --non-interactive --agree-tos \
+          --keep-until-expiring -m "$email" -d "$host" || die "certbot ACME validation failed for $host"
+      fi
+    fi
+    [ -f "$live/fullchain.pem" ] || die "no certificate lineage for $host"
+    [ -f "$live/privkey.pem" ] || die "no private key for $host"
+    postconf -e "smtpd_tls_cert_file = $live/fullchain.pem"
+    postconf -e "smtpd_tls_key_file = $live/privkey.pem"
+    write_dovecot_ssl "$live/fullchain.pem" "$live/privkey.pem"
+    doveconf -n >/dev/null || die "dovecot rejected the certificate configuration"
+    postfix check || die "postfix rejected the certificate configuration"
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    printf '#!/bin/sh\n# Managed by Aetheus mail-manage install-cert.\nsystemctl reload postfix\nsystemctl reload dovecot\n' > /etc/letsencrypt/renewal-hooks/deploy/aetheus-mail
+    chmod 755 /etc/letsencrypt/renewal-hooks/deploy/aetheus-mail
+    systemctl reload postfix
+    systemctl reload dovecot
+    echo "Certificate $live installed for postfix and dovecot"
+    ;;
+  spam-install)
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq || true
+    apt-get install -y -qq rspamd redis-server
+    mkdir -p /etc/rspamd/local.d
+    printf '# Managed by Aetheus mail-manage.\nbind_socket = "localhost:11332";\nmilter = yes;\ntimeout = 120s;\nupstream "local" {\n  default = yes;\n  self_scan = yes;\n}\n' > /etc/rspamd/local.d/worker-proxy.inc
+    printf '# Managed by Aetheus mail-manage.\nservers = "127.0.0.1";\n' > /etc/rspamd/local.d/redis.conf
+    printf '# Managed by Aetheus mail-manage (OpenDKIM signs).\nenabled = false;\n' > /etc/rspamd/local.d/dkim_signing.conf
+    if [ ! -f /etc/rspamd/local.d/actions.conf ]; then
+      printf '# Managed by Aetheus mail-manage spam-configure.\nreject = 15;\nadd_header = 6;\ngreylist = 4;\n' > /etc/rspamd/local.d/actions.conf
+    fi
+    chmod 644 /etc/rspamd/local.d/worker-proxy.inc /etc/rspamd/local.d/*.conf
+    rspamadm configtest >/dev/null || die "rspamd configuration rejected"
+    cur="$(postconf -h smtpd_milters 2>/dev/null || echo '')"
+    case "$cur" in
+      *localhost:11332*) : ;;
+      "") postconf -e "smtpd_milters = inet:localhost:11332" ;;
+      *) postconf -e "smtpd_milters = $cur, inet:localhost:11332" ;;
+    esac
+    cur="$(postconf -h non_smtpd_milters 2>/dev/null || echo '')"
+    case "$cur" in
+      *localhost:11332*) : ;;
+      "") postconf -e "non_smtpd_milters = inet:localhost:11332" ;;
+      *) postconf -e "non_smtpd_milters = $cur, inet:localhost:11332" ;;
+    esac
+    postconf -e "milter_default_action = accept"
+    postconf -e "milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}"
+    systemctl enable redis-server rspamd
+    systemctl restart redis-server
+    systemctl restart rspamd
+    wait_rspamd
+    systemctl reload postfix
+    echo "rspamd installed and chained after OpenDKIM"
+    ;;
+  spam-configure)
+    reject="${2:-}"; header="${3:-}"; grey="${4:-}"
+    valid_score "$reject" || die "invalid reject score"
+    valid_score "$header" || die "invalid add_header score"
+    valid_score "$grey"   || die "invalid greylist score"
+    awk -v r="$reject" -v h="$header" -v g="$grey" 'BEGIN { exit !(g + 0 < h + 0 && h + 0 < r + 0) }' \
+      || die "scores must satisfy greylist < add_header < reject"
+    [ -d /etc/rspamd/local.d ] || die "rspamd is not installed"
+    printf '# Managed by Aetheus mail-manage spam-configure.\nreject = %s;\nadd_header = %s;\ngreylist = %s;\n' "$reject" "$header" "$grey" > /etc/rspamd/local.d/actions.conf
+    chmod 644 /etc/rspamd/local.d/actions.conf
+    rspamadm configtest >/dev/null || die "rspamd configuration rejected"
+    systemctl reload rspamd
+    wait_rspamd
+    echo "Spam thresholds set: reject=$reject add_header=$header greylist=$grey"
+    ;;
+  spam-learn)
+    kind="${2:-}"
+    case "$kind" in spam|ham) : ;; *) die "invalid learn kind" ;; esac
+    command -v rspamc >/dev/null 2>&1 || die "rspamd is not installed"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    head -c 1048576 > "$tmp"
+    [ -s "$tmp" ] || die "no message on stdin"
+    wait_rspamd
+    rspamc "learn_$kind" < "$tmp"
+    ;;
+  send-test)
+    # Sends one tagged message through the local MTA, then follows its queue id in the journal and
+    # prints a DELIVERY line with the final status. Exit 0 = sent, 2 = deferred/bounced, 3 = unknown.
+    from="${2:-}"; to="${3:-}"
+    valid_email "$from" || die "invalid sender"
+    valid_email "$to"   || die "invalid recipient"
+    host="$(postconf -h myhostname 2>/dev/null || hostname)"
+    token="aetheus-test-$(date +%s)-$$"
+    printf 'From: %s\nTo: %s\nSubject: Aetheus delivery test %s\nMessage-ID: <%s@%s>\nDate: %s\n\nThis message was sent by Aetheus to verify mail delivery.\n' \
+      "$from" "$to" "$token" "$token" "$host" "$(date -R)" | /usr/sbin/sendmail -f "$from" -- "$to"
+    qid=""
+    i=0
+    while [ $i -lt 30 ] && [ -z "$qid" ]; do
+      qid="$(journalctl -u postfix.service -u postfix@-.service --since "-10min" --no-pager -o cat 2>/dev/null \
+        | grep -F "message-id=<$token@" | head -n1 | sed -n 's/^\([0-9A-Za-z]*\): .*/\1/p')"
+      [ -n "$qid" ] || { sleep 1; i=$((i + 1)); }
+    done
+    [ -n "$qid" ] || { echo "DELIVERY	unknown	-	$token	message not found in the journal"; exit 3; }
+    status=""
+    i=0
+    while [ $i -lt 60 ] && [ -z "$status" ]; do
+      line="$(journalctl -u postfix.service -u postfix@-.service --since "-10min" --no-pager -o cat 2>/dev/null \
+        | grep -F "$qid: to=<" | grep -F "status=" | tail -n1)"
+      status="$(printf '%s' "$line" | sed -n 's/.*status=\([a-z]*\).*/\1/p')"
+      [ -n "$status" ] || { sleep 1; i=$((i + 1)); }
+    done
+    [ -n "$status" ] || { echo "DELIVERY	unknown	$qid	$token	no final status yet"; exit 3; }
+    echo "DELIVERY	$status	$qid	$token	$(printf '%s' "$line" | cut -c1-400)"
+    [ "$status" = "sent" ] || exit 2
+    ;;
+  quota-report)
+    # One QUOTA line per virtual mailbox: address and Maildir size in KiB (du, no quota plugin needed).
+    [ -f /etc/postfix/vmailbox ] || exit 0
+    awk '$1 !~ /^#/ && NF >= 2 { print $1, $2 }' /etc/postfix/vmailbox | while read -r email path; do
+      valid_email "$email" || continue
+      printf '%s' "$path" | grep -Eq '^[A-Za-z0-9._/-]+$' || continue
+      case "$path" in *..*) continue ;; esac
+      dir="/var/mail/vhosts/$path"
+      if [ -d "$dir" ]; then kb="$(du -sk "$dir" | cut -f1)"; else kb=0; fi
+      echo "QUOTA	$email	$kb"
+    done
+    ;;
+  *)
+    die "unknown sub-command: $cmd"
+    ;;
+esac

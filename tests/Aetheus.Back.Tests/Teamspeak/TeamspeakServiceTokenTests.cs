@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Teamspeak;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -142,8 +141,8 @@ public class TeamspeakServiceTokenTests
     private async Task AssertQueryTaskQueued(string commandKeyword) =>
         await _repo.Received(1).AddTaskAsync(
             Arg.Is<ServerTask>(t => t.ServerId == 1
-                && t.Executor == Aetheus.Shared.Enums.ExecutorType.Operation
-                && t.Operation == Aetheus.Shared.Enums.OperationKind.TeamspeakServerQuery
+                && t.Executor == Aetheus.Shared.Components.Tasks.ExecutorType.Operation
+                && t.Operation == Aetheus.Shared.Components.Tasks.OperationKind.TeamspeakServerQuery
                 && t.TimeoutSeconds == 15
                 && t.Command != null && t.Command.Contains(commandKeyword)),
             Arg.Any<CancellationToken>());

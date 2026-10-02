@@ -1,0 +1,58 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Item #3 of the plan - visible during an agent self-update on the server detail page.
+   Driven by the existing server-group hub via three events:
+     - AgentUpdateQueued       → enters Queued (0%)
+     - AgentUpdateProgress     → walks through PickedUp → LaunchingUpdater (10–80%)
+     - ServerOffline           → AgentOffline (95%)
+     - Heartbeat (post-update) → Done (100%) → auto-hide after 5s
+
+   The card is invisible at rest (Phase == null). It does NOT own its own HubConnection -
+   it reuses the parent ServerDetail page's connection by accepting it as a parameter, so
+   we don't double-subscribe on the server group. *@
+
+@if (_phase is not null && _phase != AgentUpdatePhase.Done || _showDoneUntil > DateTime.Now)
+{
+    <OmniCard Class="@($"omni-u-mb-lg agent-update-progress-card {(_fadingOut ? "is-fading-out" : "")}")">
+        <OmniStack Gap="OmniSpacing.Small">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                <OmniIcon Name="@MaterialIconMap.Resolve(PhaseIcon(_phase))" Class="@PhaseIconClass(_phase)" />
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">
+                    @(_phase == AgentUpdatePhase.Failed ? L["AgentUpdateFailed"] : L["AgentUpdateInProgress"])
+                </OmniText>
+                <div class="flex-spacer"></div>
+                <OmniBadge Fill="OmniFill.Solid" Tone="@PhaseBadge(_phase)">@L[PhaseLabel(_phase)]</OmniBadge>
+            </OmniStack>
+            @* D11: a bar only where there is a percentage to show. While the agent is offline there
+               is none, so it is the loader that says "we are waiting", like everywhere else. *@
+            @if (_phase == AgentUpdatePhase.AgentOffline)
+            {
+                <AetheusLoader Size="OmniControlSize.Small" />
+            }
+            else
+            {
+                <OmniProgressBar Value="@_percent" Maximum="100" ShowValue="false"
+                    Class="metric-bar metric-bar-thin" />
+            }
+            @if (!string.IsNullOrWhiteSpace(_message))
+            {
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-m-0">@_message</OmniText>
+            }
+            @if (_phase == AgentUpdatePhase.Failed)
+            {
+                @if (Request is not null)
+                {
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">
+                        @string.Format(L["AgentUpdateVersionTransition"], Request.ObservedVersion, Request.TargetVersion)
+                    </OmniText>
+                }
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.End" Gap="OmniSpacing.Small">
+                    @if (_requestId is not null && Auth.IsAdmin)
+                    {
+                        <OmniLink Href="@FailureLogsPath" Class="notification-log-link"><OmniIcon Name="OmniIconName.Document" /> @L["Logs"]</OmniLink>
+                    }
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryAsync"><OmniIcon Name="OmniIconName.Reset" /> <span>@L["Retry"]</span></OmniButton>
+                </OmniStack>
+            }
+        </OmniStack>
+    </OmniCard>
+}

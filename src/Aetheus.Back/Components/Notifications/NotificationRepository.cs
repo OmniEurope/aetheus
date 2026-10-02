@@ -7,9 +7,10 @@ public class NotificationRepository(AppDbContext db) : INotificationRepository
 {
     public async Task<(List<NotificationChannel> Items, int Total)> GetChannelsPagedAsync(
         string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
-        var query = BuildChannelQuery(search);
+        // Recette R-224: the grid's column header filters, before the count.
+        var query = NotificationAdminListQuery.ChannelColumns.ApplyFilters(BuildChannelQuery(search), columnFilters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -76,9 +77,20 @@ public class NotificationRepository(AppDbContext db) : INotificationRepository
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<(List<string> EventTypes, List<string> Channels)> GetRuleFilterValuesAsync(CancellationToken ct = default)
+    {
+        var eventTypes = await db.NotificationRules.AsNoTracking()
+            .Select(rule => rule.EventType).Distinct().OrderBy(eventType => eventType)
+            .ToListAsync(ct).ConfigureAwait(false);
+        var channels = await db.NotificationChannels.AsNoTracking()
+            .Select(channel => channel.Name).Distinct().OrderBy(name => name)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return (eventTypes, channels);
+    }
+
     public async Task<(List<NotificationRule> Items, int Total)> GetRulesPagedAsync(
         string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.NotificationRules
             .AsNoTracking()
@@ -90,6 +102,8 @@ public class NotificationRepository(AppDbContext db) : INotificationRepository
                 EF.Functions.ILike(rule.EventType, pattern) ||
                 EF.Functions.ILike(rule.Channel.Name, pattern));
         }
+        // Recette R-224: the grid's column header filters, before the count.
+        query = NotificationAdminListQuery.RuleColumns.ApplyFilters(query, columnFilters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch

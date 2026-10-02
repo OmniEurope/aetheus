@@ -1,0 +1,8 @@
+# Aetheus Agent - firewall (ufw) management. Path-only grant of the root-owned aetheus-firewall helper,
+# which IS the security boundary: it re-validates port/protocol/source and re-enforces anti-lockout.
+Cmnd_Alias AETHEUS_FIREWALL = #{FIREWALL_HELPER_PATH}#
+Defaults!AETHEUS_FIREWALL timestamp_timeout=0
+Defaults!AETHEUS_FIREWALL env_reset
+Defaults!AETHEUS_FIREWALL secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_FIREWALL

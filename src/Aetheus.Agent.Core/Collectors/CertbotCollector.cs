@@ -17,6 +17,7 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
     private readonly Func<List<CertbotCertificateDto>> _collectCertificates;
     private readonly Func<string, bool> _fileExists;
     private readonly bool _unixLike;
+    private readonly CertbotRenewalInspector _renewalInspector;
 
     public CertbotCollector(ILogger<CertbotCollector> logger, IShellRunner shell)
         : this(logger, shell, null)
@@ -35,12 +36,14 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
         // Same reason as fileExists, one level up: the known-path fallback is Unix-only by design, so
         // on Windows the probe was unreachable and its test could only skip itself. Injecting the
         // platform decision lets the fallback be driven anywhere; production still reads the real OS.
-        bool? unixLike = null)
+        bool? unixLike = null,
+        CertbotRenewalInspector? renewalInspector = null)
         : base(logger, shell)
     {
         _collectCertificates = collectCertificates ?? CollectCertificates;
         _fileExists = fileExists ?? File.Exists;
         _unixLike = unixLike ?? !OperatingSystem.IsWindows();
+        _renewalInspector = renewalInspector ?? new CertbotRenewalInspector(ReadFileOrNull, File.Exists);
     }
 
     public async Task<CertbotDataDto> CollectAsync(CancellationToken ct = default)
@@ -52,11 +55,14 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
             if (binary is null)
                 return new CertbotDataDto { IsInstalled = false };
 
+            var (renewalCheckedAt, renewalCheckSucceeded) = _renewalInspector.ReadRenewalCheck();
             return new CertbotDataDto
             {
                 IsInstalled = true,
                 Version = await CollectVersionAsync(binary, ct).ConfigureAwait(false),
-                Certificates = _collectCertificates().Take(2048).ToList()
+                Certificates = _renewalInspector.Annotate(_collectCertificates().Take(2048)),
+                RenewalCheckedAt = renewalCheckedAt,
+                RenewalCheckSucceeded = renewalCheckSucceeded
             };
         }
         catch (Exception ex)
@@ -164,6 +170,20 @@ public sealed partial class CertbotCollector : BaseShellCollector<CertbotCollect
             }
         }
         return result;
+    }
+
+    // Renewal settings are optional context: a missing or unreadable file means "unknown", not a failure.
+    private string? ReadFileOrNull(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.LogDebug(ex, "Cannot read {Path}", path);
+            return null;
+        }
     }
 
     private static List<string> ExtractDomains(X509Certificate2 cert)

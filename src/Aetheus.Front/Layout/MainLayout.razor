@@ -12,18 +12,26 @@
 
 <a href="#main-content" class="skip-link">@L["SkipToContent"]</a>
 
-<RadzenLayout data-testid="blazor-ready"
+@* Recette R-242: the package tooltip for every title attribute, instead of the browser box. *@
+<OmniTitleTooltips />
+
+<OmniLayout data-testid="blazor-ready"
               data-viewport="@(_viewportKnown ? "ready" : "pending")"
-              class="@(_viewportKnown ? "viewport-ready" : "viewport-pending")">
-    <RadzenHeader>
-        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0" class="rz-px-2 rz-px-sm-4 header-bar">
+              Class="@(_viewportKnown ? "viewport-ready" : "viewport-pending")">
+    <OmniHeader>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+                   Gap="OmniSpacing.None" Class="header-bar">
             @if (AuthenticatedChromeReady)
             {
-                <RadzenSidebarToggle Click="@ToggleSidebar" aria-label="@L["ToggleSidebar"]" />
+                @* Recette R-043, STD-SHELL: given the sidebar's reveal, OE's toggle keeps the menu glyph while
+                   the sidebar is pushed and shows a close cross while the drawer covers the page. *@
+                <OmniSidebarToggle Controls="app-sidebar" Open="@_sidebarExpanded" Reveal="@SidebarReveal"
+                                   OpenChanged="@OnSidebarOpenChanged"
+                                   Label="@L["ToggleSidebar"]" />
             }
-            <a href="/" class="app-home-link">
+            <a href="/" class="app-home-link" aria-label="@L["Aetheus"]">
                 <img src="aetheus-icon.svg" alt="" class="app-header-icon" />
-                <RadzenText TextStyle="TextStyle.Subtitle1" class="rz-m-0 app-title">@L["Aetheus"]</RadzenText>
+                <OmniText Class="app-title">@L["Aetheus"]</OmniText>
             </a>
             <div class="flex-spacer"></div>
             @if (!_isProduction)
@@ -32,153 +40,153 @@
                    app.css) so it stays mid-bar whatever the left/right content widths are -
                    a single chip lands dead-centre too. Order: environment, then label, then
                    branch; each chip shows only when its value is present. *@
-                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.375rem" class="dev-env-banner">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+                           Gap="OmniSpacing.Small" Class="dev-env-banner">
                     <span class="dev-env-chip dev-env-chip-env" title="@L["DevBannerEnvTooltip"]">
-                        <RadzenIcon Icon="dns" class="dev-env-chip-icon" />
+                        <OmniIcon Name="OmniIconName.Database" Class="dev-env-chip-icon" />
                         <span class="dev-env-chip-text">@_envName</span>
                     </span>
                     @if (!string.IsNullOrWhiteSpace(_devLabel))
                     {
                         <span class="dev-env-chip dev-env-chip-label" title="@L["DevBannerLabelTooltip"]">
-                            <RadzenIcon Icon="label" class="dev-env-chip-icon" />
+                            <OmniIcon Name="OmniIconName.Tag" Class="dev-env-chip-icon" />
                             <span class="dev-env-chip-text">@_devLabel</span>
                         </span>
                     }
                     @if (!string.IsNullOrWhiteSpace(_devBranch))
                     {
                         <span class="dev-env-chip dev-env-chip-branch" title="@L["DevBannerBranchTooltip"]">
-                            <RadzenIcon Icon="account_tree" class="dev-env-chip-icon" />
+                            <OmniIcon Name="OmniIconName.Graph" Class="dev-env-chip-icon" />
                             <span class="dev-env-chip-text">@_devBranch</span>
                         </span>
                     }
-                </RadzenStack>
+                </OmniStack>
             }
             @if (AuthenticatedChromeReady)
             {
-                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+                           Gap="OmniSpacing.XSmall" Class="header-actions">
                     @{
                         var connected = BackendConnected;
                         var reconnecting = _signalRState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Reconnecting;
                         var connClass = connected ? "header-conn-online" : reconnecting ? "header-conn-warning" : "header-conn-offline";
                     }
-                    <RadzenIcon Icon="@(connected ? "wifi" : "wifi_off")"
+                    <OmniIcon Name="@(connected ? OmniIconName.WifiHigh : OmniIconName.WifiSlash)"
                                 title="@(connected ? L["ConnectedToBackend"] : L["NotConnectedToBackend"])"
-                                aria-label="@(connected ? L["ConnectedToBackend"] : L["NotConnectedToBackend"])"
-                                class="@($"header-conn-icon {connClass}")" />
+                                Label="@(connected ? L["ConnectedToBackend"] : L["NotConnectedToBackend"])"
+                                Class="@($"header-conn-icon {connClass}")" />
                     @* Global search is not wired yet: the field and its mobile overlay were removed rather
                        than ship a dead control (SR7M). Reinstate the input here once search is implemented. *@
-                    <RadzenButton Icon="help" Size="ButtonSize.Small"
-                        Click="@NavigateToHelp" title="@L["Help"]" aria-label="@L["Help"]" class="header-action-btn" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
+                    <OmniButton Variant="OmniButtonVariant.Ghost" OnClick="NavigateToHelp"
+                                title="@L["Help"]" Label="@L["Help"]" Class="header-action-btn">
+                        <OmniIcon Name="OmniIconName.Question" />
+                    </OmniButton>
+                    <PendingApprovalsIndicator />
                     <TaskTrackerWidget />
-                    <div class="user-menu-container">
-                        <RadzenButton Size="ButtonSize.Small"
-                            Click="@ToggleUserMenu"
-                            title="@Auth.Username"
-                            aria-label="@Auth.Username"
-                            aria-haspopup="menu"
-                            aria-controls="user-menu-popover"
-                            aria-expanded="@_userMenuOpen"
-                            class="header-action-btn header-user-btn">
-                            <RadzenIcon Icon="person" class="header-icon" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
-                            <span class="display-name">@Auth.Username</span>
-                            <RadzenIcon Icon="@(_userMenuOpen ? "expand_less" : "expand_more")" class="header-icon" />
-                        </RadzenButton>
-                        @if (_userMenuOpen)
+                    @* R-112: notification bell, next to the task tracker and built like it. *@
+                    <Aetheus.Front.Components.Notifications.NotificationBell />
+                    @* STD-SHELL, recette R2-022 (OE 1.4.0): the end of the bar is the package's application menu,
+                       the same in every application: who is signed in and their role, the organisation (the
+                       application's own row), the language, the mode, the theme (the appearance window), the
+                       settings, then the version and signing out. *@
+                    <OmniAppMenu Class="header-app-menu" Open="@_userMenuOpen" OpenChanged="@(open => _userMenuOpen = open)"
+                                 UserName="@Auth.Username" Role="@(Auth.IsAdmin ? L["Admin"] : L["User"])"
+                                 Languages="@Languages" Language="@CurrentLanguage" LanguageChanged="@OnLanguageChanged"
+                                 Appearance="@Appearance.Appearance" AppearanceChanged="@Appearance.SetAppearanceAsync"
+                                 Preset="@Appearance.Preset" OnTheme="@OnThemeMenuClick" OnSettings="@OnSettingsMenuClick"
+                                 Version="@($"Aetheus v{_version}")" OnSignOut="@OnLogout">
+                        @if (Orgs.IsLoaded && Orgs.Available.Count > 0)
                         {
-                            <div @onclick="CloseUserMenu" class="user-menu-backdrop"></div>
-                            <RadzenCard id="user-menu-popover" role="menu" @onkeydown="HandleUserMenuKeyDown" class="user-menu-card">
-                                <div class="rz-px-4 rz-py-3 user-menu-section">
-                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["Role"]</RadzenText>
-                                    <RadzenBadge Text="@(Auth.IsAdmin ? L["Admin"] : L["User"])" BadgeStyle="BadgeStyle.Info" class="rz-mt-1" />
-                                    <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mt-1">Aetheus v@_version</RadzenText>
-                                </div>
-                                @if (Orgs.IsLoaded && Orgs.Available.Count > 0)
-                                {
-                                    <div class="rz-px-4 rz-py-3 user-menu-section">
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary rz-mb-2">@L["ActiveOrganization"]</RadzenText>
-                                        <RadzenDropDown TValue="int"
-                                                        Data="@Orgs.Available"
-                                                        TextProperty="Name"
-                                                        ValueProperty="Id"
-                                                        Value="@(Orgs.Active?.Id ?? 0)"
-                                                        Change="@OnActiveOrgChanged"
-                                                        AllowClear="false"
-                                                        aria-label="@L["ActiveOrganization"]"
-                                                        class="user-menu-org-picker" />
-                                    </div>
-                                }
-                                else if (Auth.IsAdmin && Orgs.IsLoaded)
-                                {
-                                    <div class="rz-px-4 rz-py-3 user-menu-section">
-                                        <RadzenText TextStyle="TextStyle.Caption" class="rz-color-secondary">@L["ActiveOrganization"]</RadzenText>
-                                        <RadzenBadge Text="@L["AllOrganizations"]" BadgeStyle="BadgeStyle.Light" class="rz-mt-1" />
-                                    </div>
-                                }
-                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="ToggleLanguage" @onkeydown="@(e => ActivateOnKey(e, ToggleLanguage))" role="menuitem" tabindex="0">
-                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
-                                        <RadzenIcon Icon="translate" />
-                                        <RadzenText TextStyle="TextStyle.Body2">@L["Language"]</RadzenText>
-                                        <div class="flex-spacer"></div>
-                                        <RadzenBadge Text="@_currentLangLabel" BadgeStyle="BadgeStyle.Light" />
-                                    </RadzenStack>
-                                </div>
-                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="ToggleDarkMode" @onkeydown="@(e => ActivateOnKey(e, ToggleDarkMode))" role="menuitem" tabindex="0">
-                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
-                                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
-                                            <RadzenIcon Icon="@(_darkMode ? "dark_mode" : "light_mode")" />
-                                            <RadzenText TextStyle="TextStyle.Body2">@(_darkMode ? L["DarkMode"] : L["LightMode"])</RadzenText>
-                                        </RadzenStack>
-                                        <RadzenSwitch Value="@_darkMode" class="theme-switch-readonly" aria-hidden="true" />
-                                    </RadzenStack>
-                                </div>
-                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="OnSettingsMenuClick" @onkeydown="@(e => ActivateOnKey(e, OnSettingsMenuClick))" role="menuitem" tabindex="0">
-                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
-                                        <RadzenIcon Icon="settings" />
-                                        <RadzenText TextStyle="TextStyle.Body2">@L["Settings"]</RadzenText>
-                                    </RadzenStack>
-                                </div>
-                                <div class="rz-px-4 rz-py-3 user-menu-section-clickable" @onclick="OnLogoutMenuClick" @onkeydown="@(e => ActivateOnKey(e, OnLogoutMenuClick))" role="menuitem" tabindex="0">
-                                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
-                                        <RadzenIcon Icon="logout" />
-                                        <RadzenText TextStyle="TextStyle.Body2">@L["Logout"]</RadzenText>
-                                    </RadzenStack>
-                                </div>
-                            </RadzenCard>
+                            <OmniText Tone="OmniTextTone.Muted" Class="user-menu-caption">@L["ActiveOrganization"]</OmniText>
+                            <OmniDropDown TValue="int"
+                                          Options="@ActiveOrganizationOptions"
+                                          Value="@ActiveOrganizationId"
+                                          ValueChanged="@(id => OnActiveOrgChanged(id))"
+                                          ValueExpression="@(() => ActiveOrganizationId)"
+                                          Label="@L["ActiveOrganization"]"
+                                          Class="user-menu-org-picker" />
                         }
-                    </div>
-                </RadzenStack>
+                        else if (Auth.IsAdmin && Orgs.IsLoaded)
+                        {
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+                                       Justify="OmniJustification.Between" Gap="OmniSpacing.Small" Class="user-menu-all-orgs">
+                                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                                    <OmniIcon Name="OmniIconName.Buildings" />
+                                    <OmniText>@L["ActiveOrganization"]</OmniText>
+                                </OmniStack>
+                                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@L["AllOrganizations"]</OmniBadge>
+                            </OmniStack>
+                        }
+                    </OmniAppMenu>
+                </OmniStack>
             }
-        </RadzenStack>
-    </RadzenHeader>
+            else if (!Auth.IsAuthenticated)
+            {
+                @* Signed out (the login page): the same menu without an account, its trigger an icon; the mode,
+                   the theme and the language stay at the right of the bar (recette R-006). *@
+                <OmniAppMenu Class="header-app-menu" Open="@_userMenuOpen" OpenChanged="@(open => _userMenuOpen = open)"
+                             Languages="@Languages" Language="@CurrentLanguage" LanguageChanged="@OnLanguageChanged"
+                             Appearance="@Appearance.Appearance" AppearanceChanged="@Appearance.SetAppearanceAsync"
+                             Preset="@Appearance.Preset" OnTheme="@OnThemeMenuClick" />
+            }
+        </OmniStack>
+        <PageLoadProgressBar />
+    </OmniHeader>
 
+    <OmniBody>
     @if (AuthenticatedChromeReady && !Auth.MustChangePassword)
     {
-        <RadzenSidebar @bind-Expanded="@_sidebarExpanded" Responsive="false" class="sidebar-width" role="navigation" aria-label="@L["MainNavigation"]">
-            <NavMenu OnNavigate="@OnSidebarNavigationRequested" />
-        </RadzenSidebar>
-        @if (_isMobile && _sidebarExpanded)
-        {
-            <div class="sidebar-backdrop" @onclick="@(() => _sidebarExpanded = false)"></div>
-        }
+        <OmniSidebar Id="app-sidebar" Open="@_sidebarExpanded" OpenChanged="@OnSidebarOpenChanged"
+                     Position="OmniSidebarPosition.Start"
+                     Reveal="@SidebarReveal"
+                     Collapse="@(_isMobile ? OmniSidebarCollapse.Hidden : OmniSidebarCollapse.Icons)"
+                     Transition="OmniSidebarTransition.Smooth"
+                     Backdrop="@_isMobile" Class="sidebar-width" Label="@L["MainNavigation"]"
+                     CloseLabel="@L["CloseSidebar"]">
+            @* Recette R-042 (ASTRAIA parity): the open phone drawer rises over the app bar to the top of
+               the screen and carries its corner, a close cross and the logo. OE shows this header only
+               while the panel floats open, so the pushed desktop sidebar is unchanged. *@
+            <Header>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+                           Gap="OmniSpacing.None" Class="header-bar sidebar-drawer-header">
+                    <OmniSidebarToggle Controls="app-sidebar" Open="@_sidebarExpanded" Reveal="@SidebarReveal"
+                                       OpenChanged="@OnSidebarOpenChanged" Label="@L["CloseSidebar"]" />
+                    <a href="/" class="app-home-link" aria-label="@L["Aetheus"]">
+                        <img src="aetheus-icon.svg" alt="" class="app-header-icon" />
+                        <OmniText Class="app-title">@L["Aetheus"]</OmniText>
+                    </a>
+                </OmniStack>
+            </Header>
+            <ChildContent>
+                @* OE closes a floating drawer itself when an entry is chosen (any navigation), on its veil
+                   and on Escape, through OpenChanged. *@
+                <NavMenu />
+            </ChildContent>
+        </OmniSidebar>
     }
 
-    <RadzenBody role="main" id="main-content">
-        <div class="rz-px-3 rz-py-3 app-body-wrapper">
+    <OmniMain Id="main-content" Scrollable="true">
+        <div class="omni-u-px-md omni-u-py-md app-body-wrapper">
             @if (_newVersionAvailable)
             {
-                <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" AllowClose="false" class="rz-mb-3 version-alert-bar">
-                    <RadzenIcon Icon="system_update" />
-                    <RadzenText TextStyle="TextStyle.Body1" class="version-alert-bar-text">@L["NewVersionAvailable"]</RadzenText>
-                    <RadzenButton Text="@L["ReloadNow"]" Icon="refresh" Click="@OnReloadClick" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-                </RadzenAlert>
+                <OmniAlert Severity="OmniSeverity.Success" Class="version-alert-bar">
+                    <Icon><OmniIcon Name="OmniIconName.Refresh" /></Icon>
+                    <ChildContent>
+                        <OmniText Class="version-alert-bar-text">@L["NewVersionAvailable"]</OmniText>
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="OnReloadClick">
+                            <OmniIcon Name="OmniIconName.Refresh" /> @L["ReloadNow"]
+                        </OmniButton>
+                    </ChildContent>
+                </OmniAlert>
             }
             @if (Auth.IsAuthenticated && !AuthenticatedChromeReady)
             {
-                <AetheusLoader Size="AetheusLoaderSize.Large" Class="session-bootstrap-loader" />
+                <AetheusLoader Size="OmniControlSize.Large" Class="session-bootstrap-loader" />
             }
             else if (_initialized)
             {
-                <AppBreadcrumb />
+                @* PLAN-003 lot 1: the trail moved inside PageHeader (one framed block per page), which
+                   also installs the route fallback it reads its title from. *@
                 @if (CanAccessCurrentRoute)
                 {
                     <LoggedErrorBoundary @ref="_errorBoundary">
@@ -186,18 +194,20 @@
                             @Body
                         </ChildContent>
                         <ErrorContent Context="exception">
-                            <RadzenCard class="rz-mx-auto error-card">
-                                <RadzenStack AlignItems="AlignItems.Center" Gap="1rem">
-                                    <RadzenIcon Icon="error" class="error-icon" />
-                                    <RadzenText TextStyle="TextStyle.H5">@L["ErrorOccurred"]</RadzenText>
-                                    <RadzenText TextStyle="TextStyle.Body1" class="rz-color-secondary">@L["ErrorMessage"]</RadzenText>
+                            <OmniCard Class="error-card">
+                                <OmniStack Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+                                    <OmniIcon Name="OmniIconName.Error" Class="error-icon" />
+                                    <OmniHeading Level="OmniHeadingLevel.H5">@L["ErrorOccurred"]</OmniHeading>
+                                    <OmniText Tone="OmniTextTone.Muted">@L["ErrorMessage"]</OmniText>
                                     @if (HostEnv.Environment == "Development")
                                     {
                                         <pre class="dev-exception-pre">@exception.ToString()</pre>
                                     }
-                                    <RadzenButton Text="@L["Recover"]" Icon="refresh" Click="@RecoverError" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-                                </RadzenStack>
-                            </RadzenCard>
+                                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="RecoverError">
+                                        <OmniIcon Name="OmniIconName.Refresh" /> @L["Recover"]
+                                    </OmniButton>
+                                </OmniStack>
+                            </OmniCard>
                         </ErrorContent>
                     </LoggedErrorBoundary>
                 }
@@ -207,15 +217,21 @@
                 }
             }
         </div>
-    </RadzenBody>
-</RadzenLayout>
+    </OmniMain>
+    </OmniBody>
+    @* Recette R-390: the window the user menu's "Theme" opens (theme, palette, density). *@
+    <Aetheus.Front.Components.Settings.SiteAppearanceWindow @ref="_appearanceWindow" />
+</OmniLayout>
 
 <ConnectionLostDialog Visible="@_showOfflineDialog"
-                      ReconnectCountdown="@_reconnectCountdown"
+                      ReconnectCountdown="@_countdown.Remaining"
                       ManualReconnecting="@_manualReconnecting"
+                      LastFailureReason="@TaskTracker.LastFailureReason"
                       OnManualReconnect="@OnManualReconnect" />
 
-<RadzenDialog />
-<RadzenNotification />
-<RadzenTooltip />
-
+@* The short catch-up when the page comes back to the foreground (a phone put down during a run). It
+   gives way to the connection-lost overlay above, which stays the authority on a real outage. *@
+@if (AuthenticatedChromeReady)
+{
+    <RealtimeSyncIndicator OfflineOverlayShown="@_showOfflineDialog" />
+}

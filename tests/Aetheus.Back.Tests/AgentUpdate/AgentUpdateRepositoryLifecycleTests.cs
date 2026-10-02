@@ -4,9 +4,6 @@ using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 
@@ -210,7 +207,9 @@ public sealed class AgentUpdateRepositoryLifecycleTests : IDisposable
             new ServerTask { Id = 4, ServerId = 1, Status = TaskExecutionStatus.Success },
             new ServerTask
             {
-                Id = 5, ServerId = 1, Status = TaskExecutionStatus.Running,
+                Id = 5,
+                ServerId = 1,
+                Status = TaskExecutionStatus.Running,
                 Operation = OperationKind.AgentSelfUpdate
             },
             new ServerTask { Id = 6, ServerId = 2, Status = TaskExecutionStatus.Running });

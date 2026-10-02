@@ -10,8 +10,8 @@ namespace Aetheus.Back.Tests.Architecture;
 /// it is really a test that stopped protecting anything, and nobody notices when the condition it
 /// waits for never comes back. The two honest alternatives are used instead across the repository:
 /// make the dependency injectable (or resolve the tool from PATH) so the test runs everywhere, or
-/// declare <c>[Trait("Platform", "windows"|"linux")]</c> so the runner excludes it on the foreign OS
-/// and the test does not appear in the results at all.
+/// declare it <c>[PlatformFact]</c>/<c>[PlatformTheory]</c> (tests/Shared/PlatformSpecificTests.cs) so
+/// discovery leaves it out on the foreign OS and the test does not appear in the results at all.
 ///
 /// This guard is deliberately whitelist-free. Adding an exemption requires deleting that decision
 /// from here in the open, which is the point.

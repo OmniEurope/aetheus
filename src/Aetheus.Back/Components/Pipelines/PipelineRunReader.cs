@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.GitGraph;
-using Aetheus.Shared.Helpers;
 using static Aetheus.Back.Components.Pipelines.PipelineDtoMapper;
-using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
+using static Aetheus.Back.Components.Pipelines.PipelineRunDtoMapper;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -21,14 +20,43 @@ public interface IPipelineRunReader
 public sealed class PipelineRunReader(
     IPipelineRepository repo,
     IGitGraphRecorder gitGraph,
-    ISecretMaskingService secretMasking) : IPipelineRunReader
+    ISecretMaskingService secretMasking,
+    IPipelineVariableResolver variableResolver) : IPipelineRunReader
 {
     public async Task<PipelineRunDto?> GetRunAsync(int runId, CancellationToken ct = default)
     {
         var run = await repo.GetRunDetailAsync(runId, ct).ConfigureAwait(false);
         if (run is null) return null;
 
-        var dto = MapRunToDto(run);
+        // R-484: the detail query leaves every result row out. The tests are counted by outcome, the
+        // coverage and lint figures, the metrics and the artifacts are computed and projected by the
+        // database; the coverage per-file list is read by the Coverage tab when it opens.
+        var results = await repo.GetRunResultSummariesAsync(run, ct).ConfigureAwait(false);
+        var dto = MapRunToDto(run) with
+        {
+            TestResultSummary = await repo.GetTestResultSummaryAsync(runId, ct).ConfigureAwait(false),
+            CoverageSummary = results.Coverage,
+            LintSummary = results.Lint,
+            Metrics = results.Metrics,
+            Artifacts = results.Artifacts
+        };
+        // Warnings are written once, at launch. On a run that has not finished, a missing variable
+        // library the user has since created is no longer missing, and showing it as a live warning on a
+        // RUNNING run says otherwise. Re-asked here rather than rewritten in the database: the stored
+        // list stays the launch record, this is what is true when someone looks.
+        if (dto.Warnings.Count > 0 && run.Status is PipelineStatus.Pending or PipelineStatus.Running
+                or PipelineStatus.WaitingForApproval)
+        {
+            var current = await variableResolver
+                .DropResolvedLibraryWarningsAsync(dto.Warnings, run.Pipeline?.ProjectId, ct).ConfigureAwait(false);
+            if (current is not null && current.Count != dto.Warnings.Count) dto = dto with { Warnings = current };
+        }
+        // A candidate run owns no evaluation of its own (it delegates every analysis to a child
+        // pipeline and publishes its verdict via CANDIDATE_ASSURANCE_GRADE); the detail path already
+        // loaded Steps.OutputVariables in full, so this resolves synchronously, no extra query.
+        dto = PipelineRunGradeHydration.Apply(dto);
+        if (dto.GateGrade is null)
+            dto = await repo.HydrateLinkedGradeAsync(dto, ct).ConfigureAwait(false);
         var queuedTaskIds = dto.Steps
             .Where(step => step.Status == TaskExecutionStatus.Assigned && step.TaskId.HasValue)
             .Select(step => step.TaskId!.Value)

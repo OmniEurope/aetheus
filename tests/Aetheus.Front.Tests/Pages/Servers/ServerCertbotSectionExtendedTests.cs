@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -15,6 +14,7 @@ public class ServerCertbotSectionExtendedTests : BunitContext
     public ServerCertbotSectionExtendedTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
         _handler.SetJsonResponse("api/servers/10/certbot/action", true);
         _handler.SetJsonResponse("api/servers/10/certbot/create", true);
     }
@@ -136,46 +136,6 @@ public class ServerCertbotSectionExtendedTests : BunitContext
     }
 
     [Fact]
-    public void ShowConfirm_SetsAllConfirmFields()
-    {
-        var cut = RenderSection();
-        Func<Task> action = () => Task.CompletedTask;
-        typeof(ServerCertbotSection).GetMethod("ShowConfirm", Priv)!
-            .Invoke(cut.Instance, ["Title", "Message", action]);
-
-        Assert.True((bool)typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-        Assert.Equal("Title", (string)typeof(ServerCertbotSection).GetField("_confirmTitle", Priv)!.GetValue(cut.Instance)!);
-        Assert.Equal("Message", (string)typeof(ServerCertbotSection).GetField("_confirmMessage", Priv)!.GetValue(cut.Instance)!);
-    }
-
-    [Fact]
-    public async Task ConfirmAccepted_ExecutesActionAndHides()
-    {
-        var cut = RenderSection();
-        var ran = false;
-        typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerCertbotSection).GetField("_confirmAction", Priv)!.SetValue(cut.Instance, (Func<Task>)(() => { ran = true; return Task.CompletedTask; }));
-
-        await (Task)typeof(ServerCertbotSection).GetMethod("ConfirmAccepted", Priv)!.Invoke(cut.Instance, [])!;
-
-        Assert.False((bool)typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-        Assert.True(ran);
-    }
-
-    [Fact]
-    public void ConfirmCancelled_HidesAndClearsAction()
-    {
-        var cut = RenderSection();
-        typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerCertbotSection).GetField("_confirmAction", Priv)!.SetValue(cut.Instance, (Func<Task>)(() => Task.CompletedTask));
-
-        typeof(ServerCertbotSection).GetMethod("ConfirmCancelled", Priv)!.Invoke(cut.Instance, []);
-
-        Assert.False((bool)typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-        Assert.Null(typeof(ServerCertbotSection).GetField("_confirmAction", Priv)!.GetValue(cut.Instance));
-    }
-
-    [Fact]
     public async Task ExecuteActionAsync_RenewAll_SetsActionRunningFalseAfter()
     {
         var cut = RenderSection();
@@ -222,13 +182,33 @@ public class ServerCertbotSectionExtendedTests : BunitContext
     }
 
     [Fact]
-    public async Task ConfirmAccepted_NullAction_LeavesTheFlagOff()
+    public void NewCertificateButton_IsDisabled_WhileRenewAllRuns()
     {
+        // PLAN-005 lot 4: only Renew all is veiled; New certificate keeps the "an action is running"
+        // interlock in its Disabled.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(HttpMethod.Post, "api/servers/10/certbot/action", async ct =>
+        {
+            await release.Task.WaitAsync(ct);
+            return new { };
+        });
         var cut = RenderSection();
-        typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerCertbotSection).GetField("_confirmAction", Priv)!.SetValue(cut.Instance, null);
+        AngleSharp.Dom.IElement Button(string text) => cut.FindAll("button").Single(b =>
+            b.QuerySelector(".rz-button-text")?.TextContent.Trim() == text
+            || b.TextContent.Trim() == text
+            || b.GetAttribute("title") == text);
+        Assert.False(Button("NewCertificate").HasAttribute("disabled"));
 
-        await (Task)typeof(ServerCertbotSection).GetMethod("ConfirmAccepted", Priv)!.Invoke(cut.Instance, [])!;
-        Assert.False((bool)typeof(ServerCertbotSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
+        ((Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>()).ConfirmResult = true;
+        Button("RenewAll").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("btn-busy", Button("RenewAll").ClassName, StringComparison.Ordinal);
+            Assert.True(Button("NewCertificate").HasAttribute("disabled"));
+        });
+        release.SetResult();
+        cut.WaitForAssertion(() => Assert.False(Button("NewCertificate").HasAttribute("disabled")));
     }
+
 }

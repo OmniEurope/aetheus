@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.AppBackups;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Backups;
@@ -227,21 +226,39 @@ public sealed class BackupRepositoryTests : IDisposable
         _db.BackupPolicies.AddRange(
             new BackupPolicy
             {
-                Id = 1, Name = "aaa", ProjectId = 11, ServerId = 21, Enabled = true,
-                DbEngine = BackupDbEngine.MySql, ScheduleCron = "0 1 * * *",
-                RetentionCount = 30, LastRunAt = Origin
+                Id = 1,
+                Name = "aaa",
+                ProjectId = 11,
+                ServerId = 21,
+                Enabled = true,
+                DbEngine = BackupDbEngine.MySql,
+                ScheduleCron = "0 1 * * *",
+                RetentionCount = 30,
+                LastRunAt = Origin
             },
             new BackupPolicy
             {
-                Id = 2, Name = "mmm", ProjectId = 10, ServerId = 22, Enabled = false,
-                DbEngine = BackupDbEngine.None, ScheduleCron = "0 2 * * *",
-                RetentionCount = 7, LastRunAt = Origin.AddDays(1)
+                Id = 2,
+                Name = "mmm",
+                ProjectId = 10,
+                ServerId = 22,
+                Enabled = false,
+                DbEngine = BackupDbEngine.None,
+                ScheduleCron = "0 2 * * *",
+                RetentionCount = 7,
+                LastRunAt = Origin.AddDays(1)
             },
             new BackupPolicy
             {
-                Id = 3, Name = "zzz", ProjectId = 12, ServerId = 20, Enabled = true,
-                DbEngine = BackupDbEngine.Postgres, ScheduleCron = "0 3 * * *",
-                RetentionCount = 14, LastRunAt = Origin.AddDays(2)
+                Id = 3,
+                Name = "zzz",
+                ProjectId = 12,
+                ServerId = 20,
+                Enabled = true,
+                DbEngine = BackupDbEngine.Postgres,
+                ScheduleCron = "0 3 * * *",
+                RetentionCount = 14,
+                LastRunAt = Origin.AddDays(2)
             });
         await SaveAsync();
         _db.ChangeTracker.Clear();

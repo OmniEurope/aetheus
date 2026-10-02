@@ -139,7 +139,7 @@ working in order to deploy a fix to it.
 
 What stays outside the template on the production path is what no generic cutover can know: the
 candidate contract, secret-zero and the production state directory (`prod-deploy-prepare.sh`), the
-Radzen/WASM runtime contract (`prod-frontend-runtime-check.sh`, an application that answers every
+WASM runtime contract (`prod-frontend-runtime-check.sh`, an application that answers every
 health probe and then fails at the first data grid), and the vitrine published on the same host
 (`prod-vitrine-transaction.sh`, snapshotted before publication because `bluegreen-rollback` restores
 the application colour and the upstream configuration and knows nothing about a static site).
@@ -188,9 +188,11 @@ pipelines that use Docker Compose must distinguish **colour-scoped services** fr
 - A fast pipeline may skip functional CI/QA, but it must never skip infrastructure readiness or
   weaken service targeting. Schema changes still require the full release path and expand/contract
   compatibility.
-- Keep `SelfDeployPipelineYamlParseTests` green. It guards the explicit old-colour stop and the
-  readiness probes in both `.pipeline/aetheus-deploy-prod.yaml` and
-  `deploy/compose/remote-bluegreen.compose.yml`.
+- **No test guards these rules.** `.pipeline/**` is deliberately out of the Architecture Guard Tests'
+  scope (see `AGENTS.md`), so the explicit old-colour stop and the readiness probes in
+  `.pipeline/aetheus-deploy-prod.yaml` and `deploy/compose/remote-bluegreen.compose.yml` are held by
+  review and by running the pipeline, not by asserting on its YAML. Editing either file means
+  re-reading this list.
 
 The production incident that motivated these rules and the recovery procedure are documented in
 [`docs/self-deploy-guide.md`](../../../../docs/self-deploy-guide.md#5-chronologie-condensee-references).
@@ -219,8 +221,16 @@ The production incident that motivated these rules and the recovery procedure ar
 | `/api/pipelines/runs/{runId}` | GET | User | Run detail |
 | `/api/pipelines/runs/{runId}/queue` | GET | User | État courant de la file et du runner affecté au run |
 | `/api/pipelines/runs/{runId}/checkpoint-resume-preview` | GET | User | Prévisualisation des checkpoints réutilisables et des sous-pipelines à rejouer |
+| `/api/pipelines/runs/{runId}/lineage` | GET | User + Pipeline Read | Run lineage tile (recette R-498): the run that launched this one and the runs it started. Downstream runs of a pipeline the caller cannot read are left out |
+| `/api/pipelines/{id}/runs/{runId}/stage-baselines` | GET | User + Pipeline Read | Usual duration of each stage and step, averaged over the pipeline's last successful runs |
+| `/api/pipelines/runs/active-workspaces` | GET | AgentToken | Workspace slots of the runs still in flight, so an agent can reclaim the disk of the others |
+| `/api/pipelines/approvals/pending` | GET | User | Every approval still pending on a caller-readable pipeline |
+| `/api/pipelines/setup/readiness` | POST | User + Project Write | Setup wizard: what would stop the pipelines about to be created from running |
+| `/api/pipelines/setup/unmet` | GET | User + Project Read | Libraries and vaults the project's pipelines require and the project lacks |
+| `/api/pipelines/setup/provision` | POST | User + Project Write + Library/Vault Write | Create the libraries and vaults the selected templates require, keys with empty values |
+| `/api/pipelines/setup/provision-unmet` | POST | User + Project Write + Library/Vault Write | Create what `setup/unmet` reports for the existing pipelines |
 | `/api/pipelines/runs/{runId}/cancel` | POST | User | Cancel a run and its active triggered descendants recursively |
-| `/api/pipelines/runs/{runId}/retry-failed` | POST | User+ServerAdmin | Retry failed steps |
+| `/api/pipelines/runs/{runId}/retry-failed` | POST | User+ServerAdmin | Retry failed steps. A refusal is a `409` naming its own reason (`ConflictException`), not a bare `404`: the three refusals used to share one silent `false`, so an unretryable run looked exactly like a retry that had been attempted and failed. The refusal raised when nothing can be reset says that a run replays the YAML captured when it was triggered ([ADR-015](../../../../docs/adr/ADR-015-git-strict-project-pipelines.md)) and points at **Re-run** for a definition that has since been edited. |
 | `/api/pipelines/runs/{runId}/rerun` | POST | User+ServerAdmin | Relancer depuis la définition courante, un snapshot source ou une reprise explicite par checkpoints vérifiés |
 | `/api/pipelines/runs/{runId}/artifacts` | GET | User | List artifacts |
 | `/api/pipelines/runs/{runId}/artifacts` | POST | AgentToken | Publish artifact |
@@ -251,6 +261,7 @@ The production incident that motivated these rules and the recovery procedure ar
 | `/api/pipelines/templates/import` | POST | Admin | Import template from file |
 | `/api/pipelines/templates/{id}/resolve` | POST | User | Resolve template parameters |
 | `/api/pipelines/fleet` | GET | User | List the caller-visible pipeline fleet |
+| `/api/pipelines/fleet/filter-values` | GET | User | Template names offered by the fleet's Template column filter, in the fleet's scope |
 | `/api/pipelines/{id}/fleet-item` | GET | User | Fleet item detail |
 | `/api/pipelines/{id}/fleet-update/preview` | POST | User + Pipeline Write + Template Read | Preview a template-based fleet update |
 | `/api/pipelines/{id}/fleet-update` | POST | User + Pipeline Write + Template Read | Apply a template-based fleet update |
@@ -280,6 +291,7 @@ The production incident that motivated these rules and the recovery procedure ar
 - `IPipelineVariableResolver` / `PipelineVariableResolver` -- resolves the full variable set (system, inline YAML, libraries, vaults, cross-access) with warnings and secret-key tracking
 - `IPipelineGitService` / `PipelineGitService` -- git-strict storage for project-owned pipeline definitions (read/write `.pipeline/*.yaml`, env→project copy; internal repos only)
 - `IPipelineApprovalService` / `PipelineApprovalService` -- gate approvals
+- `PipelineOwnerAuthorization` -- authorizes the **whole** owner triple a create/update request names (project, environment, project server), not just the project. A project server is resolved to its owning project because there is no `ResourceType.ProjectServer`; an owner that cannot be resolved is refused, never skipped. Called by both write paths of `PipelinesController`.
 - `IPipelineArtifactService` / `PipelineArtifactService` -- artifact + test-result + coverage storage
 - `PipelineArtifactRepository` -- focused artifact persistence collaborator used by `PipelineCoreRepository`
 - `PipelineBuildNumberRepository` -- reserves the per-pipeline build counter (`BUILD_PIPELINE_RUNNUMBER`) under a row lock, joining an ambient transaction when one is open
@@ -289,14 +301,17 @@ The production incident that motivated these rules and the recovery procedure ar
 - `IPipelineWebhookService` / `PipelineWebhookService` -- webhook signature verification
 - `IPipelineRepository` / `PipelineRepository` -- facade composing `PipelineCoreRepository` (core data access, with artifact persistence delegated to `PipelineArtifactRepository`), `PipelineServerResolver` (server resolution, org-fallback, effective-project-id), `PipelineCoverageRepository` (coverage queries), `PipelineLifecycleRepository` (retention/lifecycle), and `PipelineDependencyGraphRepository` (dependency graph queries)
 - `PipelineSchedulerService` -- background: cron-triggered runs
+- `PipelineRefusedLaunchRecorder` -- recette R-522: a refused automated launch (schedule, push, webhook) has nobody to read the refusal, so it is recorded as a run that failed at once and carries the reason in its warnings, with an audit line (`LaunchRefused`) and the `pipeline.launch-refused` notification. The launcher calls it for a refused preparation (`PrepareAutomatedRunAsync`) and for a refused launch (`TriggerPreparedAutomatedRunAsync`). Inside an open transaction (`IDbTransactionScope.InTransaction`) it records nothing, since the caller's rollback would erase the run after its events had gone out: the webhook, which launches inside one, records the refusal once its transaction has rolled back, so it is recorded exactly once. Once the run is saved, the audit line, the live event and the notification are best effort (a failure is logged and never replaces the refusal the caller rethrows). A refused interactive launch still creates no run
 - `PipelineRetentionService` -- background: old-run cleanup
-- `PipelineTriggerReconcileService` -- background trigger reconciliation; scheduler, retention and reconcile use `PostgresLeaderLease` so only one blue-green replica executes each workload
+- `PipelineTriggerReconcileService` -- background trigger reconciliation; scheduler, retention and reconcile use `PostgresLeaderLease` so only one blue-green replica executes each workload. Beyond the trigger passes it also expires stale approvals (`ExpireStaleApprovalsAsync`) and frees runs stranded on an approval that is no longer `Pending` (`ResolveStrandedApprovalsAsync`). The stranded pass only **re-applies a decision already recorded** -- approved resumes, rejected/timed-out fails -- and leaves a run with no approval row at all to a human, logged, rather than deciding on a background sweep's authority. It is bounded on both sides: `GetStrandedApprovalRunsAsync` returns at most 50 runs per sweep, and a run that keeps failing to leave the state is abandoned after 5 consecutive attempts with one `LogError`, instead of one `LogCritical` per tick forever.
 
 ## Canonical source and versioned configuration (2026-07-22)
 
 This section supersedes the historical DB-fallback wording above for workspace runs. A project pipeline binds to one canonical `SourceRepositoryId`; the same repository supplies `.pipeline/<name>.yaml`, the checkout URL, and the full immutable commit. Existing mono-repository projects are backfilled automatically. A multi-repository project without an explicit binding, or any workspace pipeline without a clone URL and full SHA, fails before a run is created.
 
 The `apache-config` step maps safe destination filenames to templates under `.pipeline/configs/**`. Templates are read from the run's exact SHA, render only strict `#{VAR}#` tokens, and are sent as one encrypted `ApacheApplyConfigSet` (311). The agent snapshots affected files and enabled links, runs the fixed privileged `configtest`, reloads once, and restores/reloads the previous set if either command fails. This path requires an installer upgrade with `--enable-apache-manage` so the root-owned no-argument helper exists.
+
+A definition may take its workspace from another repository of the project (`source:` block, recette R-534, ADR-012 amendment of 2026-09-30): `PipelineWorkspaceSourceResolver` fetches it when it is a mirror, pins its branch head and, with `must_match_definition`, refuses the run unless its tree is the tree of the definition's revision. The definition, its templates and `.pipeline/configs/**` stay on the canonical repository; their revision is kept on the run as `AETHEUS_DEFINITION_COMMIT`. A same-commit or checkpoint-resume rerun of such a run (`PipelineRunLauncher.RerunAsync`) reads the definition at that recorded revision and pins the workspace to the run's own `CommitHash` in the source repository (`PrepareRunAsync` `workspaceCommitOverride`, `ResolveAsync` `pinnedCommit`) instead of its branch head; the rerun is refused when that commit is no longer in the source repository. A `trigger` step that materialises a missing target pipeline reads its definition at the same definition revision (`PipelineTriggerStepCoordinator`), never at the workspace commit of another repository.
 
 Manual run requests carry an optional idempotency key. The database enforces uniqueness per pipeline and a replay returns the existing run without dispatching tasks twice. A declared but missing Vault blocks dry-run, preflight, and launch; missing variable libraries remain warnings.
 

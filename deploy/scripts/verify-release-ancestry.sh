@@ -9,6 +9,12 @@
 # 39b751bb while reading the contract from 9afff625, which still lacked the AETHEUS_WEB_ANALYTICS_*
 # names: the run reported success, the corrected code reached production, and the variables it needed
 # never did. The panels stayed empty and the deployment looked healthy.
+#
+# F4: this script never hardcoded "main" - it always checked the ref it was handed ($2, HEAD by
+# default). aetheus-deploy-prod now checks out `develop` (its source_branch), because `main` no longer
+# leads the deployment - it trails it, fast-forwarded to the deployed commit only AFTER a successful
+# deploy (by the backend, not by this pipeline). So this same ancestry proof now runs against develop instead of
+# main, with no change to the script itself.
 set -eu
 
 # This step deliberately receives no reusable Git credential, so a fetch that needs one must fail

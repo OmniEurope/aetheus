@@ -1,0 +1,22 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects/{Id:int}/edit"
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader.Project?.Name ?? L["Project"]) - @L["Edit"] - Aetheus</PageTitle>
+
+@* Standalone edit page (not wrapped in the tabbed ProjectDetailLayout): its own header + back link. *@
+@if (Loader.Project is null)
+{
+    <AetheusLoader />
+}
+else
+{
+    @* The breadcrumb already carries "Projects / @Loader.Project.Name / Edit" - repeating the
+       project name here would triple it, so the header keeps only the section title. *@
+    <OmniPageHeader Title="@L["Edit"]"
+        ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("folder")" /></Icon>
+    </OmniPageHeader>
+    <Aetheus.Front.Components.Projects.ProjectDetailSections.ProjectEditSection
+        Project="@Loader.Project" OnSaved="@OnSaved" />
+}

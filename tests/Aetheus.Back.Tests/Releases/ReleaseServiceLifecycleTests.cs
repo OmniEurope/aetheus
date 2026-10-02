@@ -10,8 +10,6 @@ using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -32,6 +30,7 @@ public sealed class ReleaseServiceLifecycleTests
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
     private readonly IHubContext<ReleaseHub> _releaseHub = Substitute.For<IHubContext<ReleaseHub>>();
     private readonly IPipelineRepository _pipelineRepository = Substitute.For<IPipelineRepository>();
+    private readonly IArtifactRepository _artifactRepository = Substitute.For<IArtifactRepository>();
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(NowUtc));
     private readonly ReleaseService _service;
 
@@ -42,6 +41,9 @@ public sealed class ReleaseServiceLifecycleTests
             .Returns(new Dictionary<int, PipelineRunRootReference>());
         _releaseHub.Clients.Groups(Arg.Any<IReadOnlyList<string>>())
             .Returns(Substitute.For<IClientProxy>());
+        // The real repository returns a list; an unstubbed substitute returns null, and the retention
+        // loop would blame the service for the harness.
+        _artifactRepository.GetByRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns([]);
         _service = new ReleaseService(
             _repository,
             Substitute.For<IProjectService>(),
@@ -54,7 +56,7 @@ public sealed class ReleaseServiceLifecycleTests
             _artifactStorage,
             Substitute.For<IBackupRepository>(),
             _audit,
-            Substitute.For<IArtifactRepository>(),
+            _artifactRepository,
             Substitute.For<IArtifactRetentionService>(),
             _pipelineRepository,
             Substitute.For<IDbTransactionScope>());
@@ -189,6 +191,23 @@ public sealed class ReleaseServiceLifecycleTests
         Assert.Empty(await _service.GetReleasesByRunAsync(5, Ct));
     }
 
+    /// <summary>
+    /// A release a pipeline publishes records when it came to be: DetectedAt used to stay at its
+    /// default, and the run dialog's release grid showed 01/01/0001 (seen 2026-09-11).
+    /// </summary>
+    [Fact]
+    public async Task CreateReleaseFromPipelineAsync_DatesTheReleaseItCreates()
+    {
+        Release? added = null;
+        await _repository.AddReleaseAsync(Arg.Do<Release>(release => added = release), Arg.Any<CancellationToken>());
+
+        await _service.CreateReleaseFromPipelineAsync(1, 5, "c-384f63d4a8c182e07de2e9444c25e0a5a9a28e8e", null, ct: Ct);
+
+        Assert.NotNull(added);
+        Assert.Equal(NowUtc, added.DetectedAt);
+        Assert.Equal(NowUtc, added.PublishedAt);
+    }
+
     // ---------- pipeline completion ----------
 
     [Fact]
@@ -214,6 +233,29 @@ public sealed class ReleaseServiceLifecycleTests
         Assert.Equal(expected, release.Status);
         Assert.Equal(expected == ReleaseStatus.Published ? NowUtc : NowUtc.AddDays(-1), release.PublishedAt);
         await _repository.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// R-10: deploy-prod 2367 failed at its TLS stage, before production changed, and turned the
+    /// candidate it was deploying into a Failed release that the launch dialog then hid. A run that
+    /// ends badly decides only for a release it was still building; one already published keeps its
+    /// status, and the failed attempt stays visible as the status of the run it points at.
+    /// </summary>
+    [Theory]
+    [InlineData(ReleaseStatus.Published, PipelineStatus.Failed)]
+    [InlineData(ReleaseStatus.Published, PipelineStatus.Cancelled)]
+    [InlineData(ReleaseStatus.Superseded, PipelineStatus.Failed)]
+    public async Task NotifyPipelineRunCompletedAsync_AFailedDeploymentLeavesAPublishedReleaseAsItWas(
+        ReleaseStatus published, PipelineStatus outcome)
+    {
+        var release = Release(status: published, pipelineRunId: 5);
+        var publishedAt = release.PublishedAt;
+        _repository.FindByPipelineRunIdAsync(5, Arg.Any<CancellationToken>()).Returns(release);
+
+        await _service.NotifyPipelineRunCompletedAsync(5, outcome, Ct);
+
+        Assert.Equal(published, release.Status);
+        Assert.Equal(publishedAt, release.PublishedAt);
     }
 
     [Fact]
@@ -313,4 +355,56 @@ public sealed class ReleaseServiceLifecycleTests
             SourceRelease = Release(1, "1.0.0", ReleaseStatus.Deployed),
             TargetRelease = Release(2, "0.9.0")
         };
+
+    // --- PLAN-006 lot 7.3: a rollback must be able to demote the release it just undid. ---
+
+    [Fact]
+    public async Task RecordingAnAlreadyDeployedVersionAsNotDeployed_DemotesIt()
+    {
+        // Without this, a compensating Rollback stage could restore the previous colour and leave the
+        // database saying the version it just undid is the deployed one, which is the exact state
+        // prod-deploy-failure-modes.md describes as needing a manual fix.
+        // Deployed by this very run (its Record release step), then undone by its Rollback stage.
+        var deployed = Release(7, "1.2.3", ReleaseStatus.Deployed, pipelineRunId: 5);
+        _repository.FindByVersionAsync(10, "1.2.3", Arg.Any<CancellationToken>()).Returns(deployed);
+
+        await _service.CreateReleaseFromPipelineAsync(
+            projectId: 10, pipelineRunId: 5, version: "1.2.3", changelog: null, deployed: false, ct: Ct);
+
+        Assert.Equal(ReleaseStatus.Published, deployed.Status);
+    }
+
+    /// <summary>
+    /// Deploy-prod 2369 redeployed the live release, was not confirmed, and its Rollback stage put
+    /// traffic back on the colour that release was already serving - then demoted it, leaving no
+    /// release Deployed while it ran production. A release a previous run deployed is still the one
+    /// the rollback returns to: this run did not deploy it, so it cannot undo it.
+    /// </summary>
+    [Fact]
+    public async Task RecordingAsNotDeployed_LeavesAReleaseAnEarlierRunDeployed()
+    {
+        var live = Release(7, "1.2.3", ReleaseStatus.Deployed, pipelineRunId: 2368);
+        _repository.FindByVersionAsync(10, "1.2.3", Arg.Any<CancellationToken>()).Returns(live);
+
+        await _service.CreateReleaseFromPipelineAsync(
+            projectId: 10, pipelineRunId: 2369, version: "1.2.3", changelog: null, deployed: false, ct: Ct);
+
+        Assert.Equal(ReleaseStatus.Deployed, live.Status);
+        Assert.Equal(2368, live.PipelineRunId);
+    }
+
+    [Fact]
+    public async Task RecordingAsNotDeployed_DoesNotSupersedeTheOtherDeployedReleases()
+    {
+        // Superseding is what a real deployment does to its predecessor. A demotion is the opposite
+        // act, and must not take the rest of the project's history down with it.
+        var deployed = Release(7, "1.2.3", ReleaseStatus.Deployed);
+        _repository.FindByVersionAsync(10, "1.2.3", Arg.Any<CancellationToken>()).Returns(deployed);
+
+        await _service.CreateReleaseFromPipelineAsync(
+            projectId: 10, pipelineRunId: 5, version: "1.2.3", changelog: null, deployed: false, ct: Ct);
+
+        await _repository.DidNotReceive().GetDeployedProjectReleasesAsync(
+            Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
 }

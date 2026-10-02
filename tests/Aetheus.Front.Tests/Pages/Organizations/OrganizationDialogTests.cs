@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Organizations;
+using Aetheus.Front.Components.Organizations;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs.Organizations;
+using Aetheus.Shared.Components.Organizations;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Organizations;
 
 /// <summary>
 /// Behavioural tests for OrganizationDialog.razor.cs: create mode starts blank and POSTs to the
 /// collection endpoint; edit mode prefills the model from the parameter and PUTs to the id endpoint.
-/// The dialog-close payload is captured by a spy DialogService.
+/// The dialog-close payload is captured by a spy OmniDialogService.
 /// </summary>
 public class OrganizationDialogTests : BunitContext
 {
@@ -27,11 +26,11 @@ public class OrganizationDialogTests : BunitContext
     }
 
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     private static OrganizationDto MakeOrg(int id = 5) =>
         new(id, "Acme Corp", "acme", "The Acme organization", 3, 2, DateTime.UtcNow, DateTime.UtcNow);

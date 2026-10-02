@@ -1,0 +1,45 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Recette R-366: the pipeline and the run that created the release, inside the Source card. When the
+   creator was never recorded, the last run that recorded the release is shown under its own label,
+   never passed off as the creator. *@
+@if (Provenance?.CreatedBy is { } creator)
+{
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Path" Class="run-tile-icon" /> @L["ReleaseCreatedByPipeline"]</OmniText>
+        <a href="/pipelines/@creator.PipelineId" class="detail-value-link">@creator.PipelineName</a>
+    </OmniStack>
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Play" Class="run-tile-icon" /> @L["ReleaseCreatedByRun"]</OmniText>
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+            <a href="/pipelines/runs/@creator.RunId" class="detail-value-link">#@creator.RunId</a>
+            <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineHelper.GetRunBadge(creator.Status)">@L.Localize(creator.Status)</OmniBadge>
+        </OmniStack>
+    </OmniStack>
+}
+else
+{
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Path" Class="run-tile-icon" /> @L["ReleaseCreatedBy"]</OmniText>
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted" title="@L["ReleaseCreatorNotRecordedHelp"]">@L["ReleaseCreatorNotRecorded"]</OmniText>
+    </OmniStack>
+    @if (LastRecordedRunId is { } lastRunId)
+    {
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted" title="@L["ReleaseLastRecordedByHelp"]"><OmniIcon Name="OmniIconName.Play" Class="run-tile-icon" /> @L["ReleaseLastRecordedBy"]</OmniText>
+            <a href="/pipelines/runs/@lastRunId" class="detail-value-link">#@lastRunId</a>
+        </OmniStack>
+    }
+}
+@if (Provenance is not null)
+{
+    @foreach (var run in Provenance.BuildRuns)
+    {
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted" title="@L["ReleaseDeliverablesBuiltByHelp"]"><OmniIcon Name="OmniIconName.Wrench" Class="run-tile-icon" /> @L["ReleaseDeliverablesBuiltBy"]</OmniText>
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                <a href="/pipelines/@run.PipelineId" class="detail-value-link">@run.PipelineName</a>
+                <a href="/pipelines/runs/@run.RunId" class="detail-value-link">#@run.RunId</a>
+            </OmniStack>
+        </OmniStack>
+    }
+}

@@ -12,6 +12,7 @@ public static class AgentUpdateModuleExtensions
             serviceProvider.GetRequiredService<AgentReleaseCatalog>());
         services.AddSingleton<IAgentCompatibilityPolicy, AgentCompatibilityPolicy>();
         services.AddScoped<IAgentUpdateRepository, AgentUpdateRepository>();
+        services.AddScoped<AgentUpdateNotificationPublisher>();
         services.AddScoped<IAgentUpdateConfirmationService, AgentUpdateConfirmationService>();
         services.AddScoped<IAgentUpdateService, AgentUpdateService>();
         services.AddHostedService<AgentUpdateCoordinatorService>();

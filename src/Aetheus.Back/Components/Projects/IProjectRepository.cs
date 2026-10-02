@@ -3,17 +3,6 @@ using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Projects;
 
-/// <summary>
-/// Read port owned by Projects and implemented by Analysis. It keeps the project-list projection
-/// independent from Analysis repository internals while preserving the domain-grade contract.
-/// </summary>
-public interface IProjectAnalysisGradeReader
-{
-    Task<Dictionary<int, AnalysisGradeSummaryDto>> GetGradesAsync(
-        IReadOnlyCollection<int> projectIds,
-        CancellationToken ct = default);
-}
-
 public sealed record ProjectListInsight(
     int ProjectId,
     int? LastCommitId,
@@ -24,11 +13,11 @@ public sealed record ProjectListInsight(
     string? LastRunName,
     PipelineStatus? LastRunStatus,
     DateTime? LastRunAt,
-    int? ParentRunId,
-    string? ParentRunName,
     AnalysisGrade? LatestGateGrade,
     ProjectProductionStatus ProductionStatus,
-    int? OnlineUserCount);
+    int? OnlineUserCount,
+    bool LastRunIsActive = false,
+    string? LastRunCurrentStep = null);
 
 public interface IProjectRepository
 {
@@ -45,6 +34,10 @@ public interface IProjectRepository
         IReadOnlyCollection<int> projectIds, CancellationToken ct = default);
     Task<Dictionary<int, ProjectListInsight>> GetProjectListInsightsAsync(
         IReadOnlyCollection<int> projectIds, DateTime activeSessionCutoffUtc, CancellationToken ct = default);
+
+    /// <summary>The project's current quality grade alone, the one figure its detail page shows of the
+    /// list insights (commits, runs, monitored apps, audience) it used to compute in full.</summary>
+    Task<AnalysisGradeSummaryDto?> GetLatestGateGradeAsync(int projectId, CancellationToken ct = default);
 
     Task<Project?> GetProjectDetailAsync(int id, CancellationToken ct = default);
 
@@ -73,23 +66,35 @@ public interface IProjectRepository
     Task<List<ProjectServer>> GetProjectServersAsync(int projectId, CancellationToken ct = default);
     Task<(List<ProjectServer> Items, int TotalCount)> GetProjectServersPageAsync(
         int projectId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default);
+        int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
     Task<ProjectServer?> GetProjectServerAsync(int projectId, int projectServerId, CancellationToken ct = default);
     Task AddProjectServerAsync(ProjectServer projectServer, CancellationToken ct = default);
     Task RemoveProjectServerAsync(ProjectServer projectServer, CancellationToken ct = default);
 
     Task<(List<ServerTask> Items, int TotalCount)> GetTasksPagedAsync(
         int projectId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default);
+        int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
+
+    /// <summary>Recette R-212: the server names across a project's tasks, for the Server column filter.</summary>
+    Task<TaskFilterValuesDto> GetTaskFilterValuesAsync(int projectId, CancellationToken ct = default);
 
     Task<(List<TaskLog> Items, int TotalCount)> GetLogsPagedAsync(
         int projectId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default);
+        int page, int pageSize, CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null);
 
     Task<List<ServerTask>> GetRecentTasksAsync(int projectId, int count, CancellationToken ct = default);
 
     Task<List<PipelineRun>> GetRecentPipelineRunsAsync(int projectId, int count, CancellationToken ct = default);
 }
 
-/// <summary>S-TECH-N8R3: per-section counts for a project (Servers/Releases/Vaults/Libraries/Environments).</summary>
-public sealed record ProjectSectionCounts(int Servers, int Releases, int Vaults, int Libraries, int Environments);
+/// <summary>S-TECH-N8R3: per-section counts of a project. <paramref name="EnvironmentServers"/> is separate from
+/// <paramref name="Servers"/> on purpose: the Servers section lists the project's own attachments,
+/// while a server can also reach the project through one of its environments (PLAN-003 lot 29 / D23).
+/// Merging the two would have made the section tile count rows it does not show.</summary>
+public sealed record ProjectSectionCounts(
+    int Servers,
+    int Releases,
+    int Vaults,
+    int Libraries,
+    int Environments,
+    int EnvironmentServers);

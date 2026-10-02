@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Environments;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Environments;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests;
 
@@ -91,8 +88,8 @@ public class EnvironmentEditTests : BunitContext
             .NavigateTo("http://localhost/environments/new?projectId=1");
         var cut = Render<EnvironmentEdit>();
 
-        cut.Find("input[name='Name']").Input("portfolio-test");
-        cut.Find("textarea[name='Description']").Input("Local Portfolio validation environment.");
+        cut.Find("input#Name").Input("portfolio-test");
+        cut.Find("textarea#Description").Input("Local Portfolio validation environment.");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(
@@ -206,24 +203,22 @@ public class EnvironmentEditTests : BunitContext
         var cut = Render<EnvironmentEdit>();
         cut.WaitForAssertion(() => Assert.Contains("StartFromExistingEnvironment", cut.Markup));
 
-        var nullableDropdowns = cut.FindComponents<RadzenDropDown<int?>>();
+        var nullableDropdowns = cut.FindComponents<OmniDropDown<int?>>();
         var sourceDropdown = nullableDropdowns.Single(dropdown =>
             dropdown.Instance.Placeholder == "CreateEnvironmentFromScratch");
-        var sourceOptions = sourceDropdown.Instance.Data!;
+        var sourceOptions = sourceDropdown.Instance.Options;
         Assert.Contains(
             "Reference staging · Shared platform",
-            sourceOptions.Cast<object>().Single().ToString());
+            sourceOptions.Single().Text);
 
-        await cut.InvokeAsync(() => sourceDropdown.Instance.Change.InvokeAsync(77));
+        await cut.InvokeAsync(() => sourceDropdown.Instance.ValueChanged.InvokeAsync(77));
 
-        Assert.Equal("Reference staging", cut.Find("input[name='Name']").GetAttribute("value"));
-        var description = cut.FindComponents<RadzenTextArea>()
-            .Single(textArea => textArea.Instance.Name == "Description");
-        Assert.Equal("Reusable settings", description.Instance.Value);
-        var projectDropdown = cut.FindComponents<RadzenDropDown<int?>>()
+        Assert.Equal("Reference staging", cut.Find("input#Name").GetAttribute("value"));
+        Assert.Equal("Reusable settings", cut.Find("textarea#Description").GetAttribute("value"));
+        var projectDropdown = cut.FindComponents<OmniDropDown<int?>>()
             .Single(dropdown => dropdown.Instance.Placeholder == "NoProject");
         Assert.Equal(3, projectDropdown.Instance.Value);
-        var serversDropdown = Assert.Single(cut.FindComponents<RadzenDropDown<IEnumerable<int>>>());
+        var serversDropdown = Assert.Single(cut.FindComponents<OmniMultiSelect<int>>());
         Assert.Equal([5], serversDropdown.Instance.Value);
 
         cut.Find("button[type='submit']").Click();

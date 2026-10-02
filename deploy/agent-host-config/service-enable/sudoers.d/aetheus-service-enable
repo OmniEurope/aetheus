@@ -1,0 +1,19 @@
+# Aetheus Agent - enable-on-boot for the server-config YAML deploy. Each entry is an EXACT
+# fully-resolved argv (systemctl enable --now <unit>) for a pre-existing managed unit. No wildcards.
+Cmnd_Alias AETHEUS_SERVICE_ENABLE = \
+    /bin/systemctl enable --now apache2, \
+    /bin/systemctl enable --now nginx, \
+    /bin/systemctl enable --now postfix, \
+    /bin/systemctl enable --now dovecot, \
+    /bin/systemctl enable --now ts3server, \
+    /bin/systemctl enable --now portsentry, \
+    /bin/systemctl enable --now rkhunter, \
+    /bin/systemctl enable --now cron, \
+    /bin/systemctl enable --now crond
+
+Defaults!AETHEUS_SERVICE_ENABLE noexec
+Defaults!AETHEUS_SERVICE_ENABLE timestamp_timeout=0
+Defaults!AETHEUS_SERVICE_ENABLE env_reset
+Defaults!AETHEUS_SERVICE_ENABLE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_SERVICE_ENABLE

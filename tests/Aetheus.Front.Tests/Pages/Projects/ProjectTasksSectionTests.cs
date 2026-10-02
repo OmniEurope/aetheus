@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -128,7 +125,7 @@ public class ProjectTasksSectionTests : BunitContext
 
         var method = typeof(ProjectTasksSection).GetMethod("OnLoadDataAsync", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25 }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25 }])!);
 
         var page = (int)typeof(ProjectTasksSection).GetField("_page", Priv)!.GetValue(cut.Instance)!;
         Assert.Equal(2, page);
@@ -153,5 +150,39 @@ public class ProjectTasksSectionTests : BunitContext
         // OnInitializedAsync populates _result with the single seeded task.
         Assert.NotNull(result);
         Assert.Equal("Run Tests", Assert.Single(result.Items).Name);
+    }
+
+    [Fact]
+    public async Task HeaderFilters_AreColumnFilters_NotASearchTerm()
+    {
+        // Recette R-212: this section's header filters are real column filters of its endpoint; the
+        // first typed value is no longer turned into a search term.
+        _handler.SetJsonResponse("api/projects/1/tasks/filter-values", new TaskFilterValuesDto { ServerNames = ["build-01"] });
+        _handler.SetJsonResponse("api/projects/1/tasks", new PaginatedResult<ServerTaskDto> { Items = [MakeTask(1, "t")], TotalCount = 1 });
+        var cut = Render<ProjectTasksSection>(p => p.Add(x => x.ProjectId, 1));
+        cut.WaitForState(() => cut.Markup.Contains("t"), TimeSpan.FromSeconds(2));
+        var grid = cut.FindComponent<AetheusDataGrid<ServerTaskDto>>();
+        var separator = Aetheus.Shared.Components.Shared.GridFilter.ListSeparator;
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(ServerTaskDto.ServerName), "build-01", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(ServerTaskDto.Status), $"Failed{separator}Success", OmniDataGridFilterOperator.In)
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/projects/1/tasks?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=ServerName", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Value=build-01", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=Status", StringComparison.Ordinal)
+                && !url.Contains("search=", StringComparison.Ordinal);
+        }));
+        var values = (TaskFilterValuesDto)typeof(ProjectTasksSection).GetField("_filterValues", Priv)!.GetValue(cut.Instance)!;
+        Assert.Equal(["build-01"], values.ServerNames);
     }
 }

@@ -1,0 +1,38 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@inherits AppWebAnalyticsSummaryViewBase
+@* Recette R-355: the month's top pages, moved out of the Visitors view into their own telemetry
+   sub-tab. Same data source as the Visitors view (the web-analytics summary of the app). *@
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else if (_loadFailed)
+{
+    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Medium" Align="OmniAlignment.Start">
+        <OmniAlert Severity="OmniSeverity.Danger">@L["LoadFailed"]</OmniAlert>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniStack>
+}
+else if (_summary is null)
+{
+    <EmptyState Icon="groups" Title="@L["NoWebAnalyticsDataYet"]" />
+}
+else
+{
+    @* Recette R-443: the standard list, not a grid capped inside a card: every route of the month
+       (the backend bounds them to the per-app route limit), virtualized, down to the bottom of the page. *@
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["TopPagesThisMonth"]</OmniHeading>
+    <AetheusDataGrid Data="@_summary.TopPages" TItem="AppWebAnalyticsPageDto" KeyProperty="Route"
+                     Virtualize="true" FullHeight="true" PageSize="50" VirtualizationOverscanCount="3"
+                     EmptyText="@L["NoWebAnalyticsDataYet"]">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="AppWebAnalyticsPageDto"
+                                Property="Route" Title="@L["Route"]" Filterable="true" />
+            <OmniDataGridColumn TItem="AppWebAnalyticsPageDto"
+                                Property="PageViews" Title="@L["PageViews"]" Width="10rem" Filterable="true"
+                                FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+        </Columns>
+    </AetheusDataGrid>
+}

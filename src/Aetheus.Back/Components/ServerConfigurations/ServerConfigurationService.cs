@@ -91,7 +91,7 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
         ServerConfigYaml config;
         try
         {
-            config = YamlParsingHelper.Deserializer.Deserialize<ServerConfigYaml>(yaml);
+            config = YamlParsingHelper.ServerConfigDeserializer.Deserialize<ServerConfigYaml>(yaml);
         }
         catch (Exception ex) when (ex is YamlDotNet.Core.YamlException or InvalidOperationException or ArgumentException)
         {
@@ -215,7 +215,7 @@ public partial class ServerConfigurationService(IServerConfigurationRepository r
     {
         var validation = await ValidateConfigurationAsync(yaml, ct).ConfigureAwait(false);
         if (!validation.IsValid) return null;
-        var config = YamlParsingHelper.Deserializer.Deserialize<ServerConfigYaml>(yaml);
+        var config = YamlParsingHelper.ServerConfigDeserializer.Deserialize<ServerConfigYaml>(yaml);
         var server = tracked
             ? await repo.GetServerWithDockerAndServicesAsync(serverId, ct).ConfigureAwait(false)
             : await repo.GetServerWithDockerAndServicesReadOnlyAsync(serverId, ct).ConfigureAwait(false);

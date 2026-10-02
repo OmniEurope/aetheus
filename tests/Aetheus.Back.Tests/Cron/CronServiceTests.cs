@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Cron;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests.Cron;

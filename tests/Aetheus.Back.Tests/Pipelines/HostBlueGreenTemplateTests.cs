@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Tests.Pipelines;
 
@@ -17,10 +16,46 @@ namespace Aetheus.Back.Tests.Pipelines;
 public sealed class HostBlueGreenTemplateTests
 {
     /// <summary>
-    /// The version a consuming pipeline should extend. v1 stays published and immutable; every
-    /// contract below is asserted against the current one, so a new version cannot quietly drop one.
+    /// The version a consuming pipeline should extend. Earlier versions stay published and immutable;
+    /// every contract below is asserted against the current one, so a new version cannot quietly drop
+    /// one. It pinned v2 for three releases, which left v3 and v4 unchecked: it now follows the
+    /// latest the seeder publishes (asserted below).
     /// </summary>
-    private const string Resource = "host-bluegreen-deploy-v2.yaml";
+    private const string Resource = "host-bluegreen-deploy-v6.yaml";
+
+    [Fact]
+    public void Resource_IsTheLatestPublishedVersion()
+    {
+        var (_, _, resources) = DeliveryPipelineTemplateSeeder.Definitions["host-bluegreen-deploy"];
+
+        Assert.Equal(Resource, resources[^1]);
+    }
+
+    /// <summary>
+    /// v5 removes the per-step subsets v3 and v4 introduced: the control plane now decides per step
+    /// what it can forward, so a consumer maintains one list. A subset left behind would be a
+    /// variable nothing reads, and a consumer still setting it would believe it did something.
+    /// </summary>
+    [Fact]
+    public void V5_DeclaresOneComposeListAndNoPerStepSubset()
+    {
+        var definition = Parse();
+
+        Assert.DoesNotContain(definition.Variables.Keys, key => key.StartsWith("BG_COMPOSE_ENV_", StringComparison.Ordinal));
+        var yaml = DeliveryPipelineTemplateSeeder.ReadResource(Resource);
+        Assert.DoesNotContain("$(BG_COMPOSE_ENV_CUTOVER)", yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("$(BG_COMPOSE_ENV_ROLLBACK)", yaml, StringComparison.Ordinal);
+    }
+
+    /// <summary>v4 is published and immutable; it keeps its subsets for the consumers pinned on it.</summary>
+    [Fact]
+    public void PublishedV4_KeepsItsCutoverAndRollbackSubsets()
+    {
+        var v4 = DeliveryPipelineTemplateSeeder.ReadResource("host-bluegreen-deploy-v4.yaml");
+
+        Assert.Contains("compose_env: \"$(BG_COMPOSE_ENV_CUTOVER)\"", v4, StringComparison.Ordinal);
+        Assert.Contains("compose_env: \"$(BG_COMPOSE_ENV_ROLLBACK)\"", v4, StringComparison.Ordinal);
+    }
 
     private static PipelineYamlDefinition Parse() =>
         YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(
@@ -109,6 +144,43 @@ public sealed class HostBlueGreenTemplateTests
         Assert.False(string.IsNullOrWhiteSpace(step.UpstreamConf));
         Assert.False(string.IsNullOrWhiteSpace(step.ReloadHelper));
         Assert.False(string.IsNullOrWhiteSpace(step.Revision));
+    }
+
+    /// <summary>
+    /// PLAN-003 2.7: the switch forwards the consumer's confirmation window, and a consumer that sets
+    /// none arms nothing (0), so every environment but the one whose backend is being deployed is
+    /// unaffected.
+    /// </summary>
+    [Fact]
+    public void V6_Switch_ForwardsTheConfirmationWindow_WhichDefaultsToNone()
+    {
+        var definition = Parse();
+        var step = Assert.Single(definition.Stages.SelectMany(stage => stage.Steps), candidate => candidate.Type == "bluegreen-switch");
+
+        Assert.Equal("$(BG_CONFIRM_MINUTES)", step.ConfirmMinutes);
+        Assert.Equal("0", definition.Variables["BG_CONFIRM_MINUTES"]);
+    }
+
+    /// <summary>The quick-return template names only native steps and records the release it returns to.</summary>
+    [Fact]
+    public void RevertTemplate_RevertsThenRecordsTheReleaseItReturnedTo()
+    {
+        var definition = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(
+            DeliveryPipelineTemplateSeeder.ReadResource("host-bluegreen-revert-v1.yaml"));
+        var errors = new List<string>();
+        var warnings = new List<string>();
+        PipelineDefinitionValidator.ValidateDefinitionBasics(definition, errors, warnings);
+        PipelineDefinitionValidator.ValidateStages(definition, errors, warnings);
+        Assert.Empty(errors);
+
+        var revert = Assert.Single(definition.Stages.Single(stage => stage.Name == "Revert").Steps);
+        Assert.Equal("bluegreen-revert", revert.Type);
+        Assert.Equal(["BLUEGREEN_REVERTED_REVISION"], revert.Outputs);
+        var record = definition.Stages.Single(stage => stage.Name == "Record release");
+        Assert.Equal(["Revert"], record.DependsOn);
+        var release = Assert.Single(record.Steps);
+        Assert.Equal("$(BLUEGREEN_REVERTED_REVISION)", release.Version);
+        Assert.True(release.Deployed);
     }
 
     /// <summary>

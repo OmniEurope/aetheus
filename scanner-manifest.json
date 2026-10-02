@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-22T00:00:00Z",
+  "updatedAt": "2026-09-08T00:00:00Z",
   "scanners": [
     {
       "key": "gitleaks",
@@ -89,7 +89,7 @@
       "execution": "container",
       "image": "aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e",
       "entryPoint": "trivy",
-      "arguments": ["fs", "--scanners", "vuln", "--db-repository", "ghcr.io/aquasecurity/trivy-db:2", "--db-repository", "mirror.gcr.io/aquasec/trivy-db:2", "--format", "sarif", "--output", "/out/report.sarif", "--exit-code", "1", "--severity", "HIGH,CRITICAL", "/src"],
+      "arguments": ["fs", "--scanners", "vuln", "--skip-dirs", "/src/.claude", "--skip-dirs", "/src/.Codex", "--db-repository", "ghcr.io/aquasecurity/trivy-db:2", "--db-repository", "mirror.gcr.io/aquasec/trivy-db:2", "--format", "sarif", "--output", "/out/report.sarif", "--exit-code", "1", "--severity", "HIGH,CRITICAL", "/src"],
       "reportPath": "report.sarif",
       "reportFormat": "Sarif",
       "findingExitCodes": [1],
@@ -113,7 +113,7 @@
       "execution": "container",
       "image": "aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e",
       "entryPoint": "trivy",
-      "arguments": ["fs", "--scanners", "misconfig", "--skip-check-update", "--ignorefile", "/src/.trivyignore.yaml", "--skip-dirs", "/src/.claude", "--skip-dirs", "/src/.Codex", "--skip-dirs", "/src/**/bin", "--skip-dirs", "/src/**/obj", "--skip-dirs", "/src/**/node_modules", "--skip-dirs", "/src/.analysis-*", "--skip-dirs", "/src/.pipeline-artifacts", "--skip-dirs", "/src/.qa-test-results", "--skip-dirs", "/src/site", "--format", "sarif", "--output", "/out/report.sarif", "--exit-code", "1", "--severity", "HIGH,CRITICAL", "/src"],
+      "arguments": ["fs", "--scanners", "misconfig", "--skip-check-update", "--ignorefile", "/src/.trivyignore.yaml", "--skip-dirs", "/src/.claude", "--skip-dirs", "/src/.Codex", "--skip-dirs", "/src/**/bin", "--skip-dirs", "/src/**/obj", "--skip-dirs", "/src/**/node_modules", "--skip-dirs", "/src/.analysis-*", "--skip-dirs", "/src/.pipeline-artifacts", "--skip-dirs", "/src/.qa-test-results", "--skip-dirs", "/src/site", "--skip-dirs", "/src/tests/security-rules", "--format", "sarif", "--output", "/out/report.sarif", "--exit-code", "1", "--severity", "HIGH,CRITICAL", "/src"],
       "reportPath": "report.sarif",
       "reportFormat": "Sarif",
       "findingExitCodes": [1],

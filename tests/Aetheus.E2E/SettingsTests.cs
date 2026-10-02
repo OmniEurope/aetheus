@@ -20,7 +20,7 @@ public class SettingsTests : E2ETestBase
         await NavigateToAsync("admin/settings");
         await Expect(Page.GetByText("Platform Settings").First).ToBeVisibleAsync(new() { Timeout = 10000 });
         await Expect(Page).ToHaveTitleAsync(new System.Text.RegularExpressions.Regex("Settings"));
-        var tabs = Page.Locator(".rz-tabview");
+        var tabs = Page.Locator(".omni-tabs");
         await Expect(tabs).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         await Expect(Page.GetByText("General").First).ToBeVisibleAsync();
@@ -28,7 +28,7 @@ public class SettingsTests : E2ETestBase
         await Expect(Page.GetByText("Registration Tokens").First).ToBeVisibleAsync();
         await WaitForBlazorAsync();
 
-        var generalCard = Page.Locator(".rz-card").First;
+        var generalCard = Page.Locator(".omni-card").First;
         await Expect(generalCard).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         await Page.GetByText("Secrets").First.ClickAsync();
@@ -41,7 +41,7 @@ public class SettingsTests : E2ETestBase
         await Page.GetByText("Registration Tokens").First.ClickAsync();
         await WaitForBlazorAsync();
 
-        var generateButton = Page.GetByRole(AriaRole.Button, new() { Name = "Generate Token" });
+        var generateButton = Page.GetByRole(AriaRole.Button, new() { Name = "Generate", Exact = true });
         await Expect(generateButton.First).ToBeVisibleAsync(new() { Timeout = 10000 });
     }
 
@@ -52,18 +52,18 @@ public class SettingsTests : E2ETestBase
         await Page.GetByText("Registration Tokens").First.ClickAsync();
         await WaitForBlazorAsync();
 
-        var generateButton = Page.GetByRole(AriaRole.Button, new() { Name = "Generate Token" });
+        var generateButton = Page.GetByRole(AriaRole.Button, new() { Name = "Generate", Exact = true });
         await Expect(generateButton.First).ToBeVisibleAsync(new() { Timeout = 10000 });
-        var rows = Page.Locator(".rz-data-row");
+        var rows = Page.Locator(".omni-data-grid__row");
         var initialRowCount = await rows.CountAsync();
         await generateButton.First.ClickAsync();
 
         await WaitForBlazorAsync();
 
         // Should have at least one token in the grid after generating.
-        // Radzen 10 renders the grid root as `.rz-data-grid` and each data row
-        // as `.rz-data-row`.
-        var tokenGrid = Page.Locator(".rz-data-grid, .rz-datatable");
+        // The grid root renders as `.omni-data-grid` and each data row
+        // as `.omni-data-grid__row`.
+        var tokenGrid = Page.Locator(".omni-data-grid");
         await Expect(tokenGrid.First).ToBeVisibleAsync(new() { Timeout = 10000 });
 
         await Expect(rows).ToHaveCountAsync(initialRowCount + 1, new() { Timeout = 10000 });
@@ -94,7 +94,7 @@ public class SettingsTests : E2ETestBase
         await Expect(card.Locator("code")).ToContainTextAsync("type: analysis-gate");
         await Expect(card.Locator("code")).ToContainTextAsync("analysis_preset: recommended");
         await Expect(card.Locator("code")).ToContainTextAsync("analysis_rules:");
-        await Expect(card.GetByRole(AriaRole.Button, new() { Name = "Copy YAML" }))
+        await Expect(card.GetByRole(AriaRole.Button, new() { Name = "Copy", Exact = true }))
             .ToBeVisibleAsync();
 
         var bounds = await card.BoundingBoxAsync();

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -96,13 +93,13 @@ public class ServerCronSectionRenderTests : BunitContext
     }
 
     // Hardened rule #2/#3: never await OpenAsync before closing; assert only that
-    // DialogService.OnOpen fires, then close immediately. The dialog content lives in a
+    // OmniDialogService.OnOpen fires, then close immediately. The dialog content lives in a
     // separate host, NOT in cut.Markup - never WaitForState on it.
     [Fact]
     public async Task OpenCreateDialog_OpensDialog()
     {
         var cut = RenderSection();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 
@@ -118,7 +115,7 @@ public class ServerCronSectionRenderTests : BunitContext
     public async Task OpenEditDialog_OpensDialog()
     {
         var cut = RenderSection();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 

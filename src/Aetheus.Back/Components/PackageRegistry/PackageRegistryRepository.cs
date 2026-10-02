@@ -5,6 +5,21 @@ namespace Aetheus.Back.Components.PackageRegistry;
 
 internal sealed class PackageRegistryRepository(AppDbContext db) : IPackageRegistryRepository
 {
+    /// <summary>
+    /// Recette R-210 / R-224: the header filters of the package registry admin grid. The latest version
+    /// is read the way the list projects it (newest listed version).
+    /// </summary>
+    internal static readonly GridQueryMap<RegistryPackage> Columns = new GridQueryMap<RegistryPackage>()
+        .Enum("Kind", package => package.Kind)
+        .Text("Name", package => package.Name)
+        .Text("LatestVersion", package => package.Versions
+            .Where(version => version.IsListed)
+            .OrderByDescending(version => version.CreatedAt)
+            .Select(version => version.Version)
+            .FirstOrDefault())
+        .Number("VersionCount", package => package.Versions.Count)
+        .Date("UpdatedAt", package => package.UpdatedAt);
+
     public async Task<RegistryPackage?> GetPackageAsync(
         PackageRegistryKind kind, string normalizedName, CancellationToken ct = default)
         => await db.RegistryPackages
@@ -135,12 +150,13 @@ internal sealed class PackageRegistryRepository(AppDbContext db) : IPackageRegis
 
     public async Task<(List<PackageRegistryPackageDto> Items, int Total)> GetPagedAsync(
         PackageRegistryKind? kind, string? search, int page, int pageSize, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false)
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.RegistryPackages.AsNoTracking().AsQueryable();
         if (kind.HasValue)
             query = query.Where(package => package.Kind == kind.Value);
         query = ApplySearch(query, search);
+        query = Columns.ApplyFilters(query, columnFilters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         var items = await query

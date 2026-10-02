@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 
@@ -17,15 +16,15 @@ public class PipelineTemplatesControllerTests
     {
         _authz.HasPermissionAsync(
                 Arg.Any<System.Security.Claims.ClaimsPrincipal>(),
-                Arg.Any<Aetheus.Shared.Enums.ResourceType>(),
+                Arg.Any<Aetheus.Shared.Components.Auth.ResourceType>(),
                 Arg.Any<int?>(),
-                Arg.Any<Aetheus.Shared.Enums.Permission>(),
+                Arg.Any<Aetheus.Shared.Components.Auth.Permission>(),
                 Arg.Any<CancellationToken>())
             .Returns(true);
         _authz.GetAccessibleResourceIdsAsync(
                 Arg.Any<System.Security.Claims.ClaimsPrincipal>(),
-                Aetheus.Shared.Enums.ResourceType.PipelineTemplate,
-                Aetheus.Shared.Enums.Permission.Read,
+                Aetheus.Shared.Components.Auth.ResourceType.PipelineTemplate,
+                Aetheus.Shared.Components.Auth.Permission.Read,
                 Arg.Any<CancellationToken>())
             .Returns((List<int>?)null);
         _authz.GetUserOrganizationIdsAsync(

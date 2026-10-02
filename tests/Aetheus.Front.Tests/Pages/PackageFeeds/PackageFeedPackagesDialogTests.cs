@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.PackageFeeds;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.PackageFeeds;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.PackageFeeds;
 
@@ -34,7 +32,7 @@ public sealed class PackageFeedPackagesDialogTests : BunitContext
         var message = (string)typeof(PackageFeedPackagesDialog)
             .GetMethod("RemoveConfirmationMessage", BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(cut.Instance, [package])!;
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         Assert.Contains("Serilog", message);
         Assert.Contains("corp-nuget", message);
 

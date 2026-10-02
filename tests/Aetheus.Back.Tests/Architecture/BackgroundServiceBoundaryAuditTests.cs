@@ -66,11 +66,11 @@ public sealed class BackgroundServiceBoundaryAuditTests
         // Moving the rule must not have softened it: the point of the list is that a half-applied
         // deployment is never replayed blind after an outage.
         Assert.False(Aetheus.Back.Components.Pipelines.PipelineOutageReplayPolicy
-            .MayReplayAfterAnOutage(Aetheus.Shared.Enums.OperationKind.BlueGreenSwitch));
+            .MayReplayAfterAnOutage(Aetheus.Shared.Components.Tasks.OperationKind.BlueGreenSwitch));
         Assert.False(Aetheus.Back.Components.Pipelines.PipelineOutageReplayPolicy
-            .MayReplayAfterAnOutage(Aetheus.Shared.Enums.OperationKind.PipelineDeploy));
+            .MayReplayAfterAnOutage(Aetheus.Shared.Components.Tasks.OperationKind.PipelineDeploy));
         // And ordinary work is still replayable, or the stand-by feature would be pointless.
         Assert.True(Aetheus.Back.Components.Pipelines.PipelineOutageReplayPolicy
-            .MayReplayAfterAnOutage(Aetheus.Shared.Enums.OperationKind.None));
+            .MayReplayAfterAnOutage(Aetheus.Shared.Components.Tasks.OperationKind.None));
     }
 }

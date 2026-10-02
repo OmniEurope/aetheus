@@ -3,8 +3,6 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -61,6 +59,7 @@ public class PipelineDeadlockRecheckTests
             Substitute.For<IPipelineStepTaskDispatcher>(),
             Substitute.For<IHubContext<PipelineHub>>(),
             Substitute.For<IDomainEventDispatcher>(),
+            TimeProvider.System,
             Substitute.For<ILogger<PipelineStageDispatchPlanner>>());
         return (planner, repo, finalizer);
     }

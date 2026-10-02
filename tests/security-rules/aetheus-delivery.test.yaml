@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: EUPL-1.2
+# Test corpus for .aetheus/security-rules/opengrep/aetheus-delivery.yml, Compose rules.
+services:
+  builder:
+    image: example/builder:1.0
+    # ruleid: aetheus.compose.privileged-container
+    privileged: true
+    volumes:
+      # ruleid: aetheus.compose.docker-socket-mount
+      - /var/run/docker.sock:/var/run/docker.sock
+  app:
+    image: example/app:1.0
+    # ok: aetheus.compose.privileged-container
+    privileged: false
+    volumes:
+      # ok: aetheus.compose.docker-socket-mount
+      - app-data:/data

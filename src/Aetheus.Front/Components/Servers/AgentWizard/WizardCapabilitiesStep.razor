@@ -1,0 +1,53 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Recette R-399: every capability is OE's OmniSelectableCard (Multiple: a check box card). The choice
+   shows by the accent frame and tint alone, no check mark, the frame one width in every state, so the
+   text never moves; hover and focus follow the theme, dark mode included. *@
+<OmniStack Gap="OmniSpacing.Large">
+    <p>@L["WizardCapabilitiesDescription"]</p>
+    <OmniStack Gap="OmniSpacing.Medium">
+        <OmniSelectableCard Multiple="true" Title="@L["WizardModulePipelineRunner"]" Description="@L["WizardModulePipelineRunnerHint"]"
+                            Value="IncludePipelineRunner" ValueChanged="IncludePipelineRunnerChanged">
+            <Icon><OmniIcon Name="OmniIconName.RocketLaunch" /></Icon>
+        </OmniSelectableCard>
+
+        @if (IsLinux)
+        {
+            @* Docker isolation needs the pipeline runner: locked (forced off) without it, still
+               focusable and announced as unavailable. *@
+            <OmniSelectableCard Multiple="true" Title="@L["WizardModuleDocker"]"
+                                Description="@(DockerRequiresRunner ? L["WizardModuleDockerRequiresRunner"] : L["WizardModuleDockerHint"])"
+                                Value="DockerChecked" ValueChanged="IncludeDockerChanged" Disabled="DockerLocked">
+                <Icon><OmniIcon Name="OmniIconName.Package" /></Icon>
+            </OmniSelectableCard>
+
+            <OmniSelectableCard Multiple="true" Title="@L["WizardModuleServerManagement"]" Description="@L["WizardModuleServerManagementHint"]"
+                                Value="IncludeServerManagement" ValueChanged="IncludeServerManagementChanged">
+                <Icon><OmniIcon Name="OmniIconName.ShieldCheck" /></Icon>
+            </OmniSelectableCard>
+
+            <OmniSelectableCard Multiple="true" Title="@L["WizardModuleDeploymentAgent"]" Description="@L["WizardModuleDeploymentAgentHint"]"
+                                Value="IncludeDeploymentAgent" ValueChanged="IncludeDeploymentAgentChanged">
+                <Icon><OmniIcon Name="OmniIconName.CloudArrowUp" /></Icon>
+            </OmniSelectableCard>
+
+            <OmniSelectableCard Multiple="true" Title="@L["WizardModulePatchManagement"]" Description="@L["WizardModulePatchManagementHint"]"
+                                Value="IncludePatchManagement" ValueChanged="IncludePatchManagementChanged">
+                <Icon><OmniIcon Name="OmniIconName.ShieldCheck" /></Icon>
+            </OmniSelectableCard>
+
+            <OmniSelectableCard Multiple="true" Title="@L["WizardModuleFirewallManage"]" Description="@L["WizardModuleFirewallManageHint"]"
+                                Value="IncludeFirewallManagement" ValueChanged="IncludeFirewallManagementChanged">
+                <Icon><OmniIcon Name="OmniIconName.ShieldCheck" /></Icon>
+            </OmniSelectableCard>
+        }
+
+        <OmniSelectableCard Multiple="true" Title="@L["WizardDevModeInsecureTls"]" Description="@L["WizardDevModeInsecureTlsHint"]"
+                            Value="DevModeInsecureTls" ValueChanged="DevModeInsecureTlsChanged">
+            <Icon><OmniIcon Name="OmniIconName.ShieldWarning" /></Icon>
+        </OmniSelectableCard>
+    </OmniStack>
+    @if (NoActionableModule)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning">@L["WizardNoModuleWarning"]</OmniAlert>
+    }
+</OmniStack>

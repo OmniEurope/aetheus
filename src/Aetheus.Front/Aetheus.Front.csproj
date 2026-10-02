@@ -12,7 +12,7 @@
          and sorting that this environment can't run. Revisit only with that smoke test in hand. -->
     <BlazorWebAssemblyLoadAllGlobalizationData>true</BlazorWebAssemblyLoadAllGlobalizationData>
     <!-- IL trimming is THE bundle-size lever. It is already the SDK default for
-         a Release WASM publish (prod runs trimmed today, so Radzen/serialization
+         a Release WASM publish (prod runs trimmed today, so the component library and serialization
          are trim-safe at the default mode) — stated explicitly for intent.
          TrimMode is left at the SDK default on purpose: do NOT switch to 'full'
          without a real browser smoke test. AOT is intentionally NOT enabled —
@@ -69,12 +69,17 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
     <PackageReference Include="Microsoft.Extensions.Localization" />
-    <PackageReference Include="Radzen.Blazor" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Aetheus.Shared\Aetheus.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- The published OmniEurope.Blazor package (version pinned in Directory.Packages.props); it ships the
+       OE0001 analyzer itself. -->
+  <ItemGroup>
+    <PackageReference Include="OmniEurope.Blazor" />
   </ItemGroup>
 
   <!-- Firefox does not support the "integrity" key inside importmaps (Chrome 127+/Safari 18.2+ only).

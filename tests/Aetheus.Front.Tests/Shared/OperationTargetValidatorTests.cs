@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Front.Tests;
 
@@ -284,7 +282,8 @@ public class OperationTargetValidatorTests
     [InlineData(OperationKind.MailDeleteAccount, "not-an-email", false)]
     [InlineData(OperationKind.MailRemoveAlias, "alias@example.com", true)]
     [InlineData(OperationKind.MailRemoveAlias, "no-at", false)]
-    [InlineData(OperationKind.MailDkimRead, "default", true)]
+    [InlineData(OperationKind.MailDkimRead, "example.com", true)]  // PLAN-005: target is the domain
+    [InlineData(OperationKind.MailDkimRead, "default", false)]
     [InlineData(OperationKind.MailDkimRead, "bad selector!", false)]
     public void MailRemoveReadOps_ValidateTarget(OperationKind kind, string target, bool expected)
         => Assert.Equal(expected, OperationTargetValidator.IsValid(kind, target));

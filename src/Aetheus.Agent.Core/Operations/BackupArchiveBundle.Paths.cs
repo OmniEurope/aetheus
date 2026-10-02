@@ -74,7 +74,7 @@ internal static class BackupArchivePathHelpers
     internal static void TryDeleteDirectory(string path)
     {
         try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException) { } // best-effort cleanup: a leftover directory must not replace the outcome being reported
+        catch (UnauthorizedAccessException) { } // same: best-effort cleanup
     }
 }

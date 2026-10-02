@@ -28,12 +28,14 @@ public sealed class DefaultShellRunnerTests
     }
 
     [Fact]
-    public async Task RunExecAsync_DotnetVersion_ReturnsSeparateSuccessfulChannels()
+    public async Task RunExecAsync_SucceedingProcess_ReturnsSeparateSuccessfulChannels()
     {
-        var result = await _runner.RunExecAsync("dotnet", ["--version"], TestContext.Current.CancellationToken);
+        var (file, args) = SucceedingCommand();
+
+        var result = await _runner.RunExecAsync(file, args, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Matches(@"\d+\.\d+", result.StdOut);
+        Assert.Contains("observable-output", result.StdOut, StringComparison.Ordinal);
         Assert.True(string.IsNullOrWhiteSpace(result.StdErr));
     }
 
@@ -107,6 +109,13 @@ public sealed class DefaultShellRunnerTests
     private static (string File, IReadOnlyList<string> Args) StdinEchoCommand() => OperatingSystem.IsWindows()
         ? ("findstr.exe", ["/R", ".*"])
         : ("/bin/cat", []);
+
+    // Not `dotnet --version`: that resolves the SDK the working directory's global.json pins, so it
+    // measured the host's SDK layout rather than DefaultShellRunner (exit 155, SDK not found, on the CI
+    // host in runs 2413 and 2417).
+    private static (string File, IReadOnlyList<string> Args) SucceedingCommand() => OperatingSystem.IsWindows()
+        ? ("cmd.exe", ["/d", "/s", "/c", "echo observable-output"])
+        : ("/bin/sh", ["-c", "echo observable-output"]);
 
     private static (string File, IReadOnlyList<string> Args) FailingCommand() => OperatingSystem.IsWindows()
         ? ("cmd.exe", ["/d", "/s", "/c", "echo observable-error 1>&2 & exit /b 7"])

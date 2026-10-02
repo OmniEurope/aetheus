@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -17,13 +15,13 @@ public class ServerModulesSectionTests : BunitContext
     }
 
     [Fact]
-    public void Renders_EmptyList_ShowsModulesHeadingAndEmptyText()
+    public void Renders_EmptyList_ShowsEmptyText_WithoutTitleHeading()
     {
         _handler.SetJsonResponse("api/servers/1/modules", new List<ServerModuleDto>());
         var cut = Render<ServerModulesSection>(p => p.Add(x => x.ServerId, 1));
-        cut.WaitForAssertion(() => Assert.Contains("Modules", cut.Markup), TimeSpan.FromSeconds(2));
-        // Empty grid renders the NoRecords empty-text, not just a loading spinner.
-        Assert.Contains("NoRecords", cut.Markup);
+        cut.WaitForAssertion(() => Assert.Contains("NoRecords", cut.Markup), TimeSpan.FromSeconds(2));
+        // The title heading is gone: the page header already shows it.
+        Assert.DoesNotContain(">Modules<", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]

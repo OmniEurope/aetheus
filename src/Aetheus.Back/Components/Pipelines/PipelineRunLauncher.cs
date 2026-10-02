@@ -3,7 +3,6 @@ using System.Text.Json;
 using Aetheus.Back.Components.GitGraph;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
@@ -19,7 +18,7 @@ public interface IPipelineRunLauncher : IPipelineChildRunLauncher
     /// <inheritdoc cref="IPipelineRunService.TriggerRunAsync"/>
     Task<PipelineRunDto?> TriggerResolvedRunAsync(
         int id, Dictionary<string, string>? additionalVariables, Dictionary<string, string>? parameters,
-        string? yamlOverride, string? commitOverride, CancellationToken ct);
+        string? yamlOverride, string? commitOverride, CancellationToken ct, string? workspaceCommitOverride = null);
 
     /// <inheritdoc cref="IPipelineRunService.TriggerAutomatedRunAsync"/>
     Task<PipelineRunDto?> TriggerAutomatedRunAsync(
@@ -30,6 +29,16 @@ public interface IPipelineRunLauncher : IPipelineChildRunLauncher
     Task<PipelineRunPreparation?> PrepareAutomatedRunAsync(
         int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null,
         CancellationToken ct = default);
+
+    /// <inheritdoc cref="IPipelineRunService.TriggerPreparedAutomatedRunAsync"/>
+    Task<PipelineRunDto?> TriggerPreparedAutomatedRunAsync(
+        PipelineRunPreparation preparation, string triggerSource,
+        Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
+
+    /// <inheritdoc cref="IPipelineRunService.RecordRefusedAutomatedLaunchAsync"/>
+    Task RecordRefusedAutomatedLaunchAsync(
+        int pipelineId, string triggerSource, string reason,
+        IReadOnlyDictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
 
     /// <inheritdoc cref="IPipelineRunService.RerunAsync"/>
     Task<PipelineRunDto?> RerunAsync(int sourceRunId, RerunMode mode, CancellationToken ct = default);
@@ -57,15 +66,18 @@ public sealed class PipelineRunLauncher(
     IPipelineRunParameterResolver parameterResolver,
     IPipelineRunPreparationService preparations,
     IPipelineRunPreflightService preflight,
+    IPipelinePortRegistryGuard portGuard,
+    PipelineRefusedLaunchRecorder refusals,
     TimeProvider timeProvider,
     ILogger<PipelineRunLauncher> logger) : IPipelineRunLauncher
 {
     public async Task<PipelineRunDto?> TriggerResolvedRunAsync(int id,
         Dictionary<string, string>? additionalVariables, Dictionary<string, string>? parameters,
-        string? yamlOverride, string? commitOverride, CancellationToken ct)
+        string? yamlOverride, string? commitOverride, CancellationToken ct, string? workspaceCommitOverride = null)
     {
         var preparation = await preparations.PrepareRunAsync(
-            id, PipelineRunService.ResolveRunBranch(additionalVariables), yamlOverride, commitOverride, ct).ConfigureAwait(false);
+            id, PipelineRunService.ResolveRunBranch(additionalVariables), yamlOverride, commitOverride, ct,
+            workspaceCommitOverride).ConfigureAwait(false);
         return preparation is null
             ? null
             : await TriggerPreparedRunAsync(preparation, additionalVariables, parameters, ct).ConfigureAwait(false);
@@ -99,25 +111,38 @@ public sealed class PipelineRunLauncher(
         }
         var (preLaunchVariables, _, _) = await variableResolver.ResolveVariablesWithWarningsAsync(
             runtimePreparation.Definition, runtimePreparation.EffectiveProjectId, launchVars, ct,
-            pipelineId: preparation.PipelineId, pipelineName: preparation.Pipeline.Name)
+            pipelineId: preparation.PipelineId, pipelineName: preparation.Pipeline.Name,
+            // Same reasoning as the preflight below: a reference nothing can ever satisfy is a refused
+            // launch the caller sees immediately, not a deployment that renders the placeholder.
+            enforceResolvedReferences: true)
             .ConfigureAwait(false);
         preflight.ValidateUniqueDeploymentTargets(runtimePreparation.Definition, preLaunchVariables);
+
+        // Resolved TRANSITIVELY, like every other call site. Reading Pipeline.Project?.OrganizationId
+        // yields null for a pipeline owned by an Environment or a ProjectServer, and a null
+        // organization does not narrow the fleet, it opens it: the preflight then validates against
+        // another organization's servers and the reservation below can be written on one of them.
+        var organizationId = await repo
+            .GetPipelineOrganizationIdAsync(preparation.PipelineId, ct).ConfigureAwait(false);
 
         // Ask for everything the run needs now, not an hour in. Deliberately placed before the run row
         // exists: a requirement that cannot be met is a refused launch the caller sees immediately,
         // not a run that dies at its fourth stage.
-        var preflightProblems = await preflight.FindBlockingProblemsAsync(
+        var preflightOutcome = await preflight.FindBlockingProblemsAsync(
             runtimePreparation.Definition, preLaunchVariables,
-            preparation.Pipeline.Project?.OrganizationId, runtimePreparation.EffectiveProjectId, ct)
+            organizationId, runtimePreparation.EffectiveProjectId, ct)
             .ConfigureAwait(false);
+        var preflightProblems = preflightOutcome.Problems;
         if (preflightProblems.Count > 0)
         {
             // A360-28: the refusal happens before the run row exists, so an interactive caller sees the
             // 400 but a scheduler or a git push saw nothing at all - no run, no trace, no way to tell a
             // refused launch from one that never fired. The audit trail is the only record those
             // triggers can leave, so the refusal is written there before it is thrown.
+            // Information, not Warning (recette R-521): the preflight already warned once, with one
+            // entry per problem; this line only ties that refusal to the pipeline id.
             var reason = string.Join(" ", preflightProblems);
-            logger.LogWarning(
+            logger.LogInformation(
                 "Preflight refused the launch of pipeline {PipelineId} ({PipelineName}): {Reason}",
                 preparation.PipelineId, preparation.Pipeline.Name, reason);
             await audit.LogAsync(
@@ -127,10 +152,26 @@ public sealed class PipelineRunLauncher(
                 "This run cannot complete with the current configuration: " + reason);
         }
 
+        // The launch is accepted, so the ports it will bind are now this owner's. Declared here rather
+        // than at deploy time on purpose: a port claimed only once the container is up is a port two
+        // concurrent runs can both still believe is free.
+        await portGuard.DeclareReservationsAsync(
+            runtimePreparation.Definition, preLaunchVariables,
+            organizationId, runtimePreparation.EffectiveProjectId,
+            preparation.Pipeline.Project?.Name ?? preparation.Pipeline.Name, ct).ConfigureAwait(false);
+
         var run = CreatePipelineRun(
-            preparation, runtimePreparation, variables, effectiveParams, idempotencyKey);
+            preparation, runtimePreparation, variables, effectiveParams, idempotencyKey,
+            preflightOutcome.Checks);
         var existing = await PersistPipelineRunAsync(run, ct).ConfigureAwait(false);
         if (existing is not null) return existing;
+
+        // Written once the run exists, which is the only place an operator can read them. A warning
+        // kept in the server log alone would be invisible to the person whose deployment is about to
+        // fight an undeclared listener for its port.
+        if (preflightOutcome.Warnings.Count > 0)
+            await repo.AppendRunWarningsAsync(run.Id, [.. preflightOutcome.Warnings], ct).ConfigureAwait(false);
+
         return await LaunchPreparedRunAsync(
             run, preparation, runtimePreparation, variables, ct).ConfigureAwait(false);
     }
@@ -157,6 +198,13 @@ public sealed class PipelineRunLauncher(
             variables[PipelineRunService.SourceBranchVariable] = preparation.BranchName;
         if (IsGitCommitHash(preparation.CommitHash))
             variables[PipelineRunService.SourceCommitVariable] = preparation.CommitHash!;
+        // Only the preparation says where the definition came from: a caller cannot hand these in.
+        variables.Remove(PipelineRunService.DefinitionCommitVariable);
+        variables.Remove(PipelineRunService.DefinitionBranchVariable);
+        if (IsGitCommitHash(preparation.DefinitionCommitHash))
+            variables[PipelineRunService.DefinitionCommitVariable] = preparation.DefinitionCommitHash!;
+        if (!string.IsNullOrWhiteSpace(preparation.DefinitionBranchName))
+            variables[PipelineRunService.DefinitionBranchVariable] = preparation.DefinitionBranchName;
         return new ResolvedTriggerVariables(variables, effective);
     }
 
@@ -165,8 +213,13 @@ public sealed class PipelineRunLauncher(
         PipelineRunPreparation runtimePreparation,
         Dictionary<string, string> variables,
         IReadOnlyDictionary<string, string> effectiveParameters,
-        string? idempotencyKey) => new()
+        string? idempotencyKey,
+        IReadOnlyList<PreflightCheckDto> preflightChecks) => new()
         {
+            // What the preflight verified to let this run start. Kept because the refusal path is the
+            // only one that used to leave a trace, so an accepted launch said nothing about what had
+            // been looked at.
+            PreflightJson = preflightChecks.Count > 0 ? JsonSerializer.Serialize(preflightChecks) : null,
             PipelineId = preparation.PipelineId,
             Status = PipelineStatus.Running,
             StartedAt = timeProvider.GetUtcNow().UtcDateTime,
@@ -276,6 +329,7 @@ public sealed class PipelineRunLauncher(
             buildNumber: run.BuildNumber).ConfigureAwait(false);
         var publicVars = FilterSecretKeys(resolvedVars, secretKeys);
         run.ResolvedVariablesJson = JsonSerializer.Serialize(publicVars);
+        warnings.InsertRange(0, preparation.DefinitionWarnings);
         run.WarningsJson = warnings.Count > 0 ? JsonSerializer.Serialize(warnings) : null;
 
         // System:Prepare (clone/prepare workspace) and System:Cleanup only make sense when at least one
@@ -364,7 +418,36 @@ public sealed class PipelineRunLauncher(
             pipelineId, triggerSource, additionalVariables, ct).ConfigureAwait(false);
         return preparation is null
             ? null
-            : await TriggerPreparedRunAsync(preparation, additionalVariables, ct: ct).ConfigureAwait(false);
+            : await TriggerPreparedAutomatedRunAsync(preparation, triggerSource, additionalVariables, ct).ConfigureAwait(false);
+    }
+
+    public async Task<PipelineRunDto?> TriggerPreparedAutomatedRunAsync(
+        PipelineRunPreparation preparation, string triggerSource,
+        Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(preparation);
+        try
+        {
+            return await TriggerPreparedRunAsync(preparation, additionalVariables, ct: ct).ConfigureAwait(false);
+        }
+        catch (BadRequestException refusal)
+        {
+            // Mandatory catch (recette R-522): nobody is in front of an automated trigger to read the
+            // refusal, and no run row exists to carry it. It is rethrown once a failed run carries it
+            // and the subscribers are told.
+            await refusals.RecordAsync(
+                preparation.Pipeline, preparation, triggerSource, refusal.Message, additionalVariables, ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task RecordRefusedAutomatedLaunchAsync(
+        int pipelineId, string triggerSource, string reason,
+        IReadOnlyDictionary<string, string>? additionalVariables = null, CancellationToken ct = default)
+    {
+        var pipeline = await repo.FindPipelineAsync(pipelineId, ct).ConfigureAwait(false);
+        if (pipeline is null) return;
+        await refusals.RecordAsync(pipeline, null, triggerSource, reason, additionalVariables, ct).ConfigureAwait(false);
     }
 
     public async Task<PipelineRunPreparation?> PrepareAutomatedRunAsync(
@@ -388,8 +471,20 @@ public sealed class PipelineRunLauncher(
             return null;
         }
 
-        var preparation = await preparations.PrepareRunAsync(pipelineId, PipelineRunService.ResolveRunBranch(additionalVariables),
-            yamlOverride: null, PipelineRunService.ResolveSourceCommit(additionalVariables), ct).ConfigureAwait(false);
+        PipelineRunPreparation? preparation;
+        try
+        {
+            preparation = await preparations.PrepareRunAsync(pipelineId, PipelineRunService.ResolveRunBranch(additionalVariables),
+                yamlOverride: null, PipelineRunService.ResolveSourceCommit(additionalVariables), ct).ConfigureAwait(false);
+        }
+        catch (BadRequestException refusal)
+        {
+            // Mandatory catch (recette R-522), as in TriggerPreparedAutomatedRunAsync: a definition that
+            // cannot be prepared (invalid YAML, a source repository that differs or cannot be read) is a
+            // refusal nobody reads unless a failed run carries it.
+            await refusals.RecordAsync(pipeline, null, triggerSource, refusal.Message, additionalVariables, ct).ConfigureAwait(false);
+            throw;
+        }
         if (preparation is null) return null;
         var targetIds = preparation.TargetServerIds;
         foreach (var serverId in targetIds)
@@ -436,14 +531,22 @@ public sealed class PipelineRunLauncher(
             additional[PipelineRunService.ResumeSourceRunVariable] = sourceRunId.ToString();
         }
 
+        // Recette R-534: a run with a source: block records two revisions, the definition's and the
+        // workspace's (its own CommitHash). A same-commit rerun reads the definition at the first and
+        // checks out the second; without the block both are the run's commit.
+        var definitionCommit = PipelineRunService.ResolveDefinitionCommit(source);
+        var workspaceCommit = string.Equals(definitionCommit, source.CommitHash, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : source.CommitHash;
+
         return mode switch
         {
             RerunMode.SnapshotSameCommit when !string.IsNullOrWhiteSpace(source.YamlSnapshot) =>
-                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, source.CommitHash, ct).ConfigureAwait(false),
+                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, definitionCommit, ct, workspaceCommit).ConfigureAwait(false),
             RerunMode.SnapshotBranchHead when !string.IsNullOrWhiteSpace(source.YamlSnapshot) =>
                 await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, commitOverride: null, ct).ConfigureAwait(false),
             RerunMode.ResumeCheckpoints =>
-                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, source.CommitHash, ct).ConfigureAwait(false),
+                await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, source.YamlSnapshot, definitionCommit, ct, workspaceCommit).ConfigureAwait(false),
             _ => await TriggerResolvedRunAsync(source.PipelineId, additional, rerunParams, yamlOverride: null, commitOverride: null, ct).ConfigureAwait(false)
         };
     }

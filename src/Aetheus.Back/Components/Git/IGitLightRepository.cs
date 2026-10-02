@@ -13,7 +13,11 @@ public interface IGitLightRepository
     Task<List<GitInternalRepo>> GetAccessibleAsync(List<int>? projectIds, CancellationToken ct = default);
     Task<(List<GitInternalRepo> Items, int TotalCount)> GetAccessiblePagedAsync(
         List<int>? projectIds, int? projectId, string? search, string? sortBy,
-        bool sortDescending, int page, int pageSize, CancellationToken ct = default);
+        bool sortDescending, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null);
+
+    /// <summary>Recette R-224: the distinct default branches of the repositories in scope.</summary>
+    Task<List<string>> GetDefaultBranchesAsync(List<int>? projectIds, int? projectId, CancellationToken ct = default);
     Task<GitInternalRepo?> FindByIdAsync(int id, CancellationToken ct = default);
     Task<GitInternalRepo?> FindByIdWithProjectAsync(int id, CancellationToken ct = default);
     Task<GitInternalRepo?> FindBySlugAsync(int projectId, string slug, CancellationToken ct = default);

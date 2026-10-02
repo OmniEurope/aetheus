@@ -7,7 +7,6 @@ using Aetheus.Back.Components.PackageRegistry;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests.PackageRegistry;

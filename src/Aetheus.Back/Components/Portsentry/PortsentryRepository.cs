@@ -36,7 +36,7 @@ public class PortsentryRepository(AppDbContext db) : IPortsentryRepository
 
     public async Task<(List<PortsentryBlockedIp> Items, int Total)> GetBlockedIpsPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.PortsentryBlockedIps.AsNoTracking().Where(item => item.ServerId == serverId);
         if (!string.IsNullOrWhiteSpace(search))
@@ -47,6 +47,9 @@ public class PortsentryRepository(AppDbContext db) : IPortsentryRepository
                 EF.Functions.ILike(item.Protocol, pattern) ||
                 EF.Functions.ILike(item.Reason, pattern));
         }
+
+        // Recette R-210 / R-224: the header filters, after the server scope and before the count.
+        query = PortsentryListQuery.BlockedColumns.ApplyFilters(query, filters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -66,7 +69,7 @@ public class PortsentryRepository(AppDbContext db) : IPortsentryRepository
 
     public async Task<(List<PortsentryWhitelistIp> Items, int Total)> GetWhitelistPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.PortsentryWhitelistIps.AsNoTracking().Where(item => item.ServerId == serverId);
         if (!string.IsNullOrWhiteSpace(search))
@@ -76,6 +79,9 @@ public class PortsentryRepository(AppDbContext db) : IPortsentryRepository
                 EF.Functions.ILike(item.IpAddress, pattern) ||
                 EF.Functions.ILike(item.Description, pattern));
         }
+
+        // Recette R-210 / R-224: the header filters, after the server scope and before the count.
+        query = PortsentryListQuery.WhitelistColumns.ApplyFilters(query, filters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -89,6 +95,19 @@ public class PortsentryRepository(AppDbContext db) : IPortsentryRepository
         };
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct).ConfigureAwait(false);
         return (items, total);
+    }
+
+    public async Task<List<string>> GetBlockedProtocolsAsync(int serverId, CancellationToken ct = default)
+    {
+        var protocols = await db.PortsentryBlockedIps
+            .Where(item => item.ServerId == serverId)
+            .Select(item => item.Protocol)
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. protocols
+            .Where(protocol => !string.IsNullOrWhiteSpace(protocol))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
     }
 
     public async Task<PortsentryWhitelistIp> AddWhitelistIpAsync(PortsentryWhitelistIp entry, CancellationToken ct = default)

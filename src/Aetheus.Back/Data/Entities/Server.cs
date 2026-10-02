@@ -81,6 +81,16 @@ public class Server
     /// gates the open/close/toggle API. Firewall visibility also depends on it (ufw status needs root).</summary>
     public bool FirewallManagementAvailable { get; set; }
 
+    /// <summary>PLAN-005 lot 2: the agent publishes <c>ports.observe</c>, so it can report which TCP
+    /// ports are listening. Derived every heartbeat from the published capabilities, not from a sudoers
+    /// grant: the scan is unprivileged, and what actually varies is the agent version.</summary>
+    public bool PortObservationAvailable { get; set; }
+
+    /// <summary>When this host's listening ports were last observed; null when never scanned. Stored on
+    /// the server because a host listening on nothing yields no reservation row, and the UI must still
+    /// tell "scanned, nothing found" apart from "never scanned".</summary>
+    public DateTime? PortsObservedAt { get; set; }
+
     /// <summary>Cross-agent deploy capability - the deployment module's sudoers drop-in
     /// (<c>/etc/sudoers.d/aetheus-deploy</c>) is present, so the agent can apply build artifacts
     /// (binary flip + root-owned restart helper, or container compose up) on this host. Derived every
@@ -114,10 +124,20 @@ public class Server
     /// S-TECH-15: baseline of the agent's sudoers drop-in file hashes, captured on the first
     /// heartbeat that reports any. Stored as a compact JSON object (<c>{"aetheus-apache":"ABC…"}</c>).
     /// A later heartbeat whose hash for the same file differs raises a Sec-Audit drift alert.
-    /// Null until the first heartbeat with sudoers hashes arrives.
+    /// Null until the first heartbeat with sudoers hashes arrives. Re-captured from the heartbeat that
+    /// confirms an agent update, because the update re-renders the drop-ins (recette R2-023).
     /// </summary>
     [MaxLength(2048)]
     public string? SudoersBaseline { get; set; }
+
+    /// <summary>
+    /// Recette R2-023: SHA-256 hex fingerprint of the drifted sudoers state (file name and reported hash
+    /// of every drop-in that differs from <see cref="SudoersBaseline"/>) that last raised a Sec-Audit
+    /// alert. The same drifted state is alerted once, across heartbeats and backend restarts; a different
+    /// drifted state alerts again. Null while the drop-ins match the baseline.
+    /// </summary>
+    [MaxLength(64)]
+    public string? SudoersDriftAlertedFingerprint { get; set; }
 
     /// <summary>
     /// S-TECH-CDUI: the agent's most recent capability diagnostics (a drop-in present but unreadable, a
@@ -127,7 +147,35 @@ public class Server
     /// </summary>
     [MaxLength(4096)]
     public string? CapabilityDiagnosticsJson { get; set; }
+
+    /// <summary>
+    /// Recette R-479: fingerprint of each heartbeat inventory section as last written, with the time of
+    /// the last full rewrite, so a heartbeat rewrites only the sections that changed. Written in the same
+    /// transaction as the sections; null until the first heartbeat, and ignored once older than
+    /// <c>HeartbeatInventoryFingerprints.FullRewriteInterval</c> (every section is then rewritten once).
+    /// </summary>
+    [MaxLength(2048)]
+    public string? HeartbeatInventoryFingerprintsJson { get; set; }
     public string? ScannerCapabilitiesJson { get; set; }
+
+    /// <summary>
+    /// PLAN-004 R-11: UTC instant the server was retired (the Delete action). A retired server keeps
+    /// its row and every link (port registry, environments, pools, project-server chain, RBAC grants,
+    /// tags, settings) but is hidden by the <see cref="ServerQueryFilters.ExcludeRetired"/> query
+    /// filter from lists, selectors and pipeline dispatch, and its agent tokens are revoked. Null for
+    /// an active server. Re-enrolling the same machine clears it (same id, links intact); only the
+    /// explicit purge erases the row.
+    /// </summary>
+    public DateTime? DeletedAt { get; set; }
+
+    /// <summary>
+    /// PLAN-004 R-11: SHA-256 hex of the host's stable machine identity (Linux <c>/etc/machine-id</c>,
+    /// Windows <c>MachineGuid</c>), reported at enrollment; the raw value never leaves the host.
+    /// Enrollment matches it before the hostname, so a reinstalled machine revives its retired row.
+    /// Null for servers enrolled by an agent that predates the field.
+    /// </summary>
+    [MaxLength(64)]
+    public string? MachineIdHash { get; set; }
 
     public int OrganizationId { get; set; }
     public Organization Organization { get; set; } = null!;
@@ -147,6 +195,7 @@ public class Server
     public List<ApacheModule> ApacheModules { get; set; } = [];
     public List<ApacheVirtualHost> ApacheVirtualHosts { get; set; } = [];
     public List<CertbotCertificate> CertbotCertificates { get; set; } = [];
+    public CertbotState? CertbotState { get; set; }
     public MailState? MailState { get; set; }
     public List<MailDomain> MailDomains { get; set; } = [];
     public TeamspeakState? TeamspeakState { get; set; }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Security;
 using Aetheus.Agent.Core.Extensions;
 
@@ -88,6 +89,8 @@ public static class BackendProbe
     /// unreachable/timeout branches deterministically - no real network call (the previous test hit
     /// TEST-NET-1 and was flaky under parallel load). Production callers use the parameterless overload.
     /// </summary>
+    [SuppressMessage("Aetheus.Security", "SEC006",
+        Justification = "One-shot installer probe run once per process before the agent host exists; there is no DI container to take a factory from, and one client per process exhausts nothing.")]
     internal static async Task<ProbeResult> ProbeAsync(string serverUrl, TimeSpan timeout, HttpMessageHandler? handler, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(serverUrl))

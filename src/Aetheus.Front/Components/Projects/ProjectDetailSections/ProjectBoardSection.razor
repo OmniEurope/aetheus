@@ -1,0 +1,69 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ProjectWritableSectionBase
+
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-md" Gap="OmniSpacing.Large">
+    @* The breadcrumb leaf already reads "Board" - no need to repeat it as a section title. *@
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+        <OmniDropDown aria-label="@L["Assignee"]" TValue="string" Options="@(Assignees.ToOptions(item => (string)item, item => item))" @bind-Value="_assigneeFilter" AllowEmpty="true"
+            Placeholder="@L["Assignee"]" @bind-Value:after="StateHasChanged" Class="kanban-filter" />
+        <OmniDropDown aria-label="@L["Tags"]" TValue="string" Options="@(Tags.ToOptions(item => (string)item, item => item))" @bind-Value="_tagFilter" AllowEmpty="true"
+            Placeholder="@L["Tags"]" @bind-Value:after="StateHasChanged" Class="kanban-filter" />
+    </OmniStack>
+    @if (_canWrite)
+    {
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenCreateAsync"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    }
+</OmniStack>
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else
+{
+    <div class="kanban-board" role="region" tabindex="0" aria-label="@L["Board"]">
+        @foreach (var status in Columns)
+        {
+            var columnStatus = status;
+            <div class="kanban-column">
+                <div class="kanban-column-header">
+                    <span>@L.Localize(columnStatus)</span>
+                    <CountBadge Value="@ColumnItems(columnStatus).Count()" Variant="OmniTone.Neutral" />
+                </div>
+                <div class="kanban-column-drop @(_dropTarget == columnStatus ? "kanban-drop-active" : "")"
+                     @ondragover:preventDefault="true"
+                     @ondragenter="@(() => _dropTarget = columnStatus)"
+                     @ondragenter:preventDefault="true"
+                     @ondrop="@(() => OnDropAsync(columnStatus))">
+                    @foreach (var item in ColumnItems(columnStatus))
+                    {
+                        var card = item;
+                        <div draggable="@(_canWrite ? "true" : "false")"
+                             @ondragstart="@(() => OnDragStart(card))"
+                             @ondragend="@OnDragEnd"
+                             @onclick="@(() => OpenEditAsync(card))">
+                        <OmniCard Class="@($"kanban-card {(_dragged?.Id == card.Id ? "kanban-card-dragging" : "")}")">
+                            <div class="kanban-card-title">@card.Title</div>
+                            <div class="kanban-card-meta">
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@TypeBadge(card.Type)">@L.Localize(card.Type)</OmniBadge>
+                                @if (!string.IsNullOrEmpty(card.AssigneeName))
+                                {
+                                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@card.AssigneeName</OmniBadge>
+                                }
+                                @foreach (var tag in card.Tags)
+                                {
+                                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@tag</OmniBadge>
+                                }
+                                @if (_canWrite)
+                                {
+                                    <span @onclick:stopPropagation="true"><OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteAsync(card))" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton></span>
+                                }
+                            </div>
+                        </OmniCard>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}

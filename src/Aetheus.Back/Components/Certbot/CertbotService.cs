@@ -19,7 +19,10 @@ public class CertbotService(ICertbotRepository repo, IAuditService audit, ITaskS
             Domains = DeserializeDomains(c.Domains),
             ExpiryDate = c.ExpiryDate,
             CertPath = c.CertPath,
-            KeyPath = c.KeyPath
+            KeyPath = c.KeyPath,
+            Authenticator = c.Authenticator,
+            WebrootPath = c.WebrootPath,
+            RenewalConvention = c.RenewalConvention
         }).ToList();
     }
 
@@ -34,6 +37,8 @@ public class CertbotService(ICertbotRepository repo, IAuditService audit, ITaskS
             CertbotAction.RenewAll => (OperationKind.CertbotRenewAll, false),
             CertbotAction.Delete => (OperationKind.CertbotDelete, true),
             CertbotAction.RevokeAndDelete => (OperationKind.CertbotRevoke, true),
+            CertbotAction.Normalize => (OperationKind.CertbotNormalize, false),
+            CertbotAction.RenewalCheck => (OperationKind.CertbotRenewalCheck, false),
             _ => throw new BadRequestException($"Unknown Certbot action: {request.Action}")
         };
 
@@ -62,8 +67,9 @@ public class CertbotService(ICertbotRepository repo, IAuditService audit, ITaskS
             throw new BadRequestException("Invalid email address.");
 
         // Route to the typed CertbotObtain op (same path as the pipeline `type: certbot` step): the
-        // root-owned issue helper tries real ACME via the apache plugin and falls back to a self-signed
-        // cert if validation can't complete. Domains/email travel in env (off the process argv).
+        // root-owned issue helper performs real ACME through the Aetheus web root and fails honestly
+        // when validation cannot complete (PLAN-007: never the Apache plugin). Domains/email travel in
+        // env (off the process argv).
         var domains = request.Domains
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var env = new Dictionary<string, string>

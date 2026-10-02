@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -18,7 +15,6 @@ namespace Aetheus.Front.Tests.Pages.Servers;
 public class ServerServicesSectionRenderTests : BunitContext
 {
     private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
-    private static readonly BindingFlags PrivStatic = BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Public;
 
     private readonly BunitTestHelper.TestHandler _handler;
 
@@ -79,21 +75,42 @@ public class ServerServicesSectionRenderTests : BunitContext
     // ── GetStatusBadgeStyle ──────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("active", true, BadgeStyle.Success)]
-    [InlineData("scheduled", false, BadgeStyle.Info)]
-    [InlineData("idle", false, BadgeStyle.Light)]
-    [InlineData("dead", false, BadgeStyle.Danger)]
-    [InlineData("failed", false, BadgeStyle.Danger)]
-    public void GetStatusBadgeStyle_AllVariants(string status, bool isRunning, BadgeStyle expected)
+    [InlineData("active", true, OmniTone.Success)]
+    [InlineData("scheduled", false, OmniTone.Accent)]
+    [InlineData("idle", false, OmniTone.Neutral)]
+    // Recette R-507: stopped is not a fault. Only a failure is red.
+    [InlineData("dead", false, OmniTone.Neutral)]
+    [InlineData("installed", false, OmniTone.Neutral)]
+    [InlineData("generated", false, OmniTone.Neutral)]
+    [InlineData("masked", false, OmniTone.Neutral)]
+    [InlineData("activating", false, OmniTone.Warning)]
+    [InlineData("failed", false, OmniTone.Danger)]
+    public void GetStatusBadgeStyle_AllVariants(string status, bool isRunning, OmniTone expected)
     {
-        var result = ServerServicesSection.GetStatusBadgeStyle(status, isRunning);
+        var result = ManageableServiceGrid.GetStatusBadgeStyle(status, isRunning);
         Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("running", false, "ServiceStatusRunning")]
+    [InlineData("dead", false, "ServiceStatusStopped")]
+    [InlineData("installed", false, "ServiceStatusStopped")]
+    [InlineData("Stopped", false, "ServiceStatusStopped")]
+    [InlineData("masked", false, "ServiceStatusMasked")]
+    [InlineData("failed", false, "ServiceStatusFailed")]
+    [InlineData("scheduled", false, "ServiceStatusScheduled")]
+    [InlineData("idle", false, "ServiceStatusIdle")]
+    [InlineData("anything", true, "ServiceStatusRunning")]
+    [InlineData("a-word-systemd-adds-later", false, null)]
+    public void R507_ARawStatus_HasItsLabel_OrIsShownAsWritten(string status, bool isRunning, string? key)
+    {
+        Assert.Equal(key, Aetheus.Front.Components.Servers.ServiceStatusPresentation.LabelKey(status, isRunning));
     }
 
     [Fact]
     public void GetStatusBadgeStyle_Running_AlwaysSuccess()
     {
-        Assert.Equal(BadgeStyle.Success, ServerServicesSection.GetStatusBadgeStyle("scheduled", true));
+        Assert.Equal(OmniTone.Success, ManageableServiceGrid.GetStatusBadgeStyle("scheduled", true));
     }
 
     // ── Render with full service data ────────────────────────────────────────
@@ -116,14 +133,14 @@ public class ServerServicesSectionRenderTests : BunitContext
     [Fact]
     public void Renders_WindowsServiceType_FormattedCorrectly()
     {
-        Assert.Equal("Windows", ServerServicesSection.FormatType(ServiceType.WindowsService));
+        Assert.Equal("Windows", ManageableServiceGrid.FormatType(ServiceType.WindowsService));
     }
 
     [Fact]
     public void Renders_UnknownServiceType_FallsBackToToString()
     {
         var unknown = (ServiceType)999;
-        var result = ServerServicesSection.FormatType(unknown);
+        var result = ManageableServiceGrid.FormatType(unknown);
         Assert.Equal("999", result);
     }
 
@@ -193,7 +210,7 @@ public class ServerServicesSectionRenderTests : BunitContext
             Status = TaskExecutionStatus.Success
         });
 
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         cut.WaitForState(() => dialog.OpenCount == 1);
         Assert.Equal("ServiceInstalledTitle", dialog.LastTitle);
         Assert.NotNull(dialog.LastConfirmMessage);
@@ -203,54 +220,61 @@ public class ServerServicesSectionRenderTests : BunitContext
     // ── HandleTaskCompleted ──────────────────────────────────────────────────
 
     [Fact]
-    public void HandleTaskCompleted_MatchingBusyService_ClearsBusyService()
+    public void HandleTaskCompleted_TheFollowedTask_Succeeded_SaysSoOnTheRow()
     {
-        var cut = RenderSection(MakeServer(Svc("nginx")));
-        typeof(ServerServicesSection).GetField("_busyService", Priv)!.SetValue(cut.Instance, "nginx");
-        typeof(ServerServicesSection).GetField("_busyTaskId", Priv)!.SetValue(cut.Instance, 1);
+        var cut = RenderSection(MakeServer(Svc("docker")));
+        cut.Instance.Actions.Track("docker", 1, "Start");
+        cut.Render();
+        Assert.Contains("ServiceActionQueued", cut.Markup);
 
         cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
             ServerId = 21,
             TaskId = 1,
-            TaskName = "Start - nginx",
+            TaskName = "Start - docker",
             Status = TaskExecutionStatus.Success
         });
 
-        var busy = (string?)typeof(ServerServicesSection).GetField("_busyService", Priv)!.GetValue(cut.Instance);
-        Assert.Null(busy);
+        Assert.Equal(ServiceActionPhase.Succeeded, cut.Instance.Actions.Of("docker", [])!.Phase);
+        cut.WaitForAssertion(() => Assert.Contains("ServiceActionSucceeded", cut.Markup));
     }
 
     [Fact]
-    public void HandleTaskCompleted_MatchingBusyService_FailedStatus_ClearsBusyService()
+    public void HandleTaskCompleted_TheFollowedTask_Failed_LeavesItsErrorOnTheRow()
     {
-        // The failed-task branch (toast.Error path) must still release the row spinner instead of
-        // leaving it busy forever - the real-time fix has to surface failure, not swallow it.
-        var cut = RenderSection(MakeServer(Svc("nginx")));
-        typeof(ServerServicesSection).GetField("_busyService", Priv)!.SetValue(cut.Instance, "nginx");
-        typeof(ServerServicesSection).GetField("_busyTaskId", Priv)!.SetValue(cut.Instance, 7);
+        // Recette R-510 and R-515: the failure of an action launched by hand is read on the service's
+        // own row, with its exit code and a link to the task, and the row's buttons are free again.
+        var cut = RenderSection(MakeServer(Svc("docker")));
+        cut.Instance.Actions.Track("docker", 7, "Install");
 
         cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
             ServerId = 21,
             TaskId = 7,
-            TaskName = "Install - nginx",
+            TaskName = "Install - docker",
             Status = TaskExecutionStatus.Failed,
             ExitCode = 100
         });
 
-        var busy = (string?)typeof(ServerServicesSection).GetField("_busyService", Priv)!.GetValue(cut.Instance);
-        Assert.Null(busy);
+        var state = cut.Instance.Actions.Of("docker", [])!;
+        Assert.Equal(ServiceActionPhase.Failed, state.Phase);
+        Assert.Equal(100, state.ExitCode);
+        Assert.False(state.InFlight);
+        cut.WaitForAssertion(() =>
+        {
+            var line = cut.Find(".service-action-state--failed a");
+            Assert.Contains("ServiceActionFailedExit", line.TextContent);
+            Assert.Equal("/tasks/7", line.GetAttribute("href"));
+        });
     }
 
     [Fact]
-    public void HandleTaskCompleted_NonMatchingBusyService_KeepsBusyService()
+    public void HandleTaskCompleted_AnotherTask_KeepsTheActionInFlight()
     {
         var cut = RenderSection(MakeServer(Svc("nginx")));
-        typeof(ServerServicesSection).GetField("_busyService", Priv)!.SetValue(cut.Instance, "nginx");
-        typeof(ServerServicesSection).GetField("_busyTaskId", Priv)!.SetValue(cut.Instance, 1);
+        cut.Instance.Actions.Track("nginx", 1, "Start");
 
-        // A different task id (an unrelated operation completing first) must NOT clear our busy state.
+        // A different task id (an unrelated operation completing first) must NOT end our action.
         cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
             ServerId = 21,
@@ -259,16 +283,14 @@ public class ServerServicesSectionRenderTests : BunitContext
             Status = TaskExecutionStatus.Success
         });
 
-        var busy = (string?)typeof(ServerServicesSection).GetField("_busyService", Priv)!.GetValue(cut.Instance);
-        Assert.Equal("nginx", busy);
+        Assert.True(cut.Instance.Actions.Of("nginx", [])!.InFlight);
     }
 
     [Fact]
     public void HandleTaskCompleted_PreviousServer_DoesNotMutateCurrentState()
     {
         var cut = RenderSection(MakeServer(Svc("nginx")));
-        typeof(ServerServicesSection).GetField("_busyService", Priv)!.SetValue(cut.Instance, "nginx");
-        typeof(ServerServicesSection).GetField("_busyTaskId", Priv)!.SetValue(cut.Instance, 1);
+        cut.Instance.Actions.Track("nginx", 1, "Start");
 
         cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
         {
@@ -278,16 +300,78 @@ public class ServerServicesSectionRenderTests : BunitContext
             Status = TaskExecutionStatus.Success
         });
 
-        Assert.Equal("nginx", typeof(ServerServicesSection)
-            .GetField("_busyService", Priv)!.GetValue(cut.Instance));
+        Assert.True(cut.Instance.Actions.Of("nginx", [])!.InFlight);
+    }
+
+    [Fact]
+    public void TwoActionsAtOnce_AreEachFollowedOnTheirOwnRow()
+    {
+        // Recette R-510: the page followed one action at a time; a batch said nothing per service.
+        var cut = RenderSection(MakeServer(Svc("nginx"), Svc("apache2")));
+        cut.Instance.Actions.Track("nginx", 11, "Restart");
+        cut.Instance.Actions.Track("apache2", 12, "Stop");
+
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
+        {
+            ServerId = 21,
+            TaskId = 12,
+            TaskName = "Stop - apache2",
+            Status = TaskExecutionStatus.Success
+        });
+
+        Assert.Equal(ServiceActionPhase.Queued, cut.Instance.Actions.Of("nginx", [])!.Phase);
+        Assert.Equal(ServiceActionPhase.Succeeded, cut.Instance.Actions.Of("apache2", [])!.Phase);
+        // The agent started the first task: the live task list turns its row to "running".
+        var live = new List<ServerTaskDto> { new() { Id = 11, Status = TaskExecutionStatus.Running } };
+        Assert.Equal(ServiceActionPhase.Running, cut.Instance.Actions.Of("nginx", live)!.Phase);
+    }
+
+    [Fact]
+    public void TheListTheSuccessRefreshes_KeepsTheSuccessLineOnScreen()
+    {
+        // Recette R2-030: the success refreshes the server at once; the list that comes back a moment
+        // later used to take the "succeeded" line away before it could be read.
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero));
+        Services.AddSingleton<TimeProvider>(clock);
+        var cut = RenderSection(MakeServer(Svc("docker")));
+        cut.Instance.Actions.Track("docker", 11, "Start");
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification { ServerId = 21, TaskId = 11, Status = TaskExecutionStatus.Success });
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        cut.Render(parameters => parameters
+            .Add(component => component.Server, MakeServer(Svc("docker")))
+            .Add(component => component.ServerId, 21));
+
+        Assert.Equal(ServiceActionPhase.Succeeded, cut.Instance.Actions.Of("docker", [])!.Phase);
+        cut.WaitForAssertion(() => Assert.Contains("ServiceActionSucceeded", cut.Markup));
+    }
+
+    [Fact]
+    public void ANewServiceList_DropsTheSuccessLineOnceRead_AndKeepsTheFailure()
+    {
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero));
+        Services.AddSingleton<TimeProvider>(clock);
+        var cut = RenderSection(MakeServer(Svc("nginx"), Svc("apache2")));
+        cut.Instance.Actions.Track("nginx", 11, "Start");
+        cut.Instance.Actions.Track("apache2", 12, "Start");
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification { ServerId = 21, TaskId = 11, Status = TaskExecutionStatus.Success });
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification { ServerId = 21, TaskId = 12, Status = TaskExecutionStatus.Failed, ExitCode = 5 });
+
+        // A later heartbeat brings a new list: the started service now shows its own state.
+        clock.Advance(Aetheus.Front.Components.Servers.ServiceActionTracker.SuccessShownAtLeast);
+        cut.Render(parameters => parameters
+            .Add(component => component.Server, MakeServer(Svc("nginx"), Svc("apache2")))
+            .Add(component => component.ServerId, 21));
+
+        Assert.Null(cut.Instance.Actions.Of("nginx", []));
+        Assert.Equal(ServiceActionPhase.Failed, cut.Instance.Actions.Of("apache2", [])!.Phase);
     }
 
     [Fact]
     public void ServerChange_ClearsBusyAndLogState()
     {
         var cut = RenderSection(MakeServer(Svc("nginx")));
-        typeof(ServerServicesSection).GetField("_busyService", Priv)!.SetValue(cut.Instance, "nginx");
-        typeof(ServerServicesSection).GetField("_busyTaskId", Priv)!.SetValue(cut.Instance, 12);
+        cut.Instance.Actions.Track("nginx", 12, "Start");
         typeof(ServerServicesSection).GetField("_currentLogTaskId", Priv)!.SetValue(cut.Instance, 44);
         typeof(ServerServicesSection).GetField("_logsVisible", Priv)!.SetValue(cut.Instance, true);
 
@@ -296,8 +380,7 @@ public class ServerServicesSectionRenderTests : BunitContext
             .Add(component => component.Server, next)
             .Add(component => component.ServerId, 22));
 
-        Assert.Null(typeof(ServerServicesSection).GetField("_busyService", Priv)!.GetValue(cut.Instance));
-        Assert.Null(typeof(ServerServicesSection).GetField("_busyTaskId", Priv)!.GetValue(cut.Instance));
+        Assert.Null(cut.Instance.Actions.Of("nginx", []));
         Assert.Null(typeof(ServerServicesSection).GetField("_currentLogTaskId", Priv)!.GetValue(cut.Instance));
         Assert.False((bool)typeof(ServerServicesSection).GetField("_logsVisible", Priv)!.GetValue(cut.Instance)!);
     }
@@ -380,16 +463,18 @@ public class ServerServicesSectionRenderTests : BunitContext
         method.Invoke(cut.Instance, ["hello world"]);
         var content = (string)typeof(ServerServicesSection).GetField("_logsContent", Priv)!.GetValue(cut.Instance)!;
         Assert.Contains("hello world", content);
-        Assert.Equal(1, (int)typeof(ServerServicesSection).GetField("_logLineCount", Priv)!.GetValue(cut.Instance)!);
+        var buffer = (ServiceLogBuffer)typeof(ServerServicesSection).GetField("_logBuffer", Priv)!.GetValue(cut.Instance)!;
+        Assert.Equal(1, buffer.LineCount);
     }
 
     [Fact]
     public void AppendLog_MaxLinesExceeded_TruncatesAndContinues()
     {
         var cut = RenderSection();
-        // Set line count to max
-        typeof(ServerServicesSection).GetField("_logLineCount", Priv)!.SetValue(cut.Instance, 2000);
         var method = typeof(ServerServicesSection).GetMethod("AppendLog", Priv)!;
+        // Fill the buffer up to its bound so the next line starts it over.
+        for (var line = 0; line < ServiceLogBuffer.MaxLines; line++)
+            method.Invoke(cut.Instance, [$"line {line}"]);
         method.Invoke(cut.Instance, ["overflow line"]);
         var content = (string)typeof(ServerServicesSection).GetField("_logsContent", Priv)!.GetValue(cut.Instance)!;
         Assert.Contains("truncated", content);
@@ -415,30 +500,21 @@ public class ServerServicesSectionRenderTests : BunitContext
 
     // ── OnRowRender ──────────────────────────────────────────────────────────
 
-    // Row greying moved to the reusable ManageableServiceGrid (OnRowRenderInternal, private static).
+    // Row greying belongs to the reusable ManageableServiceGrid.
     [Fact]
     public void OnRowRender_NotInstalled_AddsColorClass()
     {
-        var method = typeof(ManageableServiceGrid).GetMethod("OnRowRenderInternal", PrivStatic)!;
-        // RowRenderEventArgs<T>.Data is read-only - construct via Activator and set via reflection
-        var args = new RowRenderEventArgs<ServiceInfoDto>();
-        typeof(RowRenderEventArgs<ServiceInfoDto>)
-            .GetProperty("Data")!
-            .SetValue(args, new ServiceInfoDto { Name = "nginx", IsInstalled = false });
-        method.Invoke(null, [args]);
-        Assert.Contains("rz-color-secondary", args.Attributes["class"].ToString());
+        var cut = Render<ManageableServiceGrid>(parameters => parameters
+            .Add(component => component.Services, [new ServiceInfoDto { Name = "nginx", IsInstalled = false }]));
+        Assert.Contains("omni-u-text-muted", cut.Find("tr[data-omni-row-index='0']").ClassList);
     }
 
     [Fact]
     public void OnRowRender_Installed_DoesNotAddColorClass()
     {
-        var method = typeof(ManageableServiceGrid).GetMethod("OnRowRenderInternal", PrivStatic)!;
-        var args = new RowRenderEventArgs<ServiceInfoDto>();
-        typeof(RowRenderEventArgs<ServiceInfoDto>)
-            .GetProperty("Data")!
-            .SetValue(args, new ServiceInfoDto { Name = "nginx", IsInstalled = true });
-        method.Invoke(null, [args]);
-        Assert.False(args.Attributes.ContainsKey("class"));
+        var cut = Render<ManageableServiceGrid>(parameters => parameters
+            .Add(component => component.Services, [new ServiceInfoDto { Name = "nginx", IsInstalled = true }]));
+        Assert.DoesNotContain("omni-u-text-muted", cut.Find("tr[data-omni-row-index='0']").ClassList);
     }
 
     // ── DisposeAsync ─────────────────────────────────────────────────────────
@@ -495,21 +571,109 @@ public class ServerServicesSectionRenderTests : BunitContext
         var cut = RenderSection();
         await cut.InvokeAsync(() => cut.Instance.ViewServiceLogsAsync("nginx"));
         cut.Render();
+        // R-181: the viewer opens live; the toggle is how a user freezes it, then resumes it.
+        Assert.True(cut.Instance.IsFollowingLogs);
+        await cut.InvokeAsync(() => cut.Instance.OnFollowChangedAsync(false));
+        cut.Render();
         _handler.Requests.Clear();
 
         var exception = Record.Exception(
-            () => cut.Find(".labeled-toggle-native-input").Change(true));
+            () => cut.Find("button.omni-switch.omni-switch--text-first").Click());
 
         Assert.Null(exception);
-        // Change() dispatches the handler without awaiting it, unlike the sibling test that invokes
+        // Click() dispatches the handler without awaiting it, unlike the sibling test that invokes
         // OnFollowChangedAsync directly. Asserting immediately raced the continuation and failed only
         // under full-suite load; waiting keeps the same discriminating power, because a toggle that
         // never restarts the stream still never satisfies these assertions.
-        cut.WaitForAssertion(() =>
+        //
+        // The wait was not enough: this still failed once under full-suite load, and the report said
+        // only that the wait expired. That does not distinguish a handler that never ran, a restart
+        // refused by the _logsServiceName guard, and a restart still blocked on the log-stream gate.
+        // The timeout is deliberately left at the default - raising it would thin the flake out
+        // without ever saying which of the three it was - and a failure now carries the fields
+        // StartLogStreamAsync actually branches on instead.
+        try
         {
-            Assert.True(cut.Instance.IsFollowingLogs);
-            Assert.Contains(_handler.Requests,
-                r => r.Method == "POST" && r.Url.Contains("api/servers/21/services/logs"));
+            cut.WaitForAssertion(() =>
+            {
+                Assert.True(cut.Instance.IsFollowingLogs);
+                Assert.Contains(_handler.Requests,
+                    r => r.Method == "POST" && r.Url.Contains("api/servers/21/services/logs"));
+            });
+        }
+        catch (Bunit.Extensions.WaitForHelpers.WaitForFailedException ex)
+        {
+            throw new InvalidOperationException(DescribeLogStreamState(cut), ex);
+        }
+    }
+
+    [Fact]
+    public async Task R181_TheViewerRereadsASnapshotOnATimer_NeverAFollowSession_AndNeverPilesUpReads()
+    {
+        var cut = RenderSection();
+        await cut.InvokeAsync(() => cut.Instance.ViewServiceLogsAsync("nginx"));
+        cut.Render();
+
+        Assert.True(cut.Instance.IsFollowingLogs);
+        Assert.Equal(TimeSpan.FromSeconds(30), ServiceLogAutoRefresh.Interval);
+        Assert.Empty(cut.FindAll("button[aria-label='Refresh']"));
+        var logRequests = _handler.RequestDetails.Where(r => r.Url.Contains("api/servers/21/services/logs", StringComparison.Ordinal)).ToList();
+        Assert.Single(logRequests);
+        Assert.Contains("\"follow\":false", logRequests[0].Body!, StringComparison.OrdinalIgnoreCase);
+        int LogRequests() => _handler.Requests.Count(r => r.Method == "POST" && r.Url.Contains("api/servers/21/services/logs"));
+
+        // The first read has not come back: a tick must not queue a second task behind it.
+        await cut.InvokeAsync(cut.Instance.RefreshLogsTickAsync);
+        Assert.Equal(1, LogRequests());
+
+        // Once it has, the next tick reads again.
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
+        {
+            TaskId = 42,
+            ServerId = 21,
+            TaskName = "Logs - nginx",
+            Status = TaskExecutionStatus.Success
         });
+        await cut.InvokeAsync(cut.Instance.RefreshLogsTickAsync);
+        cut.WaitForAssertion(() => Assert.Equal(2, LogRequests()));
+
+        // Switched off, ticks do nothing.
+        cut.Instance.HandleTaskCompleted(new TaskCompletedNotification
+        {
+            TaskId = 42,
+            ServerId = 21,
+            TaskName = "Logs - nginx",
+            Status = TaskExecutionStatus.Success
+        });
+        await cut.InvokeAsync(() => cut.Instance.OnFollowChangedAsync(false));
+        await cut.InvokeAsync(cut.Instance.RefreshLogsTickAsync);
+        Assert.Equal(2, LogRequests());
+    }
+
+    /// <summary>
+    /// State dump for the follow-toggle wait above, read through the rendered output rather than the
+    /// component's fields: PrivateReflectionBudgetTests refuses a new GetField, and each private field
+    /// worth naming here has a visible counterpart anyway. The combination separates the three ways
+    /// the restart can go unobserved. IsFollowingLogs still false means the toggle's handler never
+    /// ran. A closed pane means CloseLogs won the race, and StartLogStreamAsync then returns on its
+    /// _logsServiceName guard before ever posting. An open pane with the toggle on and no POST
+    /// recorded means the restart was still in flight when the wait expired, which is the case a
+    /// longer timeout would have hidden.
+    /// </summary>
+    private string DescribeLogStreamState(IRenderedComponent<ServerServicesSection> cut)
+    {
+        // The whole log card is behind @if (_logsVisible), so its line-count selector is present
+        // exactly when the pane is open.
+        var paneOpen = cut.FindAll(".log-lines-select").Count > 0;
+        var toggle = cut.FindAll("button.omni-switch.omni-switch--text-first").FirstOrDefault();
+        var toggleChecked = toggle is null ? "absent" : toggle.GetAttribute("aria-checked") ?? "absent";
+        var requests = _handler.Requests.Count == 0
+            ? "(none)"
+            : string.Join(", ", _handler.Requests.Select(r => $"{r.Method} {r.Url}"));
+
+        return "The follow toggle did not restart the log stream before the wait expired. "
+            + $"IsFollowingLogs={cut.Instance.IsFollowingLogs}, logs pane open={paneOpen}, "
+            + $"toggle checked={toggleChecked}, renders={cut.RenderCount}. "
+            + $"Requests recorded since the toggle: {requests}.";
     }
 }

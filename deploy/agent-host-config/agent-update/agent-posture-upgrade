@@ -1,0 +1,121 @@
+#!/bin/sh
+set -eu
+
+request_file="/var/lib/aetheus-agent/.agent-posture-upgrade-request"
+running_file="/var/lib/aetheus-agent/.agent-posture-upgrade-running"
+failed_request_file="/var/lib/aetheus-agent/.agent-posture-upgrade-failed-request"
+result_file="/var/lib/aetheus-agent/.agent-posture-upgrade-result"
+server_url_file="/etc/aetheus-agent-update-url"
+install_dir="/opt/aetheus-agent"
+work_dir="/var/lib/aetheus-agent"
+upgrade_dir=""
+rollback_ready=0
+outcome="failed"
+phase="claim"
+target_version="unknown"
+target_sha="unknown"
+target_commit="unknown"
+
+write_result() {
+    result_tmp="$result_file.tmp.$$"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$outcome" "$target_version" "$target_sha" "$target_commit" "$phase" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "$result_tmp"
+    chown root:root "$result_tmp"
+    chmod 644 "$result_tmp"
+    mv -f -- "$result_tmp" "$result_file"
+}
+
+restore_previous_agent() {
+    [ "$rollback_ready" -eq 1 ] || return 0
+    find "$install_dir" -mindepth 1 -maxdepth 1 ! -name appsettings.json \
+        -exec rm -rf -- {} +
+    cp -a "$rollback"/. "$install_dir"/
+    chown -R aetheus-agent:aetheus-agent "$install_dir"
+    rm -f -- "$work_dir/.agent-update-pending"
+    systemctl daemon-reload
+    systemctl start aetheus-agent
+}
+
+cleanup() {
+    [ -z "$upgrade_dir" ] || rm -rf -- "$upgrade_dir"
+}
+
+finish() {
+    exit_code="$?"
+    trap - EXIT HUP INT TERM
+    if [ "$outcome" != success ]; then
+        restore_previous_agent || true
+        if [ -f "$running_file" ]; then
+            mv -f -- "$running_file" "$failed_request_file"
+        fi
+        write_result || true
+    fi
+    cleanup
+    exit "$exit_code"
+}
+
+[ -f "$request_file" ] || exit 0
+trap finish EXIT HUP INT TERM
+[ ! -e "$running_file" ] || exit 9
+mv -- "$request_file" "$running_file"
+
+tab="$(printf '\t')"
+IFS="$tab" read -r target_version archive_name archive_size target_sha target_commit extra < "$running_file"
+case "$target_version" in ''|*[!0-9A-Za-z.+-]*) phase="invalid-version"; exit 10 ;; esac
+case "$archive_name" in
+    aetheus-agent-linux-x64-v*.tar.gz) ;;
+    *) phase="invalid-archive-name"; exit 11 ;;
+esac
+case "$archive_name" in *[!0-9A-Za-z.+-]*) phase="invalid-archive-name"; exit 11 ;; esac
+case "$archive_size" in ''|*[!0-9]*) phase="invalid-archive-size"; exit 12 ;; esac
+[ "$archive_size" -gt 0 ] || { phase="invalid-archive-size"; exit 12; }
+[ "${#target_sha}" -eq 64 ] || { phase="invalid-archive-sha"; exit 13; }
+case "$target_sha" in *[!0-9a-fA-F]*) phase="invalid-archive-sha"; exit 13 ;; esac
+case "${#target_commit}" in 40|64) ;; *) phase="invalid-commit"; exit 14 ;; esac
+case "$target_commit" in *[!0-9a-fA-F]*) phase="invalid-commit"; exit 14 ;; esac
+[ -z "${extra:-}" ] || { phase="invalid-request-fields"; exit 15; }
+
+# Let the running agent publish the handoff result before this root-owned unit replaces it.
+sleep 5
+server_url="$(head -n 1 "$server_url_file" | tr -d '\r\n')"
+case "$server_url" in
+    https://*|http://localhost*|http://127.0.0.1*|http://\[::1\]*) ;;
+    *) phase="invalid-server-url"; exit 16 ;;
+esac
+
+upgrade_dir="$(mktemp -d /var/tmp/aetheus-agent-upgrade.XXXXXX)"
+archive="$upgrade_dir/agent.tar.gz"
+payload="$upgrade_dir/payload"
+rollback="$upgrade_dir/rollback"
+mkdir -p "$payload" "$rollback"
+
+phase="download"
+curl -fSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
+    "$server_url/downloads/releases/$target_version/$archive_name" -o "$archive"
+[ "$(stat -c %s "$archive")" = "$archive_size" ] || { phase="size-mismatch"; exit 17; }
+[ "$(sha256sum "$archive" | cut -d ' ' -f1)" = "$(printf '%s' "$target_sha" | tr 'A-F' 'a-f')" ] \
+    || { phase="sha256-mismatch"; exit 18; }
+if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    phase="unsafe-archive"; exit 19
+fi
+phase="extract"
+tar -xzf "$archive" -C "$payload"
+test -f "$payload/install-agent-linux.sh"
+test -f "$payload/Aetheus.Agent.Linux.dll" || test -f "$payload/Aetheus.Agent.Linux"
+
+# Preserve a last-known-good binary tree independently from the agent-owned staging area.
+find "$install_dir" -mindepth 1 -maxdepth 1 ! -name appsettings.json \
+    -exec cp -a {} "$rollback/" \;
+rollback_ready=1
+
+phase="install"
+sh "$payload/install-agent-linux.sh" --upgrade --yes
+phase="service-health"
+systemctl is-active --quiet aetheus-agent
+outcome="success"
+phase="complete"
+write_result
+rm -f -- "$running_file" "$failed_request_file"
+rollback_ready=0
+exit 0

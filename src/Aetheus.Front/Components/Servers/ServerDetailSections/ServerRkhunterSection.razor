@@ -1,0 +1,142 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+
+@* --- Status bar --- *@
+<OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-lg">
+    <OmniBadge Fill="OmniFill.Solid" Tone="@(Rk.IsInstalled ? OmniTone.Success : OmniTone.Neutral)">@(Rk.IsInstalled ? L["Installed"] : L["NotInstalled"])</OmniBadge>
+    @if (Rk.IsInstalled)
+    {
+        @if (!string.IsNullOrEmpty(Rk.Version))
+        {
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">v@(Rk.Version)</OmniText>
+        }
+        <OmniIcon Name="@MaterialIconMap.Resolve(GetScanStatusIcon(Rk.LastScanStatus))" Class="@GetScanStatusColor(Rk.LastScanStatus)" />
+        <OmniBadge Fill="OmniFill.Solid" Tone="@GetScanBadgeStyle(Rk.LastScanStatus)">@($"{L["LastScan"]}: {LocalizeScanStatus(Rk.LastScanStatus)}")</OmniBadge>
+        @if (Rk.WarningCount > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@($"{Rk.WarningCount} {L["Warnings"]}")</OmniBadge>
+        }
+        @if (Rk.LastScanTime.Year >= 2000)
+        {
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@Rk.LastScanTime.ToString("g")</OmniText>
+        }
+    }
+    <div class="blade-content-spacer"></div>
+
+    @if (!Rk.IsInstalled)
+    {
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenSetupDialogAsync"><OmniIcon Name="OmniIconName.RocketLaunch" /> <span>@L["RkhunterSetup"]</span></OmniButton>
+    }
+    else
+    {
+        <OmniSplitButton Text="@L["Scan"]" title="@L["RunScan"]" Disabled="@_actionRunning" OnClick="@(() => ExecuteActionAsync(RkhunterAction.RunScan))"><Icon><OmniIcon Name="OmniIconName.Search" /></Icon><ChildContent>
+            <OmniMenuItem OnClick="@(() => ExecuteActionAsync(RkhunterAction.RunScan))">@L["RunScan"]</OmniMenuItem>
+            <OmniMenuItem OnClick="@(() => ExecuteActionAsync(RkhunterAction.UpdateDatabase))">@L["UpdateDatabase"]</OmniMenuItem>
+            <OmniMenuItem OnClick="@(() => ExecuteActionAsync(RkhunterAction.UpdateProperties))">@L["UpdateProperties"]</OmniMenuItem>
+        </ChildContent></OmniSplitButton>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@GetLogsAsync"><OmniIcon Name="OmniIconName.Document" /> <span>@L["ViewLogs"]</span></OmniButton>
+    }
+</OmniRow>
+
+@if (Rk.IsInstalled)
+{
+    <UrlSyncedTabs Slugs="@(new[] { "overview", "warnings", "history" })">
+        <Tabs>
+            @* --- Overview tab --- *@
+            <OmniTabsItem Key="overview" Title="@L["Overview"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("dashboard"))" /></Icon><ChildContent>
+                <OmniRow Gap="OmniSpacing.Large" Class="omni-u-mb-lg">
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFieldset><Legend>@L["DatabaseVersion"]</Legend><ChildContent>
+                            <OmniText Element="OmniTextElement.Paragraph">@(string.IsNullOrEmpty(Rk.DatabaseVersion) ? "-" : Rk.DatabaseVersion)</OmniText>
+                        </ChildContent></OmniFieldset>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFieldset><Legend>@L["DatabaseLastUpdated"]</Legend><ChildContent>
+                            <OmniText Element="OmniTextElement.Paragraph">@(Rk.DatabaseLastUpdated.Year >= 2000 ? Rk.DatabaseLastUpdated.ToString("g") : "-")</OmniText>
+                        </ChildContent></OmniFieldset>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFieldset><Legend>@L["LastScanStatus"]</Legend><ChildContent>
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                                <OmniIcon Name="@MaterialIconMap.Resolve(GetScanStatusIcon(Rk.LastScanStatus))" Class="@GetScanStatusColor(Rk.LastScanStatus)" />
+                                <OmniText Element="OmniTextElement.Paragraph">@LocalizeScanStatus(Rk.LastScanStatus) (@Rk.WarningCount @L["Warnings"])</OmniText>
+                            </OmniStack>
+                        </ChildContent></OmniFieldset>
+                    </OmniColumn>
+                </OmniRow>
+                <OmniFieldset><Legend>@L["ScheduledScan"]</Legend><ChildContent>
+                    <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.End">
+                        <div>
+                    <OmniLabel For="CronExpr">@L["CronExpression"]</OmniLabel>
+                            <OmniTextBox Value="@_scheduleCron" ValueChanged="@OnScheduleChanged" Id="CronExpr" Placeholder="0 3 * * 0" Class="w-rem-12-5"  ValueExpression="@(() => _scheduleCron)"/>
+                        </div>
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SaveScheduleAsync" Class="@(_savingSchedule ? "btn-busy" : null)" Busy="@(_savingSchedule)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                    </OmniRow>
+                </ChildContent></OmniFieldset>
+            </ChildContent></OmniTabsItem>
+
+            @* --- Warnings tab --- *@
+            <OmniTabsItem Key="warnings" Title="@L["Warnings"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("warning"))" /></Icon><ChildContent>
+                @if (_warnings.Count == 0)
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Center" Class="omni-u-py-2xl">
+                        <OmniIcon Name="OmniIconName.CheckCircle" Class="icon-3xl-success" />
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["NoWarnings"]</OmniText>
+                    </OmniStack>
+                }
+                else
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+                        <CountBadge Value="@_warnings.Count" Variant="OmniTone.Warning" />
+                    </OmniStack>
+                    <OmniDataGrid @ref="_warningsGrid" FillAvailableHeight="true" Items="@_warnings" TItem="RkhunterWarningDto" KeyOf="@(row => row.Id)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+                        <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="RkhunterWarningDto" Property="Category" Title="@L["Category"]" Width="9.375rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true" />
+                            <OmniDataGridColumn TItem="RkhunterWarningDto" Property="Detail" Title="@L["Detail"]"  Filterable="true"/>
+                            <OmniDataGridColumn TItem="RkhunterWarningDto" Property="Severity" Title="@L["Severity"]" Width="6.25rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                            <OmniDataGridColumn TItem="RkhunterWarningDto" Property="FoundAt" Title="@L["FoundAt"]" Width="9.375rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+                                <Template Context="w">
+                                    @w.FoundAt.ToString("g")
+                                </Template>
+                            </OmniDataGridColumn>
+                        </Columns>
+                    </OmniDataGrid>
+                }
+            </ChildContent></OmniTabsItem>
+
+            @* --- Scan History tab --- *@
+            <OmniTabsItem Key="history" Title="@L["ScanHistory"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("history"))" /></Icon><ChildContent>
+                @* R-181: warnings and history reload on the server's heartbeats and RKHunter task completions. *@
+                @if (_scanHistory.Count == 0)
+                {
+                    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Center" Class="omni-u-py-2xl">
+                        <OmniIcon Name="OmniIconName.Reset" Class="icon-3xl-secondary" />
+                        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["NoScanHistory"]</OmniText>
+                    </OmniStack>
+                }
+                else
+                {
+                    <OmniDataGrid @ref="_historyGrid" FillAvailableHeight="true" Items="@_scanHistory" TItem="RkhunterScanResultDto" KeyOf="@(row => row.Id)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+                        <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="RkhunterScanResultDto" Property="Status" Title="@L["Status"]" Width="7.5rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ScanStatusText">
+                                <Template Context="r">
+                                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                                        <OmniIcon Name="@MaterialIconMap.Resolve(GetScanStatusIcon(r.Status))" Class="@GetScanStatusColor(r.Status)" />
+                                        <OmniText Element="OmniTextElement.Paragraph">@LocalizeScanStatus(r.Status)</OmniText>
+                                    </OmniStack>
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="RkhunterScanResultDto" Property="ScanTime" Title="@L["ScanTime"]" Width="11.25rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+                                <Template Context="r">
+                                    @r.ScanTime.ToString("g")
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="RkhunterScanResultDto" Property="WarningCount" Title="@L["Warnings"]" Width="6.25rem"  Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators"/>
+                            <OmniDataGridColumn TItem="RkhunterScanResultDto" Property="Summary" Title="@L["Summary"]"  Filterable="true"/>
+                        </Columns>
+                    </OmniDataGrid>
+                }
+            </ChildContent></OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}

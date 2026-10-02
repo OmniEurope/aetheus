@@ -99,9 +99,10 @@ internal static class PipelineArtifactCollector
 
             var fileInfo = new FileInfo(temporaryZip);
             var hash = Stopwatch.StartNew();
+            byte[] zipHash;
             await using (var hashStream = new FileStream(
                              temporaryZip, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
-                _ = await SHA256.HashDataAsync(hashStream, ct).ConfigureAwait(false);
+                zipHash = await SHA256.HashDataAsync(hashStream, ct).ConfigureAwait(false);
             hash.Stop();
             var compressionSummary = string.Equals(compressionText?.Trim(), "adaptive", StringComparison.OrdinalIgnoreCase)
                 ? "Adaptive [" + string.Join(", ", compressionLevels
@@ -127,10 +128,19 @@ internal static class PipelineArtifactCollector
             }
             await using var stream = new FileStream(temporaryZip, FileMode.Open, FileAccess.Read);
             var upload = Stopwatch.StartNew();
-            await apiClient.UploadArtifactAsync(runId, artifactName, stageName, stream, ct).ConfigureAwait(false);
+            var artifact = await apiClient.UploadArtifactAsync(runId, artifactName, stageName, stream, ct)
+                .ConfigureAwait(false);
             upload.Stop();
+            var zipSha256 = Convert.ToHexStringLower(zipHash);
+            if (artifact is null
+                || artifact.SizeBytes != fileInfo.Length
+                || !string.Equals(artifact.Sha256, zipSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The uploaded artifact size or SHA-256 does not match the collected zip.");
             await PipelineMetricEmitter.EmitAsync(onOutput, "artifact.collect.upload", "Duration", "s", upload.Elapsed.TotalSeconds).ConfigureAwait(false);
-            await onOutput("Artifact uploaded successfully", TaskLogLevel.Info).ConfigureAwait(false);
+            await onOutput(
+                $"Artifact uploaded successfully: {GetUploadPartCount(fileInfo.Length)} part(s), " +
+                $"sha256 {zipSha256}.",
+                TaskLogLevel.Info).ConfigureAwait(false);
             await TryAutoPublishCoverageAsync(apiClient, logger, runId, stageName, baseDirectory, onOutput, ct).ConfigureAwait(false);
             return new ExecutorResult(0, false);
         }
@@ -156,6 +166,11 @@ internal static class PipelineArtifactCollector
             _ => throw new InvalidDataException(
                 "AETHEUS_ARTIFACT_COMPRESSION must be Adaptive, Fastest, Optimal or NoCompression.")
         };
+
+    internal static long GetUploadPartCount(long length) =>
+        length > ArtifactChunkPlan.ChunkThresholdBytes
+            ? 1 + (length - 1) / ArtifactChunkPlan.ChunkSizeBytes
+            : 1;
 
     private static CompressionLevel ResolveAdaptiveCompressionLevel(string? filePath)
     {

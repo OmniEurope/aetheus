@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
-using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -95,8 +94,32 @@ public sealed class PipelineTemplateResolver(IPipelineRepository repo) : IPipeli
             Parameters = parameters,
             Stages = MergeStages(parent.Stages, child.Stages),
             Isolation = child.Isolation ?? parent.Isolation,
-            OnSuccess = child.OnSuccess.Count > 0 ? child.OnSuccess : parent.OnSuccess
+            OnSuccess = child.OnSuccess.Count > 0 ? child.OnSuccess : parent.OnSuccess,
+            Requires = MergeRequires(parent.Requires, child.Requires)
         };
+    }
+
+    /// <summary>
+    /// PLAN-003 lot 30: a pipeline that extends a template needs what the template needs, plus its
+    /// own. Without this the launch preflight never saw a template's <c>requires:</c> for a pipeline
+    /// created by the wizard (<c>extends:</c> only), and launched it without the library it reads.
+    /// </summary>
+    private static PipelineRequiresDefinition? MergeRequires(
+        PipelineRequiresDefinition? parent,
+        PipelineRequiresDefinition? child)
+    {
+        if (parent is null) return child;
+        if (child is null) return parent;
+        return new PipelineRequiresDefinition
+        {
+            Libraries = Union(parent.Libraries, child.Libraries),
+            Vaults = Union(parent.Vaults, child.Vaults),
+            Environments = Union(parent.Environments, child.Environments),
+            Capabilities = Union(parent.Capabilities, child.Capabilities)
+        };
+
+        static List<string> Union(List<string> first, List<string> second) =>
+            first.Concat(second).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static List<PipelineStageDefinition> MergeStages(

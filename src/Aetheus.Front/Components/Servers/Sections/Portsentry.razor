@@ -1,0 +1,15 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerLoaderSectionBase
+@page "/servers/{Id:int}/portsentry"
+@layout Aetheus.Front.Layout.ServerDetailLayout
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
+
+<PageTitle>@(Loader?.Server?.Name ?? L["Server"]) - Portsentry - Aetheus</PageTitle>
+
+@if (Loader?.Server is not null)
+{
+    <Aetheus.Front.Components.Servers.ServerDetailSections.ServerPortsentrySection
+        ServerId="@Id"
+        Ps="@Loader.Server.Portsentry"
+        OnRefreshRequested="StateHasChanged" />
+}

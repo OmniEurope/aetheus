@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
-using Aetheus.Shared.Validation;
 using Microsoft.AspNetCore.Http;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -37,6 +35,9 @@ public class PipelineService(
         };
     }
 
+    public Task<int?> GetProjectServerProjectIdAsync(int projectServerId, CancellationToken ct = default)
+        => repo.GetProjectServerProjectIdAsync(projectServerId, ct);
+
     public async Task<PipelineDto?> GetPipelineAsync(int id, CancellationToken ct = default)
     {
         var pipeline = await repo.GetPipelineWithRunsAsync(id, ct).ConfigureAwait(false);
@@ -49,10 +50,21 @@ public class PipelineService(
         => pipelineGit.GetPipelineSourceAsync(
             projectId, pipelineName, ct, sourceBranch, sourceRepositoryId);
 
-    public async Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(
-        List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default)
+    public async Task<(bool Found, PipelineSourceDto? Source)> GetPipelineSourceByIdAsync(int id, CancellationToken ct = default)
     {
-        var pipelines = await repo.GetPipelinesForDependencyGraphAsync(accessibleIds, serverId, ct).ConfigureAwait(false);
+        var fields = await repo.GetPipelineSourceFieldsAsync(id, ct).ConfigureAwait(false);
+        if (fields is null) return (false, null);
+        if (fields.ProjectId is not { } projectId) return (true, null);
+        return (true, await pipelineGit.GetPipelineSourceAsync(
+            projectId, fields.Name, ct, fields.SourceBranch, fields.SourceRepositoryId).ConfigureAwait(false));
+    }
+
+    public async Task<PipelineDependencyGroupsDto> GetDependencyGroupsAsync(
+        List<int>? accessibleIds = null, int? serverId = null, int? projectId = null,
+        CancellationToken ct = default)
+    {
+        var pipelines = await repo
+            .GetPipelinesForDependencyGraphAsync(accessibleIds, serverId, projectId, ct).ConfigureAwait(false);
         return PipelineDependencyGraphBuilder.Build(pipelines, ValidateYaml);
     }
 

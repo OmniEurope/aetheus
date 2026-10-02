@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen.Blazor;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Shared;
 
@@ -25,9 +23,9 @@ public class PipelineDependencyGridTests : BunitContext
                 new PipelineDependencyReferenceDto(4, "deploy")
             ]
         };
-        var cut = RenderGrid(item, showsChildren: true);
+        var cut = RenderGrid(item);
 
-        cut.Find(".rz-row-toggler").ParentElement!.Click();
+        cut.Find("td[data-omni-control='expand'] button[aria-expanded]").Click();
 
         cut.WaitForAssertion(() =>
         {
@@ -40,28 +38,46 @@ public class PipelineDependencyGridTests : BunitContext
         });
     }
 
+    /// <summary>R-121: one list, the chevron decided per row. A leaf (even one with parents) has none.</summary>
     [Fact]
-    public void LeafRow_ExpandsParentsAlphabetically_AndEditTargetsYamlTab()
+    public void MixedRows_ShowTheChevronOnlyOnRowsWithChildren()
     {
-        var item = new PipelineDependencyDto
+        var items = new List<PipelineDependencyDto>
         {
-            Id = 4,
-            Name = "deploy",
-            Parents =
-            [
-                new PipelineDependencyReferenceDto(2, "zeta"),
-                new PipelineDependencyReferenceDto(1, "alpha")
-            ]
+            new() { Id = 1, Name = "release", References = [new PipelineDependencyReferenceDto(4, "deploy")] },
+            new() { Id = 4, Name = "deploy", Parents = [new PipelineDependencyReferenceDto(1, "release")] },
+            new() { Id = 5, Name = "lint" }
         };
-        var cut = RenderGrid(item, showsChildren: false);
-        cut.Find(".rz-row-toggler").ParentElement!.Click();
+        var cut = Render<PipelineDependencyGrid>(parameters => parameters
+            .Add(component => component.Items, items)
+            .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
+            .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
+            .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask));
 
-        cut.WaitForAssertion(() => Assert.True(
-            cut.Markup.IndexOf(">alpha<", StringComparison.Ordinal)
-            < cut.Markup.IndexOf(">zeta<", StringComparison.Ordinal)));
-        Assert.Contains("pipeline-relation-list-parents", cut.Markup);
+        var rows = cut.FindAll("tr[data-omni-row-index]");
+        Assert.Equal(3, rows.Count);
+        Assert.NotNull(rows.Single(row => row.TextContent.Contains("release", StringComparison.Ordinal)
+                && !row.TextContent.Contains("deploy", StringComparison.Ordinal))
+            .QuerySelector("td[data-omni-control='expand'] button[aria-expanded]"));
+        Assert.Single(cut.FindAll("td[data-omni-control='expand'] button[aria-expanded]"));
+        Assert.True(PipelineDependencyGrid.HasChildren(items[0]));
+        Assert.False(PipelineDependencyGrid.HasChildren(items[1]));
+        Assert.False(PipelineDependencyGrid.HasChildren(items[2]));
+    }
 
-        cut.FindAll("button").Single(button => button.TextContent.Contains("Edit", StringComparison.Ordinal)).Click();
+    /// <summary>R-123: Run and the star stay on the row; Edit sits in the row's "..." menu.</summary>
+    [Fact]
+    public void RowActions_KeepRunAndStarVisible_AndEditLivesInTheMenu()
+    {
+        var cut = RenderGrid(new PipelineDependencyDto { Id = 4, Name = "deploy" });
+
+        Assert.Single(cut.FindAll("button[aria-label='AddPipelineToFavorites']"));
+        Assert.Contains(cut.FindAll("button"), button => button.Names().Contains("Run", StringComparison.Ordinal));
+        Assert.Empty(cut.FindAll("[role='menuitem']"));
+
+        cut.Find("button[aria-label='MoreActions']").Click();
+        cut.FindAll("[role='menuitem']").Single(item => item.TextContent.Contains("Edit", StringComparison.Ordinal)).Click();
+
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         Assert.EndsWith("/pipelines/4?tab=edit", nav.Uri, StringComparison.Ordinal);
     }
@@ -69,9 +85,9 @@ public class PipelineDependencyGridTests : BunitContext
     [Fact]
     public void RunButton_InvokesCallbackWithPipelineId()
     {
-        (int Id, RadzenSplitButtonItem? Item)? invocation = null;
+        (int Id, string? Mode)? invocation = null;
         var item = new PipelineDependencyDto { Id = 17, Name = "release" };
-        Func<int, RadzenSplitButtonItem?, Task> run = (id, selected) => { invocation = (id, selected); return Task.CompletedTask; };
+        Func<int, string?, Task> run = (id, mode) => { invocation = (id, mode); return Task.CompletedTask; };
         var cut = Render<PipelineDependencyGrid>(parameters => parameters
             .Add(component => component.Items, new List<PipelineDependencyDto> { item })
             .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
@@ -79,13 +95,13 @@ public class PipelineDependencyGridTests : BunitContext
             .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
             .Add(component => component.CanWrite, true));
 
-        cut.FindAll("button").Single(button => button.TextContent.Contains("Run", StringComparison.Ordinal)).Click();
+        cut.FindAll("button").Single(button => button.Names().Contains("Run", StringComparison.Ordinal)).Click();
 
         cut.WaitForAssertion(() =>
         {
             Assert.NotNull(invocation);
             Assert.Equal(17, invocation.Value.Id);
-            Assert.Null(invocation.Value.Item);
+            Assert.Null(invocation.Value.Mode);
         });
     }
 
@@ -106,7 +122,7 @@ public class PipelineDependencyGridTests : BunitContext
             .Add(component => component.FavoritePipelineIds, new HashSet<int> { 17 }));
 
         var button = cut.Find("button[aria-label='RemovePipelineFromFavorites']");
-        Assert.Contains("star", button.TextContent);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.StarFilled);
 
         button.Click();
 
@@ -129,7 +145,7 @@ public class PipelineDependencyGridTests : BunitContext
             }));
 
         var button = cut.Find("button[aria-label='AddPipelineToFavorites']");
-        Assert.Contains("star_border", button.TextContent);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Star);
 
         button.Click();
 
@@ -156,10 +172,9 @@ public class PipelineDependencyGridTests : BunitContext
         {
             Assert.Contains("Alpha", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("Beta", cut.Markup, StringComparison.Ordinal);
-            Assert.Empty(cut.FindAll(".rz-row-toggler"));
-            var dataGrid = cut.FindComponent<RadzenDataGrid<PipelineDependencyDto>>().Instance;
-            Assert.True(dataGrid.AllowVirtualization);
-            Assert.False(dataGrid.AllowPaging);
+            Assert.Empty(cut.FindAll("td[data-omni-control='expand'] button[aria-expanded]"));
+            var dataGrid = cut.FindComponent<OmniDataGrid<PipelineDependencyDto>>().Instance;
+            Assert.Equal(OmniDataGridScrollMode.Virtual, dataGrid.ScrollMode);
             Assert.False(dataGrid.AllowGrouping);
         });
     }
@@ -174,15 +189,15 @@ public class PipelineDependencyGridTests : BunitContext
             ProjectId = 8,
             RecentRuns =
             [
-                new PipelineRunSummaryDto { Id = 15, Status = Aetheus.Shared.Enums.PipelineStatus.Running },
-                new PipelineRunSummaryDto { Id = 14, Status = Aetheus.Shared.Enums.PipelineStatus.Failed },
-                new PipelineRunSummaryDto { Id = 13, Status = Aetheus.Shared.Enums.PipelineStatus.Success },
-                new PipelineRunSummaryDto { Id = 12, Status = Aetheus.Shared.Enums.PipelineStatus.Cancelled },
-                new PipelineRunSummaryDto { Id = 11, Status = Aetheus.Shared.Enums.PipelineStatus.Pending }
+                new PipelineRunSummaryDto { Id = 15, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Running },
+                new PipelineRunSummaryDto { Id = 14, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Failed },
+                new PipelineRunSummaryDto { Id = 13, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Success },
+                new PipelineRunSummaryDto { Id = 12, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Cancelled },
+                new PipelineRunSummaryDto { Id = 11, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Pending }
             ]
         };
 
-        var cut = RenderGrid(item, showsChildren: false);
+        var cut = RenderGrid(item);
 
         var dots = cut.FindAll(".pipeline-run-history .pipeline-run-dot");
         Assert.Equal(5, dots.Count);
@@ -221,7 +236,10 @@ public class PipelineDependencyGridTests : BunitContext
         Assert.Contains("v2", cut.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain("v@pinnedVersion", cut.Markup, StringComparison.Ordinal);
 
-        cut.FindAll("button").Single(button => button.TextContent.Contains("Update", StringComparison.Ordinal)).Click();
+        // R-123: the model update is a "..." menu entry now, not a row button.
+        Assert.DoesNotContain(cut.FindAll("button"), button => button.Names().Contains("Update", StringComparison.Ordinal));
+        cut.Find("button[aria-label='MoreActions']").Click();
+        cut.FindAll("[role='menuitem']").Single(item => item.TextContent.Contains("Update", StringComparison.Ordinal)).Click();
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         Assert.EndsWith("/pipelines/17/template/update/3", nav.Uri, StringComparison.Ordinal);
     }
@@ -245,12 +263,37 @@ public class PipelineDependencyGridTests : BunitContext
         Assert.DoesNotContain("href=\"/templates/", cut.Markup, StringComparison.Ordinal);
     }
 
-    private IRenderedComponent<PipelineDependencyGrid> RenderGrid(PipelineDependencyDto item, bool showsChildren) =>
+    [Fact]
+    public void RecentRuns_ShowTheGradeOfTheNewestRunOnly()
+    {
+        // PLAN-007 lot 3: the pipelines table carries the grade the run grids show.
+        var graded = RenderGrid(new PipelineDependencyDto
+        {
+            Id = 1,
+            Name = "candidate",
+            RecentRuns =
+            [
+                new PipelineRunSummaryDto { Id = 9, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Success, GateGrade = Aetheus.Shared.Components.Analysis.AnalysisGrade.C },
+                new PipelineRunSummaryDto { Id = 8, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Success, GateGrade = Aetheus.Shared.Components.Analysis.AnalysisGrade.A }
+            ]
+        });
+        var badge = Assert.Single(graded.FindAll(".grade-badge"));
+        Assert.Equal("C", badge.TextContent.Trim());
+
+        var ungraded = RenderGrid(new PipelineDependencyDto
+        {
+            Id = 2,
+            Name = "deploy",
+            RecentRuns = [new PipelineRunSummaryDto { Id = 7, Status = Aetheus.Shared.Components.Pipelines.PipelineStatus.Success }]
+        });
+        Assert.Empty(ungraded.FindAll(".grade-badge"));
+    }
+
+    private IRenderedComponent<PipelineDependencyGrid> RenderGrid(PipelineDependencyDto item) =>
         Render<PipelineDependencyGrid>(parameters => parameters
             .Add(component => component.Items, new List<PipelineDependencyDto> { item })
             .Add(component => component.PipelineHref, id => $"/pipelines/{id}")
             .Add(component => component.RunPipeline, (_, _) => Task.CompletedTask)
             .Add(component => component.SetFavorite, (_, _) => Task.CompletedTask)
-            .Add(component => component.ShowsChildren, showsChildren)
             .Add(component => component.CanWrite, true));
 }

@@ -96,6 +96,15 @@ public class PipelineArtifactService(IPipelineRepository repo, TimeProvider time
         return CoverageSummaryMapper.Map(CoverageSummaryMapper.SelectCanonical(results));
     }
 
+    /// <summary>
+    /// Recette R-210: the header filters of the coverage-by-assembly grid. The assemblies are built in
+    /// memory from the run's coverage reports, so the map runs over that list. The rate and line columns
+    /// show a percentage and a covered/valid pair, not the stored numbers, so the grid does not offer a
+    /// filter on them.
+    /// </summary>
+    internal static readonly GridQueryMap<CoverageAssemblyDto> CoverageAssemblyColumns = new GridQueryMap<CoverageAssemblyDto>()
+        .Text("Name", assembly => assembly.Name);
+
     public async Task<PaginatedResult<CoverageAssemblyDto>> GetCoverageAssembliesAsync(
         int runId, PaginationRequest request, CancellationToken ct = default)
     {
@@ -107,6 +116,7 @@ public class PipelineArtifactService(IPipelineRepository repo, TimeProvider time
         if (!string.IsNullOrWhiteSpace(request.Search))
             assemblies = assemblies.Where(assembly =>
                 assembly.Name.Contains(request.Search.Trim(), StringComparison.OrdinalIgnoreCase));
+        assemblies = CoverageAssemblyColumns.ApplyFilters(assemblies.AsQueryable(), request.Filters);
         assemblies = SortAssemblies(assemblies, request.SortBy, request.SortDescending);
         var totalCount = assemblies.Count();
         var (page, pageSize) = request.Normalize();

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Logs;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Logs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
 public class SystemLogsTests : BunitContext
 {
+    private const string EntriesUrl = "api/system-logs/entries";
     private readonly BunitTestHelper.TestHandler _handler;
 
     public SystemLogsTests()
@@ -20,7 +20,7 @@ public class SystemLogsTests : BunitContext
         {
             new("app-20260424.log", 102_400, DateTime.UtcNow)
         });
-        _handler.SetJsonResponse("api/system-logs", new PaginatedResult<SystemLogEntryDto>
+        _handler.SetJsonResponse(EntriesUrl, new PaginatedResult<SystemLogEntryDto>
         {
             TotalCount = 0,
             Items = []
@@ -46,24 +46,53 @@ public class SystemLogsTests : BunitContext
     {
         var method = typeof(SystemLogs).GetMethod("GetBadgeStyle", BindingFlags.NonPublic | BindingFlags.Static)!;
         var style = method.Invoke(null, [level]);
-        // The mapper must return a defined BadgeStyle for every level (incl. the "Unknown" fallback).
-        Assert.IsType<BadgeStyle>(style);
-        Assert.True(Enum.IsDefined((BadgeStyle)style!));
+        // The mapper must return a defined OmniTone for every level (incl. the "Unknown" fallback).
+        Assert.IsType<OmniTone>(style);
+        Assert.True(Enum.IsDefined((OmniTone)style!));
+    }
+
+    /// <summary>Recette R-453: the grid reads the log from the API itself, newest first, with no
+    /// "Load more" row; the rows it shows are the API's.</summary>
+    [Fact]
+    public void Grid_ReadsTheLogFromTheApi_WithoutALoadMoreRow()
+    {
+        _handler.SetJsonResponse(EntriesUrl, new PaginatedResult<SystemLogEntryDto>
+        {
+            TotalCount = 1,
+            Items = [new SystemLogEntryDto(1, DateTime.UtcNow, "Warning", "Aetheus.Back", "disk almost full", null, null)]
+        });
+
+        var cut = Render<SystemLogs>();
+
+        cut.WaitForAssertion(() => Assert.Contains("disk almost full", cut.Markup, StringComparison.Ordinal));
+        Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains(EntriesUrl, StringComparison.Ordinal)
+            && request.Url.Contains("page=1", StringComparison.Ordinal)
+            && request.Url.Contains("sortBy=Timestamp", StringComparison.Ordinal)
+            && request.Url.Contains("sortDescending=true", StringComparison.Ordinal));
+        Assert.DoesNotContain("LoadMore", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("LogsShownCount", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("NoLogsAvailable", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task LoadEntries_LoadsFromApi()
+    public void EmptyLog_SaysSo()
     {
         var cut = Render<SystemLogs>();
-        var method = typeof(SystemLogs).GetMethod("LoadEntriesAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
-        // LoadEntriesAsync fetches page 1 from the system-logs endpoint and stores the paginated result.
-        Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("api/system-logs"));
-        var entries = (PaginatedResult<SystemLogEntryDto>?)typeof(SystemLogs)
-            .GetField("_entries", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance);
-        Assert.NotNull(entries);
-        Assert.Equal(0, entries.TotalCount);
+        cut.WaitForAssertion(() => Assert.Contains("NoLogsAvailable", cut.Markup, StringComparison.Ordinal));
+        Assert.DoesNotContain("LoadFailed", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FailedCall_SaysSoInsteadOfAnEmptyLog()
+    {
+        _handler.SetResponse(HttpMethod.Get, EntriesUrl, HttpStatusCode.InternalServerError);
+
+        var cut = Render<SystemLogs>();
+
+        cut.WaitForAssertion(() => Assert.Contains("LoadFailed", cut.Markup, StringComparison.Ordinal));
+        Assert.DoesNotContain("NoLogsAvailable", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,45 +115,5 @@ public class SystemLogsTests : BunitContext
 
         cut.WaitForState(() => _handler.Requests.Any(request =>
             request.Url.Contains("search=agent-update-42", StringComparison.Ordinal)));
-    }
-
-    [Fact]
-    public async Task LoadMore_FailureDoesNotSkipPageAndRetryRequestsSamePage()
-    {
-        _handler.SetJsonResponse("api/system-logs", new PaginatedResult<SystemLogEntryDto>
-        {
-            TotalCount = 2,
-            Page = 1,
-            PageSize = 1,
-            Items = [new SystemLogEntryDto(1, DateTime.UtcNow, "Information", "test", "first", null, null)]
-        });
-        var cut = Render<SystemLogs>();
-        cut.WaitForState(() => GetPage(cut.Instance) == 1);
-        _handler.SetResponse("api/system-logs/entries?page=2", System.Net.HttpStatusCode.InternalServerError);
-
-        await InvokeLoadMoreAsync(cut);
-
-        Assert.Equal(1, GetPage(cut.Instance));
-        _handler.SetJsonResponse("api/system-logs/entries?page=2", new PaginatedResult<SystemLogEntryDto>
-        {
-            TotalCount = 2,
-            Page = 2,
-            PageSize = 1,
-            Items = [new SystemLogEntryDto(2, DateTime.UtcNow, "Information", "test", "second", null, null)]
-        });
-
-        await InvokeLoadMoreAsync(cut);
-
-        Assert.Equal(2, GetPage(cut.Instance));
-        Assert.Equal(2, _handler.Requests.Count(r => r.Url.Contains("page=2", StringComparison.Ordinal)));
-    }
-
-    private static int GetPage(SystemLogs instance) => (int)typeof(SystemLogs)
-        .GetField("_page", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
-
-    private static async Task InvokeLoadMoreAsync(IRenderedComponent<SystemLogs> cut)
-    {
-        var method = typeof(SystemLogs).GetMethod("LoadMoreAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
     }
 }

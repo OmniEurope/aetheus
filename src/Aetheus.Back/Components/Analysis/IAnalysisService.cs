@@ -20,6 +20,9 @@ public interface IAnalysisService
     Task<List<AnalysisPortfolioProjectDto>> GetPortfolioProjectsAsync(
         IReadOnlyCollection<int>? accessibleProjectIds,
         CancellationToken ct = default);
+    Task<AnalysisPortfolioFilterValuesDto> GetPortfolioFilterValuesAsync(
+        IReadOnlyCollection<int>? accessibleProjectIds,
+        CancellationToken ct = default);
     Task<AnalysisProjectSummaryDto> GetProjectSummaryAsync(int projectId, CancellationToken ct = default);
     Task<List<AnalysisPolicyDto>> GetPoliciesAsync(int projectId, CancellationToken ct = default);
     Task<AnalysisPolicyDto> CreatePolicyAsync(int projectId, UpsertAnalysisPolicyRequest request, CancellationToken ct = default);
@@ -44,8 +47,6 @@ public interface IAnalysisService
     Task<List<AnalysisPolicyExceptionDto>> GetExceptionsAsync(int projectId, CancellationToken ct = default);
     Task<AnalysisPolicyExceptionDto> CreateExceptionAsync(int projectId, CreateAnalysisPolicyExceptionRequest request, string actor, CancellationToken ct = default);
     Task RevokeExceptionAsync(int projectId, int exceptionId, string actor, CancellationToken ct = default);
-    Task<List<AnalysisFindingDecisionDto>> GetFindingDecisionsAsync(int findingId, CancellationToken ct = default);
-    Task<AnalysisFindingDecisionDto> CreateFindingDecisionAsync(int findingId, CreateAnalysisFindingDecisionRequest request, string actor, CancellationToken ct = default);
     Task<PaginatedResult<AnalysisMetricDto>> GetMetricsAsync(int projectId, AnalysisMetricPaginationRequest request, CancellationToken ct = default);
     Task<PaginatedResult<AnalysisComponentDto>> GetComponentsAsync(int projectId, AnalysisComponentPaginationRequest request, CancellationToken ct = default);
     Task<AnalysisTrackingStatusDto?> GetTrackingStatusAsync(int projectId, CancellationToken ct = default);

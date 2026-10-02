@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -40,27 +39,26 @@ public class TaskTrackerWidgetTests : BunitContext
     }
 
     [Fact]
-    public void TogglePopover_RevealsEmptyPopover()
+    public void TriggerClick_RevealsEmptyPopoverPanel()
     {
         var cut = Render<TaskTrackerWidget>();
-        var toggle = typeof(TaskTrackerWidget).GetMethod("TogglePopover", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-        toggle.Invoke(cut.Instance, null);
-        cut.Render();
+        cut.Find("button#task-tracker.task-tracker-btn").Click();
 
-        Assert.NotEmpty(cut.FindAll(".task-tracker-popover"));
+        Assert.Single(cut.FindAll("#task-tracker-panel"));
+        Assert.NotEmpty(cut.FindAll("#task-tracker-panel .task-tracker-popover"));
         Assert.NotEmpty(cut.FindAll(".task-tracker-empty"));
     }
 
     [Theory]
-    [InlineData(TaskExecutionStatus.Running, "play_arrow")]
-    [InlineData(TaskExecutionStatus.Assigned, "schedule")]
-    [InlineData(TaskExecutionStatus.Pending, "hourglass_top")]
-    [InlineData(TaskExecutionStatus.Success, "task_alt")]
-    public void StatusIcon_ReturnsExpected(TaskExecutionStatus status, string expected)
+    [InlineData(TaskExecutionStatus.Running, OmniIconName.Play)]
+    [InlineData(TaskExecutionStatus.Assigned, OmniIconName.Timer)]
+    [InlineData(TaskExecutionStatus.Pending, OmniIconName.Hourglass)]
+    [InlineData(TaskExecutionStatus.Success, OmniIconName.CheckCircle)]
+    public void StatusIcon_ReturnsExpected(TaskExecutionStatus status, OmniIconName expected)
     {
         var m = typeof(TaskTrackerWidget).GetMethod("StatusIcon", BindingFlags.NonPublic | BindingFlags.Static)!;
-        Assert.Equal(expected, (string)m.Invoke(null, [status])!);
+        Assert.Equal(expected, (OmniIconName)m.Invoke(null, [status])!);
     }
 
     [Theory]

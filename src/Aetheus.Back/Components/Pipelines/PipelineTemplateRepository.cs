@@ -5,6 +5,13 @@ namespace Aetheus.Back.Components.Pipelines;
 
 internal sealed class PipelineTemplateRepository(AppDbContext db)
 {
+    /// <summary>Recette R-210 / R-224: the header filters of a template's version history grid.</summary>
+    internal static readonly GridQueryMap<PipelineTemplateVersion> VersionColumns = new GridQueryMap<PipelineTemplateVersion>()
+        .Number("Version", version => version.Version)
+        .Text("ChangelogEntry", version => version.ChangelogEntry)
+        .Text("CreatedByUsername", version => version.CreatedByUsername)
+        .Date("CreatedAt", version => version.CreatedAt);
+
     public async Task<List<PipelineTemplate>> GetTemplatesAsync(CancellationToken ct = default) =>
         await db.PipelineTemplates.AsNoTracking()
             .OrderBy(template => template.Category)
@@ -97,10 +104,11 @@ internal sealed class PipelineTemplateRepository(AppDbContext db)
     public async Task<(List<PipelineTemplateVersionSummaryDto> Items, int TotalCount)>
         GetTemplateVersionsPagedAsync(
             int templateId, int page, int pageSize, string? sortBy, bool sortDescending,
-            CancellationToken ct = default)
+            CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.PipelineTemplateVersions.AsNoTracking()
             .Where(version => version.TemplateId == templateId);
+        query = VersionColumns.ApplyFilters(query, columnFilters);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {

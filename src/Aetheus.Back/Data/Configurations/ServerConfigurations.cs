@@ -16,6 +16,15 @@ internal sealed class ServerConfiguration : IEntityTypeConfiguration<Server>
         builder.Property(e => e.AgentCapabilitiesJson).HasMaxLength(8192);
         builder.Property(e => e.AgentSessionFencingToken).HasDefaultValue(0L);
         builder.HasIndex(e => e.OrganizationId);
+        // PLAN-004 R-11: enrollment matches a reinstalled machine by this hash within its organization.
+        // Not unique: cloned images can share a machine-id, and a hash is evidence, not a key.
+        builder.Property(e => e.MachineIdHash).HasMaxLength(64);
+        builder.HasIndex(e => new { e.OrganizationId, e.MachineIdHash });
+        // A retired server keeps its row and links but disappears from every query that does not
+        // opt out by name (see ServerQueryFilters). Hostname/Name stay globally unique on purpose: the
+        // retired row still owns its identity, so the same machine revives it instead of duplicating it,
+        // and the change stays expand-only (no index is dropped).
+        builder.HasQueryFilter(ServerQueryFilters.ExcludeRetired, e => e.DeletedAt == null);
         builder.HasOne(e => e.Organization)
                .WithMany()
                .HasForeignKey(e => e.OrganizationId)

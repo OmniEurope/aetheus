@@ -6,10 +6,10 @@ namespace Aetheus.E2E;
 
 /// <summary>
 /// Automated accessibility fixture. Logs in through the shared <see cref="E2ETestBase"/>
-/// harness, then runs an axe-core scan over a handful of key authenticated pages and
-/// fails on any WCAG <b>serious</b> or <b>critical</b> violation. Minor/moderate findings
-/// are reported in the test output but don't fail the build - they're tracked, not gated,
-/// to keep the bar enforceable without drowning in low-impact noise.
+/// harness, then runs an axe-core scan over the main authenticated pages and fails on any
+/// WCAG <b>serious</b> or <b>critical</b> violation. Every violation, whatever its impact, is
+/// also written as SARIF (<see cref="AccessibilitySarif"/>) for a lint step to publish as
+/// Accessibility findings (PLAN-003 2.4): minor and moderate ones are tracked, not gated.
 ///
 /// Like the rest of the suite this needs a running app + browsers to execute (the
 /// E2E/Accessibility categories gate it), but it compiles and is discoverable without one.
@@ -39,12 +39,16 @@ public class AccessibilityTests : E2ETestBase
     public async Task Accessibility_KeyPages_HaveNoSeriousOrCriticalViolations()
     {
         var failures = new List<string>();
-        foreach (var path in new[] { "/", "/servers", "/projects" })
+        var violations = new List<AccessibilityViolation>();
+        foreach (var path in MainPages)
         {
             await NavigateToAsync(path);
             await WaitForNoSpinnerAsync();
 
             var result = await Page.RunAxe(ScanOptions);
+            violations.AddRange(result.Violations.Select(v => new AccessibilityViolation(
+                path, v.Id, v.Impact, v.Description, v.Help, v.HelpUrl,
+                v.Nodes.Select(node => node.Target?.ToString() ?? string.Empty).ToList())));
 
             var blocking = result.Violations
                 .Where(v => v.Impact is not null
@@ -63,7 +67,26 @@ public class AccessibilityTests : E2ETestBase
             TestContext.Error.WriteLine(message);
         }
 
+        WriteSarif(violations);
         Assert.That(failures, Is.Empty, () => string.Join("\n\n", failures));
+    }
+
+    /// <summary>The pages a user works in, each scanned once per run.</summary>
+    private static readonly string[] MainPages =
+        ["/", "/servers", "/projects", "/pipelines", "/releases", "/analysis", "/environments"];
+
+    /// <summary>
+    /// Into the QA results directory when the runner names it (AETHEUS_E2E_RESULTS_DIR, which the
+    /// QA script copies out of the container), else beside the test output.
+    /// </summary>
+    private static void WriteSarif(IReadOnlyCollection<AccessibilityViolation> violations)
+    {
+        var directory = Environment.GetEnvironmentVariable("AETHEUS_E2E_RESULTS_DIR") is { Length: > 0 } results
+            ? results
+            : Path.Combine(TestContext.CurrentContext.WorkDirectory, "e2e-results");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, AccessibilitySarif.FileName), AccessibilitySarif.Build(violations));
+        TestContext.Out.WriteLine($"Accessibility: {violations.Count} violation(s) written to {AccessibilitySarif.FileName}.");
     }
 
     private static string BuildFailureMessage(string path, IReadOnlyList<AxeResultItem> blocking)

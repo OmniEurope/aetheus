@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.SignalR.Client;
-using UsersPage = Aetheus.Front.Pages.Users.Users;
+using UsersPage = Aetheus.Front.Components.Users.Users;
 
 namespace Aetheus.Front.Tests.Pages.Users;
 

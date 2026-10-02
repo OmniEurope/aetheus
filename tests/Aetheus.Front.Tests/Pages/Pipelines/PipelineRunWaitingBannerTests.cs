@@ -1,0 +1,304 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Front.Components.Pipelines;
+using Bunit;
+
+namespace Aetheus.Front.Tests.Pages;
+
+/// <summary>
+/// The banner itself, rendered: a unit test over the summary proves the list, not that the page puts
+/// it on screen. These render the real page and read its markup.
+/// </summary>
+public class PipelineRunWaitingBannerTests : BunitContext
+{
+    public PipelineRunWaitingBannerTests()
+    {
+        _handler = BunitTestHelper.RegisterServices(this);
+        _handler.SetJsonResponse(HttpMethod.Get, "api/releases/by-run/", new List<ReleaseDto>());
+        _handler.SetResponse(HttpMethod.Get, "/source", System.Net.HttpStatusCode.NoContent);
+        _handler.SetPaginatedJsonResponse<PipelineRunDto>(HttpMethod.Get, "/runs?pageSize=50", []);
+        _handler.SetPaginatedJsonResponse<AiRunResultDto>(HttpMethod.Get, "api/ai/results", []);
+        _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/", System.Net.HttpStatusCode.NoContent);
+    }
+
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    private const string Reason = "Stage 'Build images' waits for a configured pipeline runner to come back online.";
+
+    private void ServeRun(int runId, PipelineStatus status, string? waitingReason)
+    {
+        _handler.SetJsonResponse($"api/pipelines/runs/{runId}", new PipelineRunDto
+        {
+            Id = runId,
+            PipelineId = 5,
+            PipelineName = "aetheus-candidate",
+            Status = status,
+            WaitingReason = waitingReason,
+            WaitingSince = DateTime.UtcNow.AddMinutes(-3)
+        });
+    }
+
+    [Fact]
+    public void ALiveRunWithAWaitingReason_ShowsItOnThePage()
+    {
+        ServeRun(81, PipelineStatus.Running, Reason);
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 81));
+
+        cut.WaitForAssertion(() => Assert.Contains("Build images", cut.Markup));
+        Assert.Contains("come back online", cut.Markup);
+    }
+
+    [Fact]
+    public void AFinishedRun_ShowsNoWait()
+    {
+        // The column survives the run for post-mortem reading, but a finished run is not waiting for
+        // anything, so the page must not claim it is.
+        ServeRun(82, PipelineStatus.Success, Reason);
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 82));
+
+        cut.WaitForAssertion(() => Assert.Contains("aetheus-candidate", cut.Markup));
+        Assert.DoesNotContain("come back online", cut.Markup);
+    }
+
+    [Fact]
+    public void ThePreflightRecord_ListsWhatWasVerifiedAtLaunch()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/83", new PipelineRunDto
+        {
+            Id = 83,
+            PipelineId = 5,
+            PipelineName = "aetheus-candidate",
+            Status = PipelineStatus.Success,
+            PreflightChecks =
+            [
+                new PreflightCheckDto { Kind = "environment", Subject = "qa" },
+                new PreflightCheckDto { Kind = "child-pipeline", Subject = "aetheus-ci" }
+            ]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 83));
+
+        cut.WaitForAssertion(() => Assert.Contains("run-preflight-check", cut.Markup));
+        Assert.Contains("aetheus-ci", cut.Markup);
+        Assert.Contains("qa", cut.Markup);
+    }
+
+    [Fact]
+    public void ARunWithNoPreflightRecord_ShowsNoCard()
+    {
+        // Runs created before the record existed, and launch paths that run no preflight.
+        _handler.SetJsonResponse("api/pipelines/runs/84", new PipelineRunDto
+        {
+            Id = 84,
+            PipelineId = 5,
+            PipelineName = "aetheus-candidate",
+            Status = PipelineStatus.Success
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 84));
+
+        cut.WaitForAssertion(() => Assert.Contains("aetheus-candidate", cut.Markup));
+        Assert.DoesNotContain("run-preflight-check", cut.Markup);
+    }
+
+    private void ServeSealedRun(int runId, string deployable, string? blocking = null)
+    {
+        var outputs = new Dictionary<string, string>
+        {
+            ["CANDIDATE_ASSURANCE_GRADE"] = "B",
+            ["CANDIDATE_DEPLOYABLE"] = deployable
+        };
+        if (blocking is not null) outputs["CANDIDATE_BLOCKING_TESTS"] = blocking;
+
+        _handler.SetJsonResponse($"api/pipelines/runs/{runId}", new PipelineRunDto
+        {
+            Id = runId,
+            PipelineId = 5,
+            PipelineName = "aetheus-candidate",
+            Status = PipelineStatus.Success,
+            Steps =
+            [
+                new PipelineStepRunDto
+                {
+                    Id = 1,
+                    StageName = "Seal",
+                    StepName = "assurance",
+                    Status = TaskExecutionStatus.Success,
+                    OutputVariables = outputs
+                }
+            ]
+        });
+    }
+
+    [Fact]
+    public void TheVerdict_IsABadgeOfTheStatusTile_NotABannerAboveTheTabs()
+    {
+        // PLAN-003 D15: up to three banners used to stack between the header and the tabs, pushing
+        // the content down on every run. R-496 and R-497: the verdict is a short badge in the overview's
+        // Status tile (its full sentence is the tooltip), no longer in the header, and the header stops
+        // repeating the pipeline name and the status the tiles already give.
+        ServeSealedRun(87, "false", "agentCompatibility");
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 87));
+
+        cut.WaitForAssertion(() =>
+        {
+            var badge = cut.Find(".run-overview-tiles .run-candidate-verdict-badge");
+            Assert.Contains("CandidateNotDeployableShort", badge.TextContent, StringComparison.Ordinal);
+            Assert.Equal("CandidateNotDeployableTitle", badge.GetAttribute("title"));
+        });
+        var header = cut.Find(".pipeline-run-page-header");
+        Assert.DoesNotContain("CandidateNotDeployable", header.InnerHtml, StringComparison.Ordinal);
+        Assert.Empty(header.QuerySelectorAll(".pipeline-name-link"));
+        Assert.Empty(cut.FindAll(".run-overview-tiles .pipeline-gate-grade-badge"));
+
+        // Nothing between the header frame and the tab rail: no alert survives there.
+        var frame = cut.Find(".pipeline-run-page-header");
+        var tabs = cut.Find(".pipeline-run-tabs");
+        var between = frame.NextElementSibling;
+        while (between is not null && between != tabs)
+        {
+            Assert.DoesNotContain("rz-alert", between.ClassName ?? string.Empty, StringComparison.Ordinal);
+            between = between.NextElementSibling;
+        }
+    }
+
+    [Fact]
+    public void R2_025_TheVerdict_SitsUnderTheStatusBadge_InAVerticalStack()
+    {
+        ServeSealedRun(88, "true", null);
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 88));
+
+        cut.WaitForAssertion(() => cut.Find(".run-overview-tiles .run-candidate-verdict-badge"));
+        var stack = cut.Find(".run-overview-tiles .run-status-badges");
+        Assert.Contains("omni-stack--vertical", stack.ClassName, StringComparison.Ordinal);
+        Assert.DoesNotContain("omni-stack--horizontal", stack.ClassName, StringComparison.Ordinal);
+        var badges = stack.Children.Where(child => child.ClassList.Contains("omni-badge")).ToList();
+        Assert.Equal(2, badges.Count);
+        // The run status first, the candidate verdict under it.
+        Assert.Contains("run-candidate-verdict-badge", badges[1].ClassName, StringComparison.Ordinal);
+        Assert.Contains("CandidateDeployableShort", badges[1].TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AGreenRunWhoseCandidateIsNotDeployable_SaysSoAtTheTop()
+    {
+        // The run succeeded and the package is still refused: without this the only trace was a line
+        // in a step log.
+        ServeSealedRun(85, "false", "agentCompatibility, previousSmoke");
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 85));
+
+        cut.WaitForAssertion(() => Assert.Contains("CandidateNotDeployableTitle", cut.Markup));
+        cut.WaitForAssertion(() => Assert.Contains("agentCompatibility", cut.Markup));
+    }
+
+    [Fact]
+    public void ADeployableCandidate_ShowsItsSealedGrade()
+    {
+        ServeSealedRun(86, "true");
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 86));
+
+        cut.WaitForAssertion(() => Assert.Contains("CandidateDeployableTitle", cut.Markup));
+        Assert.DoesNotContain("CandidateNotDeployableTitle", cut.Markup);
+    }
+
+    [Fact]
+    public void ARunThatIsNotACandidate_ShowsNoVerdict()
+    {
+        ServeRun(87, PipelineStatus.Success, null);
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 87));
+
+        cut.WaitForAssertion(() => Assert.Contains("aetheus-candidate", cut.Markup));
+        Assert.DoesNotContain("CandidateDeployableTitle", cut.Markup);
+        Assert.DoesNotContain("CandidateNotDeployableTitle", cut.Markup);
+    }
+
+    [Fact]
+    public void ASealWithAGradeButNoVerdict_IsNotShownAsARefusal()
+    {
+        // CANDIDATE_DEPLOYABLE can be absent (or unparseable) while a grade is published: the verdict
+        // is undecided, not negative, and the header badge must not turn that into "not deployable".
+        _handler.SetJsonResponse("api/pipelines/runs/88", new PipelineRunDto
+        {
+            Id = 88,
+            PipelineId = 5,
+            PipelineName = "aetheus-candidate",
+            Status = PipelineStatus.Success,
+            Steps =
+            [
+                new PipelineStepRunDto
+                {
+                    Id = 1,
+                    StageName = "Seal",
+                    StepName = "assurance",
+                    Status = TaskExecutionStatus.Success,
+                    OutputVariables = new Dictionary<string, string> { ["CANDIDATE_ASSURANCE_GRADE"] = "B" }
+                }
+            ]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 88));
+
+        cut.WaitForAssertion(() => Assert.Contains("aetheus-candidate", cut.Markup));
+        Assert.DoesNotContain("CandidateNotDeployableTitle", cut.Markup);
+        Assert.DoesNotContain("CandidateDeployableTitle", cut.Markup);
+    }
+
+    [Fact]
+    public void AChildOfTheChainSealedIt_TheParentStillShowsTheVerdict()
+    {
+        // The seal can run inside a triggered child rather than the run being looked at: the parent
+        // carries no output variable of its own, only a trigger step pointing at the run that sealed.
+        _handler.SetJsonResponse("api/pipelines/runs/88", new PipelineRunDto
+        {
+            Id = 88,
+            PipelineId = 5,
+            PipelineName = "aetheus-candidate",
+            Status = PipelineStatus.Success,
+            Steps =
+            [
+                new PipelineStepRunDto
+                {
+                    Id = 1,
+                    StageName = "Build and test",
+                    StepName = "trigger (aetheus-ci)",
+                    Status = TaskExecutionStatus.Success,
+                    TriggeredRunId = 89
+                }
+            ]
+        });
+        _handler.SetJsonResponse("api/pipelines/runs/89", new PipelineRunDto
+        {
+            Id = 89,
+            PipelineId = 6,
+            PipelineName = "aetheus-ci",
+            Status = PipelineStatus.Success,
+            Steps =
+            [
+                new PipelineStepRunDto
+                {
+                    Id = 2,
+                    StageName = "Seal",
+                    StepName = "assurance",
+                    Status = TaskExecutionStatus.Success,
+                    OutputVariables = new Dictionary<string, string>
+                    {
+                        ["CANDIDATE_ASSURANCE_GRADE"] = "B",
+                        ["CANDIDATE_DEPLOYABLE"] = "false",
+                        ["CANDIDATE_BLOCKING_TESTS"] = "agentCompatibility"
+                    }
+                }
+            ]
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 88));
+
+        cut.WaitForAssertion(() => Assert.Contains("CandidateNotDeployableTitle", cut.Markup));
+        cut.WaitForAssertion(() => Assert.Contains("agentCompatibility", cut.Markup));
+    }
+}

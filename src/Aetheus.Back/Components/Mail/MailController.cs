@@ -101,21 +101,19 @@ public class MailController(IMailService mailService, IResourceAuthorizationServ
     }
 
     [HttpPost("action")]
-    public async Task<IActionResult> ExecuteAction(int serverId, [FromBody] MailActionRequest request, CancellationToken ct)
+    public async Task<ActionResult<MailTaskQueuedDto>> ExecuteAction(int serverId, [FromBody] MailActionRequest request, CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Write, ct))
             return Forbid();
-        await mailService.ExecuteActionAsync(serverId, request, ct);
-        return Ok();
+        return Ok(await mailService.ExecuteActionAsync(serverId, request, ct));
     }
 
     [HttpPost("logs")]
-    public async Task<IActionResult> GetLogs(int serverId, [FromBody] MailLogRequest request, CancellationToken ct)
+    public async Task<ActionResult<MailTaskQueuedDto>> GetLogs(int serverId, [FromBody] MailLogRequest request, CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Read, ct))
             return Forbid();
-        await mailService.GetLogsAsync(serverId, request, ct);
-        return Ok();
+        return Ok(await mailService.GetLogsAsync(serverId, request, ct));
     }
 
     [HttpPost("setup")]

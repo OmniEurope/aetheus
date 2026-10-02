@@ -12,6 +12,14 @@ normalise les doublons historiques puis impose cet invariant par un index unique
 déploiement transmet l'identifiant exact de la release sélectionnée jusqu'à sa clôture : une
 release non liée à l'artefact déployé est refusée.
 
+Une release passe en `Deployed` de deux façons, et les deux lèvent `ReleaseDeployedEvent` : la
+clôture d'une étape `type: deploy`, et une étape `type: release` avec `deployed: true` (recette
+R-520), annoncée par `ReleaseDeploymentAnnouncer` avec le stage que l'agent appelant exécute dans ce
+run. L'avance de `main` n'en dépend plus : c'est l'étape `type: advance-branch` du module
+Pipelines (recette R2-001). Une étape qui enregistre un état de
+déploiement ne change pas le commit d'une release existante : il reste celui de sa candidate
+(`ReleaseRunOutcome.KeepsRecordedCommit`).
+
 ## Points d’entrée
 
 - API ou consommateur principal : `ReleasesController.cs`.

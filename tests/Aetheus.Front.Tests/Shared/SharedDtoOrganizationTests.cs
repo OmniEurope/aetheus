@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 
 namespace Aetheus.Front.Tests;
 

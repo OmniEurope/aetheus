@@ -21,19 +21,14 @@ namespace Aetheus.Agent.Core.Operations;
 public sealed class TeamspeakGracefulRestartOperationExecutor(
     ITeamspeakQueryClient queryClient,
     IOptions<AetheusAgentOptions> options,
-    ILogger<TeamspeakGracefulRestartOperationExecutor> logger) : IOperationExecutor
+    ILogger<TeamspeakGracefulRestartOperationExecutor> logger) : EnvironmentOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
 
-    public bool CanHandle(OperationKind kind) =>
+    public override bool CanHandle(OperationKind kind) =>
         kind is OperationKind.TeamspeakGracefulRestart or OperationKind.TeamspeakGetLogs;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
-        => ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public Task<ExecutorResult> ExecuteAsync(
+    public override Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target,
         IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds,

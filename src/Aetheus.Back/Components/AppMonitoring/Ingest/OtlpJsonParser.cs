@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using System.Text.Json;
+using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.AppMonitoring.Ingest;
 
-public readonly record struct ParsedMetricPoint(string MetricName, double Value, string? Unit, DateTime Timestamp, string? AttributesJson);
-public readonly record struct ParsedLogRecord(DateTime Timestamp, int SeverityNumber, string? SeverityText, string Body, string? AttributesJson);
+public readonly record struct ParsedMetricPoint(
+    string MetricName,
+    double Value,
+    string? Unit,
+    DateTime Timestamp,
+    string? AttributesJson,
+    MetricKind Kind = MetricKind.Gauge);
+/// <param name="ExceptionType">The <c>exception.type</c> attribute of a record logged with an exception.</param>
+/// <param name="Source">The instrumentation scope that wrote the record: the logger's category.</param>
+public readonly record struct ParsedLogRecord(
+    DateTime Timestamp, int SeverityNumber, string? SeverityText, string Body, string? AttributesJson,
+    string? ExceptionType = null, string? Source = null);
 public readonly record struct ParsedError(string ExceptionType, string Message, string? TopFrame, DateTime Timestamp);
 
 /// <summary>
@@ -34,9 +45,9 @@ public static class OtlpJsonParser
                     var unit = GetString(metric, "unit");
 
                     if (metric.TryGetProperty("gauge", out var gauge))
-                        AddNumberPoints(result, name, unit, gauge);
+                        AddNumberPoints(result, name, unit, gauge, MetricKind.Gauge);
                     else if (metric.TryGetProperty("sum", out var sum))
-                        AddNumberPoints(result, name, unit, sum);
+                        AddNumberPoints(result, name, unit, sum, MetricKind.Sum);
                     else if (metric.TryGetProperty("histogram", out var histogram))
                         AddHistogramP95Points(result, name, unit, histogram);
                 }
@@ -45,7 +56,8 @@ public static class OtlpJsonParser
         return result;
     }
 
-    private static void AddNumberPoints(List<ParsedMetricPoint> result, string name, string? unit, JsonElement container)
+    private static void AddNumberPoints(
+        List<ParsedMetricPoint> result, string name, string? unit, JsonElement container, MetricKind kind)
     {
         if (!container.TryGetProperty("dataPoints", out var points)) return;
         foreach (var dp in points.EnumerateArray())
@@ -58,7 +70,8 @@ public static class OtlpJsonParser
             else
                 continue;
 
-            result.Add(new ParsedMetricPoint(name, value, unit, ReadUnixNano(dp, "timeUnixNano"), ReadAttributes(dp)));
+            result.Add(new ParsedMetricPoint(
+                name, value, unit, ReadUnixNano(dp, "timeUnixNano"), ReadAttributes(dp), kind));
         }
     }
 
@@ -68,7 +81,8 @@ public static class OtlpJsonParser
         foreach (var dp in points.EnumerateArray())
         {
             if (!TryEstimateHistogramPercentile(dp, 0.95, out var value)) continue;
-            result.Add(new ParsedMetricPoint(name, value, unit, ReadUnixNano(dp, "timeUnixNano"), ReadAttributes(dp)));
+            result.Add(new ParsedMetricPoint(
+                name, value, unit, ReadUnixNano(dp, "timeUnixNano"), ReadAttributes(dp), MetricKind.Histogram));
         }
     }
 
@@ -130,6 +144,7 @@ public static class OtlpJsonParser
             foreach (var sl in scopeLogs.EnumerateArray())
             {
                 if (!sl.TryGetProperty("logRecords", out var records)) continue;
+                var source = sl.TryGetProperty("scope", out var scope) ? GetString(scope, "name") : null;
                 foreach (var lr in records.EnumerateArray())
                 {
                     var severityNumber = lr.TryGetProperty("severityNumber", out var sn) ? ReadSeverityNumber(sn) : 0;
@@ -137,7 +152,9 @@ public static class OtlpJsonParser
                     var body = lr.TryGetProperty("body", out var b) ? ReadAnyValue(b) ?? string.Empty : string.Empty;
                     var ts = ReadUnixNano(lr, "timeUnixNano");
                     if (ts == default) ts = ReadUnixNano(lr, "observedTimeUnixNano");
-                    result.Add(new ParsedLogRecord(ts, severityNumber, severityText, body, ReadAttributes(lr)));
+                    result.Add(new ParsedLogRecord(
+                        ts, severityNumber, severityText, body, ReadAttributes(lr),
+                        ReadAttributeDict(lr).GetValueOrDefault("exception.type"), source));
                 }
             }
         }

@@ -1,0 +1,28 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/pipelines"
+@page "/templates"
+@page "/pipelines/fleet"
+
+<PageTitle>@L["Pipelines"] - Aetheus</PageTitle>
+
+@* Recette R-124: the pipelines list contributes its actions (New, Import...) to the header. *@
+<OmniPageHeader Title="@L["Pipelines"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("account_tree")" /></Icon><Actions><Microsoft.AspNetCore.Components.Sections.SectionOutlet SectionName="@PipelinesList.HeaderActionsSection" /></Actions>
+</OmniPageHeader>
+
+<UrlSyncedTabs Slugs="@TabSlugs" class="pipeline-hub-tabs">
+    <Tabs>
+        @if (_canReadPipelines)
+        {
+            <OmniTabsItem Key="used" Title="@L["UsedPipelines"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("account_tree"))" /></Icon><ChildContent>
+                <PipelinesList TemplateId="@TemplateId" />
+            </ChildContent></OmniTabsItem>
+        }
+        @if (_canReadTemplates)
+        {
+            <OmniTabsItem Key="models" Title="@L["Templates"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("description"))" /></Icon><ChildContent>
+                <PipelineTemplates Embedded="true" />
+            </ChildContent></OmniTabsItem>
+        }
+    </Tabs>
+</UrlSyncedTabs>

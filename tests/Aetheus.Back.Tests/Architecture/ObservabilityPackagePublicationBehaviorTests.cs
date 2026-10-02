@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using Aetheus.Tests.Shared;
 
 namespace Aetheus.Back.Tests.Architecture;
 
@@ -9,8 +10,7 @@ public sealed class ObservabilityPackagePublicationBehaviorTests
 {
     private static string Root => FindRepoRoot();
 
-    [Fact]
-    [Trait("Platform", "linux")]
+    [PlatformFact("linux")]
     [SupportedOSPlatform("linux")]
     public async Task SuccessAndFailure_RemoveEveryTemporaryArtifact()
     {
@@ -24,11 +24,10 @@ public sealed class ObservabilityPackagePublicationBehaviorTests
         failure.AssertTemporaryArtifactsRemoved();
     }
 
-    [Theory]
+    [PlatformTheory("linux")]
     [InlineData("HUP", 129)]
     [InlineData("INT", 130)]
     [InlineData("TERM", 143)]
-    [Trait("Platform", "linux")]
     [SupportedOSPlatform("linux")]
     public async Task Signal_CleansEveryTemporaryAndTerminatesWithSignalExitCode(
         string signal,

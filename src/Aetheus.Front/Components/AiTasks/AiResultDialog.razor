@@ -1,0 +1,68 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else if (_results.Count == 0)
+{
+    <EmptyState Icon="description" Title="@L["NoAiResults"]" Description="@L["NoAiResultsDescription"]" />
+}
+else
+{
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniListBox aria-label="@L["Results"]" TValue="int" TSelection="int" @bind-Value="_selectedId" @bind-Value:after="SelectResult"
+                         Options="@_results.Select(result => new OmniOption<int>(result.Id, result.DisplayName)).ToList()"
+                         Class="omni-u-w-100" />
+            @if (InitialResult is null && _totalCount > PageSize)
+            {
+            <OmniPager Page="@_page" PageCount="@Math.Max(1, (int)Math.Ceiling(_totalCount / (double)PageSize))"
+                       PageChanged="@OnPageChangedAsync" PageSize="@PageSize" Class="omni-u-mt-sm" />
+            }
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="8">
+            @if (_selected is not null)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small"
+                             Class="omni-u-mb-md">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@VerdictStyle(_selected)">@_selected.Verdict.ToString()</OmniBadge>
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                        @_selected.ProfileName · @FormatDuration(_selected.DurationMs) · @_selected.CreatedAt.ToLocalTime().ToString("g")
+                    </OmniText>
+                    @if (_selected.SendsDataExternally)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["ExternalData"]</OmniBadge>
+                    }
+                    @if (_selected.Truncated)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["Truncated"]</OmniBadge>
+                    }
+                </OmniStack>
+                <OmniTabs>
+                        <OmniTabsItem Title="@L["Report"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("description"))" /></Icon><ChildContent>
+                            <div class="markdown-content omni-u-p-md">@((MarkupString)_reportHtml)</div>
+                        </ChildContent></OmniTabsItem>
+                        <OmniTabsItem Title="@L["Diff"]" Disabled="@string.IsNullOrWhiteSpace(_selected.DiffPatch)"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("difference"))" /></Icon><ChildContent>
+                            @if (!string.IsNullOrWhiteSpace(_selected.DiffPatch))
+                            {
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@DownloadPatchAsync" Class="omni-u-mb-sm"><OmniIcon Name="OmniIconName.Download" /> <span>@L["DownloadPatch"]</span></OmniButton>
+                                @if (_selected.ProjectId.HasValue)
+                                {
+                                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ApplyPatchAsync" Class="@("omni-u-mb-sm omni-u-ms-sm" + (_applying ? " btn-busy" : null))" Busy="@(_applying)" title="@L["ApplyOnProposedBranch"]"><OmniIcon Name="OmniIconName.Upload" /> <span>@L["ApplyToBranch"]</span></OmniButton>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_selected.ProposedBranchName))
+                                {
+                                    <OmniAlert Severity="OmniSeverity.Success" Class="omni-u-mb-sm">
+                                        @L["ProposedBranchCreated"]: <a href="/git-repositories/@_selected.ProposedRepositoryId">@_selected.ProposedBranchName</a>
+                                    </OmniAlert>
+                                }
+                                <MonacoDiffViewer OriginalValue="" ModifiedValue="@_selected.DiffPatch" />
+                            }
+                        </ChildContent></OmniTabsItem>
+                </OmniTabs>
+            }
+        </OmniColumn>
+    </OmniRow>
+}
+
+<DialogFooter OnCancel="@Close" CancelText="@L["Close"]" />

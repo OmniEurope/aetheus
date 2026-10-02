@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Components.Plugins;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;

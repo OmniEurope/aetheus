@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -120,6 +118,73 @@ public class ArtifactServiceTests
         await _repoMock.Received(1).RemoveAsync(oldest, Arg.Any<CancellationToken>());
         await _storageMock.DidNotReceive().DeleteArtifactAsync("new.zip", Arg.Any<CancellationToken>());
         await _repoMock.DidNotReceive().RemoveAsync(newest, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PublishArtifactAsync_QuotaPressure_NeverEvictsAnArtifactUnderRetentionLease()
+    {
+        _repoMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
+            .Returns((PipelineId: 10, ProjectId: (int?)5));
+        _repoMock.GetProjectTotalSizeBytesAsync(5, Arg.Any<CancellationToken>()).Returns(1500L);
+        var leased = new PipelineArtifact
+        {
+            Id = 1,
+            PipelineId = 10,
+            ProjectId = 5,
+            FilePath = "leased.zip",
+            SizeBytes = 600,
+            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            RetentionLeaseExpiresAt = DateTime.UtcNow.AddHours(1)
+        };
+        var newest = new PipelineArtifact
+        {
+            Id = 2,
+            PipelineId = 10,
+            ProjectId = 5,
+            FilePath = "new.zip",
+            SizeBytes = 900,
+            CreatedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)
+        };
+        _repoMock.GetProjectBuildArtifactsAsync(5, Arg.Any<CancellationToken>()).Returns([leased, newest]);
+
+        await Assert.ThrowsAsync<ConflictException>(() => _sut.PublishArtifactAsync(1, "build", null, 100, Stream.Null, ct: TestContext.Current.CancellationToken));
+
+        await _storageMock.DidNotReceive().DeleteArtifactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _repoMock.DidNotReceive().RemoveAsync(Arg.Any<PipelineArtifact>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PublishArtifactAsync_QuotaPressure_KeepsAnArtifactLeasedAfterTheCandidateQuery()
+    {
+        _repoMock.GetRunPipelineContextAsync(1, Arg.Any<CancellationToken>())
+            .Returns((PipelineId: 10, ProjectId: (int?)5));
+        _repoMock.GetProjectTotalSizeBytesAsync(5, Arg.Any<CancellationToken>()).Returns(1500L);
+        var oldest = new PipelineArtifact
+        {
+            Id = 1,
+            PipelineId = 10,
+            ProjectId = 5,
+            FilePath = "old.zip",
+            SizeBytes = 600,
+            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+        };
+        var newest = new PipelineArtifact
+        {
+            Id = 2,
+            PipelineId = 10,
+            ProjectId = 5,
+            FilePath = "new.zip",
+            SizeBytes = 900,
+            CreatedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)
+        };
+        _repoMock.GetProjectBuildArtifactsAsync(5, Arg.Any<CancellationToken>()).Returns([oldest, newest]);
+        // A checkpoint resume took the lease between the candidate query and the eviction.
+        _repoMock.HasActiveRetentionLeaseAsync(1, Arg.Any<DateTime>(), Arg.Any<CancellationToken>()).Returns(true);
+
+        await Assert.ThrowsAsync<ConflictException>(() => _sut.PublishArtifactAsync(1, "build", null, 100, Stream.Null, ct: TestContext.Current.CancellationToken));
+
+        await _storageMock.DidNotReceive().DeleteArtifactAsync("old.zip", Arg.Any<CancellationToken>());
+        await _repoMock.DidNotReceive().RemoveAsync(oldest, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -340,11 +405,43 @@ public class ArtifactServiceTests
     {
         var artifact = new PipelineArtifact { Id = 1, Name = "build.zip", PipelineRunId = 1, PipelineId = 1 };
         _repoMock.FindAsync(1, Arg.Any<CancellationToken>()).Returns(artifact);
+        _repoMock.GetArtifactOwningProjectIdAsync(1, Arg.Any<CancellationToken>()).Returns(7);
+        _repoMock.GetReleaseProjectIdAsync(42, Arg.Any<CancellationToken>()).Returns(7);
 
         var result = await _sut.PromoteToReleaseAsync(1, 42, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         await _retentionMock.Received(1).ApplyReleaseRetentionAsync(artifact, 42, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PromoteToReleaseAsync_ReleaseOfAnotherProject_RefusesAndAppliesNoRetention()
+    {
+        var artifact = new PipelineArtifact { Id = 1, Name = "build.zip", PipelineRunId = 1, PipelineId = 1 };
+        _repoMock.FindAsync(1, Arg.Any<CancellationToken>()).Returns(artifact);
+        _repoMock.GetArtifactOwningProjectIdAsync(1, Arg.Any<CancellationToken>()).Returns(7);
+        _repoMock.GetReleaseProjectIdAsync(42, Arg.Any<CancellationToken>()).Returns(9);
+
+        var result = await _sut.PromoteToReleaseAsync(1, 42, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+        await _retentionMock.DidNotReceive().ApplyReleaseRetentionAsync(
+            Arg.Any<PipelineArtifact>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PromoteToReleaseAsync_UnresolvableOwner_RefusesRatherThanPromoting()
+    {
+        var artifact = new PipelineArtifact { Id = 1, Name = "build.zip", PipelineRunId = 1, PipelineId = 1 };
+        _repoMock.FindAsync(1, Arg.Any<CancellationToken>()).Returns(artifact);
+        // A legacy pipeline with no owner at all: no project can be named, so no comparison can be
+        // made, so the promotion must not happen.
+        _repoMock.GetArtifactOwningProjectIdAsync(1, Arg.Any<CancellationToken>()).Returns((int?)null);
+        _repoMock.GetReleaseProjectIdAsync(42, Arg.Any<CancellationToken>()).Returns(7);
+
+        Assert.Null(await _sut.PromoteToReleaseAsync(1, 42, ct: TestContext.Current.CancellationToken));
+        await _retentionMock.DidNotReceive().ApplyReleaseRetentionAsync(
+            Arg.Any<PipelineArtifact>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     // --- GetProjectArtifactsAsync ---

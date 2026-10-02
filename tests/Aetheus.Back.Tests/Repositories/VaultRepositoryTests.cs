@@ -70,6 +70,28 @@ public class VaultRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetVaultsPagedAsync_SortByProjectName_OrdersByOwningProject()
+    {
+        var alpha = new Project { Name = "Alpha" };
+        _db.Projects.Add(alpha);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        _db.Vaults.AddRange(
+            new Vault { Name = "A", Description = "d", ProjectId = _projectId },   // project "P"
+            new Vault { Name = "B", Description = "d", ProjectId = alpha.Id }      // project "Alpha"
+        );
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (ascending, _) = await _repo.GetVaultsPagedAsync(
+            null, null, null, null, 1, 10, ct: TestContext.Current.CancellationToken, sortBy: "ProjectName");
+        Assert.Equal(["B", "A"], ascending.Select(v => v.Name));
+
+        var (descending, _) = await _repo.GetVaultsPagedAsync(
+            null, null, null, null, 1, 10, ct: TestContext.Current.CancellationToken, sortBy: "ProjectName", sortDescending: true);
+        Assert.Equal(["A", "B"], descending.Select(v => v.Name));
+    }
+
+    [Fact]
     public async Task GetVaultsPagedAsync_WithAccessibleIds_Filters()
     {
         _db.Vaults.AddRange(

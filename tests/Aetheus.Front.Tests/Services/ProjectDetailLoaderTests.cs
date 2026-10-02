@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +28,21 @@ public class ProjectDetailLoaderTests : BunitContext
             Items = [.. releases],
             TotalCount = releases.Length
         });
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_NotFoundProject_IsNotRequestedAgainOnTheNextRender()
+    {
+        _handler.SetResponse("api/projects/7", System.Net.HttpStatusCode.NotFound);
+        _handler.SetJsonResponse("api/releases", new PaginatedResult<ReleaseDto> { Items = [], TotalCount = 0 });
+        var sut = CreateLoader();
+
+        await sut.EnsureLoadedAsync(7, Xunit.TestContext.Current.CancellationToken);
+        await sut.EnsureLoadedAsync(7, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Null(sut.Project);
+        Assert.True(sut.InitialLoadCompleted);
+        Assert.Single(_handler.Requests, request => request.Url.EndsWith("api/projects/7", StringComparison.Ordinal));
     }
 
     [Fact]

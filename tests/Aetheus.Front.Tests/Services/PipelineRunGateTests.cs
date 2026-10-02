@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Services;
+using Aetheus.Front.Components.Pipelines;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Services;
 
@@ -21,9 +19,9 @@ public class PipelineRunGateTests : BunitContext
     }
 
     private PipelineRunGate Sut => Services.GetRequiredService<PipelineRunGate>();
-    private NotificationService Toasts => Services.GetRequiredService<NotificationService>();
+    private OmniOverlayService Toasts => Services.GetRequiredService<OmniOverlayService>();
     private ImmediateDialogService Dialog =>
-        (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
 
     // === Happy path - all stages resolved, no dialog ===
 
@@ -43,7 +41,7 @@ public class PipelineRunGateTests : BunitContext
 
         Assert.True(result);
         // No resolved stage carries a ServerName, so no fallback-transparency toast is shown.
-        Assert.Empty(Toasts.Messages);
+        Assert.Empty(Toasts.Toasts());
     }
 
     [Fact]
@@ -63,8 +61,8 @@ public class PipelineRunGateTests : BunitContext
         Assert.True(result);
         // A resolved stage with a ServerName triggers the "PreflightResolved" info toast, whose detail
         // names the stage, the picked server and the reason.
-        var toast = Assert.Single(Toasts.Messages);
-        Assert.Equal(NotificationSeverity.Info, toast.Severity);
+        var toast = Assert.Single(Toasts.Toasts());
+        Assert.Equal(OmniSeverity.Info, toast.Severity);
         Assert.Equal("PreflightResolved", toast.Summary?.ToString());
         var detail = toast.Detail?.ToString() ?? "";
         Assert.Contains("Deploy", detail);
@@ -97,8 +95,8 @@ public class PipelineRunGateTests : BunitContext
         var result = await Sut.ConfirmPreflightAsync(13);
 
         Assert.True(result);
-        var warning = Assert.Single(Toasts.Messages);
-        Assert.Equal(NotificationSeverity.Warning, warning.Severity);
+        var warning = Assert.Single(Toasts.Toasts());
+        Assert.Equal(OmniSeverity.Warning, warning.Severity);
         Assert.Contains("optional", warning.Detail?.ToString(), StringComparison.Ordinal);
     }
 
@@ -203,8 +201,8 @@ public class PipelineRunGateTests : BunitContext
 
         Assert.True(result);
         // Both resolved stages carry a ServerName, so the single info toast lists both picks.
-        var toast = Assert.Single(Toasts.Messages);
-        Assert.Equal(NotificationSeverity.Info, toast.Severity);
+        var toast = Assert.Single(Toasts.Toasts());
+        Assert.Equal(OmniSeverity.Info, toast.Severity);
         var detail = toast.Detail?.ToString() ?? "";
         Assert.Contains("build-01", detail);
         Assert.Contains("web-01", detail);
@@ -225,10 +223,29 @@ public class PipelineRunGateTests : BunitContext
 
         Assert.True(result);
         // ServerName present but Reason null: the toast names the server without the parenthetical reason.
-        var toast = Assert.Single(Toasts.Messages);
+        var toast = Assert.Single(Toasts.Toasts());
         var detail = toast.Detail?.ToString() ?? "";
         Assert.Contains("ci-01", detail);
         Assert.DoesNotContain("(", detail);
+    }
+
+    [Fact]
+    public async Task ConfirmPreflightAsync_MiddlewareErrorBody_ToastsItsMessageInsteadOfThrowing()
+    {
+        // Recette R2-039: a BadRequestException becomes the middleware's error object, whose
+        // "errors": null used to deserialize into a validation result with a null Errors list.
+        RegisterBadRequest("api/pipelines/9/preflight", new ApiError
+        {
+            Message = "The authoritative pipeline YAML is invalid and cannot be run.",
+            CorrelationId = "0HN7:00000002"
+        });
+
+        var result = await Sut.ConfirmPreflightAsync(9);
+
+        Assert.False(result);
+        var toast = Assert.Single(Toasts.Toasts());
+        Assert.Equal(OmniSeverity.Danger, toast.Severity);
+        Assert.Contains("cannot be run", toast.Detail?.ToString() ?? "", StringComparison.Ordinal);
     }
 
     /// <summary>

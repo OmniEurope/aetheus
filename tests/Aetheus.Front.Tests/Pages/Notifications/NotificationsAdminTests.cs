@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Notifications;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Notifications;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Notifications;
@@ -58,7 +56,7 @@ public class NotificationsAdminTests : BunitContext
         var cut = Render<NotificationsAdmin>();
         cut.WaitForState(() => cut.Markup.Contains("slack-ops"), TimeSpan.FromSeconds(3));
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("TestConnection")).Click();
+        cut.FindAll("button").First(b => b.Names().Contains("TestConnection", StringComparison.Ordinal)).Click();
 
         cut.WaitForState(() => cut.Markup.Contains("Enum_NotificationTestStatus_NotConfigured"), TimeSpan.FromSeconds(3));
         Assert.DoesNotContain("Enum_NotificationTestStatus_Sent", cut.Markup);

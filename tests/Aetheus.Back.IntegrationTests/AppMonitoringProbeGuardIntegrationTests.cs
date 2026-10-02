@@ -5,7 +5,6 @@ using System.Net.Http.Json;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 

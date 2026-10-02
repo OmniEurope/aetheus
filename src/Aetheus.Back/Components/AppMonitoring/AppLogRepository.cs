@@ -12,7 +12,8 @@ public sealed class AppLogRepository(AppDbContext db) : IAppLogRepository
     }
 
     public async Task<(List<AppLogEntry> Items, int TotalCount)> GetLogsAsync(
-        int appId, DateTime since, int? minSeverity, string? search, int page, int pageSize, CancellationToken ct = default)
+        int appId, DateTime since, int? minSeverity, string? search, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? filters = null, string? sortBy = null, bool sortDescending = true)
     {
         var query = db.AppLogEntries
             .AsNoTracking()
@@ -22,18 +23,15 @@ public sealed class AppLogRepository(AppDbContext db) : IAppLogRepository
             query = query.Where(l => l.SeverityNumber >= min);
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(l => l.Body.Contains(search));
+        // Recette R-358: the grid's header filters narrow the whole log before the count.
+        query = AppLogQuery.Filters.ApplyFilters(query, filters);
 
-        return await LoadPageAsync(query, page, pageSize, ct).ConfigureAwait(false);
-    }
-
-    private static async Task<(List<AppLogEntry> Items, int TotalCount)> LoadPageAsync(
-        IQueryable<AppLogEntry> query,
-        int page,
-        int pageSize,
-        CancellationToken ct)
-    {
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query.OrderByDescending(log => log.Timestamp)
+        // The requested column first, then newest first and the id, so pages never overlap.
+        var ordered = AppLogQuery.Sorts.ApplySorts(query, AppLogQuery.SortsOf(sortBy, sortDescending)) is { } sorted
+            ? sorted.ThenByDescending(log => log.Timestamp).ThenByDescending(log => log.Id)
+            : query.OrderByDescending(log => log.Timestamp).ThenByDescending(log => log.Id);
+        var items = await ordered
             .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, totalCount);

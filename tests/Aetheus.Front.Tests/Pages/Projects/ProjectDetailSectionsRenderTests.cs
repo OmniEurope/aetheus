@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -104,12 +101,12 @@ public class ProjectDetailSectionsRenderTests : BunitContext
     // ── ProjectServersSection badges ──────────────────────────────────────────
 
     [Theory]
-    [InlineData(ProjectServerType.AgentServer, BadgeStyle.Info)]
-    [InlineData(ProjectServerType.ExternalHost, BadgeStyle.Warning)]
-    public void ProjectServersSection_GetTypeBadge_ReturnsExpected(ProjectServerType type, BadgeStyle expected)
+    [InlineData(ProjectServerType.AgentServer, OmniTone.Accent)]
+    [InlineData(ProjectServerType.ExternalHost, OmniTone.Warning)]
+    public void ProjectServersSection_GetTypeBadge_ReturnsExpected(ProjectServerType type, OmniTone expected)
     {
         var method = typeof(ProjectServersSection).GetMethod("GetTypeBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)type])!;
+        var result = (OmniTone)method.Invoke(null, [(object)type])!;
         Assert.Equal(expected, result);
     }
 
@@ -117,18 +114,18 @@ public class ProjectDetailSectionsRenderTests : BunitContext
     public void ProjectServersSection_GetTypeBadge_Unknown_ReturnsLight()
     {
         var method = typeof(ProjectServersSection).GetMethod("GetTypeBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)(ProjectServerType)99])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(object)(ProjectServerType)99])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Theory]
-    [InlineData(ServerStatus.Online, BadgeStyle.Success)]
-    [InlineData(ServerStatus.Offline, BadgeStyle.Danger)]
-    [InlineData(ServerStatus.Disabled, BadgeStyle.Light)]
-    public void ProjectServersSection_GetStatusBadge_KnownStatuses(ServerStatus status, BadgeStyle expected)
+    [InlineData(ServerStatus.Online, OmniTone.Success)]
+    [InlineData(ServerStatus.Offline, OmniTone.Danger)]
+    [InlineData(ServerStatus.Disabled, OmniTone.Neutral)]
+    public void ProjectServersSection_GetStatusBadge_KnownStatuses(ServerStatus status, OmniTone expected)
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object?)status])!;
+        var result = (OmniTone)method.Invoke(null, [(object?)status])!;
         Assert.Equal(expected, result);
     }
 
@@ -136,8 +133,8 @@ public class ProjectDetailSectionsRenderTests : BunitContext
     public void ProjectServersSection_GetStatusBadge_Null_ReturnsLight()
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object?)null])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(object?)null])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── ProjectServersSection.EnsureAgentServersAsync ─────────────────────────
@@ -204,7 +201,7 @@ public class ProjectDetailSectionsRenderTests : BunitContext
     {
         var cut = Render<ProjectEditSection>(p =>
             p.Add(x => x.Project, (ProjectDetailDto?)null));
-        var opts = (List<object>)typeof(ProjectEditSection)
+        var opts = (System.Collections.IList)typeof(ProjectEditSection)
             .GetField("_statusOptions", Priv)!.GetValue(cut.Instance)!;
         Assert.Equal(2, opts.Count);
     }
@@ -248,6 +245,6 @@ public class ProjectDetailSectionsRenderTests : BunitContext
         Assert.True(savedCalled);
     }
 
-    // ProjectReleasesSection.GetReleaseBadge moved to the shared Helpers/ReleaseHelper - its badge
+    // ProjectReleasesSection.GetReleaseBadge moved to the shared Components/Releases/ReleaseHelper - its badge
     // mapping is covered directly by ReleaseHelperTests.
 }

@@ -1,0 +1,38 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Small">
+    <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+        <CountBadge Value="@_totalCount" Variant="OmniTone.Accent" />
+        <div class="blade-content-spacer"></div>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@AutoDetectAsync" Class="@(_detecting ? "btn-busy" : null)" Busy="@(_detecting)" title="@L["AutoDetect"]"><OmniIcon Name="OmniIconName.Sparkle" /> <span>@L["Detect"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenAddDialogAsync" title="@L["AddLink"]"><OmniIcon Name="OmniIconName.Link" /> <span>@L["Add"]</span></OmniButton>
+    </OmniRow>
+
+    <OmniTextBox aria-label="@L["Search"]" Placeholder="@L["Search"]" @bind-Value="_search" @bind-Value:after="OnSearchChangedAsync"
+        Class="pipeline-list-search omni-u-mb-sm" />
+
+    <AetheusDataGrid FullHeight="true" @ref="_grid" Data="@_links" TItem="LinkedResourceDto"
+        Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadDataAsync"
+        PageSize="25" Density="OmniDensity.Compact" EmptyText="@L["NoRecords"]"
+        Virtualize="@AetheusGrid.RemoteVirtualization"
+        VirtualData="@(() => new OmniDataGridResult<LinkedResourceDto>(_links, _totalCount))">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="LinkedResourceDto" Property="Type" Title="@L["Type"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@TypeText" >
+                    <Template Context="l">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@GetTypeBadge(l.Type)">@L.Localize(l.Type)</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="LinkedResourceDto" Property="Identifier" Title="@L["Resource"]" Filterable="true" />
+                <OmniDataGridColumn TItem="LinkedResourceDto" Property="IsAutoDetected" Title="@L["Source"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@SourceText" >
+                    <Template Context="l">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@(l.IsAutoDetected ? OmniTone.Neutral : OmniTone.Neutral)">@(l.IsAutoDetected ? L["Auto"] : L["Manual"])</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="LinkedResourceDto" Title="@L["Actions"]" Width="100px" Sortable="false" Filterable="false" >
+                    <Template Context="l">
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteLinkAsync(l.LinkId))" title="@L["Unlink"]"><OmniIcon Name="OmniIconName.LinkBreak" /></OmniButton>
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+    </AetheusDataGrid>
+</OmniStack>

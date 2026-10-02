@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -88,6 +84,39 @@ public class GitRepositoryDetailTests : BunitContext
         Assert.Contains("my-repo", cut.Markup);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void R2002_TheCloneUrl_IsOneReadOnlyFieldThatCopiesItself_AndOnlyARefusedCopyToasts(bool accepted)
+    {
+        SetupDefaultMocks();
+        var clipboard = JSInterop.SetupModule("./_content/OmniEurope.Blazor/omniInterop.js");
+        clipboard.Setup<bool>("copyText", _ => true).SetResult(accepted);
+
+        var cut = Render<GitRepositoryDetail>(parameters => parameters.Add(component => component.Id, 1));
+
+        var field = cut.WaitForElement(".clone-url-input.omni-text-box-field--copy");
+        var input = field.QuerySelector("input")!;
+        Assert.True(input.HasAttribute("readonly"));
+        Assert.Equal("http://localhost/git/my-repo.git", input.GetAttribute("value"));
+        Assert.Equal("CloneUrl", input.GetAttribute("aria-label"));
+        // OE's Copy button is welded to the field; the page adds no button of its own beside it.
+        var copy = Assert.Single(field.QuerySelectorAll("button"));
+        Assert.Contains("omni-text-box-field__copy", copy.ClassList);
+        Assert.Null(field.ParentElement?.QuerySelector(".clone-url-input + .omni-button"));
+
+        copy.Click();
+
+        Assert.Equal("http://localhost/git/my-repo.git", Assert.Single(clipboard.Invocations["copyText"]).Arguments[0]);
+        cut.WaitForAssertion(() =>
+        {
+            if (accepted)
+                Assert.DoesNotContain(Services.Toasts(), toast => toast.Summary == "CopyFailed");
+            else
+                Assert.Contains(Services.Toasts(), toast => toast.Summary == "CopyFailed");
+        });
+    }
+
     [Fact]
     public void Commits_DefaultToAllBranches()
     {
@@ -97,7 +126,6 @@ public class GitRepositoryDetailTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Contains("AllBranches", cut.Markup, StringComparison.Ordinal);
             Assert.Contains(_handler.Requests, request =>
                 request.Method == "GET"
                 && request.Url.Contains("api/git/repos/1/commits", StringComparison.Ordinal)
@@ -139,6 +167,7 @@ public class GitRepositoryDetailTests : BunitContext
     public void Renders_Branches()
     {
         SetupDefaultMocks();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/git-repositories/1?tab=branches");
         var cut = Render<GitRepositoryDetail>(p => p.Add(x => x.Id, 1));
         cut.WaitForState(() => cut.Markup.Contains("main"), TimeSpan.FromSeconds(2));
 
@@ -273,16 +302,16 @@ public class GitRepositoryDetailTests : BunitContext
     }
 
     [Theory]
-    [InlineData(PullRequestStatus.Open, BadgeStyle.Success)]
-    [InlineData(PullRequestStatus.Merged, BadgeStyle.Primary)]
-    [InlineData(PullRequestStatus.Closed, BadgeStyle.Danger)]
-    [InlineData(PullRequestStatus.Draft, BadgeStyle.Light)]
-    public void GetPrStatusBadge_ReturnsExpected(PullRequestStatus status, BadgeStyle expected)
+    [InlineData(PullRequestStatus.Open, OmniTone.Success)]
+    [InlineData(PullRequestStatus.Merged, OmniTone.Accent)]
+    [InlineData(PullRequestStatus.Closed, OmniTone.Danger)]
+    [InlineData(PullRequestStatus.Draft, OmniTone.Neutral)]
+    public void GetPrStatusBadge_ReturnsExpected(PullRequestStatus status, OmniTone expected)
     {
         var method = typeof(GitRepositoryDetail).GetMethod("GetPrStatusBadge",
             BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
-        var result = (BadgeStyle)method.Invoke(null, [status])!;
+        var result = (OmniTone)method.Invoke(null, [status])!;
         Assert.Equal(expected, result);
     }
 

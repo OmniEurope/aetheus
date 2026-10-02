@@ -4,7 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Aetheus.Back.Components.Auth;
-using Aetheus.Shared.DTOs;
+using Aetheus.Back.Components.Shared;
 
 namespace Aetheus.Back.IntegrationTests;
 

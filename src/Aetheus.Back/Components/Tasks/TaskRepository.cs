@@ -14,7 +14,26 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
 
     public async Task<(List<ServerTask> Items, int TotalCount)> GetTasksPagedAsync(
         string? search, int page, int pageSize, TaskExecutionStatus? status = null, List<int>? accessibleServerIds = null, int? serverId = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true)
+        string? sortBy = null, bool sortDescending = true, IReadOnlyList<GridFilter>? columnFilters = null)
+    {
+        var query = ScopedTasks(accessibleServerIds, serverId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(t => t.Name.Contains(search));
+
+        if (status.HasValue)
+            query = query.Where(t => t.Status == status.Value);
+
+        // Recette R-212: the header filters, after the scope and before the count.
+        query = TaskListQuery.Columns.ApplyFilters(query, columnFilters);
+
+        return await PageTasksAsync(query, page, pageSize, ct, sortBy, sortDescending).ConfigureAwait(false);
+    }
+
+    public Task<TaskFilterValuesDto> GetTaskFilterValuesAsync(List<int>? accessibleServerIds, int? serverId, CancellationToken ct = default)
+        => TaskListQuery.FilterValuesAsync(ScopedTasks(accessibleServerIds, serverId), ct);
+
+    private IQueryable<ServerTask> ScopedTasks(List<int>? accessibleServerIds, int? serverId)
     {
         var query = db.Tasks.AsNoTracking().AsQueryable();
 
@@ -24,13 +43,7 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         if (serverId.HasValue)
             query = query.Where(t => t.ServerId == serverId.Value);
 
-        if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(t => t.Name.Contains(search));
-
-        if (status.HasValue)
-            query = query.Where(t => t.Status == status.Value);
-
-        return await PageTasksAsync(query, page, pageSize, ct, sortBy, sortDescending).ConfigureAwait(false);
+        return query;
     }
 
     public async Task<(List<ServerTask> Items, int TotalCount)> GetTasksByStatusesPagedAsync(
@@ -381,11 +394,14 @@ public class TaskRepository(AppDbContext db, TimeProvider timeProvider) : ITaskR
         // including empty polls, so an active busy runner retains its queued work.
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var cutoff = now - threshold;
+        // PLAN-004 R-11: a retired server (Offline, tokens revoked) must still age out the work queued
+        // for it, or its pipeline runs would wait forever on a filtered-out server.
+        var servers = db.Servers.IgnoreQueryFilters([ServerQueryFilters.ExcludeRetired]);
         return await db.Tasks
             .Where(t => t.Status == TaskExecutionStatus.Pending
                 && !t.IsDeferredCleanup
                 && t.CreatedAt < cutoff
-                && db.Servers.Any(server =>
+                && servers.Any(server =>
                     server.Id == t.ServerId
                     && (server.Status != ServerStatus.Online
                         || server.AgentSessionLeaseExpiresAt == null

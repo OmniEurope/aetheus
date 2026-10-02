@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fixed-purpose root-owned helper. apache2ctl must exec apache2, so sudo noexec cannot be used.
+# No arguments or environment-controlled paths are accepted.
+set -eu
+[ "$#" -eq 0 ] || { echo "aetheus-apache-configtest accepts no arguments" >&2; exit 2; }
+exec /usr/sbin/apache2ctl configtest

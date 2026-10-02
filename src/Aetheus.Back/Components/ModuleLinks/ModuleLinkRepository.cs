@@ -54,6 +54,9 @@ public class ModuleLinkRepository(AppDbContext db) : IModuleLinkRepository
                     && link.SourceIdentifier.ToLower().Contains(search)));
         }
 
+        // Recette R-210: the header filters, after the server and resource scope and before the count.
+        query = ModuleLinkPageQuery.Columns(request.SourceType, identifiers).ApplyFilters(query, request.Filters);
+
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         var ordered = OrderLinks(query, request, identifiers);
         var items = await ordered

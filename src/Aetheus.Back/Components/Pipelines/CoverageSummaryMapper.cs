@@ -25,6 +25,7 @@ internal static class CoverageSummaryMapper
             LinesValid = result.LinesValid,
             BranchesCovered = result.BranchesCovered,
             BranchesValid = result.BranchesValid,
+            RunId = result.PipelineRunId,
             Files = files
         };
     }
@@ -34,9 +35,11 @@ internal static class CoverageSummaryMapper
         var files = string.IsNullOrEmpty(result.FilesJson)
             ? []
             : JsonSerializer.Deserialize<List<CoverageFileDto>>(result.FilesJson) ?? [];
+        // Recette R-428: a file without a recorded package used to be dropped, so a report without
+        // package names (or stored before the parser kept them) gave an empty table. It is grouped
+        // under the project its path names instead, by the rule the page's coverage tree uses.
         return files
-            .Where(file => !string.IsNullOrWhiteSpace(file.Assembly))
-            .GroupBy(file => file.Assembly, StringComparer.Ordinal)
+            .GroupBy(CoverageProjectName.Of, StringComparer.Ordinal)
             .Select(group =>
             {
                 var covered = group.Sum(file => file.LinesCovered);

@@ -1,0 +1,303 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/projects"
+
+<PageTitle>@L["Projects"] - Aetheus</PageTitle>
+<OmniPageHeader Title="@L["Projects"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("folder")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="projects" />
+    </Badges>
+    <Actions>
+        @* Recette R-408: the supervision of every project is a side-menu entry (NavMenu), not a button here. *@
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenCreateDialog" Disabled="@(!_canWrite)" Class="project-list-create" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    </Actions>
+</OmniPageHeader>
+
+<div class="project-list-toolbar">
+
+    <div class="project-list-controls">
+        <div class="project-list-search-wrap">
+            <OmniTextBox Placeholder="@L["SearchProjects"]" @bind-Value="_search" @bind-Value:after="ApplyFilters"
+                Class="project-list-search" aria-label="@L["SearchProjects"]" />
+        </div>
+        <OmniDropDown TValue="ProjectStatus?" Options="@_statusOptions"
+            Placeholder="@L["AllStatuses"]" AllowEmpty="true" @bind-Value="_statusFilter"
+            @bind-Value:after="ApplyFilters" Label="@L["FilterByStatus"]" Class="project-list-status-filter" />
+        <OmniDropDown TValue="ProjectSortOption" Options="@_sortOptions"
+            @bind-Value="_sortOption" Label="@L["SortProjects"]" Class="project-list-sort" />
+        <OmniButton Variant="@(_favoritesOnly ? OmniButtonVariant.Primary : OmniButtonVariant.Ghost)" OnClick="@ToggleFavoritesOnly" Class="project-favorites-filter" title="@L["FavoritesOnly"]" aria-pressed="@_favoritesOnly"><OmniIcon Name="@MaterialIconMap.Resolve((_favoritesOnly ? "star" : "star_border"))" /> <span>@L["Favorites"]</span></OmniButton>
+        <div class="project-view-switch" role="group" aria-label="@L["ProjectViewMode"]">
+            <OmniButton Variant="@(_viewMode == ProjectViewMode.Comfortable ? OmniButtonVariant.Primary : OmniButtonVariant.Ghost)" OnClick="@(() => SetViewModeAsync(ProjectViewMode.Comfortable))" title="@L["ComfortableView"]" Label="@L["ComfortableView"]" aria-pressed="@(_viewMode == ProjectViewMode.Comfortable)"><OmniIcon Name="OmniIconName.SquaresFour" /></OmniButton>
+            <OmniButton Variant="@(_viewMode == ProjectViewMode.Dense ? OmniButtonVariant.Primary : OmniButtonVariant.Ghost)" OnClick="@(() => SetViewModeAsync(ProjectViewMode.Dense))" title="@L["DenseView"]" Label="@L["DenseView"]" aria-pressed="@(_viewMode == ProjectViewMode.Dense)"><OmniIcon Name="OmniIconName.Rows" /></OmniButton>
+        </div>
+        @if (_statusFilter.HasValue || !string.IsNullOrEmpty(_search) || _favoritesOnly)
+        {
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ClearFilters"><OmniIcon Name="OmniIconName.Close" /> <span>@L["ClearFilters"]</span></OmniButton>
+        }
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="project-card-grid-loading">
+        <AetheusLoader />
+    </div>
+}
+else if (_viewMode == ProjectViewMode.Comfortable)
+{
+    <div class="project-card-grid">
+        @foreach (var project in VisibleProjects)
+        {
+            <div role="link" tabindex="0" data-testid="project-item"
+                 @onclick="@(() => OpenProject(project.Id))"
+                 @onkeydown="@((KeyboardEventArgs args) => OnProjectKeyDown(args, project.Id))">
+            <OmniCard Class="project-card">
+                <div class="project-card-header">
+                    <div class="project-card-heading">
+                        <a href="@($"/projects/{project.Id}")" class="project-card-name"
+                            @onclick:stopPropagation="true">@project.Name</a>
+                    </div>
+                    @if (!Permissions.CanWrite(ResourceType.Project, project.Id))
+                    {
+                        <OmniIcon Name="OmniIconName.Lock" Class="omni-u-text-muted icon-xs-app" title="@L["Read"]" />
+                    }
+                    <span class="project-card-action" @onclick:stopPropagation="true">
+                        <OmniButton Variant="OmniButtonVariant.Ghost" OnClick="@(() => ToggleFavoriteAsync(project))" Class="@(_favoriteProjectIds.Contains(project.Id) ? "project-favorite active" : "project-favorite")" title="@(_favoriteProjectIds.Contains(project.Id) ? L["RemoveFromFavorites"] : L["AddToFavorites"])" Label="@(_favoriteProjectIds.Contains(project.Id) ? L["RemoveFromFavorites"] : L["AddToFavorites"])" aria-pressed="@_favoriteProjectIds.Contains(project.Id)"><OmniIcon Name="@MaterialIconMap.Resolve((_favoriteProjectIds.Contains(project.Id) ? "star" : "star_border"))" /></OmniButton>
+                    </span>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(project.Description))
+                {
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted project-card-desc">
+                        @TruncateText(project.Description, 120)
+                    </OmniText>
+                }
+
+                @* PLAN-003 lot 8: no frame; two lines ruled like "Last commit" / "Last run" below.
+                   Line 1: Production, and its state on the right. Line 2: the grade, and the
+                   people online on the right when the app reports them. *@
+                <div class="project-production">
+                    <div class="project-production-row">
+                        <span class="project-production-label">@L["Production"]</span>
+                        <span class="@($"project-production-status {ProductionStatusClass(project.ProductionStatus)}")">
+                            <span class="project-production-dot"></span>
+                            @L[$"Production{project.ProductionStatus}"]
+                        </span>
+                    </div>
+                    <div class="project-production-row">
+                        <a href="@($"/projects/{project.Id}/quality")" class="project-gate-summary"
+                            @onclick:stopPropagation="true" title="@L["AnalysisGlobalGrade"]">
+                            <span class="project-production-label">@L["AnalysisGrade"]</span>
+                            <GradeBadge Value="@project.LatestGateGrade" />
+                        </a>
+                        @if (project.OnlineUserCount.HasValue)
+                        {
+                            <span class="project-online-users" title="@L["OnlineUsersAvailable"]">
+                                <OmniIcon Name="OmniIconName.Users" />
+                                @(string.Format(L["OnlineUsers"], project.OnlineUserCount.Value))
+                            </span>
+                        }
+                    </div>
+                </div>
+
+                <div class="project-activity">
+                    <div class="project-activity-row">
+                        <span class="project-activity-label">@L["LastCommit"]</span>
+                        <div class="project-activity-content">
+                            @if (project.LastCommitId.HasValue)
+                            {
+                                @* PLAN-005 lot 7 / D44: the SHA, then the first line of the message on its
+                                   own line (full message in the title); "Commit" only for a commit without one. *@
+                                <span class="project-activity-link">
+                                    <ShortId Value="@LastCommitSha(project)" Href="@GitCommitHref(project)" Copyable="false" />
+                                    @if (string.IsNullOrWhiteSpace(project.LastCommitMessage))
+                                    {
+                                        <span>@L["Commit"]</span>
+                                    }
+                                </span>
+                                @if (!string.IsNullOrWhiteSpace(project.LastCommitMessage))
+                                {
+                                    <span class="project-activity-line" title="@project.LastCommitMessage">@FirstLine(project.LastCommitMessage)</span>
+                                }
+                                @if (project.LastCommitAt.HasValue)
+                                {
+                                    <span class="project-activity-date" title="@project.LastCommitAt.Value.ToString("F")">
+                                        @project.LastCommitAt.Value.ToString("g") · @RelativeTime.FormatAgo(L, project.LastCommitAt.Value)
+                                    </span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="project-activity-empty">@L["Unavailable"]</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="project-activity-row">
+                        @* PLAN-005 lot 7 / D45: the label says which run is shown, the one in progress
+                           or the last one; the status is a badge with its word, not a colored dot. *@
+                        <span class="project-activity-label">@(project.LastRunIsActive ? L["RunInProgress"] : L["LastRun"])</span>
+                        <div class="project-activity-content">
+                            @if (project.LastRunId.HasValue)
+                            {
+                                <div class="project-activity-run">
+                                    @if (project.LastRunStatus is { } runStatus)
+                                    {
+                                        <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineHelper.GetRunBadge(runStatus)">@L.Localize(runStatus)</OmniBadge>
+                                    }
+                                    <a href="@($"/pipelines/runs/{project.LastRunId}")" class="project-activity-link"
+                                        @onclick:stopPropagation="true">
+                                        #@project.LastRunId · @(project.LastRunName ?? L["PipelineRun"])
+                                    </a>
+                                </div>
+                                @if (project.LastRunIsActive && !string.IsNullOrWhiteSpace(project.LastRunCurrentStep))
+                                {
+                                    <span class="project-activity-line" title="@project.LastRunCurrentStep">@project.LastRunCurrentStep</span>
+                                }
+                                @if (project.LastRunAt.HasValue)
+                                {
+                                    <span class="project-activity-date" title="@project.LastRunAt.Value.ToString("F")">
+                                        @project.LastRunAt.Value.ToString("g") · @RelativeTime.FormatAgo(L, project.LastRunAt.Value)
+                                    </span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="project-activity-empty">@L["Unavailable"]</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                @if (project.Tags.Count > 0)
+                {
+                    <OmniRow Gap="OmniSpacing.XSmall" Class="project-card-tags">
+                        @foreach (var tag in project.Tags.Take(4))
+                        {
+                            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@tag</OmniBadge>
+                        }
+                        @if (project.Tags.Count > 4)
+                        {
+                            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@($"+{project.Tags.Count - 4}")</OmniBadge>
+                        }
+                    </OmniRow>
+                }
+            </OmniCard>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div class="project-dense-list">
+        <div class="project-dense-header" aria-hidden="true">
+            <span>@L["Project"]</span>
+            <span>@L["Production"]</span>
+            <span>@L["AnalysisGrade"]</span>
+            <span>@L["LastCommit"]</span>
+            <span>@L["LastRun"]</span>
+            <span>@L["OnlineUsersHeader"]</span>
+        </div>
+        @foreach (var project in VisibleProjects)
+        {
+            <div class="project-dense-row" role="link" tabindex="0" data-testid="project-item"
+                @onclick="@(() => OpenProject(project.Id))"
+                @onkeydown="@((KeyboardEventArgs args) => OnProjectKeyDown(args, project.Id))">
+                <div class="project-dense-project">
+                    <span @onclick:stopPropagation="true">
+                        <OmniButton Variant="OmniButtonVariant.Ghost" OnClick="@(() => ToggleFavoriteAsync(project))" Class="@(_favoriteProjectIds.Contains(project.Id) ? "project-favorite active" : "project-favorite")" title="@(_favoriteProjectIds.Contains(project.Id) ? L["RemoveFromFavorites"] : L["AddToFavorites"])" Label="@(_favoriteProjectIds.Contains(project.Id) ? L["RemoveFromFavorites"] : L["AddToFavorites"])" aria-pressed="@_favoriteProjectIds.Contains(project.Id)"><OmniIcon Name="@MaterialIconMap.Resolve((_favoriteProjectIds.Contains(project.Id) ? "star" : "star_border"))" /></OmniButton>
+                    </span>
+                    <div>
+                        <a href="@($"/projects/{project.Id}")" @onclick:stopPropagation="true">@project.Name</a>
+                        <span class="project-dense-description">@TruncateText(project.Description, 64)</span>
+                    </div>
+                </div>
+                <div>
+                    <span class="@($"project-production-status {ProductionStatusClass(project.ProductionStatus)}")">
+                        <span class="project-production-dot"></span>
+                        @L[$"Production{project.ProductionStatus}"]
+                    </span>
+                </div>
+                <div>
+                    <a href="@($"/projects/{project.Id}/quality")"
+                        @onclick:stopPropagation="true" title="@L["AnalysisGlobalGrade"]">
+                        <GradeBadge Value="@project.LatestGateGrade" />
+                    </a>
+                </div>
+                <div class="project-dense-activity">
+                    @if (project.LastCommitId.HasValue)
+                    {
+                        <div>
+                            <ShortId Value="@LastCommitSha(project)" Href="@GitCommitHref(project)" Copyable="false" />
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(project.LastCommitMessage))
+                        {
+                            <span class="project-activity-line" title="@project.LastCommitMessage">@FirstLine(project.LastCommitMessage)</span>
+                        }
+                        <span title="@project.LastCommitAt?.ToString("F")">
+                            @(project.LastCommitAt.HasValue ? RelativeTime.FormatAgo(L, project.LastCommitAt.Value) : "-")
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="project-activity-empty">@L["Unavailable"]</span>
+                    }
+                </div>
+                <div class="project-dense-activity">
+                    @if (project.LastRunId.HasValue)
+                    {
+                        <div class="project-activity-run">
+                            @if (project.LastRunStatus is { } denseStatus)
+                            {
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineHelper.GetRunBadge(denseStatus)">@L.Localize(denseStatus)</OmniBadge>
+                            }
+                            <a href="@($"/pipelines/runs/{project.LastRunId}")" @onclick:stopPropagation="true">
+                                #@project.LastRunId · @(project.LastRunName ?? L["PipelineRun"])
+                            </a>
+                        </div>
+                        @if (project.LastRunIsActive && !string.IsNullOrWhiteSpace(project.LastRunCurrentStep))
+                        {
+                            <span class="project-activity-line" title="@project.LastRunCurrentStep">@project.LastRunCurrentStep</span>
+                        }
+                        else
+                        {
+                            <span title="@project.LastRunAt?.ToString("F")">
+                                @(project.LastRunAt.HasValue ? RelativeTime.FormatAgo(L, project.LastRunAt.Value) : "-")
+                            </span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="project-activity-empty">@L["Unavailable"]</span>
+                    }
+                </div>
+                <div class="project-dense-users">
+                    @if (project.OnlineUserCount.HasValue)
+                    {
+                        <OmniIcon Name="OmniIconName.Users" />
+                        <span>@project.OnlineUserCount</span>
+                    }
+                    else
+                    {
+                        <span class="project-activity-empty">-</span>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (VisibleProjects.Count == 0 && !_loading)
+{
+    <EmptyState Icon="folder" Title="@L["NoProjectsFound"]" Description="@L["EmptyProjectsHint"]">
+        <ActionContent>
+            @if (_statusFilter.HasValue || !string.IsNullOrEmpty(_search) || _favoritesOnly)
+            {
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ClearFilters"><OmniIcon Name="OmniIconName.Close" /> <span>@L["ClearFilters"]</span></OmniButton>
+            }
+            else
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenCreateDialog" Disabled="@(!_canWrite)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+            }
+        </ActionContent>
+    </EmptyState>
+}

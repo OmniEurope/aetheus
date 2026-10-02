@@ -1,15 +1,30 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Monitoring;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 /// <summary>Read-only projection used by the pipeline parent/leaf graph.</summary>
 internal sealed class PipelineDependencyGraphRepository(AppDbContext db)
 {
-    internal Task<List<PipelineDto>> GetAsync(List<int>? accessibleIds = null, int? serverId = null, CancellationToken ct = default)
+    /// <summary>
+    /// PLAN-003 lot 12: <paramref name="projectId"/> narrows the graph the same way
+    /// <paramref name="serverId"/> already did. A project's pipelines page used to load the graph
+    /// of the whole fleet and throw away everything but its own rows.
+    /// </summary>
+    internal async Task<List<PipelineDto>> GetAsync(
+        List<int>? accessibleIds = null, int? serverId = null, int? projectId = null,
+        CancellationToken ct = default)
     {
         var query = db.Pipelines.AsNoTracking().AsQueryable();
         if (accessibleIds is not null)
             query = query.Where(p => accessibleIds.Contains(p.Id));
+        if (projectId is { } scopedProjectId)
+        {
+            query = query.Where(pipeline =>
+                (pipeline.ProjectId ?? pipeline.Environment!.ProjectId ?? pipeline.ProjectServer!.ProjectId)
+                == scopedProjectId);
+        }
+
         if (serverId.HasValue)
         {
             var usedPipelineIds = db.PipelineStepRuns
@@ -19,9 +34,10 @@ internal sealed class PipelineDependencyGraphRepository(AppDbContext db)
             query = query.Where(pipeline => usedPipelineIds.Contains(pipeline.Id));
         }
 
-        return Project(query.OrderBy(pipeline => pipeline.Name))
+        var pipelines = await Project(query.OrderBy(pipeline => pipeline.Name))
             .AsSplitQuery()
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
+        return await PipelineRunGradeAggregation.ApplyToRecentRunsAsync(db, pipelines, ct).ConfigureAwait(false);
     }
 
     internal async Task<(List<PipelineDto> Items, List<PipelineDto> Identities, int TotalCount)> GetPageAsync(
@@ -55,6 +71,7 @@ internal sealed class PipelineDependencyGraphRepository(AppDbContext db)
                 .Skip((page - 1) * pageSize).Take(pageSize))
             .AsSplitQuery()
             .ToListAsync(ct).ConfigureAwait(false);
+        items = await PipelineRunGradeAggregation.ApplyToRecentRunsAsync(db, items, ct).ConfigureAwait(false);
 
         // Reference resolution only needs identity columns. Unlike the former endpoint this does not
         // load or parse every YAML definition; only the requested page carries YAML.

@@ -14,7 +14,8 @@ public class UserRepository(AppDbContext db) : IUserRepository
 
     public async Task<(List<UserDto> Items, int TotalCount)> GetUsersPagedProjectedAsync(
         string? search, int page, int pageSize, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false)
+        string? sortBy = null, bool sortDescending = false,
+        IReadOnlyList<GridFilter>? filters = null)
     {
         return await GetUsersPageAsync(
             search,
@@ -33,7 +34,8 @@ public class UserRepository(AppDbContext db) : IUserRepository
             }),
             ct,
             sortBy,
-            sortDescending).ConfigureAwait(false);
+            sortDescending,
+            filters).ConfigureAwait(false);
     }
 
     private async Task<(List<T> Items, int TotalCount)> GetUsersPageAsync<T>(
@@ -43,9 +45,11 @@ public class UserRepository(AppDbContext db) : IUserRepository
         Func<IQueryable<User>, IQueryable<T>> project,
         CancellationToken ct,
         string? sortBy = null,
-        bool sortDescending = false)
+        bool sortDescending = false,
+        IReadOnlyList<GridFilter>? filters = null)
     {
-        var query = BuildUserQuery(search);
+        // Recette R-210 / R-224: the header filters, before the count.
+        var query = UserListQuery.Columns.ApplyFilters(BuildUserQuery(search), filters);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         var pageQuery = query
             .OrderByProperty(sortBy, sortDescending, user => user.Username, fallbackDescending: false)

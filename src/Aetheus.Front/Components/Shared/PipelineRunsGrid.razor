@@ -1,0 +1,146 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+
+<div class="aetheus-grid-host">
+    @* Recette R-432: the page's load reaches OE through Busy, which draws its loading bar on the table only,
+       as on every other grid; the rows already there stay, and a grid with no row yet waits empty under it. *@
+    <OmniDataGrid @ref="_grid" Items="@DisplayItems" TItem="PipelineRunTableItem" NewRowHighlight="@NewRowHighlight"
+        ShowLoadingBar="true" Busy="@IsLoading"
+        MaxHeight="@(FillHeight ? null : AetheusGrid.ScrollMaxHeight)"
+        ScrollMode="@(UsesVirtualization ? OmniDataGridScrollMode.Virtual : OmniDataGridScrollMode.All)" VirtualizationOverscanCount="3" FillAvailableHeight="@FillHeight"
+        ExpandMode="OmniDataGridRowMode.Single" RowRender="@OnRowRender"
+        OnRowExpand="@OnRowExpand" OnRowCollapse="@OnRowCollapse"
+        OnRowClick="@(args => OnRowClick(args.Item))" KeyOf="@(run => run.RunId)" @bind-ExpandedKeys="_expandedKeys" Class="@GridCssClass">
+        <EmptyContent>
+            <EmptyState Icon="hourglass_empty" Title="@L[EmptyTitleKey]" Description="@L[EmptyDescriptionKey]" />
+        </EmptyContent>
+        <DetailTemplate Context="run">
+            <div class="pipeline-linked-runs">
+                <div class="pipeline-linked-runs-header">
+                    <OmniIcon Name="OmniIconName.Graph" />
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@L["LinkedPipelineRuns"]</OmniText>
+                    <CountBadge Value="@run.LinkedRuns.Count" Variant="OmniTone.Neutral" />
+                </div>
+                <PipelineRunHierarchy Items="@run.LinkedRuns" Compact="@Compact" ShowDurationInCompact="@ShowDurationInCompact"
+                                      GroupByProject="@GroupByProject" ServerId="@ServerId" />
+            </div>
+        </DetailTemplate>
+        <Columns>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="RunId" Title="@L["ID"]" Width="7rem" Frozen="true"
+                Class="pipeline-run-id-actions-column" HeaderClass="pipeline-run-id-actions-column" Filterable="true">
+                <Template Context="run">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                        <a href="@RunHref(run)" @onclick:stopPropagation="true">#@run.RunId</a>
+                        @if (CanCancel(run))
+                        {
+                            <span @onclick:stopPropagation="true"><OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => CancelRunAsync(run))" Disabled="@(_cancelling == run.RunId)" title="@L["CancelRun"]" Label="@L["CancelRun"]"><OmniIcon Name="OmniIconName.Prohibit" /></OmniButton></span>
+                        }
+                    </OmniStack>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="PipelineName" Title="@L["Pipeline"]" MinWidth="10rem"
+                Visible="@ShowPipelineColumn"
+                Class="pipeline-run-name-column" HeaderClass="pipeline-run-name-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true">
+                <Template Context="run">
+                    <a href="@PipelineHref(run)" class="pipeline-name-link" @onclick:stopPropagation="true">@run.PipelineName</a>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="Status" Title="@L["Status"]" Width="10rem"
+                Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText">
+                <Template Context="run">
+                    @if (run.Status == PipelineStatus.Running)
+                    {
+                        @* A running run has no final state to badge yet; showing its current step in
+                           place of the badge is more useful than a static "Running" label. *@
+                        @if (!string.IsNullOrWhiteSpace(run.CurrentStep))
+                        {
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="pipeline-run-current-step">
+                                <div class="run-tl-dot run-timeline-dot-running"><span class="run-timeline-pulse"></span></div>
+                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@run.CurrentStep</OmniText>
+                            </OmniStack>
+                        }
+                        else
+                        {
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineHelper.GetRunBadge(run.Status)">@L.Localize(run.Status)</OmniBadge>
+                        }
+                    }
+                    else
+                    {
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineHelper.GetRunBadge(run.Status)">@L.Localize(run.Status)</OmniBadge>
+                            @if (run.GateGrade.HasValue)
+                            {
+                                @* The gate letter only appears when a gate actually graded the run; an
+                                   ungraded run shows nothing rather than a misleading placeholder. *@
+                                <GradeBadge Value="@run.GateGrade" Title="@L["GateGrade"]" Class="pipeline-gate-grade-badge" />
+                            }
+                        </OmniStack>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="ProjectName" Title="@L["Project"]" Width="10rem"
+                Visible="@GroupByProject" Class="pipeline-project-column" HeaderClass="pipeline-project-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true">
+                <Template Context="run">
+                    <span class="pipeline-project-context">@(run.ProjectName ?? L["Unassigned"])</span>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="StartedAt" Title="@L["Started"]" FormatString="{0:g}" Width="9rem"
+                Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="CompletedAt" Title="@L["Completed"]" FormatString="{0:g}" Width="9rem"
+                Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Key="Duration" Title="@L["Duration"]" Width="8rem" Sortable="false"
+                Visible="@(!Compact || ShowDurationInCompact)" Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column">
+                <Template Context="run">
+                    <span class="pipeline-run-duration"><PipelineRunTableLiveDuration Run="@run" /></span>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="BranchName" Title="@L["Branch"]" Width="10rem"
+                Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true">
+                <Template Context="run">
+                    @if (string.IsNullOrWhiteSpace(run.BranchName))
+                    {
+                        <span class="omni-u-text-muted">-</span>
+                    }
+                    else if (BranchHref(run) is { Length: > 0 } branchHref)
+                    {
+                        <a href="@branchHref" @onclick:stopPropagation="true" class="pipeline-run-ref-link">
+                            @run.BranchName
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="pipeline-run-ref-link">@run.BranchName</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="CommitHash" Title="@L["Commit"]" Width="8rem"
+                Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column" Filterable="true">
+                <Template Context="run">
+                    @if (!string.IsNullOrWhiteSpace(run.CommitHash))
+                    {
+                        @* Recette R-373: the one short form, linked to the commit; a null Href (no page
+                           known for that commit) renders it as text. *@
+                        <ShortId Value="@run.CommitHash" Href="@CommitHref(run)" Copyable="false" Class="pipeline-run-ref-link" />
+                    }
+                    else
+                    {
+                        <span class="omni-u-text-muted">-</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineRunTableItem" Property="ServerName" Title="@L["Server"]" Width="9rem"
+                Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true">
+                <Template Context="run">
+                    @if (string.IsNullOrWhiteSpace(run.ServerName))
+                    {
+                        <span class="omni-u-text-muted">-</span>
+                    }
+                    else
+                    {
+                        <span class="pipeline-run-ref-link" title="@run.ServerOs">@run.ServerName</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </OmniDataGrid>
+</div>

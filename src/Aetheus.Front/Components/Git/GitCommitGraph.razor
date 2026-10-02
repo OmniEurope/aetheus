@@ -1,0 +1,44 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Git
+
+@if (Commits.Count == 0)
+{
+    <OmniText Tone="OmniTextTone.Muted">@L["GitGraphEmptyTitle"]</OmniText>
+}
+else
+{
+    <div class="git-svg-graph">
+        <svg class="git-svg-lanes" width="@N(SvgWidth)" height="@N(SvgHeight)"
+             viewBox="@($"0 0 {N(SvgWidth)} {N(SvgHeight)}")" xmlns="http://www.w3.org/2000/svg" role="img">
+            <title>@L["GitGraph"]</title>
+            @foreach (var e in _edges)
+            {
+                <path d="@e.Path" fill="none" stroke="@e.Color" stroke-width="2" stroke-linecap="round" />
+            }
+            @foreach (var n in _nodes)
+            {
+                <circle cx="@N(n.X)" cy="@N(n.Y)" r="@NodeRadius" fill="@LaneColor(n.Col)"
+                        stroke="var(--omni-u-bg-muted)" stroke-width="1.5" />
+            }
+        </svg>
+        <div class="git-svg-rows">
+            @foreach (var n in _nodes)
+            {
+                <div class="git-svg-row">
+                    <ShortId Value="@n.Commit.Sha" Href="@CommitHref(n.Commit)" Copyable="false" Class="git-graph-sha" />
+                    @* S-FEAT-G6T9: branch/tag refs decorating the commit tip - tags styled distinctly. *@
+                    @foreach (var r in n.Commit.RefNames)
+                    {
+                        var isTag = r.StartsWith("tag: ", StringComparison.Ordinal);
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@(isTag ? OmniTone.Warning : OmniTone.Accent)"
+                                   Class="git-graph-ref-badge">
+                            @(isTag ? r["tag: ".Length..] : r)
+                        </OmniBadge>
+                    }
+                    <span class="git-graph-subject" title="@CommitTitle(n.Commit.Message)">@CommitTitle(n.Commit.Message)</span>
+                    <span class="git-graph-meta">@n.Commit.AuthorName · @RelativeTime.FormatAgo(L, n.Commit.AuthorDate)</span>
+                </div>
+            }
+        </div>
+    </div>
+}

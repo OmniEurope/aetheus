@@ -1,0 +1,15 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniRow Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-sm">
+    <OmniDropDown aria-label="@L["SelectLogType"]" @bind-Value="_unit" Options="@(Units.ToOptions(item => (string)item, item => item))" TValue="string" Placeholder="@L["SelectLogType"]" Class="w-rem-10" />
+    <OmniNumeric aria-label="@L["Lines"]" @bind-Value="_lines" Minimum="10" Maximum="2000" TValue="int" Class="w-rem-6" />
+    <OmniTextBox aria-label="@L["MailLogFilter"]" @bind-Value="_filter" Placeholder="@L["MailLogFilter"]" maxlength="64" />
+    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@FetchAsync" Disabled="@(_pendingTaskId is not null)"><OmniIcon Name="OmniIconName.Download" /> <span>@L["FetchLogs"]</span></OmniButton>
+    @if (_pendingTaskId is not null)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+    }
+</OmniRow>
+@if (_content is not null)
+{
+    <OmniCodeBlock Code="@(string.IsNullOrWhiteSpace(_content) ? L["NoLogsAvailable"].Value : _content)" Title="@($"{L["Logs"]} - {_unit}")" Wrap="true" Class="docker-logs code-block-bounded" />
+}

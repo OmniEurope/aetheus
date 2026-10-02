@@ -1,0 +1,8 @@
+# Aetheus Agent - cron management (Phase 3). The helper is the security boundary: root-owned,
+# agent-non-writable, re-validates every argument, and can only write /etc/cron.d/aetheus-<id>.
+# noexec is intentionally omitted (the helper is a vetted script that must exec coreutils).
+Cmnd_Alias AETHEUS_CRON = #{CRON_HELPER_PATH}#
+Defaults!AETHEUS_CRON timestamp_timeout=0
+Defaults!AETHEUS_CRON env_reset
+Defaults!AETHEUS_CRON secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_CRON

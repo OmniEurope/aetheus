@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -274,9 +271,10 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
         typeof(DockerContainersTab).GetField("_inspectContent", Priv)!.SetValue(tab.Instance, "{\"Id\":\"abc\"}");
         cut.Render();
 
-        // Inspect pre block and copy button icon both appear
-        Assert.Contains("content_copy", cut.Markup);
-        Assert.Contains("docker-logs", cut.Markup);
+        // R-516: the inspect result is OE's code block, whose header carries the copy button.
+        var block = cut.Find(".omni-code-block.docker-logs");
+        Assert.Contains("\"Id\":\"abc\"", block.QuerySelector("pre")!.TextContent, StringComparison.Ordinal);
+        Assert.NotNull(block.QuerySelector("figcaption button"));
     }
 
     // ── TEST 10: Shell panel visible ─────────────────────────────────────────
@@ -326,7 +324,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
         typeof(DockerContainersTab).GetField("_envContent", Priv)!.SetValue(tab.Instance, "[\"PATH=/usr/local/sbin:/usr/bin\",\"HOME=/root\",\"USER=app\"]");
         cut.Render();
 
-        Assert.Contains("role=\"grid\"", cut.Markup);
+        Assert.Contains("omni-data-grid__table", cut.Markup);
         Assert.Contains("PATH", cut.Markup);
         Assert.Contains("HOME", cut.Markup);
     }
@@ -347,7 +345,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
 
         Assert.Contains("browse-target", cut.Markup);
         // At root path, the "arrow_upward" (go-parent) button must NOT appear
-        Assert.DoesNotContain("arrow_upward", cut.Markup);
+        Assert.DoesNotContain(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Upgrade);
     }
 
     // ── TEST 14: Browse panel - non-root path, content → pre and up-button ───
@@ -363,7 +361,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
         typeof(DockerContainersTab).GetField("_browseContent", Priv)!.SetValue(tab.Instance, "hosts  resolv.conf  passwd");
         cut.Render();
 
-        Assert.Contains("arrow_upward", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Upgrade);
         Assert.Contains("docker-logs", cut.Markup);
         Assert.Contains("hosts", cut.Markup);
     }
@@ -433,7 +431,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
         var cut = RenderSection(BuildServer(docker));
         var tab = cut.FindComponent<DockerContainersTab>();
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["zoomapp"])!);
 
@@ -462,7 +460,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
         var cut = RenderSection(BuildServer(docker));
         var tab = cut.FindComponent<DockerContainersTab>();
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["limitctr000limit"])!);
 
@@ -479,7 +477,7 @@ public class ServerDockerSectionTemplateBranchTests : BunitContext
         var cut = RenderSection();
         var tab = cut.FindComponent<DockerContainersTab>();
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", Priv)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["ctrid000000remov", "doomed-ctr"])!);
 

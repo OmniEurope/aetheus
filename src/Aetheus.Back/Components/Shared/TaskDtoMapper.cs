@@ -20,23 +20,23 @@ internal static class TaskDtoMapper
         string command,
         string serverName,
         ServerStatus serverStatus) => new()
-    {
-        Id = task.Id,
-        ServerId = task.ServerId,
-        ServerName = serverName,
-        ServerStatus = serverStatus,
-        Name = task.Name,
-        Command = command,
-        Executor = task.Executor,
-        Status = task.Status,
-        PipelineRunId = task.PipelineRunId,
-        PipelineStepRunId = task.PipelineStepRunId,
-        CreatedAt = task.CreatedAt,
-        StartedAt = task.StartedAt,
-        CompletedAt = task.CompletedAt,
-        ExitCode = task.ExitCode,
-        FailureCode = task.FailureCode,
-        FailureReason = task.FailureReason,
-        TimeoutSeconds = task.TimeoutSeconds
-    };
+        {
+            Id = task.Id,
+            ServerId = task.ServerId,
+            ServerName = serverName,
+            ServerStatus = serverStatus,
+            Name = task.Name,
+            Command = command,
+            Executor = task.Executor,
+            Status = task.Status,
+            PipelineRunId = task.PipelineRunId,
+            PipelineStepRunId = task.PipelineStepRunId,
+            CreatedAt = task.CreatedAt,
+            StartedAt = task.StartedAt,
+            CompletedAt = task.CompletedAt,
+            ExitCode = task.ExitCode,
+            FailureCode = task.FailureCode,
+            FailureReason = task.FailureReason,
+            TimeoutSeconds = task.TimeoutSeconds
+        };
 }

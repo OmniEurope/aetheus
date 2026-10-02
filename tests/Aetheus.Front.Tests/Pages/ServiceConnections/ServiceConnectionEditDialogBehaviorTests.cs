@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.ServiceConnections;
+using Aetheus.Front.Components.ServiceConnections;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.ServiceConnections;
 
@@ -19,7 +16,7 @@ public sealed class ServiceConnectionEditDialogBehaviorTests : BunitContext
     public ServiceConnectionEditDialogBehaviorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
     }
@@ -88,7 +85,7 @@ public sealed class ServiceConnectionEditDialogBehaviorTests : BunitContext
         Assert.Equal(false, Spy.LastResult);
     }
 
-    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
     private static object Model(ServiceConnectionEditDialog instance) => typeof(ServiceConnectionEditDialog)
         .GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
     private static void Set(object model, string property, object? value) => model.GetType().GetProperty(property)!.SetValue(model, value);

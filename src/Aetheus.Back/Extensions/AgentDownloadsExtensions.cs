@@ -92,10 +92,11 @@ internal static class AgentDownloadsExtensions
             // X-Content-SHA256 is verified fail-closed by the agent self-update).
             var solutionRoot = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", ".."));
             var installScript = Path.Combine(solutionRoot, "deploy", "scripts", "install-agent-linux.sh");
+            var hostConfig = HostConfigSourcePath(solutionRoot);
 
             if (prebuiltArchive is not null)
             {
-                var prepared = await GetPreparedLinuxArchiveAsync(prebuiltArchive, serverUrl, installScript);
+                var prepared = await GetPreparedLinuxArchiveAsync(prebuiltArchive, serverUrl, installScript, hostConfig);
                 httpContext.Response.Headers["X-Content-SHA256"] = prepared.Sha256;
                 await using var preparedStream = new FileStream(
                     prepared.Path, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -168,20 +169,26 @@ internal static class AgentDownloadsExtensions
     }
 
     private static async Task<PreparedArchive> GetPreparedLinuxArchiveAsync(
-        string prebuiltArchive, string serverUrl, string? freshInstallScript)
+        string prebuiltArchive, string serverUrl, string? freshInstallScript, string? freshHostConfig)
     {
         var archive = new FileInfo(prebuiltArchive);
         var scriptStamp = freshInstallScript is not null && File.Exists(freshInstallScript)
             ? File.GetLastWriteTimeUtc(freshInstallScript).Ticks
             : 0;
-        var key = string.Join('|', archive.FullName, archive.Length, archive.LastWriteTimeUtc.Ticks, scriptStamp, serverUrl);
+        // R-249: a template edit must refresh the prepared archive exactly like a script edit does.
+        var hostConfigStamp = freshHostConfig is not null && Directory.Exists(freshHostConfig)
+            ? string.Join(',', Directory.GetFiles(freshHostConfig, "*", SearchOption.AllDirectories)
+                .Order(StringComparer.Ordinal)
+                .Select(file => $"{file}:{File.GetLastWriteTimeUtc(file).Ticks}"))
+            : string.Empty;
+        var key = string.Join('|', archive.FullName, archive.Length, archive.LastWriteTimeUtc.Ticks, scriptStamp, hostConfigStamp, serverUrl);
         var lazy = PreparedLinuxArchives.GetOrAdd(
             key,
             _ => new Lazy<Task<PreparedArchive>>(
                 async () =>
                 {
                     var path = await BuildPrebuiltLinuxArchiveWithMarkerAsync(
-                        prebuiltArchive, serverUrl, freshInstallScript).ConfigureAwait(false);
+                        prebuiltArchive, serverUrl, freshInstallScript, freshHostConfig).ConfigureAwait(false);
                     return new PreparedArchive(path, await ComputeFileSha256Async(path).ConfigureAwait(false));
                 },
                 LazyThreadSafetyMode.ExecutionAndPublication));
@@ -267,7 +274,7 @@ internal static class AgentDownloadsExtensions
     }
 
     /// <summary>Builds the dev-mode Linux archive from Debug output into a temp file the caller owns (and deletes).</summary>
-    private static async Task<string?> TryBuildLinuxAgentArchiveAsync(string backContentRootPath, string serverUrl)
+    internal static async Task<string?> TryBuildLinuxAgentArchiveAsync(string backContentRootPath, string serverUrl)
     {
         var solutionRootPath = Path.GetFullPath(Path.Combine(backContentRootPath, "..", ".."));
         // Prefer cross-compiled linux-x64 publish output (produced by ylaunch -ra).
@@ -276,8 +283,10 @@ internal static class AgentDownloadsExtensions
             ? linuxPublishPath
             : Path.Combine(solutionRootPath, "src", "Aetheus.Agent.Linux", "bin", "Debug", "net10.0");
         var linuxInstallScriptPath = Path.Combine(solutionRootPath, "deploy", "scripts", "install-agent-linux.sh");
+        var hostConfigPath = HostConfigSourcePath(solutionRootPath);
 
-        if (!Directory.Exists(linuxBuildPath) || !File.Exists(linuxInstallScriptPath))
+        // R-249: the installer refuses to run without its templates, so an archive without them is no archive.
+        if (!Directory.Exists(linuxBuildPath) || !File.Exists(linuxInstallScriptPath) || !Directory.Exists(hostConfigPath))
             return null;
 
         var linuxPackageTempPath = Path.Combine(Path.GetTempPath(), $"aetheus-linux-pkg-{Guid.NewGuid():N}");
@@ -290,13 +299,14 @@ internal static class AgentDownloadsExtensions
             var installScriptDest = Path.Combine(linuxPackageTempPath, "install-agent-linux.sh");
             File.Copy(linuxInstallScriptPath, installScriptDest, true);
             NormalizeToLf(installScriptDest);
+            CopyHostConfigTemplates(hostConfigPath, linuxPackageTempPath);
             File.WriteAllText(Path.Combine(linuxPackageTempPath, ".aetheus-server-url"), serverUrl + "\n");
 
             var tempArchivePath = Path.Combine(Path.GetTempPath(), $"aetheus-linux-{Guid.NewGuid():N}.tar.gz");
             await using (var fs = new FileStream(tempArchivePath, FileMode.Create, FileAccess.Write, FileShare.None))
             await using (var gzipStream = new GZipStream(fs, CompressionLevel.Optimal))
             {
-                await TarFile.CreateFromDirectoryAsync(linuxPackageTempPath, gzipStream, includeBaseDirectory: false).ConfigureAwait(false);
+                await WriteTarIncludingHiddenAsync(linuxPackageTempPath, gzipStream).ConfigureAwait(false);
             }
 
             return tempArchivePath;
@@ -309,8 +319,9 @@ internal static class AgentDownloadsExtensions
     }
 
     /// <summary>Re-packs the prebuilt Linux archive with the server-URL marker and the
-    /// current install script into a temp file the caller owns (and deletes).</summary>
-    private static async Task<string> BuildPrebuiltLinuxArchiveWithMarkerAsync(string prebuiltArchive, string serverUrl, string? freshInstallScript)
+    /// current install script and host configuration templates into a temp file the caller owns (and deletes).</summary>
+    internal static async Task<string> BuildPrebuiltLinuxArchiveWithMarkerAsync(
+        string prebuiltArchive, string serverUrl, string? freshInstallScript, string? freshHostConfig)
     {
         var extractDir = Path.Combine(Path.GetTempPath(), $"aetheus-linux-extract-{Guid.NewGuid():N}");
         Directory.CreateDirectory(extractDir);
@@ -336,11 +347,15 @@ internal static class AgentDownloadsExtensions
                 NormalizeToLf(dest);
             }
 
+            // R-249: the templates the overlaid script reads travel with it, never an older copy.
+            if (freshHostConfig is not null && Directory.Exists(freshHostConfig))
+                CopyHostConfigTemplates(freshHostConfig, extractDir);
+
             var tempArchivePath = Path.Combine(Path.GetTempPath(), $"aetheus-linux-{Guid.NewGuid():N}.tar.gz");
             await using (var fs = new FileStream(tempArchivePath, FileMode.Create, FileAccess.Write, FileShare.None))
             await using (var gzipStream = new GZipStream(fs, CompressionLevel.Optimal))
             {
-                await TarFile.CreateFromDirectoryAsync(extractDir, gzipStream, includeBaseDirectory: false).ConfigureAwait(false);
+                await WriteTarIncludingHiddenAsync(extractDir, gzipStream).ConfigureAwait(false);
             }
 
             return tempArchivePath;
@@ -389,6 +404,43 @@ internal static class AgentDownloadsExtensions
             Directory.Delete(path, true);
 
         Directory.CreateDirectory(path);
+    }
+
+    /// <summary>R-249: folder of the archive, next to install-agent-linux.sh, holding the host
+    /// configuration templates the installer renders (deploy/agent-host-config in the repository).</summary>
+    internal const string HostConfigFolderName = "agent-host-config";
+
+    internal static string HostConfigSourcePath(string solutionRootPath)
+        => Path.Combine(solutionRootPath, "deploy", HostConfigFolderName);
+
+    /// <summary>Replaces <paramref name="packageRootPath"/>/agent-host-config with a copy of
+    /// <paramref name="sourcePath"/>, every file normalised to LF like the install script: the
+    /// installer refuses a template holding a carriage return.</summary>
+    internal static void CopyHostConfigTemplates(string sourcePath, string packageRootPath)
+    {
+        var destination = Path.Combine(packageRootPath, HostConfigFolderName);
+        if (Directory.Exists(destination))
+            Directory.Delete(destination, true);
+
+        CopyDirectoryContent(sourcePath, destination);
+        foreach (var file in Directory.GetFiles(destination, "*", SearchOption.AllDirectories))
+            NormalizeToLf(file);
+    }
+
+    /// <summary>Tars every entry under <paramref name="sourcePath"/>, hidden ones included.
+    /// TarFile.CreateFromDirectoryAsync skips hidden entries, and on Linux every dot-file is hidden:
+    /// the served archive lost its .aetheus-server-url marker there while a Windows host kept it.</summary>
+    private static async Task WriteTarIncludingHiddenAsync(string sourcePath, Stream destination)
+    {
+        var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 };
+        await using var writer = new TarWriter(destination, leaveOpen: true);
+        foreach (var entryPath in Directory.EnumerateFileSystemEntries(sourcePath, "*", options).Order(StringComparer.Ordinal))
+        {
+            var entryName = Path.GetRelativePath(sourcePath, entryPath).Replace('\\', '/');
+            if (Directory.Exists(entryPath))
+                entryName += "/";
+            await writer.WriteEntryAsync(entryPath, entryName).ConfigureAwait(false);
+        }
     }
 
     private static void NormalizeToLf(string filePath)

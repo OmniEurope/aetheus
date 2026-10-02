@@ -13,6 +13,17 @@ public class MailDomain
     public bool HasDmarc { get; set; }
     public DateTime CreatedAt { get; set; }
 
+    // PLAN-005
+    public MailRecordSource Source { get; set; } = MailRecordSource.Aetheus;
+
+    /// <summary>DKIM TXT value reported by the agent (<c>v=DKIM1; k=rsa; p=...</c>), empty when unknown.</summary>
+    public string DkimPublicKey { get; set; } = string.Empty;
+
+    /// <summary>Set by the heartbeat reconciliation when the server stopped reporting the domain.</summary>
+    public DateTime? MissingSince { get; set; }
+
+    public DateTime? DnsCheckedAt { get; set; }
+
     // Navigation
     public Server Server { get; set; } = null!;
     public List<MailAccount> Accounts { get; set; } = [];

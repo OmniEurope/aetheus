@@ -4,9 +4,6 @@ using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.Analysis;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -437,6 +434,11 @@ public sealed class ScannerOperationExecutorTests
     [InlineData("syft", "aetheus-back.tar")]
     [InlineData("trivy-image-front", "aetheus-front.tar")]
     [InlineData("syft-front", "aetheus-front.tar")]
+    // A project that names its archives after itself reaches the SAME refusal, on provenance. The
+    // archive name is no longer what blocks it: before the fix these two rows failed on a missing
+    // file while reporting a revision mismatch, a cause that was not the real one.
+    [InlineData("trivy-image", "atlas-back.tar")]
+    [InlineData("syft-front", "atlas-front.tar")]
     public async Task ExecuteAsync_BuiltArtifactFromAnotherCommit_IsRejectedBeforeProcessStart(
         string scannerKey,
         string archiveName)
@@ -461,8 +463,45 @@ public sealed class ScannerOperationExecutorTests
             await context.Runner.DidNotReceive().RunAsync(
                 Arg.Any<ProcessStartInfo>(), Arg.Any<int>(), Arg.Any<Func<string, TaskLogLevel, Task>>(),
                 Arg.Any<CancellationToken>());
+            // The message must name the two commits it compared. "revision does not match" alone was
+            // reported for an absent file too, which is what sent the reader hunting a provenance
+            // problem that did not exist.
             await context.Api.Received(1).PublishAnalysisReportAsync(42,
-                Arg.Is<PublishAnalysisReportRequest>(request => request.ErrorMessage!.Contains("revision", StringComparison.Ordinal)),
+                Arg.Is<PublishAnalysisReportRequest>(request =>
+                    request.ErrorMessage!.Contains("aaaaaaaa", StringComparison.Ordinal)
+                    && request.ErrorMessage.Contains("bbbbbbbb", StringComparison.Ordinal)),
+                Arg.Any<CancellationToken>());
+        }
+        finally { context.Dispose(); }
+    }
+
+    [Theory]
+    [InlineData("trivy-image", "-back.tar")]
+    [InlineData("syft-front", "-front.tar")]
+    public async Task ExecuteAsync_MissingImageArchive_SaysItIsMissingRatherThanBlamingTheRevision(
+        string scannerKey,
+        string expectedSuffix)
+    {
+        var context = CreateContext();
+        context.Api.PublishAnalysisReportAsync(42, Arg.Any<PublishAnalysisReportRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new AnalysisReportDto { GateStatus = AnalysisGateStatus.Error });
+        // The provenance marker is right and matches the run; only the archive is absent.
+        var image = Directory.CreateDirectory(Path.Combine(context.SourceDirectory, ".analysis-image"));
+        await File.WriteAllTextAsync(Path.Combine(image.FullName, "source-commit"), "bbbbbbbb",
+            TestContext.Current.CancellationToken);
+        var env = ValidEnvironment(context.SourceDirectory);
+        env["BUILD_SOURCEVERSION"] = "bbbbbbbb";
+        try
+        {
+            var result = await context.Executor.ExecuteAsync(
+                OperationKind.PipelineRunScanner, scannerKey, env, 60,
+                (_, _) => Task.CompletedTask, TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await context.Api.Received(1).PublishAnalysisReportAsync(42,
+                Arg.Is<PublishAnalysisReportRequest>(request =>
+                    request.ErrorMessage!.Contains(expectedSuffix, StringComparison.Ordinal)
+                    && !request.ErrorMessage.Contains("revision", StringComparison.OrdinalIgnoreCase)),
                 Arg.Any<CancellationToken>());
         }
         finally { context.Dispose(); }
@@ -708,15 +747,16 @@ public sealed class ScannerOperationExecutorTests
         if (fixedResult is not null)
             runner.RunAsync(Arg.Any<ProcessStartInfo>(), Arg.Any<int>(), Arg.Any<Func<string, TaskLogLevel, Task>>(), Arg.Any<CancellationToken>())
                 .Returns(fixedResult);
+        var projectionManager = new ScannerSourceProjectionManager(TimeSpan.Zero);
         var executor = new ScannerOperationExecutor(
             api,
             Substitute.For<IHttpClientFactory>(),
             Options.Create(new AetheusAgentOptions { WorkDirectory = root, MinTimeoutSeconds = 1, MaxTimeoutSeconds = 3600 }),
             runner,
-            new ScannerSourceProjectionManager(TimeSpan.Zero),
+            projectionManager,
             TimeProvider.System,
             NullLogger<ScannerOperationExecutor>.Instance);
-        return new TestContextData(root, source, api, runner, executor);
+        return new TestContextData(root, source, api, runner, executor, projectionManager);
     }
 
     private sealed record TestContextData(
@@ -724,11 +764,14 @@ public sealed class ScannerOperationExecutorTests
         string SourceDirectory,
         IServerApiClient Api,
         IScannerProcessRunner Runner,
-        ScannerOperationExecutor Executor) : IDisposable
+        ScannerOperationExecutor Executor,
+        ScannerSourceProjectionManager ProjectionManager) : IDisposable
     {
         public string ScansDirectory => Path.Combine(Root, "scans");
         public void Dispose()
         {
+            Assert.True(SpinWait.SpinUntil(() => ProjectionManager.ActiveProjectionCount == 0,
+                TimeSpan.FromSeconds(5)), "Scanner projection cleanup did not complete.");
             if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
         }
     }

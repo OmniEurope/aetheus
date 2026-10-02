@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Projects.Sections;
+using Aetheus.Front.Components.Projects.Sections;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +15,7 @@ public class ExternalRepoRouteTests : BunitContext
     {
         Render<ExternalRepo>(parameters => parameters.Add(component => component.Id, 7));
 
-        Assert.EndsWith("/git-repositories?projectId=7#external-repository",
+        Assert.EndsWith("/git-repositories?projectId=7&tab=external",
             Services.GetRequiredService<NavigationManager>().Uri);
     }
 }

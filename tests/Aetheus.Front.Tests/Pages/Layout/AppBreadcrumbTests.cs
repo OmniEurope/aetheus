@@ -5,27 +5,63 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Front.Tests.Pages.Layout;
 
+/// <summary>
+/// PLAN-003 D2 / recette R-395: the page header is OE's <see cref="OmniPageHeader"/>, fed by the Aetheus
+/// <see cref="BreadcrumbService"/> through OE's <see cref="OmniBreadcrumbService"/>. Line 1 is the title,
+/// the trail's leaf; line 2 is the trail, its ancestors then the title as the current item (the user's
+/// R-395 decision), or the subtitle when the page has no ancestor. The route fallback comes from
+/// <see cref="AetheusBreadcrumbResolver"/>.
+/// </summary>
 public sealed class AppBreadcrumbTests : BunitContext
 {
     public AppBreadcrumbTests() => BunitTestHelper.RegisterServices(this);
 
+    private static string Trail(IRenderedComponent<OmniPageHeader> cut) =>
+        cut.Find(".omni-page-header__trail nav").InnerHtml;
+
+    private static string Title(IRenderedComponent<OmniPageHeader> cut) =>
+        cut.Find("h1.omni-page-header__title").TextContent;
+
     [Fact]
-    public void Renders_Accessible_Global_Breadcrumb_For_Current_Route()
+    public void Renders_The_Route_Ancestors_Then_The_Title_As_The_Current_Item()
     {
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         nav.NavigateTo("/pipelines/runs/1312");
 
-        var cut = Render<AppBreadcrumb>();
+        var cut = Render<OmniPageHeader>();
 
-        var landmark = cut.Find("nav[data-testid='app-breadcrumb']");
-        Assert.Equal("BreadcrumbNavigation", landmark.GetAttribute("aria-label"));
-        Assert.Equal("OL", landmark.FirstElementChild?.TagName);
-        Assert.Contains("Pipelines", cut.Markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("PipelineRun #1312", cut.Markup, StringComparison.Ordinal);
-        var skeleton = cut.Find(".app-breadcrumb-skeleton");
-        Assert.Equal("Loading", skeleton.GetAttribute("aria-label"));
-        Assert.Equal("page", skeleton.GetAttribute("aria-current"));
-        Assert.Equal("/pipelines", cut.Find("a").GetAttribute("href"));
+        var landmark = cut.Find(".omni-page-header__trail nav");
+        Assert.False(string.IsNullOrWhiteSpace(landmark.GetAttribute("aria-label")));
+        Assert.Equal("/pipelines", cut.Find(".omni-page-header__trail a").GetAttribute("href"));
+        Assert.Contains("Pipelines", Trail(cut), StringComparison.Ordinal);
+        // The route fallback names the run as still loading: OE holds its place with a placeholder, on
+        // the title line and as the trail's last item, until the page names it.
+        Assert.Single(cut.FindAll(".omni-page-header__title-loading"));
+
+        Services.GetRequiredService<BreadcrumbService>().Set(
+            new BreadcrumbItem("Pipelines", "/pipelines"), new BreadcrumbItem("PipelineRun #1312"));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("PipelineRun #1312", Title(cut), StringComparison.Ordinal);
+            Assert.Equal("PipelineRun #1312", cut.Find(".omni-page-header__trail [aria-current='page']").TextContent.Trim());
+            Assert.Empty(cut.FindAll(".omni-page-header__crumb-loading"));
+        });
+    }
+
+    [Fact]
+    public void Renders_A_Skeleton_For_An_Ancestor_Still_Loading()
+    {
+        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+        nav.NavigateTo("/servers/7/docker");
+
+        var cut = Render<OmniPageHeader>();
+
+        // "Servers / <the server, still loading> / Docker": the middle item is an ancestor whose name
+        // arrives with the data, so it holds the trail's width instead of letting the row reflow.
+        Assert.Single(cut.FindAll(".omni-page-header__crumb-loading"));
+        Assert.Contains("Servers", Trail(cut), StringComparison.Ordinal);
+        Assert.Contains("Docker", Title(cut), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,7 +69,7 @@ public sealed class AppBreadcrumbTests : BunitContext
     {
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         nav.NavigateTo("/tasks/9");
-        var cut = Render<AppBreadcrumb>();
+        var cut = Render<OmniPageHeader>();
         var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
         breadcrumb.Set(new BreadcrumbItem("Tasks", "/tasks"), new BreadcrumbItem("Loaded task"));
 
@@ -42,9 +78,8 @@ public sealed class AppBreadcrumbTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             Assert.DoesNotContain("Loaded task", cut.Markup, StringComparison.Ordinal);
-            Assert.DoesNotContain("Server #7", cut.Markup, StringComparison.Ordinal);
-            Assert.Single(cut.FindAll(".app-breadcrumb-skeleton"));
-            Assert.Contains("Docker", cut.Markup, StringComparison.Ordinal);
+            Assert.DoesNotContain("Server #7", Trail(cut), StringComparison.Ordinal);
+            Assert.Single(cut.FindAll(".omni-page-header__crumb-loading"));
         });
 
         breadcrumb.Set(
@@ -54,8 +89,60 @@ public sealed class AppBreadcrumbTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Empty(cut.FindAll(".app-breadcrumb-skeleton"));
-            Assert.Contains("web-01", cut.Markup, StringComparison.Ordinal);
+            Assert.Empty(cut.FindAll(".omni-page-header__crumb-loading"));
+            Assert.Contains("web-01", Trail(cut), StringComparison.Ordinal);
+            Assert.Equal("Docker", Title(cut));
         });
+    }
+
+    [Fact]
+    public void Single_Item_Trail_Keeps_Line_Two_For_The_Route_Description()
+    {
+        var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
+        var cut = Render<OmniPageHeader>(parameters => parameters.Add(header => header.Subtitle, breadcrumb.Subtitle()));
+        breadcrumb.Set(new BreadcrumbItem("Dashboard"));
+        cut.Render(parameters => parameters.Add(header => header.Subtitle, breadcrumb.Subtitle()));
+
+        // D3: line 2 exists even with no ancestor, so every page starts its content at the same Y.
+        // Since recette R-089 it holds the page description when there is no trail; either way the
+        // leaf is written once, as the title.
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Single(cut.FindAll(".omni-page-header__trail"));
+            Assert.Empty(cut.FindAll(".omni-breadcrumb__item"));
+            Assert.Equal("PageDescription_dashboard", cut.Find(".omni-page-header__trail-text").TextContent);
+            Assert.Contains("Dashboard", Title(cut), StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void An_Explicit_Title_Wins_Over_The_Trail_Leaf()
+    {
+        var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
+        breadcrumb.Set(new BreadcrumbItem("Projects", "/projects"), new BreadcrumbItem("Project #42"));
+
+        var cut = Render<OmniPageHeader>(parameters => parameters.Add(header => header.Title, "Aetheus"));
+
+        Assert.Equal("Aetheus", Title(cut));
+        Assert.Contains("Projects", Trail(cut), StringComparison.Ordinal);
+    }
+
+    /// <summary>R-014 / R-089: the route description stands in for a missing subtitle only when the page has
+    /// no ancestor; with a trail, only the page's own subtitle shows, under the header.</summary>
+    [Fact]
+    public void The_Subtitle_Falls_Back_To_The_Route_Description_Only_Without_Ancestors()
+    {
+        var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
+
+        breadcrumb.Set(new BreadcrumbItem("Dashboard"));
+        Assert.Equal("PageDescription_dashboard", breadcrumb.Subtitle());
+        Assert.Equal("Mine", breadcrumb.Subtitle("Mine"));
+
+        breadcrumb.Set(new BreadcrumbItem("Projects", "/projects"), new BreadcrumbItem("Project #42"));
+        Assert.Null(breadcrumb.Subtitle());
+        Assert.Equal("Mine", breadcrumb.Subtitle("Mine"));
+        Assert.Equal("/projects", breadcrumb.ParentHref);
+        Assert.Equal(["Projects", "Project #42"],
+            Services.GetRequiredService<OmniBreadcrumbService>().Items.Select(entry => entry.Text));
     }
 }

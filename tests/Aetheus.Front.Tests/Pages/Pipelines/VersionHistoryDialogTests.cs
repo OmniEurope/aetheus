@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -51,7 +47,7 @@ public class VersionHistoryDialogTests : BunitContext
         var cut = Render<VersionHistoryDialog>(p => p
             .Add(x => x.LibraryId, 1)
             .Add(x => x.EntryId, 2));
-        await LoadAsync(cut, new LoadDataArgs { Skip = 25, Top = 25, OrderBy = "Version desc" });
+        await LoadAsync(cut, new GridLoadArgs { Skip = 25, Top = 25, OrderBy = "Version desc" });
 
         Assert.Contains("ENV", cut.Markup);
         Assert.Contains(_handler.Requests, request => request.Url.Contains("page=2", StringComparison.Ordinal));
@@ -75,12 +71,12 @@ public class VersionHistoryDialogTests : BunitContext
     }
 
     private static async Task LoadAsync(
-        IRenderedComponent<VersionHistoryDialog> cut, LoadDataArgs? args = null)
+        IRenderedComponent<VersionHistoryDialog> cut, GridLoadArgs? args = null)
     {
         var method = typeof(VersionHistoryDialog).GetMethod(
             "LoadDataAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(
-            cut.Instance, [args ?? new LoadDataArgs { Skip = 0, Top = 25 }])!);
+            cut.Instance, [args ?? new GridLoadArgs { Skip = 0, Top = 25 }])!);
         cut.Render();
     }
 }

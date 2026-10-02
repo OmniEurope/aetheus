@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -116,6 +115,28 @@ public class PipelineGitServiceTests
         Assert.Equal(yaml, result);
         await _cliMock.Received().GetBlobAsync(
             Arg.Any<string>(), commit, ".pipeline/deploy.yaml", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task R534_AnAdditionalSource_IsNeverWhereADefinitionIsReadByDefault()
+    {
+        // The project's repository plus the mirror of an external one attached beside it: a pipeline
+        // bound to no repository still reads its definition from the project's own.
+        // Recette R-483: the source is read from the stored repositories (no default-branch sync).
+        _gitServiceMock.GetAccessibleRepositoriesAsync(Arg.Is<List<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 1 })), Arg.Any<CancellationToken>()).Returns(
+        [
+            new GitLightRepoDto { Id = 10, ProjectId = 1, Slug = "aetheus", DefaultBranch = "develop" },
+            new GitLightRepoDto { Id = 20, ProjectId = 1, Slug = "aetheus-public", DefaultBranch = "main", IsAdditionalSource = true }
+        ]);
+        var tempDir = Directory.CreateTempSubdirectory("pgs-test-r534-").FullName;
+        _gitServiceMock.ResolveDiskPath(1, "aetheus").Returns(tempDir);
+        _cliMock.GetCommitsAsync(tempDir, "develop", skip: 0, take: 1, ct: Arg.Any<CancellationToken>())
+            .Returns([new GitLightCommitDto { Sha = "c755999fc0" }]);
+
+        var source = await _sut.GetPipelineSourceAsync(1, "deploy", TestContext.Current.CancellationToken);
+
+        Assert.NotNull(source);
+        Assert.Equal((10, "develop", "c755999fc0"), (source.RepositoryId, source.Branch, source.CommitHash));
     }
 
     [Fact]
@@ -355,17 +376,53 @@ public class PipelineGitServiceTests
 
     // --- Helpers ---
 
+    [Fact]
+    public async Task R483_GetPipelineSourceAsync_ReadsTheRepositoryOnce_AndGivesItsHeadCommit()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        SetupRepoWithDiskPath(1, "my-repo", "develop");
+        _cliMock.GetCommitsAsync(Arg.Any<string>(), "develop", skip: 0, take: 1, ct: Arg.Any<CancellationToken>())
+            .Returns([new GitLightCommitDto { Sha = "c755999fc0" }]);
+
+        var source = await _sut.GetPipelineSourceAsync(1, "Aetheus Candidate", ct);
+
+        Assert.NotNull(source);
+        Assert.Equal(("develop", "c755999fc0", ".pipeline/aetheus-candidate.yaml"), (source.Branch, source.CommitHash, source.Path));
+        // The stored repository list is read once and reused for the head commit; the syncing list
+        // (default branch detection: two git processes and a possible write) is never asked for.
+        await _gitServiceMock.Received(1).GetAccessibleRepositoriesAsync(Arg.Any<List<int>?>(), Arg.Any<CancellationToken>());
+        await _gitServiceMock.DidNotReceiveWithAnyArgs().GetRepositoriesAsync(default, ct);
+        await _cliMock.DidNotReceiveWithAnyArgs().DetectDefaultBranchAsync(string.Empty, ct);
+    }
+
+    [Fact]
+    public async Task R483_GetPipelineSourceAsync_AnUnreadableHead_IsAnUnresolvedSource_NotAFailure()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        SetupRepoWithDiskPath(1, "my-repo", "develop");
+        _cliMock.GetCommitsAsync(Arg.Any<string>(), "develop", skip: 0, take: 1, ct: Arg.Any<CancellationToken>())
+            .Returns<List<GitLightCommitDto>>(_ => throw new InvalidOperationException("git failed"));
+
+        var source = await _sut.GetPipelineSourceAsync(1, "deploy", ct);
+
+        Assert.NotNull(source);
+        Assert.Null(source.CommitHash);
+    }
+
     private void SetupRepoWithDiskPath(int projectId, string slug, string defaultBranch)
     {
-        _gitServiceMock.GetRepositoriesAsync(projectId, Arg.Any<CancellationToken>())
-            .Returns([new GitLightRepoDto
+        List<GitLightRepoDto> repos = [new GitLightRepoDto
             {
                 Id = 1,
                 ProjectId = projectId,
                 Slug = slug,
                 DefaultBranch = defaultBranch,
                 IsEmpty = false
-            }]);
+            }];
+        _gitServiceMock.GetRepositoriesAsync(projectId, Arg.Any<CancellationToken>()).Returns(repos);
+        _gitServiceMock.GetAccessibleRepositoriesAsync(
+                Arg.Is<List<int>?>(ids => ids != null && ids.Contains(projectId)), Arg.Any<CancellationToken>())
+            .Returns(repos);
 
         // ResolveDiskPath returns a path that exists in tests - use temp directory
         var tempDir = Path.Combine(Path.GetTempPath(), $"pgs-test-{projectId}-{slug}");

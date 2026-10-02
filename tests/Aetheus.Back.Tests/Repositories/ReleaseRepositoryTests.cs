@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Repositories;
@@ -25,6 +24,52 @@ public class ReleaseRepositoryTests : IDisposable
         _db.Projects.Add(project);
         _db.SaveChanges();
         _projectId = project.Id;
+    }
+
+    [Fact]
+    public async Task GetReleasesPagedAsync_AppliesColumnFilters_AndResolvedIds_BeforeTheCount()
+    {
+        // Recette R-224: publication range, status and grade lists, project name and the ids the
+        // source pipeline filter resolved to all narrow the query.
+        _db.Releases.AddRange(
+            new Release { Id = 11, ProjectId = _projectId, Version = "1.0.0", BranchName = "main", Status = ReleaseStatus.Published, AssuranceGrade = AnalysisGrade.A, PublishedAt = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc) },
+            new Release { Id = 12, ProjectId = _projectId, Version = "1.1.0", BranchName = "main", Status = ReleaseStatus.Published, AssuranceGrade = AnalysisGrade.C, PublishedAt = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc) },
+            new Release { Id = 13, ProjectId = _projectId, Version = "1.2.0", BranchName = "main", Status = ReleaseStatus.Detected, PublishedAt = null },
+            new Release { Id = 14, ProjectId = _projectId, Version = "0.9.0", BranchName = "main", Status = ReleaseStatus.Published, AssuranceGrade = AnalysisGrade.A, PublishedAt = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc) });
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var separator = GridFilter.ListSeparator;
+
+        var (items, total) = await _repo.GetReleasesPagedAsync(null, null, 1, 10, ct: TestContext.Current.CancellationToken,
+            columnFilters:
+            [
+                new GridFilter
+                {
+                    Field = "PublishedAt", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-01",
+                    SecondOperator = GridFilterOperator.LessThan, SecondValue = "2026-09-10"
+                },
+                new GridFilter { Field = "Status", Operator = GridFilterOperator.In, Value = "Published" },
+                new GridFilter { Field = "AssuranceGrade", Operator = GridFilterOperator.In, Value = $"A{separator}B" },
+                new GridFilter { Field = "ProjectName", Operator = GridFilterOperator.In, Value = "p" }
+            ]);
+        var (_, resolvedTotal) = await _repo.GetReleasesPagedAsync(null, null, 1, 10, ct: TestContext.Current.CancellationToken,
+            releaseIds: [12, 13]);
+        var facts = await _repo.GetReleaseFilterFactsAsync(null, null, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, total);
+        Assert.Equal("1.0.0", Assert.Single(items).Version);
+        Assert.Equal(2, resolvedTotal);
+        Assert.Equal(4, facts.Count);
+        Assert.All(facts, fact => Assert.Equal("P", fact.ProjectName));
+    }
+
+    [Fact]
+    public void SourcePipelineFilter_MatchesTheTickedRootPipelines_WithoutCase()
+    {
+        var ids = ReleaseListQuery.WithSourcePipelineAmong(
+            new GridFilter { Field = "SourcePipelineName", Operator = GridFilterOperator.In, Value = $"DEPLOY{GridFilter.ListSeparator}nightly" },
+            [(1, "deploy"), (2, "build"), (3, null), (4, "Nightly")]);
+
+        Assert.Equal([1, 4], ids.Order());
     }
 
     [Fact]
@@ -224,6 +269,35 @@ public class ReleaseRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetByPipelineRunIdAsync_KeepsTheReleaseACandidatePublished_AfterTheDeployRunRewroteIt()
+    {
+        // Recette R-365: the candidate run published release 51, then the deploy run recorded it again
+        // and became its PipelineRunId. The candidate's release step output still names it. A RELEASE_ID
+        // pointing at another project's release, or written by a failed step, is ignored.
+        _db.Pipelines.AddRange(
+            new Pipeline { Id = 50, Name = "candidate", ProjectId = _projectId },
+            new Pipeline { Id = 51, Name = "deploy-prod", ProjectId = _projectId });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 2421, PipelineId = 50 },
+            new PipelineRun { Id = 2422, PipelineId = 51 });
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = 2421, StageName = "Candidate", StepName = "Publish", Status = TaskExecutionStatus.Success, OutputVariablesJson = "{\"RELEASE_ID\":\"51\"}" },
+            new PipelineStepRun { PipelineRunId = 2421, StageName = "Other", StepName = "Spoof", Status = TaskExecutionStatus.Success, OutputVariablesJson = "{\"RELEASE_ID\":\"52\"}" },
+            new PipelineStepRun { PipelineRunId = 2421, StageName = "Other", StepName = "Failed", Status = TaskExecutionStatus.Failed, OutputVariablesJson = "{\"RELEASE_ID\":\"53\"}" });
+        _db.Releases.AddRange(
+            new Release { Id = 51, ProjectId = _projectId, Version = "c-9e1d", Status = ReleaseStatus.Deployed, PipelineRunId = 2422 },
+            new Release { Id = 52, ProjectId = _projectId + 1, Version = "c-other", Status = ReleaseStatus.Published },
+            new Release { Id = 53, ProjectId = _projectId, Version = "c-failed", Status = ReleaseStatus.Published });
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var candidate = await _repo.GetByPipelineRunIdAsync(2421, TestContext.Current.CancellationToken);
+        var deploy = await _repo.GetByPipelineRunIdAsync(2422, TestContext.Current.CancellationToken);
+
+        Assert.Equal(51, Assert.Single(candidate).Id);
+        Assert.Equal(51, Assert.Single(deploy).Id);
+    }
+
+    [Fact]
     public async Task FindPreviousPublishedWithArtifactAsync_UsesOnlyTheSameDeploymentCohort()
     {
         var previousAccept = new Release
@@ -337,4 +411,83 @@ public class ReleaseRepositoryTests : IDisposable
     }
 
     public void Dispose() => _db.Dispose();
+
+    [Fact]
+    public async Task GetReleasesPagedAsync_Deployable_KeepsEveryReleaseWhosePayloadIsRetained()
+    {
+        // PLAN-005 lot 5 / D40, R-10: what a deployment's restore by release name can actually use is
+        // the retained payload, whatever the status - deploy-prod 2368 restored a release a failed
+        // deployment had marked Failed. The status is shown beside it; only a purged one is left out.
+        PipelineArtifact Payload() => new() { Name = "application-payload", FilePath = "a.tgz" };
+        _db.Releases.AddRange(
+            new Release { ProjectId = _projectId, Version = "published-with-payload", BranchName = "develop", Status = ReleaseStatus.Published, Artifacts = [Payload()] },
+            new Release { ProjectId = _projectId, Version = "deployed-with-payload", BranchName = "develop", Status = ReleaseStatus.Deployed, Artifacts = [Payload()] },
+            new Release { ProjectId = _projectId, Version = "published-purged", BranchName = "develop", Status = ReleaseStatus.Published },
+            new Release { ProjectId = _projectId, Version = "superseded-with-payload", BranchName = "develop", Status = ReleaseStatus.Superseded, Artifacts = [Payload()] },
+            new Release { ProjectId = _projectId, Version = "failed-with-payload", BranchName = "develop", Status = ReleaseStatus.Failed, Artifacts = [Payload()] });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (deployable, total) = await _repo.GetReleasesPagedAsync(
+            null, _projectId, 1, 25, ct: TestContext.Current.CancellationToken, deployableOnly: true);
+        var (all, _) = await _repo.GetReleasesPagedAsync(null, _projectId, 1, 25, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(4, total);
+        Assert.Equal(
+            ["deployed-with-payload", "failed-with-payload", "published-with-payload", "superseded-with-payload"],
+            deployable.Select(release => release.Version).Order());
+        Assert.Equal(5, all.Count);
+    }
+
+    [Fact]
+    public async Task GetRedeployTargetsAsync_NamesThePreviousDeploymentAndTheLivePipeline()
+    {
+        // PLAN-007 lot 5: the newest Superseded release is the one production ran before the live one,
+        // and the live release points at the run that deployed it, launched with a candidateVersion.
+        _db.Pipelines.Add(new Pipeline { Id = 40, Name = "deploy-prod" });
+        _db.PipelineRuns.Add(new PipelineRun { Id = 400, PipelineId = 40, ParametersJson = "{\"candidateVersion\":\"c-3\"}" });
+        _db.Releases.AddRange(
+            new Release { Id = 1, ProjectId = _projectId, Version = "c-1", Status = ReleaseStatus.Superseded, PublishedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new Release { Id = 2, ProjectId = _projectId, Version = "c-2", Status = ReleaseStatus.Superseded, PublishedAt = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc) },
+            new Release { Id = 3, ProjectId = _projectId, Version = "c-3", Status = ReleaseStatus.Deployed, PublishedAt = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc), PipelineRunId = 400 });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var target = (await _repo.GetRedeployTargetsAsync([_projectId], TestContext.Current.CancellationToken))[_projectId];
+
+        Assert.Equal(new ReleaseRedeployTarget(2, 40), target);
+    }
+
+    [Fact]
+    public async Task GetRedeployTargetsAsync_NamesTheProjectsRevertPipeline_ByTheTemplateItExtends()
+    {
+        // PLAN-003 2.7: "Revenir à N-1" is the project pipeline extending host-bluegreen-revert.
+        _db.Pipelines.AddRange(
+            new Pipeline { Id = 42, Name = "deploy-prod", ProjectId = _projectId, TemplateReferenceName = "host-bluegreen-deploy" },
+            new Pipeline { Id = 43, Name = "revert-prod", ProjectId = _projectId, TemplateReferenceName = "host-bluegreen-revert" },
+            new Pipeline { Id = 44, Name = "someone-elses-revert", ProjectId = _projectId + 1, TemplateReferenceName = "host-bluegreen-revert" });
+        _db.Releases.AddRange(
+            new Release { Id = 21, ProjectId = _projectId, Version = "c-1", Status = ReleaseStatus.Superseded, PublishedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new Release { Id = 22, ProjectId = _projectId, Version = "c-2", Status = ReleaseStatus.Deployed, PublishedAt = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc) });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var target = (await _repo.GetRedeployTargetsAsync([_projectId], TestContext.Current.CancellationToken))[_projectId];
+
+        Assert.Equal(43, target.RevertPipelineId);
+    }
+
+    [Fact]
+    public async Task GetRedeployTargetsAsync_WithoutACandidateVersionRunOffersNoPipeline()
+    {
+        // A live release deployed by a run that took no candidateVersion (release-fast) has no
+        // pipeline that could redeploy the previous one by version.
+        _db.Pipelines.Add(new Pipeline { Id = 41, Name = "release-fast" });
+        _db.PipelineRuns.Add(new PipelineRun { Id = 410, PipelineId = 41 });
+        _db.Releases.AddRange(
+            new Release { Id = 11, ProjectId = _projectId, Version = "c-1", Status = ReleaseStatus.Superseded, PublishedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new Release { Id = 12, ProjectId = _projectId, Version = "c-2", Status = ReleaseStatus.Deployed, PublishedAt = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc), PipelineRunId = 410 });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var target = (await _repo.GetRedeployTargetsAsync([_projectId], TestContext.Current.CancellationToken))[_projectId];
+
+        Assert.Equal(new ReleaseRedeployTarget(11, null), target);
+    }
 }

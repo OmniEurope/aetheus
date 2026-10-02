@@ -1,0 +1,56 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PipelineTemplateExtractionBase
+@page "/pipelines/{PipelineId:int}/template/extract"
+
+<PageTitle>@L["ExtractAsTemplate"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["ExtractAsTemplate"]" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("add_circle")" /></Icon>
+</OmniPageHeader>
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">@L["LoadFailed"]</OmniAlert>
+}
+else
+{
+    <EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        <OmniRow Gap="OmniSpacing.Large" Class="omni-u-mt-md">
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniFormField For="oe-pages-pipelines-pipelinetemplateextract-1" Class="omni-u-w-100"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.TemplateName" Class="omni-u-w-100" Id="oe-pages-pipelines-pipelinetemplateextract-1" />
+                </ChildContent></OmniFormField>
+                <ValidationMessage For="@(() => _model.TemplateName)" />
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniFormField For="oe-pages-pipelines-pipelinetemplateextract-2" Class="omni-u-w-100"><LabelContent>@L["Category"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Category" Class="omni-u-w-100" Id="oe-pages-pipelines-pipelinetemplateextract-2" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12">
+                <OmniFormField For="oe-pages-pipelines-pipelinetemplateextract-3" Class="omni-u-w-100"><LabelContent>@L["Description"]</LabelContent><ChildContent>
+                    <OmniTextArea @bind-Value="_model.Description" Rows="3" Class="omni-u-w-100" Id="oe-pages-pipelines-pipelinetemplateextract-3" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+        </OmniRow>
+        <OmniAlert Severity="OmniSeverity.Info" Class="omni-u-mt-md">@L["ExtractionParametersHelp"]</OmniAlert>
+        <OmniText Element="OmniTextElement.Strong" Class="omni-u-mt-md omni-u-mb-sm">@L["NewTemplateYaml"]</OmniText>
+        <MonacoEditor Value="@_model.TemplateYamlContent" ValueChanged="@(value => _model.TemplateYamlContent = value)" />
+        <ValidationMessage For="@(() => _model.TemplateYamlContent)" />
+        <OmniCheckBox @bind-Value="_model.RewritePipeline" Class="omni-u-mt-md">@L["RewritePipelineToPin"]</OmniCheckBox>
+        @if (_model.RewritePipeline)
+        {
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-mt-md omni-u-mb-sm">@L["RewrittenPipelineYaml"]</OmniText>
+            <MonacoEditor Value="@_model.RewrittenPipelineYaml" ValueChanged="@(value => _model.RewrittenPipelineYaml = value)" />
+        }
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Justify="OmniJustification.End" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@Cancel"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Extract"]</span></OmniButton>
+        </OmniStack>
+    </EditForm>
+}

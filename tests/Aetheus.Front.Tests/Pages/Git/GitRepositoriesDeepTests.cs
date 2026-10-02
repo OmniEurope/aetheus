@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Git;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Git;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -203,9 +201,9 @@ public class GitRepositoriesDeepTests : BunitContext
         {
             new()
             {
-                ResourceType = Aetheus.Shared.Enums.ResourceType.Project,
+                ResourceType = Aetheus.Shared.Components.Auth.ResourceType.Project,
                 ResourceId = null,
-                Permission = Aetheus.Shared.Enums.Permission.Write
+                Permission = Aetheus.Shared.Components.Auth.Permission.Write
             }
         };
         await cut.InvokeAsync(() => permissions.SetPermissions(writeProject, isAdmin: false));
@@ -228,12 +226,12 @@ public class GitRepositoriesDeepTests : BunitContext
         await cut.Instance.DisposeAsync();
 
         // After dispose the handler is detached: restoring Write must NOT flip _canWrite back.
-        var writeAll = Enum.GetValues<Aetheus.Shared.Enums.ResourceType>()
+        var writeAll = Enum.GetValues<Aetheus.Shared.Components.Auth.ResourceType>()
             .Select(rt => new EffectivePermissionDto
             {
                 ResourceType = rt,
                 ResourceId = null,
-                Permission = Aetheus.Shared.Enums.Permission.Write
+                Permission = Aetheus.Shared.Components.Auth.Permission.Write
             })
             .ToList();
         permissions.SetPermissions(writeAll, isAdmin: false);

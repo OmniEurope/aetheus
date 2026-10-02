@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -35,7 +32,7 @@ public class ImportJsonDialogTests : BunitContext
     {
         var cut = Render<ImportJsonDialog>();
         var buttons = cut.FindAll("button");
-        var cancelBtn = buttons.FirstOrDefault(b => b.TextContent.Contains("Cancel"));
+        var cancelBtn = buttons.FirstOrDefault(b => b.TextContent.Contains("GoBack"));
         Assert.NotNull(cancelBtn);
     }
 
@@ -44,7 +41,7 @@ public class ImportJsonDialogTests : BunitContext
     {
         var cut = Render<ImportJsonDialog>();
         var textarea = cut.Find("textarea");
-        textarea.Change("{\"key\": \"value\"}");
+        textarea.Input("{\"key\": \"value\"}");
 
         var buttons = cut.FindAll("button");
         var importBtn = buttons.FirstOrDefault(b => b.TextContent.Contains("Import"));

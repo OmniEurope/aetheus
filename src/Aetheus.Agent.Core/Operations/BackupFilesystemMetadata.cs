@@ -36,6 +36,21 @@ internal static class BackupFilesystemMetadata
             File.SetUnixFileMode(target, File.GetUnixFileMode(source));
     }
 
+    // A new owner-only file opened for sequential async I/O; CreateNew refuses to follow or reuse an existing path.
+    internal static FileStreamOptions CreatePrivateFileOptions(FileAccess access = FileAccess.Write)
+    {
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = access,
+            Share = FileShare.None,
+            BufferSize = 81920,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+        };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = PrivateFileMode;
+        return options;
+    }
+
     internal static void CreatePrivateDirectory(string path)
     {
         var existed = Directory.Exists(path);

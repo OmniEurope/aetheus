@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Shared.DTOs;
-using static Aetheus.Front.Pages.Pipelines.PipelineRunTimelineBuilder;
+using Aetheus.Front.Components.Pipelines;
+using static Aetheus.Front.Components.Pipelines.PipelineRunTimelineBuilder;
 
 namespace Aetheus.Front.Tests.Pages.Pipelines;
 

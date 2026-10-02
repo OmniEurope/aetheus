@@ -1,0 +1,25 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* A green run whose candidate is NOT deployable is the case that reads wrong: the run succeeded, and
+   the one sentence that mattered lived in a step log. *@
+@if (Verdict is { Deployable: false })
+{
+    <OmniAlert Severity="OmniSeverity.Warning" Title="@L["CandidateNotDeployableTitle"]" Class="omni-u-mt-sm">
+        <div>@L["CandidateNotDeployableDetail"]</div>
+        @if (Verdict.BlockingTests.Count > 0)
+        {
+            <div class="omni-u-mt-xs">
+                @L["CandidateBlockingTests"]: <strong>@string.Join(", ", Verdict.BlockingTests)</strong>
+            </div>
+        }
+    </OmniAlert>
+}
+else if (Verdict is { Deployable: true })
+{
+    <OmniAlert Severity="OmniSeverity.Success" Title="@L["CandidateDeployableTitle"]" Class="omni-u-mt-sm">
+        @if (Verdict.Grade is { Length: > 0 } grade)
+        {
+            <span>@L["AssuranceGrade"]: <strong>@grade</strong></span>
+        }
+    </OmniAlert>
+}

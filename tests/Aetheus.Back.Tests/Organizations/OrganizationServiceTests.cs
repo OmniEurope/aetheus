@@ -4,10 +4,7 @@ using Aetheus.Back.Components.Organizations;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;

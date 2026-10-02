@@ -1,6 +1,14 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
+# git exports the hooking repository to hook processes (GIT_DIR, and from a linked worktree the
+# common directory too). Every git command the test suites spawn in their own temp repositories
+# then silently targets THIS repository instead: on 2026-08-28 a pre-push run replaced the real
+# index with a fixture tree; on 2026-09-17, run from a linked worktree after only four variables
+# were unset, fixtures rewrote the real branches and force-pushed a fixture commit to origin main.
+# Unset every repository-local variable git itself declares, not a hand-kept subset.
+unset $(git rev-parse --local-env-vars)
+
 # The unit suites the CI gate blocks on, run before the code can reach a shared branch.
 # Without this, a red test only surfaced hours later in nightly: commit ad1b1f15 pushed a
 # broken architecture test to develop because pre-commit only builds, and nightly 1955 was

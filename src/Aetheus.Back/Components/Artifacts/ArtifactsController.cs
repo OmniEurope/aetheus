@@ -7,6 +7,7 @@ namespace Aetheus.Back.Components.Artifacts;
 [Authorize]
 public class ArtifactsController(
     IArtifactService artifactService,
+    IChunkedArtifactUploadService chunkedUploads,
     IResourceAuthorizationService authz) : ControllerBase
 {
     [HttpGet("project/{projectId:int}")]
@@ -17,6 +18,18 @@ public class ArtifactsController(
             return Forbid();
 
         return Ok(await artifactService.GetProjectArtifactsAsync(projectId, request, ct));
+    }
+
+    /// <summary>Recette R-210: the pipeline and environment names the project artifacts grid's column
+    /// filters offer.</summary>
+    [HttpGet("project/{projectId:int}/filter-values")]
+    public async Task<ActionResult<ProjectArtifactFilterValuesDto>> GetProjectArtifactFilterValues(
+        int projectId, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await artifactService.GetProjectArtifactFilterValuesAsync(projectId, ct));
     }
 
     [HttpGet("{id:int}")]
@@ -94,6 +107,81 @@ public class ArtifactsController(
         return Ok(result);
     }
 
+    // --- Chunked upload (PLAN-006 lot 5) -------------------------------------------------------
+    // An artifact larger than MaxArtifactUploadBytes cannot be a single request. It used to be split
+    // into four separately named artifacts and reassembled with `cat` in three YAML files, which put
+    // the integrity of a deployed payload in a shell pipeline nothing verified. Here the digests are
+    // declared up front and checked on arrival, and MaxArtifactUploadBytes becomes the per-part cap.
+    //
+    // The single-request upload above is unchanged and still accepted: an agent that predates this
+    // keeps working, which matters because the agent is deployed by the pipeline it serves.
+
+    [HttpPost("upload/{runId:int}/begin")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<ActionResult<ChunkedUploadSession>> BeginChunkedUpload(
+        int runId,
+        [FromQuery] string name,
+        [FromQuery] string? stageName,
+        [FromQuery] int totalParts,
+        [FromQuery] string sha256,
+        CancellationToken ct)
+    {
+        if (await AgentIsAssignedAsync(runId, ct) is { } failure) return failure;
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 100) return BadRequest("Invalid artifact name");
+        if (stageName is { Length: > 200 }) return BadRequest("Invalid stage name");
+
+        return Ok(await chunkedUploads.BeginAsync(runId, name, stageName, totalParts, sha256, ct));
+    }
+
+    [HttpPost("upload/{runId:int}/part/{uploadId}/{index:int}")]
+    [Authorize(Policy = "AgentToken")]
+    [RequestSizeLimit(MaxArtifactUploadBytes)]
+    public async Task<ActionResult<ChunkedPartResult>> UploadChunkedPart(
+        int runId, string uploadId, int index, [FromQuery] string sha256, CancellationToken ct)
+    {
+        if (await AgentIsAssignedAsync(runId, ct) is { } failure) return failure;
+
+        var result = await chunkedUploads.AcceptPartAsync(runId, uploadId, index, sha256, Request.Body, ct);
+        // A refused part is a client error the agent retries, not a server fault: it says so, and
+        // says which part, so a resend targets that part rather than the whole artifact.
+        return result.Accepted ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("upload/{runId:int}/complete/{uploadId}")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<ActionResult<PipelineArtifactDto>> CompleteChunkedUpload(
+        int runId, string uploadId, [FromQuery] string name, [FromQuery] string? stageName, CancellationToken ct)
+    {
+        if (await AgentIsAssignedAsync(runId, ct) is { } failure) return failure;
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 100) return BadRequest("Invalid artifact name");
+        if (stageName is { Length: > 200 }) return BadRequest("Invalid stage name");
+
+        // Assembled and digest-checked before anything is published: an artifact that does not match
+        // what was announced never reaches the content-addressed store.
+        await using var assembled = await chunkedUploads.OpenCompletedAsync(runId, uploadId, ct);
+        var result = await artifactService.PublishArtifactAsync(
+            runId, name, stageName, assembled.Length, assembled, ct);
+        chunkedUploads.Discard(uploadId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpDelete("upload/{runId:int}/{uploadId}")]
+    [Authorize(Policy = "AgentToken")]
+    public async Task<IActionResult> AbandonChunkedUpload(int runId, string uploadId, CancellationToken ct)
+    {
+        if (await AgentIsAssignedAsync(runId, ct) is { } failure) return failure;
+        chunkedUploads.Discard(uploadId);
+        return NoContent();
+    }
+
+    /// <summary>The agent-token check every upload endpoint shares: enrolled, and executing THIS run.</summary>
+    private async Task<ActionResult?> AgentIsAssignedAsync(int runId, CancellationToken ct)
+    {
+        var serverIdClaim = User.FindFirst("ServerId")?.Value;
+        if (!int.TryParse(serverIdClaim, out var agentServerId)) return Forbid();
+        return await artifactService.IsAgentAssignedToRunAsync(runId, agentServerId, ct) ? null : Forbid();
+    }
+
     [HttpPost("{id:int}/promote")]
     public async Task<ActionResult<PipelineArtifactDto>> PromoteArtifact(
         int id, [FromBody] PromoteArtifactRequest request, CancellationToken ct)
@@ -115,8 +203,14 @@ public class ArtifactsController(
     {
         var artifact = await artifactService.GetArtifactAsync(artifactId, ct);
         if (artifact is null) return (null, NotFound());
-        if (artifact.ProjectId is { } projectId
-            && !await authz.HasPermissionAsync(User, ResourceType.Project, projectId, permission, ct))
+
+        // Fail-closed, and resolved transitively. The artifact's own ProjectId is null by design for
+        // a pipeline owned by an Environment or a ProjectServer, so authorizing on that column alone
+        // let any authenticated caller read, download and promote those artifacts. An owner that
+        // cannot be named is a refusal: there is no permission to check, not no permission needed.
+        var owningProjectId = await artifactService.GetOwningProjectIdAsync(artifactId, ct);
+        if (owningProjectId is not { } projectId) return (null, Forbid());
+        if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId, permission, ct))
             return (null, Forbid());
         return (artifact, null);
     }

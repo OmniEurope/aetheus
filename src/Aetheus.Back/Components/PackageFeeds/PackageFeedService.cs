@@ -17,7 +17,7 @@ public class PackageFeedService(
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetPagedFeedsAsync(
             projectId, request.Search, page, pageSize,
-            request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<PackageFeedDto>
         {
             Items = items,

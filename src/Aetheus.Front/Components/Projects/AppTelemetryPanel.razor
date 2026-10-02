@@ -1,0 +1,51 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Projects
+@* ADR-021 phases 2-4: OTLP telemetry (metrics/logs/errors/ingestion) for the project's monitored apps. *@
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else if (_apps.Count == 0)
+{
+    <EmptyState Icon="insights" Title="@L["NoMonitoredApps"]" />
+}
+else
+{
+    <OmniStack Gap="OmniSpacing.XSmall" Class="omni-u-mb-md">
+        <OmniLabel For="telemetry-application">@L["Application"]</OmniLabel>
+        <OmniDropDown Id="telemetry-application" TValue="int?" name="telemetry-application" @bind-Value="_selectedAppId" Options="@(_apps.ToOptions(item => (int?)item.Id, item => item.Name))"
+                        @bind-Value:after="OnAppChanged" Class="w-rem-20" />
+    </OmniStack>
+
+    @if (_selectedApp is not null)
+    {
+        @* Plain OmniTabs (local state, listed as an exact exception in UrlSyncedTabsAuditTests): the
+           sub-tabs are scoped to the application picked above, which the URL does not carry, so a
+           ?tab= slug alone would not name what is shown. *@
+        <OmniTabs>
+                <OmniTabsItem Title="@L["Visitors"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("groups"))" /></Icon><ChildContent>
+                    <AppWebAnalyticsView AppId="_selectedApp.Id" ProjectId="_selectedApp.ProjectId" />
+                </ChildContent></OmniTabsItem>
+                @* Recette R-355: the top pages grid has its own sub-tab. *@
+                <OmniTabsItem Key="pages" Title="@L["WebAnalyticsPagesTab"]"><Icon><OmniIcon Name="OmniIconName.Document" /></Icon><ChildContent>
+                    <AppWebAnalyticsPagesView AppId="_selectedApp.Id" />
+                </ChildContent></OmniTabsItem>
+                @* R-455 / R-444: the Performance tab replaces the Metrics tab. Its overview comes first
+                   (per-route timings from the Aetheus.Telemetry package) and the metric explorer opens
+                   on demand under it. *@
+                <OmniTabsItem Key="performance" Title="@L["Performance"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("speed"))" /></Icon><ChildContent>
+                    <AppPerformanceView AppId="_selectedApp.Id" AppName="@_selectedApp.Name" />
+                </ChildContent></OmniTabsItem>
+                <OmniTabsItem Title="@L["Logs"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("terminal"))" /></Icon><ChildContent>
+                    <AppLogsView AppId="_selectedApp.Id" ProjectId="_selectedApp.ProjectId" AppName="@_selectedApp.Name" />
+                </ChildContent></OmniTabsItem>
+                <OmniTabsItem Title="@L["Errors"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("bug_report"))" /></Icon><ChildContent>
+                    <AppErrorsView AppId="_selectedApp.Id" ProjectId="_selectedApp.ProjectId" AppName="@_selectedApp.Name" />
+                </ChildContent></OmniTabsItem>
+                <OmniTabsItem Title="@L["Ingestion"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("settings_input_antenna"))" /></Icon><ChildContent>
+                    <AppIngestionSettings AppId="_selectedApp.Id" App="_selectedApp" CanWrite="_canWrite"
+                                          OnChanged="@OnTelemetryChangedAsync" />
+                </ChildContent></OmniTabsItem>
+        </OmniTabs>
+    }
+}

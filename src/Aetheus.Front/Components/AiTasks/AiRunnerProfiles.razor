@@ -1,0 +1,58 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits PagedDataGridPageBase<AiRunnerProfileDto>
+@page "/admin/ai-profiles"
+
+<PageTitle>@L["AiRunnerProfiles"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["AiRunnerProfiles"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("smart_toy")" /></Icon>
+</OmniPageHeader>
+
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center"
+             Justify="OmniJustification.Between" Class="omni-u-mb-md" Gap="OmniSpacing.Large">
+    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["AiRunnerProfilesDescription"]</OmniText>
+    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenDialogAsync(null))"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+</OmniStack>
+
+@* Recette R-239: the grid stays mounted while it loads (IsLoading shows the state). Swapping it for a
+   loader recreated it on every load, and the new grid loaded again: the page flickered in a loop until
+   the server answered 429. A failed load reads as a message with Retry, never as a raw exception. *@
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">
+        @L["LoadFailed"]
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadPageAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniAlert>
+}
+    <AetheusDataGrid FullHeight="true" @ref="_grid" Data="@_profiles" Count="@_totalCount"
+                TItem="AiRunnerProfileDto" PageSize="25"
+                LoadData="@LoadDataAsync" IsLoading="@_loading"
+                Virtualize="@AetheusGrid.RemoteVirtualization"
+                VirtualData="@(() => new OmniDataGridResult<AiRunnerProfileDto>(_profiles, _totalCount))"
+                class="omni-u-w-100">
+        <EmptyTemplate>
+            <EmptyState Icon="smart_toy" Title="@L["NoAiRunnerProfiles"]"
+                        Description="@L["NoAiRunnerProfilesDescription"]" />
+        </EmptyTemplate>
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="AiRunnerProfileDto" Property="Name" Title="@L["Name"]" Filterable="true" />
+            <OmniDataGridColumn TItem="AiRunnerProfileDto" Property="Binary" Title="@L["Binary"]" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_binaries" FilterSearchable="true" >
+                <Template Context="profile"><code>@profile.Binary</code></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AiRunnerProfileDto" Property="TimeoutSeconds" Title="@L["Timeout"]" Width="110px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                <Template Context="profile">@profile.TimeoutSeconds s</Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AiRunnerProfileDto" Property="SendsDataExternally" Title="@L["ExternalData"]" Width="130px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@YesNoText" >
+                <Template Context="profile">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@(profile.SendsDataExternally ? OmniTone.Warning : OmniTone.Success)">@(profile.SendsDataExternally ? L["Yes"] : L["No"])</OmniBadge>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="AiRunnerProfileDto" Title="@L["Actions"]" Width="120px"
+                                  Sortable="false" Filterable="false" TextAlign="OmniDataGridTextAlign.Center">
+                <Template Context="profile">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OpenDialogAsync(profile))" title="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteAsync(profile))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>

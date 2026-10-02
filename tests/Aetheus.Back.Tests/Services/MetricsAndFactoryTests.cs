@@ -4,7 +4,6 @@ using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Extensions;
 using Aetheus.Back.Services;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;

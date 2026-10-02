@@ -13,49 +13,58 @@
 
 @inherits LayoutComponentBase
 @layout MainLayout
-@inject Aetheus.Front.Services.ProjectDetailLoader Loader
+@inject Aetheus.Front.Components.Shared.ProjectDetailLoader Loader
 @inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
 @inject Microsoft.AspNetCore.Components.NavigationManager Nav
 @inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
 
-@using Aetheus.Shared.Enums
 
 <CascadingValue Value="Loader" Name="ProjectLoader">
-    @if (Loader.Project is null && !Loader.InitialLoadCompleted)
+    @* PLAN-003 D4: the header frame is rendered immediately, loading or not, so the page content
+       never jumps when the project arrives. Only what depends on the entity waits. *@
+    @if (Loader.Project is null && Loader.InitialLoadCompleted)
     {
-        <AetheusLoader Size="AetheusLoaderSize.Large" />
-    }
-    else if (Loader.Project is null)
-    {
-        <RadzenStack AlignItems="AlignItems.Center" Gap="1rem" class="rz-p-8">
-            <RadzenIcon Icon="error" class="error-state-icon" />
-            <RadzenText TextStyle="TextStyle.H5">@L["ProjectNotFound"]</RadzenText>
-            <Aetheus.Front.Shared.BrowserBackButton Text="@L["BackToProjects"]" Title="@L["GoBack"]" />
-        </RadzenStack>
+        <OmniStack Align="OmniAlignment.Center" Gap="OmniSpacing.Medium" Class="detail-not-found">
+            <OmniIcon Name="OmniIconName.Error" Class="omni-error-state-icon" />
+            <OmniHeading Level="OmniHeadingLevel.H5">@L["ProjectNotFound"]</OmniHeading>
+            <Aetheus.Front.Components.Shared.BrowserBackButton Text="@L["BackToProjects"]" Title="@L["GoBack"]" />
+        </OmniStack>
     }
     else
     {
-        <div class="project-detail-header detail-page-header">
-            <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
-            <span class="project-detail-icon" aria-hidden="true"><RadzenIcon Icon="folder" /></span>
-            <div class="project-detail-identity">
-                <div class="project-detail-title-row">
-                    <RadzenText TextStyle="TextStyle.H4" class="rz-m-0 detail-page-title">@Loader.Project.Name</RadzenText>
-                    <RadzenBadge BadgeStyle="@(Loader.Project.Status == ProjectStatus.Active ? BadgeStyle.Success : BadgeStyle.Light)"
-                        Text="@L[Loader.Project.Status.ToString()]" />
-                </div>
-                @if (!string.IsNullOrWhiteSpace(Loader.Project.Description))
+        @* D7: the title is the section (breadcrumb leaf); the project name is an ancestor. D5: no
+           project folder icon (recette R-219: the section's own icon instead), and a status badge only when the project is NOT active. Recette R-180: no project
+           description in the header of a project section. *@
+        @* Recette R-124: on the pipelines section the pipelines list adds its New button to the
+           header actions. Recette R-180: Follow and Edit in one "..." menu on every project section,
+           the header's own menu (R-395). Recette R-431: the section's own actions come first in the
+           same menu (the quality findings export), rather than as a row of their own. *@
+        RenderFragment? projectMenu = Loader.Project is { } project
+            ? @<text>
+                @foreach (var action in _sectionMenu.Actions)
                 {
-                    <RadzenText TextStyle="TextStyle.Body2" class="project-detail-description rz-m-0">@Loader.Project.Description</RadzenText>
+                    <OmniMenuItem OnClick="@action.Run" Disabled="@action.Disabled" title="@action.Title"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(action.Icon)" /></Icon><ChildContent>@action.Text</ChildContent></OmniMenuItem>
                 }
-            </div>
-            <div class="flex-spacer"></div>
-            <RadzenButton Icon="edit" Text="@L["Edit"]" Click="@(() => Nav.NavigateTo($"/projects/{Loader.Project.Id}/edit"))"
-                class="project-detail-edit-button" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-        </div>
+                <Aetheus.Front.Components.Notifications.ProjectSubscriptionMenuItem State="@_subscription" />
+                <OmniMenuItem OnClick="@(() => Nav.NavigateTo($"/projects/{project.Id}/edit"))"><Icon><OmniIcon Name="OmniIconName.Edit" /></Icon><ChildContent>@L["Edit"]</ChildContent></OmniMenuItem>
+              </text>
+            : null;
+        <OmniPageHeader ShowBack="true" Subtitle="@Breadcrumb.Subtitle()" MenuContent="@projectMenu" Icon="@MaterialIconMap.HeaderIcon(SectionIcon)">
+            <Badges>
+                @if (Loader.Project is { Status: not ProjectStatus.Active } inactive)
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@L[inactive.Status.ToString()]</OmniBadge>
+                }
+            </Badges>
+            <Actions>
+                <Microsoft.AspNetCore.Components.Sections.SectionOutlet SectionName="@Aetheus.Front.Components.Shared.PipelinesList.HeaderActionsSection" />
+            </Actions>
+        </OmniPageHeader>
     }
 
     <div class="@(Loader.Project is null ? "blade-content blade-content-hidden" : "blade-content")">
-        @Body
+        <CascadingValue Value="_sectionMenu" IsFixed="true">
+            @Body
+        </CascadingValue>
     </div>
 </CascadingValue>

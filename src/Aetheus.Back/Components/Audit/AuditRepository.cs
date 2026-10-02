@@ -22,9 +22,9 @@ public class AuditRepository(AppDbContext db) : IAuditRepository
     }
 
     public async Task<List<AuditLog>> GetPagedAsync(int skip, int take, string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true)
+        string? sortBy = null, bool sortDescending = true, IReadOnlyList<GridFilter>? filters = null)
     {
-        return await BuildFilteredQuery(search, action, entityType, entityId, dateFrom, dateTo)
+        return await BuildFilteredQuery(search, action, entityType, entityId, dateFrom, dateTo, filters)
             .AsNoTracking()
             .OrderByProperty(sortBy, sortDescending, a => a.Timestamp)
             .Skip(skip)
@@ -33,14 +33,16 @@ public class AuditRepository(AppDbContext db) : IAuditRepository
             .ConfigureAwait(false);
     }
 
-    public async Task<int> CountAsync(string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default)
+    public async Task<int> CountAsync(string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? filters = null)
     {
-        return await BuildFilteredQuery(search, action, entityType, entityId, dateFrom, dateTo)
+        return await BuildFilteredQuery(search, action, entityType, entityId, dateFrom, dateTo, filters)
             .CountAsync(ct)
             .ConfigureAwait(false);
     }
 
-    private IQueryable<AuditLog> BuildFilteredQuery(string? search, string? action, string? entityType, int? entityId, DateTime? dateFrom, DateTime? dateTo)
+    private IQueryable<AuditLog> BuildFilteredQuery(string? search, string? action, string? entityType, int? entityId, DateTime? dateFrom, DateTime? dateTo,
+        IReadOnlyList<GridFilter>? filters)
     {
         var query = db.AuditLogs.AsNoTracking().AsQueryable();
 
@@ -57,7 +59,8 @@ public class AuditRepository(AppDbContext db) : IAuditRepository
         if (dateTo.HasValue)
             query = query.Where(a => a.Timestamp <= dateTo.Value);
 
-        return query;
+        // Recette R-238: the grid's header filters, next to the typed parameters older callers send.
+        return AuditLogQuery.Columns.ApplyFilters(query, filters);
     }
 
     public async Task<List<string>> GetDistinctActionsAsync(CancellationToken ct = default)

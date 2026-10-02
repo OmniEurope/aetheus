@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Monitoring;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Analysis;
@@ -10,6 +11,7 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
     private readonly AnalysisGovernanceRepository _governance = new(db);
     private readonly AnalysisProjectSummaryRepository _projectSummary = new(db);
     private readonly AnalysisPortfolioProjectRepository _portfolioProjects = new(db);
+    private readonly AnalysisFindingOccurrenceRepository _occurrences = new(db);
     public Task<AnalysisRunContext?> GetRunContextAsync(int runId, CancellationToken ct = default) =>
         _reports.GetRunContextAsync(runId, ct);
 
@@ -131,6 +133,13 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
         if (request.Category.HasValue) query = query.Where(finding => finding.Category == request.Category.Value);
         if (request.Severity.HasValue) query = query.Where(finding => finding.Severity == request.Severity.Value);
         if (request.Status.HasValue) query = query.Where(finding => finding.Status == request.Status.Value);
+        if (request.Categories is { Count: > 0 } categories) query = query.Where(finding => categories.Contains(finding.Category));
+        if (request.Severities is { Count: > 0 } severities) query = query.Where(finding => severities.Contains(finding.Severity));
+        if (request.Statuses is { Count: > 0 } statuses) query = query.Where(finding => statuses.Contains(finding.Status));
+        // The ID column's number filter.
+        if (request.IdFrom is { } idFrom) query = query.Where(finding => finding.Id >= idFrom);
+        if (request.IdTo is { } idTo) query = query.Where(finding => finding.Id <= idTo);
+        if (request.IdNot is { } idNot) query = query.Where(finding => finding.Id != idNot);
         if (string.IsNullOrWhiteSpace(request.Search)) return query;
         var search = request.Search.Trim().ToLowerInvariant();
         return query.Where(finding => finding.Title.ToLower().Contains(search)
@@ -222,15 +231,7 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
         var findingIds = findings.Select(finding => finding.Id).ToList();
         var latestOccurrences = findingIds.Count == 0
             ? []
-            : await db.AnalysisFindingOccurrences.AsNoTracking()
-                .Where(occurrence => findingIds.Contains(occurrence.AnalysisFindingId))
-                .Include(occurrence => occurrence.AnalysisReport)
-                    .ThenInclude(report => report.PipelineRun)
-                    .ThenInclude(run => run!.Pipeline)
-                .GroupBy(occurrence => occurrence.AnalysisFindingId)
-                .Select(group => group.OrderByDescending(occurrence => occurrence.CreatedAt).First())
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
+            : await _occurrences.GetLatestAsync(findingIds, ct).ConfigureAwait(false);
         var byFindingId = latestOccurrences.ToDictionary(occurrence => occurrence.AnalysisFindingId);
         var responsibleByFindingId = new Dictionary<int, string>();
         if (findingIds.Count > 0)
@@ -341,9 +342,9 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
         CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
-        var query = ApplyPortfolioFilters(db.AnalysisReports.AsNoTracking(), accessibleProjectIds, request);
+        var query = AnalysisPortfolioQuery.ApplyPortfolioFilters(db.AnalysisReports.AsNoTracking(), accessibleProjectIds, request);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        query = OrderPortfolio(query, request);
+        query = AnalysisPortfolioQuery.OrderPortfolio(query, request);
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize)
             .Select(report => new AnalysisPortfolioRow(
                 report.Id,
@@ -369,8 +370,14 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
                 report.Occurrences.Count(occurrence => occurrence.IsNew),
                 report.Evaluation == null ? 0 : report.Evaluation.BlockerCount,
                 report.Evaluation == null ? 0 : report.Evaluation.WarningCount,
-                report.CompletedAt))
+                report.CompletedAt,
+                report.PipelineRun == null ? null : report.PipelineRun.RepositoryUrl,
+                null))
             .ToListAsync(ct).ConfigureAwait(false);
+        var repositoryIds = await PipelineRunRepositoryLinks
+            .ResolveAsync(db, items.Select(item => item.RepositoryUrl), ct).ConfigureAwait(false);
+        items = items.Select(item => item with { RepositoryId = PipelineRunRepositoryLinks.Find(repositoryIds, item.RepositoryUrl) })
+            .ToList();
         return (items, totalCount);
     }
 
@@ -379,65 +386,26 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
         CancellationToken ct = default) =>
         _portfolioProjects.GetAsync(accessibleProjectIds, ct);
 
-    private static IQueryable<AnalysisReport> ApplyPortfolioFilters(
-        IQueryable<AnalysisReport> query,
+    /// <summary>Recette R-224: the distinct organizations, projects and scanners of the reports in scope.</summary>
+    public async Task<AnalysisPortfolioFilterValuesDto> GetPortfolioFilterValuesAsync(
         IReadOnlyCollection<int>? accessibleProjectIds,
-        AnalysisPortfolioPaginationRequest request)
+        CancellationToken ct = default)
     {
-        if (accessibleProjectIds is not null)
+        var query = AnalysisPortfolioQuery.ApplyPortfolioFilters(db.AnalysisReports.AsNoTracking(), accessibleProjectIds, new AnalysisPortfolioPaginationRequest());
+        var organizations = await query.Select(report => report.Organization.Name).Distinct().ToListAsync(ct).ConfigureAwait(false);
+        var projects = await query.Select(report => report.Project.Name).Distinct().ToListAsync(ct).ConfigureAwait(false);
+        var scanners = await query.Select(report => report.ScannerName).Distinct().ToListAsync(ct).ConfigureAwait(false);
+        static List<string> Sorted(IEnumerable<string> values) => [.. values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
+        return new AnalysisPortfolioFilterValuesDto
         {
-            var projectIds = accessibleProjectIds.ToArray();
-            query = query.Where(report => projectIds.Contains(report.ProjectId));
-        }
-        if (request.OrganizationId.HasValue)
-            query = query.Where(report => report.OrganizationId == request.OrganizationId.Value);
-        if (request.ProjectId.HasValue)
-            query = query.Where(report => report.ProjectId == request.ProjectId.Value);
-        if (request.PipelineId.HasValue)
-            query = query.Where(report => report.PipelineRun != null
-                && report.PipelineRun.PipelineId == request.PipelineId.Value);
-        if (request.Category.HasValue)
-            query = query.Where(report => report.Category == request.Category.Value);
-        if (!string.IsNullOrWhiteSpace(request.Branch))
-            query = query.Where(report => report.BranchName == request.Branch.Trim());
-        if (!string.IsNullOrWhiteSpace(request.Commit))
-        {
-            var commit = request.Commit.Trim().ToLowerInvariant();
-            query = query.Where(report => (report.CommitHash ?? string.Empty).ToLower().StartsWith(commit));
-        }
-        if (request.From.HasValue) query = query.Where(report => report.CompletedAt >= request.From.Value);
-        if (request.To.HasValue) query = query.Where(report => report.CompletedAt <= request.To.Value);
-        if (!string.IsNullOrWhiteSpace(request.Search))
-        {
-            var search = request.Search.Trim().ToLowerInvariant();
-            query = query.Where(report => report.Project.Name.ToLower().Contains(search)
-                || report.Organization.Name.ToLower().Contains(search)
-                || report.ScannerName.ToLower().Contains(search)
-                || (report.BranchName ?? string.Empty).ToLower().Contains(search)
-                 || (report.CommitHash ?? string.Empty).ToLower().Contains(search)
-                 || (report.PipelineRun != null ? report.PipelineRun.Pipeline.Name : string.Empty).ToLower().Contains(search));
-        }
-        return query;
-    }
-
-    private static IQueryable<AnalysisReport> OrderPortfolio(
-        IQueryable<AnalysisReport> query,
-        AnalysisPortfolioPaginationRequest request) =>
-        (request.SortBy, request.SortDescending) switch
-        {
-            ("OrganizationName", false) => query.OrderBy(report => report.Organization.Name),
-            ("OrganizationName", true) => query.OrderByDescending(report => report.Organization.Name),
-            ("ProjectName", false) => query.OrderBy(report => report.Project.Name),
-            ("ProjectName", true) => query.OrderByDescending(report => report.Project.Name),
-            ("PipelineName", false) => query.OrderBy(report => report.PipelineRun == null ? null : report.PipelineRun.Pipeline.Name),
-            ("PipelineName", true) => query.OrderByDescending(report => report.PipelineRun == null ? null : report.PipelineRun.Pipeline.Name),
-            ("Category", false) => query.OrderBy(report => report.Category),
-            ("Category", true) => query.OrderByDescending(report => report.Category),
-            ("Status", false) => query.OrderBy(report => report.Status),
-            ("Status", true) => query.OrderByDescending(report => report.Status),
-            ("CompletedAt", false) => query.OrderBy(report => report.CompletedAt),
-            _ => query.OrderByDescending(report => report.CompletedAt)
+            Organizations = Sorted(organizations),
+            Projects = Sorted(projects),
+            Scanners = Sorted(scanners)
         };
+    }
 
     public Task<AnalysisProjectSummaryDto> GetProjectSummaryAsync(
         int projectId,
@@ -524,6 +492,9 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
         CancellationToken ct = default)
         => await _governance.SaveFindingDecisionAsync(finding, decision, ct).ConfigureAwait(false);
 
+    public async Task SaveTrackedChangesAsync(CancellationToken ct = default)
+        => await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
     public async Task ReopenExpiredFindingDecisionsAsync(int projectId, DateTime now, CancellationToken ct = default)
         => await _governance.ReopenExpiredFindingDecisionsAsync(projectId, now, ct).ConfigureAwait(false);
 
@@ -592,5 +563,7 @@ public sealed class AnalysisRepository(AppDbContext db) : IAnalysisRepository
     public Task<AnalysisRunGateDto> GetRunGateAsync(int runId, string? scope = null, CancellationToken ct = default) =>
         _insights.GetRunGateAsync(runId, scope, ct);
     public Task<AnalysisRunGateDto> GetRunGateAsync(int runId, CancellationToken ct = default) => GetRunGateAsync(runId, null, ct);
+    public Task<AnalysisRunGateDto> GetRunResultSummaryAsync(int runId, int findingLimit, CancellationToken ct = default) =>
+        _insights.GetRunGateAsync(runId, null, ct, findingLimit);
     public Task<int?> GetLatestProjectRunIdAsync(int projectId, CancellationToken ct = default) => _insights.GetLatestProjectRunIdAsync(projectId, ct);
 }

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.Sections;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.Sections;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 /// <summary>
-/// Tests for the thin routing-layer section pages under Pages/Servers/Sections/.
+/// Tests for the thin routing-layer section pages under Components/Servers/Sections/.
 /// Each page's OnParametersSetAsync is tested with and without a loader, and the
 /// real subscribe/unsubscribe lifecycle against the loader's OnTaskCompleted event
 /// is asserted (subscriber count goes 0 → 1 on parameters, back to 0 on dispose).
@@ -79,8 +77,8 @@ public class ServerSectionRoutingTests : BunitContext
     [Fact]
     public async Task Services_OnParametersSetAsync_NullLoader_DoesNotSubscribe()
     {
-        var component = new Aetheus.Front.Pages.Servers.Sections.Services();
-        typeof(Aetheus.Front.Pages.Servers.Sections.Services).GetProperty("Id")!.SetValue(component, 3);
+        var component = new Aetheus.Front.Components.Servers.Sections.Services();
+        typeof(Aetheus.Front.Components.Servers.Sections.Services).GetProperty("Id")!.SetValue(component, 3);
         await RunParametersAsync(component);
         Assert.Null(typeof(ServerTaskAwareSectionBase).GetField("_subscribedLoader", Priv)!.GetValue(component));
     }
@@ -190,7 +188,7 @@ public class ServerSectionRoutingTests : BunitContext
     [Fact]
     public void Services_OnTaskCompleted_WithNullSection_IsNoOp()
     {
-        var component = new Aetheus.Front.Pages.Servers.Sections.Services();
+        var component = new Aetheus.Front.Components.Servers.Sections.Services();
         var method = typeof(ServerTaskAwareSectionBase).GetMethod("OnTaskCompletedAsync", Priv)!;
         var notification = new TaskCompletedNotification { ServerId = 1, TaskName = "services check" };
         method.Invoke(component, [notification]);

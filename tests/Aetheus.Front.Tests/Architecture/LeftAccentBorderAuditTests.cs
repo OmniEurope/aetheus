@@ -13,10 +13,11 @@ public class LeftAccentBorderAuditTests
     private static readonly HashSet<string> AllowedStructuralBorders =
     [
         "0",
-        "1px solid var(--rz-base-700, #2e2e2e)",
-        "2px dashed var(--rz-base-500)",
-        "1px solid var(--rz-base-600, #444)",
-        "0.125rem solid var(--rz-base-600, #333)"
+        // The run timeline's structural rule, softened to the tile separator token (recette R-055).
+        "1px solid var(--aetheus-tile-separator)",
+        "2px dashed var(--omni-color-text-muted)",
+        "1px solid var(--omni-color-text-muted, #444)",
+        "0.125rem solid var(--omni-color-text-muted, #333)"
     ];
 
     [Fact]

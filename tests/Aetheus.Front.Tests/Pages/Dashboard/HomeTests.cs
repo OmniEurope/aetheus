@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Front.Services;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -18,6 +14,7 @@ public class HomeTests : BunitContext
             HttpMethod.Get,
             "api/appmonitoring/summary",
             new AppMonitoringSummaryDto());
+        BunitTestHelper.SetOnboardingWizardResponses(_handler);
     }
 
     private readonly BunitTestHelper.TestHandler _handler;
@@ -123,7 +120,7 @@ public class HomeTests : BunitContext
         Assert.Contains("deploy", cut.Markup);
         Assert.DoesNotContain("verify", cut.Markup);
 
-        cut.Find("button[aria-label='ExpandLinkedPipelineRuns']").Click();
+        cut.Find("button.omni-data-grid__expand").Click();
         cut.WaitForState(() => cut.Markup.Contains("verify"));
 
         Assert.Contains("verify", cut.Markup);
@@ -151,13 +148,13 @@ public class HomeTests : BunitContext
         RenderWithServer(new ServerDto { Id = 1, Name = "srv", Status = ServerStatus.Online });
 
         var cut = Render<Home>();
-        var statusIcon = cut.WaitForElement("[role='img'][aria-label]");
+        var statusIcon = cut.WaitForElement("svg.omni-icon.omni-u-text-success[role='img'][aria-label]");
         var classes = statusIcon.GetAttribute("class") ?? string.Empty;
 
         // Check the row status icon, not the dashboard tiles which legitimately use both colours.
-        Assert.Equal("wifi", statusIcon.TextContent.Trim());
-        Assert.Contains("rz-color-success", classes);
-        Assert.DoesNotContain("rz-color-danger", classes);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.WifiHigh);
+        Assert.Contains("omni-u-text-success", classes);
+        Assert.DoesNotContain("omni-u-text-danger", classes);
         // Icon-only status carries an accessible name (a11y), not just a title.
         Assert.False(string.IsNullOrWhiteSpace(statusIcon.GetAttribute("aria-label")));
     }
@@ -168,12 +165,12 @@ public class HomeTests : BunitContext
         RenderWithServer(new ServerDto { Id = 1, Name = "srv", Status = ServerStatus.Offline });
 
         var cut = Render<Home>();
-        var statusIcon = cut.WaitForElement("[role='img'][aria-label]");
+        var statusIcon = cut.WaitForElement("svg.omni-icon.omni-u-text-danger[role='img'][aria-label]");
         var classes = statusIcon.GetAttribute("class") ?? string.Empty;
 
-        Assert.Equal("wifi_off", statusIcon.TextContent.Trim());
-        Assert.Contains("rz-color-danger", classes);
-        Assert.DoesNotContain("rz-color-success", classes);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.WifiSlash);
+        Assert.Contains("omni-u-text-danger", classes);
+        Assert.DoesNotContain("omni-u-text-success", classes);
     }
 
     [Fact]
@@ -190,11 +187,11 @@ public class HomeTests : BunitContext
         });
 
         var cut = Render<Home>();
-        cut.WaitForState(() => cut.Markup.Contains("rz-color-success"));
+        cut.WaitForState(() => cut.Markup.Contains("omni-u-text-success"));
 
-        Assert.Contains("build", cut.Markup);
-        Assert.Contains("rocket_launch", cut.Markup);
-        Assert.Contains("settings", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Wrench);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.RocketLaunch);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Settings);
     }
 
     [Theory]
@@ -236,11 +233,16 @@ public class HomeTests : BunitContext
         });
 
         var cut = Render<Home>();
-        cut.WaitForState(() => cut.Markup.Contains("rz-color-success"));
+        cut.WaitForState(() => cut.Markup.Contains("omni-u-text-success"));
 
         // Only the online/offline icon is shown when no capability is known. rocket_launch is unique to
-        // the deploy capability, so its absence proves the conditional icons are gated on the flags.
-        Assert.DoesNotContain("rocket_launch", cut.Markup);
+        // the deploy capability inside the servers grid, so its absence there proves the conditional
+        // icons are gated on the flags. Scoped to that grid: the first-run onboarding card renders its
+        // own rocket_launch heading icon elsewhere on the page.
+        var serversGrid = cut.FindComponent<OmniDataGrid<ServerDto>>();
+        Assert.DoesNotContain("rocket_launch", serversGrid.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("build", serversGrid.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("settings", serversGrid.Markup, StringComparison.Ordinal);
     }
 
     private void RenderWithServer(ServerDto server) =>

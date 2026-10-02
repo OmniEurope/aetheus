@@ -5,9 +5,17 @@ namespace Aetheus.Back.Components.PackageFeeds;
 
 public class PackageFeedRepository(AppDbContext db) : IPackageFeedRepository
 {
+    /// <summary>Recette R-210 / R-224: the header filters of the package feeds admin grid.</summary>
+    internal static readonly GridQueryMap<PackageFeed> Columns = new GridQueryMap<PackageFeed>()
+        .Text("Name", f => f.Name)
+        .Enum("FeedType", f => f.FeedType)
+        .Text("UpstreamUrl", f => f.UpstreamUrl)
+        .Number("PackageCount", f => f.Packages.Count);
+
     public async Task<(List<PackageFeedDto> Items, int Total)> GetPagedFeedsAsync(
         int? projectId, string? search, int page, int pageSize,
-        string? sortBy, bool sortDescending, CancellationToken ct = default)
+        string? sortBy, bool sortDescending, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.PackageFeeds
             .AsNoTracking()
@@ -23,6 +31,7 @@ public class PackageFeedRepository(AppDbContext db) : IPackageFeedRepository
                 || (f.Description != null && EF.Functions.ILike(f.Description, pattern)));
         }
 
+        query = Columns.ApplyFilters(query, columnFilters);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = ApplySort(query, sortBy, sortDescending);
 

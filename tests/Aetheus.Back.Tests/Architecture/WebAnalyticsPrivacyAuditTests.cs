@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json.Serialization;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.Tests.Architecture;
 
@@ -55,6 +54,7 @@ public sealed class WebAnalyticsPrivacyAuditTests
         Assert.Equal(
             new[]
             {
+                "AuthenticatedUserId",
                 "DurationMs",
                 "ErrorType",
                 "EventId",

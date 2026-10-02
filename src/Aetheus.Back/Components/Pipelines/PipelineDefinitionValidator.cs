@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Helpers;
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -11,8 +9,9 @@ internal static class PipelineDefinitionValidator
         "release", "substitute", "coverage", "complexity", "lint", "artifacts",
         "deploy", "apache-proxy", "apache-config", "certbot", "trigger", "restore-artifacts",
         "restore-backup", "scanner", "analysis-gate", "publish-observability", "ai", "smoke",
+        "dotnet-test", "gate-status", "mutation",
         "bluegreen-migrate", "bluegreen-up", "bluegreen-switch", "bluegreen-commit", "bluegreen-rollback",
-        "bluegreen-retire"
+        "bluegreen-retire", "bluegreen-revert", "advance-branch"
     };
 
     internal static void ValidateDefinitionBasics(
@@ -29,14 +28,48 @@ internal static class PipelineDefinitionValidator
         if (!string.IsNullOrWhiteSpace(definition.SourceBranch)
             && !PipelineBranchValidator.IsValid(definition.SourceBranch))
             errors.Add("The configured source_branch is invalid.");
+        ValidateSource(definition.Source, errors);
         if (definition.Branches.Count > 0
             && !string.Equals(definition.Trigger, "webhook", StringComparison.OrdinalIgnoreCase))
             warnings.Add("`branches:` filter only applies to the webhook trigger; it will be ignored for this trigger type.");
         if (definition.SupersedeRunning == true
             && !string.Equals(definition.Trigger, "webhook", StringComparison.OrdinalIgnoreCase))
             warnings.Add("`supersede_running:` only applies to the webhook trigger; it will be ignored for this trigger type.");
+        if (definition.PathsIgnore.Any(string.IsNullOrWhiteSpace))
+            errors.Add("Path filter entries cannot be empty.");
+        if (definition.PathsIgnore.Count > 0
+            && !string.Equals(definition.Trigger, "webhook", StringComparison.OrdinalIgnoreCase))
+            warnings.Add("`paths_ignore:` only applies to the webhook trigger; it will be ignored for this trigger type.");
         if (definition.Stages.Count == 0)
             errors.Add("Pipeline must have at least one stage.");
+    }
+
+    // Recette R-534: the source: block names a repository of the project by its slug. Whether that
+    // repository exists is a fact of the installation, checked when a run is prepared.
+    private static void ValidateSource(PipelineSourceDefinition? source, ICollection<string> errors)
+    {
+        if (source is null) return;
+        var repository = source.Repository.Trim();
+        if (repository.Length == 0)
+            errors.Add("source.repository is required: the slug of a repository attached to the project.");
+        else if (repository.Length > 200 || repository.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
+            errors.Add("source.repository must be a repository slug (letters, digits, '-', '_', '.').");
+        if (!string.IsNullOrWhiteSpace(source.Branch) && !PipelineBranchValidator.IsValid(source.Branch.Trim()))
+            errors.Add("The configured source.branch is invalid.");
+        if (!string.IsNullOrWhiteSpace(source.MatchBranch))
+        {
+            if (!source.MustMatchDefinition)
+                errors.Add("source.match_branch is only read when source.must_match_definition is true.");
+            if (!PipelineBranchValidator.IsValid(source.MatchBranch.Trim()))
+                errors.Add("The configured source.match_branch is invalid.");
+        }
+        if (string.IsNullOrWhiteSpace(source.MatchExcludeFile)) return;
+        if (!source.MustMatchDefinition)
+            errors.Add("source.match_exclude_file is only read when source.must_match_definition is true.");
+        var path = source.MatchExcludeFile.Replace('\\', '/').Trim();
+        if (!path.StartsWith(".pipeline/configs/", StringComparison.Ordinal)
+            || path.Split('/').Any(segment => segment is "." or ".."))
+            errors.Add("source.match_exclude_file must be a file under .pipeline/configs/.");
     }
 
     internal static void ValidateStages(
@@ -50,11 +83,77 @@ internal static class PipelineDefinitionValidator
                 errors.Add("Stage name cannot be empty.");
             if (OsTypeHelper.IsUnrecognized(stage.Os))
                 warnings.Add($"Stage '{stage.Name}' has an unrecognized os '{stage.Os}' - expected 'linux' or 'windows'; it will be ignored (no OS constraint).");
+            // PLAN-003 2.7: a window longer than a day is not a confirmation any more. Recette R-370: the
+            // pipeline's own approval no longer needs an environment to be recorded against.
+            if (stage.ApprovalTimeoutMinutes is { } minutes && minutes is < 1 or > 1440)
+                errors.Add($"Stage '{stage.Name}': approval_timeout_minutes must be between 1 and 1440.");
             if (stage.Jobs.Count > 0)
                 ValidateJobs(stage, errors, warnings);
             else
                 ValidateLegacyStage(stage, errors, warnings);
         }
+        foreach (var stage in YamlParsingHelper.FlattenJobs(definition))
+            foreach (var step in stage.Steps)
+                ValidateArtifactsStep(errors, step, stage, $"stage '{stage.Name}'");
+        ValidateArtifactNamesAreUnique(definition, errors);
+    }
+
+    /// <summary>
+    /// Two stages of one pipeline may not publish under the same artifact name: the second
+    /// publication replaces the first, and the consumer that restores it gets whichever ran last.
+    /// Only stages that actually publish are considered - a name declared on a stage with no
+    /// artifacts is inert.
+    /// </summary>
+    private static void ValidateArtifactNamesAreUnique(PipelineYamlDefinition definition, List<string> errors)
+    {
+        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stage in YamlParsingHelper.FlattenJobs(definition))
+        {
+            // A stage's own bundle, then each artifacts step (PLAN-003 4.5): one namespace for both.
+            var publishers = stage.Steps
+                .Where(step => IsArtifactsStep(step) && !string.IsNullOrWhiteSpace(step.ArtifactName))
+                .Select(step => (Name: step.ArtifactName!.Trim(), Owner: $"step '{step.Name}' of stage '{stage.Name}'"));
+            if (stage.Artifacts.Count > 0)
+                publishers = publishers.Prepend((PipelineRunScheduler.StageArtifactName(stage), $"stage '{stage.Name}'"));
+            foreach (var (name, owner) in publishers)
+            {
+                if (seen.TryGetValue(name, out var first))
+                    errors.Add(
+                        $"{Capitalize(first)} and {owner} both publish artifact '{name}'; "
+                        + "the second publication would replace the first. Give one of them its own artifact_name.");
+                else
+                    seen[name] = owner;
+            }
+        }
+
+        static string Capitalize(string text) => char.ToUpperInvariant(text[0]) + text[1..];
+    }
+
+    private static bool IsArtifactsStep(PipelineStepDefinition step) =>
+        string.Equals(step.Type, "artifacts", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// PLAN-003 4.5: an artifacts step names what it publishes and which files. It collects from the
+    /// agent's workspace, so it is refused in a container-isolated stage, whose files live in the
+    /// step containers rather than in that workspace.
+    /// </summary>
+    private static void ValidateArtifactsStep(List<string> errors, PipelineStepDefinition step, PipelineStageDefinition stage, string context)
+    {
+        if (!IsArtifactsStep(step))
+        {
+            if (!string.IsNullOrWhiteSpace(step.ArtifactName))
+                errors.Add($"Step '{step.Name}' in {context} artifact_name is only valid on an artifacts step.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(step.ArtifactName))
+            errors.Add($"Step '{step.Name}' in {context} requires artifact_name.");
+        if (step.TargetFiles.Count == 0)
+            errors.Add($"Step '{step.Name}' in {context} requires target_files, the files the artifact holds.");
+        if (stage.Isolation?.IsContainer == true)
+            errors.Add($"Step '{step.Name}' in {context} cannot collect artifacts in a container-isolated stage; declare them on the stage.");
+        // Every leg would publish the same name and the last one would silently replace the others.
+        if (stage.Matrix is { Count: > 0 })
+            errors.Add($"Step '{step.Name}' in {context} cannot collect artifacts in a matrix: each leg would replace the previous one.");
     }
 
     private static void ValidateJobs(
@@ -107,9 +206,11 @@ internal static class PipelineDefinitionValidator
         foreach (var step in steps)
         {
             ValidateStepBasics(errors, warnings, step, context, environment);
+            ValidateDeclaredOutputs(errors, step, context);
             ValidateApacheConfigStep(errors, step, context);
             ValidateRestoreArtifactsStep(errors, step, context);
             ValidateTriggerStep(errors, step, context);
+            ValidateAdvanceBranchStep(errors, step, context);
         }
     }
 
@@ -128,6 +229,7 @@ internal static class PipelineDefinitionValidator
             errors.Add($"Step '{step.Name}' in {context} must have a shell command or checkout enabled.");
         if (step.RetryCount < 0)
             errors.Add($"Step '{step.Name}' retry_count cannot be negative.");
+        WarnAboutInlineLogic(warnings, step, context);
         PipelineAiStepValidator.Validate(errors, step, context);
         PipelineStepAnalysisValidator.Validate(errors, step, context, environment);
         if (string.Equals(step.Type, "coverage", StringComparison.OrdinalIgnoreCase)
@@ -135,6 +237,71 @@ internal static class PipelineDefinitionValidator
             warnings.Add(
                 $"Step '{step.Name}' in {context} uses legacy min_coverage. " +
                 "Keep it temporarily for compatibility, then move the threshold to a versioned quality gate.");
+    }
+
+    /// <summary>
+    /// <c>outputs:</c> widens what the launch check accepts, so it is held to the shape a published
+    /// name has and to a bound: a typo or a lower-case name would otherwise exempt a reference nothing
+    /// will ever satisfy.
+    /// </summary>
+    private static void ValidateDeclaredOutputs(List<string> errors, PipelineStepDefinition step, string context)
+    {
+        if (step.Outputs.Count > PipelineUnresolvedVariableGuard.MaxDeclaredOutputs)
+            errors.Add($"Step '{step.Name}' in {context} declares {step.Outputs.Count} outputs, more than the {PipelineUnresolvedVariableGuard.MaxDeclaredOutputs} allowed.");
+        foreach (var output in step.Outputs)
+            if (output is null || !PipelineUnresolvedVariableGuard.DeclaredOutputName().IsMatch(output))
+                errors.Add($"Step '{step.Name}' in {context} output '{output}' must be an upper snake case variable name.");
+        var duplicate = step.Outputs.GroupBy(output => output, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            errors.Add($"Step '{step.Name}' in {context} declares output '{duplicate.Key}' twice.");
+    }
+
+    /// <summary>How long a shell step may get before it stops being a call and starts being a
+    /// program. Thirty lines, not the five the convention asks for: this is a warning shown to every
+    /// project, and it must fire on what is genuinely unmaintainable rather than on style.</summary>
+    private const int InlineShellLineBudget = 30;
+
+    /// <summary>
+    /// Warns about logic living inside a pipeline definition instead of a tested script or a typed
+    /// step. A YAML is not versioned, not tested and not reusable: the same forty-line block copied
+    /// into a second pipeline is how a fix reaches one of them and not the other.
+    ///
+    /// A warning, never an error. Refusing these would break every existing definition, including
+    /// this repository's own, which is exactly the migration this warning exists to guide.
+    /// </summary>
+    private static void WarnAboutInlineLogic(
+        List<string> warnings, PipelineStepDefinition step, string context)
+    {
+        if (string.IsNullOrWhiteSpace(step.Shell)) return;
+
+        var lineCount = step.Shell.AsSpan().Count('\n') + 1;
+        if (lineCount > InlineShellLineBudget)
+            warnings.Add(
+                $"Step '{step.Name}' in {context} inlines {lineCount} lines of shell. "
+                + "Move it to a tested script under deploy/scripts/ (or a typed step) and call it: "
+                + "a shell block in a definition is not versioned, not tested and not reusable.");
+
+        if (ContainsHeredoc(step.Shell))
+            warnings.Add(
+                $"Step '{step.Name}' in {context} embeds a heredoc. "
+                + "Whatever it writes belongs in a file of its own, tested; a heredoc hides a second "
+                + "language inside the definition, where nothing checks it.");
+    }
+
+    /// <summary>A shell heredoc opener (<c>&lt;&lt;EOF</c>, <c>&lt;&lt;-'EOF'</c>, <c>&lt;&lt;"EOF"</c>).
+    /// Matched on the operator plus a delimiter word, so a plain redirection or a comparison does not
+    /// trip it.</summary>
+    private static bool ContainsHeredoc(string shell)
+    {
+        for (var index = shell.IndexOf("<<", StringComparison.Ordinal); index >= 0;
+             index = shell.IndexOf("<<", index + 2, StringComparison.Ordinal))
+        {
+            var rest = shell.AsSpan(index + 2);
+            if (rest.Length > 0 && rest[0] == '-') rest = rest[1..];
+            if (rest.Length > 0 && (rest[0] == '\'' || rest[0] == '"')) rest = rest[1..];
+            if (rest.Length > 0 && (char.IsLetter(rest[0]) || rest[0] == '_')) return true;
+        }
+        return false;
     }
 
     private static void ValidateApacheConfigStep(
@@ -169,15 +336,44 @@ internal static class PipelineDefinitionValidator
                  && (string.IsNullOrWhiteSpace(step.Artifact)
                      || string.IsNullOrWhiteSpace(step.ArtifactSourcePipeline)))
             errors.Add($"Step '{step.Name}' in {context} requires 'release' or both 'artifact' and 'artifact_source_pipeline'.");
+        ValidateArtifactSourceSelector(errors, step, context, hasReleaseSource);
         if (!PipelinePathValidation.IsSafeRelativeDirectory(step.TargetDirectory))
             errors.Add($"Step '{step.Name}' in {context} target_directory must be a safe relative path.");
         if (step.AllowMissing
             && string.IsNullOrWhiteSpace(step.ArtifactSourcePipeline)
-            && !string.Equals(step.Release?.Trim(), "latest-published", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(step.Release?.Trim(), "previous-published", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(step.Release?.Trim(), "previous-deployed", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(step.Release?.Trim(), "current-deployed", StringComparison.OrdinalIgnoreCase))
+            && !BootstrapReleaseSelectors.Contains(step.Release?.Trim() ?? string.Empty))
             errors.Add($"Step '{step.Name}' in {context} allow_missing requires artifact_source_pipeline or release: latest-published, previous-published, previous-deployed, or current-deployed.");
+    }
+
+    /// <summary>Release selectors that may legitimately resolve to nothing, so `allow_missing` on
+    /// them is a bootstrap and not a way to hide a broken reference.</summary>
+    private static readonly HashSet<string> BootstrapReleaseSelectors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "latest-published", "previous-published", "previous-deployed", "current-deployed"
+    };
+
+    private static void ValidateArtifactSourceSelector(
+        ICollection<string> errors,
+        PipelineStepDefinition step,
+        string context,
+        bool hasReleaseSource)
+    {
+        var selector = step.ArtifactSourceSelector?.Trim();
+        if (string.IsNullOrEmpty(selector)) return;
+
+        if (!string.Equals(selector, PipelineArtifactTaskFactory.SameCommitSelector, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(selector, PipelineArtifactTaskFactory.LatestSuccessfulSelector, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add(
+                $"Step '{step.Name}' in {context} artifact_source_selector must be "
+                + $"'{PipelineArtifactTaskFactory.SameCommitSelector}' or "
+                + $"'{PipelineArtifactTaskFactory.LatestSuccessfulSelector}'.");
+        }
+        // Refused rather than ignored: a selector written beside a `release:` reads as if it widened
+        // that lookup, and silently dropping it is how a definition ends up meaning something other
+        // than what it says.
+        if (hasReleaseSource)
+            errors.Add($"Step '{step.Name}' in {context} cannot combine 'release' with 'artifact_source_selector'.");
     }
 
     private static void ValidateTriggerStep(
@@ -197,13 +393,29 @@ internal static class PipelineDefinitionValidator
             errors.Add($"Step '{step.Name}' in {context} requires a valid source_branch when inherit_source is false.");
     }
 
+    // Recette R2-001: the branch is required. A literal name is checked here; one built from a variable
+    // is checked when the step runs, where the backend refuses a name git would not take.
+    private static void ValidateAdvanceBranchStep(
+        ICollection<string> errors,
+        PipelineStepDefinition step,
+        string context)
+    {
+        if (!string.Equals(step.Type, "advance-branch", StringComparison.OrdinalIgnoreCase))
+            return;
+        var branch = step.Branch?.Trim();
+        if (string.IsNullOrEmpty(branch))
+            errors.Add($"Step '{step.Name}' in {context} requires a branch to advance.");
+        else if (!branch.Contains("$(", StringComparison.Ordinal) && !PipelineBranchValidator.IsValid(branch))
+            errors.Add($"Step '{step.Name}' in {context} names an invalid branch '{branch}'.");
+    }
+
     private static bool IsSafeApacheDestinationPattern(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > 220
             || value.Contains('/') || value.Contains('\\') || value.Contains("..", StringComparison.Ordinal))
             return false;
         var probe = System.Text.RegularExpressions.Regex.Replace(
-            value, @"\$\([A-Za-z_][A-Za-z0-9_.-]*\)", "value");
+            value, @"\$\([A-Za-z_][A-Za-z0-9_.-]*(?::-[A-Za-z0-9_.-]*)?\)", "value");
         return OperationTargetValidator.ApacheSiteFileRegex().IsMatch(probe);
     }
 }

@@ -4,7 +4,7 @@ namespace Aetheus.Back.Components.Releases;
 
 public interface IReleaseService
 {
-    Task<PaginatedResult<ReleaseDto>> GetReleasesAsync(int? projectId, PaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default);
+    Task<PaginatedResult<ReleaseDto>> GetReleasesAsync(int? projectId, PaginationRequest request, List<int>? accessibleIds = null, CancellationToken ct = default, bool deployableOnly = false);
     Task<ReleaseDto?> GetReleaseAsync(int id, CancellationToken ct = default);
     Task<ReleaseRollbackPreviewDto> GetRollbackPreviewAsync(int id, CancellationToken ct = default);
     Task<List<ReleaseDto>> GetReleasesByRunAsync(int pipelineRunId, CancellationToken ct = default);
@@ -16,6 +16,11 @@ public interface IReleaseService
     /// <summary>One page of a server's releases. Preferred over the unpaged overload for any UI.</summary>
     Task<PaginatedResult<ReleaseDto>> GetServerReleasesAsync(
         int serverId, PaginationRequest request, CancellationToken ct = default);
+
+    /// <summary>Recette R-224: the project and source pipeline names across the releases of a scope
+    /// (a server's when <paramref name="serverId"/> is set, else the accessible ones, of one project or all).</summary>
+    Task<ReleaseFilterValuesDto> GetReleaseFilterValuesAsync(
+        int? projectId, List<int>? accessibleIds, int? serverId, CancellationToken ct = default);
     Task<List<ReleaseDto>> SyncReleasesAsync(int projectId, CancellationToken ct = default);
     Task<ReleaseDto> TriggerReleaseBuildAsync(int releaseId, TriggerReleaseBuildRequest request, CancellationToken ct = default);
     Task<ReleaseRollbackDto> RollbackReleaseAsync(int releaseId, RollbackReleaseRequest request, CancellationToken ct = default);

@@ -1,12 +1,39 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.Analysis;
 
 public sealed class SarifAnalysisParserTests
 {
+    [Theory]
+    // A container scanner reports the repository under its /src mount.
+    [InlineData("file:///src/tests/security-rules/aetheus-security.py", "tests/security-rules/aetheus-security.py")]
+    [InlineData("/src/src/Aetheus.Back/Program.cs", "src/Aetheus.Back/Program.cs")]
+    // A path relative to the repository is already right, its own "src" folder included.
+    [InlineData("src/Aetheus.Back/Program.cs", "src/Aetheus.Back/Program.cs")]
+    [InlineData("deploy/scripts/run.sh", "deploy/scripts/run.sh")]
+    public void R504_TheReportedPath_IsRelativeToTheRepository(string uri, string expected)
+    {
+        var sarif = $$"""
+            {
+              "version": "2.1.0",
+              "runs": [{
+                "tool": { "driver": { "name": "Ruff" } },
+                "results": [{
+                  "ruleId": "F821",
+                  "message": { "text": "Undefined name" },
+                  "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "{{uri}}" }, "region": { "startLine": 8 } } }]
+                }]
+              }]
+            }
+            """;
+
+        var finding = Assert.Single(SarifAnalysisParser.Parse(sarif, AnalysisCategory.CodeQuality));
+
+        Assert.Equal(expected, finding.FilePath);
+    }
+
     [Fact]
     public void Parse_ExtractsRuleLocationSeverityAndCwe()
     {

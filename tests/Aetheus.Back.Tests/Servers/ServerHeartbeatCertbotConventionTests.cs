@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Components.Audit;
+using Aetheus.Back.Components.Certbot;
+using Aetheus.Back.Components.Notifications;
+using Aetheus.Back.Components.Servers;
+using Aetheus.Back.Components.Servers.Events;
+using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Hubs;
+using Aetheus.Back.Services;
+using Aetheus.Back.Services.DomainEvents;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+
+namespace Aetheus.Back.Tests.Servers;
+
+/// <summary>PLAN-007: the heartbeat persists how each lineage renews and the last renewal rehearsal, and
+/// reports a newly recorded failed rehearsal exactly once.</summary>
+public sealed class ServerHeartbeatCertbotConventionTests
+{
+    private static readonly DateTime CheckedAt = new(2026, 9, 18, 12, 8, 8, DateTimeKind.Utc);
+
+    private readonly IServerRepository _repo = Substitute.For<IServerRepository>();
+    private readonly IServerHeartbeatRepository _heartbeatRepo = Substitute.For<IServerHeartbeatRepository>();
+    private readonly IDomainEventDispatcher _events = Substitute.For<IDomainEventDispatcher>();
+    private readonly ServerService _sut;
+
+    public ServerHeartbeatCertbotConventionTests()
+    {
+        var hub = Substitute.For<IHubContext<ServerHub>>();
+        hub.Clients.Returns(Substitute.For<IHubClients>());
+        var alertHub = Substitute.For<IHubContext<AlertHub>>();
+        alertHub.Clients.Returns(Substitute.For<IHubClients>());
+        _repo.FindServerAsync(1, Arg.Any<CancellationToken>()).Returns(new Server { Id = 1, Name = "web", Hostname = "web" });
+        _sut = new ServerService(_repo, _heartbeatRepo, hub, alertHub, Substitute.For<IAuditService>(),
+            Substitute.For<Aetheus.Back.Components.Tasks.ITaskService>(),
+            Options.Create(new BackgroundServicesOptions()), TimeProvider.System, Substitute.For<IDbTransactionScope>(),
+            domainEvents: _events);
+    }
+
+    [Fact]
+    public async Task Certificates_KeepTheirRenewalSettingsAndConventionVerdict()
+    {
+        await _sut.ProcessHeartbeatAsync(1, Heartbeat(succeeded: true), ct: TestContext.Current.CancellationToken);
+
+        await _heartbeatRepo.Received(1).ReplaceCertbotCertificatesAsync(1, Arg.Is<List<CertbotCertificate>>(certificates =>
+            certificates.Count == 1
+            && certificates[0].Authenticator == "apache"
+            && certificates[0].WebrootPath == string.Empty
+            && certificates[0].RenewalConvention == CertbotRenewalConvention.NotWebroot), Arg.Any<CancellationToken>());
+        await _heartbeatRepo.Received(1).ReplaceCertbotStateAsync(1, Arg.Is<CertbotState?>(state =>
+            state != null && state.RenewalCheckedAt == CheckedAt && state.RenewalCheckSucceeded == true),
+            Arg.Any<CancellationToken>());
+        _events.DidNotReceive().Publish(Arg.Any<CertbotRenewalCheckFailedEvent>());
+    }
+
+    [Fact]
+    public async Task NewlyRecordedFailedRenewalCheck_IsPublished()
+    {
+        _heartbeatRepo.GetCertbotRenewalCheckedAtAsync(1, Arg.Any<CancellationToken>())
+            .Returns(CheckedAt.AddDays(-7));
+
+        await _sut.ProcessHeartbeatAsync(1, Heartbeat(succeeded: false), ct: TestContext.Current.CancellationToken);
+
+        _events.Received(1).Publish(Arg.Is<CertbotRenewalCheckFailedEvent>(e => e.ServerId == 1 && e.CheckedAt == CheckedAt));
+    }
+
+    [Fact]
+    public async Task AlreadyKnownFailedRenewalCheck_IsNotPublishedAgain()
+    {
+        _heartbeatRepo.GetCertbotRenewalCheckedAtAsync(1, Arg.Any<CancellationToken>()).Returns(CheckedAt);
+
+        await _sut.ProcessHeartbeatAsync(1, Heartbeat(succeeded: false), ct: TestContext.Current.CancellationToken);
+
+        _events.DidNotReceive().Publish(Arg.Any<CertbotRenewalCheckFailedEvent>());
+    }
+
+    [Fact]
+    public async Task CertbotNotInstalled_ClearsTheState()
+    {
+        await _sut.ProcessHeartbeatAsync(1, new ServerHeartbeatDto(), ct: TestContext.Current.CancellationToken);
+
+        await _heartbeatRepo.Received(1).ReplaceCertbotStateAsync(1, null, Arg.Any<CancellationToken>());
+        _events.DidNotReceive().Publish(Arg.Any<CertbotRenewalCheckFailedEvent>());
+    }
+
+    [Fact]
+    public async Task FailedRenewalCheckEvent_ReachesTheNotificationRules()
+    {
+        var notifications = Substitute.For<INotificationService>();
+        var handler = new CertbotRenewalCheckNotificationHandler(notifications);
+
+        await handler.HandleAsync(new CertbotRenewalCheckFailedEvent(1, CheckedAt), TestContext.Current.CancellationToken);
+
+        await notifications.Received(1).SendEventAsync("certbot.renewal-check.failed", Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    private static ServerHeartbeatDto Heartbeat(bool succeeded) => new()
+    {
+        Certbot = new CertbotDataDto
+        {
+            IsInstalled = true,
+            RenewalCheckedAt = CheckedAt,
+            RenewalCheckSucceeded = succeeded,
+            Certificates =
+            [
+                new CertbotCertificateDto
+                {
+                    Name = "random.example.com",
+                    Domains = ["random.example.com"],
+                    ExpiryDate = CheckedAt.AddDays(60),
+                    Authenticator = "apache",
+                    RenewalConvention = CertbotRenewalConvention.NotWebroot
+                }
+            ]
+        }
+    };
+}

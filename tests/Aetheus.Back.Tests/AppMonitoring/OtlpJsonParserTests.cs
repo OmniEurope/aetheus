@@ -36,6 +36,25 @@ public class OtlpJsonParserTests
     }
 
     [Fact]
+    public void R491_ParseLogs_KeepsTheExceptionTypeAndTheLoggerOfARecord()
+    {
+        const string json = """
+        {"resourceLogs":[{"scopeLogs":[{"scope":{"name":"Aetheus.Back.Services.AppTelemetryRetentionService"},"logRecords":[
+          {"timeUnixNano":"1700000000000000000","severityNumber":17,"body":{"stringValue":"sweep failed"},
+           "attributes":[{"key":"exception.type","value":{"stringValue":"Npgsql.PostgresException"}}]},
+          {"timeUnixNano":"1700000000000000000","severityNumber":9,"body":{"stringValue":"sweep done"}}
+        ]}]}]}
+        """;
+        using var doc = JsonDocument.Parse(json);
+
+        var logs = OtlpJsonParser.ParseLogs(doc);
+
+        Assert.Equal("Npgsql.PostgresException", logs[0].ExceptionType);
+        Assert.Equal("Aetheus.Back.Services.AppTelemetryRetentionService", logs[0].Source);
+        Assert.Null(logs[1].ExceptionType);
+    }
+
+    [Fact]
     public void ParseLogs_ExtractsSeverityAndBody()
     {
         const string json = """

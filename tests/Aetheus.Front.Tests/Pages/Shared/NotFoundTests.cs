@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -14,6 +13,16 @@ public class NotFoundTests : BunitContext
 
         Assert.Contains("NotFound", cut.Markup);
         Assert.Contains("NotFoundMessage", cut.Markup);
+    }
+
+    [Fact]
+    public void TheTitleIsTheHeaderOnly_NotRepeatedInTheBody()
+    {
+        // PLAN-003 lot 1: a page has one title, the OmniPageHeader's; a second heading under it repeats it.
+        BunitTestHelper.RegisterServices(this);
+        var cut = Render<NotFound>();
+
+        Assert.Empty(cut.FindAll(".not-found-container .rz-text-h4"));
     }
 }
 

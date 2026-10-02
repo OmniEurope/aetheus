@@ -2,8 +2,6 @@
 using System.Security.Claims;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 
@@ -50,8 +48,11 @@ public class PipelinesControllerTests
                 OrganizationId = 4,
                 TemplateId = 7
             });
+        // The real owner authorization, not a substitute: these tests are about which owners a caller
+        // may attach a pipeline to, and stubbing that away would assert on the stub instead.
         _sut = new PipelinesController(
-            _service, _runService, _approvalService, _artifactService, _webhookService, _authz);
+            _service, _runService, _approvalService, _artifactService, _webhookService,
+            new PipelineOwnerAuthorization(_service, _authz), _authz);
         _fleetSut = new PipelineFleetController(_fleetService, _authz);
         var controllerContext = new ControllerContext
         {
@@ -252,6 +253,94 @@ public class PipelinesControllerTests
 
         var created = Assert.IsType<CreatedAtActionResult>(response.Result);
         Assert.Equal(5, ((PipelineDto)created.Value!).Id);
+    }
+
+    [Fact]
+    public async Task CreatePipeline_EnvironmentTheCallerCannotWrite_IsRefused()
+    {
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 9,
+            Permission.Write, Arg.Any<CancellationToken>()).Returns(false);
+
+        var response = await _sut.CreatePipeline(
+            new CreatePipelineRequest { Name = "New", YamlDefinition = "yaml", EnvironmentId = 9 },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreatePipeline_ProjectServerWhoseProjectTheCallerCannotWrite_IsRefused()
+    {
+        _service.GetProjectServerProjectIdAsync(7, Arg.Any<CancellationToken>()).Returns(42);
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Project, 42,
+            Permission.Write, Arg.Any<CancellationToken>()).Returns(false);
+
+        var response = await _sut.CreatePipeline(
+            new CreatePipelineRequest { Name = "New", YamlDefinition = "yaml", ProjectServerId = 7 },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreatePipeline_ProjectServerThatCannotBeResolved_IsRefused()
+    {
+        // Fail closed: an owner nobody can name is not an owner nobody needs permission for.
+        _service.GetProjectServerProjectIdAsync(7, Arg.Any<CancellationToken>()).Returns((int?)null);
+
+        var response = await _sut.CreatePipeline(
+            new CreatePipelineRequest { Name = "New", YamlDefinition = "yaml", ProjectServerId = 7 },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdatePipeline_MovingIntoAnEnvironmentTheCallerCannotWrite_IsRefused()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken).Returns(new PipelineDto { Id = 1 });
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 9,
+            Permission.Write, Arg.Any<CancellationToken>()).Returns(false);
+
+        var response = await _sut.UpdatePipeline(
+            1, new UpdatePipelineRequest { Name = "Updated", EnvironmentId = 9 },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().UpdatePipelineAsync(
+            Arg.Any<int>(), Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdatePipeline_MovingOutOfAnEnvironmentTheCallerCannotWrite_IsRefused()
+    {
+        _service.GetPipelineAsync(1, TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 1, EnvironmentId = 9 });
+        _authz.HasPermissionAsync(Arg.Any<ClaimsPrincipal>(), ResourceType.Environment, 9,
+            Permission.Write, Arg.Any<CancellationToken>()).Returns(false);
+
+        var response = await _sut.UpdatePipeline(
+            1, new UpdatePipelineRequest { Name = "Updated" }, TestContext.Current.CancellationToken);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        await _service.DidNotReceive().UpdatePipelineAsync(
+            Arg.Any<int>(), Arg.Any<UpdatePipelineRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreatePipeline_EnvironmentTheCallerCanWrite_IsAllowed()
+    {
+        _service.CreatePipelineAsync(Arg.Any<CreatePipelineRequest>(), TestContext.Current.CancellationToken)
+            .Returns(new PipelineDto { Id = 5, Name = "New" });
+
+        var response = await _sut.CreatePipeline(
+            new CreatePipelineRequest { Name = "New", YamlDefinition = "yaml", EnvironmentId = 9 },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<CreatedAtActionResult>(response.Result);
     }
 
     [Fact]

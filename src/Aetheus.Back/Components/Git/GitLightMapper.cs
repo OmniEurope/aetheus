@@ -25,8 +25,18 @@ internal static partial class GitLightMapper
         IsEmpty = r.IsEmpty,
         CloneUrl = cloneUrl,
         CreatedAt = r.CreatedAt,
-        LastPushAt = r.LastPushAt
+        LastPushAt = r.LastPushAt,
+        IsAdditionalSource = IsAdditionalSource(r)
     };
+
+    /// <summary>
+    /// The mirror of an external repository that is not the project's own source (recette R-534): it
+    /// sits beside the project's repository for the pipelines that name it. A repository whose
+    /// connection was not loaded reads as the project's own, which is the behaviour before mirrors.
+    /// </summary>
+    public static bool IsAdditionalSource(GitInternalRepo repo) =>
+        repo.GitConnection is { ProviderType: not GitProviderType.AetheusGit } connection
+        && repo.Project?.GitConnectionId != connection.Id;
 
     /// <summary>Translates a pull-request sort key from the DTO's vocabulary to the entity's.
     /// <para>The grid sends the DTO property name, and the DTO's <c>CreatedAt</c> is the entity's

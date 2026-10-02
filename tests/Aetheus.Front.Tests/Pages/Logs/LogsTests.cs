@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages;
 using Bunit;
-using LogsPage = Aetheus.Front.Pages.Logs.Logs;
+using LogsPage = Aetheus.Front.Components.Logs.Logs;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -136,9 +135,9 @@ public class LogsTests : BunitContext
     public void ResetWatchState_ClearsPriorLogsAndMaskedMode()
     {
         var cut = Render<LogsPage>();
-        var logs = (List<Aetheus.Shared.DTOs.TaskLogDto>)typeof(LogsPage)
+        var logs = (List<Aetheus.Shared.Components.Logs.TaskLogDto>)typeof(LogsPage)
             .GetField("_logs", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
-        logs.Add(new Aetheus.Shared.DTOs.TaskLogDto { TaskId = 1, Message = "old" });
+        logs.Add(new Aetheus.Shared.Components.Logs.TaskLogDto { TaskId = 1, Message = "old" });
         typeof(LogsPage).GetField("_showUnmasked", BindingFlags.NonPublic | BindingFlags.Instance)!
             .SetValue(cut.Instance, true);
 
@@ -160,10 +159,10 @@ public class LogsTests : BunitContext
             .Invoke(cut.Instance, [2]);
         var append = typeof(LogsPage).GetMethod("AppendLog", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-        append.Invoke(cut.Instance, [new Aetheus.Shared.DTOs.TaskLogDto { TaskId = 1, Message = "stale" }]);
-        append.Invoke(cut.Instance, [new Aetheus.Shared.DTOs.TaskLogDto { TaskId = 2, Message = "current" }]);
+        append.Invoke(cut.Instance, [new Aetheus.Shared.Components.Logs.TaskLogDto { TaskId = 1, Message = "stale" }]);
+        append.Invoke(cut.Instance, [new Aetheus.Shared.Components.Logs.TaskLogDto { TaskId = 2, Message = "current" }]);
 
-        var logs = (List<Aetheus.Shared.DTOs.TaskLogDto>)typeof(LogsPage)
+        var logs = (List<Aetheus.Shared.Components.Logs.TaskLogDto>)typeof(LogsPage)
             .GetField("_logs", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance)!;
         Assert.Equal("current", Assert.Single(logs).Message);
     }

@@ -5,15 +5,16 @@ namespace Aetheus.Front.Tests.Architecture;
 
 /// <summary>
 /// Every table in the product offers the same four affordances: sort, resize, advanced filtering and
-/// infinite scroll. A user who learns one table has learnt them all, and none of them silently caps
-/// what it will show.
+/// scrolling through every row. A user who learns one table has learnt them all, and none of them
+/// silently caps what it will show.
 ///
 /// <para>The shared <c>AetheusDataGrid</c> carries all four by default, so a grid built on it needs no
-/// declaration. A raw <c>RadzenDataGrid</c> has to opt in explicitly, and this guard is what makes
-/// forgetting one impossible: it reads the markup rather than trusting convention.</para>
+/// declaration. A raw <c>OmniDataGrid</c> takes them from the default OmniEurope preset registered by
+/// <c>AetheusGridPresets</c> (PLAN-012); this guard reads the markup so that no grid turns one off or
+/// leaves the preset.</para>
 ///
-/// <para>Opting out is allowed but never silent: a grid states <c>Virtualize="false"</c> (wrapper) or
-/// <c>AllowVirtualization="false"</c> (raw) plus a reason, and is listed here.</para>
+/// <para>Recette R-327: no table shows a pager; every one scrolls. The last exception, the five-row
+/// pager of <c>ReleasePickerGrid</c> (decision R-10), was lifted by the same recette: none is left.</para>
 /// </summary>
 public sealed class GridCapabilityAuditTests
 {
@@ -23,26 +24,19 @@ public sealed class GridCapabilityAuditTests
     /// by its own dedicated test below rather than by the sweep.</summary>
     private const string WrapperFile = "AetheusDataGrid.razor";
 
-    /// <summary>Grids that legitimately show neither a pager nor infinite scroll, because they are
-    /// sized to their own content: a dialog listing four parameters gains nothing from a pager and the
-    /// control would be pure furniture. Every other table pages. Each entry carries the reason
-    /// it does. Anything not on this list must virtualise.</summary>
-    private static readonly Dictionary<string, string> PagerExceptions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["PipelineRunParametersDialog.razor"] = "Dialog sized to its content: a handful of parameters, no scroll region.",
-        ["PipelineRunVariablesDialog.razor"] = "Dialog sized to its content.",
-        ["DryRunResultDialog.razor"] = "Dialog sized to its content.",
-        ["DockerProjectDialog.razor"] = "Dialog sized to its content.",
-        ["VersionHistoryDialog.razor"] = "Dialog sized to its content.",
-        ["SecretVersionHistoryDialog.razor"] = "Dialog sized to its content.",
-        ["TemplateVersionHistoryDialog.razor"] = "Dialog sized to its content.",
-        ["PackageFeedPackagesDialog.razor"] = "Dialog sized to its content.",
-        ["PackageRegistryPackageDialog.razor"] = "Dialog sized to its content."
-    };
+    /// <summary>Recette R-327: the grids that still page, each with its reason. Empty: every table
+    /// scrolls. An entry needs the user's approval, like any guard exception.</summary>
+    private static readonly Dictionary<string, string> PagedGrids = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Finds the opening element only; RadzenDataGridColumn is a different element.</summary>
+    /// <summary>Finds the opening wrapper element (AetheusDataGridColumn does not exist, but the guard
+    /// stays exact).</summary>
+    private static readonly Regex WrapperOpen = new(
+        @"<AetheusDataGrid(?![A-Za-z])",
+        RegexOptions.Compiled);
+
+    /// <summary>Finds the opening element only; OmniDataGridColumn is a different element.</summary>
     private static readonly Regex GridOpen = new(
-        @"<RadzenDataGrid(?!Column)\b",
+        @"<OmniDataGrid(?!Column)\b",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -51,10 +45,12 @@ public sealed class GridCapabilityAuditTests
     /// (<c>Click="@(() =&gt; Foo())"</c>) and then reports the attributes that follow as missing. That
     /// exact mistake produced a wave of false failures here, so the scan is character-based.</para>
     /// </summary>
-    private static IReadOnlyList<string> TagsIn(string text)
+    private static IReadOnlyList<string> TagsIn(string text) => TagsIn(text, GridOpen);
+
+    private static IReadOnlyList<string> TagsIn(string text, Regex opening)
     {
         var tags = new List<string>();
-        foreach (Match open in GridOpen.Matches(text))
+        foreach (Match open in opening.Matches(text))
         {
             var index = open.Index + open.Length;
             char? quote = null;
@@ -70,7 +66,7 @@ public sealed class GridCapabilityAuditTests
                 if (current == '>') break;
             }
             if (index >= text.Length)
-                throw new InvalidOperationException("Unterminated RadzenDataGrid tag.");
+                throw new InvalidOperationException("Unterminated grid tag.");
             tags.Add(text[open.Index..(index + 1)]);
         }
         return tags;
@@ -89,7 +85,7 @@ public sealed class GridCapabilityAuditTests
 
         if (results.Count == 0)
             throw new InvalidOperationException(
-                "No raw RadzenDataGrid found. A guard that scans nothing passes vacuously.");
+                "No raw OmniDataGrid found. A guard that scans nothing passes vacuously.");
         return results;
     }
 
@@ -105,63 +101,144 @@ public sealed class GridCapabilityAuditTests
     public void EveryRawGrid_AllowsSorting()
     {
         var offenders = RawGrids()
-            .Where(grid => !DeclaresAny(grid.Tag, "AllowSorting"))
+            .Where(grid => Declares(grid.Tag, "AllowSorting", "false"))
             .Select(grid => grid.File)
             .Distinct()
             .ToList();
 
         Assert.True(offenders.Count == 0,
-            "Every table must be sortable. Missing AllowSorting in:\n" + string.Join("\n", offenders));
+            "Every table must be sortable. AllowSorting is disabled in:\n" + string.Join("\n", offenders));
     }
 
     [Fact]
     public void EveryRawGrid_AllowsColumnResize()
     {
         var offenders = RawGrids()
-            .Where(grid => !DeclaresAny(grid.Tag, "AllowColumnResize"))
+            .Where(grid => Declares(grid.Tag, "AllowColumnResize", "false"))
             .Select(grid => grid.File)
             .Distinct()
             .ToList();
 
         Assert.True(offenders.Count == 0,
-            "Every table must let the user widen a truncated column. Missing AllowColumnResize in:\n"
+            "Every table must let the user widen a truncated column. AllowColumnResize is disabled in:\n"
             + string.Join("\n", offenders));
     }
 
     [Fact]
-    public void EveryRawGrid_UsesAdvancedFiltering()
+    public void EveryRawGrid_UsesSimpleFiltering()
     {
         var offenders = RawGrids()
-            .Where(grid => !DeclaresAny(grid.Tag, "AllowFiltering")
-                           || !Declares(grid.Tag, "FilterMode", "FilterMode.Advanced"))
+            .Where(grid => Declares(grid.Tag, "AllowFiltering", "false")
+                           || DeclaresAny(grid.Tag, "FilterMode")
+                              && !Declares(grid.Tag, "FilterMode", "OmniDataGridFilterMode.Simple"))
             .Select(grid => grid.File)
             .Distinct()
             .ToList();
 
         Assert.True(offenders.Count == 0,
-            "Every table filters through the advanced header menu, the affordance used across the "
-            + "product. Missing AllowFiltering or FilterMode.Advanced in:\n" + string.Join("\n", offenders));
+            "Every table filters through the simple header menu, the affordance used across the "
+            + "product. Filtering is disabled or uses another mode in:\n" + string.Join("\n", offenders));
     }
 
     /// <summary>
-    /// Every table pages. Virtualization was the default until the cost showed up in use: Radzen can
-    /// only virtualise inside a bounded height, so the grid grew its own scroll body while the page
-    /// kept its own, and one table carried two scrollbars.
+    /// PLAN-012: the shared settings live in the default grid preset, so a raw grid that named another
+    /// preset, or "none", would lose sorting and filtering without writing a single "false".
     /// </summary>
     [Fact]
-    public void EveryRawGrid_Pages()
+    public void EveryRawGrid_KeepsTheDefaultPreset()
     {
         var offenders = RawGrids()
-            .Where(grid => !PagerExceptions.ContainsKey(Path.GetFileName(grid.File)))
-            .Where(grid => !DeclaresAny(grid.Tag, "AllowPaging"))
+            .Where(grid => DeclaresAny(grid.Tag, "PresetName"))
             .Select(grid => grid.File)
             .Distinct()
             .ToList();
 
         Assert.True(offenders.Count == 0,
-            "Every table pages rather than scrolling infinitely; a virtualised grid needs a bounded "
-            + "height and then shows a second scrollbar. Declare AllowPaging in:\n"
+            "Every raw table takes the default grid preset (AetheusGridPresets). PresetName is set in:\n"
             + string.Join("\n", offenders));
+    }
+
+    /// <summary>
+    /// Recette R-327: every table scrolls instead of showing a pager. A raw grid declares its
+    /// <c>ScrollMode</c> (OE merged AllowPaging and AllowVirtualization into it) without ever choosing
+    /// <c>Paged</c>, and bounds its height (FillAvailableHeight when it ends the page, MaxHeight when it
+    /// sits among other content or in a dialog), so it renders only its window. Deciding the mode from
+    /// <c>AetheusGrid.Virtualization</c> is refused: that switch is off in production, so such a grid
+    /// rendered every row in one tall block.
+    /// </summary>
+    [Fact]
+    public void EveryRawGrid_ScrollsInsteadOfPaging()
+    {
+        var offenders = RawGrids()
+            .Where(grid => !PagedGrids.ContainsKey(Path.GetFileName(grid.File)))
+            .Where(grid => ScrollModeOf(grid.Tag) is not { } mode
+                           || mode.Contains("OmniDataGridScrollMode.Paged", StringComparison.Ordinal)
+                           || mode.Contains("AetheusGrid.Virtualization", StringComparison.Ordinal)
+                           || !(DeclaresAny(grid.Tag, "FillAvailableHeight") || DeclaresAny(grid.Tag, "MaxHeight")))
+            .Select(grid => grid.File)
+            .Distinct()
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "Every table scrolls instead of paging (recette R-327): ScrollMode declared and never Paged, "
+            + "and a bounded height (FillAvailableHeight or MaxHeight). Missing in:\n"
+            + string.Join("\n", offenders));
+    }
+
+    /// <summary>The value bound to <c>ScrollMode</c>, a literal or an expression; null when undeclared.</summary>
+    private static string? ScrollModeOf(string tag)
+    {
+        var match = Regex.Match(tag, @"(?<=[\s<])ScrollMode\s*=\s*""(?<value>@\(.*?\)|[^""]*)""", RegexOptions.Singleline);
+        return match.Success ? match.Groups["value"].Value : null;
+    }
+
+    /// <summary>
+    /// Recette R-327, the wrapper side: <c>AetheusDataGrid</c> pages unless it virtualizes, and its
+    /// default follows <c>AetheusGrid.Virtualization</c>, off in production. So every caller declares how
+    /// it scrolls: remote virtualization (<c>VirtualData</c> with <c>AetheusGrid.RemoteVirtualization</c>)
+    /// for a server-paged list, or <c>Virtualize</c> for a fully loaded collection (always, or once it
+    /// outgrows one page, which then never shows a pager). A <c>LoadData</c> grid without
+    /// <c>VirtualData</c> pages whatever it declares, so it is refused too.
+    /// </summary>
+    [Fact]
+    public void EveryWrapperGrid_ScrollsInsteadOfPaging()
+    {
+        var offenders = new List<string>();
+        var scanned = 0;
+        foreach (var file in RepositoryScan.Enumerate(FrontRoot, "*.razor"))
+        {
+            if (PagedGrids.ContainsKey(Path.GetFileName(file))) continue;
+            foreach (var tag in TagsIn(File.ReadAllText(file), WrapperOpen))
+            {
+                scanned++;
+                var remote = DeclaresAny(tag, "LoadData");
+                var scrolls = remote
+                    ? DeclaresAny(tag, "VirtualData") && Declares(tag, "Virtualize", "@AetheusGrid.RemoteVirtualization")
+                    : DeclaresAny(tag, "Virtualize")
+                      && !Declares(tag, "Virtualize", "false")
+                      && !Declares(tag, "Virtualize", "@AetheusGrid.Virtualization");
+                if (!scrolls) offenders.Add(Path.GetRelativePath(FrontRoot, file));
+            }
+        }
+
+        Assert.True(scanned > 0, "No AetheusDataGrid found. A guard that scans nothing passes vacuously.");
+        Assert.True(offenders.Count == 0,
+            "Every table scrolls instead of paging (recette R-327). A remote list declares VirtualData and "
+            + "Virtualize=\"@AetheusGrid.RemoteVirtualization\"; a local one declares Virtualize. Paged in:\n"
+            + string.Join("\n", offenders.Distinct()));
+    }
+
+    /// <summary>Recette R-327: the release picker, the last paged table, scrolls through the virtual
+    /// window like the other lists; its five-row pager (decision R-10) must not come back.</summary>
+    [Fact]
+    public void TheReleasePicker_Scrolls()
+    {
+        var picker = Path.Combine(FrontRoot, "Components", "Pipelines", "ReleasePickerGrid.razor");
+        var tag = Assert.Single(TagsIn(File.ReadAllText(picker), WrapperOpen));
+
+        Assert.True(Declares(tag, "Virtualize", "@AetheusGrid.RemoteVirtualization"), tag);
+        Assert.True(DeclaresAny(tag, "VirtualData"), tag);
+        Assert.Empty(PagedGrids);
     }
 
     /// <summary>
@@ -211,7 +288,7 @@ public sealed class GridCapabilityAuditTests
     public void TheSharedWrapper_CarriesAllFourCapabilitiesByDefault()
     {
         var wrapper = File.ReadAllText(
-            Path.Combine(FrontRoot, "Shared", "AetheusDataGrid.razor.cs"));
+            Path.Combine(FrontRoot, "Components", "Shared", "AetheusDataGrid.razor.cs"));
 
         Assert.Contains("public bool AllowSorting { get; set; } = true;", wrapper, StringComparison.Ordinal);
         Assert.Contains("public bool AllowFiltering { get; set; } = true;", wrapper, StringComparison.Ordinal);
@@ -221,22 +298,28 @@ public sealed class GridCapabilityAuditTests
         // bounded height, and with it the second scrollbar on every grid at once.
         Assert.Contains(
             "public static bool Virtualization { get; set; }",
-            File.ReadAllText(Path.Combine(FrontRoot, "Shared", "AetheusGrid.cs")),
+            File.ReadAllText(Path.Combine(FrontRoot, "Components", "Shared", "AetheusGrid.cs")),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "public static bool Virtualization { get; set; } = true;",
-            File.ReadAllText(Path.Combine(FrontRoot, "Shared", "AetheusGrid.cs")),
+            File.ReadAllText(Path.Combine(FrontRoot, "Components", "Shared", "AetheusGrid.cs")),
             StringComparison.Ordinal);
-        Assert.Contains("FilterMode FilterMode { get; set; } = FilterMode.Advanced;", wrapper, StringComparison.Ordinal);
+        Assert.Contains("OmniDataGridFilterMode FilterMode { get; set; } = OmniDataGridFilterMode.Simple;", wrapper, StringComparison.Ordinal);
 
-        var markup = File.ReadAllText(Path.Combine(FrontRoot, "Shared", "AetheusDataGrid.razor"));
-        // Paging and virtualization are mutually exclusive in Radzen: binding one to the negation of
-        // the other is what keeps the wrapper from silently rendering a pager over a virtualised body.
-        Assert.Contains("AllowVirtualization=\"@Virtualize\"", markup, StringComparison.Ordinal);
-        Assert.Contains("AllowPaging=\"@(!Virtualize)\"", markup, StringComparison.Ordinal);
+        var markup = File.ReadAllText(Path.Combine(FrontRoot, "Components", "Shared", "AetheusDataGrid.razor"));
+        // Paging and virtualization are mutually exclusive: one ScrollMode chosen from the same flag is
+        // what keeps the wrapper from silently rendering a pager over a virtualised body.
+        Assert.Contains(
+            "ScrollMode=\"@(EffectiveVirtualize ? OmniDataGridScrollMode.Virtual : OmniDataGridScrollMode.Paged)\"",
+            markup, StringComparison.Ordinal);
+        Assert.Contains("Load=\"@EffectiveLoad\"", markup, StringComparison.Ordinal);
+        Assert.Contains("VirtualBlockSize=\"@PageSize\"", markup, StringComparison.Ordinal);
+
+        Assert.Contains("public int PageSize { get; set; } = 20;", wrapper, StringComparison.Ordinal);
+        Assert.Contains("public Func<OmniDataGridResult<TItem>>? VirtualData { get; set; }", wrapper, StringComparison.Ordinal);
     }
 
-    /// <summary>Radzen only virtualises inside a bounded, scrollable body. Without the height rule the
+    /// <summary>The grid only virtualises inside a bounded, scrollable body. Without the height rule the
     /// virtualised grids would render as an unbounded, non-scrolling list.</summary>
     [Fact]
     public void TheVirtualizedGridHeight_IsDefinedInCss()
@@ -244,6 +327,6 @@ public sealed class GridCapabilityAuditTests
         var css = File.ReadAllText(Path.Combine(FrontRoot, "wwwroot", "css", "app.css"));
 
         Assert.Contains(".aetheus-grid-virtualized", css, StringComparison.Ordinal);
-        Assert.Contains(".aetheus-grid-virtualized .rz-data-grid-data", css, StringComparison.Ordinal);
+        Assert.Contains(".aetheus-grid-virtualized .omni-data-grid__viewport", css, StringComparison.Ordinal);
     }
 }

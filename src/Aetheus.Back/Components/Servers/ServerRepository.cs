@@ -25,9 +25,10 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
     public async Task<(List<ServerDto> Items, int TotalCount)> GetServersPagedProjectedAsync(
         string? search, string? sortBy, bool sortDescending,
         ServerType? type, ServerStatus? status,
-        int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default)
+        int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
-        var query = BuildFilteredSortedServerQuery(search, sortBy, sortDescending, type, status, accessibleIds);
+        var query = BuildFilteredSortedServerQuery(search, sortBy, sortDescending, type, status, accessibleIds, columnFilters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
@@ -117,14 +118,30 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
 
     // Shared filter + sort pipeline for the two paged list overloads (entity vs. projected).
     // Identical WHERE/ORDER BY clauses live here so they cannot drift apart.
+    public async Task<List<ServerFilterFact>> GetServerFilterFactsAsync(List<int>? accessibleIds, CancellationToken ct = default)
+    {
+        var query = db.Servers.AsNoTracking();
+        if (accessibleIds is not null)
+            query = query.Where(server => accessibleIds.Contains(server.Id));
+
+        var rows = await query
+            .Select(server => new { server.Id, server.OsDescription, server.AgentVersion, server.Tags })
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. rows.Select(row => new ServerFilterFact(row.Id, row.OsDescription, row.AgentVersion, TagsHelper.DeserializeTags(row.Tags)))];
+    }
+
     private IQueryable<Server> BuildFilteredSortedServerQuery(
         string? search, string? sortBy, bool sortDescending,
-        ServerType? type, ServerStatus? status, List<int>? accessibleIds)
+        ServerType? type, ServerStatus? status, List<int>? accessibleIds,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.Servers.AsNoTracking().AsQueryable();
 
         if (accessibleIds is not null)
             query = query.Where(s => accessibleIds.Contains(s.Id));
+
+        // Recette R-211: the list's column header filters, before the count.
+        query = ServerListQuery.Columns.ApplyFilters(query, columnFilters);
 
         if (type.HasValue)
             query = query.Where(s => s.Type == type.Value);
@@ -166,6 +183,7 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
             .Include(s => s.ApacheModules)
             .Include(s => s.ApacheVirtualHosts)
             .Include(s => s.CertbotCertificates)
+            .Include(s => s.CertbotState)
             .Include(s => s.MailState)
             .Include(s => s.TeamspeakState)
             .Include(s => s.PortsentryState)
@@ -198,54 +216,8 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
             .ConfigureAwait(false);
     }
 
-    public async Task RemoveServerAsync(Server server, CancellationToken ct = default)
-    {
-        // Relying solely on FK CASCADE was too slow on servers with months of
-        // metrics history - the single cascading transaction took long enough
-        // that the browser surfaced it as a 'NetworkError' (the fetch gave up
-        // before the response came back). On relational providers we set-delete
-        // the heavy leaf tables first; the remaining small relations cascade.
-        // InMemory (used by integration tests) still cascades via EF - it does
-        // not support ExecuteDelete.
-        if (db.Database.IsRelational())
-        {
-            db.Database.SetCommandTimeout(TimeSpan.FromMinutes(2));
-            var id = server.Id;
-
-            // Atomicity: the leaf set-deletes and the final server delete must all
-            // commit together, so a mid-sequence failure can't leave orphaned rows.
-            await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-
-            // Restrict-FK: Vault → ProjectServer → Server - delete leaf-to-root.
-            var psIds = await db.ProjectServers.Where(ps => ps.ServerId == id).Select(ps => ps.Id).ToListAsync(ct).ConfigureAwait(false);
-            if (psIds.Count > 0)
-            {
-                await db.VaultSecretVersions.Where(v => v.VaultSecret!.Vault!.ProjectServerId != null && psIds.Contains(v.VaultSecret.Vault.ProjectServerId!.Value)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-                await db.VaultSecrets.Where(v => v.Vault.ProjectServerId != null && psIds.Contains(v.Vault.ProjectServerId!.Value)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-                await db.Vaults.Where(v => v.ProjectServerId != null && psIds.Contains(v.ProjectServerId!.Value)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-                await db.EnvironmentProjectServers.Where(x => psIds.Contains(x.ProjectServerId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-                await db.ProjectServers.Where(ps => ps.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            }
-            await db.ServerMetrics.Where(m => m.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.ServiceInfos.Where(s => s.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.DockerContainers.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.DockerImages.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.DockerNetworks.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.DockerVolumes.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.DockerComposeStacks.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.ApacheStates.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.ApacheModules.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.ApacheVirtualHosts.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.CertbotCertificates.Where(x => x.ServerId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-
-            db.Servers.Remove(server);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-            return;
-        }
-        db.Servers.Remove(server);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+    // RemoveServerAsync moved to ServerRetirementRepository.PurgeServerAsync (PLAN-004 R-11): the
+    // hard delete is now the explicit purge of an already retired server.
 
 
 
@@ -270,12 +242,8 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task<bool> ServerExistsAsync(int serverId, CancellationToken ct = default)
-    {
-        return await db.Servers
-            .AnyAsync(s => s.Id == serverId, ct)
-            .ConfigureAwait(false);
-    }
+    public Task<bool> ServerExistsAsync(int serverId, CancellationToken ct = default) =>
+        ServerTaskRepositoryOperations.ServerExistsAsync(db, serverId, ct);
 
     public async Task<List<Server>> GetStaleOnlineServersAsync(TimeSpan threshold, CancellationToken ct = default)
     {
@@ -450,7 +418,7 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
 
     public async Task<(List<Project> Items, int Total)> GetProjectsForServerPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.Projects
             .Where(project => ProjectIdsForServer(serverId).Contains(project.Id))
@@ -462,6 +430,9 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
                 EF.Functions.ILike(project.Name, pattern) ||
                 EF.Functions.ILike(project.Description, pattern));
         }
+
+        // Recette R-210 / R-224: the header filters, after the server scope and before the count.
+        query = ServerProjectListQuery.Columns.ApplyFilters(query, filters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
@@ -512,47 +483,32 @@ public class ServerRepository(AppDbContext db, TimeProvider timeProvider) : ISer
                 || task.Status == TaskExecutionStatus.Assigned
                 || task.Status == TaskExecutionStatus.Running), ct);
 
-    public async Task<List<ServerDto>> GetServersForCompatibilityAsync(
+    public Task<List<ServerDto>> GetServersForCompatibilityAsync(
         List<int>? accessibleIds,
+        CancellationToken ct = default) =>
+        ServerCompatibilityFacts.ReadAsync(db.Servers, accessibleIds, ct);
+
+    public async Task<(List<TaskLog> Items, int TotalCount)> GetLogsPagedAsync(
+        int serverId,
+        int page,
+        int pageSize,
+        IReadOnlyList<GridFilter>? filters = null,
+        IReadOnlyList<GridSort>? sorts = null,
         CancellationToken ct = default)
     {
-        var query = db.Servers.AsNoTracking();
-        if (accessibleIds is not null)
-            query = query.Where(server => accessibleIds.Contains(server.Id));
-
-        var facts = await query.Select(server => new
-        {
-            server.Id,
-            server.AgentVersion,
-            server.AgentProtocolVersion,
-            server.AgentCapabilitiesJson,
-            server.LastHeartbeat,
-            server.Status,
-            server.PipelineRunnerEnabled,
-            server.DeploymentTargetAvailable
-        }).ToListAsync(ct).ConfigureAwait(false);
-        return facts.Select(server => new ServerDto
-        {
-            Id = server.Id,
-            AgentVersion = server.AgentVersion,
-            AgentProtocolVersion = server.AgentProtocolVersion,
-            AgentCapabilities = ServerDataMapper.DeserializeDiagnostics(server.AgentCapabilitiesJson),
-            LastHeartbeat = server.LastHeartbeat,
-            Status = server.Status,
-            PipelineRunnerEnabled = server.PipelineRunnerEnabled,
-            DeploymentTargetAvailable = server.DeploymentTargetAvailable
-        }).ToList();
-    }
-
-    public async Task<(List<TaskLog> Items, int TotalCount)> GetLogsPagedAsync(int serverId, int page, int pageSize, CancellationToken ct = default)
-    {
+        // R-518: a line that is only an agent directive (`##aetheus[pipelinemetric ...]`,
+        // `##aetheus[setvariable ...]`) is a message to the backend, not a log line for a reader.
         var query = db.TaskLogs
-            .Where(l => l.Task.ServerId == serverId)
+            .Where(l => l.Task.ServerId == serverId && !l.Message.StartsWith("##aetheus["))
             .AsNoTracking();
+        // Recette R-210 / R-224: the grid's header filters narrow the whole log before the count.
+        query = ServerLogQuery.Columns.ApplyFilters(query, filters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
-            .OrderByDescending(l => l.Timestamp)
+        var ordered = ServerLogQuery.Columns.ApplySorts(query, sorts) is { } sorted
+            ? sorted.ThenByDescending(l => l.Timestamp).ThenByDescending(l => l.Id)
+            : query.OrderByDescending(l => l.Timestamp).ThenByDescending(l => l.Id);
+        var items = await ordered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);

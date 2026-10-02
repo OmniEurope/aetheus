@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Front.Tests;
 
@@ -101,5 +99,24 @@ stages: []";
         var result = _sut.Parse(yaml);
         Assert.NotNull(result);
         Assert.Equal("hello", result!.Variables["MY_VAR"]);
+    }
+
+    /// <summary>
+    /// Computed properties never reach the YAML: the backend parses a saved pipeline strictly, and an
+    /// `is_empty` or `is_container` key it does not know makes the whole definition invalid.
+    /// </summary>
+    [Fact]
+    public void Serialize_LeavesComputedPropertiesOut()
+    {
+        var yaml = _sut.Serialize(new PipelineYamlDefinition
+        {
+            Name = "app",
+            Requires = new PipelineRequiresDefinition { Libraries = ["app-host"] },
+            Isolation = new PipelineIsolationDefinition { Mode = PipelineIsolationDefinition.ModeContainer }
+        });
+
+        Assert.Contains("app-host", yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("is_empty", yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("is_container", yaml, StringComparison.Ordinal);
     }
 }

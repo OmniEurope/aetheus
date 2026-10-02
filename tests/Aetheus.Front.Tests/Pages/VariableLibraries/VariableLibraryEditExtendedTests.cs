@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -32,12 +30,14 @@ public class VariableLibraryEditExtendedTests : BunitContext
             ProjectId = 1,
             ProjectName = "App",
             RowVersion = Guid.NewGuid(),
-            Entries =
-            [
-                new VariableEntryDto { Id = 1, Key = "BASE_URL", Value = "https://example.com" }
-            ]
+            EntryCount = 1
         });
-        _handler.SetJsonResponse($"api/variable-libraries/{id}/entries",
+        // Rows come from the paged entries endpoint; the detail payload never carries them.
+        _handler.SetPaginatedJsonResponse(HttpMethod.Get, $"api/variable-libraries/{id}/entries",
+        [
+            new VariableEntryDto { Id = 1, Key = "BASE_URL", Value = "https://example.com" }
+        ]);
+        _handler.SetJsonResponse(HttpMethod.Post, $"api/variable-libraries/{id}/entries",
             new VariableEntryDto { Id = 2, Key = "NEW", Value = "val" });
         _handler.SetJsonResponse($"api/variable-libraries/{id}/export",
             new List<VariableEntryDto> { new() { Id = 1, Key = "BASE_URL", Value = "https://example.com" } });
@@ -79,7 +79,8 @@ public class VariableLibraryEditExtendedTests : BunitContext
         var cut = RenderExisting();
 
         SetFormValue(cut.Instance, "_newEntry", "Key", "");
-        await InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry");
+        // OnValidSubmit runs on the renderer dispatcher; the grid refresh that follows the POST requires it.
+        await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
 
         // Empty key short-circuits before the create call - no entry POST is sent.
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/variable-libraries/1/entries"));
@@ -92,7 +93,8 @@ public class VariableLibraryEditExtendedTests : BunitContext
 
         SetFormValue(cut.Instance, "_newEntry", "Key", "PORT");
         SetFormValue(cut.Instance, "_newEntry", "Value", "8080");
-        await InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry");
+        // OnValidSubmit runs on the renderer dispatcher; the grid refresh that follows the POST requires it.
+        await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
 
         // A valid key drives a real POST to the library's entries endpoint.
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/variable-libraries/1/entries"));

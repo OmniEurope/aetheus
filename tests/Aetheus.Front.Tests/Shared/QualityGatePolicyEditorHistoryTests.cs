@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using AngleSharp.Dom;
 using Bunit;
 
@@ -12,8 +9,8 @@ namespace Aetheus.Front.Tests.Shared;
 /// it is only reachable from a revision row, and exercising it needs a rendered history dialog with
 /// at least two revisions (recorded as a follow-up rather than asserted vacuously).
 ///
-/// bUnit notes: a RadzenTemplateForm does not submit from a click on its button, use
-/// <c>Find("form").Submit()</c>; and Radzen text inputs answer onchange, so use <c>.Change()</c>.
+/// bUnit notes: a templated form does not submit from a click on its button, use
+/// <c>Find("form").Submit()</c>; and its text inputs answer onchange, so use <c>.Change()</c>.
 /// </summary>
 public sealed class QualityGatePolicyEditorHistoryTests : BunitContext
 {
@@ -115,9 +112,9 @@ public sealed class QualityGatePolicyEditorHistoryTests : BunitContext
         var cut = RenderEditor();
         cut.Find("button[title='Duplicate']").Click();
         cut.WaitForState(() => cut.FindAll("form").Count > 0, TimeSpan.FromSeconds(3));
-        cut.Find("input[name='PolicyName']").Change("No cycles copy");
-        cut.Find("input[name='MetricKey']").Change("architecture.cycles*");
-        cut.Find("input[name='Threshold']").Change("0");
+        cut.Find("input#PolicyName").Input("No cycles copy");
+        cut.Find("input#MetricKey").Input("architecture.cycles*");
+        cut.Find("input#quality-gate-threshold").Change("0");
 
         cut.Find("form").Submit();
 

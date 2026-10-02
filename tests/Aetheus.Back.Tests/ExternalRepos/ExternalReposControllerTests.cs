@@ -2,8 +2,6 @@
 using System.Security.Claims;
 using Aetheus.Back.Components.ExternalRepos;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -31,26 +29,8 @@ public class ExternalReposControllerTests
     }
 
     [Fact]
-    public void IsFeatureEnabled_ReflectsService()
-    {
-        _service.IsEnabled.Returns(true);
-        var result = _sut.IsFeatureEnabled();
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.True((bool)ok.Value!);
-    }
-
-    [Fact]
-    public async Task GetForProject_FeatureDisabled_ReturnsNotFound()
-    {
-        _service.IsEnabled.Returns(false);
-        var result = await _sut.GetForProject(1, TestContext.Current.CancellationToken);
-        Assert.IsType<NotFoundResult>(result.Result);
-    }
-
-    [Fact]
     public async Task Attach_Enabled_ReturnsOk()
     {
-        _service.IsEnabled.Returns(true);
         _service.AttachAsync(Arg.Any<AttachExternalRepoRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ExternalRepoDto { ProjectId = 1, OwnerOrGroup = "acme", RepositoryName = "demo" });
 
@@ -60,12 +40,24 @@ public class ExternalReposControllerTests
     }
 
     [Fact]
-    public async Task Attach_Disabled_ReturnsNotFound()
+    public async Task GetForProject_WithoutExternalRepository_AnswersNoContent()
     {
-        _service.IsEnabled.Returns(false);
+        // Recette R-321: the normal "nothing attached" state is 204, never a 404 logged as a warning.
+        _service.GetForProjectAsync(2, Arg.Any<CancellationToken>()).Returns((ExternalRepoDto?)null);
 
-        var result = await _sut.Attach(new AttachExternalRepoRequest { ProjectId = 1, OwnerOrGroup = "a", RepositoryName = "b" }, TestContext.Current.CancellationToken);
+        var result = await _sut.GetForProject(2, TestContext.Current.CancellationToken);
 
-        Assert.IsType<NotFoundResult>(result.Result);
+        Assert.IsType<NoContentResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetForProject_WithExternalRepository_AnswersIt()
+    {
+        var repository = new ExternalRepoDto { ProjectId = 2, OwnerOrGroup = "acme", RepositoryName = "demo" };
+        _service.GetForProjectAsync(2, Arg.Any<CancellationToken>()).Returns(repository);
+
+        var result = await _sut.GetForProject(2, TestContext.Current.CancellationToken);
+
+        Assert.Same(repository, Assert.IsType<OkObjectResult>(result.Result).Value);
     }
 }

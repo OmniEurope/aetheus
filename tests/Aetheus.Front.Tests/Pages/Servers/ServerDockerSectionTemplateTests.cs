@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -297,7 +295,7 @@ public class ServerDockerSectionTemplateTests : BunitContext
         var tab = cut.FindComponent<DockerContainersTab>();
 
         var method = typeof(DockerContainersTab).GetMethod("ConfirmRemoveContainerAsync", BF)!;
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi", "nginx"])!);
 
         Assert.Equal(1, dialog.OpenCount);
@@ -314,7 +312,7 @@ public class ServerDockerSectionTemplateTests : BunitContext
         var tab = cut.FindComponent<DockerContainersTab>();
 
         var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BF)!;
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
         Assert.Equal("abc123def456ghi", dialog.LastParameters!["ContainerId"]);

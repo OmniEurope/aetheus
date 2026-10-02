@@ -6,13 +6,19 @@ namespace Aetheus.Back.Components.AiTasks;
 public sealed class AiTaskRepository(AppDbContext db) : IAiTaskRepository
 {
     public async Task<(List<AiRunnerProfile> Items, int Total)> GetProfilesPageAsync(
-        string? search, int page, int pageSize, CancellationToken ct)
+        string? search, int page, int pageSize, CancellationToken ct,
+        IReadOnlyList<GridFilter>? columnFilters = null,
+        string? sortBy = null, bool sortDescending = false)
     {
         var query = db.AiRunnerProfiles.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(profile => profile.Name.Contains(search));
+        // Recette R-224: the list's column header filters, before the count.
+        query = AiTaskListQuery.ProfileColumns.ApplyFilters(query, columnFilters);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query.OrderBy(profile => profile.Name)
+        var ordered = AiTaskListQuery.ProfileColumns.ApplySorts(query,
+            [new GridSort { Field = sortBy ?? "Name", Descending = sortDescending }])!;
+        var items = await ordered.ThenBy(profile => profile.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, total);
@@ -50,7 +56,9 @@ public sealed class AiTaskRepository(AppDbContext db) : IAiTaskRepository
 
     public async Task<(List<AiTaskDefinition> Items, int Total)> GetDefinitionsPageAsync(
         string? search, int page, int pageSize, int? projectId, int? serverId,
-        List<int>? accessibleProjectIds, List<int>? accessibleServerIds, CancellationToken ct)
+        List<int>? accessibleProjectIds, List<int>? accessibleServerIds, CancellationToken ct,
+        IReadOnlyList<GridFilter>? columnFilters = null,
+        string? sortBy = null, bool sortDescending = false)
     {
         var query = db.AiTaskDefinitions.AsNoTracking();
         if (projectId.HasValue) query = query.Where(definition => definition.ProjectId == projectId);
@@ -65,14 +73,18 @@ public sealed class AiTaskRepository(AppDbContext db) : IAiTaskRepository
         }
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(definition => definition.Name.Contains(search));
+        // Recette R-224: the list's column header filters, after the scope and before the count.
+        query = AiTaskListQuery.DefinitionColumns.ApplyFilters(query, columnFilters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
+        var detailQuery = query
             .Include(definition => definition.Profile)
             .Include(definition => definition.Project)
             .Include(definition => definition.Server)
-            .Include(definition => definition.Triggers)
-            .OrderBy(definition => definition.Name)
+            .Include(definition => definition.Triggers);
+        var ordered = AiTaskListQuery.DefinitionColumns.ApplySorts(detailQuery,
+            [new GridSort { Field = sortBy ?? "Name", Descending = sortDescending }])!;
+        var items = await ordered.ThenBy(definition => definition.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, total);

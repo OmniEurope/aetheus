@@ -1,0 +1,63 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Reusable task list: server-side paginated grid whose column headers are the filters (localized status
+   badge, offline badge, detail navigation) + live SignalR refresh. Hosted by the global /tasks page (no
+   scope) and by the per-server tasks section (ServerId set), so both share the exact same feature set.
+   Recette R-221: no filter row above the grid; the former search box and status list duplicated the
+   Name and Status column filters. *@
+
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-md">
+        @L["LoadFailed"]
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadGridAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniAlert>
+}
+
+<AetheusDataGrid @ref="_grid" Data="@_tasks" TItem="ServerTaskDto"
+    Count="@_totalCount" PageSize="20" IsLoading="@_loading" LoadData="@OnLoadData" FullHeight="true"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<ServerTaskDto>(_tasks, _totalCount))"
+    RowClick="@OpenTask">
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="ServerTaskDto" Property="Id" Title="#" Width="80px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+            <Template Context="task">
+                <a href="@($"/tasks/{task.Id}")" class="pipeline-name-link"
+                    @onclick:stopPropagation="true">@task.Id</a>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerTaskDto" Property="Name" Title="@L["Name"]" MinWidth="10rem" Filterable="true" />
+        @if (ServerId is null)
+        {
+            <OmniDataGridColumn TItem="ServerTaskDto" Property="ServerName" Title="@L["Server"]" Width="150px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.ServerNames" FilterSearchable="true" />
+        }
+        <OmniDataGridColumn TItem="ServerTaskDto" Title="@L["Source"]" Width="210px" Sortable="false" Filterable="false" >
+            <Template Context="task">
+                @if (task.PipelineRunId is { } pipelineRunId)
+                {
+                    <span @onclick:stopPropagation="true"><OmniLink Href="@($"/pipelines/runs/{pipelineRunId}")">@($"{L["PipelineRun"]} #{pipelineRunId}")</OmniLink></span>
+                }
+                else
+                {
+                    <span @onclick:stopPropagation="true"><OmniLink Href="@($"/servers/{task.ServerId}/overview")">@($"{L["Server"]}: {GetSourceServerName(task)}")</OmniLink></span>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerTaskDto" Property="Executor" Title="@L["Executor"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ExecutorText"><Template Context="task">@L.Localize(task.Executor)</Template></OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerTaskDto" Property="Status" Title="@L["Status"]" Width="270px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText" >
+            <Template Context="task">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@GetTaskBadge(task.Status)">@L.Localize(task.Status)</OmniBadge>
+                @if (!string.IsNullOrWhiteSpace(task.FailureCode))
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@GetFailureBadge(task.FailureCode)" title="@task.FailureReason" Class="omni-u-ms-xs"><Icon><OmniIcon Name="@GetFailureIcon(task.FailureCode)" /></Icon><ChildContent>@L[task.FailureCode]</ChildContent></OmniBadge>
+                }
+                @if (IsStalledOnOfflineAgent(task))
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning"
+                        title="@L["TaskAgentOfflineHint"]" Class="omni-u-ms-xs"><Icon><OmniIcon Name="OmniIconName.WifiSlash" /></Icon><ChildContent>@L["TaskAgentOffline"]</ChildContent></OmniBadge>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerTaskDto" Property="CreatedAt" Title="@L["Created"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+        <OmniDataGridColumn TItem="ServerTaskDto" Property="ExitCode" Title="@L["Exit"]" Width="80px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+    </Columns>
+</AetheusDataGrid>

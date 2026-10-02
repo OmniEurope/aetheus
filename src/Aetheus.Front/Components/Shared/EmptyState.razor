@@ -1,0 +1,20 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+<OmniStack Align="OmniAlignment.Center" Justify="OmniJustification.Center" Gap="OmniSpacing.Medium" Class="empty-state">
+    @if (!string.IsNullOrWhiteSpace(Icon))
+    {
+        <OmniIcon Name="@MaterialIconMap.Resolve(Icon)" Class="empty-state-icon" />
+    }
+    @if (!string.IsNullOrWhiteSpace(Title))
+    {
+        <OmniHeading Level="OmniHeadingLevel.H5">@Title</OmniHeading>
+    }
+    @if (!string.IsNullOrWhiteSpace(Description))
+    {
+        <OmniText Tone="OmniTextTone.Muted" Class="empty-state-description">@Description</OmniText>
+    }
+    @if (ActionContent is not null)
+    {
+        <div class="empty-state-actions">@ActionContent</div>
+    }
+</OmniStack>

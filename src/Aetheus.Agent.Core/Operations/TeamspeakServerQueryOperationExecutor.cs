@@ -13,19 +13,11 @@ namespace Aetheus.Agent.Core.Operations;
 /// The serveradmin credential is read from the agent's local credentials file and never travels in
 /// the task, so this runs as the unprivileged agent process - no shell, no <c>nc</c>, no sudo hop.
 /// </summary>
-public sealed class TeamspeakServerQueryOperationExecutor(ITeamspeakQueryClient queryClient) : IOperationExecutor
+public sealed class TeamspeakServerQueryOperationExecutor(ITeamspeakQueryClient queryClient) : EnvironmentOperationExecutor
 {
-    public bool CanHandle(OperationKind kind) => kind == OperationKind.TeamspeakServerQuery;
+    public override bool CanHandle(OperationKind kind) => kind == OperationKind.TeamspeakServerQuery;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken)
-        => ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
         string target,
         IReadOnlyDictionary<string, string> envVars,

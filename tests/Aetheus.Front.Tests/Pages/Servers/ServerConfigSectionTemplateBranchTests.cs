@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -60,7 +59,7 @@ public class ServerConfigSectionTemplateBranchTests : BunitContext
             .SetValue(cut.Instance, "hostname: web01\ntype: Docker");
         cut.Render();
 
-        Assert.Contains("content_copy", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Copy);
         Assert.Contains("config-yaml-block", cut.Markup);
         Assert.Contains("hostname: web01", cut.Markup);
     }
@@ -147,20 +146,20 @@ public class ServerConfigSectionTemplateBranchTests : BunitContext
     // ── TEST 7: GetChangeBadgeStyle for "pull" action → Success badge ─────────
 
     [Theory]
-    [InlineData("pull", BadgeStyle.Success)]
-    [InlineData("create", BadgeStyle.Success)]
-    [InlineData("deploy", BadgeStyle.Success)]
-    [InlineData("enable", BadgeStyle.Success)]
-    [InlineData("update", BadgeStyle.Info)]
-    [InlineData("unchanged", BadgeStyle.Light)]
-    [InlineData("delete", BadgeStyle.Light)]
-    [InlineData("remove", BadgeStyle.Light)]
-    public void Template_GetChangeBadgeStyle_ReturnsExpected(string action, BadgeStyle expected)
+    [InlineData("pull", OmniTone.Success)]
+    [InlineData("create", OmniTone.Success)]
+    [InlineData("deploy", OmniTone.Success)]
+    [InlineData("enable", OmniTone.Success)]
+    [InlineData("update", OmniTone.Accent)]
+    [InlineData("unchanged", OmniTone.Neutral)]
+    [InlineData("delete", OmniTone.Neutral)]
+    [InlineData("remove", OmniTone.Neutral)]
+    public void Template_GetChangeBadgeStyle_ReturnsExpected(string action, OmniTone expected)
     {
         var method = typeof(ServerConfigSection).GetMethod(
             "GetChangeBadgeStyle",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [action])!;
+        var result = (OmniTone)method.Invoke(null, [action])!;
         Assert.Equal(expected, result);
     }
 
@@ -233,7 +232,7 @@ public class ServerConfigSectionTemplateBranchTests : BunitContext
         cut.Render();
 
         Assert.Contains("config-yaml-block", cut.Markup);
-        Assert.Contains("content_copy", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Copy);
         Assert.Contains("CurrentConfiguration", cut.Markup);
     }
 

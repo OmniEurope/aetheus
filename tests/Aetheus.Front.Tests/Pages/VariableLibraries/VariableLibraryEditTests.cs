@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -31,13 +30,15 @@ public class VariableLibraryEditTests : BunitContext
             ProjectId = 1,
             ProjectName = "Project1",
             RowVersion = Guid.NewGuid(),
-            Entries =
-            [
-                new VariableEntryDto { Id = 1, Key = "BASE_URL", Value = "https://example.com" },
-                new VariableEntryDto { Id = 2, Key = "API_KEY", Value = "secret-key-123" }
-            ]
+            EntryCount = 2
         });
-        _handler.SetJsonResponse($"api/variable-libraries/{id}/entries", new VariableEntryDto { Id = 3, Key = "NEW", Value = "val" });
+        // Rows come from the paged entries endpoint; the detail payload never carries them.
+        _handler.SetPaginatedJsonResponse(HttpMethod.Get, $"api/variable-libraries/{id}/entries",
+        [
+            new VariableEntryDto { Id = 1, Key = "BASE_URL", Value = "https://example.com" },
+            new VariableEntryDto { Id = 2, Key = "API_KEY", Value = "secret-key-123" }
+        ]);
+        _handler.SetJsonResponse(HttpMethod.Post, $"api/variable-libraries/{id}/entries", new VariableEntryDto { Id = 3, Key = "NEW", Value = "val" });
         _handler.SetJsonResponse($"api/variable-libraries/{id}/export", new List<VariableEntryDto>());
         _handler.SetJsonResponse("api/variable-libraries", new VariableLibraryDto { Id = id, Name = "Created" });
     }
@@ -78,8 +79,8 @@ public class VariableLibraryEditTests : BunitContext
             new VariableLibraryDto { Id = 5, Name = "browser-lib" });
 
         var cut = Render<VariableLibraryEdit>();
-        cut.Find("input[name='Name']").Input("browser-lib");
-        cut.Find("textarea[name='Description']").Input("Created from the browser");
+        cut.Find("input#Name").Input("browser-lib");
+        cut.Find("textarea#Description").Input("Created from the browser");
         cut.Find("button[type='submit']").Click();
 
         cut.WaitForAssertion(() =>
@@ -132,13 +133,13 @@ public class VariableLibraryEditTests : BunitContext
 
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(VariableLibraryEdit).GetMethod("OnSubmit", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // Edit PUTs to the id endpoint and surfaces a success toast.
         Assert.Contains(_handler.Requests, r => r.Method == "PUT" && r.Url.Contains("api/variable-libraries/1"));
-        Assert.Contains(notif.Messages, m => m.Severity == Radzen.NotificationSeverity.Success);
+        Assert.Contains(notif.Toasts(), m => m.Severity == OmniSeverity.Success);
     }
 
     [Fact]
@@ -148,7 +149,8 @@ public class VariableLibraryEditTests : BunitContext
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
 
         SetFormValue(cut.Instance, "_newEntry", "Key", "");
-        await InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry");
+        // OnValidSubmit runs on the renderer dispatcher; the grid refresh that follows the POST requires it.
+        await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
 
         // Empty key short-circuits before the create call - no entry POST is sent.
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/variable-libraries/1/entries"));
@@ -162,7 +164,8 @@ public class VariableLibraryEditTests : BunitContext
 
         SetFormValue(cut.Instance, "_newEntry", "Key", "NEW_VAR");
         SetFormValue(cut.Instance, "_newEntry", "Value", "some-value");
-        await InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry");
+        // OnValidSubmit runs on the renderer dispatcher; the grid refresh that follows the POST requires it.
+        await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
 
         // A valid key drives a real POST to the library's entries endpoint.
         Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/variable-libraries/1/entries"));
@@ -208,13 +211,15 @@ public class VariableLibraryEditTests : BunitContext
             Id = 3,
             Name = "Big Lib",
             RowVersion = Guid.NewGuid(),
-            Entries = Enumerable.Range(1, 20).Select(i => new VariableEntryDto
+            EntryCount = 20
+        });
+        _handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/variable-libraries/3/entries",
+            Enumerable.Range(1, 20).Select(i => new VariableEntryDto
             {
                 Id = i,
                 Key = $"VAR_{i}",
                 Value = $"value-{i}"
-            }).ToList()
-        });
+            }));
 
         var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 3));
         // A library with many entries renders its name and the entry keys (first and last).

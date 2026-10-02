@@ -15,7 +15,7 @@ namespace Aetheus.Agent.Core.Operations;
 /// </summary>
 public sealed class TeamspeakSetupOperationExecutor(
     IOptions<AetheusAgentOptions> options,
-    ILogger<TeamspeakSetupOperationExecutor> logger) : IOperationExecutor
+    ILogger<TeamspeakSetupOperationExecutor> logger) : EnvironmentOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
 
@@ -24,19 +24,9 @@ public sealed class TeamspeakSetupOperationExecutor(
     // binary, NOPASSWD. The helper re-validates every argument and is itself the security boundary.
     internal const string SetupHelperPath = "/usr/local/lib/aetheus/teamspeak-setup";
 
-    public bool CanHandle(OperationKind kind) => kind is OperationKind.TeamspeakSetup;
+    public override bool CanHandle(OperationKind kind) => kind is OperationKind.TeamspeakSetup;
 
-    public async Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind,
-        string target,
-        int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput,
-        CancellationToken cancellationToken)
-        // No env vars supplied - fall back to the documented defaults (TS3 voice 9987 / query 10011).
-        => await ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken)
-            .ConfigureAwait(false);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
         string target,
         IReadOnlyDictionary<string, string> envVars,

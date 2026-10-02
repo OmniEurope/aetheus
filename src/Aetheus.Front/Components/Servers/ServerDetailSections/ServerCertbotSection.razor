@@ -1,0 +1,75 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits ServerActionSectionBase
+
+@* --- Status bar --- *@
+<OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-lg">
+    <OmniBadge Fill="OmniFill.Solid" Tone="@(Certbot.IsInstalled ? OmniTone.Success : OmniTone.Neutral)">@(Certbot.IsInstalled ? L["Installed"] : L["NotInstalled"])</OmniBadge>
+    @if (!string.IsNullOrEmpty(Certbot.Version))
+    {
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">v@(Certbot.Version)</OmniText>
+    }
+    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">@string.Format(L["CertificateCount"], Certbot.Certificates.Count)</OmniBadge>
+    @if (Certbot.IsInstalled)
+    {
+        <OmniBadge Fill="OmniFill.Solid" Tone="@RenewalCheckStyle" data-testid="certbot-renewal-check">@RenewalCheckText</OmniBadge>
+    }
+    <div class="blade-content-spacer"></div>
+
+    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowConfirm(L["CertbotNormalize"], L["ConfirmCertbotNormalize"], () => ExecuteActionAsync(CertbotAction.Normalize), L["CertbotNormalize"]))" Disabled="@(!Certbot.IsInstalled)" Class="@(_actionRunning ? "btn-busy" : null)" Busy="@(_actionRunning)" title="@L["CertbotNormalizeTitle"]"><OmniIcon Name="OmniIconName.Swap" /> <span>@L["CertbotNormalize"]</span></OmniButton>
+    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ExecuteActionAsync(CertbotAction.RenewalCheck))" Disabled="@(!Certbot.IsInstalled)" Class="@(_actionRunning ? "btn-busy" : null)" Busy="@(_actionRunning)" title="@L["CertbotRenewalCheckTitle"]"><OmniIcon Name="OmniIconName.ShieldCheck" /> <span>@L["CertbotRenewalCheck"]</span></OmniButton>
+
+    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowConfirm(L["RenewAllCerts"], L["ConfirmRenewAllCerts"], () => ExecuteActionAsync(CertbotAction.RenewAll), L["Renew"]))" Disabled="@(!Certbot.IsInstalled)" Class="@(_actionRunning ? "btn-busy" : null)" Busy="@(_actionRunning)" title="@L["RenewAll"]"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Renew"]</span></OmniButton>
+    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenCreateDialog" Disabled="@(!Certbot.IsInstalled || _actionRunning)" title="@L["NewCertificate"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+</OmniRow>
+
+<UrlSyncedTabs Slugs="@(new[] { "certificates", "relations" })">
+    <Tabs>
+        @* --- Certificates tab --- *@
+        <OmniTabsItem Key="certificates" Title="@L["Certificates"]">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+                <CountBadge Value="@FilteredCertificates.Count" Variant="OmniTone.Accent" />
+                <OmniTextBox aria-label="@L["FilterCertificates"]" @bind-Value="_certSearch" Placeholder="@L["FilterCertificates"]" />
+            </OmniStack>
+            <OmniDataGrid @ref="_grid" FillAvailableHeight="true" Items="@FilteredCertificates" TItem="CertbotCertificateDto" KeyOf="@(row => row.Name)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+                <Columns>
+                    <OmniDataGridColumn Frozen="true" TItem="CertbotCertificateDto" Property="Name" Title="@L["CertName"]" Width="12.5rem" Filterable="true" />
+                    <OmniDataGridColumn TItem="CertbotCertificateDto" Title="@L["Domains"]" Sortable="false">
+                        <Template Context="c">
+                            @string.Join(", ", c.Domains)
+                        </Template>
+                    </OmniDataGridColumn>
+                    <OmniDataGridColumn TItem="CertbotCertificateDto" Property="ExpiryDate" Title="@L["Expiry"]" Width="11.25rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange">
+                        <Template Context="c">
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@c.ExpiryDate.ToString("yyyy-MM-dd")</OmniText>
+                                @if (IsExpiringSoon(c))
+                                {
+                                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["ExpiringSoon"]</OmniBadge>
+                                }
+                            </OmniStack>
+                        </Template>
+                    </OmniDataGridColumn>
+                    <OmniDataGridColumn TItem="CertbotCertificateDto" Property="RenewalConvention" Title="@L["CertbotRenewal"]" Width="12.5rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ConventionFilterText">
+                        <Template Context="c">
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@ConventionStyle(c)" title="@ConventionDetail(c)" data-testid="certbot-convention">@ConventionText(c)</OmniBadge>
+                        </Template>
+                    </OmniDataGridColumn>
+                    <OmniDataGridColumn TItem="CertbotCertificateDto" Title="@L["Actions"]" Width="15rem" Sortable="false">
+                        <Template Context="c">
+                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall">
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ExecuteActionAsync(CertbotAction.Renew, c.Name))" title="@L["Renew"]" Label="@L["Renew"]"><OmniIcon Name="OmniIconName.Refresh" /></OmniButton>
+                                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => ShowDestructiveConfirm(L["RevokeCert"], string.Format(L["ConfirmRevokeCert"], c.Name),
+                                        () => ExecuteActionAsync(CertbotAction.RevokeAndDelete, c.Name), L["Revoke"].Value))" title="@L["Revoke"]" Label="@L["Revoke"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                            </OmniStack>
+                        </Template>
+                    </OmniDataGridColumn>
+                </Columns>
+            </OmniDataGrid>
+        </OmniTabsItem>
+
+        @* --- Relations tab --- *@
+        <OmniTabsItem Key="relations" Title="@L["Relations"]">
+            <ModuleLinksTab ServerId="ServerId" SourceType="ModuleLinkType.Certbot" Resources="@CertbotResourceNames" />
+        </OmniTabsItem>
+    </Tabs>
+</UrlSyncedTabs>

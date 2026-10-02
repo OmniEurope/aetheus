@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Tasks;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Tasks;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Tasks;
@@ -55,5 +52,61 @@ public class TaskDetailTests : BunitContext
         Assert.DoesNotContain("Enum_ExecutorType_Operation", cut.Markup);
         Assert.Contains("href=\"/servers/9/overview\"", cut.Markup);
         Assert.DoesNotContain("CancelTask", cut.Markup);
+        // A finished task has nothing to follow.
+        Assert.DoesNotContain("TaskInProgress", cut.Markup);
+    }
+
+    [Fact]
+    public async Task R513_ARunningTask_ShowsItsLinesAsTheyArrive_ThenItsEnd()
+    {
+        _handler.SetJsonResponse("api/tasks/22358", new ServerTaskDto
+        {
+            Id = 22358,
+            ServerId = 5,
+            ServerName = "vps",
+            Name = "Service Start - dovecot",
+            Status = TaskExecutionStatus.Running
+        });
+        _handler.SetJsonResponse("api/logs/task/22358", new List<TaskLogDto>
+        {
+            new() { Id = 1, TaskId = 22358, Message = "first line", Timestamp = DateTime.Now }
+        });
+        var cut = Render<TaskDetail>(parameters => parameters.Add(p => p.TaskId, 22358));
+        cut.WaitForAssertion(() => Assert.Contains("first line", cut.Markup));
+        Assert.True(cut.Instance.InFlight);
+        Assert.Contains("TaskInProgress", cut.Markup);
+
+        // A pushed batch: the new line is added, the one already on screen is not doubled, and a line
+        // of another task is left out.
+        cut.Instance.OnLogsReceived(
+        [
+            new() { Id = 1, TaskId = 22358, Message = "first line", Timestamp = DateTime.Now },
+            new() { Id = 2, TaskId = 22358, Message = "pushed line", Timestamp = DateTime.Now },
+            new() { Id = 3, TaskId = 99, Message = "other task", Timestamp = DateTime.Now }
+        ]);
+        cut.WaitForAssertion(() => Assert.Contains("pushed line", cut.Markup));
+        Assert.Single(cut.FindAll(".log-entry"), entry => entry.TextContent.Contains("first line"));
+        Assert.DoesNotContain("other task", cut.Markup);
+
+        _handler.SetJsonResponse("api/tasks/22358", new ServerTaskDto
+        {
+            Id = 22358,
+            ServerId = 5,
+            ServerName = "vps",
+            Name = "Service Start - dovecot",
+            Status = TaskExecutionStatus.Failed,
+            ExitCode = 5
+        });
+        _handler.SetJsonResponse("api/logs/task/22358", new List<TaskLogDto>
+        {
+            new() { Id = 1, TaskId = 22358, Message = "first line", Timestamp = DateTime.Now },
+            new() { Id = 2, TaskId = 22358, Message = "pushed line", Timestamp = DateTime.Now },
+            new() { Id = 4, TaskId = 22358, Message = "Unit dovecot.service not found", Timestamp = DateTime.Now }
+        });
+        await cut.InvokeAsync(cut.Instance.ReloadFinishedAsync);
+
+        cut.WaitForAssertion(() => Assert.Contains("Unit dovecot.service not found", cut.Markup));
+        Assert.False(cut.Instance.InFlight);
+        Assert.DoesNotContain("TaskInProgress", cut.Markup);
     }
 }

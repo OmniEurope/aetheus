@@ -5,7 +5,7 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.Audit;
 
-public class AuditService(IAuditRepository repo, IHttpContextAccessor httpContextAccessor, IAuditChainService chainService, IMemoryCache cache, TimeProvider timeProvider) : IAuditService
+public class AuditService(IAuditRepository repo, IHttpContextAccessor httpContextAccessor, IAuditChainService chainService, IMemoryCache cache, TimeProvider timeProvider, IAdminChangeNotifier? adminNotifier = null) : IAuditService
 {
     private static readonly SemaphoreSlim ChainLock = new(1, 1);
     private const int MaxChainRaceRetries = 3;
@@ -42,6 +42,7 @@ public class AuditService(IAuditRepository repo, IHttpContextAccessor httpContex
                 try
                 {
                     await repo.AddAsync(log, ct).ConfigureAwait(false);
+                    await BroadcastAsync(log.Id, ct).ConfigureAwait(false);
                     return;
                 }
                 catch (DbUpdateException) when (attempt < MaxChainRaceRetries)
@@ -56,15 +57,33 @@ public class AuditService(IAuditRepository repo, IHttpContextAccessor httpContex
         }
     }
 
+    /// <summary>
+    /// Recette R-181: the audit page follows new entries over the admin hub instead of a Refresh
+    /// button. Best effort: the entry is written already; a failed push only delays the page until
+    /// its next load, so it never fails the audited action.
+    /// </summary>
+    private async Task BroadcastAsync(int id, CancellationToken ct)
+    {
+        if (adminNotifier is null) return;
+        try
+        {
+            await adminNotifier.BroadcastAsync(AdminEntities.AuditLog, id, EntityChangeOps.Created, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[Audit] live push failed: {exception.Message}");
+        }
+    }
+
     public async Task<PaginatedResult<AuditLogDto>> GetLogsPagedAsync(int page, int pageSize, string? search = null, string? action = null, string? entityType = null, int? entityId = null, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true)
+        string? sortBy = null, bool sortDescending = true, IReadOnlyList<GridFilter>? filters = null)
     {
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, PaginationRequest.MaxPageSize);
         var skip = (page - 1) * pageSize;
-        var totalCount = await repo.CountAsync(search, action, entityType, entityId, dateFrom, dateTo, ct).ConfigureAwait(false);
+        var totalCount = await repo.CountAsync(search, action, entityType, entityId, dateFrom, dateTo, ct, filters).ConfigureAwait(false);
         var pageItems = await repo.GetPagedAsync(skip, pageSize, search, action, entityType, entityId, dateFrom, dateTo, ct,
-            sortBy, sortDescending).ConfigureAwait(false);
+            sortBy, sortDescending, filters).ConfigureAwait(false);
 
         var items = pageItems.Select(l => new AuditLogDto
         {

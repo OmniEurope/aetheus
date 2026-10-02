@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Logs;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;

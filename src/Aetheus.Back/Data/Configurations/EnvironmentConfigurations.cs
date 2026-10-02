@@ -12,6 +12,9 @@ internal sealed class EnvironmentConfiguration : IEntityTypeConfiguration<Enviro
         // Per-project name uniqueness (was global): lets the same environment name (e.g. "Staging")
         // exist across projects and supports environment duplication into another project.
         builder.HasIndex(e => new { e.Name, e.ProjectId }).IsUnique();
+        // git's own ref-name limit is far higher, but a branch name is a short identifier here and an
+        // unbounded column would be the only free-text field on this entity without a ceiling.
+        builder.Property(e => e.AdvanceBranchName).HasMaxLength(255);
         builder.HasOne(e => e.Project)
                .WithMany()
                .HasForeignKey(e => e.ProjectId)
@@ -40,6 +43,9 @@ internal sealed class EnvironmentServerConfiguration : IEntityTypeConfiguration<
     public void Configure(EntityTypeBuilder<EnvironmentServer> builder)
     {
         builder.HasKey(e => new { e.EnvironmentId, e.ServerId });
+        // PLAN-004 R-11: a retired server's link is kept but hidden, so an environment edit (which
+        // replaces the loaded links) cannot drop it, and a revived server is back in its environments.
+        builder.HasQueryFilter(ServerQueryFilters.ExcludeRetired, e => e.Server.DeletedAt == null);
         builder.HasOne(e => e.Environment)
                .WithMany(env => env.Servers)
                .HasForeignKey(e => e.EnvironmentId)
@@ -64,6 +70,7 @@ internal sealed class PipelineApprovalConfiguration : IEntityTypeConfiguration<P
         builder.HasOne(e => e.Environment)
                .WithMany(env => env.Approvals)
                .HasForeignKey(e => e.EnvironmentId)
+               .IsRequired(false)
                .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(e => e.ResolvedByUser)
                .WithMany()
@@ -85,6 +92,8 @@ internal sealed class AgentPoolServerConfiguration : IEntityTypeConfiguration<Ag
     public void Configure(EntityTypeBuilder<AgentPoolServer> builder)
     {
         builder.HasKey(e => new { e.AgentPoolId, e.ServerId });
+        // PLAN-004 R-11: as for EnvironmentServer, a pool edit must not drop a retired server's link.
+        builder.HasQueryFilter(ServerQueryFilters.ExcludeRetired, e => e.Server.DeletedAt == null);
         builder.HasOne(e => e.AgentPool)
                .WithMany(p => p.Servers)
                .HasForeignKey(e => e.AgentPoolId)

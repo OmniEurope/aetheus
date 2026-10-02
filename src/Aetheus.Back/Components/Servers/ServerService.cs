@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.Json;
 using Aetheus.Back.Components.AgentUpdate;
-using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -29,14 +27,20 @@ public class ServerService(
     IAgentCompatibilityPolicy? compatibilityPolicy = null,
     // No IPipelineRepository: its single use was enriching server releases with their source
     // pipeline, and that whole endpoint now lives in Releases, which already sits above Pipelines.
-    IAgentUpdateConfirmationService? updateConfirmation = null)
+    IAgentUpdateConfirmationService? updateConfirmation = null,
+    // PLAN-005 lot 2: optional so the many unit tests that new-up this service directly keep compiling;
+    // when absent the heartbeat simply carries no port observation.
+    PortRegistry.IPortRegistryService? portRegistry = null,
+    // PLAN-005: publishes MailInventoryReportedEvent from the heartbeat; optional so direct unit-test
+    // construction keeps working (DI always injects the real dispatcher).
+    Services.DomainEvents.IDomainEventDispatcher? domainEvents = null)
     : IServerLifecycleService, IServerHeartbeatService, IServerServiceManagementService,
       IServerAgentContactService, IServerDiagnosticService
 {
     // ServerHeartbeatProcessor is internal, so a typed ILogger<> for it cannot appear on this public
     // ctor - build the category logger from the (public) factory instead. Optional/null-defaulted so unit
     // tests that new-up the service directly need not thread a factory (DI still injects the real one).
-    private readonly ServerHeartbeatProcessor _heartbeat = new(repo, heartbeatRepo, serverHub, alertHub, timeProvider, transaction, updateConfirmation,
+    private readonly ServerHeartbeatProcessor _heartbeat = new(repo, heartbeatRepo, serverHub, alertHub, timeProvider, transaction, updateConfirmation, portRegistry, domainEvents,
         (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<ServerHeartbeatProcessor>());
     private readonly ServerServiceManager _serviceManager = new(repo, heartbeatRepo, audit, taskService);
     private readonly ServerAgentContactProbe _contact = new(repo, backgroundOptions, timeProvider);
@@ -60,9 +64,22 @@ public class ServerService(
                 .Select(server => server.Id)
                 .ToList();
         }
+
+        // Recette R-211: the tag and agent columns resolve to server ids here; the others reach the query.
+        var columnFilters = request.Filters ?? [];
+        foreach (var filter in columnFilters.Where(ServerListQuery.IsResolvedInMemory))
+        {
+            var matching = await ResolveInMemoryFilterAsync(filter, effectiveAccessibleIds, ct).ConfigureAwait(false);
+            effectiveAccessibleIds = effectiveAccessibleIds is null
+                ? [.. matching]
+                : [.. effectiveAccessibleIds.Where(matching.Contains)];
+        }
+
+        var storedFilters = columnFilters.Where(filter => !ServerListQuery.IsResolvedInMemory(filter)).ToList();
         var (items, totalCount) = await repo.GetServersPagedProjectedAsync(
             request.Search, request.SortBy, request.SortDescending,
-            type, status, page, pageSize, effectiveAccessibleIds, ct).ConfigureAwait(false);
+            type, status, page, pageSize, effectiveAccessibleIds, ct,
+            storedFilters.Count == 0 ? null : storedFilters).ConfigureAwait(false);
 
         return new PaginatedResult<ServerDto>
         {
@@ -70,6 +87,37 @@ public class ServerService(
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
+        };
+    }
+
+    private async Task<HashSet<int>> ResolveInMemoryFilterAsync(GridFilter filter, List<int>? scope, CancellationToken ct)
+    {
+        if (string.Equals(filter.Field, ServerListQuery.TagsKey, StringComparison.OrdinalIgnoreCase))
+        {
+            var facts = await repo.GetServerFilterFactsAsync(scope, ct).ConfigureAwait(false);
+            return ServerListQuery.TaggedWithAny(filter, facts.Select(fact => (fact.Id, (IReadOnlyCollection<string>)fact.Tags)));
+        }
+
+        var servers = await repo.GetServersForCompatibilityAsync(scope, ct).ConfigureAwait(false);
+        return ServerListQuery.AgentMatchingAny(filter, servers.Select(server => (
+            server.Id,
+            server.AgentVersion,
+            compatibilityPolicy is null ? (AgentCompatibilityStatus?)null : compatibilityPolicy.Evaluate(server).Status)));
+    }
+
+    /// <summary>Recette R-211: the OS, versions and tags present across the servers the caller can read.</summary>
+    public async Task<ServerFilterValuesDto> GetServerFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default)
+    {
+        var facts = await repo.GetServerFilterFactsAsync(accessibleIds, ct).ConfigureAwait(false);
+        static List<string> Distinct(IEnumerable<string> values) => [.. values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
+        return new ServerFilterValuesDto
+        {
+            OsDescriptions = Distinct(facts.Select(fact => fact.OsDescription)),
+            AgentVersions = Distinct(facts.Select(fact => fact.AgentVersion)),
+            Tags = Distinct(facts.SelectMany(fact => fact.Tags))
         };
     }
 
@@ -206,18 +254,6 @@ public class ServerService(
     public Task<bool> ServerExistsAsync(int serverId, CancellationToken ct = default)
         => repo.ServerExistsAsync(serverId, ct);
 
-    public async Task<bool> DeleteServerAsync(int id, CancellationToken ct = default)
-    {
-        var server = await repo.FindServerAsync(id, ct).ConfigureAwait(false);
-        if (server is null) return false;
-
-        var name = server.Name;
-        await repo.RemoveServerAsync(server, ct).ConfigureAwait(false);
-        await audit.LogAsync("Deleted", "Server", id, name, ct).ConfigureAwait(false);
-        await serverHub.Clients.Groups([HubGroups.AllServers, HubGroups.Server(id), HubGroups.ServerOrg(server.OrganizationId)]).SendAsync("ServerRemoved", id, ct).ConfigureAwait(false);
-        return true;
-    }
-
     public async Task<List<string>> GetServerNamesAsync(List<int>? accessibleIds = null, CancellationToken ct = default)
     {
         return await repo.GetServerNamesAsync(accessibleIds, ct).ConfigureAwait(false);
@@ -231,7 +267,7 @@ public class ServerService(
     {
         var (page, pageSize) = request.Normalize();
         var (projects, total) = await repo.GetProjectsForServerPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<ProjectDto>
         {
             Items = projects.Select(project => ProjectDtoMapper.ToDto(project)).ToList(),
@@ -324,7 +360,8 @@ public class ServerService(
     public async Task<PaginatedResult<TaskLogDto>> GetServerLogsAsync(int serverId, PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
-        var (items, totalCount) = await repo.GetLogsPagedAsync(serverId, page, pageSize, ct).ConfigureAwait(false);
+        var (items, totalCount) = await repo.GetLogsPagedAsync(
+            serverId, page, pageSize, request.Filters, ServerLogQuery.SortsOf(request), ct).ConfigureAwait(false);
         return TaskLogMapper.ToPaginatedResult(items, totalCount, page, pageSize);
     }
 

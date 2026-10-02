@@ -27,9 +27,12 @@ public sealed class BackendModuleDependencyArchitectureTests
         var violations = RepositoryScan.Enumerate(projectsDirectory, "*.cs")
             .Where(path =>
             {
+                // Projects reads grades through the IProjectAnalysisGradeReader port only. The port lives in
+                // Analysis since 2026-09-25 (layer guard: Analysis L7 must not reach up into Projects L8 to
+                // implement it), so the namespace is allowed; its implementations are not.
                 var source = File.ReadAllText(path);
-                return source.Contains("Aetheus.Back.Components.Analysis", StringComparison.Ordinal)
-                    || source.Contains("AnalysisProjectSummaryRepository", StringComparison.Ordinal);
+                return source.Contains("AnalysisProjectSummaryRepository", StringComparison.Ordinal)
+                    || source.Contains("ProjectAnalysisGradeRepository", StringComparison.Ordinal);
             })
             .Select(path => Path.GetRelativePath(root, path))
             .ToArray();

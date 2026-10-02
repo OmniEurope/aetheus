@@ -1,0 +1,19 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/pipelines/setup"
+
+<PageTitle>@L["PipelineSetupWizard"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["PipelineSetupWizard"]" ShowBack="@(!string.IsNullOrWhiteSpace(BackHref))" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("auto_awesome")" /></Icon>
+</OmniPageHeader>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else
+{
+    <WizardDialog Steps="@_steps" CanAdvance="@CanAdvance" StepChanged="@OnStepChanged"
+                  OnFinishClicked="@CreatePipelinesAsync" OnCancelClicked="@GoBack"
+                  FinishText="@L["CreatePipelines"]" />
+}

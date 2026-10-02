@@ -1,0 +1,23 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniStack Gap="OmniSpacing.Medium">
+    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@string.Format(L["MailDnsCheckedAt"], Check.CheckedAt.ToString("g"))</OmniText>
+    @foreach (var record in Check.Records)
+    {
+        <OmniCard>
+            <OmniStack Gap="OmniSpacing.XSmall">
+                <OmniRow Align="OmniAlignment.Center" Gap="OmniSpacing.Small">
+                    <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@record.Kind.ToString().ToUpperInvariant()</OmniText>
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@record.Name</OmniText>
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@MailUiText.VerdictStyle(record.Verdict)">@MailUiText.Verdict(L, record.Verdict)</OmniBadge>
+                    @if (!string.IsNullOrEmpty(record.Detail))
+                    {
+                        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@MailUiText.Detail(L, record.Detail)</OmniText>
+                    }
+                </OmniRow>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@L["MailDnsExpected"] : @record.Expected</OmniText>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@L["MailDnsObserved"] : @(record.Observed.Count == 0 ? "-" : string.Join(" | ", record.Observed))</OmniText>
+            </OmniStack>
+        </OmniCard>
+    }
+</OmniStack>
+<DialogFooter CancelText="@L["Close"]" OnCancel="@(() => Dialog.Close())" />

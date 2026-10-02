@@ -10,8 +10,7 @@ public sealed class RepoSourceResolver(
     IProjectRepository projectRepo,
     IGitLightRepository lightRepo,
     IConfiguration configuration,
-    IHttpContextAccessor httpContextAccessor,
-    IOptions<FeatureFlagsOptions> features) : IRepoSourceResolver
+    IHttpContextAccessor httpContextAccessor) : IRepoSourceResolver
 {
     public async Task<RepoSource> ResolveAsync(int projectId, CancellationToken ct = default)
     {
@@ -21,7 +20,7 @@ public sealed class RepoSourceResolver(
             return new RepoSource(null, null, IsExternal: false, IsMirrorBacked: false);
         }
 
-        var isExternal = features.Value.ExternalRepos && project.GitConnectionId is not null;
+        var isExternal = project.GitConnectionId is not null;
         if (!isExternal)
         {
             // Internal repo (or plain RepositoryUrl): clone exactly what the project points to, but

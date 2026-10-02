@@ -12,13 +12,15 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 | `/api/servers/names` | GET | User | Server name list |
 | `/api/servers/{id}` | GET | User | Server detail |
 | `/api/servers/{id}` | PUT | User | Update server |
-| `/api/servers/{id}` | DELETE | Admin | Delete server |
+| `/api/servers/{id}` | DELETE | Admin | Retire server: row and links kept, agent tokens revoked, hidden from lists and dispatch; re-enrolling the same machine (machine-id hash, then hostname) revives it |
+| `/api/servers/retired` | GET | User | Retired servers (paginated) |
+| `/api/servers/{id}/permanent` | DELETE | Admin | Permanently delete a retired server with its links and backup policies (409 on an active server) |
 | `/api/servers/{id}/pipeline-runner` | POST | Admin | Opt-in/out pipeline execution |
 | `/api/servers/{id}/container-isolation-policy` | POST | ServerAdmin | Exiger ou non l'isolation conteneur sur ce runner |
 | `/api/servers/{id}/heartbeat` | POST | AgentToken | Agent heartbeat |
 | `/api/servers/{id}/contact-agent` | POST | User | Probe agent reachability |
 | `/api/servers/{id}/diagnostic` | GET | User | Offline diagnostic summary |
-| `/api/servers/{id}/agent/update` | POST | Admin | Queue agent self-update |
+| `/api/servers/{id}/agent/update` | POST | Admin | Queue agent self-update (always queues, even when the agent is already current -- see `Components/AgentUpdate/README.md`) |
 | `/api/servers/{id}/agent/progress` | POST | AgentToken | Report update progress |
 | `/api/servers/agent/update-all-preview` | GET | Admin | Preview fleet-wide agent updates |
 | `/api/servers/agent/update-all` | POST | Admin | Queue update for all servers |

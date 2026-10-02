@@ -25,11 +25,20 @@ NODE="$(sh "$WORKSPACE/deploy/scripts/ensure-node-runtime.sh")"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 cd "$SOURCE_ROOT"
+# The tested source decides the runner, not this script: V runs on Microsoft.Testing.Platform
+# (global.json "test.runner"), while a V-1 released before that move still carries VSTest and its
+# loggers. Both produce the same TRX, which is all the classifier reads.
+if grep -q '"Microsoft.Testing.Platform"' global.json; then
+  set -- test --project tests/Aetheus.Back.IntegrationTests --configuration Release --no-build --no-restore \
+    --no-progress --report-trx --report-trx-filename integration.trx --results-directory "$RESULTS_DIR"
+else
+  set -- test tests/Aetheus.Back.IntegrationTests --configuration Release --no-build --no-restore \
+    --logger "console;verbosity=minimal" --logger "trx;LogFileName=integration.trx" \
+    --results-directory "$RESULTS_DIR"
+fi
 RAW_TEST_EXIT=0
 sh "$WORKSPACE/deploy/scripts/run-with-progress.sh" "Integration tests ($RESULT_LABEL)" \
-  "$DOTNET" test tests/Aetheus.Back.IntegrationTests --configuration Release --no-build --no-restore \
-  --logger "console;verbosity=minimal" --logger "trx;LogFileName=integration.trx" \
-  --results-directory "$RESULTS_DIR" || RAW_TEST_EXIT=$?
+  "$DOTNET" "$@" || RAW_TEST_EXIT=$?
 
 STATUS="$("$NODE" "$WORKSPACE/deploy/scripts/classify-dotnet-test-result.mjs" "$RAW_TEST_EXIT" "$TRX" -)"
 echo "Integration suite $RESULT_LABEL produced an executed-test proof with findings status $STATUS."

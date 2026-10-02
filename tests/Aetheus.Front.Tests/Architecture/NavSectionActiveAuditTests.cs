@@ -8,7 +8,7 @@ namespace Aetheus.Front.Tests.Architecture;
 /// <summary>
 /// Guards the sidebar's cross-route active-state highlighting. Each top-level nav group
 /// in <c>NavMenu.razor</c> renders its children inside an <c>@if (IsOnSection("group"))</c>
-/// block and lights up via <c>Selected="@IsOnSection("group")"</c>. The highlight only
+/// block and lights up through the menu's route state. The highlight only
 /// works if every child route is claimed by that group's entry in <c>IsOnSection</c>'s
 /// path table - a child added to the menu but forgotten in the table navigates to a page
 /// where the parent group goes dark (the regression this guard prevents).
@@ -32,7 +32,7 @@ public class NavSectionActiveAuditTests
         // this guard pass vacuously.
         Assert.True(groups.Count >= 3,
             $"Expected to parse >=3 nav groups from NavMenu.razor, found {groups.Count}. "
-            + "Has the @if (IsOnSection(\"...\")) structure changed?");
+            + "Has the Expanded=\"@IsOnSection(\"...\")\" structure changed?");
 
         var isOnSection = typeof(NavMenu).GetMethod("IsOnSection",
             BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -62,25 +62,26 @@ public class NavSectionActiveAuditTests
             + string.Join("\n  ", violations));
     }
 
-    // Maps each group key to its static (non-parameterized) child Paths, read from the
-    // @if (IsOnSection("group")) { ... } block that renders that group's submenu.
+    // Maps each group key to its static (non-parameterized) child Paths, read from the body of the
+    // group item opened with Expanded="@IsOnSection("group")" (recette R-012: a group is open in its
+    // section and its entries are always rendered). The entries are leaf items, so the body ends at
+    // the first closing </OmniPanelMenuItem> after the group's opening tag.
     private static List<(string Group, List<string> ChildPaths)> ExtractGroups(string razor)
     {
         var result = new List<(string, List<string>)>();
 
-        foreach (Match m in Regex.Matches(razor, @"IsOnSection\(""(?<g>\w+)""\)\s*\)\s*\{"))
+        foreach (Match m in Regex.Matches(razor, @"Expanded=""@IsOnSection\(""(?<g>\w+)""\)""[^>]*>"))
         {
             var group = m.Groups["g"].Value;
-            var braceStart = razor.IndexOf('{', m.Index + m.Length - 1);
-            if (braceStart < 0) continue;
-            var braceEnd = FindMatchingCloseBrace(razor, braceStart);
-            if (braceEnd < 0) continue;
+            var bodyStart = m.Index + m.Length;
+            var bodyEnd = razor.IndexOf("</OmniPanelMenuItem>", bodyStart, StringComparison.Ordinal);
+            if (bodyEnd < 0) continue;
 
-            var block = razor.Substring(braceStart, braceEnd - braceStart + 1);
+            var block = razor.Substring(bodyStart, bodyEnd - bodyStart);
 
-            // Static Path="literal" only - skip interpolated Path="@(...)" routes (their
+            // Static Href="literal" only - skip interpolated Href="@(...)" routes (their
             // active-state is covered by the parameterized detail-page logic, not the table).
-            var children = Regex.Matches(block, @"Path=""(?<p>[^""@][^""]*)""")
+            var children = Regex.Matches(block, @"Href=""(?<p>[^""@][^""]*)""")
                 .Select(c => c.Groups["p"].Value)
                 .Where(p => p.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -91,17 +92,6 @@ public class NavSectionActiveAuditTests
         }
 
         return result;
-    }
-
-    private static int FindMatchingCloseBrace(string source, int openIndex)
-    {
-        var depth = 1;
-        for (var i = openIndex + 1; i < source.Length; i++)
-        {
-            if (source[i] == '{') depth++;
-            else if (source[i] == '}' && --depth == 0) return i;
-        }
-        return -1;
     }
 
     private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;

@@ -21,7 +21,8 @@ public interface IGitLightService
     Task<bool> DeleteRepositoryAsync(int id, CancellationToken ct = default);
 
     // Commits
-    Task<PaginatedResult<GitLightCommitDto>> GetCommitsAsync(int repoId, string? refName, int page, int pageSize, string? search = null, CancellationToken ct = default);
+    Task<PaginatedResult<GitLightCommitDto>> GetCommitsAsync(int repoId, string? refName, int page, int pageSize, string? search = null, CancellationToken ct = default, GitCommitLogFilter? filter = null);
+
     Task<GitLightCommitDetailDto?> GetCommitDetailAsync(int repoId, string sha, CancellationToken ct = default);
     Task<Dictionary<string, string>> GetCommitMessagesAsync(int repoId, IReadOnlyCollection<string> shas, CancellationToken ct = default);
 
@@ -58,7 +59,9 @@ public interface IGitLightService
     Task<List<BranchProtectionRuleDto>> GetBranchProtectionRulesAsync(int repoId, CancellationToken ct = default);
     Task<BranchProtectionRuleDto> CreateBranchProtectionRuleAsync(int repoId, CreateBranchProtectionRuleRequest request, CancellationToken ct = default);
     Task<BranchProtectionRuleDto?> UpdateBranchProtectionRuleAsync(int repoId, int ruleId, UpdateBranchProtectionRuleRequest request, CancellationToken ct = default);
-    Task<bool> DeleteBranchProtectionRuleAsync(int ruleId, CancellationToken ct = default);
+    /// <summary>Deletes a rule OF <paramref name="repoId"/>. A rule belonging to another repository
+    /// is refused: the caller was authorized on the repository, not on the rule id.</summary>
+    Task<bool> DeleteBranchProtectionRuleAsync(int repoId, int ruleId, CancellationToken ct = default);
     Task<bool> IsBranchProtectedAsync(int repoId, string branchName, CancellationToken ct = default);
 
     // Blame

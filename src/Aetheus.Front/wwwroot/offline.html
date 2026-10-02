@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aetheus</title>
+    <link rel="stylesheet" href="/css/offline.css" />
+    <script src="/js/offline.js" defer></script>
+</head>
+<body>
+    <main class="offline-card">
+        <h1 data-offline-lang="en">Connection unavailable</h1>
+        <h1 data-offline-lang="fr" hidden>Connexion indisponible</h1>
+        <p data-offline-lang="en">Aetheus cannot load while the application server is unavailable. Your data has not been changed.</p>
+        <p data-offline-lang="fr" hidden>Aetheus ne peut pas démarrer tant que le serveur de l’application est indisponible. Vos données n’ont pas été modifiées.</p>
+        <form action="/" method="get">
+            <button type="submit" data-offline-lang="en">Retry</button>
+            <button type="submit" data-offline-lang="fr" hidden>Réessayer</button>
+        </form>
+    </main>
+</body>
+</html>

@@ -1,0 +1,19 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git/branches/{BranchId:int}"
+@page "/git-repositories/branches/{BranchId:int}"
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+<PageTitle>@L["Branch"] - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else
+{
+    <OmniPageHeader Title="@L["Branch"]"
+        ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("account_tree")" /></Icon>
+    </OmniPageHeader>
+    <OmniAlert Severity="OmniSeverity.Warning">@L["NotFound"]</OmniAlert>
+}

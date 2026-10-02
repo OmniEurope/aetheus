@@ -15,13 +15,13 @@ public class RbacUiTests : E2ETestBase
     {
         await LoginAsync();
         await NavigateToAsync("");
-        await Page.WaitForSelectorAsync(".rz-navigation-item", new() { Timeout = 10000 });
+        await Page.WaitForSelectorAsync(".omni-panel-menu__link", new() { Timeout = 10000 });
         var settingsLink = Page.Locator("a[href*='settings']").First;
         await Expect(settingsLink).ToBeVisibleAsync();
 
         await NavigateToAsync("users");
-        await Page.WaitForSelectorAsync(".rz-datatable", new() { Timeout = 10000 });
-        await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+        await Page.WaitForSelectorAsync(".omni-data-grid", new() { Timeout = 10000 });
+        await Expect(Page.Locator(".omni-data-grid")).ToBeVisibleAsync();
     }
 
     [Test]
@@ -61,7 +61,7 @@ public class RbacUiTests : E2ETestBase
         await Page.GotoAsync($"{FrontendUrl}/servers");
         await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
         await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToBeVisibleAsync();
-        await Expect(Page.Locator(".rz-datatable")).ToHaveCountAsync(0);
+        await Expect(Page.Locator(".omni-data-grid")).ToHaveCountAsync(0);
     }
 
     [Test]
@@ -106,7 +106,7 @@ public class RbacUiTests : E2ETestBase
         await Page.GotoAsync($"{FrontendUrl}/servers");
         await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");
         await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToHaveCountAsync(0);
-        await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+        await Expect(Page.Locator(".omni-data-grid")).ToBeVisibleAsync();
 
         foreach (var viewport in new[] { (Width: 390, Height: 812), (Width: 812, Height: 390) })
         {
@@ -120,7 +120,7 @@ public class RbacUiTests : E2ETestBase
                 Is.LessThanOrEqualTo(widths[1]),
                 $"The non-admin server-reader view must fit {viewport.Width}x{viewport.Height}.");
             await Expect(Page.GetByText("Access denied.", new() { Exact = true })).ToHaveCountAsync(0);
-            await Expect(Page.Locator(".rz-datatable")).ToBeVisibleAsync();
+            await Expect(Page.Locator(".omni-data-grid")).ToBeVisibleAsync();
         }
     }
 
@@ -148,9 +148,9 @@ public class RbacUiTests : E2ETestBase
         await Page.WaitForSelectorAsync("[data-testid='blazor-ready']", new() { Timeout = PlaywrightConfig.AppReadyTimeoutMs });
         await Page.EvaluateAsync("localStorage.clear()");
         await Page.GotoAsync($"{FrontendUrl}/login", new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await Page.WaitForSelectorAsync("input[name='Username']", new() { Timeout = PlaywrightConfig.AppReadyTimeoutMs });
-        await Page.FillAsync("input[name='Username']", username);
-        await Page.FillAsync("input[name='Password']", password);
+        await Page.WaitForSelectorAsync("#Username", new() { Timeout = PlaywrightConfig.AppReadyTimeoutMs });
+        await Page.FillAsync("#Username", username);
+        await Page.FillAsync("#Password", password);
         await Page.ClickAsync("button[type='submit']");
         await Page.WaitForURLAsync($"{FrontendUrl}/");
         await Page.WaitForSelectorAsync("[data-testid='blazor-ready']");

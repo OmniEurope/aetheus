@@ -6,12 +6,11 @@ using Microsoft.Extensions.Options;
 namespace Aetheus.Back.Components.ExternalRepos;
 
 /// <summary>
-/// Scheduled refresh of external-repo mirrors. A no-op while <c>Features:ExternalRepos</c> is off.
+/// Scheduled refresh of external-repo mirrors.
 /// Wakes once a minute and fetches every auto-sync connection whose fetch interval has elapsed.
 /// </summary>
 public sealed class ExternalRepoSyncService(
     IServiceScopeFactory scopeFactory,
-    IOptions<FeatureFlagsOptions> features,
     TimeProvider timeProvider,
     ILogger<ExternalRepoSyncService> logger) : BackgroundService
 {
@@ -22,11 +21,6 @@ public sealed class ExternalRepoSyncService(
         using var timer = new PeriodicTimer(PollInterval);
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
-            if (!features.Value.ExternalRepos)
-            {
-                continue;
-            }
-
             try
             {
                 await SyncDueMirrorsAsync(stoppingToken).ConfigureAwait(false);

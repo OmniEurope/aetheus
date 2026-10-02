@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
-using Aetheus.Shared.Validation;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -16,7 +12,6 @@ public class ServerMailSectionRenderTests : BunitContext
     private readonly BunitTestHelper.TestHandler _handler;
 
     private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
-    private static readonly BindingFlags StaticPriv = BindingFlags.NonPublic | BindingFlags.Static;
 
     public ServerMailSectionRenderTests()
     {
@@ -44,6 +39,7 @@ public class ServerMailSectionRenderTests : BunitContext
         _handler.SetJsonResponse($"api/servers/{serverId}/mail/setup", true);
         _handler.SetJsonResponse($"api/servers/{serverId}/mail/logs", true);
         _handler.SetJsonResponse($"api/servers/{serverId}/mail/dns", new MailDnsRecordsDto());
+        _handler.SetJsonResponse($"api/servers/{serverId}/mail/diagnostics", new MailDiagnosticsDto());
     }
 
     private IRenderedComponent<ServerMailSection> RenderSection(ServerDetailDto? server = null, int serverId = 10)
@@ -85,6 +81,75 @@ public class ServerMailSectionRenderTests : BunitContext
         Assert.Contains("example.com", cut.Markup);
     }
 
+    [Fact]
+    public void Renders_InstalledMail_DoesNotRequestRoutingDiagnosticsOnMount()
+    {
+        var cut = RenderSection();
+        cut.WaitForState(() => cut.Markup.Contains("example.com"), TimeSpan.FromSeconds(2));
+        Assert.DoesNotContain(_handler.Requests, request => request.Url.Contains("mail/diagnostics", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SetupWizard_KeepsWhatWasTyped_WhenTheDialogRendersAgain()
+    {
+        // R-511: the dialog frame re-renders its content on every key press with the same parameters.
+        var model = new MailDialogModel();
+        var cut = Render<MailOperationDialog>(p => p
+            .Add(x => x.Mode, MailDialogMode.Setup)
+            .Add(x => x.Model, model));
+
+        cut.Find("#oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-11").Input("mail.example.org");
+        cut.Render(p => p.Add(x => x.Mode, MailDialogMode.Setup).Add(x => x.Model, model));
+
+        Assert.Equal("mail.example.org",
+            cut.Find("#oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-11").GetAttribute("value"));
+        Assert.DoesNotContain("MailSetupDoesNotMoveMail", cut.Markup);
+    }
+
+    [Fact]
+    public void SetupWizard_ShowsCurrentMxWithoutAnOvhAlert()
+    {
+        _handler.SetJsonResponse("api/servers/10/mail/mx-preview?domain=example.com", new MailMxPreviewDto
+        {
+            Domain = "example.com",
+            Hosts = ["mx1.ovh.net"],
+            Verdict = MailCheckVerdict.Ok
+        });
+        var cut = Render<MailOperationDialog>(p => p
+            .Add(x => x.Mode, MailDialogMode.Setup)
+            .Add(x => x.ServerId, 10)
+            .Add(x => x.Model, new MailDialogModel { Domain = "example.com" }));
+
+        cut.FindAll("button").First(button => button.TextContent.Contains("MailCheckCurrentRouting", StringComparison.Ordinal)).Click();
+
+        cut.WaitForState(() => cut.Markup.Contains("MailCurrentMxHosts"), TimeSpan.FromSeconds(2));
+        Assert.Contains(_handler.Requests, request => request.Url.Contains("mail/mx-preview?domain=example.com", StringComparison.Ordinal));
+
+        cut.FindAll("button").First(button => button.TextContent.Contains("Next", StringComparison.Ordinal)).Click();
+        cut.FindAll("button").First(button => button.TextContent.Contains("Next", StringComparison.Ordinal)).Click();
+        Assert.DoesNotContain("MailOvhRoutingNotice", cut.Markup);
+        Assert.Contains("MailSetupSummary", cut.Markup);
+    }
+
+    [Fact]
+    public void DnsCheckDialog_ShowsObservedMxWithoutProviderWarning()
+    {
+        var cut = Render<MailDnsCheckDialog>(p => p.Add(x => x.Check, new MailDnsCheckDto
+        {
+            Domain = "example.com",
+            Records = [new MailDnsRecordCheckDto
+            {
+                Kind = MailDnsRecordKind.Mx,
+                Observed = ["mail.example.com", "mx1.ovh.net"],
+                Verdict = MailCheckVerdict.Ok
+            }]
+        }));
+
+        Assert.Contains("mail.example.com", cut.Markup);
+        Assert.Contains("mx1.ovh.net", cut.Markup);
+        Assert.DoesNotContain("MailOvhRoutingNotice", cut.Markup);
+    }
+
     // ── LoadDataAsync ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -93,7 +158,7 @@ public class ServerMailSectionRenderTests : BunitContext
         var cut = RenderSection();
         var domainLoader = typeof(ServerMailSection).GetMethod("LoadDomainsAsync", Priv)!;
         var accountLoader = typeof(ServerMailSection).GetMethod("LoadAccountsAsync", Priv)!;
-        var args = new LoadDataArgs { Skip = 0, Top = 25 };
+        var args = new GridLoadArgs { Skip = 0, Top = 25 };
 
         await cut.InvokeAsync(async () => await (Task)domainLoader.Invoke(cut.Instance, [args])!);
         await cut.InvokeAsync(async () => await (Task)accountLoader.Invoke(cut.Instance, [args])!);
@@ -217,7 +282,7 @@ public class ServerMailSectionRenderTests : BunitContext
         var method = typeof(ServerMailSection).GetMethod("ShowConfirm", Priv)!;
 
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["Delete Domain", "Are you sure?", (Func<Task>)(() => Task.CompletedTask)])!);
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
 
         Assert.Equal("Delete Domain", dialog.LastTitle);
         Assert.Equal("Are you sure?", dialog.LastConfirmMessage);
@@ -242,8 +307,7 @@ public class ServerMailSectionRenderTests : BunitContext
     [InlineData(1024 * 1024, "MB", "1")]
     public void FormatBytes_ReturnsHumanReadable(long bytes, string expectedUnit, string expectedNumber)
     {
-        var method = typeof(ServerMailSection).GetMethod("FormatBytes", StaticPriv)!;
-        var result = (string)method.Invoke(null, [bytes])!;
+        var result = ServerMailQueueTab.FormatBytes(bytes);
         Assert.Contains(expectedUnit, result);
         Assert.Contains(expectedNumber, result);
     }
@@ -254,7 +318,7 @@ public class ServerMailSectionRenderTests : BunitContext
     public void HandleTaskCompleted_DoesNotThrow()
     {
         var cut = RenderSection();
-        var ex = Record.Exception(() => cut.Instance.HandleTaskCompleted());
+        var ex = Record.Exception(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification { TaskId = 1, ServerId = 10 }));
         Assert.Null(ex);
     }
 
@@ -270,7 +334,7 @@ public class ServerMailSectionRenderTests : BunitContext
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [domain])!);
 
         var dom = (string)typeof(ServerMailSection).GetField("_dkimRotationDomain", Priv)!.GetValue(cut.Instance)!;
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
 
         Assert.Equal("example.com", dom);
         Assert.Equal(typeof(MailOperationDialog), dialog.LastComponent);

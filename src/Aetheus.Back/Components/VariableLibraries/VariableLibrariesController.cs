@@ -17,6 +17,15 @@ public class VariableLibrariesController(IVariableLibraryService service, IResou
         return Ok(await service.GetLibrariesAsync(projectId, environmentId, projectServerId, request, accessibleIds, ct));
     }
 
+    /// <summary>Recette R-210: the project names the variable libraries list's column filter offers.</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<VariableLibraryFilterValuesDto>> GetFilterValues(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.VariableLibrary, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new VariableLibraryFilterValuesDto());
+        return Ok(await service.GetFilterValuesAsync(accessibleIds, ct));
+    }
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<VariableLibraryDetailDto>> GetLibrary(int id, CancellationToken ct)
     {

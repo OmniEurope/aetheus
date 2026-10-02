@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -12,7 +9,7 @@ namespace Aetheus.Front.Tests.Shared;
 /// blocks a release, so sending the wrong scope or the wrong id silently rewrites a different rule than
 /// the one on screen.
 ///
-/// Note for anyone extending these: a RadzenTemplateForm does NOT submit from a click on its submit
+/// Note for anyone extending these: a templated form does NOT submit from a click on its submit
 /// button under bUnit. Use <c>cut.Find("form").Submit()</c>, the pattern the auth and analysis tests
 /// already use - clicking leaves Submit unfired and every assertion then passes vacuously.
 /// </summary>
@@ -47,11 +44,11 @@ public sealed class QualityGatePolicyEditorSaveTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("No cycles"), TimeSpan.FromSeconds(3));
         cut.Find("button[title='Edit']").Click();
         cut.WaitForState(() => cut.FindAll("form").Count > 0, TimeSpan.FromSeconds(3));
-        // Radzen validators read the DOM, not the pre-populated model, so the required fields have to
+        // The validators read the DOM, not the pre-populated model, so the required fields have to
         // be typed for Submit to fire at all. Same values the rule already carries.
-        cut.Find("input[name='PolicyName']").Change("No cycles");
-        cut.Find("input[name='MetricKey']").Change("architecture.cycles*");
-        cut.Find("input[name='Threshold']").Change("0");
+        cut.Find("input#PolicyName").Input("No cycles");
+        cut.Find("input#MetricKey").Input("architecture.cycles*");
+        cut.Find("input#quality-gate-threshold").Change("0");
         return cut;
     }
 
@@ -138,12 +135,12 @@ public sealed class QualityGatePolicyEditorSaveTests : BunitContext
     [Fact]
     public void AnInvalidFormSendsNothing()
     {
-        // This is the property that distinguishes Radzen's Submit from a handler wired to every
+        // This is the property that distinguishes the form's Submit from a handler wired to every
         // submit: Submit fires only when the form validates. Without it, the fix that revived this
         // form would let an incomplete rule reach the API and come back a 400.
         StubASuccessfulSave();
         var cut = RenderEditorWithFormOpen();
-        cut.Find("input[name='PolicyName']").Change(string.Empty);
+        cut.Find("input#PolicyName").Input(string.Empty);
 
         cut.Find("form").Submit();
 

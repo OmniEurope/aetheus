@@ -36,13 +36,13 @@ public sealed class MutationNotificationAuditTests
 
     private static readonly Dictionary<string, string> DelegatedFeedback = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Pages/Audit/AuditDetailDialog.razor.cs:OnInitializedAsync"] =
+        ["Components/Audit/AuditDetailDialog.razor.cs:OnInitializedAsync"] =
             "passive integrity read rendered directly in the opened detail dialog",
-        ["Pages/Servers/ServerDetailSections/ServerServicesSection.razor.cs:StartLogStreamAsync"] =
+        ["Components/Servers/ServerDetailSections/ServerServicesSection.razor.cs:StartLogStreamAsync"] =
             "opens a read-only task-log stream; it does not mutate server state",
-        ["Shared/QualityGatePolicyEditor.razor.cs:SaveRequestAsync"] =
+        ["Components/Shared/QualityGatePolicyEditor.razor.cs:SaveRequestAsync"] =
             "transport helper; SaveAsync owns success feedback",
-        ["Shared/QualityGatePolicyEditor.razor.cs:SaveBatchAsync"] =
+        ["Components/Shared/QualityGatePolicyEditor.razor.cs:SaveBatchAsync"] =
             "transport helper; preset/import callers own success feedback"
     };
 
@@ -50,17 +50,12 @@ public sealed class MutationNotificationAuditTests
     public void UserFacingMutations_HaveNotificationFeedback()
     {
         var frontDir = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front");
-        var roots = new[]
-        {
-            Path.Combine(frontDir, "Pages"),
-            Path.Combine(frontDir, "Shared")
-        };
+        var roots = RepositoryScan.PageRoots;
         var violations = new List<string>();
         var usedDelegations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mutationCount = 0;
 
-        foreach (var file in roots.SelectMany(root =>
-                     RepositoryScan.Enumerate(root, "*.razor.cs")))
+        foreach (var (_, file) in RepositoryScan.EnumerateUnion(roots, "*.razor.cs"))
         {
             var source = File.ReadAllText(file);
             var relative = Path.GetRelativePath(frontDir, file).Replace('\\', '/');

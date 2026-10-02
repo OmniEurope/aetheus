@@ -1,0 +1,8 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* Reusable tabs wrapper that mirrors the active tab in the URL (?tab=slug) so the browser
+   back/forward buttons navigate between tabs and a tab is shareable/bookmarkable. OE selects a tab by
+   its key, so every OmniTabsItem placed in <Tabs> carries Key="<its slug>". *@
+<OmniTabs Class="@CssClass" Value="@SelectedKey" ValueChanged="@OnValueChangedAsync" RenderAllPanels="@RenderAllPanels">
+    @Tabs
+</OmniTabs>

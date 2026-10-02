@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/tasks"
+
+<PageTitle>@L["Tasks"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Tasks"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("task")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="tasks" />
+    </Badges>
+</OmniPageHeader>
+
+<TaskListView />

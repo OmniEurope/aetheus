@@ -4,7 +4,6 @@ using System.Text.Json;
 using Aetheus.Back.Components.PackageRegistry;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.PackageRegistry;
 

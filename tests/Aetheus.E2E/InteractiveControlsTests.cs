@@ -25,11 +25,11 @@ public sealed class InteractiveControlsTests : E2ETestBase
 
         var projectRadio = Page.GetByRole(AriaRole.Radio, new() { Name = "Project", Exact = true });
         await Expect(projectRadio).ToBeCheckedAsync(new() { Timeout = 5000 });
-        var projectSelector = Page.Locator(".rz-dropdown");
+        var projectSelector = Page.Locator("select.omni-drop-down");
         await Expect(projectSelector).ToBeVisibleAsync(new() { Timeout = 5000 });
 
         // Click the visible radio text, not the input circle. This is the user
-        // interaction that previously had only been inferred from Radzen markup.
+        // interaction that previously had only been inferred from the markup.
         var globalText = Page.GetByText("Global", new() { Exact = true });
         await Expect(globalText).ToBeVisibleAsync();
         await globalText.ClickAsync();
@@ -57,12 +57,12 @@ public sealed class InteractiveControlsTests : E2ETestBase
         var password = Page.Locator("input[type='password']").First;
         var feedback = Page.GetByText("Password must be at least 12 characters.", new() { Exact = true });
         await Expect(password).ToBeVisibleAsync(new() { Timeout = 10000 });
-        await Expect(feedback).ToHaveClassAsync(new Regex("rz-color-secondary"));
+        await Expect(feedback).ToHaveClassAsync(new Regex("omni-u-text-muted"));
 
         await password.FillAsync("123456789012");
 
         await Expect(password).ToBeFocusedAsync();
-        await Expect(feedback).ToHaveClassAsync(new Regex("rz-color-success"), new() { Timeout = 5000 });
+        await Expect(feedback).ToHaveClassAsync(new Regex("omni-u-text-success"), new() { Timeout = 5000 });
     }
 
     [Test]
@@ -79,7 +79,7 @@ public sealed class InteractiveControlsTests : E2ETestBase
         AllowBrowserDiagnostic(new Regex(
             @"ERR_FAILED|Failed to (?:start|complete)|WebSocket.*failed|Failed to fetch",
             RegexOptions.IgnoreCase));
-        var dialog = Page.Locator(".connection-lost-mask");
+        var dialog = Page.Locator(".omni-connection-overlay");
         await Expect(dialog).ToHaveCountAsync(0);
 
         const string taskHubPattern = "**/hubs/servers**";
@@ -113,6 +113,12 @@ public sealed class InteractiveControlsTests : E2ETestBase
         finally
         {
             await Page.UnrouteAsync(taskHubPattern);
+            // A real network recovery raises `online`, and the app now listens for it to cut the
+            // current backoff step short. Raising it here is not a shortcut for the test: without
+            // it the route silently becomes reachable again, which is exactly the situation the
+            // browser reports and no code can otherwise detect. It is also the assertion that the
+            // R5 wake-up wiring exists at all - remove the listener and this test fails on time.
+            await Page.EvaluateAsync("() => window.dispatchEvent(new Event('online'))");
         }
 
         // Restoring the real SignalR route lets the initial-connect retry loop recover without
@@ -159,15 +165,29 @@ public sealed class InteractiveControlsTests : E2ETestBase
             // "element(s) not found" while nothing was broken. The probe task never terminates on
             // its own (no real agent answers it), so waiting longer cannot mask a lost event: the
             // badge is owed to us for as long as the task stays in flight.
-            await Expect(Page.Locator(".task-tracker-badge")).ToBeVisibleAsync(new() { Timeout = 45000 });
+            //
+            // That worst case no longer exists, and padding the budget was the wrong answer to it.
+            // 45s made this the only flaky test in the suite (it failed QA run 2306, 1 of 61, and
+            // graded candidate 2302 F while passing run 2288 on equivalent code) because restoring
+            // the route mid-delay cost the full clamped 30s before the next attempt even started,
+            // leaving 15s for StartAsync, JoinAllServers and SeedActiveAsync on an agent running the
+            // whole stack. The application now listens for `online` and cuts that sleep short, and
+            // the unroute above raises that event the way a real network recovery does, so the
+            // reconnect lands in seconds. The budget below covers a slow connect, not a backoff step
+            // waited out for nothing.
+            await Expect(Page.Locator(".task-tracker-count")).ToBeVisibleAsync(new() { Timeout = 30000 });
 
             // The overlay can come back once more here: SignalR backs off between reconnect
             // attempts, so the longer the hub stayed blocked the later the successful retry lands.
-            // Clicking through it failed with "connection-lost-mask intercepts pointer events".
+            // Clicking through it failed with "the connection overlay intercepts pointer events".
             // Re-asserting its absence is stricter than ignoring it - the click below still has to
             // happen on a genuinely reconnected page.
             await Expect(dialog).ToHaveCountAsync(0, new() { Timeout = 30000 });
-            await Page.Locator(".task-tracker-btn").ClickAsync();
+            // OE 1.2.0 puts the popover Id on its trigger and sets aria-controls only while the panel
+            // exists, so the closed trigger is found by its id and the link is checked once open.
+            var trackerButton = Page.Locator("button#task-tracker.task-tracker-btn");
+            await trackerButton.ClickAsync();
+            await Expect(trackerButton).ToHaveAttributeAsync("aria-controls", "task-tracker-panel");
             await Expect(Page.Locator(".task-tracker-row-name").Filter(new() { HasText = taskName }))
                 .ToBeVisibleAsync(new() { Timeout = 10000 });
         }

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -77,10 +75,16 @@ public class MailOperationExecutorTests
     }
 
     [Fact]
-    public void BuildSetupArgv_ProducesExactArgv_PasswordAbsent()
-        => Assert.Equal(
-            new[] { "-n", "/usr/local/lib/aetheus/mail-setup", "mail.example.com", "example.com", "default", "admin@example.com", "1024" },
-            MailOperationExecutor.BuildSetupArgv("mail.example.com", "example.com", "default", "admin@example.com", 1024));
+    public void SetupCommand_ProducesExactArgv_PasswordOnStdinOnly()
+    {
+        var command = MailManageCommandBuilder.Build(OperationKind.MailSetup, "example.com", ValidEnv());
+        Assert.NotNull(command);
+        Assert.Equal(
+            new[] { "-n", "/usr/local/lib/aetheus/mail-setup", "mail.example.com", "example.com", "default", "admin@example.com", "1024", "none" },
+            command.Argv);
+        Assert.DoesNotContain("SecureP@ss123!", command.Argv);
+        Assert.Equal("SecureP@ss123!\n", command.Stdin);
+    }
 
     private static Dictionary<string, string> ValidEnv() => new(StringComparer.Ordinal)
     {

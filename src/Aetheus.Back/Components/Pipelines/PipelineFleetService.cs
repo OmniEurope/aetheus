@@ -28,6 +28,15 @@ internal sealed class PipelineFleetService(
             request, organizationIds, accessiblePipelineIds, ct).ConfigureAwait(false);
     }
 
+    public async Task<PipelineFleetFilterValuesDto> GetFilterValuesAsync(
+        IReadOnlyCollection<int>? organizationIds,
+        IReadOnlyCollection<int>? accessiblePipelineIds,
+        CancellationToken ct = default) =>
+        new()
+        {
+            Templates = await fleetRepository.GetTemplateNamesAsync(organizationIds, accessiblePipelineIds, ct).ConfigureAwait(false)
+        };
+
     public async Task<PipelineFleetItemDto> GetItemAsync(int pipelineId, CancellationToken ct = default)
     {
         var row = await GetRowAsync(pipelineId, ct).ConfigureAwait(false);

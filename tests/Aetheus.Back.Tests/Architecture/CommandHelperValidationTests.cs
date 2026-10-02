@@ -5,7 +5,6 @@ using Aetheus.Back.Components.Apache;
 using Aetheus.Back.Components.Docker;
 using Aetheus.Back.Components.Mail;
 using Aetheus.Back.Components.Rkhunter;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Back.Tests.Architecture;
@@ -28,108 +27,9 @@ public class CommandHelperValidationTests
 {
     private readonly CommandValidator _validator = new(Options.Create(new AetheusAgentOptions()));
 
-    // ───────────────────────────────────────────────────────────────────
-    // Mail - service commands that pass the default allow-list
-    // ───────────────────────────────────────────────────────────────────
-
-    public static TheoryData<string, string> MailServiceCommands_Allowed => new()
-    {
-        { "StartPostfix",    MailCommandHelper.BuildServiceCommand(MailAction.StartPostfix) },
-        { "StopPostfix",     MailCommandHelper.BuildServiceCommand(MailAction.StopPostfix) },
-        { "RestartPostfix",  MailCommandHelper.BuildServiceCommand(MailAction.RestartPostfix) },
-        { "StartDovecot",    MailCommandHelper.BuildServiceCommand(MailAction.StartDovecot) },
-        { "StopDovecot",     MailCommandHelper.BuildServiceCommand(MailAction.StopDovecot) },
-        { "RestartDovecot",  MailCommandHelper.BuildServiceCommand(MailAction.RestartDovecot) },
-    };
-
-    [Theory]
-    [MemberData(nameof(MailServiceCommands_Allowed))]
-    public void MailServiceCommand_IsAllowed(string label, string command)
-    {
-        Assert.True(_validator.IsAllowed(command),
-            $"Mail service command '{label}' should pass validation but was rejected: {command}");
-    }
-
-    // ───────────────────────────────────────────────────────────────────
-    // Mail - service commands with actions not in the systemctl pattern
-    //   reload/enable/disable are not in the default allow-list for systemctl
-    // ───────────────────────────────────────────────────────────────────
-
-    public static TheoryData<string, string> MailServiceCommands_NotInPattern => new()
-    {
-        { "ReloadPostfix",  MailCommandHelper.BuildServiceCommand(MailAction.ReloadPostfix) },
-        { "ReloadDovecot",  MailCommandHelper.BuildServiceCommand(MailAction.ReloadDovecot) },
-    };
-
-    [Theory]
-    [MemberData(nameof(MailServiceCommands_NotInPattern))]
-    public void MailServiceCommand_ReloadNotInDefaultPattern(string label, string command)
-    {
-        // reload is not in the default systemctl pattern (start|stop|restart|status only)
-        Assert.False(_validator.IsAllowed(command),
-            $"Mail service command '{label}' should be rejected (reload not in default systemctl pattern): {command}");
-    }
-
-    // ───────────────────────────────────────────────────────────────────
-    // Mail - commands with shell metacharacters (executed via sudo path)
-    // ───────────────────────────────────────────────────────────────────
-
-    public static TheoryData<string, string> MailCommands_WithMetachars => new()
-    {
-        { "FlushQueue",     MailCommandHelper.BuildServiceCommand(MailAction.FlushQueue) },
-        { "ViewQueue",      MailCommandHelper.BuildServiceCommand(MailAction.ViewQueue) },
-        { "TestConfig",     MailCommandHelper.BuildServiceCommand(MailAction.TestConfig) },
-        { "GetLogs_postfix", MailCommandHelper.BuildGetLogsCommand("postfix", 100) },
-        { "GetLogs_dovecot", MailCommandHelper.BuildGetLogsCommand("dovecot", 100) },
-        // Mail full setup AND every incremental op (add/remove domain, add/delete account, add/remove alias,
-        // dkim-rotate/read, change-password) no longer build shell commands - they dispatch typed
-        // OperationKinds through the root-owned mail-setup / mail-manage helpers (S-FEAT-W8KN + the audit
-        // "dead shell action" migration). See MailOperationExecutorTests for the argv coverage.
-    };
-
-    [Theory]
-    [MemberData(nameof(MailCommands_WithMetachars))]
-    public void MailCommand_WithMetachars_IsRejected(string label, string command)
-    {
-        Assert.False(_validator.IsAllowed(command),
-            $"Mail command '{label}' contains shell metacharacters and should be rejected: {command}");
-    }
-
-    // ───────────────────────────────────────────────────────────────────
-    // Mail - SpamAssassin service commands
-    //   Only start/stop/restart match the default systemctl pattern
-    // ───────────────────────────────────────────────────────────────────
-
-    public static TheoryData<string, string> SpamAssassinCommands_Allowed => new()
-    {
-        { "start",   MailCommandHelper.BuildSpamAssassinServiceCommand("start") },
-        { "stop",    MailCommandHelper.BuildSpamAssassinServiceCommand("stop") },
-        { "restart", MailCommandHelper.BuildSpamAssassinServiceCommand("restart") },
-        { "status",  MailCommandHelper.BuildSpamAssassinServiceCommand("status") },
-    };
-
-    [Theory]
-    [MemberData(nameof(SpamAssassinCommands_Allowed))]
-    public void SpamAssassinCommand_StartStopRestart_IsAllowed(string label, string command)
-    {
-        Assert.True(_validator.IsAllowed(command),
-            $"SpamAssassin '{label}' should pass validation but was rejected: {command}");
-    }
-
-    public static TheoryData<string, string> SpamAssassinCommands_NotInPattern => new()
-    {
-        { "reload",  MailCommandHelper.BuildSpamAssassinServiceCommand("reload") },
-        { "enable",  MailCommandHelper.BuildSpamAssassinServiceCommand("enable") },
-        { "disable", MailCommandHelper.BuildSpamAssassinServiceCommand("disable") },
-    };
-
-    [Theory]
-    [MemberData(nameof(SpamAssassinCommands_NotInPattern))]
-    public void SpamAssassinCommand_ReloadEnableDisable_NotInDefaultPattern(string label, string command)
-    {
-        Assert.False(_validator.IsAllowed(command),
-            $"SpamAssassin '{label}' should be rejected (not in default systemctl pattern): {command}");
-    }
+    // Mail no longer has any shell-string builders (PLAN-005): service control, queue, configuration
+    // check, logs and spam-filter control dispatch typed OperationKinds through the root-owned
+    // mail-manage helper. The argv coverage lives in MailManageCommandBuilderTests (agent).
 
     // Portsentry no longer has any shell-string builders: it dispatches exclusively via typed
     // OperationKind ops (setup / unblock / service / logs / status), covered by
@@ -200,28 +100,5 @@ public class CommandHelperValidationTests
         var command = DockerCommandHelper.EncodeBase64Shell(content);
         Assert.False(_validator.IsAllowed(command),
             $"DockerCommandHelper.EncodeBase64Shell output contains a pipe and must be rejected by the default validator: {command}");
-    }
-
-    // ───────────────────────────────────────────────────────────────────
-    // Cross-cutting: command helpers must not produce empty/null strings
-    // ───────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void AllBuildMethods_ProduceNonEmptyStrings()
-    {
-        var commands = new (string Label, string Command)[]
-        {
-            ("Mail.StartPostfix",        MailCommandHelper.BuildServiceCommand(MailAction.StartPostfix)),
-            ("Mail.GetLogs",             MailCommandHelper.BuildGetLogsCommand("postfix", 50)),
-            // Remove/delete/dkim-read builders were removed (typed ops via mail-manage) - covered by
-            // MailOperationExecutorTests / MailServiceTests instead.
-            ("Mail.SpamAssassin.start",  MailCommandHelper.BuildSpamAssassinServiceCommand("start")),
-        };
-
-        foreach (var (label, command) in commands)
-        {
-            Assert.False(string.IsNullOrWhiteSpace(command),
-                $"{label} produced a null/empty command string");
-        }
     }
 }

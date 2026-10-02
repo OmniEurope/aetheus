@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Audit;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 
@@ -61,6 +60,18 @@ public class AuditControllerTests
         await _sut.GetAuditLogs(page: 2, pageSize: 25, search: "q", action: "Created", entityType: "Server", dateFrom: from, dateTo: to, ct: TestContext.Current.CancellationToken);
 
         await _serviceMock.Received(1).GetLogsPagedAsync(2, 25, "q", "Created", "Server", null, from, to, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetAuditLogs_PassesTheColumnFilters_ThroughToTheService()
+    {
+        // Recette R-238: the grid's header filters travel beside the typed parameters.
+        List<GridFilter> filters = [new() { Field = "Timestamp", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-01T08:00:00Z" }];
+
+        await _sut.GetAuditLogs(ct: TestContext.Current.CancellationToken, filters: filters);
+
+        await _serviceMock.Received(1).GetLogsPagedAsync(1, 50, null, null, null, null, null, null, TestContext.Current.CancellationToken,
+            null, true, Arg.Is<IReadOnlyList<GridFilter>?>(received => received != null && received.Single().Field == "Timestamp"));
     }
 
     [Fact]

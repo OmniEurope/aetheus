@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -458,6 +456,39 @@ public class PipelineTemplateServiceTests
         var resolved = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(result);
         Assert.Equal(3, resolved.Parameters.Count);
         Assert.Equal("child-value", resolved.Parameters.Single(p => p.Name == "shared").Default);
+    }
+
+    /// <summary>
+    /// PLAN-003 lot 30: the template's <c>requires:</c> reaches the resolved pipeline, joined with the
+    /// pipeline's own, so the launch preflight checks what the template needs. A wizard pipeline
+    /// (<c>extends:</c> only) used to resolve with no requirement at all.
+    /// </summary>
+    [Fact]
+    public async Task ResolveTemplateAsync_Extends_JoinsTheTemplateRequiresWithThePipelines()
+    {
+        _repoMock.FindTemplateByNameAsync("base", 1, Arg.Any<CancellationToken>()).Returns(new PipelineTemplate
+        {
+            Name = "base",
+            YamlContent = """
+                name: base
+                requires:
+                  libraries: [app-host]
+                  vaults: [app-secrets]
+                stages: []
+                """
+        });
+
+        var onlyExtends = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(
+            await _sut.ResolveTemplateAsync("name: app\nextends: base\n", ct: TestContext.Current.CancellationToken) ?? string.Empty);
+        Assert.Equal(["app-host"], onlyExtends.Requires!.Libraries);
+        Assert.Equal(["app-secrets"], onlyExtends.Requires.Vaults);
+
+        var withOwn = YamlParsingHelper.Deserializer.Deserialize<PipelineYamlDefinition>(
+            await _sut.ResolveTemplateAsync(
+                "name: app\nextends: base\nrequires:\n  libraries: [APP-HOST, app-extra]\n",
+                ct: TestContext.Current.CancellationToken) ?? string.Empty);
+        Assert.Equal(["app-host", "app-extra"], withOwn.Requires!.Libraries);
+        Assert.Equal(["app-secrets"], withOwn.Requires.Vaults);
     }
 
     [Fact]

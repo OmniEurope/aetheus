@@ -38,6 +38,12 @@ public static class SarifAnalysisParser
 
                 foreach (var result in results.EnumerateArray())
                 {
+                    // A suppressed result is one somebody already decided about, in the source, with
+                    // a written justification. Reporting it again as a finding turns every accepted
+                    // exception back into an open one at the next run, and a gate that keeps raising
+                    // what has already been answered is a gate people stop reading.
+                    if (IsSuppressed(result)) continue;
+
                     if (parsed.Count >= MaxFindings)
                         throw new BadRequestException($"SARIF report exceeds the maximum of {MaxFindings} findings.");
 
@@ -47,6 +53,33 @@ public static class SarifAnalysisParser
 
             return parsed;
         }
+    }
+
+    /// <summary>
+    /// SARIF 2.1.0 §3.27.23: a result carrying a non-empty <c>suppressions</c> array has been
+    /// suppressed. An EMPTY array means the opposite, that the tool looked and found no suppression,
+    /// so it must not be read as one.
+    ///
+    /// Only <c>accepted</c> and absent states count as suppressed. A suppression the tool marked
+    /// <c>rejected</c> or <c>underReview</c> is still an open question, and hiding it would answer
+    /// that question on the tool's behalf.
+    /// </summary>
+    private static bool IsSuppressed(JsonElement result)
+    {
+        if (!result.TryGetProperty("suppressions", out var suppressions)
+            || suppressions.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var suppression in suppressions.EnumerateArray())
+        {
+            if (suppression.ValueKind != JsonValueKind.Object) continue;
+            var state = ReadString(suppression, "state");
+            if (state is null
+                || state.Equals("accepted", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private static ParsedAnalysisFinding ParseFinding(
@@ -218,6 +251,9 @@ public static class SarifAnalysisParser
         return new FindingLocation(filePath, startLine, endLine, symbol);
     }
 
+    /// <summary>Where the scanner containers mount the repository they analyse.</summary>
+    private const string ScannerWorkspaceMount = "/src/";
+
     private static string? NormalizePath(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -226,6 +262,13 @@ public static class SarifAnalysisParser
             decoded = decoded[7..];
         if (decoded.Length >= 3 && char.IsLetter(decoded[0]) && decoded[1] == ':' && decoded[2] == '/')
             decoded = decoded[3..];
+        // Recette R-504: a scanner run in a container sees the repository mounted on /src
+        // (ScannerContainerProcessBuilder), so the absolute path it reports, /src/tests/x.py, is
+        // tests/x.py in the repository. Kept as it was, it read "src/tests/x.py", a file that does not
+        // exist, and the link to it fell back on the repository root. A relative path is left alone:
+        // "src/Aetheus.Back/X.cs" is a real folder of the repository.
+        if (decoded.StartsWith(ScannerWorkspaceMount, StringComparison.Ordinal))
+            decoded = decoded[ScannerWorkspaceMount.Length..];
         decoded = decoded.TrimStart('/');
         var segments = decoded.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(segment => segment != "." && segment != "..")

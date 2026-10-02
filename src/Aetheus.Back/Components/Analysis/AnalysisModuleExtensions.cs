@@ -19,7 +19,12 @@ public static class AnalysisModuleExtensions
             .ValidateOnStart();
         services.AddScoped<IAnalysisRepository, AnalysisRepository>();
         services.AddScoped<IAnalysisService, AnalysisService>();
-        services.AddScoped<Aetheus.Back.Components.Projects.IProjectAnalysisGradeReader, ProjectAnalysisGradeRepository>();
+        // Recette R-485: the run result reader, its stamp repository and its bounded result cache.
+        services.AddScoped<IAnalysisRunResultRepository, AnalysisRunResultRepository>();
+        services.AddScoped<IAnalysisRunResultService, AnalysisRunResultService>();
+        services.AddSingleton<AnalysisRunResultCache>();
+        services.AddScoped<IAnalysisFindingDecisionService, AnalysisFindingDecisionService>();
+        services.AddScoped<Aetheus.Back.Components.Analysis.IProjectAnalysisGradeReader, ProjectAnalysisGradeRepository>();
         services.AddScoped<AnalysisPolicyEngine>();
         services.AddScoped<DependencyTrackOutboxRepository>();
         services.AddScoped<IDependencyTrackOutbox, DependencyTrackOutbox>();

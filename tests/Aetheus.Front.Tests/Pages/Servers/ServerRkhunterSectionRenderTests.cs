@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -61,10 +58,14 @@ public class ServerRkhunterSectionRenderTests : BunitContext
     // ── Render ────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Renders_InstalledState_ShowsRkhunterHeading()
+    public void Renders_InstalledState_ShowsInstalledBadgeAndScanActions_WithoutTitleHeading()
     {
         var cut = RenderInstalled();
-        Assert.Contains("RKHunter", cut.Markup);
+        Assert.Contains(cut.FindAll(".omni-badge"), badge => badge.TextContent.Trim() == "Installed");
+        Assert.Contains("RunScan", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("ViewLogs", cut.Markup, StringComparison.Ordinal);
+        // The page header already shows the title: the section no longer repeats it.
+        Assert.DoesNotContain("RKHunter", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -75,10 +76,12 @@ public class ServerRkhunterSectionRenderTests : BunitContext
     }
 
     [Fact]
-    public void Renders_NotInstalled_ShowsHeading()
+    public void Renders_NotInstalled_ShowsNotInstalledBadgeAndSetupButton_WithoutTitleHeading()
     {
         var cut = RenderNotInstalled();
-        Assert.Contains("RKHunter", cut.Markup);
+        Assert.Contains("NotInstalled", cut.Markup, StringComparison.Ordinal);
+        Assert.Contains("RkhunterSetup", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("RKHunter", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -271,6 +274,38 @@ public class ServerRkhunterSectionRenderTests : BunitContext
         Assert.Null(ex);
     }
 
+    // ── R-181: realtime instead of Refresh ────────────────────────────────────
+
+    [Fact]
+    public void R181_NoRefreshButtons_AndTheHistoryIsLoadedWithoutAClick()
+    {
+        var cut = RenderInstalled();
+
+        Assert.DoesNotContain(cut.FindAll("button"), b => b.TextContent.Contains("Refresh", StringComparison.Ordinal));
+        // The history used to stay empty until its Refresh button was clicked.
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/servers/50/rkhunter/history", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task R181_AHeartbeat_ReloadsWarningsAndHistory_ACompletedTaskOfTheFeedDoesNot()
+    {
+        var cut = RenderInstalled();
+        _handler.SetJsonResponse("api/servers/50/rkhunter/warnings",
+            new List<RkhunterWarningDto> { new() { Category = "files", Detail = "pushed warning", Severity = "warning" } });
+        int Reads() => _handler.Requests.Count(r => r.Url.Contains("api/servers/50/rkhunter/", StringComparison.Ordinal)
+            && (r.Url.Contains("/warnings", StringComparison.Ordinal) || r.Url.Contains("/history", StringComparison.Ordinal)));
+        var before = Reads();
+
+        // Heartbeat trigger only: RKHunter completions already arrive through HandleTaskCompletedAsync.
+        await cut.Instance.LiveFeed!.OnTaskCompletedAsync(new TaskCompletedNotification { TaskId = 3, ServerId = 50 });
+        Assert.Equal(before, Reads());
+
+        await cut.Instance.LiveFeed.OnHeartbeatAsync(50);
+
+        Assert.Equal(before + 2, Reads());
+        Assert.Equal("pushed warning", Assert.Single(cut.Instance.Warnings).Detail);
+    }
+
     // ── Static helpers ────────────────────────────────────────────────────────
 
     [Theory]
@@ -294,12 +329,12 @@ public class ServerRkhunterSectionRenderTests : BunitContext
     }
 
     [Theory]
-    [InlineData("clean", BadgeStyle.Success)]
-    [InlineData("warning", BadgeStyle.Warning)]
-    [InlineData("other", BadgeStyle.Light)]
-    public void GetScanBadgeStyle_ReturnsCorrectStyle(string status, BadgeStyle expected)
+    [InlineData("clean", OmniTone.Success)]
+    [InlineData("warning", OmniTone.Warning)]
+    [InlineData("other", OmniTone.Neutral)]
+    public void GetScanBadgeStyle_ReturnsCorrectStyle(string status, OmniTone expected)
     {
         var method = typeof(ServerRkhunterSection).GetMethod("GetScanBadgeStyle", StaticPriv)!;
-        Assert.Equal(expected, (BadgeStyle)method.Invoke(null, [status])!);
+        Assert.Equal(expected, (OmniTone)method.Invoke(null, [status])!);
     }
 }

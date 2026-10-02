@@ -1,0 +1,46 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mb-md">
+        <OmniTextBox aria-label="@L["PackageName"]" @bind-Value="_newPackage" Placeholder="@L["PackageName"]" Class="omni-u-grow" />
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@AddAsync" Disabled="@string.IsNullOrWhiteSpace(_newPackage)" Class="@(_adding ? "btn-busy" : null)" Busy="@(_adding)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@SyncAsync" Class="@(_syncing ? "btn-busy" : null)" Busy="@(_syncing)"><OmniIcon Name="OmniIconName.Sync" /> <span>@L["SyncNow"]</span></OmniButton>
+    </OmniStack>
+
+    @if (_lastSync is not null)
+    {
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-mb-sm">
+            @string.Format(L["PackageFeedSyncSummary"], _lastSync.Synced, _lastSync.Failed, _lastSync.Unsupported)
+            @if (!string.IsNullOrEmpty(_lastSync.Message)) { <span> - @_lastSync.Message</span> }
+        </OmniText>
+    }
+
+    <AetheusDataGrid @ref="_grid" IsLoading="@_loading" Data="@_packages" TItem="PackageEntryDto" KeyProperty="Id" Virtualize="true" NewRowHighlight="@NewRowHighlight">
+        <EmptyTemplate>
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-p-lg">@L["NoTrackedPackages"]</OmniText>
+        </EmptyTemplate>
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="PackageEntryDto" Property="Name" Title="@L["PackageName"]" Filterable="true" />
+            <OmniDataGridColumn TItem="PackageEntryDto" Property="LatestVersion" Title="@L["LatestVersion"]" Width="8.75rem" Filterable="true">
+                <Template Context="p">
+                    @if (string.IsNullOrEmpty(p.LatestVersion))
+                    {
+                        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["NotSyncedYet"]</OmniText>
+                    }
+                    else
+                    {
+                        <span class="text-mono">@p.LatestVersion</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PackageEntryDto" Property="LastSyncedAt" Title="@L["LastFetched"]" Width="10rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+                <Template Context="p">@(p.LastSyncedAt.Year < 2000 ? "-" : p.LastSyncedAt.ToString("g"))</Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PackageEntryDto" Title="" Width="3.5rem" Sortable="false" TextAlign="OmniDataGridTextAlign.Center">
+                <Template Context="p">
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RemoveAsync(p))" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+
+    <DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

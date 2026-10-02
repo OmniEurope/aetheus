@@ -2,6 +2,16 @@
    "$schema": "https://alirezanet.github.io/Husky.Net/schema.json",
    "tasks": [
       {
+         "name": "staged-whitespace",
+         "group": "pre-commit",
+         "command": "pwsh",
+         "args": [
+            "-NoProfile",
+            "-File",
+            "scripts/check-staged-whitespace.ps1"
+         ]
+      },
+      {
          "name": "build",
          "group": "pre-commit",
          "command": "dotnet",
@@ -10,6 +20,8 @@
             "-c",
             "Release",
             "--warnaserror",
+            "-p:HUSKY=0",
+            "-m:1",
             "-v",
             "q"
          ]
@@ -40,10 +52,9 @@
          "command": "dotnet",
          "args": [
             "test",
+            "--project",
             "tests/Aetheus.Back.Tests/Aetheus.Back.Tests.csproj",
-            "-v",
-            "q",
-            "--nologo"
+            "--no-progress"
          ]
       },
       {
@@ -52,10 +63,9 @@
          "command": "dotnet",
          "args": [
             "test",
+            "--project",
             "tests/Aetheus.Agent.Core.Tests/Aetheus.Agent.Core.Tests.csproj",
-            "-v",
-            "q",
-            "--nologo"
+            "--no-progress"
          ]
       },
       {
@@ -64,10 +74,9 @@
          "command": "dotnet",
          "args": [
             "test",
+            "--project",
             "tests/Aetheus.Front.Tests/Aetheus.Front.Tests.csproj",
-            "-v",
-            "q",
-            "--nologo"
+            "--no-progress"
          ]
       },
       {
@@ -76,10 +85,9 @@
          "command": "dotnet",
          "args": [
             "test",
+            "--project",
             "tests/Aetheus.Analyzers.Tests/Aetheus.Analyzers.Tests.csproj",
-            "-v",
-            "q",
-            "--nologo"
+            "--no-progress"
          ]
       }
    ]

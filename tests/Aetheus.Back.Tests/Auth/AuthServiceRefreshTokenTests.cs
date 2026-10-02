@@ -2,6 +2,7 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Organizations;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
@@ -31,6 +32,9 @@ public class AuthServiceRefreshTokenTests
             Substitute.For<IMemoryCache>(), Substitute.For<IOrganizationService>(),
             Substitute.For<ITotpService>(), TimeProvider.System,
             Substitute.For<IHttpContextAccessor>(), Substitute.For<Aetheus.Back.Services.IAdminChangeNotifier>(), Substitute.For<ILogger<AuthService>>());
+
+        // The revoke is a compare-and-set (R-072): by default this request is the one that wins it.
+        _repo.RevokeRefreshTokenAsync(Arg.Any<int>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(true);
     }
 
     private static User ActiveUser(int id = 1) =>
@@ -136,5 +140,77 @@ public class AuthServiceRefreshTokenTests
         Assert.False(string.IsNullOrEmpty(result.Token));
         // Grace re-issue does NOT mint a new refresh token.
         await _repo.DidNotReceive().AddRefreshTokenAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// R-072: two requests read the same active token, and the other one revoked it first. The loser
+    /// must not fail (it used to end in a 500) nor fork the chain: it retires the replacement it minted
+    /// and is answered like a request arriving inside the grace window, an access token only.
+    /// </summary>
+    [Fact]
+    public async Task RefreshToken_LostConcurrentRotation_ReissuesAccessTokenOnly()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Stored(new RefreshToken { Id = 30, UserId = 1, ExpiresAt = DateTime.UtcNow.AddDays(1), User = ActiveUser() });
+        _repo.RevokeRefreshTokenAsync(30, Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(false);
+        _repo.FindRefreshTokenStateAsync(30, Arg.Any<CancellationToken>())
+            .Returns(new RefreshToken { Id = 30, UserId = 1, RevokedAt = DateTime.UtcNow, ReplacedById = 31 });
+
+        var outcome = await _sut.RefreshTokenWithReasonAsync("plaintext", ct);
+
+        Assert.Null(outcome.RejectionCode);
+        Assert.False(string.IsNullOrEmpty(outcome.Response!.Token));
+        Assert.Null(outcome.Response.RefreshToken);
+        // The replacement minted by the loser (Id 0 under the mock) is revoked, never handed out.
+        await _repo.Received(1).RevokeRefreshTokenAsync(0, null, Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().RevokeAllUserRefreshTokensAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().DeleteExpiredRefreshTokensAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// R-072: when what beat this request was a revocation without replacement (a logout), the reuse
+    /// keeps the existing replay rule: the chain is revoked and the refusal names the replay.
+    /// </summary>
+    [Fact]
+    public async Task RefreshToken_LostToARevocationWithoutReplacement_IsTreatedAsReplay()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Stored(new RefreshToken { Id = 32, UserId = 7, ExpiresAt = DateTime.UtcNow.AddDays(1), User = ActiveUser(7) });
+        _repo.RevokeRefreshTokenAsync(32, Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(false);
+        _repo.FindRefreshTokenStateAsync(32, Arg.Any<CancellationToken>())
+            .Returns(new RefreshToken { Id = 32, UserId = 7, RevokedAt = DateTime.UtcNow });
+
+        var outcome = await _sut.RefreshTokenWithReasonAsync("plaintext", ct);
+
+        Assert.Null(outcome.Response);
+        Assert.Equal(RefreshRejectionCodes.Replay, outcome.RejectionCode);
+        await _repo.Received(1).RevokeAllUserRefreshTokensAsync(7, Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// PLAN-005 lot 9 / D48: each of the refusals has its own code, so a session that ended can say
+    /// which one ended it; a success carries none.
+    /// </summary>
+    [Fact]
+    public async Task RefreshTokenWithReason_NamesEachRefusal()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        _repo.FindRefreshTokenByHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((RefreshToken?)null);
+        Assert.Equal(RefreshRejectionCodes.UnknownToken, (await _sut.RefreshTokenWithReasonAsync("x", ct)).RejectionCode);
+
+        Stored(new RefreshToken { Id = 20, UserId = 5, ExpiresAt = DateTime.UtcNow.AddDays(1), RevokedAt = DateTime.UtcNow.AddHours(-1), User = ActiveUser(5) });
+        Assert.Equal(RefreshRejectionCodes.Replay, (await _sut.RefreshTokenWithReasonAsync("x", ct)).RejectionCode);
+
+        Stored(new RefreshToken { Id = 21, UserId = 1, ExpiresAt = DateTime.UtcNow.AddDays(-1), User = ActiveUser() });
+        Assert.Equal(RefreshRejectionCodes.Expired, (await _sut.RefreshTokenWithReasonAsync("x", ct)).RejectionCode);
+
+        Stored(new RefreshToken { Id = 22, UserId = 1, ExpiresAt = DateTime.UtcNow.AddDays(1), User = new User { Id = 1, Username = "bob", IsActive = false, UserRoles = [] } });
+        Assert.Equal(RefreshRejectionCodes.UserInactive, (await _sut.RefreshTokenWithReasonAsync("x", ct)).RejectionCode);
+
+        Stored(new RefreshToken { Id = 23, UserId = 1, ExpiresAt = DateTime.UtcNow.AddDays(1), User = ActiveUser() });
+        var success = await _sut.RefreshTokenWithReasonAsync("x", ct);
+        Assert.NotNull(success.Response);
+        Assert.Null(success.RejectionCode);
     }
 }

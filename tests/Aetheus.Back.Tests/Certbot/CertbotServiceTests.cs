@@ -3,8 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Certbot;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -56,6 +54,19 @@ public class CertbotServiceTests
 
         Assert.Single(result);
         Assert.Empty(result[0].Domains);
+    }
+
+    [Theory]
+    [InlineData(CertbotAction.Normalize, OperationKind.CertbotNormalize)]
+    [InlineData(CertbotAction.RenewalCheck, OperationKind.CertbotRenewalCheck)]
+    public async Task ExecuteActionAsync_ConventionActions_QueueTargetlessOperations(CertbotAction action, OperationKind operation)
+    {
+        await _sut.ExecuteActionAsync(1, new CertbotActionRequest { Action = action }, ct: TestContext.Current.CancellationToken);
+
+        await _repoMock.Received(1).AddTaskAsync(Arg.Is<ServerTask>(t =>
+            t.ServerId == 1 && t.Executor == ExecutorType.Operation &&
+            t.Operation == operation && t.Command == "-" && t.Status == TaskExecutionStatus.Pending),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -240,7 +240,7 @@ public class ServerDetailModuleMappingTests
         Id = 1,
         Name = "test",
         Hostname = "test.local",
-        Status = Aetheus.Shared.Enums.ServerStatus.Online,
+        Status = Aetheus.Shared.Components.Servers.ServerStatus.Online,
         Tags = "[]",
         CreatedAt = DateTime.UtcNow
     };

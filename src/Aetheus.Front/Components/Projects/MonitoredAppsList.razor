@@ -1,0 +1,92 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Projects
+@* ADR-021 phase 1: monitored-apps (availability) list for a project. *@
+<OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-md">
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-0">@L["MonitoredApps"]</OmniHeading>
+    @if (_canWrite)
+    {
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenCreateDialogAsync"><OmniIcon Name="OmniIconName.Add" /> <span>@L["AddMonitoredApp"]</span></OmniButton>
+    }
+</OmniRow>
+
+<AetheusDataGrid @ref="_grid" Data="@_apps" TItem="MonitoredAppDto" PageSize="20" Virtualize="@(_apps.Count > 20)"
+                IsLoading="@_loading" EmptyText="@L["NoMonitoredApps"]">
+    <EmptyTemplate>
+        <EmptyState Icon="monitor_heart" Title="@L["NoMonitoredApps"]" Description="@L["EmptyMonitoredAppsHint"]">
+            <ActionContent>
+                @if (_canWrite)
+                {
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenCreateDialogAsync"><OmniIcon Name="OmniIconName.Add" /> <span>@L["AddMonitoredApp"]</span></OmniButton>
+                }
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
+    <Columns>
+        @* Recette R-210: the status column reads CurrentStatus, so its filter lists the health states. *@
+        <OmniDataGridColumn Frozen="true" TItem="MonitoredAppDto" Property="CurrentStatus" Title="@L["Status"]" Width="160px" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText" >
+            <Template Context="app">
+                @if (app.CurrentStatus == AppHealthStatus.Unknown && app.LastCheckedAt is null)
+                {
+                    <OmniBadge Tone="OmniTone.Neutral" Fill="OmniFill.Outline">@L["AppHealthNeverProbed"]</OmniBadge>
+                }
+                else
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@MonitoredAppsStatusGrid.HealthBadge(app.CurrentStatus)">@StatusLabel(app.CurrentStatus)</OmniBadge>
+                }
+                @if (app.IngestDroppedCount > 0)
+                {
+                    <span title="@L["AppThrottledHint"]" class="omni-u-ms-xs">
+                        <OmniBadge Tone="OmniTone.Warning" Fill="OmniFill.Outline">@L["AppThrottled"]</OmniBadge>
+                    </span>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="MonitoredAppDto" Property="Name" Title="@L["Name"]" Filterable="true" >
+            <Template Context="app">
+                @* R-467: the name opens this page's telemetry on that application, not a second page. *@
+                <OmniLink Href="@($"/projects/{ProjectId}/monitoring?app={app.Id}")">@app.Name</OmniLink>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="MonitoredAppDto" Property="ProbeUrl" Title="@L["ProbeUrl"]" Filterable="true" >
+            <Template Context="app">
+                <span class="omni-u-truncate">@(string.IsNullOrEmpty(app.ProbeUrl) ? L["NotAvailable"].Value : app.ProbeUrl)</span>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="MonitoredAppDto" Key="HostingServer" Value="@ServerValue" Title="@L["HostingServer"]" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" >
+            <Template Context="app">
+                @if (MonitoredAppServerLabel.ServerId(app) is { } serverId)
+                {
+                    <OmniLink Href="@($"/servers/{serverId}/overview")">@FormatServer(app)</OmniLink>
+                }
+                else
+                {
+                    @FormatServer(app)
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="MonitoredAppDto" Title="@L["Uptime24h"]" Width="150px" Sortable="false" Filterable="false" >
+            <Template Context="app">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <AvailabilitySparkline Samples="@SamplesFor(app.Id)" />
+                    <span>@FormatUptime(app.Uptime24h)</span>
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="MonitoredAppDto" Title="@L["Uptime7d"]" Width="110px" Sortable="false" Filterable="false" >
+            <Template Context="app">@FormatUptime(app.Uptime7d)</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="MonitoredAppDto" Property="LastResponseTimeMs" Title="@L["ResponseTime"]" Width="120px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+            <Template Context="app">@(app.LastResponseTimeMs is { } ms ? $"{ms} ms" : L["NotAvailable"].Value)</Template>
+        </OmniDataGridColumn>
+        @if (_canWrite)
+        {
+            <OmniDataGridColumn TItem="MonitoredAppDto" Title="@L["Actions"]" Width="110px" Sortable="false" Filterable="false">
+                <Template Context="app">
+                    @* R-505 (2026-09-30): Edit is the main action of a monitored application's row, blue. *@
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenEditDialogAsync(app))" Class="omni-u-me-xs" title="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteAppAsync(app))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                </Template>
+            </OmniDataGridColumn>
+        }
+    </Columns>
+</AetheusDataGrid>

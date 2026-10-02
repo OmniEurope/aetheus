@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Vaults;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Time.Testing;
@@ -14,6 +13,7 @@ namespace Aetheus.Back.Tests.AppMonitoring;
 
 public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
 {
+    private readonly string _databaseName = Guid.NewGuid().ToString();
     private readonly AppDbContext _db;
     private readonly IVaultService _vaults = Substitute.For<IVaultService>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
@@ -25,8 +25,9 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
     public AppWebAnalyticsConfigurationServiceTests()
     {
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseInMemoryDatabase(_databaseName)
             .Options);
+        _db.Projects.Add(new Project { Id = 3, Name = "Portfolio", OrganizationId = 1 });
         _db.MonitoredApps.Add(new MonitoredApp
         {
             Id = 7,
@@ -35,10 +36,12 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
             Enabled = true
         });
         _db.SaveChanges();
+        _vaults.GetVaultsAsync(3, null, null, Arg.Any<PaginationRequest>(), null, Arg.Any<CancellationToken>())
+            .Returns(new PaginatedResult<VaultDto> { Items = [], TotalCount = 0 });
         _vaults.CreateVaultAsync(Arg.Any<CreateVaultRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new VaultDto { Id = 42, Name = "aetheus-web-analytics-7", ProjectId = 3 });
+            .Returns(new VaultDto { Id = 42, Name = "portfolio.analytics", ProjectId = 3 });
         _vaults.CreateSecretAsync(42, Arg.Any<CreateVaultSecretRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new VaultSecretDto { Id = 8, Key = AppWebAnalyticsConfigurationService.SecretKey });
+            .Returns(new VaultSecretDto { Id = 8, Key = AppWebAnalyticsConfigurationService.SecretKeyFor(7) });
         _service = new AppWebAnalyticsConfigurationService(
             new AppMonitoringRepository(_db),
             _vaults,
@@ -48,7 +51,7 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Configure_CreatesPerApplicationVaultAndPersistsOnlyMetadata()
+    public async Task Configure_CreatesTheProjectVaultWithOneKeyForThisAppAndPersistsOnlyMetadata()
     {
         var configured = await _service.ConfigureAsync(7, new ConfigureAppWebAnalyticsRequest
         {
@@ -63,7 +66,10 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
         Assert.Equal(["https://www.example.com"], configured.AllowedOrigins);
         var app = await _db.MonitoredApps.AsNoTracking()
             .SingleAsync(TestContext.Current.CancellationToken);
-        Assert.Equal("aetheus-web-analytics-7", app.AnalyticsVaultName);
+        Assert.Equal("portfolio.analytics", app.AnalyticsVaultName);
+        await _vaults.Received(1).CreateVaultAsync(
+            Arg.Is<CreateVaultRequest>(request => request.Name == "portfolio.analytics" && request.ProjectId == 3),
+            Arg.Any<CancellationToken>());
         Assert.Equal(1, app.AnalyticsPseudonymKeyVersion);
         Assert.DoesNotContain(
             AppWebAnalyticsConfigurationService.SecretKey,
@@ -73,7 +79,7 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
         await _vaults.Received(1).CreateSecretAsync(
             42,
             Arg.Is<CreateVaultSecretRequest>(request =>
-                request.Key == AppWebAnalyticsConfigurationService.SecretKey
+                request.Key == AppWebAnalyticsConfigurationService.SecretKeyFor(7)
                 && Convert.FromBase64String(request.Value).Length == 32),
             Arg.Any<CancellationToken>());
         await _audit.Received(1).LogAsync(
@@ -243,14 +249,14 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
         _vaults.GetVaultsAsync(3, null, null, Arg.Any<PaginationRequest>(), null, Arg.Any<CancellationToken>())
             .Returns(new PaginatedResult<VaultDto>
             {
-                Items = [new VaultDto { Id = 42, Name = "aetheus-web-analytics-7" }],
+                Items = [new VaultDto { Id = 42, Name = "portfolio.analytics" }],
                 TotalCount = 1
             });
         _vaults.GetVaultDetailAsync(42, Arg.Any<CancellationToken>())
             .Returns(new VaultDetailDto
             {
                 Id = 42,
-                Name = "aetheus-web-analytics-7",
+                Name = "portfolio.analytics",
                 Secrets = [new VaultSecretDto { Id = 8, Key = AppWebAnalyticsConfigurationService.SecretKey }]
             });
         _vaults.RotateSecretAsync(42, 8, Arg.Any<RotateVaultSecretRequest>(), Arg.Any<CancellationToken>())
@@ -271,6 +277,100 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
             Arg.Any<List<string>>(),
             3,
             Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>PLAN-003 2.1: a second app of the same project joins the existing vault instead of
+    /// creating its own, and a failure then removes only the key it added.</summary>
+    [Fact]
+    public async Task Configure_ASecondAppOfTheProject_AddsItsKeyToTheExistingVault()
+    {
+        _vaults.GetVaultsAsync(3, null, null, Arg.Any<PaginationRequest>(), null, Arg.Any<CancellationToken>())
+            .Returns(new PaginatedResult<VaultDto>
+            {
+                Items = [new VaultDto { Id = 50, Name = "portfolio.analytics", ProjectId = 3 }],
+                TotalCount = 1
+            });
+        _vaults.GetVaultDetailAsync(50, Arg.Any<CancellationToken>())
+            .Returns(new VaultDetailDto
+            {
+                Id = 50,
+                Name = "portfolio.analytics",
+                Secrets = [new VaultSecretDto { Id = 1, Key = AppWebAnalyticsConfigurationService.SecretKeyFor(6) }]
+            });
+        _vaults.CreateSecretAsync(50, Arg.Any<CreateVaultSecretRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new VaultSecretDto { Id = 9, Key = AppWebAnalyticsConfigurationService.SecretKeyFor(7) });
+
+        await _service.ConfigureAsync(7, new ConfigureAppWebAnalyticsRequest
+        {
+            Enabled = true,
+            SiteId = "portfolio-prod",
+            AllowedOrigins = ["https://www.example.com"]
+        }, TestContext.Current.CancellationToken);
+
+        await _vaults.DidNotReceive().CreateVaultAsync(Arg.Any<CreateVaultRequest>(), Arg.Any<CancellationToken>());
+        await _vaults.Received(1).CreateSecretAsync(
+            50,
+            Arg.Is<CreateVaultSecretRequest>(request => request.Key == AppWebAnalyticsConfigurationService.SecretKeyFor(7)),
+            Arg.Any<CancellationToken>());
+        var app = await _db.MonitoredApps.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("portfolio.analytics", app.AnalyticsVaultName);
+    }
+
+    [Fact]
+    public async Task Configure_SaveFailureWithASharedVault_RemovesOnlyTheKeyItAdded()
+    {
+        _vaults.GetVaultsAsync(3, null, null, Arg.Any<PaginationRequest>(), null, Arg.Any<CancellationToken>())
+            .Returns(new PaginatedResult<VaultDto>
+            {
+                Items = [new VaultDto { Id = 50, Name = "portfolio.analytics", ProjectId = 3 }],
+                TotalCount = 1
+            });
+        _vaults.GetVaultDetailAsync(50, Arg.Any<CancellationToken>())
+            .Returns(new VaultDetailDto { Id = 50, Name = "portfolio.analytics", Secrets = [] });
+        _vaults.CreateSecretAsync(50, Arg.Any<CreateVaultSecretRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new VaultSecretDto { Id = 9, Key = AppWebAnalyticsConfigurationService.SecretKeyFor(7) });
+
+        // Same database, a context whose save fails: the key is provisioned, then the metadata is not.
+        await using var failing = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(_databaseName)
+            .AddInterceptors(new FailingSaveInterceptor())
+            .Options);
+        var service = new AppWebAnalyticsConfigurationService(
+            new AppMonitoringRepository(failing), _vaults, _audit, _cache, _time);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.ConfigureAsync(7, new ConfigureAppWebAnalyticsRequest
+        {
+            Enabled = true,
+            SiteId = "portfolio-prod",
+            AllowedOrigins = ["https://www.example.com"]
+        }, TestContext.Current.CancellationToken));
+
+        await _vaults.Received(1).DeleteSecretAsync(50, 9, CancellationToken.None);
+        await _vaults.DidNotReceive().DeleteVaultAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("Portfolio", 3, "portfolio.analytics")]
+    [InlineData("Aetheus", 1, "aetheus.analytics")]
+    [InlineData("  Mon Projet Été ", 4, "mon-projet-t.analytics")]
+    [InlineData("---", 5, "project-5.analytics")]
+    public void VaultNameFor_IsTheLowerCaseSlugOfTheProject(string projectName, int projectId, string expected) =>
+        Assert.Equal(expected, AppWebAnalyticsConfigurationService.VaultNameFor(projectName, projectId));
+
+    [Fact]
+    public void ReadKey_PrefersTheAppsOwnKeyAndStillReadsAVaultFromTheRelease()
+    {
+        var both = new Dictionary<string, string>
+        {
+            [AppWebAnalyticsConfigurationService.SecretKeyFor(7)] = "own",
+            [AppWebAnalyticsConfigurationService.SecretKey] = "legacy"
+        };
+        var legacyOnly = new Dictionary<string, string> { [AppWebAnalyticsConfigurationService.SecretKey] = "legacy" };
+        var otherApp = new Dictionary<string, string> { [AppWebAnalyticsConfigurationService.SecretKeyFor(8)] = "not-mine" };
+
+        Assert.Equal("own", AppWebAnalyticsConfigurationService.ReadKey(both, 7));
+        Assert.Equal("legacy", AppWebAnalyticsConfigurationService.ReadKey(legacyOnly, 7));
+        Assert.Null(AppWebAnalyticsConfigurationService.ReadKey(otherApp, 7));
     }
 
     [Fact]
@@ -322,5 +422,14 @@ public sealed class AppWebAnalyticsConfigurationServiceTests : IDisposable
     {
         _cache.Dispose();
         _db.Dispose();
+    }
+
+    private sealed class FailingSaveInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            CancellationToken cancellationToken = default) =>
+            throw new DbUpdateException("save failed");
     }
 }

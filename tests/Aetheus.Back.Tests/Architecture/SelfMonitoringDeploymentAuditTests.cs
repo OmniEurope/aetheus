@@ -21,8 +21,15 @@ public sealed class SelfMonitoringDeploymentAuditTests
         Assert.Contains("AETHEUS_TELEMETRY_ENABLED=${AETHEUS_TELEMETRY_ENABLED:-false}", compose, StringComparison.Ordinal);
         Assert.Contains("OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}", compose, StringComparison.Ordinal);
         Assert.Contains("Aetheus.WebAnalytics.csproj", staticServerProject, StringComparison.Ordinal);
-        Assert.Equal(2, frontDockerfile.Split("COPY Directory.Build.props .", StringSplitOptions.None).Length - 1);
-        Assert.Contains("AddAetheusWebAnalytics(builder.Configuration)", staticServer, StringComparison.Ordinal);
+        // The static server is published on the host now, so the front image no longer carries the
+        // two build stages that had to copy the repository build policy. What the image must still
+        // prove is that the server it serves the site with is the one carrying the analytics
+        // endpoint, which is the COPY below plus the project reference asserted above.
+        Assert.Contains("COPY .pipeline-publish/static-server/ .", frontDockerfile, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet publish", frontDockerfile, StringComparison.Ordinal);
+        Assert.Contains("AddAetheusWebAnalytics(builder.Configuration, options => options.AcceptDeclaredUserId = true)", staticServer, StringComparison.Ordinal);
+        // R-471: behind Apache the visitor address is the forwarded one, not the proxy.
+        Assert.Contains("app.UseForwardedHeaders(forwardedHeadersOptions);", staticServer, StringComparison.Ordinal);
         Assert.Contains("MapAetheusWebAnalytics()", staticServer, StringComparison.Ordinal);
         Assert.Contains("AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY=${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY:-}", compose, StringComparison.Ordinal);
         Assert.Contains("aetheus-analytics-bootstrap.js", index, StringComparison.Ordinal);

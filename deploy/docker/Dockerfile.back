@@ -6,7 +6,7 @@
 ARG APP_VERSION=0.0.0
 ARG CACHE_COHORT=shared
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build-source
+FROM mcr.microsoft.com/dotnet/sdk:10.0.100@sha256:c7445f141c04f1a6b454181bd098dcfa606c61ba0bd213d0a702489e5bd4cd71 AS build-source
 ARG CACHE_COHORT
 WORKDIR /src
 
@@ -50,7 +50,7 @@ RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sha
 # Install the EF tool BEFORE copying sources: source-only rebuilds keep this
 # layer cached instead of re-downloading the tool on every deploy.
 RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
-    dotnet tool install --global dotnet-ef --version 10.0.11
+    dotnet tool install --global dotnet-ef --version 10.0.12
 ENV PATH="${PATH}:/root/.dotnet/tools"
 
 ARG APP_VERSION
@@ -61,6 +61,8 @@ COPY src/Aetheus.Shared/ Aetheus.Shared/
 COPY src/Aetheus.Agent.Core/ Aetheus.Agent.Core/
 COPY src/Aetheus.Agent.Linux/ Aetheus.Agent.Linux/
 COPY deploy/scripts/install-agent-linux.sh deploy/scripts/install-agent-linux.sh
+# R-249: the host configuration templates install-agent-linux.sh renders, shipped next to it.
+COPY deploy/agent-host-config/ deploy/agent-host-config/
 COPY deploy/scripts/zap-active-automation.sh /deploy/scripts/zap-active-automation.sh
 COPY deploy/scripts/publish-observability-package.sh /deploy/scripts/publish-observability-package.sh
 COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-observability-packages.sh
@@ -73,6 +75,8 @@ RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sha
     && sed -i 's/\r$//' deploy/scripts/install-agent-linux.sh \
     && chmod +x deploy/scripts/install-agent-linux.sh \
     && cp deploy/scripts/install-agent-linux.sh /tmp/agent-linux/install-agent-linux.sh \
+    && find deploy/agent-host-config -type f -exec sed -i 's/\r$//' {} + \
+    && cp -R deploy/agent-host-config /tmp/agent-linux/agent-host-config \
     && mkdir -p /agent-release \
     && tar -C /tmp/agent-linux -czf /agent-release/aetheus-agent-linux-x64-v${APP_VERSION}.tar.gz . \
     && rm -rf /tmp/agent-linux
@@ -111,33 +115,15 @@ RUN chmod +x /generate-agent-release-manifest.sh \
 FROM scratch AS agent-release-output
 COPY --from=agent-release /agent-release/ /
 
-FROM build-source AS backend-build
-COPY src/Aetheus.Shared/ Aetheus.Shared/
-COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
-COPY src/Aetheus.Telemetry/ Aetheus.Telemetry/
-COPY src/Aetheus.Back/ Aetheus.Back/
-COPY deploy/pipelines/toto-conformance-fixture/ /deploy/pipelines/toto-conformance-fixture/
-COPY deploy/pipelines/toto-vulnerable-fixture/ /deploy/pipelines/toto-vulnerable-fixture/
-COPY deploy/pipelines/toto-*.yaml /deploy/pipelines/
-COPY deploy/pipeline-templates/*.yaml /deploy/pipeline-templates/
-COPY deploy/pipeline-templates/generic/*.yaml /deploy/pipeline-templates/generic/
-COPY deploy/scripts/generate-delivery-contract.mjs /deploy/scripts/generate-delivery-contract.mjs
-COPY deploy/scripts/verify-delivery-promotion.mjs /deploy/scripts/verify-delivery-promotion.mjs
-COPY deploy/scripts/resolve-injected-nuget-packages.mjs /deploy/scripts/resolve-injected-nuget-packages.mjs
-COPY deploy/scripts/generate-artifact-provenance.mjs /deploy/scripts/generate-artifact-provenance.mjs
-COPY deploy/scripts/generate-candidate-assurance-contract.mjs /deploy/scripts/generate-candidate-assurance-contract.mjs
-COPY deploy/scripts/verify-candidate-assurance-contract.mjs /deploy/scripts/verify-candidate-assurance-contract.mjs
-COPY deploy/scripts/zap-active-automation.sh /deploy/scripts/zap-active-automation.sh
-COPY deploy/scripts/publish-observability-package.sh /deploy/scripts/publish-observability-package.sh
-COPY deploy/scripts/promote-observability-packages.sh /deploy/scripts/promote-observability-packages.sh
-ARG APP_VERSION
-RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
-    dotnet publish Aetheus.Back/Aetheus.Back.csproj \
-        -c Release -r linux-x64 --no-self-contained \
-        -o /app/publish \
-        /p:Version=${APP_VERSION} \
-    && mkdir -p /app/publish/wwwroot/downloads
-
+# The backend publish is NOT built here any more. The pipeline has already compiled the whole
+# solution in Release before this image is built, and rebuilding the same sources from a cold obj/
+# inside the container cost 88.6 s (measured 2026-09-07). deploy/scripts/publish-application.sh
+# produces it on the host, into .pipeline-publish/backend/, and it is copied in below.
+#
+# The EF migrations bundle stays here, deliberately. `dotnet ef migrations bundle --runtime linux-x64
+# --self-contained` emits an apphost for the BUILD host's operating system, so producing it on a
+# Windows host writes a PE executable this Linux image copies, chmods and then fails to run with no
+# output at all. Built in this container, the answer no longer depends on who ran the pipeline.
 FROM build-source AS ef-bundle
 COPY src/Aetheus.Shared/ Aetheus.Shared/
 COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
@@ -157,14 +143,17 @@ COPY deploy/scripts/verify-candidate-assurance-contract.mjs /deploy/scripts/veri
 # Pass the non-routable placeholder directly to the design-time factory. Arguments after
 # `--` are forwarded by dotnet-ef to IDesignTimeDbContextFactory, avoiding environment
 # propagation differences between Docker engines. This value is never used at runtime.
-# The restore belongs to this layer for the same reason as the publishes above: `dotnet ef` builds
-# the project from the assets file the cached restore layer left behind, and never re-downloads a
-# package the buildx cache mount no longer holds. Mirror run 1104 proved the split exactly: the
-# combined restore came back `#28 CACHED`, the publish that had been given its own restore went
-# through, and this stage still failed with NETSDK1064 on Microsoft.AspNetCore.OpenApi.
+# The restore belongs to this layer because `dotnet ef` builds the project from the assets file the
+# cached restore layer left behind, and never re-downloads a package the buildx cache mount no longer
+# holds. Mirror run 1104 proved the split exactly: the combined restore came back `#28 CACHED` and
+# this stage still failed with NETSDK1064 on Microsoft.AspNetCore.OpenApi.
+# RunAnalyzers=false: this compile only feeds the bundle, and the analyzers' verdict belongs to the
+# CI Compile stage. Skipping them halves the compile (28 s -> 14 s for Aetheus.Back, measured locally
+# on 2026-09-13) and leaves the assemblies byte-identical (same sha256); source generators still run.
+# dotnet-ef forwards no MSBuild property, so it is set as an environment variable MSBuild reads.
 RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sharing=locked \
     dotnet restore Aetheus.Back/Aetheus.Back.csproj -r linux-x64 \
-    && dotnet-ef migrations bundle \
+    && RunAnalyzers=false dotnet-ef migrations bundle \
         --project Aetheus.Back/Aetheus.Back.csproj \
         --startup-project Aetheus.Back/Aetheus.Back.csproj \
         --runtime linux-x64 \
@@ -174,14 +163,16 @@ RUN --mount=type=cache,id=nuget-${CACHE_COHORT},target=/root/.nuget/packages,sha
         -- \
         --design-connection "Host=localhost;Database=aetheus_design;Username=build"
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12@sha256:6a94333d37514e385650a3c81a55e5350b67253dbe136e9cf17e499c35606a8c AS runtime
 WORKDIR /app
 
 # Static layers (apt, writable dirs) BEFORE the build-output COPY: placed after
 # it, they were invalidated - and apt re-run - on every source change.
 # curl is required by the compose healthcheck on /health/live.
+# libssl3t64 is named with openssl so apt takes the security candidate even when the base image lags
+# the Ubuntu fix (recette R2-028, CVE-2026-84782).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgssapi-krb5-2 git openssl curl \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 git openssl libssl3t64 curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Every named-volume mount point must exist app-owned in the image, otherwise a
@@ -191,10 +182,13 @@ RUN apt-get update \
 RUN mkdir -p /app/logs /app/data/git-repos /app/data/dp-keys /app/data/artifacts /app/data/packages \
     && chown -R app:app /app/logs /app/data
 
-COPY --from=backend-build /app/publish .
+COPY .pipeline-publish/backend/ .
 COPY --from=ef-bundle /app/efbundle ./efbundle
 COPY --from=agent-release /agent-release/ ./wwwroot/downloads/
 COPY deploy/docker/entrypoint-back.sh ./entrypoint-back.sh
+# The host publish is what this image now IS, so its absence must stop the build rather than produce
+# an image with no application in it.
+RUN test -s /app/Aetheus.Back.dll && test -s /app/efbundle
 
 RUN sed -i 's/\r//' /app/entrypoint-back.sh \
     && chmod 0755 /app/entrypoint-back.sh /app/efbundle \

@@ -1,0 +1,8 @@
+[Unit]
+Description=Aetheus certbot renewal check (dry run)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=#{CERTBOT_MANAGE_HELPER_PATH}# renewal-check

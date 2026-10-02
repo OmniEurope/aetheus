@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Notifications;
+using Aetheus.Front.Components.Notifications;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Notifications;
 
@@ -19,7 +16,7 @@ public sealed class NotificationChannelEditDialogBehaviorTests : BunitContext
     public NotificationChannelEditDialogBehaviorTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
     }
@@ -83,7 +80,7 @@ public sealed class NotificationChannelEditDialogBehaviorTests : BunitContext
         Assert.Equal(false, Spy.LastResult);
     }
 
-    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
     private static object Model(NotificationChannelEditDialog instance) => typeof(NotificationChannelEditDialog)
         .GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
     private static void Set(object model, string property, object? value) => model.GetType().GetProperty(property)!.SetValue(model, value);

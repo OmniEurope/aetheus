@@ -24,9 +24,9 @@ public class ServiceConnectionRepositoryTests : IDisposable
     public async Task GetPagedAsync_ReturnsPagedResults()
     {
         _db.ServiceConnections.AddRange(
-            new ServiceConnection { Name = "Conn-A", Type = Shared.Enums.ServiceConnectionType.GitHub },
-            new ServiceConnection { Name = "Conn-B", Type = Shared.Enums.ServiceConnectionType.GitLab },
-            new ServiceConnection { Name = "Conn-C", Type = Shared.Enums.ServiceConnectionType.DockerRegistry }
+            new ServiceConnection { Name = "Conn-A", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub },
+            new ServiceConnection { Name = "Conn-B", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitLab },
+            new ServiceConnection { Name = "Conn-C", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.DockerRegistry }
         );
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -40,8 +40,8 @@ public class ServiceConnectionRepositoryTests : IDisposable
     public async Task GetPagedAsync_WithSearch_Filters()
     {
         _db.ServiceConnections.AddRange(
-            new ServiceConnection { Name = "GitHub Token", Type = Shared.Enums.ServiceConnectionType.GitHub },
-            new ServiceConnection { Name = "Docker Hub", Type = Shared.Enums.ServiceConnectionType.DockerRegistry }
+            new ServiceConnection { Name = "GitHub Token", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub },
+            new ServiceConnection { Name = "Docker Hub", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.DockerRegistry }
         );
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -57,8 +57,8 @@ public class ServiceConnectionRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         _db.ServiceConnections.AddRange(
-            new ServiceConnection { Name = "A", Type = Shared.Enums.ServiceConnectionType.GitHub, ProjectId = p.Id },
-            new ServiceConnection { Name = "B", Type = Shared.Enums.ServiceConnectionType.GitHub, ProjectId = 999 }
+            new ServiceConnection { Name = "A", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub, ProjectId = p.Id },
+            new ServiceConnection { Name = "B", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub, ProjectId = 999 }
         );
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -70,8 +70,8 @@ public class ServiceConnectionRepositoryTests : IDisposable
     public async Task GetPagedAsync_WithAccessibleIds_Filters()
     {
         _db.ServiceConnections.AddRange(
-            new ServiceConnection { Name = "A", Type = Shared.Enums.ServiceConnectionType.GitHub },
-            new ServiceConnection { Name = "B", Type = Shared.Enums.ServiceConnectionType.GitLab }
+            new ServiceConnection { Name = "A", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub },
+            new ServiceConnection { Name = "B", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitLab }
         );
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
         var first = await _db.ServiceConnections.FirstAsync(sc => sc.Name == "A", cancellationToken: TestContext.Current.CancellationToken);
@@ -86,7 +86,7 @@ public class ServiceConnectionRepositoryTests : IDisposable
         var p = new Project { Name = "P" };
         _db.Projects.Add(p);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
-        var conn = new ServiceConnection { Name = "Conn", Type = Shared.Enums.ServiceConnectionType.GitHub, ProjectId = p.Id };
+        var conn = new ServiceConnection { Name = "Conn", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub, ProjectId = p.Id };
         _db.ServiceConnections.Add(conn);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -105,7 +105,7 @@ public class ServiceConnectionRepositoryTests : IDisposable
     [Fact]
     public async Task FindAsync_Found()
     {
-        var conn = new ServiceConnection { Name = "Conn", Type = Shared.Enums.ServiceConnectionType.GitHub };
+        var conn = new ServiceConnection { Name = "Conn", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub };
         _db.ServiceConnections.Add(conn);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -121,9 +121,9 @@ public class ServiceConnectionRepositoryTests : IDisposable
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         _db.ServiceConnections.AddRange(
-            new ServiceConnection { Name = "Shared", Type = Shared.Enums.ServiceConnectionType.GitHub, ProjectId = null },
-            new ServiceConnection { Name = "Project", Type = Shared.Enums.ServiceConnectionType.GitHub, ProjectId = p.Id },
-            new ServiceConnection { Name = "Other", Type = Shared.Enums.ServiceConnectionType.GitHub, ProjectId = 999 }
+            new ServiceConnection { Name = "Shared", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub, ProjectId = null },
+            new ServiceConnection { Name = "Project", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub, ProjectId = p.Id },
+            new ServiceConnection { Name = "Other", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub, ProjectId = 999 }
         );
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -134,14 +134,14 @@ public class ServiceConnectionRepositoryTests : IDisposable
     [Fact]
     public async Task AddAsync_Persists()
     {
-        await _repo.AddAsync(new ServiceConnection { Name = "New", Type = Shared.Enums.ServiceConnectionType.GitHub }, ct: TestContext.Current.CancellationToken);
+        await _repo.AddAsync(new ServiceConnection { Name = "New", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub }, ct: TestContext.Current.CancellationToken);
         Assert.Equal(1, await _db.ServiceConnections.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task RemoveAsync_Removes()
     {
-        var conn = new ServiceConnection { Name = "Del", Type = Shared.Enums.ServiceConnectionType.GitHub };
+        var conn = new ServiceConnection { Name = "Del", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub };
         _db.ServiceConnections.Add(conn);
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -152,7 +152,7 @@ public class ServiceConnectionRepositoryTests : IDisposable
     [Fact]
     public async Task SaveChangesAsync_PersistsPendingChanges()
     {
-        _db.ServiceConnections.Add(new ServiceConnection { Name = "Pending", Type = Shared.Enums.ServiceConnectionType.GitHub });
+        _db.ServiceConnections.Add(new ServiceConnection { Name = "Pending", Type = Aetheus.Shared.Components.ServiceConnections.ServiceConnectionType.GitHub });
         await _repo.SaveChangesAsync(ct: TestContext.Current.CancellationToken);
         Assert.Equal(1, await _db.ServiceConnections.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }

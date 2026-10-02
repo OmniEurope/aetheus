@@ -1,0 +1,13 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@using Microsoft.Extensions.Localization
+@using Aetheus.Front.Resources
+@inject IStringLocalizer<AppStrings> L
+
+@if (!string.IsNullOrEmpty(OwnerName))
+{
+    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral" Class="inherited-badge"
+        title="@string.Format(L["InheritedFrom"], OwnerLabel, OwnerName)">
+        @($"{OwnerLabel}: {OwnerName}")
+    </OmniBadge>
+}

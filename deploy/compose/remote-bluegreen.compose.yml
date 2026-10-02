@@ -77,6 +77,9 @@ services:
         - Cors__Origins__2=${FRONT_URL_PROD}
         - App__Version=${APP_VERSION}
         - Aetheus__PublicApiBaseUrl=${API_BASE_URL}
+        # The base of the clone URLs the UI shows. Empty (the default) keeps the API's; production sets
+        # the app's, whose vhost proxies /git/ to this backend.
+        - GitLight__CloneBaseUrl=${GIT_CLONE_BASE_URL:-}
         # Where a deployed application pushes its telemetry. Without it the control plane skips the
         # whole OTEL injection and every deployment ran with telemetry disabled, which is why
         # Supervision showed a live application and no metrics at all. Ingestion is served by the API
@@ -142,6 +145,17 @@ services:
         - AETHEUS_WEB_ANALYTICS_INGEST_KEY=${AETHEUS_WEB_ANALYTICS_INGEST_KEY:-}
         - AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY=${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY:-}
         - AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION=${AETHEUS_WEB_ANALYTICS_PSEUDONYMIZATION_KEY_VERSION:-1}
+      healthcheck:
+        # Serving the site, not merely listening: the deploy reads this index to check the published
+        # WASM, so anything less would report ready while the probe that follows still fails. Without
+        # this block `up --wait` returned as soon as the container ran, and run 2218 died on curl (7)
+        # against a front that had been up for less than a second.
+        test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/"]
+        interval: 10s
+        timeout: 5s
+        retries: 12
+        # The static host has no database to wait for, so it is ready far sooner than the backend.
+        start_period: 30s
       mem_limit: ${FRONT_MEM_LIMIT:-256m}
       restart: unless-stopped
     container_name: ${APPNAME}-${ENV}-blue-front

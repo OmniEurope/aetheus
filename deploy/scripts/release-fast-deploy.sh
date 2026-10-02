@@ -3,7 +3,8 @@
 # The preceding step built both immutable images from BUILD_SOURCEVERSION.
 set -eu
 
-required_vars="WORKSPACE BUILD_SOURCEVERSION PROD_ENV_FILE COMPOSE_PROJECT BG_COMPOSE PORT_FRONT_BLUE PORT_BACK_BLUE PORT_FRONT_GREEN PORT_BACK_GREEN UPSTREAM_CONF UPSTREAM_LINK PUBLIC_APP_URL PUBLIC_API_URL AETHEUS_DEPLOY_TARGET"
+# PLAN-003 2.1: ENV_FILE and UPSTREAM_DEFINE come from the aetheus.prod library, like the rest.
+required_vars="WORKSPACE BUILD_SOURCEVERSION ENV_FILE COMPOSE_PROJECT BG_COMPOSE PORT_FRONT_BLUE PORT_BACK_BLUE PORT_FRONT_GREEN PORT_BACK_GREEN UPSTREAM_CONF UPSTREAM_LINK UPSTREAM_DEFINE PUBLIC_APP_URL PUBLIC_API_URL AETHEUS_DEPLOY_TARGET"
 for name in $required_vars; do
   eval "value=\${$name:-}"
   if [ -z "$value" ]; then
@@ -20,8 +21,11 @@ if [ "$SOURCE_COMMIT" != "$BUILD_SOURCEVERSION" ]; then
   exit 1
 fi
 
-export AETHEUS_BACK_IMAGE="aetheus-back:${SOURCE_COMMIT}"
-export AETHEUS_FRONT_IMAGE="aetheus-front:${SOURCE_COMMIT}"
+# shellcheck source=deploy-identity.sh
+. "$WORKSPACE/deploy/scripts/deploy-identity.sh"
+deploy_image_repos
+export AETHEUS_BACK_IMAGE="$BACK_IMAGE_REPO:${SOURCE_COMMIT}"
+export AETHEUS_FRONT_IMAGE="$FRONT_IMAGE_REPO:${SOURCE_COMMIT}"
 BACK_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$AETHEUS_BACK_IMAGE")"
 FRONT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$AETHEUS_FRONT_IMAGE")"
 [ -n "$BACK_IMAGE_ID" ] && [ -n "$FRONT_IMAGE_ID" ] || {
@@ -29,7 +33,6 @@ FRONT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$AETHEUS_FRONT_IMAGE"
   exit 1
 }
 
-ENV_FILE="$PROD_ENV_FILE"
 STATE_DIR="$(dirname "$ENV_FILE")"
 COLOR_FILE="$STATE_DIR/live-color"
 TRANSACTION_DIR="$STATE_DIR/fast-deployment-transaction"
@@ -136,31 +139,70 @@ printf '%s\n' "$FRONT_HTML" | grep -qi '<html' || {
   echo "Idle frontend is not serving HTML; Apache was not changed." >&2
   exit 1
 }
-RADZEN_SCRIPT_PATH="$(printf '%s\n' "$FRONT_HTML" \
-  | sed -n 's/.*src="\([^"]*Radzen\.Blazor\.js?v=[^"]*\)".*/\1/p' \
-  | head -n 1)"
-[ -n "$RADZEN_SCRIPT_PATH" ] || {
-  echo "Idle frontend does not cache-bust its Radzen JavaScript; Apache was not changed." >&2
+# Run 2247 shipped an index.html that still carried the SDK's "#[.{fingerprint}]" placeholders: a
+# build without the fingerprint property followed by a --no-build publish. It contained <html, it
+# contained a versioned component-library script, and the browser got "Blazor is not defined" - the
+# two checks below are the ones that would have refused it. Only Apache is spared here; the
+# containers stay up so the run can still be read.
+printf '%s\n' "$FRONT_HTML" | grep -q '#\[' && {
+  echo "Idle frontend index.html still contains unresolved asset placeholders; Apache was not changed." >&2
   exit 1
 }
-RADZEN_SMOKE_FILE="$WORKSPACE/.aetheus-radzen-smoke.$$"
-if ! curl -fsS "${FRONT_URL}${RADZEN_SCRIPT_PATH}" > "$RADZEN_SMOKE_FILE" \
-   || ! grep -q 'createDataGrid' "$RADZEN_SMOKE_FILE" \
-   || ! grep -q 'createSplitButton' "$RADZEN_SMOKE_FILE"; then
-  rm -f "$RADZEN_SMOKE_FILE"
-  echo "Idle frontend Radzen JavaScript is incompatible with the published WASM; Apache was not changed." >&2
+BLAZOR_BOOT_PATH="$(printf '%s\n' "$FRONT_HTML" \
+  | sed -n 's/.*src="\([^"]*blazor\.webassembly[^"]*\.js\)".*/\1/p' \
+  | head -n 1)"
+[ -n "$BLAZOR_BOOT_PATH" ] || {
+  echo "Idle frontend index.html does not reference the Blazor bootstrap script; Apache was not changed." >&2
+  exit 1
+}
+curl -fsSI "${FRONT_URL}${BLAZOR_BOOT_PATH}" >/dev/null 2>&1 || {
+  echo "Idle frontend references a Blazor bootstrap script it does not serve (${BLAZOR_BOOT_PATH}); Apache was not changed." >&2
+  exit 1
+}
+OMNI_CSS_PATH="$(printf '%s\n' "$FRONT_HTML" \
+  | sed -n 's/.*href="\([^"]*_content\/OmniEurope\.Blazor\/omnieurope\.blazor\.css\)".*/\1/p' \
+  | head -n 1)"
+[ -n "$OMNI_CSS_PATH" ] || {
+  echo "Idle frontend does not reference the OmniEurope.Blazor stylesheet; Apache was not changed." >&2
+  exit 1
+}
+OMNI_SMOKE_FILE="$WORKSPACE/.aetheus-omni-smoke.$$"
+if ! curl -fsS "${FRONT_URL}${OMNI_CSS_PATH}" > "$OMNI_SMOKE_FILE" \
+   || ! grep -q '\.omni-' "$OMNI_SMOKE_FILE" \
+   || ! curl -fsS "${FRONT_URL}_content/OmniEurope.Blazor/omniInterop.js" > "$OMNI_SMOKE_FILE" \
+   || ! grep -q 'focusFirstInvalid' "$OMNI_SMOKE_FILE"; then
+  rm -f "$OMNI_SMOKE_FILE"
+  echo "Idle frontend OmniEurope.Blazor assets are missing or incompatible; Apache was not changed." >&2
   exit 1
 fi
-rm -f "$RADZEN_SMOKE_FILE"
+rm -f "$OMNI_SMOKE_FILE"
 FRONT_HEADERS="$(curl -fsSI "$FRONT_URL" | tr -d '\r')"
 printf '%s\n' "$FRONT_HEADERS" | grep -Eqi '^Cache-Control:.*no-store' || {
   echo "Idle frontend index.html is cacheable; Apache was not changed." >&2
   exit 1
 }
 
+# A leftover transaction is not always a deployment in flight. Run 2240 flipped Apache, recorded its
+# release, and then lost the step that closes the transaction (that step only writes COMMITTED and
+# removes this directory). Refusing here would have locked every later fast deploy behind a
+# directory nobody could remove without a shell on the host. So: a transaction whose state says the
+# host was committed and whose candidate colour is the colour that is live right now is a finished
+# deployment that was never closed. Close it and carry on. Anything else - another state, or a live
+# colour that contradicts the transaction - is a host in an unknown shape, and that refusal stays.
 if [ -e "$TRANSACTION_DIR" ]; then
-  echo "FATAL: an unfinished fast deployment transaction already exists at $TRANSACTION_DIR." >&2
-  exit 1
+  LEFTOVER_STATE="$(cat "$TRANSACTION_DIR/state" 2>/dev/null || true)"
+  LEFTOVER_IDLE="$(cat "$TRANSACTION_DIR/idle" 2>/dev/null || true)"
+  LEFTOVER_COMMIT="$(cat "$TRANSACTION_DIR/source-commit" 2>/dev/null || true)"
+  RECORDED_COMMIT="$(cat "$STATE_DIR/source-commit" 2>/dev/null || true)"
+  if [ "$LEFTOVER_STATE" = HOST_COMMITTED_PENDING_RELEASE ] && [ "$LEFTOVER_IDLE" = "$LIVE" ] \
+     && { [ -z "$RECORDED_COMMIT" ] || [ "$RECORDED_COMMIT" = "$LEFTOVER_COMMIT" ]; }; then
+    echo ">>> Closing the fast deployment transaction of ${LEFTOVER_COMMIT:-an unknown commit}: it went live as $LIVE and was never committed."
+    printf '%s\n' COMMITTED > "$TRANSACTION_DIR/state"
+    rm -rf "$TRANSACTION_DIR"
+  else
+    echo "FATAL: an unfinished fast deployment transaction already exists at $TRANSACTION_DIR (state=${LEFTOVER_STATE:-?}, candidate=${LEFTOVER_IDLE:-?}, live=$LIVE)." >&2
+    exit 1
+  fi
 fi
 TRANSACTION_TMP="$TRANSACTION_DIR.tmp.$$"
 mkdir -m 700 "$TRANSACTION_TMP"
@@ -206,7 +248,8 @@ on_deploy_exit() {
 }
 trap on_deploy_exit EXIT
 
-sh "$WORKSPACE/deploy/scripts/render-apache-upstream.sh" \
+UPSTREAM_DEFINE="$UPSTREAM_DEFINE" UPSTREAM_CONF="$UPSTREAM_CONF" \
+  sh "$WORKSPACE/deploy/scripts/render-apache-upstream.sh" \
   "$WORKSPACE/.pipeline/configs/apache/aetheus-upstream.conf" \
   "$UPSTREAM_CONF" "$IDLE_FRONT" "$IDLE_BACK" "$IDLE"
 ln -sfn "$UPSTREAM_CONF" "$UPSTREAM_LINK"
@@ -243,5 +286,40 @@ if ! $COMPOSE --profile "$LIVE" stop "back-$LIVE" "front-$LIVE"; then
   echo "##aetheus[setvariable name=FAST_DEPLOY_OLD_COLOR_STOPPED]false"
 else
   echo "##aetheus[setvariable name=FAST_DEPLOY_OLD_COLOR_STOPPED]true"
+fi
+# The same confirmation window as aetheus-deploy-prod. The pipeline's Confirm stage asks a human for
+# 10 minutes and rolls back without an answer; this host-side countdown covers a backend too broken
+# to dispatch that rollback. It starts detached (setsid, its own log, no inherited stdout/stderr, or
+# the agent would wait for it) with copies of what the rollback needs, since the workspace may be gone.
+FAST_CONFIRM_MINUTES="${FAST_CONFIRM_MINUTES:-0}"
+case "$FAST_CONFIRM_MINUTES" in ''|*[!0-9]*) echo "FAST_CONFIRM_MINUTES must be a whole number of minutes." >&2; FAST_CONFIRM_MINUTES=0 ;; esac
+if [ "$FAST_CONFIRM_MINUTES" -gt 0 ]; then
+  WATCH_DIR="$STATE_DIR/fast-confirm-$SOURCE_COMMIT"
+  rm -rf "$WATCH_DIR"
+  mkdir -p "$WATCH_DIR/deploy/scripts" "$WATCH_DIR/deploy/compose"
+  chmod 700 "$WATCH_DIR"
+  cp "$WORKSPACE/deploy/scripts/finalize-fast-release-transaction.sh" \
+     "$WORKSPACE/deploy/scripts/deploy-identity.sh" \
+     "$WORKSPACE/deploy/scripts/fast-release-confirm-watchdog.sh" "$WATCH_DIR/deploy/scripts/"
+  cp "$WORKSPACE/$BG_COMPOSE" "$WATCH_DIR/deploy/compose/"
+  {
+    for name in ENV_FILE COMPOSE_PROJECT PORT_FRONT_BLUE PORT_BACK_BLUE PORT_FRONT_GREEN PORT_BACK_GREEN \
+                UPSTREAM_CONF UPSTREAM_LINK BUILD_PROJECTNAME AGENT_HELPERS_DIR; do
+      eval "value=\${$name:-}"
+      printf "export %s='%s'\n" "$name" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+    done
+    printf "export BUILD_SOURCEVERSION='%s'\n" "$SOURCE_COMMIT"
+    printf "export BG_COMPOSE='%s'\n" "$WATCH_DIR/deploy/compose/$(basename "$BG_COMPOSE")"
+  } > "$WATCH_DIR/watch.env"
+  chmod 600 "$WATCH_DIR/watch.env"
+  WATCH_LOG="$STATE_DIR/fast-confirm-$SOURCE_COMMIT.log"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh "$WATCH_DIR/deploy/scripts/fast-release-confirm-watchdog.sh" "$WATCH_DIR" "$FAST_CONFIRM_MINUTES" \
+      </dev/null >>"$WATCH_LOG" 2>&1 &
+  else
+    nohup sh "$WATCH_DIR/deploy/scripts/fast-release-confirm-watchdog.sh" "$WATCH_DIR" "$FAST_CONFIRM_MINUTES" \
+      </dev/null >>"$WATCH_LOG" 2>&1 &
+  fi
+  echo ">>> Confirmation window armed: without a confirmation within $FAST_CONFIRM_MINUTES minutes, this host returns to $LIVE by itself (log: $WATCH_LOG)."
 fi
 echo ">>> Fast deployment completed on $IDLE with $SOURCE_COMMIT."

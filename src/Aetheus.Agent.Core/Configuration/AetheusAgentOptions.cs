@@ -5,7 +5,7 @@ public sealed class AetheusAgentOptions
 {
     public const string SectionName = "Aetheus";
 
-    public string ServerUrl { get; set; } = Aetheus.Shared.Constants.LocalDevelopmentEndpoints.ApiHttpsBaseUrl;
+    public string ServerUrl { get; set; } = Aetheus.Shared.Components.Shared.LocalDevelopmentEndpoints.ApiHttpsBaseUrl;
     public string? Name { get; set; }
     public int PollingIntervalSeconds { get; set; } = AgentRuntimeDefaults.PollingIntervalSeconds;
     public int HeartbeatIntervalSeconds { get; set; } = AgentRuntimeDefaults.HeartbeatIntervalSeconds;

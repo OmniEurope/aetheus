@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Text.Json;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Tests;
 
@@ -234,7 +231,7 @@ public class ApiClientPipelinesTests
         handler2.SetJsonResponse("api/pipelines/templates", new List<PipelineTemplateSummaryDto> { new() { Id = 1, Name = "Cached" } });
         await api2.PipelineTemplates.GetPipelineTemplatesAsync();
         // The cache moved into the sub-client that owns it; it is still the only state in the client.
-        var cacheField = typeof(Aetheus.Front.Services.Api.PipelineTemplatesApi).GetField("_templateCache",
+        var cacheField = typeof(Aetheus.Front.Components.Pipelines.PipelineTemplatesApi).GetField("_templateCache",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         Assert.NotNull(cacheField.GetValue(api2.PipelineTemplates));
 
@@ -259,7 +256,7 @@ public class ApiClientPipelinesTests
         var r = await _api.PipelineTemplates.UpdatePipelineTemplateAsync(1, new UpdatePipelineTemplateRequest { Name = "Updated Template" }, Xunit.TestContext.Current.CancellationToken);
         Assert.Equal("Updated Template", r!.Name);
         AssertLastRequest(HttpMethod.Put, "api/pipelines/templates/1");
-        Assert.Null(typeof(Aetheus.Front.Services.Api.PipelineTemplatesApi).GetField("_templateCache",
+        Assert.Null(typeof(Aetheus.Front.Components.Pipelines.PipelineTemplatesApi).GetField("_templateCache",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(_api.PipelineTemplates));
     }
 
@@ -273,7 +270,7 @@ public class ApiClientPipelinesTests
         var r = await _api.PipelineTemplates.DeletePipelineTemplateAsync(1, Xunit.TestContext.Current.CancellationToken);
         Assert.True(r.Success);
         AssertLastRequest(HttpMethod.Delete, "api/pipelines/templates/1");
-        Assert.Null(typeof(Aetheus.Front.Services.Api.PipelineTemplatesApi).GetField("_templateCache",
+        Assert.Null(typeof(Aetheus.Front.Components.Pipelines.PipelineTemplatesApi).GetField("_templateCache",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(_api.PipelineTemplates));
     }
 

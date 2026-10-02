@@ -1,0 +1,187 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers"
+
+<PageTitle>@L["Servers"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Servers"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("dns")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="servers" />
+        @* A healthy fleet shows nothing here: the up-to-date count is the normal case and reads as
+           noise, and a zero counter is not information. Only what needs attention is displayed. *@
+        @if (_compatibilitySummary.UpdateRecommended > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@($"{L["AgentCompatibility_UpdateRecommended"]}: {_compatibilitySummary.UpdateRecommended}")</OmniBadge>
+        }
+        @if (_compatibilitySummary.UpdateRequired > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@($"{L["AgentCompatibility_UpdateRequired"]}: {_compatibilitySummary.UpdateRequired}")</OmniBadge>
+        }
+        @if (_compatibilitySummary.Unknown > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@($"{L["AgentCompatibility_Unknown"]}: {_compatibilitySummary.Unknown}")</OmniBadge>
+        }
+    </Badges>
+    <Actions>
+        @* Recette R-197: no column button in the header any more; the choice stays, opened from Tools. *@
+        <div class="column-chooser-wrap">
+            @if (_showColumnChooser)
+            {
+                <OmniCard Class="column-chooser-popup">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+                        <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["ChooseColumns"]</OmniText>
+                        <div class="flex-spacer"></div>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ToggleColumnChooser" title="@L["Close"]" Label="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+                    </OmniStack>
+                    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.XSmall">
+                        @foreach (var col in _columnLabels)
+                        {
+                            var visible = IsColumnVisible(col.Key);
+                            <OmniCheckBox TValue="bool" Value="visible" ValueExpression="@(() => visible)" ValueChanged="@(v => OnColumnVisibilityChanged(col.Key, v))">@col.Value</OmniCheckBox>
+                        }
+                    </OmniStack>
+                </OmniCard>
+            }
+        </div>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@GoToAddAgent" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"].Value : null)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["AddAgent"]</span></OmniButton>
+        @* Last in the row, after Add (recette R-021). *@
+        <OmniOverflowMenu Label="@L["Tools"]">
+            <OmniMenuItem OnClick="@OnUpdateAllAgents" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["UpdateAllAgents"]</ChildContent></OmniMenuItem>
+            <OmniMenuItem OnClick="@OpenPortCheckDialog"><Icon><OmniIcon Name="OmniIconName.MagnifyingGlassPlus" /></Icon><ChildContent>@L["CheckPorts"]</ChildContent></OmniMenuItem>
+            <OmniMenuItem OnClick="@OpenRetiredServersDialog"><Icon><OmniIcon Name="OmniIconName.Archive" /></Icon><ChildContent>@L["RetiredServers"]</ChildContent></OmniMenuItem>
+            <OmniMenuItem OnClick="@ToggleColumnChooser"><Icon><OmniIcon Name="OmniIconName.Columns" /></Icon><ChildContent>@L["ChooseColumns"]</ChildContent></OmniMenuItem>
+        </OmniOverflowMenu>
+    </Actions>
+</OmniPageHeader>
+
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-md">
+        @L["LoadFailed"]
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ReloadGridAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniAlert>
+}
+
+<AetheusDataGrid @ref="_grid" TItem="ServerDto" Data="@_servers"
+    Count="@_totalCount" IsLoading="@_loading" LoadData="@OnLoadData" PageSize="20"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<ServerDto>(_servers, _totalCount))"
+    RowClick="@(s => Navigation.NavigateTo($"/servers/{s.Id}/overview"))" FullHeight="true" class="server-list-grid">
+    <EmptyTemplate>
+        <EmptyState Icon="dns" Title="@L["EmptyServersTitle"]" Description="@L["EmptyServersHint"]">
+            <ActionContent>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@GoToAddAgent" Disabled="@(!_canWrite)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["AddAgent"]</span></OmniButton>
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="ServerDto" Property="Name" Title="@L["Name"]" MinWidth="180px" Filterable="true" >
+            <Template Context="server">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <span class="server-status-dot @(server.Status == ServerStatus.Online ? "server-status-online" : "server-status-offline")"></span>
+                    <NavLink href="@($"/servers/{server.Id}/overview")" class="server-name-link">@server.Name</NavLink>
+                    @if (!Permissions.CanWrite(ResourceType.Server, server.Id))
+                    {
+                        <OmniIcon Name="OmniIconName.Lock" Class="omni-u-text-muted icon-xs-app"
+                            title="@L["Read"]" />
+                    }
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerDto" Property="Type" Title="@L["Type"]" Width="130px" Visible="@IsColumnVisible("Type")" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@TypeText" >
+            <Template Context="server">
+                <span>@L.Localize(server.Type)</span>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerDto" Property="Status" Title="@L["Status"]" Width="140px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@StatusText" >
+            <Template Context="server">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                    @if (server.Status == ServerStatus.Online)
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@L.Localize(server.Status)</OmniBadge>
+                    }
+                    else
+                    {
+                        <span title="@OfflineReason(server)">
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@ServerHeartbeatHelper.Severity(server.LastHeartbeat)">@L.Localize(server.Status)</OmniBadge>
+                        </span>
+                    }
+                    @if (server.InsecureTls)
+                    {
+                        @* A state of the connection, so it sits beside the status, not the name (recette
+                           R-029). Icon only; the warning keeps its accessible name through title and AriaLabel. *@
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning"
+                            title="@L["InsecureTlsHint"]" aria-label="@L["InsecureTlsBadge"]"><Icon><OmniIcon Name="OmniIconName.ShieldWarning" /></Icon></OmniBadge>
+                    }
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerDto" Property="Hostname" Title="@L["Hostname"]" MinWidth="150px" Visible="@IsColumnVisible("Hostname")" Filterable="true" />
+        <OmniDataGridColumn TItem="ServerDto" Property="OsDescription" Title="@L["OperatingSystem"]" MinWidth="200px" Visible="@IsColumnVisible("OsDescription")" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.OsDescriptions" FilterSearchable="true" >
+            <Template Context="server">
+                <span>@server.OsDescription</span>
+            </Template>
+        </OmniDataGridColumn>
+        @* Recette R-211: one list mixing the agent states and the versions; a server matches any ticked item. *@
+        <OmniDataGridColumn TItem="ServerDto" Property="AgentVersion" Title="@L["AgentVersion"]" Width="240px" Visible="@IsColumnVisible("AgentVersion")" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_agentCandidates" FormatFilterValue="@AgentText" FilterSearchable="true" >
+            <Template Context="server">
+                @* One line (recette R-030): the compatibility badge sits beside the version, not under it. *@
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">
+                        @server.AgentVersion
+                    </OmniText>
+                    <AgentCompatibilityBadge Value="@server.AgentCompatibility" />
+                    @if (server.AgentUpdateRequest?.BlockingTaskCount > 0)
+                    {
+                        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-warning omni-u-m-0">
+                            @string.Format(L["AgentUpdateWaitingForTasks"], server.AgentUpdateRequest.BlockingTaskCount)
+                        </OmniText>
+                    }
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerDto" Key="@ServerTagsColumn" Title="@L["Tags"]" Width="220px" Sortable="false" Visible="@IsColumnVisible("Tags")" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_filterValues.Tags" FilterSearchable="true" >
+            <Template Context="server">
+                <OmniRow Gap="OmniSpacing.XSmall">
+                    @{ var visibleTags = server.Tags.Take(3).ToList(); }
+                    @foreach (var tag in visibleTags)
+                    {
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => FilterByTag(tag))" Class="tag-filter-button"><OmniIcon Name="OmniIconName.Tag" /> <span>@tag</span></OmniButton>
+                    }
+                    @if (server.Tags.Count > 3)
+                    {
+                        <details class="tag-more-details">
+                            <summary>@($"+{server.Tags.Count - 3}")</summary>
+                            <span class="tag-more-content">@string.Join(", ", server.Tags.Skip(3))</span>
+                        </details>
+                    }
+                </OmniRow>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerDto" Property="LastHeartbeat" Title="@L["LastHeartbeat"]" Width="170px" Visible="@IsColumnVisible("LastHeartbeat")" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+            <Template Context="server">
+                @if (server.LastHeartbeat.Year >= 2000)
+                {
+                    <span title="@server.LastHeartbeat.ToString("g")">@RelativeTime.FormatAgo(L, server.LastHeartbeat)</span>
+                }
+                else
+                {
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0 omni-u-text-muted">@L["Never"]</OmniText>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="ServerDto" Title="" Width="120px" Sortable="false" Filterable="false" TextAlign="OmniDataGridTextAlign.Center">
+            <Template Context="server">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Justify="OmniJustification.Center"
+                    @onclick:stopPropagation="true">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OnContactAgent(server))" title="@L["ContactAgent"]" Label="@L["ContactAgent"]"><OmniIcon Name="OmniIconName.CellTower" /></OmniButton>
+                    @if (Permissions.CanWrite(ResourceType.Server, server.Id))
+                    {
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnRetireServer(server))" title="@L["RetireServer"]" Label="@L["RetireServer"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                    }
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+

@@ -111,7 +111,8 @@ internal sealed class BlueGreenJournal(BlueGreenContext context)
         }
     }
 
-    private static string? ReadOrNull(string path)
+    /// <summary>A trimmed state file, or null when it is absent or unreadable. Shared with <see cref="BlueGreenReserve"/>.</summary>
+    internal static string? ReadOrNull(string path)
     {
         try
         {
@@ -123,12 +124,18 @@ internal sealed class BlueGreenJournal(BlueGreenContext context)
         }
     }
 
-    private static void WriteAtomic(string path, string content)
+    private static void WriteAtomic(string path, string content) => WritePrivateAtomic(path, content + "\n");
+
+    /// <summary>
+    /// Writes <paramref name="content"/> verbatim as an owner-only file through a temporary file and a
+    /// rename, so a crash mid-write never leaves a truncated record. Shared with <see cref="BlueGreenReserve"/>.
+    /// </summary>
+    internal static void WritePrivateAtomic(string path, string content)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         var temp = $"{path}.tmp.{Environment.ProcessId}";
-        File.WriteAllText(temp, content + "\n");
+        File.WriteAllText(temp, content);
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         File.Move(temp, path, overwrite: true);

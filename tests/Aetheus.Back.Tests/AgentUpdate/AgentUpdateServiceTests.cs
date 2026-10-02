@@ -5,8 +5,6 @@ using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -85,7 +83,10 @@ public class AgentUpdateServiceTests
 
         _sut = new AgentUpdateService(
             _hubMock, _taskService, _audit, _updateRepo, _releases, _compatibility,
-            NullLogger<AgentUpdateService>.Instance);
+            NullLogger<AgentUpdateService>.Instance,
+            new AgentUpdateNotificationPublisher(
+                Substitute.For<Aetheus.Back.Components.Notifications.IUserNotificationService>(),
+                NullLogger<AgentUpdateNotificationPublisher>.Instance));
     }
 
     [Fact]
@@ -119,8 +120,12 @@ public class AgentUpdateServiceTests
     }
 
     [Fact]
-    public async Task QueueUpdateAsync_AlreadyUpToDate_DoesNotReserveOrQueue()
+    public async Task QueueUpdateAsync_AlreadyUpToDate_StillQueuesTheUpdate()
     {
+        // This used to return AlreadyUpToDate and reserve nothing, so Update agent on a server the fleet
+        // considered current did nothing at all, on precisely the server an operator was trying to
+        // repair. The per-server action is explicit: someone named this server, and reinstalling a
+        // current agent is one of the reasons to do that. The fleet sweep still skips current agents.
         _updateRepo.FindServerAsync(1, Arg.Any<CancellationToken>())
             .Returns(new Server { Id = 1, Name = "srv-1", AgentVersion = "1.0.0" });
         _compatibility.Evaluate(Arg.Any<ServerDto>())
@@ -129,13 +134,11 @@ public class AgentUpdateServiceTests
         var result = await _sut.QueueUpdateAsync(
             1, "admin", TestContext.Current.CancellationToken);
 
-        Assert.Equal(AgentUpdateQueueOutcome.AlreadyUpToDate, result.Outcome);
-        Assert.Equal("1.0.0", result.SourceVersion);
-        Assert.Equal("1.0.0", result.TargetVersion);
-        await _updateRepo.DidNotReceive().ReserveAsync(
-            Arg.Any<Server>(),
+        Assert.NotEqual(AgentUpdateQueueOutcome.AlreadyUpToDate, result.Outcome);
+        await _updateRepo.Received(1).ReserveAsync(
+            Arg.Is<Server>(server => server.Id == 1),
             Arg.Any<AgentReleaseManifestDto>(),
-            Arg.Any<string>(),
+            "admin",
             Arg.Any<CancellationToken>());
     }
 

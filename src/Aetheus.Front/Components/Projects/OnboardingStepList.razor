@@ -1,0 +1,66 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Projects
+<OmniCard Class="project-onboarding">
+    <div class="project-onboarding-heading">
+        <span class="project-onboarding-heading-icon" aria-hidden="true"><OmniIcon Name="OmniIconName.RocketLaunch" /></span>
+        <div>
+            <OmniHeading Level="OmniHeadingLevel.H5">@Title</OmniHeading>
+            <OmniText Class="project-onboarding-copy">@Description</OmniText>
+        </div>
+    </div>
+    <div class="onboarding-steps-scroll" role="region" aria-label="@Title" tabindex="0">
+        <table class="onboarding-steps">
+            <thead>
+                <tr>
+                    <th scope="col" class="onboarding-steps-col-step">@L["Step"]</th>
+                    <th scope="col" class="onboarding-steps-col-copy">@L["Description"]</th>
+                    <th scope="col" class="onboarding-steps-col-state">@L["Status"]</th>
+                    <th scope="col" class="onboarding-steps-col-action">@L["Action"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var index = 0; index < Steps.Count; index++)
+                {
+                    var step = Steps[index];
+                    var number = index + 1;
+                    <tr class="@RowCss(step)" data-testid="onboarding-step"
+                        role="@(HasLink(step) ? "link" : null)" tabindex="@(HasLink(step) ? 0 : null)"
+                        @onclick="@(() => Open(step))" @onkeydown="@((KeyboardEventArgs args) => OnRowKeyDown(args, step))">
+                        <th scope="row" class="onboarding-step-title">
+                            <span class="project-onboarding-icon"><OmniIcon Name="@MaterialIconMap.Resolve(step.Icon)" /></span>
+                            <span class="onboarding-step-label">@number. @step.Title</span>
+                        </th>
+                        <td class="onboarding-step-copy">
+                            <span>@step.Description</span>
+                            @if (step.State == OnboardingStepState.Blocked && !string.IsNullOrWhiteSpace(step.BlockedReason))
+                            {
+                                <span class="onboarding-step-reason">
+                                    <OmniIcon Name="OmniIconName.Prohibit" />
+                                    <span>@step.BlockedReason</span>
+                                </span>
+                            }
+                        </td>
+                        <td>
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@StateBadgeVariant(step.State)">@StateText(step.State)</OmniBadge>
+                        </td>
+                        <td class="onboarding-step-action">
+                            @if (step.State != OnboardingStepState.Blocked
+                                 && !string.IsNullOrWhiteSpace(step.Href)
+                                 && !string.IsNullOrWhiteSpace(step.ActionLabel))
+                            {
+                                <a href="@step.Href" class="onboarding-step-link" @onclick:stopPropagation="true">
+                                    <OmniIcon Name="@(step.State == OnboardingStepState.Done ? OmniIconName.OpenExternal : OmniIconName.ArrowRight)" />
+                                    <span>@step.ActionLabel</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="onboarding-step-action-empty" aria-hidden="true">-</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</OmniCard>

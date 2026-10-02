@@ -2,7 +2,6 @@
 using System.Text.Json;
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests.Analysis;

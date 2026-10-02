@@ -2,9 +2,6 @@
 using System.Text.Json;
 using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Components.Servers;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests;
 

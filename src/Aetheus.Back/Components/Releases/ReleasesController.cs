@@ -11,7 +11,8 @@ public class ReleasesController(
     IReleaseService service,
     IResourceAuthorizationService authz,
     IConfiguration configuration,
-    IPipelineRunService pipelineRunService) : ControllerBase
+    IPipelineRunService pipelineRunService,
+    IReleaseDeploymentAnnouncer deploymentAnnouncer) : ControllerBase
 {
     /// <summary>
     /// Releases of every project a server is involved in.
@@ -37,13 +38,35 @@ public class ReleasesController(
         return Ok(await service.GetServerReleasesAsync(serverId, request, ct));
     }
 
+    /// <summary>Recette R-224: the project and pipeline names a server's releases list filters offer.</summary>
+    [HttpGet("/api/servers/{serverId:int}/releases/filter-values")]
+    public async Task<ActionResult<ReleaseFilterValuesDto>> GetServerReleaseFilterValues(int serverId, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Read, ct))
+            return Forbid();
+
+        return Ok(await service.GetReleaseFilterValuesAsync(null, null, serverId, ct));
+    }
+
+    /// <summary>Recette R-224: the project and pipeline names the releases list filters offer, across
+    /// the releases the caller can read (of one project when <paramref name="projectId"/> is set).</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<ReleaseFilterValuesDto>> GetReleaseFilterValues([FromQuery] int? projectId, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Release, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new ReleaseFilterValuesDto());
+        return Ok(await service.GetReleaseFilterValuesAsync(projectId, accessibleIds, null, ct));
+    }
+
     [HttpGet]
     public async Task<ActionResult<PaginatedResult<ReleaseDto>>> GetReleases(
-        [FromQuery] int? projectId, [FromQuery] PaginationRequest request, CancellationToken ct)
+        [FromQuery] int? projectId, [FromQuery] PaginationRequest request, CancellationToken ct,
+        [FromQuery] bool deployable = false)
     {
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Release, Permission.Read, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<ReleaseDto>());
-        return Ok(await service.GetReleasesAsync(projectId, request, accessibleIds, ct));
+        // PLAN-005 lot 5 / D40: deployable=true narrows to what a deployment's release restore accepts.
+        return Ok(await service.GetReleasesAsync(projectId, request, accessibleIds, ct, deployable));
     }
 
     [HttpGet("{id:int}")]
@@ -143,6 +166,9 @@ public class ReleasesController(
             projectId, pipelineRunId, request.Version, request.Changelog,
             request.CommitHash, request.TagName, request.BranchName, request.ArtifactPipelineRunId,
             request.Deployed, ct);
+        // R-520: a release step that records its release as deployed is a deployment like any other.
+        if (request.Deployed && result.Status == ReleaseStatus.Deployed)
+            await deploymentAnnouncer.AnnounceAsync(result.Id, pipelineRunId, agentServerId, ct);
         return CreatedAtAction(nameof(GetRelease), new { id = result.Id }, result);
     }
 

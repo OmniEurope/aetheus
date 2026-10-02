@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -115,8 +112,8 @@ public class ProjectServerDialogTests : BunitContext
     {
         // Behavioural (not a record set-then-get tautology): the dialog binds the provided field values
         // into the real form inputs a user would submit, and exposes a wired submit button. (OnSubmit
-        // then packages these into a ProjectServerDialogResult passed to DialogService.Close - a close a
-        // standalone bUnit render cannot observe, since Radzen only fires OnClose for a stacked dialog.)
+        // then packages these into a ProjectServerDialogResult passed to OmniDialogService.Close - a close a
+        // standalone bUnit render cannot observe, since OnClose only fires for a stacked dialog.)
         var cut = Render<ProjectServerDialog>(p => p
             .Add(x => x.Type, ProjectServerType.ExternalHost)
             .Add(x => x.ServerId, 5)

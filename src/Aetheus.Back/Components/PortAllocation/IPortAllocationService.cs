@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: EUPL-1.2
+namespace Aetheus.Back.Components.PortAllocation;
+
+/// <summary>
+/// PLAN-005 lot 5: allocating ports straight into a variable library. It sits above the registry and
+/// the libraries, which are both storage and therefore cannot call each other; this is where the two
+/// are joined - in one transaction on a relational provider (the scope is re-entrant), with the
+/// compensation kept for the InMemory provider, as spelled out on the service.
+/// </summary>
+public interface IPortAllocationService
+{
+    /// <summary>
+    /// The servers a library may allocate on, with the one to pre-select when the library's own scope
+    /// names exactly one.
+    /// </summary>
+    Task<PortAllocationTargetsDto> GetTargetsAsync(int libraryId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reserves one port per key and writes the entries; a failed write releases the ports the call had
+    /// just reserved, so a reservation never outlives it. The reservation is recorded under the
+    /// library's project, so the project's own pipeline is not later refused the ports allocated for
+    /// it; a library with no project is refused rather than reserved under an identity no deployment
+    /// would recognise.
+    /// </summary>
+    Task<List<VariableEntryDto>> AllocateIntoLibraryAsync(
+        int libraryId, int serverId, IReadOnlyList<string> keys, CancellationToken ct = default);
+
+    /// <summary>Checks the library's existing <c>PORT_*</c> entries against one server.</summary>
+    Task<PortCheckResultDto> CheckLibraryPortsAsync(
+        int libraryId, int serverId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Releases one port on every server the library reaches, but only where the library's own project
+    /// holds it. Offered after a <c>PORT_*</c> entry is deleted, so the reservation does not outlive the
+    /// variable and keep the port blocked for everybody. Returns how many reservations were released,
+    /// which is zero when the port belongs to somebody else - that release is a deliberate act on the
+    /// registry page, not a side effect of editing a library.
+    /// </summary>
+    Task<int> ReleaseLibraryPortAsync(int libraryId, int port, CancellationToken ct = default);
+}

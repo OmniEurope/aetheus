@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -225,7 +224,7 @@ public class VaultEditAsyncTests : BunitContext
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var style = method.Invoke(null, [DateTime.UtcNow.AddDays(60)])!.ToString()!;
-        Assert.Contains("Light", style);
+        Assert.Contains("Neutral", style);
     }
 
     // ── Test 10: CopyKeyReference calls JS clipboard ─────────────────────────

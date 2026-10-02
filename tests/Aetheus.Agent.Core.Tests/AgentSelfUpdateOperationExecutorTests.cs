@@ -8,8 +8,6 @@ using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -106,7 +104,7 @@ public class AgentSelfUpdateOperationExecutorTests : IDisposable
         var result = await RunLegacyDownload(Build(HttpStatusCode.NotFound, null, null, false));
 
         Assert.Equal(-1, result.ExitCode);
-        await _api.Received().ReportUpdateProgressAsync(7, Arg.Any<Shared.DTOs.AgentUpdateProgressReport>(), Arg.Any<CancellationToken>());
+        await _api.Received().ReportUpdateProgressAsync(7, Arg.Any<Aetheus.Shared.Components.Servers.AgentUpdateProgressReport>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -178,7 +176,7 @@ public class AgentSelfUpdateOperationExecutorTests : IDisposable
 
         Assert.Equal(-1, result.ExitCode);
         await _api.Received().ReportUpdateProgressAsync(7,
-            Arg.Is<Shared.DTOs.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Downloaded),
+            Arg.Is<Aetheus.Shared.Components.Servers.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Downloaded),
             Arg.Any<CancellationToken>());
     }
 
@@ -200,14 +198,14 @@ public class AgentSelfUpdateOperationExecutorTests : IDisposable
         Assert.Equal(-1, result.ExitCode);
         // Proof the download SHA gate passed and extraction actually ran: those phases were reported.
         await _api.Received().ReportUpdateProgressAsync(7,
-            Arg.Is<Shared.DTOs.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Downloaded),
+            Arg.Is<Aetheus.Shared.Components.Servers.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Downloaded),
             Arg.Any<CancellationToken>());
         await _api.Received().ReportUpdateProgressAsync(7,
-            Arg.Is<Shared.DTOs.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Extracting),
+            Arg.Is<Aetheus.Shared.Components.Servers.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Extracting),
             Arg.Any<CancellationToken>());
         // And it failed at staging validation, not before extraction.
         await _api.Received().ReportUpdateProgressAsync(7,
-            Arg.Is<Shared.DTOs.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Failed && r.Message == "staged payload invalid"),
+            Arg.Is<Aetheus.Shared.Components.Servers.AgentUpdateProgressReport>(r => r.Phase == AgentUpdatePhase.Failed && r.Message == "staged payload invalid"),
             Arg.Any<CancellationToken>());
     }
 
@@ -247,7 +245,7 @@ public class AgentSelfUpdateOperationExecutorTests : IDisposable
             Path.Combine(installDir.FullName, "Aetheus.Agent.Windows.exe"),
             TestContext.Current.CancellationToken));
         await _api.Received().ReportUpdateProgressAsync(7,
-            Arg.Is<Shared.DTOs.AgentUpdateProgressReport>(
+            Arg.Is<Aetheus.Shared.Components.Servers.AgentUpdateProgressReport>(
                 report => report.Phase == AgentUpdatePhase.LaunchingUpdater),
             Arg.Any<CancellationToken>());
     }
@@ -555,9 +553,9 @@ public class AgentSelfUpdateOperationExecutorTests : IDisposable
                     Content = JsonContent.Create(new AgentReleaseManifestDto
                     {
                         SoftwareVersion = Version,
-                        ProtocolVersion = Aetheus.Shared.Constants.AgentProtocol.CurrentVersion,
-                        MinimumSupportedProtocol = Aetheus.Shared.Constants.AgentProtocol.CurrentVersion - 1,
-                        MaximumSupportedProtocol = Aetheus.Shared.Constants.AgentProtocol.MaximumSupportedVersion,
+                        ProtocolVersion = Aetheus.Shared.Components.Shared.AgentProtocol.CurrentVersion,
+                        MinimumSupportedProtocol = Aetheus.Shared.Components.Shared.AgentProtocol.CurrentVersion - 1,
+                        MaximumSupportedProtocol = Aetheus.Shared.Components.Shared.AgentProtocol.MaximumSupportedVersion,
                         Commit = Commit,
                         Archives =
                         [
@@ -692,7 +690,7 @@ public class AgentSelfUpdateOperationExecutorTests : IDisposable
 
             Assert.Equal(-1, result.ExitCode);
             Assert.Equal(
-                Aetheus.Shared.Constants.TaskFailureCodes.InfrastructureMismatch,
+                Aetheus.Shared.Components.Shared.TaskFailureCodes.InfrastructureMismatch,
                 result.FailureCode);
             await _api.Received().ReportUpdateProgressAsync(
                 7,

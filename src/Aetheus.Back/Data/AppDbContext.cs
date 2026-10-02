@@ -37,6 +37,7 @@ public class AppDbContext(
     public DbSet<ApacheModule> ApacheModules => Set<ApacheModule>();
     public DbSet<ApacheVirtualHost> ApacheVirtualHosts => Set<ApacheVirtualHost>();
     public DbSet<CertbotCertificate> CertbotCertificates => Set<CertbotCertificate>();
+    public DbSet<CertbotState> CertbotStates => Set<CertbotState>();
     public DbSet<MailState> MailStates => Set<MailState>();
     public DbSet<MailDomain> MailDomains => Set<MailDomain>();
     public DbSet<MailAccount> MailAccounts => Set<MailAccount>();
@@ -56,6 +57,8 @@ public class AppDbContext(
     public DbSet<RkhunterWarning> RkhunterWarnings => Set<RkhunterWarning>();
     public DbSet<RkhunterScanResult> RkhunterScanResults => Set<RkhunterScanResult>();
     public DbSet<ModuleLink> ModuleLinks => Set<ModuleLink>();
+    public DbSet<ServerPortReservation> ServerPortReservations => Set<ServerPortReservation>();
+    public DbSet<ServerPortRange> ServerPortRanges => Set<ServerPortRange>();
     public DbSet<VariableLibrary> VariableLibraries => Set<VariableLibrary>();
     public DbSet<VariableLibraryEntry> VariableLibraryEntries => Set<VariableLibraryEntry>();
     public DbSet<VariableLibraryEntryVersion> VariableLibraryEntryVersions => Set<VariableLibraryEntryVersion>();
@@ -77,8 +80,12 @@ public class AppDbContext(
     public DbSet<AgentPool> AgentPools => Set<AgentPool>();
     public DbSet<AgentPoolServer> AgentPoolServers => Set<AgentPoolServer>();
     public DbSet<PipelineArtifact> PipelineArtifacts => Set<PipelineArtifact>();
+    public DbSet<PipelineRunArtifactInput> PipelineRunArtifactInputs => Set<PipelineRunArtifactInput>();
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();
+    public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
+    public DbSet<ProjectSubscription> ProjectSubscriptions => Set<ProjectSubscription>();
+    public DbSet<UserNotificationPreference> UserNotificationPreferences => Set<UserNotificationPreference>();
     public DbSet<ServiceConnection> ServiceConnections => Set<ServiceConnection>();
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
     public DbSet<TestResult> TestResults => Set<TestResult>();
@@ -112,6 +119,7 @@ public class AppDbContext(
     public DbSet<AppHealthHourly> AppHealthHourly => Set<AppHealthHourly>();
     public DbSet<AppMetricSample> AppMetricSamples => Set<AppMetricSample>();
     public DbSet<AppMetricHourly> AppMetricHourly => Set<AppMetricHourly>();
+    public DbSet<AppMetricName> AppMetricNames => Set<AppMetricName>();
     public DbSet<AppMetricThreshold> AppMetricThresholds => Set<AppMetricThreshold>();
     public DbSet<AppLogEntry> AppLogEntries => Set<AppLogEntry>();
     public DbSet<AppErrorEvent> AppErrorEvents => Set<AppErrorEvent>();

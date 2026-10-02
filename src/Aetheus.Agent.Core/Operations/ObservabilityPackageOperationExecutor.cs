@@ -11,7 +11,7 @@ namespace Aetheus.Agent.Core.Operations;
 /// </summary>
 public sealed class ObservabilityPackageOperationExecutor(
     ILogger<ObservabilityPackageOperationExecutor> logger,
-    IOptions<AetheusAgentOptions> options) : IOperationExecutor
+    IOptions<AetheusAgentOptions> options) : EnvironmentOperationExecutor
 {
     private const string PromotionResource =
         "Aetheus.Agent.Core.PublicationHarnesses.promote-observability-packages.sh";
@@ -27,15 +27,10 @@ public sealed class ObservabilityPackageOperationExecutor(
         "AETHEUS_PACKAGE_TOKEN"
     ];
 
-    public bool CanHandle(OperationKind kind) =>
+    public override bool CanHandle(OperationKind kind) =>
         kind == OperationKind.PipelinePublishObservabilityBundle;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind,
         string target,
         IReadOnlyDictionary<string, string> envVars,
@@ -163,7 +158,7 @@ public sealed class ObservabilityPackageOperationExecutor(
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
+            catch (InvalidOperationException) { } // the process already exited: nothing left to kill
             if (ct.IsCancellationRequested) throw;
             return new ExecutorResult(-1, true);
         }

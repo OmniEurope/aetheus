@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Net.Http.Json;
-using Aetheus.Shared.DTOs;
 
 namespace Aetheus.Back.IntegrationTests;
 

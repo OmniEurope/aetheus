@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -70,8 +67,12 @@ public class ServerDetailLayoutTests : BunitContext
         return loader;
     }
 
-    private IRenderedComponent<ServerDetailLayout> RenderLayout(ServerDetailDto server)
+    private IRenderedComponent<ServerDetailLayout> RenderLayout(ServerDetailDto server, string section = "overview")
     {
+        // The trail is what carries the server name now (D7), and it is route-derived: render the
+        // layout on a real server route, the way the router does.
+        Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>()
+            .NavigateTo($"/servers/{server.Id}/{section}");
         SeedLoader(server);
         return Render<ServerDetailLayout>(p => p.Add(x => x.Body, b => b.AddMarkupContent(0, "<div id=\"body\">body</div>")));
     }
@@ -79,18 +80,65 @@ public class ServerDetailLayoutTests : BunitContext
     // ── action buttons gated by _canWrite ─────────────────────────────────────
 
     [Fact]
-    public void ActionButtons_Rendered_WhenCanWrite()
+    public void ActionButtons_ConfigurationAndToolsMenu_Rendered_OnOverview_WhenCanWrite()
     {
         var cut = RenderLayout(MakeServer());
-        // Default test permissions grant Read+Write → all four action buttons present.
+        // Default test permissions grant Read+Write. Configuration (recette R-200, formerly "Edit")
+        // stays a first-class button; the other write actions live in the tools menu, which only
+        // renders its items once opened.
+        var configuration = cut.Find("button[aria-label=\"Configuration\"]");
+        Assert.Equal("Configuration", configuration.GetAttribute("title"));
+        Assert.Contains("Configuration", configuration.TextContent, StringComparison.Ordinal);
+        Assert.NotNull(configuration.QuerySelector("svg"));
+        Assert.DoesNotContain("aria-label=\"Edit\"", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("ContactAgent", cut.Markup);
+
+        cut.Find(".omni-overflow-menu__trigger").Click();
+
         Assert.Contains("ContactAgent", cut.Markup);
         Assert.Contains("UpdateAgent", cut.Markup);
-        Assert.Contains("Edit", cut.Markup);
-        Assert.Contains("Delete", cut.Markup);
-        Assert.Contains("aria-label=\"ContactAgent\"", cut.Markup);
-        Assert.Contains("aria-label=\"UpdateAgent\"", cut.Markup);
-        Assert.Contains("aria-label=\"Edit\"", cut.Markup);
-        Assert.Contains("aria-label=\"Delete\"", cut.Markup);
+        // PLAN-004 R-11: the tools menu retires the server; permanent deletion lives with retired servers.
+        Assert.Contains("RetireServer", cut.Markup);
+    }
+
+    [Theory]
+    [InlineData("logs")]
+    [InlineData("pipelines")]
+    public void ActionButtons_ConfigurationAndToolsMenu_NotRendered_OffOverview(string section)
+    {
+        // Recette R-199: the server's own actions belong to its Overview; other sections keep theirs.
+        var cut = RenderLayout(MakeServer(), section);
+
+        Assert.Contains("id=\"body\"", cut.Markup);
+        Assert.Empty(cut.FindAll("button[aria-label=\"Configuration\"]"));
+        Assert.Empty(cut.FindAll(".omni-overflow-menu"));
+        Assert.False(cut.Instance.IsOverview);
+    }
+
+    [Theory]
+    [InlineData("servers/1", true)]
+    [InlineData("servers/1/overview", true)]
+    [InlineData("servers/1/overview?tab=disks", true)]
+    [InlineData("servers/1/overview#top", true)]
+    [InlineData("servers/1/logs", false)]
+    [InlineData("servers/1/overview/extra", false)]
+    [InlineData("servers", false)]
+    [InlineData("projects/1/overview", false)]
+    [InlineData("", false)]
+    public void IsOverviewPath_TrueOnlyForServerRootAndOverview(string relativePath, bool expected)
+    {
+        Assert.Equal(expected, ServerDetailLayout.IsOverviewPath(relativePath));
+    }
+
+    [Theory]
+    [InlineData("servers/1", "dns")]
+    [InlineData("servers/1/overview", "dns")]
+    [InlineData("servers/1/pipelines?tab=runs", "account_tree")]
+    [InlineData("servers/1/libraries", "library_books")]
+    [InlineData("servers/1/logs#end", "receipt_long")]
+    public void SectionIconFor_MatchesTheSideMenuIcon(string relativePath, string expected)
+    {
+        Assert.Equal(expected, ServerDetailLayout.SectionIconFor(relativePath));
     }
 
     [Fact]
@@ -161,6 +209,10 @@ public class ServerDetailLayoutTests : BunitContext
     public async Task SaveEditAsync_ApiFails_KeepsPanelAndClearsSaving()
     {
         var server = MakeServer(8, "stay");
+        // The trail is what carries the server name now (D7), and it is route-derived: render the
+        // layout on a real server route, the way the router does.
+        Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>()
+            .NavigateTo($"/servers/{server.Id}/overview");
         SeedLoader(server);
         _handler.SetResponse("api/servers/8", System.Net.HttpStatusCode.BadRequest);
 
@@ -179,21 +231,21 @@ public class ServerDetailLayoutTests : BunitContext
     // ── delete ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task OnDeleteServer_ServerNull_ReturnsEarly()
+    public async Task OnRetireServer_ServerNull_ReturnsEarly()
     {
         var loader = Services.GetRequiredService<ServerDetailLoader>();
         typeof(ServerDetailLoader).GetProperty(nameof(ServerDetailLoader.InitialLoadCompleted))!.SetValue(loader, true);
         var cut = Render<ServerDetailLayout>(p => p.Add(x => x.Body, b => b.AddMarkupContent(0, "<div/>")));
 
-        var method = typeof(ServerDetailLayout).GetMethod("OnDeleteServer", Priv)!;
+        var method = typeof(ServerDetailLayout).GetMethod("OnRetireServer", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
-        // Null server short-circuits before the confirm/delete flow - no DELETE is ever sent.
+        // Null server short-circuits before the confirm/retire flow - no DELETE is ever sent.
         Assert.DoesNotContain(_handler.Requests, r => r.Method == "DELETE");
     }
 
     [Fact]
-    public async Task OnDeleteServer_ShowsBusyStateWhileDeleteCompletes()
+    public async Task OnRetireServer_ShowsBusyStateWhileRetireCompletes()
     {
         var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _handler.SetAsyncJsonResponse(HttpMethod.Delete, "api/servers/12", async ct =>
@@ -202,18 +254,23 @@ public class ServerDetailLayoutTests : BunitContext
             return new { };
         });
         var cut = RenderLayout(MakeServer(12, "delete-me"));
+        // The retire action lives in the tools menu, so its busy label only exists once it is open.
+        cut.Find(".omni-overflow-menu__trigger").Click();
 
-        var deletion = cut.InvokeAsync(cut.Instance.DeleteServerConfirmedAsync);
+        var deletion = cut.InvokeAsync(cut.Instance.RetireServerConfirmedAsync);
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Contains("Deleting", cut.Markup);
+            // PLAN-005 lot 4 / D35: the label stays "Retire server"; the busy state is the item being
+            // disabled, not a "Retiring…" label that changes the width of the menu.
+            var item = cut.FindAll(".omni-menu__item").Single(element => element.TextContent.Contains("RetireServer", StringComparison.Ordinal));
+            Assert.True(item.HasAttribute("disabled"));
         });
+        Assert.DoesNotContain("Retiring", cut.Markup, StringComparison.Ordinal);
         Assert.False(deletion.IsCompleted);
 
         releaseDelete.SetResult();
         await deletion;
-        cut.WaitForAssertion(() => Assert.DoesNotContain("Deleting", cut.Markup));
     }
 
     // ── contact agent dialog ────────────────────────────────────────────────
@@ -222,12 +279,12 @@ public class ServerDetailLayoutTests : BunitContext
     public void OpenContactAgentDialog_ServerLoaded_OpensDialog()
     {
         var cut = RenderLayout(MakeServer(9, "contact-me"));
-        var dialog = Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 
         var method = typeof(ServerDetailLayout).GetMethod("OpenContactAgentDialog", Priv)!;
-        // Returns a non-completing Task (dialog stays open); the loaded server drives DialogService.Open.
+        // Returns a non-completing Task (dialog stays open); the loaded server drives OmniDialogService.Open.
         _ = (Task)method.Invoke(cut.Instance, [])!;
         Assert.True(opened);
     }
@@ -276,22 +333,24 @@ public class ServerDetailLayoutTests : BunitContext
     // ── header chrome ─────────────────────────────────────────────────────────
 
     [Fact]
-    public void Header_ShowsServerName_AndOnlineBadge()
+    public void Header_ShowsServerName_WithoutAStatusBadge()
     {
+        // Recette R-083: the status badge left the header of the server pages (the Overview shows the
+        // status in its Essentials card).
         var cut = RenderLayout(MakeServer(name: "header-srv"));
         Assert.Contains("header-srv", cut.Markup);
-        Assert.Contains("Online", cut.Markup);
+        Assert.Empty(cut.FindAll(".omni-page-header__frame .omni-badge"));
     }
 
     [Fact]
-    public void Header_OfflineServer_ShowsOfflineBadge()
+    public void Header_OfflineServer_HasNoStatusBadgeEither()
     {
         var cut = RenderLayout(MakeServer(name: "down-srv", status: ServerStatus.Offline) with
         {
             LastHeartbeat = DateTime.Now.AddMinutes(-60)
         });
         Assert.Contains("down-srv", cut.Markup);
-        Assert.Contains("Offline", cut.Markup);
+        Assert.Empty(cut.FindAll(".omni-page-header__frame .omni-badge"));
     }
 
     [Fact]

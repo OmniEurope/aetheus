@@ -12,18 +12,6 @@ public class StaticAssetAuditTests
     }
 
     [Fact]
-    public void RadzenSanitizer_PreservesNativeHeaderSortState()
-    {
-        var root = FindRepoRoot();
-        var source = File.ReadAllText(Path.Combine(root, "src", "Aetheus.Front", "wwwroot", "js", "a11y-radzen.js"));
-
-        Assert.DoesNotContain("removeAttribute(\"aria-sort\")", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("querySelectorAll(\n            \"[aria-sort]", source, StringComparison.Ordinal);
-        Assert.Contains("table[role='presentation']", source, StringComparison.Ordinal);
-        Assert.Contains("presentationTables[i].removeAttribute(\"role\")", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void MonacoDiffEditor_DetachesModelsBeforeDisposingThem()
     {
         var root = FindRepoRoot();

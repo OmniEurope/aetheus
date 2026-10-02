@@ -74,9 +74,14 @@ public static class AetheusTelemetryBuilderExtensions
                 ConfigureExporter(exporter, options.TracesEndpoint!, options));
         });
 
+        // The per-route timings Aetheus shows in each application's Performance tab: measured in
+        // process, exported as gauges on the same metrics pipeline.
+        services.AddAetheusRequestPerformanceMetrics();
+
         openTelemetry.WithMetrics(builder =>
         {
             builder.AddAspNetCoreInstrumentation();
+            builder.AddMeter(RequestPerformanceMetrics.MeterName);
             if (options.EnableHttpClientTracing)
                 builder.AddHttpClientInstrumentation();
             if (options.EnableRuntimeMetrics)

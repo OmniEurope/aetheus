@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.Pipelines.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Microsoft.AspNetCore.SignalR;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Helpers;
+using Microsoft.AspNetCore.SignalR;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -48,8 +46,13 @@ public sealed class PipelineStageDispatchPlanner(
     IPipelineStepTaskDispatcher stepDispatcher,
     IHubContext<PipelineHub> pipelineHub,
     IDomainEventDispatcher domainEvents,
+    TimeProvider timeProvider,
     ILogger<PipelineStageDispatchPlanner> logger) : IPipelineStageDispatchPlanner
 {
+    private readonly PipelineReadyStageServerSelector _serverSelector = new(repo, dispatchServers, logger);
+    private readonly PipelineStageApprovalGate _approvals = new(repo, pipelineHub, domainEvents, timeProvider);
+    private readonly PipelineDeploymentGradeGate _gradeGate = new(repo);
+
     public async Task<bool> CreateTasksForNextStageAsync(
         int runId, PipelineYamlDefinition definition, Dictionary<string, string> resolvedVars,
         HashSet<string> secretKeys, IPipelineChildRunLauncher launcher, CancellationToken ct)
@@ -71,7 +74,12 @@ public sealed class PipelineStageDispatchPlanner(
         // producer step completed but before its operation task did; dispatching a consumer here
         // races publication and can let failure cleanup erase the shared workspace.
         if (await repo.HasActiveArtifactCollectionAsync(runId, ct).ConfigureAwait(false))
+        {
+            await repo.SetRunWaitingReasonAsync(
+                runId, "Artifact collection is in flight; the next stage waits for it to finish.", ct)
+                .ConfigureAwait(false);
             return false;
+        }
 
         var completedStages = await repo.GetCompletedStageNamesAsync(runId, ct).ConfigureAwait(false);
         var terminalStages = await repo.GetTerminalStageNamesAsync(runId, ct).ConfigureAwait(false);
@@ -91,8 +99,19 @@ public sealed class PipelineStageDispatchPlanner(
 
         // Output variables are run-scoped and may drive the condition of the next stage. They must
         // therefore be available before conditions are evaluated, not only while creating its tasks.
-        await InjectOutputVariablesAsync(runId, resolvedVars, ct).ConfigureAwait(false);
+        // The declared values referencing them are expanded again here (D-02).
+        PipelineVariableExpansion.ApplyStepOutputs(
+            resolvedVars, secretKeys, await repo.GetSuccessfulStepOutputsAsync(runId, ct).ConfigureAwait(false));
         var activeStageNames = await repo.GetActiveStageNamesAsync(runId, ct).ConfigureAwait(false) ?? [];
+        // R-368: before the run touches anything, approvals included. Only a run that has not started:
+        // failing a started one outright would skip its failed() rollback.
+        if (completedStages.Count == 0 && terminalStages.Count == 0 && activeStageNames.Count == 0
+            && await _gradeGate.EvaluateAsync(runId, resolvedVars, ct).ConfigureAwait(false) is { } refusal)
+        {
+            finalizer.MarkStepsAs(pendingSteps, TaskExecutionStatus.Cancelled);
+            await finalizer.FailRunWithUnmatchedStagesAsync(runId, [refusal], [], ct).ConfigureAwait(false);
+            return false;
+        }
         var state = new NextStageDispatchState(
             await repo.GetRunAffinityServerIdAsync(runId, ct).ConfigureAwait(false),
             activeStageNames);
@@ -102,11 +121,7 @@ public sealed class PipelineStageDispatchPlanner(
                     completedStages, flattenedStages, previousStageFailed, secretKeys, state, launcher, ct)
                 .ConfigureAwait(false)) return false;
 
-        return await FinalizeNextStageDispatchAsync(
-            runId, state.SystemTaskDispatchFailed, state.AnyTaskCreated, state.AnyStageSyncFailed,
-            state.AnyStageCancelled, state.AnyThrottled, state.AnyRunnerTemporarilyUnavailable,
-            state.AnyEnvironmentCheckFailed, state.UnmatchedReasons, state.UnmatchedStageSteps, ct)
-            .ConfigureAwait(false);
+        return await FinalizeNextStageDispatchAsync(runId, state, ct).ConfigureAwait(false);
     }
 
     private async Task<bool> DispatchReadyStageAsync(
@@ -162,6 +177,8 @@ public sealed class PipelineStageDispatchPlanner(
         if (!dispatch.Handled) return false;
         state.AnyTaskCreated |= dispatch.TaskCreated;
         state.AnyRunnerTemporarilyUnavailable |= dispatch.RunnerTemporarilyUnavailable;
+        if (dispatch.RunnerTemporarilyUnavailable)
+            state.AddWaiting($"System stage '{stageName}' waits for a configured pipeline runner to come back online.");
         state.SystemTaskDispatchFailed |= dispatch.DispatchFailed;
         state.UnmatchedReasons.AddRange(dispatch.Reasons);
         state.UnmatchedStageSteps.AddRange(dispatch.UnmatchedSteps);
@@ -192,9 +209,10 @@ public sealed class PipelineStageDispatchPlanner(
         if (IsGroupThrottled(stageDef, flattenedStages, state.ActiveStageNames, state.DispatchedPerGroup))
         {
             state.AnyThrottled = true;
+            state.AddWaiting($"Stage '{stageName}' waits: group '{stageDef.Group}' has reached its concurrency limit.");
             return ReadyStagePreparation.Skip;
         }
-        if (await CheckAndCreateApprovalAsync(runId, stageName, stageDef, ct).ConfigureAwait(false))
+        if (await _approvals.CheckAndCreateApprovalAsync(runId, stageName, stageDef, flattenedStages, ct).ConfigureAwait(false))
             return ReadyStagePreparation.Stop;
         if (await environmentChecks.CheckEnvironmentChecksAsync(stageDef, ct).ConfigureAwait(false) == false)
         {
@@ -217,12 +235,15 @@ public sealed class PipelineStageDispatchPlanner(
         CancellationToken ct)
     {
         var stageHasDeploy = dispatchServers.StageHasDeployStep(stageDef);
-        var resolution = await ResolveReadyStageServerAsync(
+        var resolution = await _serverSelector.ResolveAsync(
             runId, stageName, stageDef, resolvedVars, organizationId,
             stageHasDeploy, state.AffinityServerId, ct).ConfigureAwait(false);
         if (resolution.Server is null)
         {
             state.AnyRunnerTemporarilyUnavailable |= resolution.RunnerTemporarilyUnavailable;
+            if (resolution.RunnerTemporarilyUnavailable)
+                state.AddWaiting($"Stage '{stageName}' waits for a configured "
+                    + (stageHasDeploy ? "deployment target" : "pipeline runner") + " to come back online.");
             state.AddUnmatched(resolution.Reason, stageSteps);
             return null;
         }
@@ -276,11 +297,22 @@ public sealed class PipelineStageDispatchPlanner(
         public List<string> UnmatchedReasons { get; } = [];
         public List<PipelineStepRun> UnmatchedStageSteps { get; } = [];
 
+        /// <summary>Why a ready stage was not dispatched although the run is still alive. Distinct from
+        /// <see cref="UnmatchedReasons"/>, which fails the run: these are transient, and are what the
+        /// run page shows instead of leaving the user in front of a run that moves no task.</summary>
+        public List<string> WaitingReasons { get; } = [];
+
         public void AddUnmatched(string? reason, IEnumerable<PipelineStepRun> steps)
         {
             if (reason is null) return;
             UnmatchedReasons.Add(reason);
             UnmatchedStageSteps.AddRange(steps);
+        }
+
+        public void AddWaiting(string reason)
+        {
+            if (!WaitingReasons.Contains(reason, StringComparer.Ordinal))
+                WaitingReasons.Add(reason);
         }
     }
 
@@ -312,7 +344,13 @@ public sealed class PipelineStageDispatchPlanner(
         if (readyStageNames.Count > 0)
             return null;
         if (await repo.HasAnyRunningStepInRunAsync(runId, ct).ConfigureAwait(false))
+        {
+            // Nothing is ready because something is running: that is progress, not a wait. Clearing
+            // here matters - a run throttled a moment ago would otherwise keep showing that throttle
+            // long after the stage it was waiting behind started.
+            await repo.SetRunWaitingReasonAsync(runId, null, ct).ConfigureAwait(false);
             return false;
+        }
 
         if (previousStageFailed)
         {
@@ -355,58 +393,6 @@ public sealed class PipelineStageDispatchPlanner(
                 BuildDeadlockReasons(pendingSteps, definition, recheckedCompleted),
                 pendingSteps, ct).ConfigureAwait(false);
         return false;
-    }
-
-    private sealed record ReadyStageServerResolution(
-        Server? Server,
-        bool RunnerTemporarilyUnavailable,
-        string? Reason);
-
-    private async Task<ReadyStageServerResolution> ResolveReadyStageServerAsync(
-        int runId,
-        string stageName,
-        PipelineStageDefinition stageDef,
-        Dictionary<string, string> resolvedVars,
-        int? organizationId,
-        bool stageHasDeploy,
-        int? affinityServerId,
-        CancellationToken ct)
-    {
-        var effectiveStage = dispatchServers.ResolveEffectiveStageTarget(stageDef, resolvedVars);
-        Server? server = null;
-        List<int>? configuredTargets = null;
-        if (!stageHasDeploy && affinityServerId is not null)
-        {
-            configuredTargets = await repo.FindCandidateTargetServerIdsAsync(
-                effectiveStage.Pool, effectiveStage.Environment, effectiveStage.Agent,
-                OsTypeHelper.Parse(effectiveStage.Os), organizationId, false, ct).ConfigureAwait(false);
-            if (configuredTargets.Contains(affinityServerId.Value))
-            {
-                server = await repo.FindOnlineServerByIdAsync(
-                    affinityServerId.Value, OsTypeHelper.Parse(effectiveStage.Os), ct).ConfigureAwait(false);
-                if (server is null)
-                    return new(null, true, null);
-            }
-        }
-        server ??= await dispatchServers.ResolveServerForTargetAsync(
-            stageDef, resolvedVars, organizationId, stageHasDeploy, ct).ConfigureAwait(false);
-        if (server is not null)
-            return new(server, false, null);
-
-        configuredTargets ??= await repo.FindCandidateTargetServerIdsAsync(
-            effectiveStage.Pool, effectiveStage.Environment, effectiveStage.Agent,
-            OsTypeHelper.Parse(effectiveStage.Os), organizationId, stageHasDeploy, ct).ConfigureAwait(false);
-        if (configuredTargets.Count > 0)
-        {
-            logger.LogWarning(
-                "Run {RunId} stage {StageName} is waiting for a configured {TargetKind} to come back online",
-                runId, stageName, stageHasDeploy ? "deployment target" : "pipeline runner");
-            return new(null, true, null);
-        }
-        var reason = stageHasDeploy
-            ? dispatchServers.BuildNoDeployTargetReason(stageName, stageDef)
-            : dispatchServers.BuildNoServerReason(stageName, stageDef);
-        return new(null, false, reason);
     }
 
     private sealed record SystemStageDispatch(
@@ -459,38 +445,45 @@ public sealed class PipelineStageDispatchPlanner(
 
     private async Task<bool> FinalizeNextStageDispatchAsync(
         int runId,
-        bool systemTaskDispatchFailed,
-        bool anyTaskCreated,
-        bool anyStageSyncFailed,
-        bool anyStageCancelled,
-        bool anyThrottled,
-        bool anyRunnerTemporarilyUnavailable,
-        bool anyEnvCheckFailed,
-        List<string> unmatchedReasons,
-        List<PipelineStepRun> unmatchedStageSteps,
+        NextStageDispatchState state,
         CancellationToken ct)
     {
-        if (systemTaskDispatchFailed && !await finalizer.IsRunActiveAsync(runId, ct).ConfigureAwait(false))
+        if (state.SystemTaskDispatchFailed && !await finalizer.IsRunActiveAsync(runId, ct).ConfigureAwait(false))
             return false;
-        if (anyTaskCreated)
+        if (state.AnyTaskCreated)
         {
+            // Something moved: whatever the run was waiting for is over, so the reason must go with it.
+            await repo.SetRunWaitingReasonAsync(runId, null, ct).ConfigureAwait(false);
             await repo.SaveChangesAsync(ct).ConfigureAwait(false);
             return false;
         }
-        if (anyStageSyncFailed)
+        if (state.AnyStageSyncFailed)
         {
             await repo.SaveChangesAsync(ct).ConfigureAwait(false);
             return true;
         }
-        if (anyStageCancelled)
+        if (state.AnyStageCancelled)
             return true;
-        if ((anyThrottled || anyRunnerTemporarilyUnavailable)
-            && unmatchedReasons.Count == 0
-            && !anyEnvCheckFailed)
+        if ((state.AnyThrottled || state.AnyRunnerTemporarilyUnavailable)
+            && state.UnmatchedReasons.Count == 0
+            && !state.AnyEnvironmentCheckFailed)
+        {
+            // The run stays alive and dispatches nothing. This is the case the page could not
+            // explain: record why, once, so a re-pass does not reset the "waiting since" clock.
+            await repo.SetRunWaitingReasonAsync(runId, JoinWaitingReasons(state.WaitingReasons), ct)
+                .ConfigureAwait(false);
             return false;
-        await finalizer.FailRunWithUnmatchedStagesAsync(runId, unmatchedReasons, unmatchedStageSteps, ct).ConfigureAwait(false);
+        }
+        await finalizer.FailRunWithUnmatchedStagesAsync(
+            runId, state.UnmatchedReasons, state.UnmatchedStageSteps, ct).ConfigureAwait(false);
         return false;
     }
+
+    /// <summary>The waiting sentences as one stored value. Empty means the planner knows it is waiting
+    /// but not on what; the run still gets a truthful message rather than nothing at all.</summary>
+    private static string JoinWaitingReasons(List<string> reasons) => reasons.Count == 0
+        ? "The scheduler found nothing it could dispatch on this pass."
+        : string.Join(" ", reasons);
 
     // A pipeline needs the workspace (clone/checkout) only if at least one step is NOT a `type: trigger`
     // step. Trigger steps just launch a child run; a pipeline made entirely of them (a pure orchestrator)
@@ -535,54 +528,6 @@ public sealed class PipelineStageDispatchPlanner(
     // --- P-14: cancellation, approval resume and retry now live in PipelineRunControlService.
     // The engine passes itself as the scheduler: those operations re-enter stage advancement, so the
     // dependency is satisfied per call instead of being injected in both directions.
-
-    private async Task<bool> CheckAndCreateApprovalAsync(
-        int runId, string stageName, PipelineStageDefinition stageDef, CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(stageDef.Environment)) return false;
-
-        var env = await repo.FindEnvironmentByNameAsync(stageDef.Environment, ct).ConfigureAwait(false);
-        if (env is null || !env.RequireApproval) return false;
-
-        // Check if an approval already exists for this run/stage
-        var existingApprovals = await repo.GetApprovalsAsync(runId, ct).ConfigureAwait(false);
-        if (existingApprovals.Any(a => a.StageName == stageName)) return false;
-
-        var approval = new PipelineApproval
-        {
-            PipelineRunId = runId,
-            StageName = stageName,
-            EnvironmentId = env.Id
-        };
-        await repo.AddApprovalAsync(approval, ct).ConfigureAwait(false);
-
-        if (!await repo.TryTransitionPipelineRunStatusAsync(
-                runId, PipelineStatus.Running, PipelineStatus.WaitingForApproval, ct).ConfigureAwait(false))
-            return false;
-        var approvalPipelineId = await repo.GetPipelineIdForRunAsync(runId, ct).ConfigureAwait(false);
-        var approvalGroups = HubGroups.PipelineRunUpdates(runId, approvalPipelineId);
-        await pipelineHub.Clients.Groups(approvalGroups).SendAsync("ApprovalRequired", runId, stageName, env.Name, ct).ConfigureAwait(false);
-        // Approval observers (audit, notifications) are non-blocking.
-        domainEvents.Publish(new PipelineApprovalRequestedEvent(runId, stageName, env.Name));
-
-        return true;
-    }
-
-    private async Task InjectOutputVariablesAsync(int runId, Dictionary<string, string> vars, CancellationToken ct)
-    {
-        var stepOutputs = await repo.GetSuccessfulStepOutputsAsync(runId, ct).ConfigureAwait(false);
-
-        foreach (var step in stepOutputs)
-        {
-            var outputVars = DeserializeResolvedVariables(step.OutputVariablesJson);
-            foreach (var (key, value) in outputVars)
-            {
-                vars[$"{step.StageName}.{step.StepName}.{key}"] = value;
-                if (!key.Equals(PipelineDeploymentTargetGuard.TargetVariable, StringComparison.OrdinalIgnoreCase))
-                    vars[key] = value;
-            }
-        }
-    }
 
     internal static bool IsFailureHandlerCondition(string? condition)
     {

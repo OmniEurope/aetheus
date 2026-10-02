@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests;
@@ -354,6 +352,71 @@ public class PipelineRepositoryTests : IDisposable
         Assert.Null(downstream.CompletedAt);
     }
 
+    /// <summary>
+    /// Production run 2240 failed its retry twice on "cannot open
+    /// deploy/scripts/finalize-fast-release-transaction.sh". Its agent had restarted, taking the
+    /// workspace with it, and nothing put the repository back: <c>checkout: true</c> stopped cloning
+    /// (the double-clone fix), only System:Prepare clones, and System:Prepare was Success so the retry
+    /// never touched it. A retry has to replay the preparation, or it retries into an empty directory.
+    /// </summary>
+    [Fact]
+    public async Task ResetFailedStepRunsAsync_ReplaysThePreparationThatPutsTheRepositoryInTheWorkspace()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Failed, StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = PipelineRunService.SystemPrepareStage, StepName = "Clone Repository", Order = 0, IsSystem = true, Status = TaskExecutionStatus.Success, StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow },
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = "a", StepName = "ok", Order = 1, Status = TaskExecutionStatus.Success },
+            new PipelineStepRun { PipelineRunId = run.Id, StageName = "b", StepName = "ko", Order = 2, Status = TaskExecutionStatus.Failed, ExitCode = 2, StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var count = await _repo.ResetFailedStepRunsAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        // The count still answers "how many failed steps am I retrying", so the caller's
+        // "nothing to retry" refusal keeps its meaning: the preparation is not a retried step.
+        Assert.Equal(1, count);
+        _db.ChangeTracker.Clear();
+        var steps = await _db.PipelineStepRuns.AsNoTracking()
+            .Where(s => s.PipelineRunId == run.Id)
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var prepare = steps.Single(s => s.StageName == PipelineRunService.SystemPrepareStage);
+        Assert.Equal(TaskExecutionStatus.Pending, prepare.Status);
+        Assert.Null(prepare.StartedAt);
+        Assert.Null(prepare.CompletedAt);
+        Assert.Equal(TaskExecutionStatus.Pending, steps.Single(s => s.StepName == "ko").Status);
+        // A step that already succeeded is not replayed just because the preparation is.
+        Assert.Equal(TaskExecutionStatus.Success, steps.Single(s => s.StepName == "ok").Status);
+    }
+
+    /// <summary>
+    /// The preparation is replayed with a retry, never on its own: a run with nothing to retry stays
+    /// closed, and its workspace is not rebuilt for no reason.
+    /// </summary>
+    [Fact]
+    public async Task ResetFailedStepRunsAsync_LeavesThePreparationAloneWhenThereIsNothingToRetry()
+    {
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Failed, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.Add(new PipelineStepRun { PipelineRunId = run.Id, StageName = PipelineRunService.SystemPrepareStage, StepName = "Clone Repository", Order = 0, IsSystem = true, Status = TaskExecutionStatus.Success });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var count = await _repo.ResetFailedStepRunsAsync(run.Id, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, count);
+        _db.ChangeTracker.Clear();
+        var prepare = await _db.PipelineStepRuns.AsNoTracking()
+            .SingleAsync(s => s.PipelineRunId == run.Id, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(TaskExecutionStatus.Success, prepare.Status);
+    }
+
     [Fact]
     public async Task ResetFailedStepRunsAsync_NoFailedSteps_ReturnsZeroAndNoChange()
     {
@@ -564,6 +627,95 @@ public class PipelineRepositoryTests : IDisposable
     }
 
     // --- GetRunDetailAsync ---
+
+    [Fact]
+    public async Task R484_TheRunDetail_LeavesItsTestRowsOut_AndTheSummaryCountsThemByOutcome()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(ct);
+        var run = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow };
+        var other = new PipelineRun { PipelineId = p.Id, Status = PipelineStatus.Success, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.AddRange(run, other);
+        await _db.SaveChangesAsync(ct);
+        _db.TestResults.AddRange(
+            new TestResult { PipelineRunId = run.Id, TestName = "a", Outcome = TestOutcome.Passed, DurationMs = 10 },
+            new TestResult { PipelineRunId = run.Id, TestName = "b", Outcome = TestOutcome.Passed, DurationMs = 5 },
+            new TestResult { PipelineRunId = run.Id, TestName = "c", Outcome = TestOutcome.Failed, DurationMs = 2.5 },
+            new TestResult { PipelineRunId = run.Id, TestName = "d", Outcome = TestOutcome.Skipped },
+            new TestResult { PipelineRunId = other.Id, TestName = "z", Outcome = TestOutcome.Error, DurationMs = 99 });
+        await _db.SaveChangesAsync(ct);
+        _db.ChangeTracker.Clear();
+
+        var detail = await _repo.GetRunDetailAsync(run.Id, ct);
+        var summary = await _repo.GetTestResultSummaryAsync(run.Id, ct);
+
+        Assert.NotNull(detail);
+        Assert.Empty(detail.TestResults);
+        Assert.NotNull(summary);
+        Assert.Equal((4, 2, 1, 1, 0, 17.5), (summary.TotalTests, summary.Passed, summary.Failed, summary.Skipped, summary.Errors, summary.TotalDurationMs));
+        Assert.Null(await _repo.GetTestResultSummaryAsync(9999, ct));
+    }
+
+    /// <summary>Recette R-484: the detail loads no coverage, lint, metric or artifact rows; their figures
+    /// come from the database: the canonical coverage report without its per-file list, the last lint
+    /// report, the metrics and the artifacts with the run's branch and commit.</summary>
+    [Fact]
+    public async Task R484_TheRunDetail_LeavesItsResultRowsOut_AndTheSummariesComeFromTheDatabase()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var p = new Pipeline { Name = "P", YamlDefinition = "y" };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(ct);
+        var run = new PipelineRun { PipelineId = p.Id, StartedAt = DateTime.UtcNow, BranchName = "develop", CommitHash = "abc123" };
+        var other = new PipelineRun { PipelineId = p.Id, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.AddRange(run, other);
+        await _db.SaveChangesAsync(ct);
+        var now = DateTime.UtcNow;
+        _db.CoverageResults.AddRange(
+            new CoverageResult { PipelineRunId = run.Id, LineRate = 0.5, LinesCovered = 5, LinesValid = 10, FilesJson = "[{\"File\":\"a.cs\"}]", CreatedAt = now },
+            new CoverageResult { PipelineRunId = run.Id, LineRate = 0.8, LinesCovered = 80, LinesValid = 100, FilesJson = "[{\"File\":\"b.cs\"}]", CreatedAt = now.AddMinutes(-1) },
+            new CoverageResult { PipelineRunId = other.Id, LinesValid = 1000, CreatedAt = now });
+        _db.LintResults.AddRange(
+            new LintResult { PipelineRunId = run.Id, Tool = "old", ErrorCount = 3, CreatedAt = now.AddMinutes(-5) },
+            new LintResult { PipelineRunId = run.Id, Tool = "new", WarningCount = 2, CreatedAt = now });
+        _db.RunMetrics.Add(new RunMetric { PipelineRunId = run.Id, Key = "loc.total", Value = 42, StepName = "build", CreatedAt = now });
+        _db.PipelineArtifacts.Add(new PipelineArtifact { PipelineRunId = run.Id, PipelineId = p.Id, Name = "drop", FilePath = "1/drop.zip", SizeBytes = 7, Sha256 = new string('a', 64), CreatedAt = now });
+        await _db.SaveChangesAsync(ct);
+        _db.ChangeTracker.Clear();
+
+        var detail = await _repo.GetRunDetailAsync(run.Id, ct);
+        Assert.NotNull(detail);
+        Assert.Empty(detail.CoverageResults);
+        Assert.Empty(detail.LintResults);
+        Assert.Empty(detail.RunMetrics);
+        Assert.Empty(detail.Artifacts);
+
+        var results = await _repo.GetRunResultSummariesAsync(detail, ct);
+
+        Assert.NotNull(results.Coverage);
+        Assert.Equal((0.8, 100, run.Id), (results.Coverage.LineRate, results.Coverage.LinesValid, results.Coverage.RunId));
+        Assert.Empty(results.Coverage.Files);
+        Assert.NotNull(results.Lint);
+        Assert.Equal(("new", 2, true), (results.Lint.Tool, results.Lint.WarningCount, results.Lint.Passed));
+        Assert.Equal(("loc.total", 42d, "build"), (results.Metrics.Single().Key, results.Metrics.Single().Value, results.Metrics.Single().StepName));
+        var artifact = Assert.Single(results.Artifacts);
+        Assert.Equal(("drop", "develop", "abc123", (string?)null), (artifact.Name, artifact.BranchName, artifact.CommitHash, artifact.Sha256));
+    }
+
+    /// <summary>Recette R-483: the source endpoint reads four columns of the pipeline.</summary>
+    [Fact]
+    public async Task R483_GetPipelineSourceFieldsAsync_GivesTheProjectNameAndSourceBinding()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var p = new Pipeline { Name = "Candidate", YamlDefinition = "y", ProjectId = 4, SourceBranch = "develop", SourceRepositoryId = 9 };
+        _db.Pipelines.Add(p);
+        await _db.SaveChangesAsync(ct);
+
+        Assert.Equal(new PipelineSourceFields(4, "Candidate", "develop", 9), await _repo.GetPipelineSourceFieldsAsync(p.Id, ct));
+        Assert.Null(await _repo.GetPipelineSourceFieldsAsync(p.Id + 1000, ct));
+    }
 
     [Fact]
     public async Task GetRunDetailAsync_Found_IncludesStepRuns()

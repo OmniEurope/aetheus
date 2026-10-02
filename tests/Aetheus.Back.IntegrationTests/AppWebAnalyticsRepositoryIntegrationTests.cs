@@ -4,7 +4,6 @@ using System.Security.Cryptography;
 using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -118,6 +117,41 @@ public sealed class AppWebAnalyticsRepositoryIntegrationTests(PostgresFixture fi
 
         Assert.Equal((100, 0), result);
         Assert.InRange(counter.Count, 1, 15);
+    }
+
+    [Fact]
+    public async Task R2007_TrimToAsync_DeletesTheOldestEventsOnPostgres()
+    {
+        await fixture.ResetAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(fixture.ConnectionString)
+            .Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var app = await CreateAppAsync(db);
+        var now = new DateTime(2026, 7, 23, 12, 0, 0, DateTimeKind.Utc);
+        var events = Enumerable.Range(0, 10)
+            .Select(index => Event(app.Id, now.AddMinutes(index)) with
+            {
+                Kind = "browser_error",
+                ErrorType = "script_error"
+            })
+            .ToList();
+        var repository = new AppWebAnalyticsRepository(db);
+        await repository.RecordAsync(app.Id, events, 30, now, TestContext.Current.CancellationToken);
+        var before = await repository.EstimateStorageBytesAsync(app.Id, TestContext.Current.CancellationToken);
+
+        // Three events' worth less than what is stored: the three oldest go, the seven newest stay.
+        var trimmed = await repository.TrimToAsync(app.Id, before - 3 * 480, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, trimmed.Events);
+        Assert.Equal(0, trimmed.Sessions);
+        var left = await db.AppAnalyticsEvents.AsNoTracking().Where(item => item.MonitoredAppId == app.Id)
+            .Select(item => item.OccurredAtUtc).OrderBy(item => item)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(7, left.Count);
+        Assert.Equal(now.AddMinutes(3), left[0]);
+        Assert.Equal(before - 3 * 480, trimmed.RemainingBytes);
     }
 
     [Fact]

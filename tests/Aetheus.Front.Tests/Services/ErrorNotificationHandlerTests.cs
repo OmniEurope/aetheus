@@ -3,11 +3,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests;
 
@@ -20,7 +19,7 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
         client.Dispose();
         handler.Dispose();
     }
@@ -32,7 +31,7 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
         client.Dispose();
         handler.Dispose();
     }
@@ -44,9 +43,37 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Error, notif.Messages[0].Severity);
-        Assert.Equal("Error 400", notif.Messages[0].Summary);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Danger, notif.Toasts()[0].Severity);
+        Assert.Equal("Error 400", notif.Toasts()[0].Summary);
+        client.Dispose();
+        handler.Dispose();
+    }
+
+    [Fact]
+    public async Task SendAsync_BadRequestTheCallerHandles_LeavesTheToastToTheCaller()
+    {
+        var (notif, handler, client) = CreateSetup(HttpStatusCode.BadRequest, new ApiError { Message = "refused" });
+        var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost/api/pipelines/5/run");
+        request.Options.Set(ErrorNotificationHandler.CallerHandlesBadRequest, true);
+
+        await client.SendAsync(request, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Empty(notif.Toasts());
+        client.Dispose();
+        handler.Dispose();
+    }
+
+    [Fact]
+    public async Task SendAsync_ServerErrorOnARequestWhoseCallerHandlesBadRequest_StillNotifies()
+    {
+        var (notif, handler, client) = CreateSetup(HttpStatusCode.InternalServerError);
+        var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost/api/pipelines/5/run");
+        request.Options.Set(ErrorNotificationHandler.CallerHandlesBadRequest, true);
+
+        await client.SendAsync(request, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.Single(notif.Toasts());
         client.Dispose();
         handler.Dispose();
     }
@@ -58,9 +85,9 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Error, notif.Messages[0].Severity);
-        Assert.Equal("Error 500", notif.Messages[0].Summary);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Danger, notif.Toasts()[0].Severity);
+        Assert.Equal("Error 500", notif.Toasts()[0].Summary);
         client.Dispose();
         handler.Dispose();
     }
@@ -72,8 +99,8 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal("ResourceNotFound", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal("ResourceNotFound", notif.Toasts()[0].Detail);
         client.Dispose();
         handler.Dispose();
     }
@@ -85,8 +112,8 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal("AccessDenied", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal("AccessDenied", notif.Toasts()[0].Detail);
         client.Dispose();
         handler.Dispose();
     }
@@ -98,8 +125,8 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal("ConflictingOperation", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal("ConflictingOperation", notif.Toasts()[0].Detail);
         client.Dispose();
         handler.Dispose();
     }
@@ -112,8 +139,8 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal("Custom error message", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal("Custom error message", notif.Toasts()[0].Detail);
         client.Dispose();
         handler.Dispose();
     }
@@ -129,7 +156,7 @@ public class ErrorNotificationHandlerTests
             new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"),
             Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Equal("Pipeline definition is invalid.", Assert.Single(notif.Messages).Detail);
+        Assert.Equal("Pipeline definition is invalid.", Assert.Single(notif.Toasts()).Detail);
         client.Dispose();
         handler.Dispose();
     }
@@ -141,8 +168,8 @@ public class ErrorNotificationHandlerTests
 
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal("RequestFailed", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal("RequestFailed", notif.Toasts()[0].Detail);
         client.Dispose();
         handler.Dispose();
     }
@@ -155,7 +182,7 @@ public class ErrorNotificationHandlerTests
         // (ResponseContentRead) - a second read of the already-consumed stream threw
         // ObjectDisposedException, which bubbled to the ErrorBoundary instead of the caller's normal
         // non-2xx handling. The handler must buffer first so the stream is read exactly once.
-        var notif = new NotificationService();
+        var notif = new OmniOverlayService(new FakeTimeProvider());
         var json = JsonSerializer.SerializeToUtf8Bytes(new ApiError { Message = "boom" });
         var innerHandler = new OneShotStubHandler(HttpStatusCode.BadRequest, json);
         var localizerMock = Substitute.For<IStringLocalizer<AppStrings>>();
@@ -168,16 +195,16 @@ public class ErrorNotificationHandlerTests
         // the buffer-first fix that second read of the consumed one-shot stream throws here.
         await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/data"), Xunit.TestContext.Current.CancellationToken);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal("boom", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal("boom", notif.Toasts()[0].Detail);
         client.Dispose();
         handler.Dispose();
     }
 
-    private static (NotificationService notif, ErrorNotificationHandler handler, HttpClient client) CreateSetup(
+    private static (OmniOverlayService notif, ErrorNotificationHandler handler, HttpClient client) CreateSetup(
         HttpStatusCode statusCode, object? jsonBody = null)
     {
-        var notif = new NotificationService();
+        var notif = new OmniOverlayService(new FakeTimeProvider());
 
         var innerHandler = new StubHandler(statusCode, jsonBody);
         var localizerMock = Substitute.For<IStringLocalizer<AppStrings>>();

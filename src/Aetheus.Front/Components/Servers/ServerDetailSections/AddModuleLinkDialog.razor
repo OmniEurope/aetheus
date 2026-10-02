@@ -1,0 +1,19 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Small">
+    <OmniStack Gap="OmniSpacing.XSmall">
+        <OmniLabel For="module-link-target-type">@L["TargetType"]</OmniLabel>
+        <OmniDropDown Id="module-link-target-type" TValue="ModuleLinkType" name="module-link-target-type" Options="@(TargetTypes.ToOptions(item => (ModuleLinkType)item, item => item))" @bind-Value="_targetType" />
+    </OmniStack>
+    <OmniStack Gap="OmniSpacing.XSmall">
+        <OmniLabel For="module-link-target-identifier">@L["TargetIdentifier"]</OmniLabel>
+        <OmniTextBox Id="module-link-target-identifier" @bind-Value="_targetIdentifier" Placeholder="@L["ResourceName"]" />
+    </OmniStack>
+    <OmniStack Gap="OmniSpacing.XSmall">
+        <OmniLabel For="module-link-source-resource">@L["SourceResource"]</OmniLabel>
+        <OmniDropDown Id="module-link-source-resource" TValue="string" name="module-link-source-resource" Options="@(Resources.ToOptions(item => (string)item, item => item))" @bind-Value="_sourceIdentifier" />
+    </OmniStack>
+    <Aetheus.Front.Components.Shared.DialogFooter OnCancel="@(() => Dialog.Close())">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@Save"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+    </Aetheus.Front.Components.Shared.DialogFooter>
+</OmniStack>

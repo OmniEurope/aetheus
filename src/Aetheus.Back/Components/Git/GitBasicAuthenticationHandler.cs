@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
+using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.PersonalAccessTokens;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;

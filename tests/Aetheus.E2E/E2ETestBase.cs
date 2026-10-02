@@ -71,16 +71,16 @@ public abstract class E2ETestBase : PageTest
             try
             {
                 await Page.GotoAsync($"{FrontendUrl}/login", new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-                await Page.WaitForSelectorAsync("input[name='Username']", new() { Timeout = AppReadyTimeoutMs });
+                await Page.WaitForSelectorAsync("#Username", new() { Timeout = AppReadyTimeoutMs });
 
-                await Page.FillAsync("input[name='Username']", AdminUser);
-                await Page.FillAsync("input[name='Password']", AdminPassword);
+                await Page.FillAsync("#Username", AdminUser);
+                await Page.FillAsync("#Password", AdminPassword);
                 await Page.ClickAsync("button[type='submit']");
 
                 var submitStateHandle = await Page.WaitForFunctionAsync("""
                     () => {
                         if (location.pathname === '/') return 'root';
-                        if (document.querySelector('.login-container .rz-alert-danger, .login-container .rz-alert'))
+                        if (document.querySelector('.login-container .omni-alert--danger, .login-container .omni-alert'))
                             return 'login-error';
                         return null;
                     }
@@ -101,7 +101,7 @@ public abstract class E2ETestBase : PageTest
                 // retry the complete login flow a bounded number of times.
                 var stateHandle = await Page.WaitForFunctionAsync("""
                     () => {
-                        const panel = document.querySelector('.rz-panel-menu');
+                        const panel = document.querySelector('.omni-panel-menu');
                         if (panel && getComputedStyle(panel).visibility !== 'hidden') return 'ready';
                         if (location.pathname === '/login') return 'login';
                         return null;
@@ -140,10 +140,10 @@ public abstract class E2ETestBase : PageTest
         // Prefer the stable readiness hook on MainLayout's top-level container - it only
         // renders once the boot gate (auth/orgs/permissions) resolves, so it's a
         // deterministic "chrome is up" signal. The login page renders no chrome, so fall
-        // back to the historical Radzen-class / username-field selector for that route.
+        // back to the menu / username-field selector for that route.
         await Page.WaitForSelectorAsync(
-            $"[data-testid='{PlaywrightConfig.BlazorReadyTestId}'], .rz-panel-menu, input[name='Username']",
-            new() { Timeout = AppReadyTimeoutMs });
+            $"[data-testid='{PlaywrightConfig.BlazorReadyTestId}'], .omni-panel-menu, #Username",
+            new() { State = WaitForSelectorState.Attached, Timeout = AppReadyTimeoutMs });
 
         // Wait for every page-level loading indicator to clear rather than sleeping a fixed delay.
         // Task-tracker loaders are intentionally non-centered and do not block page readiness.
@@ -157,14 +157,13 @@ public abstract class E2ETestBase : PageTest
 
     protected async Task WaitForDataGridAsync()
     {
-        // Radzen 10 renders RadzenDataGrid with `.rz-data-grid` (and `.rz-datatable`).
-        await Page.WaitForSelectorAsync(".rz-data-grid, .rz-datatable", new() { Timeout = AppReadyTimeoutMs });
+        await Page.WaitForSelectorAsync(".omni-data-grid", new() { Timeout = AppReadyTimeoutMs });
     }
 
     protected async Task WaitForNoSpinnerAsync()
     {
         await Page.WaitForFunctionAsync("""
-            () => [...document.querySelectorAll('.rz-progressbar-circular, .aetheus-loader-centered')]
+            () => [...document.querySelectorAll('.aetheus-loader')]
                 .every(element => {
                     const style = getComputedStyle(element);
                     const rect = element.getBoundingClientRect();
@@ -174,13 +173,10 @@ public abstract class E2ETestBase : PageTest
             """, null, new() { Timeout = AppReadyTimeoutMs });
     }
 
-    // Radzen 10 RadzenPanelMenu renders each item as
-    // `a.rz-navigation-item-link > span.rz-navigation-item-text`. Match the
-    // text span by exact text (so "Logs" doesn't also match "System Logs"),
-    // then return the clickable link ancestor.
+    // Match the menu item's exact text so "Logs" does not also match "System Logs".
     protected ILocator SidebarNavItem(string text)
     {
-        return Page.Locator(".rz-panel-menu a.rz-navigation-item-link")
+        return Page.Locator(".omni-panel-menu a.omni-panel-menu__link, .rz-panel-menu a.rz-navigation-item-link")
             .Filter(new()
             {
                 Has = Page.GetByText(text, new() { Exact = true })

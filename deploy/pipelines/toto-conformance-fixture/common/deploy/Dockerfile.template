@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.100@sha256:c7445f141c04f1a6b454181bd098dcfa606c61ba0bd213d0a702489e5bd4cd71 AS build
 WORKDIR /src
 COPY . .
 RUN if find .aetheus-injection/feed -maxdepth 1 -name '*.nupkg' -print -quit \
@@ -17,7 +17,7 @@ RUN if find .aetheus-injection/feed -maxdepth 1 -name '*.nupkg' -print -quit \
 RUN dotnet publish src/Toto.Api/Toto.Api.csproj --configuration Release --no-restore \
     -p:NoWarn=NU3018%3BNU3027%3BNU3042 --output /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12@sha256:6a94333d37514e385650a3c81a55e5350b67253dbe136e9cf17e499c35606a8c
 WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \

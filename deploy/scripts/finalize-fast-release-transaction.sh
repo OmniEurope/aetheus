@@ -3,7 +3,7 @@
 set -eu
 
 ACTION="${1:?commit or rollback is required}"
-ENV_FILE="${PROD_ENV_FILE:?PROD_ENV_FILE is required}"
+ENV_FILE="${ENV_FILE:?ENV_FILE is required}"
 STATE_DIR="$(dirname "$ENV_FILE")"
 TRANSACTION_DIR="$STATE_DIR/fast-deployment-transaction"
 EXPECTED_COMMIT="${BUILD_SOURCEVERSION:?BUILD_SOURCEVERSION is required}"
@@ -38,10 +38,13 @@ case "$PREVIOUS_LIVE" in
 esac
 case "$IDLE" in blue|green) ;; *) echo "FATAL: invalid candidate colour." >&2; exit 1 ;; esac
 
-export AETHEUS_BACK_IMAGE="aetheus-back:$EXPECTED_COMMIT"
-export AETHEUS_FRONT_IMAGE="aetheus-front:$EXPECTED_COMMIT"
+# shellcheck source=deploy-identity.sh
+. "$(dirname "$0")/deploy-identity.sh"
+deploy_image_repos
+export AETHEUS_BACK_IMAGE="$BACK_IMAGE_REPO:$EXPECTED_COMMIT"
+export AETHEUS_FRONT_IMAGE="$FRONT_IMAGE_REPO:$EXPECTED_COMMIT"
 COMPOSE="docker compose -p ${COMPOSE_PROJECT:?} --env-file $ENV_FILE -f ${BG_COMPOSE:?}"
-echo ">>> Release recording failed; restoring the previous $PREVIOUS_LIVE colour."
+echo ">>> Restoring the previous $PREVIOUS_LIVE colour (confirmation refused or not given in time, or release recording failed)."
 $COMPOSE --profile "$PREVIOUS_LIVE" start "back-$PREVIOUS_LIVE" "front-$PREVIOUS_LIVE"
 i=1
 while [ "$i" -le 30 ]; do

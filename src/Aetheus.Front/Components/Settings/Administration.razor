@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin"
+
+<PageTitle>@L["Administration"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Administration"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("admin_panel_settings")" /></Icon>
+</OmniPageHeader>
+
+@* Recette R-237: the tiles are grouped by what they administer, and every icon has the one accent
+   tint. Recette R-456: one OE settings tile per entry of the side menu's Administration group (none
+   missing), with that menu entry's icon, its title and a line of description under it. *@
+@foreach (var group in Groups)
+{
+    <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L[group.TitleKey]</OmniHeading>
+    <div class="admin-tile-grid">
+        @foreach (var tile in group.Tiles)
+        {
+            <a href="@tile.Href" class="admin-tile-link">
+                <OmniSettingsTile Title="@L[tile.TitleKey]" Description="@L[tile.DescriptionKey]">
+                    <Icon><OmniIcon Name="@MaterialIconMap.Resolve(tile.Icon)" /></Icon>
+                </OmniSettingsTile>
+            </a>
+        }
+    </div>
+}

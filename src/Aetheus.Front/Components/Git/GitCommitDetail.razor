@@ -1,0 +1,178 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/git-repositories/{RepoId:int}/commits/{Sha}"
+
+<PageTitle>@(_detail is null ? L["Commit"].Value : Short(_detail.Commit.Sha)) - Aetheus</PageTitle>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else if (_detail is null)
+{
+    <OmniPageHeader Title="@L["Commit"]" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon>
+    </OmniPageHeader>
+    @* Recette R-319: the repository answered, it just does not hold this commit; say which one. *@
+    <OmniAlert Severity="OmniSeverity.Warning" Class="commit-not-in-repository">
+        @string.Format(System.Globalization.CultureInfo.CurrentCulture, L["CommitNotInRepository"], Short(Sha))
+    </OmniAlert>
+}
+else
+{
+    <OmniPageHeader Title="@Short(_detail.Commit.Sha)" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("commit")" /></Icon>
+        <Badges>
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@_detail.Commit.AuthorName</OmniBadge>
+        </Badges>
+    </OmniPageHeader>
+
+    <OmniCard Class="git-commit-summary">
+        <div class="git-commit-summary-content">
+            <div class="git-commit-overview">
+                <OmniText Element="OmniTextElement.Strong" Class="git-commit-message">@_detail.Commit.Message</OmniText>
+                <div class="git-commit-metadata">
+                    <div class="essential-item">
+                        <OmniIcon Name="OmniIconName.Tag" Class="essential-icon" />
+                        <div class="essential-text">
+                            <span class="essential-label">@L["Commit"]</span>
+                            <span class="essential-value overview-break-anywhere"><code>@_detail.Commit.Sha</code></span>
+                        </div>
+                    </div>
+                    <div class="essential-item">
+                        <OmniIcon Name="OmniIconName.User" Class="essential-icon" />
+                        <div class="essential-text">
+                            <span class="essential-label">@L["Author"]</span>
+                            <span class="essential-value overview-break-anywhere">@_detail.Commit.AuthorName &lt;@_detail.Commit.AuthorEmail&gt;</span>
+                        </div>
+                    </div>
+                    <div class="essential-item">
+                        <OmniIcon Name="OmniIconName.CalendarBlank" Class="essential-icon" />
+                        <div class="essential-text">
+                            <span class="essential-label">@L["Date"]</span>
+                            <span class="essential-value" title="@_detail.Commit.AuthorDate.ToString("F")">@_detail.Commit.AuthorDate.ToString("g")</span>
+                        </div>
+                    </div>
+                    @if (_detail.Commit.ParentShas.Count > 0)
+                    {
+                        <div class="essential-item">
+                            <OmniIcon Name="OmniIconName.Graph" Class="essential-icon" />
+                            <div class="essential-text">
+                                <span class="essential-label">@L["Parents"]</span>
+                                <span class="essential-value">
+                                    @foreach (var parent in _detail.Commit.ParentShas)
+                                    {
+                                        <a href="@($"/git-repositories/{RepoId}/commits/{parent}")" class="omni-link omni-u-me-sm"><code>@Short(parent)</code></a>
+                                    }
+                                </span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="git-commit-stats" aria-label="@L["FilesChanged"]">
+                <div class="git-commit-stat">
+                    <strong>@_detail.Diff.Stats.FilesChanged</strong>
+                    <span>@L["FilesChanged"]</span>
+                </div>
+                <div class="git-commit-stat">
+                    <strong class="diff-file-stat-add">+@_detail.Diff.Stats.Additions</strong>
+                    <span>@L["Additions"]</span>
+                </div>
+                <div class="git-commit-stat">
+                    <strong class="diff-file-stat-del">-@_detail.Diff.Stats.Deletions</strong>
+                    <span>@L["Deletions"]</span>
+                </div>
+            </div>
+        </div>
+    </OmniCard>
+
+    @if (_detail.Commit.ParentShas.Count > 1)
+    {
+        <OmniAlert Severity="OmniSeverity.Info" Class="omni-u-mt-md omni-u-mb-sm">
+            @L["GitMergeDiffFirstParent"]
+        </OmniAlert>
+    }
+
+    @if (_detail.Diff.IsTruncated)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning" Class="omni-u-mt-md omni-u-mb-sm">
+            @L["GitPatchTruncated"]
+        </OmniAlert>
+    }
+
+    @if (_detail.Diff.FileDiffs.Count == 0)
+    {
+        <OmniAlert Severity="OmniSeverity.Info">@L["NoFileChanges"]</OmniAlert>
+    }
+    else
+    {
+        <div class="git-diff-workspace omni-u-mt-md">
+            <aside class="git-file-browser" aria-label="@L["FilesChanged"]">
+                <div class="git-file-browser-header">
+                    <div class="git-file-browser-title">
+                        <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["FilesChanged"]</OmniText>
+                        <span>@_visibleFiles.Count / @_detail.Diff.FileDiffs.Count</span>
+                    </div>
+                    <OmniTextBox @bind-Value="_fileSearch" @bind-Value:after="OnFileSearchChanged"
+                                   Placeholder="@L["Search"]" aria-label="@L["Search"]"
+                                   Class="git-file-search" />
+                    <div class="git-file-status-filters" aria-label="@L["FilterByStatus"]">
+                        <OmniButton Variant="OmniButtonVariant.Ghost" OnClick="@(() => SetStatusFilter(null))" Class="@StatusFilterClass(null)" Label="@L["AllFiles"]" aria-pressed="@(_statusFilter is null ? "true" : "false")"><OmniIcon Name="OmniIconName.Document" /> <span>@($"{L["AllFiles"]} · {_detail.Diff.FileDiffs.Count}")</span></OmniButton>
+                        @foreach (var status in _availableStatuses)
+                        {
+                            <OmniButton Variant="OmniButtonVariant.Ghost" OnClick="@(() => SetStatusFilter(status))" Class="@StatusFilterClass(status)" Label="@LocalizeStatus(status)" aria-pressed="@(StatusFilterIsActive(status) ? "true" : "false")"><OmniIcon Name="@MaterialIconMap.Resolve(StatusIcon(status))" /> <span>@($"{LocalizeStatus(status)} · {StatusCount(status)}")</span></OmniButton>
+                        }
+                    </div>
+                </div>
+                <OmniListBox TValue="string" TSelection="string" Options="@FileOptions" Value="@(_selectedFile?.Path ?? string.Empty)"
+                             ValueChanged="@OnFilePathSelected" ValueExpression="@(() => SelectedFilePath)"
+                             Class="git-file-listbox" aria-label="@L["FilesChanged"]" />
+                @if (_visibleFiles.Count == 0)
+                {
+                    <div class="git-file-browser-empty">@L["NoFilesFound"]</div>
+                }
+            </aside>
+
+            <section class="git-focused-diff" aria-live="polite">
+                @if (_selectedFile is null)
+                {
+                    <EmptyState Icon="search_off" Title="@L["NoFilesFound"]" />
+                }
+                else
+                {
+                    <div class="git-focused-diff-header">
+                        <div class="git-focused-diff-title">
+                            <code title="@_selectedFile.Path">@_selectedFile.Path</code>
+                            <div>
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@StatusBadge(_selectedFile.Status)">@LocalizeStatus(_selectedFile.Status)</OmniBadge>
+                                <span class="diff-file-stat-add">+@_selectedFile.Additions</span>
+                                <span class="diff-file-stat-del">-@_selectedFile.Deletions</span>
+                            </div>
+                        </div>
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@ToggleDiff" Class="git-diff-toggle" Label="@(_diffCollapsed ? L["ShowDiff"] : L["HideDiff"])" aria-expanded="@(!_diffCollapsed ? "true" : "false")"><OmniIcon Name="@MaterialIconMap.Resolve((_diffCollapsed ? "expand_more" : "expand_less"))" /> <span>@(_diffCollapsed ? L["ShowDiff"] : L["HideDiff"])</span></OmniButton>
+                    </div>
+                    @if (!_diffCollapsed)
+                    {
+                        @if (_selectedDiffLines.Count > 0)
+                        {
+                            <div class="diff-view git-focused-diff-body" tabindex="0">
+                                @foreach (var line in _selectedDiffLines)
+                                {
+                                    <span class="@LineClass(line.Text)">
+                                        <span class="diff-line-number">@line.OldLineNumber</span>
+                                        <span class="diff-line-number">@line.NewLineNumber</span>
+                                        <span class="diff-line-content">@line.Text</span>
+                                    </span>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <OmniAlert Severity="OmniSeverity.Info" Class="omni-u-m-md">@L["BinaryFile"]</OmniAlert>
+                        }
+                    }
+                }
+            </section>
+        </div>
+    }
+}

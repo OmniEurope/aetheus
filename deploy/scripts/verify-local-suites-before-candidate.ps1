@@ -49,7 +49,11 @@ foreach ($suite in $suites) {
     Write-Host "RUN   $($suite.Name)" -ForegroundColor Cyan
     # Not -ErrorAction: dotnet test signals failure through its exit code, and a red suite must be
     # collected rather than abort the sweep, so the report lists every failing suite at once.
-    & dotnet test $projectPath --configuration $Configuration --nologo --verbosity quiet
+    # Microsoft.Testing.Platform mode (global.json): the project is named by --project, and the
+    # VSTest-era --nologo/--verbosity are refused as invalid arguments there.
+    Push-Location $repoRoot
+    try { & dotnet test --project $projectPath --configuration $Configuration --no-progress }
+    finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "FAIL  $($suite.Name)" -ForegroundColor Red
         $failed.Add($suite.Name)

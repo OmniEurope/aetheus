@@ -54,6 +54,16 @@ public class AlertRepository(AppDbContext db, TimeProvider timeProvider) : IAler
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<List<(int Id, string Name)>> GetServerIdNamePairsAsync(CancellationToken ct = default)
+    {
+        var rows = await db.Servers.AsNoTracking()
+            .OrderBy(server => server.Name)
+            .Select(server => new { server.Id, server.Name })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return rows.Select(row => (row.Id, row.Name)).ToList();
+    }
+
     public async Task<int> AddProvisionedRulesIfMissingAsync(
         IReadOnlyCollection<AlertRule> rules,
         CancellationToken ct = default)

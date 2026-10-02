@@ -1,0 +1,19 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@typeparam TItem
+@implements IAsyncDisposable
+
+@*
+    PLAN-008 lot 44: a drop-in replacement for Blazor's <Virtualize> that does not need
+    `style-src-attr 'unsafe-inline'`. <Virtualize> sizes its two spacers with a style attribute in
+    markup, which a strict policy refuses; this one sizes them through the CSSOM, the path the policy
+    leaves open. The rendering contract is the same: Items, ItemSize, OverscanCount and a template.
+*@
+<div class="aetheus-vlist" @ref="_root">
+    <div class="aetheus-vlist-spacer" @ref="_topSpacer" aria-hidden="true"></div>
+    @for (var index = Start; index < Start + Count; index++)
+    {
+        @ChildContent(Items[index])
+    }
+    <div class="aetheus-vlist-spacer" @ref="_bottomSpacer" aria-hidden="true"></div>
+</div>

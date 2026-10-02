@@ -14,7 +14,7 @@ internal sealed class AnalyticsPseudonymizer(AetheusWebAnalyticsOptions options)
     public AnalyticsExportEvent Create(HttpContext context, AnalyticsBrowserEvent source, string normalizedRoute)
     {
         var instant = source.OccurredAtUtc.UtcDateTime;
-        var identity = ResolveIdentity(context, out var authenticated);
+        var identity = ResolveIdentity(context, source, out var authenticated);
         return new AnalyticsExportEvent
         {
             ApplicationId = options.ApplicationId,
@@ -34,16 +34,27 @@ internal sealed class AnalyticsPseudonymizer(AetheusWebAnalyticsOptions options)
             SessionPseudonym = authenticated
                 ? DeriveStablePseudonym("session", identity)
                 : DerivePeriodPseudonym("session-day", $"{instant:yyyy-MM-dd}", identity),
-            AuthenticatedPseudonym = authenticated ? DeriveStablePseudonym("authenticated", identity) : null,
+            AuthenticatedPseudonym = authenticated
+                ? DeriveStablePseudonym("authenticated", identity)
+                // A declared sign-in without an identifier carries no account, so it stays keyed on the network prefix and
+                // on the month: a stable pseudonym of a network would follow it across months, which
+                // the anonymous path never does. Counts are monthly, so nothing is lost.
+                : source.SignedIn == true
+                    ? DerivePeriodPseudonym("signed-in-month", $"{instant:yyyy-MM}", identity)
+                    : null,
             KeyVersion = options.PseudonymizationKeyVersion
         };
     }
 
-    private string ResolveIdentity(HttpContext context, out bool authenticated)
+    private string ResolveIdentity(HttpContext context, AnalyticsBrowserEvent source, out bool authenticated)
     {
         var userId = context.User.Identity?.IsAuthenticated == true
             ? options.AuthenticatedUserIdResolver(context)
             : null;
+        // R-471: a host that never sees the session takes the opaque identifier the application
+        // declares. The host's own authentication always wins when it has one.
+        if (string.IsNullOrWhiteSpace(userId) && options.AcceptDeclaredUserId)
+            userId = source.AuthenticatedUserId;
         authenticated = !string.IsNullOrWhiteSpace(userId);
         if (authenticated)
             return $"account:{userId}";

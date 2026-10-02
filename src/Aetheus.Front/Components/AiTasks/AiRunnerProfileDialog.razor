@@ -1,0 +1,62 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Small" />
+}
+else
+{
+    <OmniTemplateForm TModel="EditModel" Model="@_model" OnValidSubmit="@SubmitAsync">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniFormField For="oe-pages-ai-airunnerprofiledialog-1" Class="omni-u-w-100"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Name" Class="omni-u-w-100" Id="oe-pages-ai-airunnerprofiledialog-1" />
+                </ChildContent></OmniFormField>
+                <ValidationMessage For="@(() => _model.Name)" />
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniFormField For="oe-pages-ai-airunnerprofiledialog-2" Class="omni-u-w-100"><LabelContent>@L["Binary"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Binary" Class="omni-u-w-100" Id="oe-pages-ai-airunnerprofiledialog-2" />
+                </ChildContent></OmniFormField>
+                <ValidationMessage For="@(() => _model.Binary)" />
+            </OmniColumn>
+            <OmniColumn Span="12">
+                <OmniFormField For="oe-pages-ai-airunnerprofiledialog-3" Class="omni-u-w-100"><LabelContent>@L["Description"]</LabelContent><ChildContent>
+                    <OmniTextBox @bind-Value="_model.Description" Class="omni-u-w-100" Id="oe-pages-ai-airunnerprofiledialog-3" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12">
+                <OmniFormField For="oe-pages-ai-airunnerprofiledialog-4" Class="omni-u-w-100"><LabelContent>@L["ArgumentTemplate"]</LabelContent><ChildContent>
+                    <OmniTextArea @bind-Value="_model.Arguments" Rows="7" Class="omni-u-w-100 text-mono" Id="oe-pages-ai-airunnerprofiledialog-4" />
+                </ChildContent></OmniFormField>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                    @L["AiArgumentTemplateHint"]
+                </OmniText>
+            </OmniColumn>
+            <OmniColumn Span="12">
+                <OmniFormField For="oe-pages-ai-airunnerprofiledialog-5" Class="omni-u-w-100"><LabelContent>@L["EnvironmentVariables"]</LabelContent><ChildContent>
+                    <OmniTextArea @bind-Value="_model.Environment" Rows="4" Class="omni-u-w-100 text-mono" Id="oe-pages-ai-airunnerprofiledialog-5" />
+                </ChildContent></OmniFormField>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                    @L["AiEnvironmentHint"]
+                </OmniText>
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="4">
+                <OmniFormField For="ai-profile-timeout"><LabelContent>@L["TimeoutSeconds"]</LabelContent><ChildContent>
+                    <OmniNumeric @bind-Value="_model.TimeoutSeconds" Minimum="1" Maximum="86400" Id="ai-profile-timeout" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="4">
+                <OmniFormField For="ai-profile-max-output"><LabelContent>@L["MaxOutputBytes"]</LabelContent><ChildContent>
+                    <OmniNumeric @bind-Value="_model.MaxOutputBytes" Minimum="1024" Maximum="1000000" Id="ai-profile-max-output" />
+                </ChildContent></OmniFormField>
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="4">
+                <OmniSwitch @bind-Value="_model.SendsDataExternally">@L["ExternalData"]</OmniSwitch>
+            </OmniColumn>
+        </OmniRow>
+        <DialogFooter OnCancel="@Cancel">
+            <OmniButton Busy="@_busy" ButtonType="OmniButtonType.Submit" Variant="OmniButtonVariant.Primary"><OmniIcon Name="@(IsEdit ? OmniIconName.Save : OmniIconName.Add)" /> <span>@(IsEdit ? L["Save"] : L["Create"])</span></OmniButton>
+        </DialogFooter>
+    </OmniTemplateForm>
+}

@@ -20,6 +20,7 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
             NullLogger<GitLightCliService>.Instance,
             TimeProvider.System);
         RunGit($"init --bare --initial-branch main \"{_bare}\"");
+        GitFixtureGuard.AssertOwnedBy(_bare, _bare);
     }
 
     [Fact]
@@ -101,6 +102,9 @@ public sealed class GitLightCliServiceCommitTests : IDisposable
             RedirectStandardError = true,
             RedirectStandardOutput = true
         };
+        // WHY: pre-push hook env inheritance incident - GIT_DIR/GIT_INDEX_FILE would redirect this
+        // fixture git call to the real repository.
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(psi);
         using var process = Process.Start(psi)
                             ?? throw new InvalidOperationException($"Could not start '{git}'.");
         var stderr = process.StandardError.ReadToEnd();

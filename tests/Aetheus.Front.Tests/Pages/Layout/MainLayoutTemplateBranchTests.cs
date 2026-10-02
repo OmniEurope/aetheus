@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using NSubstitute;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -76,7 +75,7 @@ public class MainLayoutTemplateBranchTests : BunitContext
 
         // Title and the username (auth header) appear only in the authenticated branch.
         Assert.Contains("Aetheus", cut.Markup);
-        Assert.Contains("header-user-btn", cut.Markup);
+        Assert.Equal("user", cut.Find(".omni-app-menu__trigger-name").TextContent);
         // Sidebar toggle is gated on Auth.IsAuthenticated.
         Assert.Contains("header-bar", cut.Markup);
     }
@@ -94,11 +93,24 @@ public class MainLayoutTemplateBranchTests : BunitContext
 
         Assert.Contains("login", nav.Uri);
         // The authenticated user button must NOT be rendered for an anonymous user.
-        Assert.DoesNotContain("header-user-btn", cut.Markup);
+        Assert.Empty(cut.FindAll(".omni-app-menu__trigger-name"));
+    }
+
+    /// <summary>PLAN-005 lot 8 / D47: a URL pasted without a session keeps its page for after the login.</summary>
+    [Fact]
+    public void UnauthenticatedUser_OnAPage_IsSentToLoginWithThatPage()
+    {
+        RegisterWithTaskTracker(authenticated: false);
+        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+        nav.NavigateTo("http://localhost/projects/1/pipelines?tab=runs");
+
+        Render<MainLayout>();
+
+        Assert.Equal("http://localhost/login?returnUrl=%2Fprojects%2F1%2Fpipelines%3Ftab%3Druns", nav.Uri);
     }
 
     [Fact]
-    public void BreadcrumbItems_RenderInFixedGlobalSlot()
+    public void BreadcrumbItems_AreNotRenderedByTheShell()
     {
         RegisterWithTaskTracker();
         var breadcrumb = Services.GetRequiredService<BreadcrumbService>();
@@ -110,37 +122,38 @@ public class MainLayoutTemplateBranchTests : BunitContext
         ]));
         cut.Render();
 
-        Assert.Contains("app-breadcrumb", cut.Markup);
-        Assert.Contains("Servers", cut.Markup);
-        Assert.Contains("web-01", cut.Markup);
+        // PLAN-003 lot 1: setting breadcrumb items paints nothing here; the page header draws them.
+        Assert.DoesNotContain("omni-breadcrumb", cut.Markup);
+        Assert.DoesNotContain("web-01", cut.Markup);
         Assert.DoesNotContain("breadcrumb-slot", cut.Markup);
     }
 
-    // ── User menu open → role badge + language/dark-mode/settings/logout rows ─
-    // Covers lines 75-113 (the @if (_userMenuOpen) dropdown card).
+    // ── Application menu (OE's OmniAppMenu, STD-SHELL) → identity, role, rows ──
 
     [Fact]
-    public void UserMenu_WhenOpened_RendersRoleAndMenuSections()
+    public void UserMenu_WhenOpened_RendersIdentityRoleAndRows()
     {
         RegisterWithTaskTracker(authenticated: true, isAdmin: false);
         var cut = Render<MainLayout>();
 
-        // Closed by default - the dropdown card is absent.
-        Assert.DoesNotContain("user-menu-card", cut.Markup);
+        // Closed by default - the menu card is absent.
+        Assert.Empty(cut.FindAll(".omni-app-menu__card"));
 
-        // Click the user button - the real path that opens the menu.
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card");
+        // Click the trigger - the real path that opens the menu.
+        cut.Find(".omni-app-menu__trigger").Click();
+        cut.WaitForElement(".omni-app-menu__card", TimeSpan.FromSeconds(10));
 
-        // Open → the card with the localized menu rows is rendered.
-        Assert.Contains("user-menu-card", cut.Markup);
-        Assert.Contains("Logout", cut.Markup);
-        Assert.Contains("Settings", cut.Markup);
-        // Non-admin user → "User" role label (not "Admin").
-        Assert.Contains("User", cut.Markup);
+        Assert.Equal("user", cut.Find(".omni-app-menu__identity .omni-app-menu__label").TextContent);
+        // Non-admin user → "User" role badge (not "Admin").
+        Assert.Equal("User", cut.Find(".omni-app-menu__identity .omni-badge").TextContent.Trim());
+        // Theme, settings, the version and signing out are all bound, so all show.
+        Assert.Single(cut.FindAll(".omni-app-menu__theme"));
+        Assert.Single(cut.FindAll(".omni-app-menu__settings"));
+        Assert.Single(cut.FindAll(".omni-app-menu__sign-out"));
+        Assert.StartsWith("Aetheus v", cut.Find(".omni-app-menu__version").TextContent, StringComparison.Ordinal);
+        // Two languages are offered, so the language row shows.
+        Assert.Single(cut.FindAll(".omni-app-menu__language"));
     }
-
-    // ── Admin user, menu open → "Admin" role badge (line 81 true branch) ──────
 
     [Fact]
     public void UserMenu_AdminUser_RendersAdminRoleBadge()
@@ -148,40 +161,34 @@ public class MainLayoutTemplateBranchTests : BunitContext
         RegisterWithTaskTracker(authenticated: true, isAdmin: true);
         var cut = Render<MainLayout>();
 
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card");
+        cut.Find(".omni-app-menu__trigger").Click();
+        cut.WaitForElement(".omni-app-menu__card", TimeSpan.FromSeconds(10));
 
-        Assert.Contains("Admin", cut.Markup);
+        Assert.Equal("Admin", cut.Find(".omni-app-menu__identity .omni-badge").TextContent.Trim());
     }
 
-    // ── Dark mode default → "dark_mode" icon; toggle flips to "light_mode" ────
-    // Covers the @(_darkMode ? "dark_mode" : "light_mode") expression (line 94).
+    // ── Mode row: dark by default; picking light stores it and repaints ─────────
 
     [Fact]
-    public async Task DarkMode_DefaultIcon_AndRowTogglesState()
+    public async Task ModeRow_DefaultsToDark_AndPickingLightStoresAndRepaints()
     {
         RegisterWithTaskTracker();
         var cut = Render<MainLayout>();
 
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card");
-        // Default dark mode true → dark_mode icon + DarkMode label rendered.
-        Assert.Contains("dark_mode", cut.Markup);
-        Assert.Contains("DarkMode", cut.Markup);
-        Assert.True(cut.Instance._darkMode);
+        cut.Find(".omni-app-menu__trigger").Click();
+        cut.WaitForElement(".omni-app-menu__card", TimeSpan.FromSeconds(10));
+        // OE's order: light, dark, system; the pressed one is the stored mode (dark when nothing is stored).
+        var modes = cut.FindAll(".omni-app-menu__mode");
+        Assert.Equal(["false", "true", "false"], modes.Select(mode => mode.GetAttribute("aria-checked")));
 
-        // Click the dark-mode menu row - the real UI path that flips the theme.
-        // ClickAsync, not Click: the synchronous overload does not return the dispatch task, so with
-        // an `async Task` handler like ToggleDarkMode it is fire-and-forget. When the renderer's
-        // dispatcher is already busy (the version monitor re-rendering, or plain CPU contention on a
-        // loaded build agent) the handler had not even reached its first line when the assertion ran,
-        // and the test failed with Expected: False / Actual: True - exactly the CI flake on run 1166.
-        var darkRow = cut.FindAll(".user-menu-section-clickable")
-            .First(el => el.TextContent.Contains("DarkMode"));
-        await darkRow.ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+        // ClickAsync: the handler is async (it stores and repaints), so the dispatch task is awaited.
+        await modes[0].ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
 
-        // Observable effect: the theme flag flipped to light mode.
-        Assert.False(cut.Instance._darkMode);
+        Assert.Equal(OmniAppearance.Light, Services.GetRequiredService<Aetheus.Front.Components.Settings.SiteAppearanceState>().Appearance);
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "localStorage.setItem"
+            && Equals(i.Arguments[0], StorageKeys.Theme) && Equals(i.Arguments[1], "light"));
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "Aetheus.setOmniTheme" && Equals(i.Arguments[0], "light"));
+        cut.WaitForAssertion(() => Assert.Equal("true", cut.FindAll(".omni-app-menu__mode")[0].GetAttribute("aria-checked")));
     }
 
     // ── _newVersionAvailable = true → version alert banner (lines 133-140) ────

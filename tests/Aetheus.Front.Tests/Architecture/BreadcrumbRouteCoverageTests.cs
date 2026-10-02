@@ -9,10 +9,9 @@ public sealed class BreadcrumbRouteCoverageTests
     [Fact]
     public void Every_Razor_Route_Has_An_Immediate_Breadcrumb_Fallback()
     {
-        var pages = Path.Combine(FindRepoRoot(), "src", "Aetheus.Front", "Pages");
         var failures = new List<string>();
 
-        foreach (var file in RepositoryScan.Enumerate(pages, "*.razor"))
+        foreach (var (pages, file) in RepositoryScan.EnumerateUnion(RepositoryScan.PageRoots, "*.razor"))
         {
             var source = File.ReadAllText(file);
             foreach (Match match in Regex.Matches(source, "@page\\s+\"([^\"]+)\""))
@@ -71,26 +70,25 @@ public sealed class BreadcrumbRouteCoverageTests
         Assert.Contains(items, item => item.Text.Contains(leaf, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// D3 / recette R-395: the trail line of the page header keeps a fixed height on every route, even with
+    /// nothing to show, so the content under it never moves. OmniPageHeader owns that geometry now; no
+    /// Aetheus rule may resize, clip or wrap the trail line.
+    /// </summary>
     [Fact]
-    public void Global_Slot_Has_Fixed_Block_Geometry()
+    public void Trail_Line_Keeps_The_Headers_Fixed_Geometry()
     {
-        var css = File.ReadAllText(Path.Combine(
-            FindRepoRoot(), "src", "Aetheus.Front", "wwwroot", "css", "app.css"));
+        var css = Regex.Replace(File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "src", "Aetheus.Front", "wwwroot", "css", "app.css")), @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
 
-        Assert.Contains(".app-breadcrumb {", css, StringComparison.Ordinal);
-        Assert.Contains("flex: 0 0 1.75rem", css, StringComparison.Ordinal);
-        Assert.Contains("height: 1.75rem", css, StringComparison.Ordinal);
-        Assert.Contains("overflow-x: auto", css, StringComparison.Ordinal);
-        Assert.Contains("width: max-content", css, StringComparison.Ordinal);
-        Assert.Contains("min-width: 100%", css, StringComparison.Ordinal);
-        Assert.Contains("white-space: nowrap", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".app-breadcrumb", css, StringComparison.Ordinal);
+        var offenders = Regex.Matches(css, @"(?<selector>[^{}]*omni-page-header__trail[^{}]*)\{(?<body>[^}]*)\}")
+            .Where(rule => Regex.IsMatch(rule.Groups["body"].Value,
+                @"(?<![-\w])(height|block-size|min-height|max-height|min-block-size|max-block-size|overflow|overflow-x|overflow-y|white-space|flex-wrap)\s*:"))
+            .Select(rule => rule.Groups["selector"].Value.Trim())
+            .ToList();
 
-        var itemContentRule = Regex.Match(
-            css,
-            @"\.app-breadcrumb\s*>\s*ol\s*>\s*li a,\s*\.app-breadcrumb\s*>\s*ol\s*>\s*li span\s*\{(?<body>[^}]*)\}");
-        Assert.True(itemContentRule.Success);
-        Assert.DoesNotContain("overflow: hidden", itemContentRule.Groups["body"].Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("text-overflow: ellipsis", itemContentRule.Groups["body"].Value, StringComparison.Ordinal);
+        Assert.True(offenders.Count == 0, "These app.css rules change the header trail line: " + string.Join(", ", offenders));
     }
 
     private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;

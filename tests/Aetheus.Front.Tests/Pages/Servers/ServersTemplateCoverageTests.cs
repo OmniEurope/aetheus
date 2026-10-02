@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using Radzen;
-using ServersPage = Aetheus.Front.Pages.Servers.Servers;
+using OmniEurope.Blazor.Components;
+using ServersPage = Aetheus.Front.Components.Servers.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -30,7 +28,7 @@ public class ServersTemplateCoverageTests : BunitContext
         var load = typeof(ServersPage).GetMethod("OnLoadData",
             BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () =>
-            await (Task)load.Invoke(cut.Instance, [new LoadDataArgs()])!);
+            await (Task)load.Invoke(cut.Instance, [new GridLoadArgs()])!);
     }
 
     private static ServerDto MakeServer(int id, ServerType type, ServerStatus status,
@@ -98,21 +96,6 @@ public class ServersTemplateCoverageTests : BunitContext
 
     // ── ClearFilters ──────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task ClearFilters_ResetsFilters()
-    {
-        var cut = Render<ServersPage>();
-        cut.Instance._search = "prod";
-        cut.Instance._typeFilter = ServerType.Docker;
-        cut.Instance._statusFilter = ServerStatus.Offline;
-
-        await cut.Instance.ClearFilters();
-
-        Assert.Null(cut.Instance._search);
-        Assert.Null(cut.Instance._typeFilter);
-        Assert.Null(cut.Instance._statusFilter);
-    }
-
     // ── Template: servers with varied data ───────────────────────────────────
 
     /// <summary>
@@ -162,7 +145,7 @@ public class ServersTemplateCoverageTests : BunitContext
     /// Covers: Docker type badge → ServerTypeHelper.GetBadgeStyle/GetIcon (line 85-88).
     /// </summary>
     [Fact]
-    public async Task Template_DockerServer_RendersDockerTypeBadge()
+    public async Task Template_DockerServer_RendersDockerTypeAsText()
     {
         _handler.SetJsonResponse("api/servers", new PaginatedResult<ServerDto>
         {
@@ -174,8 +157,8 @@ public class ServersTemplateCoverageTests : BunitContext
         await LoadServers(cut);
         cut.WaitForState(() => cut.Markup.Contains("server-3"), TimeSpan.FromSeconds(2));
 
-        // Docker type → icon "inventory_2" plus the localized Docker enum key in the Type badge.
-        Assert.Contains("inventory_2", cut.Markup);
+        // PLAN-003 lot 6: the Type column is plain localized text, no badge and no icon.
+        Assert.DoesNotContain("inventory_2", cut.Markup);
         Assert.Contains("Enum_ServerType_Docker", cut.Markup);
     }
 
@@ -286,36 +269,21 @@ public class ServersTemplateCoverageTests : BunitContext
         Assert.Contains("server-8", cut.Markup);
     }
 
-    /// <summary>
-    /// Covers: _typeFilter has value OR _statusFilter has value → ClearFilters button (line 51-55).
-    /// </summary>
+    /// <summary>Recette R-211: no filter bar above the list any more; the columns filter from their
+    /// headers, the ones with few values through a checkable list.</summary>
     [Fact]
-    public void Template_TypeFilterActive_ShowsClearFiltersButton()
-    {
-        var cut = Render<ServersPage>();
-        cut.Instance._typeFilter = ServerType.Docker;
-        cut.Render();
-
-        // An active type filter reveals the ClearFilters button.
-        Assert.Contains("ClearFilters", cut.Markup);
-    }
-
-    /// <summary>
-    /// Covers: _statusFilter has value → ClearFilters button.
-    /// </summary>
-    [Fact]
-    public void Template_StatusFilterActive_ShowsClearFiltersButton()
+    public void Toolbar_IsGone_AndTheColumnsFilterFromTheirHeaders()
     {
         var cut = Render<ServersPage>();
 
-        // Baseline: no filter active → no ClearFilters button.
-        Assert.DoesNotContain("ClearFilters", cut.Markup);
-
-        cut.Instance._statusFilter = ServerStatus.Offline;
-        cut.Render();
-
-        // An active status filter reveals the ClearFilters button.
-        Assert.Contains("ClearFilters", cut.Markup);
+        Assert.Empty(cut.FindAll(".server-list-search"));
+        Assert.DoesNotContain("ClearFilters", cut.Markup, StringComparison.Ordinal);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotEmpty(cut.FindAll("th[data-omni-col='Status'] .omni-multi-select__option"));
+            Assert.NotEmpty(cut.FindAll("th[data-omni-col='Type'] .omni-multi-select__option"));
+            Assert.NotEmpty(cut.FindAll("th[data-omni-col='LastHeartbeat'] .omni-data-grid__date-range"));
+        });
     }
 
     /// <summary>
@@ -336,22 +304,25 @@ public class ServersTemplateCoverageTests : BunitContext
         var load = typeof(ServersPage).GetMethod("OnLoadData",
             BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () =>
-            await (Task)load.Invoke(cut.Instance, [new LoadDataArgs()])!);
+            await (Task)load.Invoke(cut.Instance, [new GridLoadArgs()])!);
         cut.WaitForState(() => cut.Markup.Contains("server-9"), TimeSpan.FromSeconds(2));
 
         // No write permission → read-only "lock" icon renders next to the server name.
-        Assert.Contains("lock", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Lock);
     }
 
-    /// <summary>
-    /// Covers: FilterByTag method sets _search to tag value.
-    /// </summary>
+    /// <summary>Recette R-211: a tag clicked in a row becomes the Tags column's own filter, sent to the API.</summary>
     [Fact]
-    public async Task FilterByTag_SetsSearch()
+    public async Task FilterByTag_SetsTheTagsColumnFilter()
     {
+        _handler.SetJsonResponse("api/servers", new PaginatedResult<ServerDto> { Items = [], TotalCount = 0 });
         var cut = Render<ServersPage>();
-        await cut.Instance.FilterByTag("prod");
-        Assert.Equal("prod", cut.Instance._search);
+
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("production"));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Tags", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=production", StringComparison.Ordinal)));
     }
 
     /// <summary>

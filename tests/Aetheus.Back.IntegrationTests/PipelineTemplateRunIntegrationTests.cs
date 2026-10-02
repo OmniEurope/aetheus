@@ -3,9 +3,8 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Back.Services;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,7 +16,12 @@ public sealed class PipelineTemplateRunIntegrationTests(PostgresFixture fixture)
     [Fact]
     public async Task CompletingPrepare_DispatchesResolvedTemplateSteps()
     {
-        await using var factory = new AetheusWebApplicationFactory(fixture.ConnectionString);
+        await using var baseFactory = new AetheusWebApplicationFactory(fixture.ConnectionString);
+        // Since external Git pipelines (a790fae72) a project with a repository URL and no internal mirror
+        // reads its pipeline from that repository; git.example never resolves, and this test is about the
+        // template steps, so the repository answers "no pipeline file" and the stored definition is used.
+        await using var factory = baseFactory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddSingleton<IGitCliService, NoPipelineFileGitCli>()));
         await using var scope = factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var organizationId = await db.Set<Organization>().Select(item => item.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -86,5 +90,17 @@ public sealed class PipelineTemplateRunIntegrationTests(PostgresFixture fixture)
         var userTask = await db.Tasks.AsNoTracking()
             .SingleAsync(item => item.PipelineRunId == run.Id && item.Id != prepareTask.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("Inspect Template", userTask.Name);
+    }
+
+    private sealed class NoPipelineFileGitCli : IGitCliService
+    {
+        public Task<List<(string BranchName, string Version)>> ListReleaseBranchesAsync(string repositoryUrl, CancellationToken ct = default) =>
+            Task.FromResult(new List<(string BranchName, string Version)>());
+
+        public Task<GitRemoteBranch> ResolveBranchCommitAsync(string repositoryUrl, string? branch, CancellationToken ct = default) =>
+            Task.FromResult(new GitRemoteBranch(branch ?? "main", new string('a', 40)));
+
+        public Task<string?> ReadPipelineYamlAsync(string repositoryUrl, string commit, string pipelineName, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
     }
 }

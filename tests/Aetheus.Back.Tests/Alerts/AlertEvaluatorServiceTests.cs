@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Alerts;
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -6,7 +6,9 @@ namespace Aetheus.Back.Components.AiTasks;
 public interface IAiTaskRepository
 {
     Task<(List<AiRunnerProfile> Items, int Total)> GetProfilesPageAsync(
-        string? search, int page, int pageSize, CancellationToken ct);
+        string? search, int page, int pageSize, CancellationToken ct,
+        IReadOnlyList<GridFilter>? columnFilters = null,
+        string? sortBy = null, bool sortDescending = false);
     Task<List<AiRunnerProfile>> GetProfilesForOrganizationsAsync(
         List<int> organizationIds, CancellationToken ct);
     Task<AiRunnerProfile?> FindProfileAsync(int id, CancellationToken ct);
@@ -17,7 +19,9 @@ public interface IAiTaskRepository
 
     Task<(List<AiTaskDefinition> Items, int Total)> GetDefinitionsPageAsync(
         string? search, int page, int pageSize, int? projectId, int? serverId,
-        List<int>? accessibleProjectIds, List<int>? accessibleServerIds, CancellationToken ct);
+        List<int>? accessibleProjectIds, List<int>? accessibleServerIds, CancellationToken ct,
+        IReadOnlyList<GridFilter>? columnFilters = null,
+        string? sortBy = null, bool sortDescending = false);
     Task<AiTaskDefinition?> FindDefinitionAsync(int id, CancellationToken ct);
     Task AddDefinitionAsync(AiTaskDefinition definition, CancellationToken ct);
     Task RemoveDefinitionAsync(AiTaskDefinition definition, CancellationToken ct);

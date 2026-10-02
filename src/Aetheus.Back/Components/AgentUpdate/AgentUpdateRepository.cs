@@ -47,40 +47,13 @@ internal sealed class AgentUpdateRepository(AppDbContext db, TimeProvider timePr
     /// move: ServerService reads the same shape for its own views, so relocating it would only have
     /// pushed the dependency the other way.
     ///
-    /// It calls the Servers mapper for the capabilities JSON. That is a pure static helper, not an
-    /// injected collaborator, so it creates no dependency to invert - duplicating the deserialization
-    /// would risk the two drifting on what a capability string means.
+    /// The read itself is the shared <see cref="ServerCompatibilityFacts"/>: a pure static helper over the
+    /// query, not an injected collaborator, so it creates no dependency to invert - and the two
+    /// modules cannot drift on which columns a compatibility verdict needs (recette R-530).
     /// </summary>
-    public async Task<List<ServerDto>> GetServersForCompatibilityAsync(
-        List<int>? accessibleIds, CancellationToken ct = default)
-    {
-        var query = db.Servers.AsNoTracking();
-        if (accessibleIds is not null)
-            query = query.Where(server => accessibleIds.Contains(server.Id));
-
-        var facts = await query.Select(server => new
-        {
-            server.Id,
-            server.AgentVersion,
-            server.AgentProtocolVersion,
-            server.AgentCapabilitiesJson,
-            server.LastHeartbeat,
-            server.Status,
-            server.PipelineRunnerEnabled,
-            server.DeploymentTargetAvailable
-        }).ToListAsync(ct).ConfigureAwait(false);
-        return facts.Select(server => new ServerDto
-        {
-            Id = server.Id,
-            AgentVersion = server.AgentVersion,
-            AgentProtocolVersion = server.AgentProtocolVersion,
-            AgentCapabilities = Servers.ServerDataMapper.DeserializeDiagnostics(server.AgentCapabilitiesJson),
-            LastHeartbeat = server.LastHeartbeat,
-            Status = server.Status,
-            PipelineRunnerEnabled = server.PipelineRunnerEnabled,
-            DeploymentTargetAvailable = server.DeploymentTargetAvailable
-        }).ToList();
-    }
+    public Task<List<ServerDto>> GetServersForCompatibilityAsync(
+        List<int>? accessibleIds, CancellationToken ct = default) =>
+        ServerCompatibilityFacts.ReadAsync(db.Servers, accessibleIds, ct);
 
     /// <summary>
     /// Work in flight on a server that is not itself an agent update - what makes it too busy to be

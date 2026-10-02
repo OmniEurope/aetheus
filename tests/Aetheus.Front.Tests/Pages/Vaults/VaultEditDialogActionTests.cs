@@ -2,18 +2,16 @@
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
-using Aetheus.Front.Pages.Vaults;
+using Aetheus.Front.Components.Vaults;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Vaults;
 
 /// <summary>
-/// The vault actions that go through a Radzen dialog, driven with an immediate dialog double:
+/// The vault actions that go through a dialog, driven with an immediate dialog double:
 /// deleting the vault, updating, rotating and deleting a secret, importing a JSON payload and
 /// reading a secret's version history. Those paths were previously skipped because the real dialog
 /// service never completes under bUnit, so none of their confirm/cancel rules were protected.
@@ -30,7 +28,7 @@ public sealed class VaultEditDialogActionTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
         {
             Items = [new ProjectDto { Id = 1, Name = "aetheus" }],
@@ -60,6 +58,15 @@ public sealed class VaultEditDialogActionTests : BunitContext
     private static IElement TextButton(IRenderedComponent<VaultEdit> cut, string text) =>
         cut.FindAll("button").First(button => button.TextContent.Contains(text, StringComparison.Ordinal));
 
+    /// <summary>Import and Export moved into the three-dots tools menu, which renders its items only
+    /// while open. Opening it first is what a user does, so the test does the same.</summary>
+    private static IElement ToolsMenuItem(IRenderedComponent<VaultEdit> cut, string text)
+    {
+        cut.Find(".omni-overflow-menu__trigger").Click();
+        return cut.FindAll(".omni-menu__item")
+            .First(item => item.TextContent.Contains(text, StringComparison.Ordinal));
+    }
+
     private bool Sent(string method, string urlContains) =>
         _handler.Requests.Any(request => request.Method == method
             && request.Url.Contains(urlContains, StringComparison.Ordinal));
@@ -81,7 +88,7 @@ public sealed class VaultEditDialogActionTests : BunitContext
         _dialog.ConfirmResult = false;
         var cut = RenderVault();
 
-        TextButton(cut, "Delete").Click();
+        ToolsMenuItem(cut, "Delete").Click(); // Recette R-287: the vault's Delete is in the tools menu.
 
         Assert.False(Sent("DELETE", "api/vaults/1"));
     }
@@ -93,7 +100,7 @@ public sealed class VaultEditDialogActionTests : BunitContext
         _dialog.ConfirmResult = true;
         var cut = RenderVault();
 
-        TextButton(cut, "Delete").Click();
+        ToolsMenuItem(cut, "Delete").Click(); // Recette R-287: the vault's Delete is in the tools menu.
 
         cut.WaitForAssertion(() => Assert.True(Sent("DELETE", "api/vaults/1")), TimeSpan.FromSeconds(2));
     }
@@ -106,7 +113,7 @@ public sealed class VaultEditDialogActionTests : BunitContext
         var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
         var cut = RenderVault();
 
-        TextButton(cut, "Delete").Click();
+        ToolsMenuItem(cut, "Delete").Click(); // Recette R-287: the vault's Delete is in the tools menu.
 
         cut.WaitForAssertion(() => Assert.True(Sent("DELETE", "api/vaults/1")), TimeSpan.FromSeconds(2));
         Assert.DoesNotContain("/vaults", new Uri(navigation.Uri).AbsolutePath.TrimEnd('/') + "/end");
@@ -246,7 +253,7 @@ public sealed class VaultEditDialogActionTests : BunitContext
         _dialog.OpenResult = "[{\"key\":\"A\",\"value\":\"1\"},{\"key\":\"B\",\"value\":\"2\"}]";
         var cut = RenderVault();
 
-        TextButton(cut, "Import").Click();
+        ToolsMenuItem(cut, "Import").Click();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/vaults/1/import")), TimeSpan.FromSeconds(2));
         var request = LastBody<List<CreateVaultSecretRequest>>("POST", "api/vaults/1/import");
@@ -263,7 +270,7 @@ public sealed class VaultEditDialogActionTests : BunitContext
         _dialog.OpenResult = payload;
         var cut = RenderVault();
 
-        TextButton(cut, "Import").Click();
+        ToolsMenuItem(cut, "Import").Click();
 
         Assert.False(Sent("POST", "api/vaults/1/import"));
     }

@@ -9,6 +9,8 @@ public static class ArtifactsModuleExtensions
         services.AddScoped<IArtifactService, ArtifactService>();
         services.AddScoped<IArtifactRetentionService, ArtifactRetentionService>();
         services.AddSingleton<IArtifactStorageService, ArtifactStorageService>();
+        // Singleton like the storage service: sessions live on disk, so it holds no per-request state.
+        services.AddSingleton<IChunkedArtifactUploadService, ChunkedArtifactUploadService>();
         services.AddHostedService<ArtifactCleanupService>();
         services.AddHostedService<ArtifactStorageMonitorService>();
         return services;

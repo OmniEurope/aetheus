@@ -3,11 +3,13 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Back.Exceptions;
+using Aetheus.Back.Hubs;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 
 namespace Aetheus.Back.Tests;
 
@@ -122,18 +124,24 @@ public class PipelineRepositoryQueryTests : IDisposable
         // Finished last but shortest, so an order by CompletedAt cannot pass for an order by duration.
         _db.PipelineRuns.Add(new PipelineRun
         {
-            PipelineId = pipeline.Id, Status = PipelineStatus.Success,
-            StartedAt = start.AddHours(3), CompletedAt = start.AddHours(3).AddMinutes(2)
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Success,
+            StartedAt = start.AddHours(3),
+            CompletedAt = start.AddHours(3).AddMinutes(2)
         });
         _db.PipelineRuns.Add(new PipelineRun
         {
-            PipelineId = pipeline.Id, Status = PipelineStatus.Success,
-            StartedAt = start, CompletedAt = start.AddMinutes(30)
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Success,
+            StartedAt = start,
+            CompletedAt = start.AddMinutes(30)
         });
         // Still running for ~4h: measured against now, it is the longest of the three.
         _db.PipelineRuns.Add(new PipelineRun
         {
-            PipelineId = pipeline.Id, Status = PipelineStatus.Running, StartedAt = start
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Running,
+            StartedAt = start
         });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -156,6 +164,87 @@ public class PipelineRepositoryQueryTests : IDisposable
         Assert.Equal(PipelineStatus.Running, shortestFirst[^1].Status);
     }
 
+    /// <summary>PLAN-008 lot 12: the grid's generic column filters and sort keys reach the runs query,
+    /// and the total they report is the size of the filtered set.</summary>
+    [Fact]
+    public async Task GetRunsPagedAsync_AppliesTheGridColumnFiltersAndSorts_BeforeCounting()
+    {
+        var pipeline = new Pipeline { Name = "grid", YamlDefinition = "name: grid\nstages: []" };
+        _db.Pipelines.Add(pipeline);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var start = new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc);
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Failed, StartedAt = start, BranchName = "feature/login", BuildNumber = 1 },
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Success, StartedAt = start.AddHours(1), BranchName = "main", BuildNumber = 2 },
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Failed, StartedAt = start.AddHours(2), BranchName = "feature/logout", BuildNumber = 3 });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (runs, total) = await _repo.GetRunsPagedAsync(
+            pipeline.Id, 1, 25,
+            new PipelineRunPaginationRequest
+            {
+                Filters =
+                [
+                    new GridFilter { Field = "status", Operator = GridFilterOperator.Equals, Value = "Failed" },
+                    new GridFilter { Field = "branchName", Operator = GridFilterOperator.StartsWith, Value = "FEATURE/" }
+                ],
+                Sorts = [new GridSort { Field = "buildNumber", Descending = true }]
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, total);
+        Assert.Equal(["feature/logout", "feature/login"], runs.Select(run => run.BranchName));
+    }
+
+    /// <summary>Recette R-210 / R-224: the runs grid's checkable status list and its date ranges.</summary>
+    [Fact]
+    public async Task GetRunsPagedAsync_AppliesTheStatusListAndTheDateRanges()
+    {
+        var pipeline = new Pipeline { Name = "grid-lists", YamlDefinition = "name: grid\nstages: []" };
+        _db.Pipelines.Add(pipeline);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var start = new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc);
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Failed, StartedAt = start, CompletedAt = start.AddMinutes(5), BuildNumber = 1 },
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Cancelled, StartedAt = start.AddDays(1), CompletedAt = start.AddDays(1).AddMinutes(5), BuildNumber = 2 },
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Success, StartedAt = start.AddDays(1), CompletedAt = start.AddDays(1).AddMinutes(9), BuildNumber = 3 },
+            new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Failed, StartedAt = start.AddDays(3), BuildNumber = 4 });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (runs, total) = await _repo.GetRunsPagedAsync(
+            pipeline.Id, 1, 25,
+            new PipelineRunPaginationRequest
+            {
+                Filters =
+                [
+                    new GridFilter { Field = "Status", Operator = GridFilterOperator.In, Value = string.Join(GridFilter.ListSeparator, "Failed", "Cancelled") },
+                    new GridFilter
+                    {
+                        Field = "StartedAt", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-01T00:00:00",
+                        SecondOperator = GridFilterOperator.LessThan, SecondValue = "2026-09-03T00:00:00"
+                    },
+                    new GridFilter { Field = "CompletedAt", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-02T00:00:00" }
+                ]
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, total);
+        Assert.Equal(PipelineStatus.Cancelled, Assert.Single(runs).Status);
+    }
+
+    [Fact]
+    public async Task GetRunsPagedAsync_RefusesAColumnTheGridDoesNotExpose()
+    {
+        var pipeline = new Pipeline { Name = "grid-refusal", YamlDefinition = "name: grid\nstages: []" };
+        _db.Pipelines.Add(pipeline);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => _repo.GetRunsPagedAsync(
+            pipeline.Id, 1, 25,
+            new PipelineRunPaginationRequest { Filters = [new GridFilter { Field = "yamlSnapshot", Operator = GridFilterOperator.Contains, Value = "secret" }] },
+            TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task GetRunsPagedAsync_FiltersBeforeCounting_SoThePagerMatchesWhatIsReachable()
     {
@@ -165,13 +254,19 @@ public class PipelineRepositoryQueryTests : IDisposable
 
         _db.PipelineRuns.Add(new PipelineRun
         {
-            PipelineId = pipeline.Id, Status = PipelineStatus.Failed,
-            StartedAt = DateTime.UtcNow, BranchName = "develop", CommitHash = "abc123"
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Failed,
+            StartedAt = DateTime.UtcNow,
+            BranchName = "develop",
+            CommitHash = "abc123"
         });
         _db.PipelineRuns.Add(new PipelineRun
         {
-            PipelineId = pipeline.Id, Status = PipelineStatus.Success,
-            StartedAt = DateTime.UtcNow, BranchName = "main", CommitHash = "def456"
+            PipelineId = pipeline.Id,
+            Status = PipelineStatus.Success,
+            StartedAt = DateTime.UtcNow,
+            BranchName = "main",
+            CommitHash = "def456"
         });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -238,6 +333,43 @@ public class PipelineRepositoryQueryTests : IDisposable
 
         Step(1, TaskExecutionStatus.Failed, continueOnError: false);
         Assert.True(await _repo.HasAnyFailedStepInRunAsync(1, ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task HasAnyContinuableFailedStepInRunAsync_SeesOnlyTheSwallowedFailures()
+    {
+        // PLAN-003 D13 reads the case the other query hides: the run finished green because the
+        // failure was continuable, and that is exactly what makes it Partial rather than Success.
+        Step(1, TaskExecutionStatus.Success);
+        Assert.False(await _repo.HasAnyContinuableFailedStepInRunAsync(1, ct: TestContext.Current.CancellationToken));
+
+        Step(1, TaskExecutionStatus.Failed, continueOnError: false);
+        Assert.False(await _repo.HasAnyContinuableFailedStepInRunAsync(1, ct: TestContext.Current.CancellationToken));
+
+        Step(1, TaskExecutionStatus.Failed, continueOnError: true);
+        Assert.True(await _repo.HasAnyContinuableFailedStepInRunAsync(1, ct: TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>R-14: the rollback stages count as having rolled back only when they ran and all of
+    /// their steps succeeded.</summary>
+    [Fact]
+    public async Task DidStagesAllSucceedAsync_NeedsEveryStepOfTheNamedStagesGreen()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        void StageStep(string stage, TaskExecutionStatus status)
+        {
+            _db.PipelineStepRuns.Add(new PipelineStepRun { PipelineRunId = 7, Status = status, StageName = stage, StepName = "s" });
+            _db.SaveChanges();
+        }
+
+        StageStep("Deploy", TaskExecutionStatus.Failed);
+        Assert.False(await _repo.DidStagesAllSucceedAsync(7, ["Rollback"], ct));
+
+        StageStep("Rollback", TaskExecutionStatus.Success);
+        Assert.True(await _repo.DidStagesAllSucceedAsync(7, ["Rollback"], ct));
+
+        StageStep("Rollback", TaskExecutionStatus.Failed);
+        Assert.False(await _repo.DidStagesAllSucceedAsync(7, ["Rollback"], ct));
     }
 
     [Fact]
@@ -472,6 +604,9 @@ public class PipelineRepositoryQueryTests : IDisposable
     [Fact]
     public async Task FindServerIdsInPoolAsync_ReturnsServerIdsForPool()
     {
+        // The link points at a real server row, as its FK guarantees in PostgreSQL: the link filter
+        // (PLAN-004 R-11) reads the server to hide a retired one, so an orphan link would vanish.
+        _db.Servers.Add(new Server { Id = 7, Name = "pool-runner", Hostname = "pool-runner" });
         _db.AgentPoolServers.Add(new AgentPoolServer { ServerId = 7, AgentPool = new AgentPool { Id = 1, Name = "build-pool" } });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -483,6 +618,7 @@ public class PipelineRepositoryQueryTests : IDisposable
     [Fact]
     public async Task FindServerIdsInEnvironmentAsync_ReturnsServerIdsForEnvironment()
     {
+        _db.Servers.Add(new Server { Id = 8, Name = "env-runner", Hostname = "env-runner" });
         _db.EnvironmentServers.Add(new EnvironmentServer { ServerId = 8, Environment = new Aetheus.Back.Data.Entities.Environment { Id = 1, Name = "staging" } });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -841,6 +977,35 @@ public class PipelineRepositoryQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task DependencyQueries_CarryTheGradeOfEachRecentRun()
+    {
+        // PLAN-007 lot 3: the pipelines table shows the grade the run grids show. Run 1 sealed its own
+        // assurance letter; run 2 grades nothing and must stay without one.
+        _db.Pipelines.Add(new Pipeline { Id = 71, Name = "candidate" });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 11, PipelineId = 71, Status = PipelineStatus.Success, StartedAt = new DateTime(2026, 7, 1, 0, 1, 0, DateTimeKind.Utc) },
+            new PipelineRun { Id = 12, PipelineId = 71, Status = PipelineStatus.Success, StartedAt = new DateTime(2026, 7, 1, 0, 2, 0, DateTimeKind.Utc) });
+        _db.PipelineStepRuns.Add(new PipelineStepRun
+        {
+            PipelineRunId = 11,
+            StepName = "seal",
+            Status = TaskExecutionStatus.Success,
+            OutputVariablesJson = "{\"CANDIDATE_ASSURANCE_GRADE\":\"C\"}"
+        });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var graphItem = Assert.Single(await _repo.GetPipelinesForDependencyGraphAsync(ct: TestContext.Current.CancellationToken));
+        var (pageItems, _, _) = await _repo.GetPipelineDependencyPageAsync(
+            new PipelinePaginationRequest { Page = 1, PageSize = 25 }, ct: TestContext.Current.CancellationToken);
+
+        foreach (var runs in new[] { graphItem.RecentRuns, Assert.Single(pageItems).RecentRuns })
+        {
+            Assert.Equal(AnalysisGrade.C, runs.Single(run => run.Id == 11).GateGrade);
+            Assert.Null(runs.Single(run => run.Id == 12).GateGrade);
+        }
+    }
+
+    [Fact]
     public async Task DependencyGraph_ServerScope_ReturnsOnlyPipelinesExecutedOnServer()
     {
         _db.Pipelines.AddRange(
@@ -861,6 +1026,28 @@ public class PipelineRepositoryQueryTests : IDisposable
 
         Assert.Equal("used", Assert.Single(pipelines).Name);
     }
+    [Fact]
+    public async Task DependencyGraph_ProjectScope_ReturnsOnlyThatProjectsPipelines()
+    {
+        // PLAN-003 lot 12: the graph is narrowed by project the same way it already was by
+        // server, so a project's pipelines page stops loading the whole fleet's graph.
+        _db.Projects.AddRange(
+            new Project { Id = 90, Name = "mine", OrganizationId = 1 },
+            new Project { Id = 91, Name = "other", OrganizationId = 1 });
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment { Id = 92, Name = "staging", ProjectId = 90 });
+        _db.Pipelines.AddRange(
+            new Pipeline { Id = 90, Name = "mine-direct", ProjectId = 90, YamlDefinition = "name: a" },
+            new Pipeline { Id = 92, Name = "mine-via-environment", EnvironmentId = 92, YamlDefinition = "name: b" },
+            new Pipeline { Id = 91, Name = "theirs", ProjectId = 91, YamlDefinition = "name: c" });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var pipelines = await _repo.GetPipelinesForDependencyGraphAsync(
+            projectId: 90, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, pipelines.Count);
+        Assert.DoesNotContain(pipelines, pipeline => pipeline.Name == "theirs");
+    }
+
 
     [Fact]
     public async Task TryResolveApprovalAsync_OnlyFirstPendingDecisionWins()
@@ -889,5 +1076,181 @@ public class PipelineRepositoryQueryTests : IDisposable
         Assert.NotNull(first);
         Assert.Equal(ApprovalStatus.Approved, first.Status);
         Assert.Null(second);
+    }
+
+    private void SeedApproval(int id, int runId, int environmentId, ApprovalStatus status, DateTime requestedAt)
+    {
+        _db.PipelineApprovals.Add(new PipelineApproval
+        {
+            Id = id,
+            PipelineRunId = runId,
+            EnvironmentId = environmentId,
+            StageName = "deploy",
+            Status = status,
+            RequestedAt = requestedAt
+        });
+    }
+
+    [Fact]
+    public async Task GetPendingApprovalsAsync_ListsOnlyUndecidedApprovalsOfWaitingRunsTheCallerMayRead()
+    {
+        // PLAN-007 lot 7: the home page and the top bar list what waits for a decision, and only that.
+        var at = new DateTime(2026, 9, 12, 8, 0, 0, DateTimeKind.Utc);
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment { Id = 1, Name = "prod" });
+        _db.Pipelines.AddRange(
+            new Pipeline { Id = 60, Name = "deploy-prod", ProjectId = 3 },
+            new Pipeline { Id = 61, Name = "someone-elses" });
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { Id = 600, PipelineId = 60, Status = PipelineStatus.WaitingForApproval },
+            new PipelineRun { Id = 601, PipelineId = 60, Status = PipelineStatus.Failed },
+            new PipelineRun { Id = 602, PipelineId = 61, Status = PipelineStatus.WaitingForApproval },
+            new PipelineRun { Id = 603, PipelineId = 60, Status = PipelineStatus.WaitingForApproval });
+        SeedApproval(1, runId: 600, environmentId: 1, ApprovalStatus.Pending, requestedAt: at);
+        SeedApproval(2, runId: 601, environmentId: 1, ApprovalStatus.Pending, requestedAt: at);   // run ended
+        SeedApproval(3, runId: 602, environmentId: 1, ApprovalStatus.Pending, requestedAt: at);   // not readable
+        SeedApproval(4, runId: 603, environmentId: 1, ApprovalStatus.Approved, requestedAt: at);  // decided
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var pending = await _repo.GetPendingApprovalsAsync([60], TestContext.Current.CancellationToken);
+
+        var approval = Assert.Single(pending);
+        Assert.Equal(1, approval.ApprovalId);
+        Assert.Equal(600, approval.PipelineRunId);
+        Assert.Equal("deploy-prod", approval.PipelineName);
+        Assert.Equal(3, approval.ProjectId);
+        Assert.Equal("prod", approval.EnvironmentName);
+        Assert.Equal(2, (await _repo.GetPendingApprovalsAsync(null, TestContext.Current.CancellationToken)).Count);
+    }
+
+    [Fact]
+    public async Task GetExpiredPendingApprovalIdsAsync_SelectsOnlyPendingApprovalsPastTheirEnvironmentTimeout()
+    {
+        var now = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc);
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment
+        {
+            Id = 1,
+            Name = "production",
+            ApprovalTimeoutMinutes = 30
+        });
+        SeedApproval(1, runId: 10, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-60));
+        SeedApproval(2, runId: 11, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-5));
+        SeedApproval(3, runId: 12, environmentId: 1, ApprovalStatus.Approved, requestedAt: now.AddMinutes(-60));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var expired = await _repo.GetExpiredPendingApprovalIdsAsync(now, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1], expired);
+    }
+
+    /// <summary>PLAN-003 2.7: a confirmation window expires on its own delay, not the environment's day.</summary>
+    [Fact]
+    public async Task GetExpiredPendingApprovalIdsAsync_AStageDelay_OverridesTheEnvironmentTimeout()
+    {
+        var now = new DateTime(2026, 9, 12, 12, 0, 0, DateTimeKind.Utc);
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment { Id = 1, Name = "production", ApprovalTimeoutMinutes = 1440 });
+        SeedApproval(1, runId: 10, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-11));
+        SeedApproval(2, runId: 11, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-9));
+        SeedApproval(3, runId: 12, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-11));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        foreach (var approval in _db.PipelineApprovals.Where(a => a.Id == 1 || a.Id == 2))
+            approval.TimeoutMinutes = 10;
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        // 1: past its ten minutes. 2: within them. 3: no delay of its own, within the environment's day.
+        Assert.Equal([1], await _repo.GetExpiredPendingApprovalIdsAsync(now, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GetExpiredPendingApprovalIdsAsync_WithinTimeout_ReturnsNothing()
+    {
+        var now = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc);
+        // Default entity timeout (1440 min): a day-old request is still within it.
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment { Id = 1, Name = "staging" });
+        SeedApproval(1, runId: 10, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-1439));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(await _repo.GetExpiredPendingApprovalIdsAsync(now, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GetExpiredPendingApprovalIdsAsync_ZeroTimeout_ExpiresImmediately()
+    {
+        // Documents the real contract: the query has no "0 = disabled" special case, so a raw 0 expires
+        // any past request immediately. 0 is unreachable through the API ([Range(1, 10080)] on
+        // EnvironmentRequest.ApprovalTimeoutMinutes) and the entity defaults to 1440.
+        var now = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc);
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment
+        {
+            Id = 1,
+            Name = "raw-zero",
+            ApprovalTimeoutMinutes = 0
+        });
+        SeedApproval(1, runId: 10, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-1));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal([1], await _repo.GetExpiredPendingApprovalIdsAsync(now, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ExpiredApproval_TimedOutDecisionThroughRealRepository_FailsRunAndLeavesFreshApprovalUntouched()
+    {
+        // The exact sequence ExpireStaleApprovalsAsync performs, against the real repository: select the
+        // expired ids, then decide each TimedOut through PipelineApprovalService.
+        var now = DateTime.UtcNow;
+        _db.Environments.Add(new Aetheus.Back.Data.Entities.Environment
+        {
+            Id = 1,
+            Name = "production",
+            ApprovalTimeoutMinutes = 30
+        });
+        _db.PipelineRuns.Add(new PipelineRun { Id = 10, PipelineId = 55, Status = PipelineStatus.WaitingForApproval });
+        _db.PipelineRuns.Add(new PipelineRun { Id = 11, PipelineId = 55, Status = PipelineStatus.WaitingForApproval });
+        SeedApproval(1, runId: 10, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-60));
+        SeedApproval(2, runId: 11, environmentId: 1, ApprovalStatus.Pending, requestedAt: now.AddMinutes(-5));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        // The refusal goes through the real control service against the real repository: an environment
+        // approval carries no delay of its own, so the run fails without its scheduler being involved.
+        var runService = Substitute.For<IPipelineRunService>();
+        var control = new PipelineRunControlService(
+            _repo, Substitute.For<IHubContext<PipelineHub>>(), Substitute.For<IPipelineRunDefinitionParser>());
+        runService.ApplyRefusalAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(call => control.ApplyRefusalAsync(
+                call.Arg<int>(), Substitute.For<IPipelineRunScheduler>(), Substitute.For<IPipelineChildRunLauncher>(),
+                call.Arg<CancellationToken>()));
+        var approvalService = new PipelineApprovalService(
+            _repo,
+            runService,
+            Substitute.For<IHttpContextAccessor>(),
+            Substitute.For<IHubContext<PipelineHub>>(),
+            NullLogger<PipelineApprovalService>.Instance,
+            TimeProvider.System);
+
+        var expired = await _repo.GetExpiredPendingApprovalIdsAsync(now, TestContext.Current.CancellationToken);
+        var decidedId = Assert.Single(expired);
+        var decided = await approvalService.DecideApprovalAsync(
+            decidedId,
+            new ApprovalDecisionRequest { Decision = ApprovalStatus.TimedOut, Comments = "Approval timed out" },
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(decided);
+        Assert.Equal(ApprovalStatus.TimedOut, decided.Status);
+        Assert.NotNull(decided.ResolvedAt);
+        Assert.Equal("Approval timed out", decided.Comments);
+
+        var expiredApproval = await _db.PipelineApprovals.AsNoTracking()
+            .FirstAsync(a => a.Id == 1, TestContext.Current.CancellationToken);
+        Assert.Equal(ApprovalStatus.TimedOut, expiredApproval.Status);
+        var failedRun = await _db.PipelineRuns.AsNoTracking()
+            .FirstAsync(r => r.Id == 10, TestContext.Current.CancellationToken);
+        Assert.Equal(PipelineStatus.Failed, failedRun.Status);
+        Assert.NotNull(failedRun.CompletedAt);
+
+        var freshApproval = await _db.PipelineApprovals.AsNoTracking()
+            .FirstAsync(a => a.Id == 2, TestContext.Current.CancellationToken);
+        Assert.Equal(ApprovalStatus.Pending, freshApproval.Status);
+        var untouchedRun = await _db.PipelineRuns.AsNoTracking()
+            .FirstAsync(r => r.Id == 11, TestContext.Current.CancellationToken);
+        Assert.Equal(PipelineStatus.WaitingForApproval, untouchedRun.Status);
     }
 }

@@ -11,6 +11,7 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
             .AsNoTracking()
             .Where(r => r.ProjectId == projectId)
             .Include(r => r.Project)
+            .Include(r => r.GitConnection)
             .OrderBy(r => r.Name)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -23,6 +24,7 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
             query = query.Where(r => projectIds.Contains(r.ProjectId));
         return await query
             .Include(r => r.Project)
+            .Include(r => r.GitConnection)
             .OrderBy(r => r.Project!.Name)
             .ThenBy(r => r.Name)
             .ToListAsync(ct)
@@ -31,18 +33,28 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
 
     public async Task<(List<GitInternalRepo> Items, int TotalCount)> GetAccessiblePagedAsync(
         List<int>? projectIds, int? projectId, string? search, string? sortBy,
-        bool sortDescending, int page, int pageSize, CancellationToken ct = default)
+        bool sortDescending, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
-        var query = FilterAccessible(projectIds, projectId, search);
+        // Recette R-224: the grid's column header filters, after the scope and before the count.
+        var query = GitRepositoryListQuery.Columns.ApplyFilters(FilterAccessible(projectIds, projectId, search), columnFilters);
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         var items = await OrderAccessible(query, sortBy, sortDescending)
             .Include(r => r.Project)
+            .Include(r => r.GitConnection)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct)
             .ConfigureAwait(false);
         return (items, totalCount);
     }
+
+    public Task<List<string>> GetDefaultBranchesAsync(List<int>? projectIds, int? projectId, CancellationToken ct = default) =>
+        FilterAccessible(projectIds, projectId, search: null)
+            .Select(r => r.DefaultBranch)
+            .Distinct()
+            .OrderBy(branch => branch)
+            .ToListAsync(ct);
 
     private IQueryable<GitInternalRepo> FilterAccessible(
         List<int>? projectIds, int? projectId, string? search)
@@ -88,6 +100,7 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
         return await db.GitInternalRepos
             .Where(r => r.Id == id)
             .Include(r => r.Project)
+            .Include(r => r.GitConnection)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
     }
@@ -97,6 +110,7 @@ public class GitLightRepository(AppDbContext db) : IGitLightRepository
         return await db.GitInternalRepos
             .Where(r => r.ProjectId == projectId && r.Slug == slug)
             .Include(r => r.Project)
+            .Include(r => r.GitConnection)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
     }

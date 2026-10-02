@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Front.Pages.Tasks;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
+using Aetheus.Front.Components.Tasks;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;

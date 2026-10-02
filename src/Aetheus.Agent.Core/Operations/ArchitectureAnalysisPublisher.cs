@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Aetheus.Agent.Core.Operations;
@@ -16,6 +18,18 @@ internal static class ArchitectureAnalysisPublisher
         CancellationToken ct)
     {
         var startedAt = timeProvider.GetUtcNow().UtcDateTime;
+        // Candidate #2328 spent 130 s here while ingesting the same report takes about 8 s on a local
+        // PostgreSQL (PLAN-007 lot 6). Each phase now reports its own duration as a run metric, so the
+        // next run says where the time goes before anything is changed on the strength of a guess.
+        var phase = Stopwatch.StartNew();
+        async Task PhaseAsync(string key)
+        {
+            await onOutput(
+                $"##aetheus[pipelinemetric key=architecture.publish.{key};type=Duration;unit=s]"
+                + phase.Elapsed.TotalSeconds.ToString("0.######", CultureInfo.InvariantCulture),
+                TaskLogLevel.Info).ConfigureAwait(false);
+            phase.Restart();
+        }
         var rulesPath = Path.Combine(baseDirectory, ".aetheus", "architecture-rules.json");
         var productSources = SelectProductSources(baseDirectory, sources);
         var report = ArchitectureAnalyzer.Analyze(productSources, rulesPath);
@@ -78,11 +92,13 @@ internal static class ArchitectureAnalysisPublisher
             ])
             .ToList();
         var metricsJson = JsonSerializer.Serialize(new { metrics });
+        await PhaseAsync("analyze").ConfigureAwait(false);
         await onOutput(
             $"Publishing architecture metrics report: {metrics.Count} records, {System.Text.Encoding.UTF8.GetByteCount(metricsJson)} bytes.",
             TaskLogLevel.Info).ConfigureAwait(false);
         var metricsArtifact = await AnalysisArtifactUploader.UploadTextAsync(apiClient, runId,
             "analysis-dotnet-architecture-metrics", stageName, "dotnet-architecture-metrics.json", metricsJson, ct).ConfigureAwait(false);
+        await PhaseAsync("metrics_artifact").ConfigureAwait(false);
         var metricsResult = await apiClient.PublishAnalysisReportAsync(runId, new PublishAnalysisReportRequest
         {
             ScannerKey = "dotnet-architecture-metrics",
@@ -99,6 +115,7 @@ internal static class ArchitectureAnalysisPublisher
             StartedAt = startedAt,
             CompletedAt = timeProvider.GetUtcNow().UtcDateTime
         }, ct).ConfigureAwait(false);
+        await PhaseAsync("metrics_report").ConfigureAwait(false);
         if (metricsResult is null)
             return new ExecutorResult(1, false);
 
@@ -124,6 +141,7 @@ internal static class ArchitectureAnalysisPublisher
             StartedAt = startedAt,
             CompletedAt = timeProvider.GetUtcNow().UtcDateTime
         }, ct).ConfigureAwait(false);
+        await PhaseAsync("findings").ConfigureAwait(false);
         await onOutput(
             $"Architecture graphs published: {string.Join(", ", report.Graphs.Select(item => $"{item.Key}={item.Value.Edges.Count} edges"))}; {report.Graphs["project"].Cycles.Count} project cycles, {report.Violations.Count} violations.",
             findingsResult?.GateStatus == AnalysisGateStatus.Blocked ? TaskLogLevel.Error : TaskLogLevel.Info).ConfigureAwait(false);

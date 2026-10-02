@@ -28,7 +28,8 @@ public sealed class CertbotOperationExecutor(
 
     public bool CanHandle(OperationKind kind) => kind is OperationKind.CertbotObtain
         or OperationKind.CertbotRenew or OperationKind.CertbotRenewAll
-        or OperationKind.CertbotDelete or OperationKind.CertbotRevoke;
+        or OperationKind.CertbotDelete or OperationKind.CertbotRevoke
+        or OperationKind.CertbotNormalize or OperationKind.CertbotRenewalCheck;
 
     public Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target,
@@ -115,6 +116,8 @@ public sealed class CertbotOperationExecutor(
             OperationKind.CertbotRenewAll => "renew-all",
             OperationKind.CertbotDelete => "delete",
             OperationKind.CertbotRevoke => "revoke",
+            OperationKind.CertbotNormalize => "normalize",
+            OperationKind.CertbotRenewalCheck => "renewal-check",
             _ => string.Empty
         };
         if (verb.Length == 0)
@@ -128,7 +131,7 @@ public sealed class CertbotOperationExecutor(
         var psi = SudoProcessStartInfo.Create();
         foreach (var arg in BuildManageArgv(kind, verb, certName)) psi.ArgumentList.Add(arg);
 
-        await onOutput($"certbot {verb}{(kind == OperationKind.CertbotRenewAll ? " (all)" : $" {certName}")}…", TaskLogLevel.Info).ConfigureAwait(false);
+        await onOutput($"certbot {verb}{(IsLineageless(kind) ? " (all)" : $" {certName}")}…", TaskLogLevel.Info).ConfigureAwait(false);
         return await ProcessRunner.RunAsync(psi, timeoutSeconds, onOutput, logger, ct).ConfigureAwait(false);
     }
 
@@ -136,9 +139,12 @@ public sealed class CertbotOperationExecutor(
     internal static string[] BuildObtainArgv(string primaryDomain) =>
         ["-n", HelperPath, primaryDomain];
 
-    // `sudo -n <manage-helper> <verb> [certName]` - argv-exact; renew-all takes no lineage name.
+    // `sudo -n <manage-helper> <verb> [certName]` - argv-exact; the all-lineage verbs take no name.
     internal static string[] BuildManageArgv(OperationKind kind, string verb, string certName) =>
-        kind == OperationKind.CertbotRenewAll
+        IsLineageless(kind)
             ? ["-n", ManageHelperPath, verb]
             : ["-n", ManageHelperPath, verb, certName];
+
+    private static bool IsLineageless(OperationKind kind) =>
+        kind is OperationKind.CertbotRenewAll or OperationKind.CertbotNormalize or OperationKind.CertbotRenewalCheck;
 }

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Settings;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Settings;
 using Bunit;
-using SettingsPage = Aetheus.Front.Pages.Settings.Settings;
+using SettingsPage = Aetheus.Front.Components.Settings.Settings;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -43,12 +42,15 @@ public class SettingsRenderTests : BunitContext
     }
 
     [Fact]
-    public void Renders_WithProfileTab()
+    public void Renders_WithRemovedProfileTab_FallsBackToTheFirstTab()
     {
         SetupStubs();
 
         var cut = Render<SettingsPage>(p => p.Add(x => x.Tab, "profile"));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
+
+        // The profile tab was removed (the display name cannot be changed), so an old "profile"
+        // link lands on the first tab, appearance, instead of an empty panel.
 
         var index = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -67,7 +69,7 @@ public class SettingsRenderTests : BunitContext
         var index = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
-        Assert.Equal(1, index);
+        Assert.Equal(0, index); // "appearance" is the first tab since the profile tab was removed
     }
 
     [Fact]
@@ -78,11 +80,11 @@ public class SettingsRenderTests : BunitContext
         var cut = Render<SettingsPage>(p => p.Add(x => x.Tab, "security"));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        // "security" is index 3 in TabNames.
+        // "security" is index 2 in TabNames (appearance, notifications, security, tokens, about).
         var index = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
-        Assert.Equal(3, index);
+        Assert.Equal(2, index);
     }
 
     [Fact]
@@ -93,44 +95,40 @@ public class SettingsRenderTests : BunitContext
         var cut = Render<SettingsPage>(p => p.Add(x => x.Tab, "about"));
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        // "about" is index 5 (last) in TabNames, after the tokens tab.
+        // "about" is index 4 (last) in TabNames, after the tokens tab.
         var index = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
-        Assert.Equal(5, index);
+        Assert.Equal(4, index);
     }
 
     [Fact]
-    public async Task SaveProfile_CallsToast()
+    public void NotificationToggle_SavesThePreferenceOnTheServer()
     {
         SetupStubs();
-
-        var cut = Render<SettingsPage>();
-        cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
-
-        var method = typeof(SettingsPage).GetMethod("SaveProfile", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-
-        // SaveProfile persists the display name to localStorage (no server profile endpoint).
-        var write = JSInterop.Invocations.Single(i =>
-            i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] == "aetheus_display_name");
-        Assert.Equal("aetheus_display_name", write.Arguments[0]);
-    }
-
-    [Fact]
-    public void NotificationToggle_PersistsImmediately()
-    {
-        SetupStubs();
+        var failed = new NotificationPreferenceDto
+        {
+            EventType = NotificationEventTypes.PipelineFailed,
+            IsEnabled = true,
+            DefaultEnabled = true,
+            CarriesProjectId = true
+        };
+        _handler.SetJsonResponse(HttpMethod.Get, "api/notifications/me/preferences", new List<NotificationPreferenceDto> { failed });
+        _handler.SetJsonResponse(HttpMethod.Put, "api/notifications/me/preferences",
+            new List<NotificationPreferenceDto> { failed with { IsEnabled = false, IsSaved = true } });
 
         var cut = Render<SettingsPage>(p => p.Add(x => x.Tab, "notifications"));
-        cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
+        // Recette R-233: each event is a settings tile whose switch carries the preference text.
+        cut.WaitForElement(".notification-preference-toggle button[role='switch']").Click();
 
-        cut.Find("input.labeled-toggle-native-input").Change(false);
-
-        cut.WaitForAssertion(() => Assert.Contains(JSInterop.Invocations, invocation =>
+        cut.WaitForAssertion(() => Assert.Contains(_handler.RequestDetails, request =>
+            request.Method == "PUT"
+            && request.Url.Contains("api/notifications/me/preferences", StringComparison.Ordinal)
+            && request.Body!.Contains("\"eventType\":\"pipeline.failed\"", StringComparison.Ordinal)
+            && request.Body.Contains("\"isEnabled\":false", StringComparison.Ordinal)));
+        Assert.DoesNotContain(JSInterop.Invocations, invocation =>
             invocation.Identifier == "localStorage.setItem"
-            && (string?)invocation.Arguments[0] == "aetheus_notif_email"
-            && (string?)invocation.Arguments[1] == "false"));
+            && ((string?)invocation.Arguments[0])?.StartsWith("aetheus_notif_", StringComparison.Ordinal) == true);
     }
 
     [Fact]
@@ -142,7 +140,7 @@ public class SettingsRenderTests : BunitContext
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
         var method = typeof(SettingsPage).GetMethod("OnTabChange", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        cut.InvokeAsync(() => method.Invoke(cut.Instance, [2]));
+        cut.InvokeAsync(() => method.Invoke(cut.Instance, ["security"]));
 
         var index = (int)typeof(SettingsPage)
             .GetField("_selectedTabIndex", BindingFlags.NonPublic | BindingFlags.Instance)!

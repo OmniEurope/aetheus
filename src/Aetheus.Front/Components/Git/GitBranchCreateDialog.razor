@@ -1,0 +1,20 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniTemplateForm TModel="CreateGitLightBranchRequest" Model="@_request" OnValidSubmit="@Submit">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Large">
+        <OmniFormField For="oe-pages-git-gitbranchcreatedialog-1"><LabelContent>@L["BranchName"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_request.Name" Id="oe-pages-git-gitbranchcreatedialog-1" />
+        </ChildContent></OmniFormField>
+        <ValidationMessage For="@(() => _request.Name)" />
+
+        <OmniFormField Label="@L["StartFrom"]" For="oe-formfield-pages-git-gitbranchcreatedialog-1">
+            <OmniDropDown Id="oe-formfield-pages-git-gitbranchcreatedialog-1" TValue="string" Options="@((Branches.Select(b => b.Name)).ToOptions(item => (string)item, item => item))" @bind-Value="_request.StartRef"
+                Placeholder="HEAD" AllowEmpty="true" />
+        </OmniFormField>
+
+        <DialogFooter OnCancel="@Cancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_submitting ? "btn-busy" : null)" Busy="@(_submitting)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        </DialogFooter>
+    </OmniStack>
+</OmniTemplateForm>

@@ -19,18 +19,18 @@ public sealed class ResponsiveGridColumnAuditTests
             var source = File.ReadAllText(file);
             foreach (Match match in Regex.Matches(
                          source,
-                         @"<RadzenDataGrid\b(?:(?:""[^""]*"")|[^>])*>",
+                         @"<OmniDataGrid(?!Column)\b(?:(?:""[^""]*"")|[^>])*>",
                          RegexOptions.Singleline))
             {
                 gridCount++;
-                Assert.Contains("Responsive=\"false\"", match.Value, StringComparison.Ordinal);
+                Assert.DoesNotContain("Responsive=\"true\"", match.Value, StringComparison.Ordinal);
             }
 
             Assert.DoesNotContain("col-hide-", source, StringComparison.Ordinal);
             Assert.DoesNotContain("HiddenColumnsHint", source, StringComparison.Ordinal);
         }
 
-        Assert.True(gridCount > 0, "No Radzen data grids were found to audit.");
+        Assert.True(gridCount > 0, "No OE data grids were found to audit.");
     }
 
     /// <summary>
@@ -52,20 +52,20 @@ public sealed class ResponsiveGridColumnAuditTests
 
             foreach (Match match in Regex.Matches(
                          source,
-                         @"<RadzenDataGrid\b(?:(?:""[^""]*"")|[^>])*>",
+                         @"<OmniDataGrid(?!Column)\b(?:(?:""[^""]*"")|[^>])*>",
                          RegexOptions.Singleline))
             {
                 gridCount++;
-                var missing = new List<string>();
-                if (!match.Value.Contains("AllowSorting", StringComparison.Ordinal)) missing.Add("AllowSorting");
-                if (!match.Value.Contains("AllowFiltering", StringComparison.Ordinal)) missing.Add("AllowFiltering");
-                if (missing.Count > 0) violations.Add($"{relative}: missing {string.Join(" + ", missing)}");
+                var disabled = new List<string>();
+                if (match.Value.Contains("AllowSorting=\"false\"", StringComparison.Ordinal)) disabled.Add("AllowSorting");
+                if (match.Value.Contains("AllowFiltering=\"false\"", StringComparison.Ordinal)) disabled.Add("AllowFiltering");
+                if (disabled.Count > 0) violations.Add($"{relative}: disables {string.Join(" + ", disabled)}");
             }
         }
 
-        Assert.True(gridCount > 0, "No Radzen data grids were found to audit.");
+        Assert.True(gridCount > 0, "No OE data grids were found to audit.");
         Assert.True(violations.Count == 0,
-            "Every data grid sets AllowSorting and AllowFiltering (claude-ui-patterns.md):\n  "
+            "Every data grid sets AllowSorting and AllowFiltering (docs/contracts/ui-patterns.md):\n  "
             + string.Join("\n  ", violations.Order(StringComparer.Ordinal)));
     }
 
@@ -76,11 +76,13 @@ public sealed class ResponsiveGridColumnAuditTests
             FindRepoRoot(), "src", "Aetheus.Front", "wwwroot", "css", "app.css"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.Contains(".rz-data-grid .rz-data-grid-data {\n    overflow-x: auto;", css);
+        Assert.Contains(".omni-data-grid .omni-data-grid__viewport {\n    overflow-x: auto;", css);
         Assert.Contains(
-            ".rz-data-grid .rz-grid-table > colgroup > col:not([style^=\"width:\"]):not([style*=\";width:\"]):not([style*=\"; width:\"]) {\n    width: 10rem;",
+            // The default reaches only columns without a width of their own: an OE Width arrives as
+            // --omni-col-width and must win (recette 2026-09-21, every column was 172px).
+            ".omni-data-grid .omni-data-grid__table > colgroup > col:not([style^=\"width:\"]):not([style*=\";width:\"]):not([style*=\"; width:\"]):not([style*=\"--omni-col-width\"]) {\n    width: max(10rem, var(--omni-col-min, 0px));",
             css);
-        Assert.DoesNotContain(".rz-data-grid .col-hide-", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".omni-data-grid .col-hide-", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".hidden-columns-hint", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".pipeline-project-column {\n        display: none", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".pipeline-secondary-column {\n        display: none", css, StringComparison.Ordinal);
@@ -107,16 +109,21 @@ public sealed class ResponsiveGridColumnAuditTests
     }
 
     [Fact]
-    public void CompactSidebar_CssAndJavascriptShareThe1024PixelBoundary()
+    public void CompactSidebar_LayoutAndJavascriptShareTheOmniEuropeMediumBoundary()
     {
         var root = FindRepoRoot();
-        var css = File.ReadAllText(Path.Combine(
-            root, "src", "Aetheus.Front", "wwwroot", "css", "app.css"));
+        var layout = File.ReadAllText(Path.Combine(
+            root, "src", "Aetheus.Front", "Layout", "MainLayout.razor"));
+        var layoutCode = File.ReadAllText(Path.Combine(
+            root, "src", "Aetheus.Front", "Layout", "MainLayout.razor.cs"));
         var javascript = File.ReadAllText(Path.Combine(
             root, "src", "Aetheus.Front", "wwwroot", "js", "layout.js"));
 
-        Assert.Contains("@media (max-width: 1024px)", css, StringComparison.Ordinal);
-        Assert.Contains("matchMedia('(max-width: 1024px)')", javascript, StringComparison.Ordinal);
+        // The sidebar and both toggles read one reveal, decided on the same boundary as the JS watcher.
+        Assert.Contains("Reveal=\"@SidebarReveal\"", layout, StringComparison.Ordinal);
+        Assert.Contains("SidebarReveal => _isMobile ? OmniSidebarReveal.Overlay : OmniSidebarReveal.Push;", layoutCode, StringComparison.Ordinal);
+        Assert.Contains("Collapse=\"@(_isMobile ? OmniSidebarCollapse.Hidden : OmniSidebarCollapse.Icons)\"", layout, StringComparison.Ordinal);
+        Assert.Contains("matchMedia('(max-width: 63.99rem)')", javascript, StringComparison.Ordinal);
         Assert.Contains(
             "return dotNetRef.invokeMethodAsync('OnViewportChanged'",
             javascript,
@@ -130,14 +137,14 @@ public sealed class ResponsiveGridColumnAuditTests
             FindRepoRoot(), "src", "Aetheus.Front", "wwwroot", "css", "app.css"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.Contains(".rz-data-grid .rz-grid-table-fixed {\n    table-layout: fixed;", css);
-        Assert.Contains(".rz-data-grid thead .rz-column-title-content", css);
+        Assert.Contains(".omni-data-grid .omni-data-grid__table {\n    table-layout: fixed;", css);
+        Assert.Contains(".omni-data-grid thead .omni-data-grid__title", css);
         Assert.Contains("min-width: 0;", css);
         Assert.Contains("overflow: hidden;", css);
         Assert.Contains("text-overflow: ellipsis;", css);
         var titleRule = Regex.Match(
             css,
-            @"\.rz-data-grid thead \.rz-column-title-content\s*\{(?<body>[^}]*)\}",
+            @"\.omni-data-grid thead \.omni-data-grid__title\s*\{(?<body>[^}]*)\}",
             RegexOptions.Singleline);
         Assert.True(titleRule.Success, "The bounded grid-header title rule is missing.");
         Assert.DoesNotContain("min-width: max-content;", titleRule.Groups["body"].Value);
@@ -158,22 +165,6 @@ public sealed class ResponsiveGridColumnAuditTests
             "    }");
 
         Assert.Contains(expectedRule, css, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DetailHeader_ActionsCompactFromAvailableContentWidth()
-    {
-        var css = File.ReadAllText(Path.Combine(
-            FindRepoRoot(), "src", "Aetheus.Front", "wwwroot", "css", "app.css"))
-            .Replace("\r\n", "\n", StringComparison.Ordinal);
-
-        Assert.Contains(".detail-page-header {\n    container-name: detail-header;\n    container-type: inline-size;", css);
-        Assert.Contains("@container detail-header (max-width: 52rem)", css);
-        Assert.Contains(".detail-page-header > .rz-button .rz-button-text", css);
-        Assert.Contains("@media (max-width: 48rem)", css);
-        Assert.Contains("flex-wrap: wrap !important;", css);
-        Assert.Contains(".detail-page-header > .detail-page-title", css);
-        Assert.Contains(".detail-page-header > .flex-spacer", css);
     }
 
     private static string FindRepoRoot() => Aetheus.Front.Tests.Architecture.RepositoryScan.Root;

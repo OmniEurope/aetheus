@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Pipelines;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Time.Testing;
 
@@ -73,6 +72,13 @@ public class AuditSecurityRemediationTests
     [InlineData("deployment_bootstrap_password")]
     [InlineData("BOOTSTRAP_STAMP")]
     public void BootstrapVariableNames_AreReserved_SoAPipelineCannotDeclareTheAdminCredential(string name)
+        => Assert.True(PipelineParameterResolver.IsReservedName(name));
+
+    [Theory]
+    [InlineData("UPSTREAM_RUN_ID")]
+    [InlineData("upstream_chain")]
+    [InlineData("UPSTREAM_RELEASE")]
+    public void TheParentContextNames_AreReserved_SoARunCannotClaimAParent(string name)
         => Assert.True(PipelineParameterResolver.IsReservedName(name));
 
     [Theory]

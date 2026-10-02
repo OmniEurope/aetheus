@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: EUPL-1.2
+# SPDX-FileCopyrightText: 2026 Aetheus contributors
+#
+# R-249 - host configuration files written by deploy/scripts/install-agent-linux.sh. The backend
+# ships this folder next to the installer in the agent archive (agent-host-config/).
+#
+# One line per template: its path relative to this folder, then the placeholders it declares.
+# render_host_config (install-agent-linux.sh) replaces each declared #{NAME}# by the value of the
+# installer variable NAME, and refuses to install when a placeholder is undeclared, declared but
+# unused, or has no value. A line that is exactly #{include:<path>}# inlines another template of
+# this list verbatim: that is how the files a root-owned helper writes at run time (Dovecot,
+# OpenDKIM, the ACME alias, the local HTTPS vhost, the TeamSpeak unit) live here while the installed
+# helper stays byte-identical. Their $name references are expanded by the helper when it runs, not
+# by the installer.
+#
+agent-update/agent-posture-upgrade
+agent-update/aetheus-agent-upgrade.service AGENT_UPDATE_WORKER_PATH
+agent-update/aetheus-agent-upgrade.path AGENT_UPDATE_REQUEST_FILE
+agent/sudoers.d/aetheus-agent AGENT_USER
+apache/aetheus-apache-configtest
+apache/aetheus-apache-reload
+apache/sudoers.d/aetheus-apache APACHE_CONFIGTEST_HELPER_PATH APACHE_RELOAD_HELPER_PATH AGENT_USER
+certbot/aetheus-certbot-issue ACME_WEBROOT
+certbot/aetheus-acme-webroot.conf
+certbot/local-ssl-site.conf
+certbot/aetheus-certbot-manage ACME_WEBROOT
+certbot/sudoers.d/aetheus-certbot CERTBOT_ISSUE_HELPER_PATH CERTBOT_MANAGE_HELPER_PATH AGENT_USER
+certbot/renewal-hooks-deploy/aetheus-apache
+certbot/aetheus-certbot-renewal-check.service CERTBOT_MANAGE_HELPER_PATH
+certbot/aetheus-certbot-renewal-check.timer
+cron/cron-apply
+cron/sudoers.d/aetheus-cron CRON_HELPER_PATH AGENT_USER
+deploy/aetheus-app@.service DEPLOY_READ_GROUP DEPLOY_BASE_DIR
+deploy/deploy-restart
+deploy/sudoers.d/aetheus-deploy DEPLOY_RESTART_HELPER_PATH AGENT_USER
+portsentry/unblock-ip
+portsentry/portsentry-setup
+portsentry/sudoers.d/aetheus-portsentry UNBLOCK_HELPER_PATH PORTSENTRY_SETUP_HELPER_PATH AGENT_USER
+service-enable/sudoers.d/aetheus-service-enable AGENT_USER
+package/sudoers.d/aetheus-package AGENT_USER
+patch/sudoers.d/aetheus-patch AGENT_USER
+firewall/aetheus-firewall
+firewall/sudoers.d/aetheus-firewall FIREWALL_HELPER_PATH AGENT_USER
+mail/mail-setup
+mail/dovecot-2.3/99-aetheus.conf
+mail/dovecot-2.3/99-aetheus-ssl.conf
+mail/dovecot-2.4/99-aetheus.conf
+mail/dovecot-2.4/99-aetheus-ssl.conf
+mail/opendkim.conf
+mail/mail-manage ACME_WEBROOT
+mail/sudoers.d/aetheus-mail MAIL_SETUP_HELPER_PATH MAIL_MANAGE_HELPER_PATH AGENT_USER
+teamspeak/teamspeak-setup
+teamspeak/teamspeak3.service
+teamspeak/sudoers.d/aetheus-teamspeak TEAMSPEAK_SETUP_HELPER_PATH AGENT_USER
+rkhunter/sudoers.d/aetheus-rkhunter AGENT_USER
+agent/aetheus-agent.service AGENT_USER AGENT_GROUP INSTALL_DIR STATE_DIRECTORY_MODE EXEC_START NNP_BLOCK PROTECT_SYSTEM_BLOCK WORK_DIR READ_WRITE_PATHS_BLOCK SANDBOX_PRIV_BLOCK ADDRESS_FAMILIES
+agent/appsettings.json SERVER_URL_J REG_TOKEN_J AGENT_NAME_J WORK_DIR_J ALLOW_INSECURE_JSON DOCKER_STORAGE_DEPLOYMENT_ONLY

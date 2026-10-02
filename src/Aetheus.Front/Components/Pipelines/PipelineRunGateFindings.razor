@@ -1,0 +1,62 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniCard Class="analysis-run-gate-overview analysis-run-gate-page omni-u-mt-md omni-u-p-md">
+    <div class="analysis-run-gate-heading">
+        <OmniIcon Name="OmniIconName.ShieldCheck" />
+        <div>
+            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@L["AnalysisGateTab"]</OmniHeading>
+        </div>
+        @* PLAN-003 lot 22: the word is dropped when the letter carries the same verdict. *@
+        @if (PipelineRunGatePresentation.ShowsStatusWord(Gate))
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineRunGatePresentation.GateStyle(Gate.Status)">@L[PipelineRunGatePresentation.StatusKey(Gate.Status)]</OmniBadge>
+        }
+        @if (Gate.Grade?.OverallGrade is { } grade)
+        {
+            <GradeBadge Value="@grade" Title="@L["GateGrade"]" Class="pipeline-gate-grade-badge analysis-run-gate-grade" />
+        }
+    </div>
+    <div class="analysis-run-gate-toolbar omni-u-mb-md">
+        @* The OE key-figure tile: value over its label, the label wraps, so a narrow column keeps
+           both inside the tile (a side-by-side nowrap pair spilled out of it at 375 px). *@
+        <div class="analysis-run-gate-metrics">
+            <OmniStatTile Value="@($"{Gate.FindingCount}")" Label="@L["AnalysisGateFindings"]" />
+            <OmniStatTile Value="@($"{Gate.NewFindingCount}")" Label="@L["AnalysisGateNewFindings"]" />
+            <OmniStatTile Value="@($"{Gate.ReportCount}")" Label="@L["AnalysisReports"]" />
+            <OmniStatTile Value="@($"{Gate.Violations.Count}")" Label="@L["AnalysisGateViolations"]" />
+        </div>
+        <div class="analysis-run-gate-actions">
+            @if (ProjectId is { } projectId)
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenProjectQuality(projectId))" title="@L["AnalysisOpenProjectQuality"]"><OmniIcon Name="OmniIconName.OpenExternal" /> <span>@L["AnalysisOpenProjectQuality"]</span></OmniButton>
+            }
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="ExportAllAiPromptAsync" Disabled="@(ListedCount == 0)" Busy="@_exporting" title="@L["AnalysisExportAllAiPrompt"]"><OmniIcon Name="OmniIconName.Download" /> <span>@L["AnalysisExport"]</span></OmniButton>
+        </div>
+    </div>
+    @* R-527: the findings already decided on are hidden until asked for; the switch says how many. *@
+    @if (Gate.DecidedFindingCount > 0)
+    {
+        <OmniSwitch TValue="bool" @bind-Value="_showDecided" @bind-Value:after="ShowDecidedChangedAsync" Class="omni-u-mb-sm analysis-run-gate-decided-switch">@string.Format(L["AnalysisGateShowDecided"], Gate.DecidedFindingCount)</OmniSwitch>
+    }
+    @if (ListedCount == 0)
+    {
+        <EmptyState Icon="task_alt" Title="@L["AnalysisNoFindings"]" Description="@L["AnalysisNoFindingsDescription"]" />
+    }
+    else
+    {
+        @* Recette R-502: the columns of every findings list (AnalysisFindingColumns), over this run's
+           findings; a click on the row opens the finding, as on the project's Quality page. *@
+        @* R-500: FullHeight lets OE size the grid to what is left under it, inside the card. *@
+        @* Recette R-485: the findings of the run and the runs it triggered, read from the server page
+           by page, filtered and sorted there, like the project's Quality list. *@
+        <AetheusDataGrid @ref="_grid" Data="@_rows" Count="@_total" TItem="AnalysisFindingDto" KeyProperty="Id" LoadData="LoadAsync" RowClick="OpenFinding"
+                         AllowSorting="true" AllowFiltering="true" FilterMode="OmniDataGridFilterMode.Simple" PageSize="25"
+                         Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<AnalysisFindingDto>(_rows, _total))"
+                         FullHeight="true" class="analysis-run-findings-grid" VirtualizationOverscanCount="3">
+            <Columns>
+                <AnalysisFindingColumns ShowStatus="@_showDecided" ShowOwnership="false" RunId="@Gate.PipelineRunId"
+                                        CanRevertDecisions="@(_showDecided && CanDecide)" RevertDecision="@RevertDecisionAsync" />
+            </Columns>
+        </AetheusDataGrid>
+    }
+</OmniCard>

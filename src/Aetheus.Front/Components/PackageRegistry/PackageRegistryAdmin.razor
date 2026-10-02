@@ -1,0 +1,69 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits Aetheus.Front.Components.Shared.RealtimeAdminGridPageBase<PackageRegistryPackageDto>
+@page "/admin/package-registry"
+
+<PageTitle>@L["PackageRegistry"] - Aetheus</PageTitle>
+
+@if (Auth.IsAdmin)
+{
+<OmniPageHeader Title="@L["PackageRegistry"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("deployed_code")" /></Icon>
+    <Actions>
+    </Actions>
+    <Filters>
+        <OmniTextBox aria-label="@L["Search"]" Placeholder="@L["Search"]" @bind-Value="_search"
+            @bind-Value:after="ResetSearchAsync" Class="pipeline-list-search" />
+    </Filters>
+</OmniPageHeader>
+
+<OmniRow Gap="OmniSpacing.Large" Class="omni-u-mb-lg">
+    <OmniColumn Span="12" MediumSpan="6">
+        <OmniCard>
+            <OmniHeading Level="OmniHeadingLevel.H5">NuGet</OmniHeading>
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mb-sm">@L["RegistryNuGetHelp"]</OmniText>
+            <code class="text-mono">/api/packages/nuget/v3/index.json</code>
+        </OmniCard>
+    </OmniColumn>
+    <OmniColumn Span="12" MediumSpan="6">
+        <OmniCard>
+            <OmniHeading Level="OmniHeadingLevel.H5">npm</OmniHeading>
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mb-sm">@L["RegistryNpmHelp"]</OmniText>
+            <code class="text-mono">/api/packages/npm/</code>
+        </OmniCard>
+    </OmniColumn>
+</OmniRow>
+
+<AetheusDataGrid @ref="_grid" Data="@_packages" TItem="PackageRegistryPackageDto"
+    Count="@_totalCount" IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="20"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<PackageRegistryPackageDto>(_packages, _totalCount))"
+ FullHeight="true">
+    <EmptyTemplate>
+        <EmptyState Icon="deployed_code" Title="@L["NoRegistryPackages"]"
+            Description="@L["NoRegistryPackagesDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="PackageRegistryPackageDto" Property="Kind" Title="@L["Type"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@KindText" >
+            <Template Context="p"><OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@L.Localize(p.Kind)</OmniBadge></Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PackageRegistryPackageDto" Property="Name" Title="@L["PackageName"]" Filterable="true" >
+            <Template Context="p"><span class="text-mono">@p.Name</span></Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PackageRegistryPackageDto" Property="LatestVersion" Title="@L["LatestVersion"]" Width="140px" Filterable="true" >
+            <Template Context="p"><span class="text-mono">@(p.LatestVersion ?? "-")</span></Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PackageRegistryPackageDto" Property="VersionCount" Title="@L["Versions"]" Width="100px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+        <OmniDataGridColumn TItem="PackageRegistryPackageDto" Property="TotalSizeBytes" Title="@L["Size"]" Width="110px" Filterable="false" >
+            <Template Context="p">@DisplayFormatting.BinarySize(p.TotalSizeBytes)</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PackageRegistryPackageDto" Property="UpdatedAt" Title="@L["UpdatedAt"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" >
+            <Template Context="p">@p.UpdatedAt.ToString("g")</Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PackageRegistryPackageDto" Title="@L["Actions"]" Width="90px" Sortable="false" Filterable="false" >
+            <Template Context="p">
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OpenPackageAsync(p))" title="@L["ViewDetails"]" Label="@L["ViewDetails"]"><OmniIcon Name="OmniIconName.Eye" /></OmniButton>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>
+}

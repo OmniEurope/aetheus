@@ -4,6 +4,49 @@ Aetheus.goBack = function () {
     window.history.back();
 };
 
+// PLAN-005 lot 9 / D50: another tab of this browser rotated the tokens. The "storage" event only
+// fires in the OTHER tabs, which is exactly who needs the new values; only the two token keys are
+// forwarded, and the listener is registered once per page.
+Aetheus.watchAuthStorage = function (dotnetRef, tokenKey, refreshTokenKey) {
+    Aetheus._authSession = dotnetRef;
+    if (Aetheus._authStorageWatched) return;
+    Aetheus._authStorageWatched = true;
+    window.addEventListener('storage', function (event) {
+        if (event.key !== tokenKey && event.key !== refreshTokenKey) return;
+        dotnetRef.invokeMethodAsync('OnStorageChanged', event.key, event.newValue);
+    });
+};
+
+// Web analytics: whether the visitor is signed in, as a yes/no only. The analytics bootstrap asks at
+// send time; the app answers from memory (a synchronous call Blazor WebAssembly supports). No token
+// and no account ever reach the analytics module.
+Aetheus.analyticsSignedIn = function () {
+    try {
+        return Aetheus._authSession ? Aetheus._authSession.invokeMethod('IsSignedInForAnalytics') === true : false;
+    } catch {
+        return false;
+    }
+};
+
+// Recette R-471: the opaque identifier of the signed-in account, answered from memory like the yes/no
+// above. It is a keyed hash minted by the backend (the token's aetheus:avid claim), never the token, the
+// account name or an e-mail address; undefined when nobody is signed in.
+Aetheus.analyticsVisitor = function () {
+    try {
+        const id = Aetheus._authSession ? Aetheus._authSession.invokeMethod('VisitorForAnalytics') : null;
+        return typeof id === 'string' && id.length > 0 ? id : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+// The application says its session is known, or that the visitor changed (sign-in, sign-out). The
+// measurement, once loaded, leaves its handler here; until then the call is a no-op.
+Aetheus.analyticsIdentityChanged = function () {
+    Aetheus._analyticsSessionKnown = true;
+    if (typeof Aetheus._onAnalyticsIdentity === 'function') Aetheus._onAnalyticsIdentity();
+};
+
 Aetheus.hideSplash = function () {
     // Fade out and remove the single boot splash (#app-splash, declared in index.html).
     // Idempotent: a missing element (already removed) is a no-op.
@@ -16,12 +59,82 @@ Aetheus.hideSplash = function () {
     setTimeout(remove, 600);
 };
 
-Aetheus.setTheme = function (cssUrl) {
-    const link = document.querySelector('link[href*="material-"]');
-    if (link) {
-        link.href = cssUrl;
+// PLAN-008 lot 11: the stored appearance is 'dark', 'light' or 'system'. 'system' follows the OS
+// and repaints when the OS preference changes, without a reload. Anything else reads as dark, which
+// is what the application defaulted to before the System option existed.
+Aetheus.effectiveTheme = function (appearance) {
+    if (appearance === 'light') return 'light';
+    if (appearance !== 'system') return 'dark';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+};
+
+Aetheus.setOmniTheme = function (appearance) {
+    Aetheus._appearance = appearance;
+    document.documentElement.setAttribute('data-omni-theme', Aetheus.effectiveTheme(appearance));
+    Aetheus.paintThemeTokens();
+
+    if (!Aetheus._systemTheme && window.matchMedia) {
+        Aetheus._systemTheme = window.matchMedia('(prefers-color-scheme: light)');
+        Aetheus._systemTheme.addEventListener('change', function () {
+            if (Aetheus._appearance === 'system') {
+                document.documentElement.setAttribute('data-omni-theme', Aetheus.effectiveTheme('system'));
+                Aetheus.paintThemeTokens();
+            }
+        });
+    }
+    return Aetheus.effectiveTheme(appearance);
+};
+
+// Recette R-232: the chosen theme and palette of the whole site. Their token values ({ light, dark },
+// resolved by the settings page from the OmniEurope.Blazor catalogue) are kept in localStorage, so the
+// boot script of index.html paints the same values before the first frame. They go through the CSSOM
+// on <html>, as OmniEurope.Blazor's own theme scope does: no style attribute in markup, so the strict
+// style policy holds, and the menus and dialogs rendered at the end of <body> follow too.
+Aetheus._themeTokenNames = [];
+Aetheus.paintThemeTokens = function () {
+    var root = document.documentElement;
+    Aetheus._themeTokenNames.forEach(function (name) { root.style.removeProperty(name); });
+    Aetheus._themeTokenNames = [];
+    var raw = localStorage.getItem('aetheus_theme_tokens');
+    if (!raw) return;
+    var tokens;
+    try { tokens = JSON.parse(raw); } catch { return; }
+    var half = root.getAttribute('data-omni-theme') === 'light' ? tokens.light : tokens.dark;
+    Object.keys(half || {}).forEach(function (name) {
+        root.style.setProperty(name, half[name]);
+        Aetheus._themeTokenNames.push(name);
+    });
+};
+
+Aetheus.setThemeTokens = function (tokensJson) {
+    if (tokensJson) localStorage.setItem('aetheus_theme_tokens', tokensJson);
+    else localStorage.removeItem('aetheus_theme_tokens');
+    Aetheus.paintThemeTokens();
+};
+
+// Recette R-232: the density of the whole site; 'comfortable' is the shipped one and carries no attribute.
+Aetheus.setDensity = function (density) {
+    var root = document.documentElement;
+    if (density === 'compact' || density === 'spacious') {
+        root.setAttribute('data-aetheus-density', density);
+        root.setAttribute('data-omni-density', density);
+    } else {
+        root.removeAttribute('data-aetheus-density');
+        root.removeAttribute('data-omni-density');
     }
 };
+
+// Recette R-390: OE's text size and control size, 1 to 10. Level 5 is the site as drawn and carries no
+// attribute; the others set data-oe-text-size / data-oe-control-size on <html>, which OE's stylesheet
+// reads (root font size, control scale). The boot script of index.html applies the same keys.
+Aetheus._setScale = function (attribute, level) {
+    var root = document.documentElement;
+    var value = parseInt(level, 10);
+    if (value >= 1 && value <= 10 && value !== 5) root.setAttribute(attribute, String(value));
+    else root.removeAttribute(attribute);
+};
+Aetheus.setTextSize = function (level) { Aetheus._setScale('data-oe-text-size', level); };
+Aetheus.setControlSize = function (level) { Aetheus._setScale('data-oe-control-size', level); };
 
 Aetheus.setLang = function (lang) {
     document.documentElement.lang = lang.substring(0, 2);
@@ -85,7 +198,7 @@ Aetheus.setTitlePrefix = function (prefix) {
 Aetheus.focusById = function (id) {
     const el = document.getElementById(id);
     if (!el) return;
-    // The id may point at a wrapper (e.g. a RadzenPassword/RadzenFormField) whose
+    // The id may point at a wrapper (e.g. an OmniPassword/OmniFormField) whose
     // real focusable target is a nested <input>; prefer that when present.
     const target = el.matches('input, textarea, select') ? el : (el.querySelector('input, textarea, select') || el);
     target.focus();
@@ -98,6 +211,23 @@ Aetheus.copyToClipboard = async function (text) {
     } catch {
         return false;
     }
+};
+
+// PLAN-005 lot 4 / D35 (STD-BUSY): a busy button is not disabled, the veil keeps its look, so the
+// keyboard (Enter, Space, or Enter in a form's field, which clicks the submit button) could still
+// activate it and submit twice. Its clicks are swallowed here, in the capture phase, before Blazor's
+// own listeners see them. pointer-events: none already covers the mouse.
+window.addEventListener('click', function (e) {
+    if (e.target instanceof Element && e.target.closest('.btn-busy')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+}, true);
+
+// PLAN-005 lot 2 / D32: true when a line-clamped element hides part of its text, so the toast shows
+// "Show more" only when there is more to show.
+Aetheus.isClamped = function (el) {
+    return !!el && el.scrollHeight > el.clientHeight + 1;
 };
 
 // Scroll a log terminal element to its bottom / top. Used by the pipeline run log viewer for
@@ -117,11 +247,32 @@ Aetheus.scrollToTop = function (el) {
     if (el) { el.scrollTop = 0; }
 };
 
+// Tells the run page when the reader scrolls a log terminal by hand: away from the tail (so a live
+// run stops dragging them back to the newest line) or back to it (following resumes). Only scrolls
+// that follow a gesture of the reader count; the page's own scrollToBottom never does.
+Aetheus.watchLogFollow = function (el, dotnet) {
+    if (!el || el.__aetheusLogFollow) { return; }
+    var gestureUntil = 0;
+    var reported = true;
+    var gesture = function () { gestureUntil = Date.now() + 600; };
+    ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown'].forEach(function (type) {
+        el.addEventListener(type, gesture, { passive: true });
+    });
+    el.addEventListener('scroll', function () {
+        if (Date.now() > gestureUntil) { return; }
+        var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        if (atBottom === reported) { return; }
+        reported = atBottom;
+        dotnet.invokeMethodAsync('OnUserScrolled', atBottom);
+    }, { passive: true });
+    el.__aetheusLogFollow = true;
+};
+
 Aetheus.initFormShortcuts = function () {
     document.addEventListener('keydown', function (e) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             // Prefer dialog forms (modal) over page forms
-            var form = document.querySelector('.rz-dialog form') || document.querySelector('form');
+            var form = document.querySelector('.omni-dialog form') || document.querySelector('form');
             if (form) {
                 var submitBtn = form.querySelector('button[type="submit"]');
                 if (submitBtn && !submitBtn.disabled) {
@@ -159,7 +310,7 @@ Aetheus.setLocal = function (key, value) {
     } catch { /* ignore */ }
 };
 
-// Compact drawer viewport watcher (Astraia parity). A matchMedia("(max-width: 1024px)") listener
+// Compact drawer viewport watcher (Astraia parity). A matchMedia("(max-width: 63.99rem)") listener
 // pushes the mobile/desktop boolean into MainLayout via [JSInvokable] OnViewportChanged, so the
 // sidebar collapses to an overlay on phones/tablets and restores the in-flow rail on wider screens.
 Aetheus._viewportMql = null;
@@ -171,7 +322,7 @@ Aetheus._onViewportChange = function (e) {
 };
 Aetheus.watchViewport = function (dotNetRef) {
     Aetheus._viewportRef = dotNetRef;
-    Aetheus._viewportMql = window.matchMedia('(max-width: 1024px)');
+    Aetheus._viewportMql = window.matchMedia('(max-width: 63.99rem)');
     Aetheus._viewportMql.addEventListener('change', Aetheus._onViewportChange);
     // Return the promise: MainLayout keeps the opaque splash mounted until this initial state has
     // been applied and rendered, eliminating the cold-load drawer/backdrop flash.
@@ -185,18 +336,18 @@ Aetheus.disposeViewportWatcher = function () {
     Aetheus._viewportRef = null;
 };
 
-// Data-grid actions are visually icon-only in compact rows. Radzen keeps their localized Text in
+// Data-grid actions are visually icon-only in compact rows. The grid keeps their localized text in
 // the DOM for accessibility, but does not copy it to `title`, so mouse users get no tooltip. Apply
-// the same contract to every current and future grid button, including Radzen's filter controls.
+// the same contract to every current and future grid button, filter controls included.
 (function addDataGridButtonTooltips() {
     function apply(root) {
         const buttons = [];
-        if (root instanceof Element && root.matches('.rz-datatable button')) buttons.push(root);
-        if (root.querySelectorAll) buttons.push(...root.querySelectorAll('.rz-datatable button'));
+        if (root instanceof Element && root.matches('.omni-data-grid button')) buttons.push(root);
+        if (root.querySelectorAll) buttons.push(...root.querySelectorAll('.omni-data-grid button'));
 
         buttons.forEach(function (button) {
             if (button.getAttribute('title')) return;
-            const text = button.querySelector('.rz-button-text')?.textContent?.trim();
+            const text = button.querySelector('.omni-button__content')?.textContent?.trim();
             const label = text || button.getAttribute('aria-label');
             if (label) button.setAttribute('title', label);
         });
@@ -267,83 +418,168 @@ window.copyToClipboard = async function (text) {
     }
 };
 
-// ESC4: close the top-most open dialog on Escape, mirroring the title-bar close button. Radzen only
-// wires its own Escape handler when a dialog opts in (closeDialogOnEsc) - ours don't - so this gives
-// Escape-to-close uniformly without editing every DialogService call site. A dialog with no close
-// button (intentionally non-dismissible) has nothing to click and stays open. If a Radzen popup /
-// dropdown is open we bail so Escape closes that first, not the whole dialog.
-(function closeDialogsOnEscape() {
-    document.addEventListener('keydown', function (e) {
-        if (e.key !== 'Escape' && e.key !== 'Esc') return;
-        if (document.querySelector('.rz-popup, .rz-overlaypanel, .rz-dropdown-panel, .rz-multiselect-panel, .rz-autocomplete-panel')) return;
-        // Scope to the TOP-MOST dialog only and click ITS own close button. If that dialog has no
-        // close button (e.g. a non-dismissible confirm stacked over an editor), do nothing - never
-        // fall through to a dialog beneath it, which would close the wrong one.
-        var dialogs = document.querySelectorAll('.rz-dialog');
-        if (!dialogs.length) return;
-        var closeBtn = dialogs[dialogs.length - 1].querySelector('.rz-dialog-titlebar-close');
-        if (!closeBtn) return;
-        e.preventDefault();
-        closeBtn.click();
-    });
-})();
-
-(function lockNavGroupsOpen() {
-    function forceOpenGroup(group) {
-        if (!group) return;
-
-        group.setAttribute('aria-expanded', 'true');
-        group.classList.add('rz-navigation-item-expanded');
-
-        const submenuId = group.getAttribute('aria-controls');
-        if (!submenuId) return;
-
-        const submenu = document.getElementById(submenuId);
-        if (!submenu) return;
-
-        submenu.style.display = '';
-        submenu.hidden = false;
-        submenu.setAttribute('aria-hidden', 'false');
+// The app used to have no way of knowing the network had come back. During a PC sleep the browser
+// freezes timers, and on wake the SignalR retry loop was still sitting inside a backoff step of up
+// to 30s - scheduled for a network condition that no longer applied. Both events below say "try
+// now"; the .NET side decides whether anything is actually waiting.
+Aetheus._onConnectivityWake = function () {
+    if (Aetheus._connectivityRef) {
+        Aetheus._connectivityRef.invokeMethodAsync('OnConnectivityWake');
     }
+};
+Aetheus._onVisibilityWake = function () {
+    // Only the return to visible matters. Leaving the tab is not a connectivity event.
+    if (document.visibilityState === 'visible') Aetheus._onConnectivityWake();
+};
+Aetheus.watchConnectivity = function (dotNetRef) {
+    Aetheus._connectivityRef = dotNetRef;
+    window.addEventListener('online', Aetheus._onConnectivityWake);
+    document.addEventListener('visibilitychange', Aetheus._onVisibilityWake);
+};
+Aetheus.disposeConnectivityWatcher = function () {
+    window.removeEventListener('online', Aetheus._onConnectivityWake);
+    document.removeEventListener('visibilitychange', Aetheus._onVisibilityWake);
+    Aetheus._connectivityRef = null;
+};
 
-    function forceAll() {
-        document
-            .querySelectorAll('li.rz-navigation-item.nav-group')
-            .forEach(forceOpenGroup);
+// The page leaving and regaining the foreground, both ways, for the synchronising indicator: a phone
+// put down freezes the tab, and what the realtime side must catch up on is only known on return.
+Aetheus._onPageVisibility = function () {
+    if (Aetheus._pageVisibilityRef) {
+        Aetheus._pageVisibilityRef.invokeMethodAsync('OnPageVisibilityChanged', document.visibilityState === 'visible');
     }
+};
+Aetheus.watchPageVisibility = function (dotNetRef) {
+    Aetheus._pageVisibilityRef = dotNetRef;
+    document.addEventListener('visibilitychange', Aetheus._onPageVisibility);
+};
+Aetheus.disposePageVisibilityWatcher = function () {
+    document.removeEventListener('visibilitychange', Aetheus._onPageVisibility);
+    Aetheus._pageVisibilityRef = null;
+};
 
-    document.addEventListener('click', function (evt) {
-        const groupLink = evt.target.closest('li.rz-navigation-item.nav-group > .rz-navigation-item-wrapper > a.rz-navigation-item-link');
-        if (!groupLink) return;
+// PLAN-008 lot 44: the viewport side of AetheusVirtualList. Blazor's own <Virtualize> sizes its
+// spacers with a style attribute in markup, which a strict style-src-attr refuses; setProperty is
+// the path it leaves open, so the heights are applied here and the scroll position is reported back.
+Aetheus._virtualLists = new WeakMap();
 
-        evt.preventDefault();
-        evt.stopPropagation();
-        if (typeof evt.stopImmediatePropagation === 'function') {
-            evt.stopImmediatePropagation();
-        }
+Aetheus.sizeVirtualSpacer = function (spacer, height) {
+    if (spacer) spacer.style.setProperty('--vlist-height', height + 'px');
+};
 
-        const targetHref = groupLink.getAttribute('href');
-        if (!targetHref) return;
+// The scrolling ancestor is what the rows move inside; the list itself usually does not scroll.
+Aetheus._scrollingAncestor = function (element) {
+    var viewport = element.parentElement;
+    while (viewport && viewport !== document.body) {
+        var overflow = getComputedStyle(viewport).overflowY;
+        if (overflow === 'auto' || overflow === 'scroll') break;
+        viewport = viewport.parentElement;
+    }
+    return viewport || document.scrollingElement || document.documentElement;
+};
 
-        const nextUrl = new URL(targetHref, window.location.origin);
-        history.pushState({}, '', nextUrl.pathname + nextUrl.search + nextUrl.hash);
-        window.dispatchEvent(new PopStateEvent('popstate'));
+Aetheus.watchVirtualList = function (root, ref) {
+    if (!root || !ref) return;
 
-        const group = groupLink.closest('li.rz-navigation-item.nav-group');
+    var viewport = Aetheus._scrollingAncestor(root);
+
+    var pending = false;
+    var report = function () {
+        if (pending) return;
+        pending = true;
         requestAnimationFrame(function () {
-            forceOpenGroup(group);
+            pending = false;
+            var top = viewport === document.scrollingElement
+                ? window.scrollY - root.offsetTop
+                : viewport.scrollTop - (root.offsetTop - viewport.offsetTop);
+            var height = viewport === document.scrollingElement ? window.innerHeight : viewport.clientHeight;
+            ref.invokeMethodAsync('OnViewportAsync', Math.max(0, top), Math.max(0, height));
         });
-    }, true);
+    };
 
-    const observer = new MutationObserver(function () {
-        forceAll();
+    var resize = typeof ResizeObserver === 'function' ? new ResizeObserver(report) : null;
+    if (resize) resize.observe(viewport);
+    viewport.addEventListener('scroll', report, { passive: true });
+    Aetheus._virtualLists.set(root, { viewport: viewport, report: report, resize: resize });
+    report();
+};
+
+Aetheus.unwatchVirtualList = function (root) {
+    var state = root ? Aetheus._virtualLists.get(root) : null;
+    if (!state) return;
+    state.viewport.removeEventListener('scroll', state.report);
+    if (state.resize) state.resize.disconnect();
+    Aetheus._virtualLists.delete(root);
+};
+
+// Recette R-324: the page header (OmniPageHeader) folds its badges and actions behind its toggle as
+// soon as they no longer fit beside the title, whatever the viewport width, instead of squeezing
+// badges or letting buttons fall onto the breadcrumb line; OE folds them on a phone only. The frame is
+// measured unfolded (its natural layout) and marked data-compact when anything overflows; its CSS
+// lives with the header rules in app.css. The flag is a data attribute because Blazor owns the class
+// attribute. The title's sideways scroll and its chevrons (recette R-331) are OE's (omni-page-header.js).
+(function fitPageHeaders() {
+    var frames = new Set();
+    var queued = false;
+
+    function measure(frame) {
+        var row = frame.querySelector('.omni-page-header__row');
+        if (!row) return;
+        frame.removeAttribute('data-compact');
+        var title = frame.querySelector('.omni-page-header__title');
+        var details = row.querySelector('.omni-page-header__details');
+        var overflows = row.scrollWidth > row.clientWidth + 1
+            || (!!title && title.scrollWidth > title.clientWidth + 1)
+            || (!!details && details.offsetParent !== null && details.offsetTop > row.offsetTop + 4);
+        frame.toggleAttribute('data-compact', overflows);
+    }
+
+    function flush() {
+        queued = false;
+        frames.forEach(function (frame) {
+            if (!frame.isConnected) { frames.delete(frame); resize.unobserve(frame); return; }
+            measure(frame);
+        });
+    }
+
+    function queue() {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(flush);
+    }
+
+    var resize = new ResizeObserver(queue);
+
+    function track(root) {
+        var found = [];
+        if (root instanceof Element && root.matches('.omni-page-header__frame')) found.push(root);
+        if (root.querySelectorAll) found.push.apply(found, root.querySelectorAll('.omni-page-header__frame'));
+        found.forEach(function (frame) {
+            if (frames.has(frame)) return;
+            frames.add(frame);
+            resize.observe(frame);
+        });
+    }
+
+    // Content arriving after the first render (badges once the run loads, a section's actions) can
+    // change what fits, so any change inside a header is measured again.
+    var mutations = new MutationObserver(function (records) {
+        records.forEach(function (record) {
+            record.addedNodes.forEach(function (node) {
+                if (node.nodeType === Node.ELEMENT_NODE) track(node);
+            });
+            var target = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
+            if (target && target.closest && target.closest('.omni-page-header__row')) queue();
+        });
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', forceAll);
-    } else {
-        forceAll();
+    function start() {
+        track(document);
+        mutations.observe(document.body, { childList: true, subtree: true, characterData: true });
+        queue();
     }
+
+    if (typeof ResizeObserver !== 'function') return;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
 })();

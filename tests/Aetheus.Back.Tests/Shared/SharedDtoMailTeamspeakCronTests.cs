@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.ComponentModel.DataAnnotations;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 
 namespace Aetheus.Back.Tests.SharedDtos;
 
@@ -25,10 +23,10 @@ public class SharedDtoMailTeamspeakCronTests
     public void MailCertificateDto_DefaultValues()
     {
         var dto = new MailCertificateDto();
-        Assert.Equal(string.Empty, dto.Domain);
+        Assert.Equal(string.Empty, dto.Hostname);
         Assert.Equal(string.Empty, dto.Issuer);
-        Assert.False(dto.IsValid);
-        Assert.True(dto.AutoRenew);
+        Assert.Null(dto.ExpiresAt);
+        Assert.False(dto.UsesLetsEncryptLineage);
     }
 
     [Fact]
@@ -36,16 +34,16 @@ public class SharedDtoMailTeamspeakCronTests
     {
         var dto = new MailCertificateDto
         {
-            Id = 1,
-            Domain = "example.com",
-            Issuer = "Let's Encrypt",
+            Hostname = "mail.example.com",
+            CertPath = "/etc/letsencrypt/live/mail.example.com/fullchain.pem",
+            IsReadable = true,
+            Issuer = "CN=R11, O=Let's Encrypt, C=US",
             ExpiresAt = DateTime.UtcNow.AddDays(90),
-            IsValid = true,
-            AutoRenew = false
+            UsesLetsEncryptLineage = true
         };
-        Assert.Equal("example.com", dto.Domain);
-        Assert.True(dto.IsValid);
-        Assert.False(dto.AutoRenew);
+        Assert.Equal("mail.example.com", dto.Hostname);
+        Assert.True(dto.IsReadable);
+        Assert.True(dto.UsesLetsEncryptLineage);
     }
 
     [Fact]
@@ -79,10 +77,9 @@ public class SharedDtoMailTeamspeakCronTests
         Assert.False(dto.IsInstalled);
         Assert.False(dto.IsRunning);
         Assert.Equal(string.Empty, dto.Version);
-        Assert.Equal(5.0, dto.RequiredScore);
-        Assert.True(dto.RewriteHeader);
-        Assert.Empty(dto.WhitelistedAddresses);
-        Assert.Empty(dto.BlacklistedAddresses);
+        Assert.Null(dto.RejectScore);
+        Assert.Null(dto.AddHeaderScore);
+        Assert.Null(dto.GreylistScore);
     }
 
     [Fact]
@@ -92,22 +89,29 @@ public class SharedDtoMailTeamspeakCronTests
         {
             IsInstalled = true,
             IsRunning = true,
-            Version = "3.4.6",
-            RequiredScore = 3.5,
-            RewriteHeader = false,
-            WhitelistedAddresses = ["a@b.com"],
-            BlacklistedAddresses = ["x@y.com"]
+            Name = "rspamd",
+            Version = "3.4",
+            RejectScore = 15,
+            AddHeaderScore = 6,
+            GreylistScore = 4
         };
         Assert.True(dto.IsInstalled);
-        Assert.Equal(3.5, dto.RequiredScore);
-        Assert.Single(dto.WhitelistedAddresses);
+        Assert.Equal(15, dto.RejectScore);
+        Assert.Equal("rspamd", dto.Name);
     }
 
     [Fact]
     public void UpdateSpamFilterRequest_Valid()
     {
-        var req = new UpdateSpamFilterRequest { RequiredScore = 3.0 };
+        var req = new UpdateSpamFilterRequest { RejectScore = 20, AddHeaderScore = 8, GreylistScore = 5 };
         Assert.Empty(ValidateModel(req));
+    }
+
+    [Fact]
+    public void UpdateSpamFilterRequest_OutOfRangeScore_Fails()
+    {
+        var req = new UpdateSpamFilterRequest { RejectScore = 5000 };
+        Assert.NotEmpty(ValidateModel(req));
     }
 
     [Fact]
@@ -144,14 +148,14 @@ public class SharedDtoMailTeamspeakCronTests
     [Fact]
     public void RequestMailCertificateRequest_Valid()
     {
-        var req = new RequestMailCertificateRequest { Domain = "example.com", Email = "admin@example.com" };
+        var req = new RequestMailCertificateRequest { Email = "admin@example.com" };
         Assert.Empty(ValidateModel(req));
     }
 
     [Fact]
-    public void RequestMailCertificateRequest_EmptyDomain_Fails()
+    public void RequestMailCertificateRequest_EmptyEmail_Fails()
     {
-        var req = new RequestMailCertificateRequest { Domain = "", Email = "a@b.com" };
+        var req = new RequestMailCertificateRequest { Email = "" };
         Assert.NotEmpty(ValidateModel(req));
     }
 
@@ -710,61 +714,61 @@ public class SharedDtoMailTeamspeakCronTests
     [Fact]
     public void OperationTargetValidator_DockerOps_Valid()
     {
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.DockerRestartContainer, "nginx"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.DockerStartContainer, "app:v1"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.DockerStopContainer, "web"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.DockerPullImage, "registry.io/org/img:tag"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.DockerRestartContainer, "nginx"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.DockerStartContainer, "app:v1"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.DockerStopContainer, "web"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.DockerPullImage, "registry.io/org/img:tag"));
     }
 
     [Fact]
     public void OperationTargetValidator_ServiceOps_Valid()
     {
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ServiceStart, "nginx"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ServiceStop, "apache2"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ServiceRestart, "sshd"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ServiceStatus, "postfix"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ServiceStart, "nginx"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ServiceStop, "apache2"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ServiceRestart, "sshd"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ServiceStatus, "postfix"));
     }
 
     [Fact]
     public void OperationTargetValidator_ApacheOps_Valid()
     {
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ApacheReload, "-"));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ApacheTestConfig, "apache2"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ApacheReload, "-"));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ApacheTestConfig, "apache2"));
         // empty string is caught by the IsNullOrWhiteSpace guard, so it returns false
-        Assert.False(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ApacheReload, ""));
+        Assert.False(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ApacheReload, ""));
     }
 
     [Fact]
     public void OperationTargetValidator_AgentSelfUpdate_AlwaysValid()
     {
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.AgentSelfUpdate, null));
-        Assert.True(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.AgentSelfUpdate, ""));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.AgentSelfUpdate, null));
+        Assert.True(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.AgentSelfUpdate, ""));
     }
 
     [Fact]
     public void OperationTargetValidator_None_Invalid()
     {
-        Assert.False(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.None, "target"));
+        Assert.False(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.None, "target"));
     }
 
     [Fact]
     public void OperationTargetValidator_NullTarget_Invalid()
     {
-        Assert.False(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.DockerRestartContainer, null));
-        Assert.False(Aetheus.Shared.Validation.OperationTargetValidator.IsValid(OperationKind.ServiceStart, "  "));
+        Assert.False(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.DockerRestartContainer, null));
+        Assert.False(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid(OperationKind.ServiceStart, "  "));
     }
 
     [Fact]
     public void OperationTargetValidator_Unknown_Invalid()
     {
-        Assert.False(Aetheus.Shared.Validation.OperationTargetValidator.IsValid((OperationKind)999, "target"));
+        Assert.False(Aetheus.Shared.Components.Shared.OperationTargetValidator.IsValid((OperationKind)999, "target"));
     }
 
     // --- BoundedDictionary (backend side) ---
 
     private class TestBoundedModel
     {
-        [Aetheus.Shared.Validation.BoundedDictionary(maxEntries: 3, maxKeyLength: 10, maxValueLength: 20)]
+        [Aetheus.Shared.Components.Shared.BoundedDictionary(maxEntries: 3, maxKeyLength: 10, maxValueLength: 20)]
         public Dictionary<string, string>? Data { get; set; }
     }
 

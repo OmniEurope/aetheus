@@ -1,0 +1,26 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+<OmniTemplateForm TModel="CertbotForm" Model="@_model" OnValidSubmit="@Create">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Small">
+        <OmniFormField For="oe-pages-servers-serverdetailsections-servercertbotcreatedialog-1"><LabelContent>@L["Domains"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_model.Domains" Placeholder="@L["PlaceholderDomains"]" Id="oe-pages-servers-serverdetailsections-servercertbotcreatedialog-1" />
+            <ValidationMessage For="@(() => _model.Domains)" />
+        </ChildContent></OmniFormField>
+        <OmniFormField For="oe-pages-servers-serverdetailsections-servercertbotcreatedialog-2"><LabelContent>@L["Email"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_model.Email" Placeholder="admin@example.com" Id="oe-pages-servers-serverdetailsections-servercertbotcreatedialog-2" />
+            <ValidationMessage For="@(() => _model.Email)" />
+        </ChildContent></OmniFormField>
+        <OmniCheckBox @bind-Value="_webroot">@L["UseWebroot"]</OmniCheckBox>
+
+        @if (_webroot)
+        {
+            <OmniFormField For="oe-pages-servers-serverdetailsections-servercertbotcreatedialog-3"><LabelContent>@L["WebrootPath"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="_model.WebrootPath" Placeholder="/var/www/html" Id="oe-pages-servers-serverdetailsections-servercertbotcreatedialog-3" />
+                <ValidationMessage For="@(() => _model.WebrootPath)" />
+            </ChildContent></OmniFormField>
+        }
+        <Aetheus.Front.Components.Shared.DialogFooter OnCancel="@Cancel">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        </Aetheus.Front.Components.Shared.DialogFooter>
+    </OmniStack>
+</OmniTemplateForm>

@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Microsoft.AspNetCore.Components;
-using Microsoft.JSInterop;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.TestDoubles;
 
-internal sealed class ImmediateDialogService(NavigationManager nav, IJSRuntime js) : DialogService(nav, js)
+internal sealed class ImmediateDialogService(AppDialogs dialogs, OmniOverlayService overlay) : OmniDialogService(dialogs, overlay)
 {
     public int OpenCount { get; private set; }
     public Type? LastComponent { get; private set; }
@@ -14,21 +12,23 @@ internal sealed class ImmediateDialogService(NavigationManager nav, IJSRuntime j
     public object? OpenResult { get; set; }
     public bool? ConfirmResult { get; set; } = false;
     public string? LastConfirmMessage { get; private set; }
+    public OmniConfirmOptions? LastConfirmOptions { get; private set; }
 
-    public override Task<dynamic?> OpenAsync<T>(string title, Dictionary<string, object?>? parameters = null, DialogOptions? options = null)
+    public override Task<object?> OpenAsync<T>(string title, Dictionary<string, object?>? parameters = null, OmniDialogOptions? options = null)
     {
         OpenCount++;
         LastComponent = typeof(T);
         LastTitle = title;
         LastParameters = parameters;
-        return Task.FromResult<dynamic?>(OpenResult);
+        return Task.FromResult(OpenResult);
     }
 
-    public override Task<bool?> Confirm(string message, string title, ConfirmOptions? options = null, CancellationToken? cancellationToken = null)
+    public override Task<bool?> Confirm(string? message, string? title, OmniConfirmOptions? options = null)
     {
         OpenCount++;
         LastTitle = title;
         LastConfirmMessage = message;
+        LastConfirmOptions = options;
         return Task.FromResult(ConfirmResult);
     }
 }

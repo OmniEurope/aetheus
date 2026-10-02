@@ -4,12 +4,32 @@ using System.Text.Json;
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Mail;
 
 public class MailService(IMailRepository repo, IAuditService audit, IEncryptionService encryption, IServerRepository serverRepo, ITaskService taskService) : IMailService
 {
+    // PLAN-005: every action is a typed operation run by the root-owned mail-manage helper. The former
+    // shell fallback (SpamAssassin systemctl strings) could never run under the non-root agent.
+    private static readonly Dictionary<MailAction, (OperationKind Kind, string Target)> s_actions = new()
+    {
+        [MailAction.StartPostfix] = (OperationKind.MailStartPostfix, "-"),
+        [MailAction.StopPostfix] = (OperationKind.MailStopPostfix, "-"),
+        [MailAction.RestartPostfix] = (OperationKind.MailRestartPostfix, "-"),
+        [MailAction.ReloadPostfix] = (OperationKind.MailReloadPostfix, "-"),
+        [MailAction.StartDovecot] = (OperationKind.MailStartDovecot, "-"),
+        [MailAction.StopDovecot] = (OperationKind.MailStopDovecot, "-"),
+        [MailAction.RestartDovecot] = (OperationKind.MailRestartDovecot, "-"),
+        [MailAction.ReloadDovecot] = (OperationKind.MailReloadDovecot, "-"),
+        [MailAction.FlushQueue] = (OperationKind.MailFlushQueue, "-"),
+        [MailAction.ViewQueue] = (OperationKind.MailViewQueue, "-"),
+        [MailAction.TestConfig] = (OperationKind.MailTestConfig, "-"),
+        [MailAction.StartSpamFilter] = (OperationKind.MailServiceControl, "rspamd:start"),
+        [MailAction.StopSpamFilter] = (OperationKind.MailServiceControl, "rspamd:stop"),
+        [MailAction.RestartSpamFilter] = (OperationKind.MailServiceControl, "rspamd:restart"),
+        [MailAction.RestartOpenDkim] = (OperationKind.MailServiceControl, "opendkim:restart")
+    };
+
     private Task QueueTaskAsync(ServerTask task, CancellationToken ct = default)
         => TaskQueuePersistence.PersistAndNotifyAsync(repo.AddTaskAsync, taskService, task, ct);
 
@@ -36,18 +56,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
     public async Task<MailDataDto> GetStateAsync(int serverId, CancellationToken ct = default)
     {
         var state = await repo.GetStateAsync(serverId, ct).ConfigureAwait(false);
-        if (state is null)
-            return new MailDataDto();
-
-        return new MailDataDto
-        {
-            IsInstalled = true,
-            IsPostfixRunning = state.IsPostfixRunning,
-            IsDovecotRunning = state.IsDovecotRunning,
-            PostfixVersion = state.PostfixVersion,
-            DovecotVersion = state.DovecotVersion,
-            QueueSize = state.QueueSize
-        };
+        return MailStateProjector.ToDto(state);
     }
 
     public async Task<List<MailDomainDto>> GetDomainsAsync(int serverId, CancellationToken ct = default)
@@ -61,7 +70,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetDomainsPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return Page(items.Select(MapDomain), total, page, pageSize);
     }
 
@@ -92,7 +101,8 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
         // new domain is the operation target; no secret is involved. Queued via QueueTaskAsync so the
         // TaskQueued SignalR event is broadcast (top-bar tracker).
         await QueueTaskAsync(ServerTaskFactory.Operation(serverId, $"Mail - add domain {request.Name}",
-            OperationKind.MailAddDomain, request.Name, timeoutSeconds: 30), ct).ConfigureAwait(false);
+            OperationKind.MailAddDomain, request.Name,
+            new Dictionary<string, string> { [MailSetupEnv.DkimSelector] = request.DkimSelector }, timeoutSeconds: 60), ct).ConfigureAwait(false);
 
         await audit.LogAsync("MailAddDomain", "Mail", serverId, request.Name, ct).ConfigureAwait(false);
         return MapDomain(domain);
@@ -142,7 +152,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetAccountsPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return Page(items.Select(MapAccount), total, page, pageSize);
     }
 
@@ -242,41 +252,41 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
         await audit.LogAsync("MailDeleteAccount", "Mail", serverId, email, ct).ConfigureAwait(false);
     }
 
-    public async Task ExecuteActionAsync(int serverId, MailActionRequest request, CancellationToken ct = default)
+    public async Task<MailTaskQueuedDto> ExecuteActionAsync(int serverId, MailActionRequest request, CancellationToken ct = default)
     {
-        var op = request.Action switch
-        {
-            MailAction.StartPostfix => (OperationKind?)OperationKind.MailStartPostfix,
-            MailAction.StopPostfix => OperationKind.MailStopPostfix,
-            MailAction.RestartPostfix => OperationKind.MailRestartPostfix,
-            MailAction.ReloadPostfix => OperationKind.MailReloadPostfix,
-            MailAction.StartDovecot => OperationKind.MailStartDovecot,
-            MailAction.StopDovecot => OperationKind.MailStopDovecot,
-            MailAction.RestartDovecot => OperationKind.MailRestartDovecot,
-            MailAction.ReloadDovecot => OperationKind.MailReloadDovecot,
-            MailAction.FlushQueue => OperationKind.MailFlushQueue,
-            MailAction.ViewQueue => OperationKind.MailViewQueue,
-            MailAction.TestConfig => OperationKind.MailTestConfig,
-            _ => null
-        };
+        if (!s_actions.TryGetValue(request.Action, out var operation))
+            throw new BadRequestException($"Unsupported mail action '{request.Action}'.");
+        var (kind, target) = operation;
 
-        if (op is { } kind)
-        {
-            await QueueTaskAsync(ServerTaskFactory.Operation(serverId, $"Mail - {request.Action}", kind, target: "-", timeoutSeconds: 30), ct).ConfigureAwait(false);
-        }
-        else
-        {
-            // Fallback to shell for complex operations (SpamAssassin service control)
-            var command = MailCommandHelper.BuildServiceCommand(request.Action);
-            await QueueTaskAsync(ServerTaskFactory.Shell(serverId, $"Mail - {request.Action}", command, 30), ct).ConfigureAwait(false);
-        }
-
+        await EnsureMailManageableAsync(serverId, ct).ConfigureAwait(false);
+        var task = ServerTaskFactory.Operation(serverId, $"Mail - {request.Action}", kind, target, timeoutSeconds: 90);
+        await QueueTaskAsync(task, ct).ConfigureAwait(false);
         await audit.LogAsync($"Mail{request.Action}", "Mail", serverId, request.Action.ToString(), ct).ConfigureAwait(false);
+        return new MailTaskQueuedDto { TaskId = task.Id };
     }
 
-    public async Task GetLogsAsync(int serverId, MailLogRequest request, CancellationToken ct = default)
+    public async Task<MailTaskQueuedDto> GetLogsAsync(int serverId, MailLogRequest request, CancellationToken ct = default)
     {
-        await QueueTaskAsync(ServerTaskFactory.Operation(serverId, $"Mail logs - {request.LogType}", OperationKind.MailGetLogs, target: request.LogType, timeoutSeconds: 15), ct).ConfigureAwait(false);
+        if (!MailValidation.IsValidManagedUnit(request.LogType))
+            throw new BadRequestException("Invalid log source.");
+        if (!MailValidation.IsValidLogLines(request.Lines))
+            throw new BadRequestException("Invalid line count.");
+        var env = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [MailSetupEnv.LogLines] = request.Lines.ToString(CultureInfo.InvariantCulture)
+        };
+        if (!string.IsNullOrEmpty(request.Filter))
+        {
+            if (!MailValidation.IsValidLogFilter(request.Filter))
+                throw new BadRequestException("Invalid log filter.");
+            env[MailSetupEnv.LogFilter] = request.Filter;
+        }
+
+        await EnsureMailManageableAsync(serverId, ct).ConfigureAwait(false);
+        var task = ServerTaskFactory.Operation(serverId, $"Mail logs - {request.LogType}",
+            OperationKind.MailGetLogs, request.LogType, env, timeoutSeconds: 30);
+        await QueueTaskAsync(task, ct).ConfigureAwait(false);
+        return new MailTaskQueuedDto { TaskId = task.Id };
     }
 
     public async Task SetupAsync(int serverId, MailSetupRequest request, CancellationToken ct = default)
@@ -287,6 +297,8 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
             throw new BadRequestException("Invalid domain.");
         if (!MailCommandHelper.IsValidEmail(request.AdminEmail))
             throw new BadRequestException("Invalid admin email.");
+        if (!request.AdminEmail.EndsWith("@" + request.Domain, StringComparison.OrdinalIgnoreCase))
+            throw new BadRequestException("The admin address must belong to the mail domain.");
         if (!MailCommandHelper.IsValidPassword(request.AdminPassword))
             throw new BadRequestException("Admin password must be 8–128 characters and contain no control characters.");
         if (!MailCommandHelper.IsValidDkimSelector(request.DkimSelector))
@@ -315,11 +327,12 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
             [MailSetupEnv.DkimSelector] = request.DkimSelector,
             [MailSetupEnv.AdminEmail] = request.AdminEmail,
             [MailSetupEnv.QuotaMb] = request.QuotaMb.ToString(CultureInfo.InvariantCulture),
-            [MailSetupEnv.AdminPassword] = request.AdminPassword
+            [MailSetupEnv.AdminPassword] = request.AdminPassword,
+            [MailSetupEnv.SpamFilter] = request.EnableSpamFilter ? "rspamd" : "none"
         };
 
         var task = ServerTaskFactory.Operation(serverId, $"Mail - full setup ({request.Domain})",
-            OperationKind.MailSetup, request.Domain, env, timeoutSeconds: 300);
+            OperationKind.MailSetup, request.Domain, env, timeoutSeconds: 900);
         // F-001 / F11b: the admin password rides in EnvironmentVariables. Encrypt it at rest (AES-256)
         // like every other secret-bearing task instead of leaving plaintext JSON in the DB - the
         // backend decrypts it only when the task is dispatched to the agent (TaskService env mapping).
@@ -351,21 +364,20 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
     {
         var domain = await repo.GetDomainAsync(serverId, domainId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException($"Mail domain {domainId} not found.");
+        var state = await repo.GetStateAsync(serverId, ct).ConfigureAwait(false);
 
-        // Read DKIM key from server via typed op (replaces the dead `cat ... 2>/dev/null` shell). The
-        // helper cats /etc/opendkim/keys/{selector}.txt as root.
-        await QueueTaskAsync(ServerTaskFactory.Operation(serverId, $"Mail - read DKIM key ({domain.Name})",
-            OperationKind.MailDkimRead, target: domain.DkimSelector, timeoutSeconds: 10), ct).ConfigureAwait(false);
-
-        return new MailDnsRecordsDto
+        // PLAN-005: the DKIM public key comes from the heartbeat inventory (the agent reads the .txt the
+        // helper leaves world-readable). Only when it is still unknown is the key read on demand through
+        // mail-manage, whose output lands in the task log.
+        if (string.IsNullOrEmpty(domain.DkimPublicKey))
         {
-            Domain = domain.Name,
-            MxRecord = $"10 mail.{domain.Name}.",
-            SpfRecord = $"v=spf1 mx a ~all",
-            DkimSelector = domain.DkimSelector,
-            DkimRecord = $"{domain.DkimSelector}._domainkey.{domain.Name}",
-            DmarcRecord = $"v=DMARC1; p=quarantine; rua=mailto:postmaster@{domain.Name}"
-        };
+            await QueueTaskAsync(ServerTaskFactory.Operation(serverId, $"Mail - read DKIM key ({domain.Name})",
+                OperationKind.MailDkimRead, domain.Name,
+                new Dictionary<string, string> { [MailSetupEnv.DkimSelector] = domain.DkimSelector },
+                timeoutSeconds: 30), ct).ConfigureAwait(false);
+        }
+
+        return MailDnsRecordFactory.Build(domain, state?.Hostname);
     }
 
     private static MailDomainDto MapDomain(MailDomain domain) => new()
@@ -377,6 +389,8 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
         HasSpf = domain.HasSpf,
         HasDkim = domain.HasDkim,
         HasDmarc = domain.HasDmarc,
+        Source = domain.Source,
+        MissingSince = domain.MissingSince,
         CreatedAt = domain.CreatedAt
     };
 
@@ -394,6 +408,10 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
         Email = account.Email,
         QuotaMb = account.QuotaMb,
         IsActive = account.IsActive,
+        Domain = account.Email[(account.Email.IndexOf('@') + 1)..],
+        UsedMb = account.UsedMb,
+        Source = account.Source,
+        MissingSince = account.MissingSince,
         CreatedAt = account.CreatedAt
     };
 
@@ -403,6 +421,8 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
         SourceEmail = alias.SourceEmail,
         DestinationEmail = alias.DestinationEmail,
         IsActive = alias.IsActive,
+        Source = alias.Source,
+        MissingSince = alias.MissingSince,
         CreatedAt = alias.CreatedAt
     };
 
@@ -443,7 +463,7 @@ public class MailService(IMailRepository repo, IAuditService audit, IEncryptionS
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetAliasesPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return Page(items.Select(MapAlias), total, page, pageSize);
     }
 

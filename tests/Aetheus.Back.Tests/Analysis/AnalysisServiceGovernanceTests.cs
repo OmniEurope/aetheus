@@ -6,8 +6,6 @@ using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -28,6 +26,8 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(NowUtc));
     private readonly AppDbContext _db;
     private readonly AnalysisService _service;
+    private readonly AnalysisFindingDecisionService _decisions;
+    private readonly IAuditService _audit = Substitute.For<IAuditService>();
 
     public AnalysisServiceGovernanceTests()
     {
@@ -43,6 +43,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         _db.ChangeTracker.Clear();
 
         var repository = new AnalysisRepository(_db);
+        _decisions = new AnalysisFindingDecisionService(repository, _clock, _audit);
         _service = new AnalysisService(
             repository,
             new AnalysisIngestGate(Options.Create(new AnalysisPlatformOptions())),
@@ -243,7 +244,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         _db.ChangeTracker.Clear();
 
         await Assert.ThrowsAsync<BadRequestException>(
-            () => _service.CreateFindingDecisionAsync(
+            () => _decisions.CreateFindingDecisionAsync(
                 1,
                 new CreateAnalysisFindingDecisionRequest { Status = status, Reason = "not allowed here" },
                 "alice",
@@ -258,7 +259,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         _db.ChangeTracker.Clear();
 
         await Assert.ThrowsAsync<BadRequestException>(
-            () => _service.CreateFindingDecisionAsync(
+            () => _decisions.CreateFindingDecisionAsync(
                 1,
                 new CreateAnalysisFindingDecisionRequest
                 {
@@ -274,7 +275,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
     public async Task CreateFindingDecisionAsync_RefusesAnUnknownFinding()
     {
         await Assert.ThrowsAsync<NotFoundException>(
-            () => _service.CreateFindingDecisionAsync(
+            () => _decisions.CreateFindingDecisionAsync(
                 404,
                 new CreateAnalysisFindingDecisionRequest
                 {
@@ -292,7 +293,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         await SaveAsync();
         _db.ChangeTracker.Clear();
 
-        var decision = await _service.CreateFindingDecisionAsync(
+        var decision = await _decisions.CreateFindingDecisionAsync(
             1,
             new CreateAnalysisFindingDecisionRequest
             {
@@ -319,7 +320,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         AddFinding();
         await SaveAsync();
         _db.ChangeTracker.Clear();
-        await _service.CreateFindingDecisionAsync(
+        await _decisions.CreateFindingDecisionAsync(
             1,
             new CreateAnalysisFindingDecisionRequest
             {
@@ -331,7 +332,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         _db.ChangeTracker.Clear();
         _clock.Advance(TimeSpan.FromHours(1));
 
-        await _service.CreateFindingDecisionAsync(
+        await _decisions.CreateFindingDecisionAsync(
             1,
             new CreateAnalysisFindingDecisionRequest
             {
@@ -342,7 +343,7 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
             Ct);
         _db.ChangeTracker.Clear();
 
-        var decisions = await _service.GetFindingDecisionsAsync(1, Ct);
+        var decisions = await _decisions.GetFindingDecisionsAsync(1, Ct);
         Assert.Equal(2, decisions.Count);
         Assert.Single(decisions, decision => decision.RevokedAt is null);
         Assert.Equal(
@@ -350,10 +351,79 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
             decisions.Single(decision => decision.RevokedAt is null).Status);
     }
 
+    private async Task DecideAsync(AnalysisFindingStatus status = AnalysisFindingStatus.Accepted)
+    {
+        await _decisions.CreateFindingDecisionAsync(
+            1,
+            new CreateAnalysisFindingDecisionRequest { Status = status, Reason = "accepted for this release" },
+            "alice",
+            Ct);
+        _db.ChangeTracker.Clear();
+    }
+
+    [Fact]
+    public async Task R2_027_RevokeActiveFindingDecisionAsync_ReopensTheFinding_KeepsTheHistory_AndAudits()
+    {
+        AddFinding();
+        await SaveAsync();
+        _db.ChangeTracker.Clear();
+        await DecideAsync(AnalysisFindingStatus.FalsePositive);
+        _clock.Advance(TimeSpan.FromHours(2));
+
+        await _decisions.RevokeActiveFindingDecisionAsync(1, "bob", Ct);
+        _db.ChangeTracker.Clear();
+
+        var finding = await _db.AnalysisFindings.AsNoTracking().FirstAsync(Ct);
+        Assert.Equal(AnalysisFindingStatus.Open, finding.Status);
+        Assert.Equal(NowUtc.AddHours(2), finding.UpdatedAt);
+        var decision = Assert.Single(await _decisions.GetFindingDecisionsAsync(1, Ct));
+        Assert.Equal(AnalysisFindingStatus.FalsePositive, decision.Status);
+        Assert.Equal(NowUtc.AddHours(2), decision.RevokedAt);
+        await _audit.Received(1).LogAsync("AnalysisFindingDecisionRevoked", nameof(AnalysisFinding), 1,
+            Arg.Is<string>(details => details.Contains("actor=bob", StringComparison.Ordinal)
+                && details.Contains("status=Open", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task R2_027_RevokeActiveFindingDecisionAsync_LeavesAFixedFindingFixed()
+    {
+        AddFinding();
+        await SaveAsync();
+        _db.ChangeTracker.Clear();
+        await DecideAsync();
+        var tracked = await _db.AnalysisFindings.FirstAsync(Ct);
+        tracked.Status = AnalysisFindingStatus.Fixed;
+        await SaveAsync();
+        _db.ChangeTracker.Clear();
+
+        await _decisions.RevokeActiveFindingDecisionAsync(1, "bob", Ct);
+        _db.ChangeTracker.Clear();
+
+        Assert.Equal(AnalysisFindingStatus.Fixed, (await _db.AnalysisFindings.AsNoTracking().FirstAsync(Ct)).Status);
+        Assert.NotNull(Assert.Single(await _decisions.GetFindingDecisionsAsync(1, Ct)).RevokedAt);
+    }
+
+    [Fact]
+    public async Task R2_027_RevokeActiveFindingDecisionAsync_RefusesAFindingWithoutActiveDecision_OrUnknown()
+    {
+        AddFinding();
+        await SaveAsync();
+        _db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<ConflictException>(() => _decisions.RevokeActiveFindingDecisionAsync(1, "bob", Ct));
+        await Assert.ThrowsAsync<NotFoundException>(() => _decisions.RevokeActiveFindingDecisionAsync(404, "bob", Ct));
+        await DecideAsync();
+        await _decisions.RevokeActiveFindingDecisionAsync(1, "bob", Ct);
+        _db.ChangeTracker.Clear();
+        // Reverted once: nothing is left to revert.
+        await Assert.ThrowsAsync<ConflictException>(() => _decisions.RevokeActiveFindingDecisionAsync(1, "bob", Ct));
+    }
+
     [Fact]
     public async Task GetFindingDecisionsAsync_IsEmptyForAFindingNobodyDecidedOn()
     {
-        Assert.Empty(await _service.GetFindingDecisionsAsync(404, Ct));
+        Assert.Empty(await _decisions.GetFindingDecisionsAsync(404, Ct));
     }
 
     // ---------- read wrappers ----------
@@ -395,13 +465,22 @@ public sealed class AnalysisServiceGovernanceTests : IDisposable
         });
         _db.AnalysisMetrics.Add(new AnalysisMetric
         {
-            Id = 1, OrganizationId = 7, ProjectId = 10, AnalysisReportId = 1,
-            Key = "coverage", Value = 80, ToolName = "coverlet"
+            Id = 1,
+            OrganizationId = 7,
+            ProjectId = 10,
+            AnalysisReportId = 1,
+            Key = "coverage",
+            Value = 80,
+            ToolName = "coverlet"
         });
         _db.AnalysisComponents.Add(new AnalysisComponent
         {
-            Id = 1, OrganizationId = 7, ProjectId = 10, AnalysisReportId = 1,
-            Name = "serilog", Version = "1.0.0"
+            Id = 1,
+            OrganizationId = 7,
+            ProjectId = 10,
+            AnalysisReportId = 1,
+            Name = "serilog",
+            Version = "1.0.0"
         });
         await SaveAsync();
         _db.ChangeTracker.Clear();

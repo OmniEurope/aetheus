@@ -5,10 +5,13 @@
     "description": "Surveillez l’état de la plateforme, les serveurs, les projets, les applications et les exécutions récentes depuis une vue temps réel.",
     "icon": "dashboard",
     "sections": [
-      { "title": "Indicateurs de plateforme", "content": "Les cartes résument les serveurs en ligne ou hors ligne, les tâches en attente et les pipelines en cours. L’état de santé de l’application distingue un service disponible, dégradé, indisponible ou encore inconnu." },
-      { "title": "Serveurs et projets", "content": "Les listes affichent les ressources auxquelles vous avez accès. Ouvrez un serveur ou un projet pour accéder à son espace détaillé. Les diagnostics de capacités signalent notamment si un agent sait construire, déployer ou administrer une cible." },
-      { "title": "Applications supervisées", "content": "La zone Applications supervisées liste toutes les applications suivies, leur disponibilité et leur dernier changement. Le nombre de visiteurs actuels apparaît uniquement lorsque les statistiques web sont disponibles. Les données se rafraîchissent automatiquement lorsque leur état change." },
-      { "title": "Activité récente", "content": "Les exécutions récentes indiquent le projet, le pipeline, le statut et l’heure de mise à jour. Une exécution peut être ouverte pour consulter sa définition, ses étapes, ses logs et ses résultats." },
+      { "title": "Tuiles de l’accueil", "content": "L’accueil réunit quatre tuiles : Serveurs, Exécutions récentes, Projets et Applications supervisées. L’en-tête de chaque tuile affiche un badge par compteur non nul, par exemple le nombre de serveurs en ligne et hors ligne. Lorsque des approbations attendent une décision, elles sont listées au-dessus des tuiles, chacune avec un lien vers son exécution." },
+      { "title": "Serveurs et projets", "content": "Les listes affichent les ressources auxquelles vous avez accès. Cliquez une ligne pour ouvrir le serveur ou le projet dans son espace détaillé. Les diagnostics de capacités signalent notamment si un agent sait construire, déployer ou administrer une cible." },
+      { "title": "Applications supervisées", "content": "La zone Applications supervisées liste toutes les applications suivies, leur disponibilité et leur dernier changement. Le nombre de visiteurs actuels apparaît uniquement lorsque les statistiques web sont disponibles. Les données se rafraîchissent automatiquement lorsque leur état change. L’entrée **Supervision** du menu latéral donne la même liste, tous projets confondus, avec le dernier événement reçu." },
+      { "title": "Activité récente", "content": "Les exécutions récentes indiquent le projet, le pipeline, le statut et l’heure de mise à jour. Les exécutions déclenchées par une autre sont regroupées sous leur exécution parente ; seul le groupe le plus récent est ouvert. Une exécution peut être ouverte pour consulter sa définition, ses étapes, ses logs et ses résultats." },
+      { "title": "Barre du haut", "content": "À droite de la barre se trouvent l’icône de connexion (connecté ou non au backend), l’aide de la page affichée, les approbations en attente (la liste s’ouvre au clic, chaque ligne mène à son exécution), les tâches en cours avec leur nombre, la cloche des notifications et le menu utilisateur. Ce menu indique votre rôle, l’organisation active, la langue et le mode clair, sombre ou système ; il mène au thème et aux Paramètres, affiche la version et se termine par le bouton **Déconnexion**." },
+      { "title": "Temps réel et reconnexion", "content": "Les pages suivent le serveur en temps réel, sans bouton Actualiser. Si la liaison est perdue, un écran « Connexion perdue » affiche le compte à rebours de la prochaine tentative et se ferme seul au retour de la liaison. De retour sur un onglet resté en arrière-plan, l’indicateur « Synchronisation en cours… » s’affiche le temps de recharger les données. Quand une nouvelle version d’Aetheus est déployée, un bandeau propose **Recharger**." },
+      { "title": "Boutons et confirmations", "content": "La couleur d’un bouton dit son importance dans sa zone : bleu pour l’action principale, gris pour les autres actions et pour quitter un dialogue, rouge pour une action destructive ou qui interrompt (supprimer, arrêter, révoquer, régénérer une clé). Le vert marque un résultat (badge, notification), pas un bouton ; quelques exceptions choisies existent, comme la cloche des notifications. Une confirmation nomme son action par un verbe précis (Créer, Supprimer, Arrêter…) et **Revenir** la ferme sans rien faire." },
       { "title": "Tableau personnalisé", "content": "Un administrateur peut remplacer la vue standard par un tableau personnalisé défini comme tableau par défaut. Utilisez **Gérer les tableaux de bord** pour créer et organiser ses widgets." }
     ]
   },
@@ -18,14 +21,16 @@
     "description": "Enrôlez les agents, surveillez leur compatibilité et administrez les services et ressources disponibles sur chaque machine.",
     "icon": "dns",
     "sections": [
-      { "title": "Parc de serveurs", "content": "Recherchez par nom, hostname ou tags, filtrez par type, statut et compatibilité d’agent, puis choisissez les colonnes visibles. Les badges signalent notamment TLS non sécurisé, capacité de déploiement et niveau de compatibilité. **Mettre à jour tous les agents** lance une opération groupée sur les agents éligibles." },
-      { "title": "Ajouter un agent", "content": "L’assistant **Ajouter un agent** génère un jeton d’enregistrement et les instructions Linux ou Windows adaptées à l’URL du backend. Copiez la commande ou l’ensemble des instructions, installez le service sur la cible, puis attendez son premier heartbeat. Un jeton doit rester secret et n’est destiné qu’à l’enrôlement." },
+      { "title": "Parc de serveurs", "content": "Filtrez le tableau depuis l’en-tête de chaque colonne : nom, type, statut, hostname, système, version d’agent, tags et dernier heartbeat. Les badges du titre comptent les agents à mettre à jour ou de compatibilité inconnue ; le badge TLS non sécurisé figure dans la colonne Statut. **Ajouter** ouvre l’assistant d’ajout d’agent. Le menu **Outils** regroupe **Tout mettre à jour** (opération groupée sur les agents éligibles), **Vérifier** (contrôle de ports), **Serveurs retirés** et **Choisir les colonnes**." },
+      { "title": "Ajouter un agent", "content": "L’assistant avance en quatre étapes affichées en haut : **Plateforme** (système d’exploitation de la machine), **Capacités** (exécuteur de pipelines, gestion de serveur, agent de déploiement, isolation conteneur, correctifs OS, pare-feu), **Installation** (commandes Linux ou Windows adaptées à l’URL du backend, jeton d’enregistrement et lien d’installation à copier) puis **Vérification**, qui attend le premier heartbeat de l’agent et mène à sa page. Le jeton doit rester secret et ne sert qu’à l’enrôlement." },
       { "title": "Présence et compatibilité", "content": "Le heartbeat pilote l’état En ligne/Hors ligne et les métriques. **Contacter l’agent** vérifie la dernière présence et fournit un diagnostic. Les états À jour, Mise à jour recommandée, Mise à jour requise et Inconnu comparent version, protocole et capacités attendues. Une mise à jour peut attendre la fin des tâches actives." },
       { "title": "Vue d’ensemble et propriétés", "content": "La vue d’ensemble affiche CPU, mémoire, disque, uptime, heartbeat et diagnostics. Les sections Propriétés et Configuration regroupent identité, tags, capacités, paramètres de runner, isolation de conteneur et options TLS. Les actions Modifier et Supprimer exigent les permissions appropriées." },
-      { "title": "Services et modules", "content": "La section Services permet de sélectionner, installer, démarrer, arrêter, redémarrer ou désinstaller les services pris en charge. Les pages Docker, Apache, Certbot, Mail, TeamSpeak, Portsentry et Rkhunter exposent les informations et actions propres au module. Les opérations indisponibles sont bloquées si l’agent est hors ligne ou ne possède pas la capacité requise." },
+      { "title": "Services et modules", "content": "La section Services permet de sélectionner, installer, démarrer, arrêter, redémarrer ou désinstaller les services pris en charge ; le journal d’un service s’ouvre en suivi et relit ses dernières lignes toutes les 30 s. Les pages Docker, Apache, Certbot, Mail, TeamSpeak, Portsentry et Rkhunter exposent les informations et actions propres au module. La page Ports tient le registre des ports du serveur : les déploiements y déclarent les leurs et une réservation peut être ajoutée à la main. Les opérations indisponibles sont bloquées si l’agent est hors ligne ou ne possède pas la capacité requise." },
+      { "title": "Certificats Certbot", "content": "La page Certbot indique pour chaque certificat sa façon de se renouveler (Conforme, Hors webroot, Mauvais webroot) et le résultat du dernier test de renouvellement. **Normaliser** fait renouveler chaque certificat par le webroot ACME d’Aetheus. **Test à blanc** répète chaque renouvellement auprès de l’autorité de test, sans toucher aux certificats réels. Un test en échec est signalé par une notification." },
+      { "title": "Serveur mail", "content": "La page Mail adopte une configuration Postfix/Dovecot/OpenDKIM existante : les domaines, boîtes et alias trouvés sur le serveur apparaissent comme **Adoptés**, et ceux que le serveur ne remonte plus sont marqués **Absent du serveur** au lieu d’être supprimés. La configuration installe une pile fonctionnelle (livraison LMTP, soumission authentifiée sur 587, DKIM, antispam rspamd en option). La carte d’état affiche TLS, OpenDKIM et l’antispam ; **Obtenir un certificat** demande un certificat Let’s Encrypt pour le nom d’hôte mail. **Vérifier le DNS** compare les enregistrements MX, SPF, DKIM et DMARC publiés à ceux dont le serveur a besoin. L’onglet Diagnostic contrôle les services, le DNS, le DNS inverse et les ports, envoie un mail de test et mesure l’usage des boîtes, sans SSH." },
       { "title": "Administration système", "content": "Les sections Cron, Pare-feu et Mises à jour servent à consulter ou appliquer les opérations système autorisées par l’installation de l’agent. Les pages Applications, Modules et Services reflètent l’inventaire réellement collecté. Aucune élévation n’est implicite : seules les capacités activées lors de l’installation sont proposées." },
       { "title": "Ressources liées", "content": "Les sections Projets, Pipelines, Bibliothèques, Coffres, Releases, Tâches et Logs filtrent les ressources liées au serveur. Elles réutilisent les mêmes droits, filtres et actions que leurs vues globales." },
-      { "title": "Temps réel et sécurité", "content": "Heartbeats, statuts de tâches et logs sont reçus en temps réel. Après une reconnexion, les abonnements sont restaurés et les données sont rechargées. Les actions d’administration restent soumises aux permissions de ressource et aux capacités déclarées par l’agent." }
+      { "title": "Temps réel et sécurité", "content": "Heartbeats, statuts de tâches et logs sont reçus en temps réel ; les sections du serveur se mettent à jour à chaque heartbeat et à chaque tâche terminée. Après une reconnexion, les abonnements sont restaurés et les données sont rechargées. Les actions d’administration restent soumises aux permissions de ressource et aux capacités déclarées par l’agent." }
     ]
   },
   {
@@ -34,13 +39,14 @@
     "description": "Organisez dépôts, pipelines, cibles, qualité, sauvegardes et exploitation dans un espace projet partagé.",
     "icon": "folder",
     "sections": [
-      { "title": "Liste et vues", "content": "Recherchez et filtrez les projets par statut, favoris ou tri. Les modes dense et confortable adaptent la présentation. Chaque carte peut afficher le dernier commit, la dernière exécution, la production, la note d’analyse et les utilisateurs actuellement présents." },
+      { "title": "Liste et vues", "content": "Recherchez et filtrez les projets par statut, favoris ou tri. Les modes dense et confortable adaptent la présentation. Chaque carte peut afficher le dernier commit, la dernière exécution, la production, la note d’analyse et les utilisateurs actuellement présents. La supervision de tous les projets à la fois est l’entrée **Supervision** du menu latéral." },
       { "title": "Créer ou modifier", "content": "Définissez le nom, la description, l’URL du dépôt, la branche par défaut et les tags. Le projet appartient à une organisation et ses actions dépendent des permissions. La page Modifier centralise ces paramètres." },
-      { "title": "Vue d’ensemble et tableau", "content": "La vue d’ensemble réunit l’état, le README, les informations Git, les pipelines et l’activité. Le tableau organise le suivi de travail du projet en colonnes et éléments déplaçables lorsque cette fonction est configurée." },
+      { "title": "Menu du projet", "content": "Le menu latéral d’un projet liste, selon vos droits, Vue d’ensemble, Pipelines, Qualité, Serveurs, Releases, Artefacts, Bibliothèques, Coffres, Environnements, Supervision, Tâches, Journaux, Git et Modifier. Le menu « ⋮ » de l’en-tête regroupe les actions de la section affichée (par exemple **Tout exporter** dans Qualité), **Suivre** pour être notifié des événements du projet, et Modifier." },
+      { "title": "Vue d’ensemble et tableau", "content": "La vue d’ensemble réunit les cartes Informations et Dépôt, le README, les pipelines, les derniers commits et l’activité. Le tableau organise le suivi de travail du projet en colonnes et éléments déplaçables lorsque cette fonction est configurée." },
       { "title": "Livraison", "content": "Les sections Pipelines, Releases, Artefacts et Environnements couvrent la définition, l’exécution, la promotion et les livrables. La section Serveurs associe les cibles disponibles au projet." },
       { "title": "Configuration partagée", "content": "Les Bibliothèques fournissent les variables non sensibles et les Coffres les secrets chiffrés. Les ressources peuvent être héritées selon leur propriétaire et les droits effectifs." },
       { "title": "Qualité, sauvegardes et IA", "content": "Qualité ouvre le portefeuille d’analyse du projet. Sauvegardes gère les politiques et contrôles de restauration. Tâches IA exécute les définitions liées au projet avec le profil de runner choisi." },
-      { "title": "Exploitation", "content": "Monitoring regroupe disponibilité et télémétrie. Tâches et Logs filtrent l’activité du projet. Dépôt externe expose la liaison avec le dépôt source. Toutes les sections conservent le contexte du projet et se mettent à jour selon les événements disponibles." }
+      { "title": "Exploitation", "content": "Supervision (Monitoring) regroupe les applications supervisées du projet, leur disponibilité et leur télémétrie. Tâches et Journaux filtrent l’activité du projet ; le badge de statut d’une tâche prend la couleur de son état. Dépôt externe expose la liaison avec le dépôt source. Toutes les sections conservent le contexte du projet et se mettent à jour selon les événements disponibles." }
     ]
   },
   {
@@ -49,9 +55,9 @@
     "description": "Gérez les miroirs Git de projet et explorez code, branches, commits, tags, règles de protection et pull requests.",
     "icon": "commit",
     "sections": [
-      { "title": "Créer et synchroniser un dépôt", "content": "Un dépôt est lié à un projet et possède un nom, une description, une branche par défaut et un statut. Le backend maintient un miroir local utilisé pour la navigation et les opérations Git. Actualisez la vue pour récupérer les changements distants." },
+      { "title": "Créer et synchroniser un dépôt", "content": "Un dépôt est lié à un projet et possède un nom, une description, une branche par défaut et un statut. La liste sépare les Dépôts internes et le Dépôt externe. Un dépôt externe attaché à un projet qui a déjà son dépôt interne s’ajoute à côté, comme source supplémentaire : un pipeline le construit en le nommant dans sa définition (`source:` avec `repository:`), et sa carte montre les lignes à écrire. Le jeton reste vide pour un dépôt public. Le backend maintient un miroir local utilisé pour la navigation et les opérations Git ; les changements poussés arrivent sans bouton Actualiser, et **Réessayer** relance une lecture qui a échoué." },
       { "title": "Code et fichiers", "content": "Parcourez l’arborescence, ouvrez les fichiers, copiez leur contenu et consultez le README rendu. Les fichiers binaires sont identifiés et ne sont pas affichés comme du texte." },
-      { "title": "Branches, tags et commits", "content": "Créez une branche ou un tag, définissez la branche par défaut et inspectez le graphe des commits. La fiche d’un commit affiche auteur, date, parents, fichiers modifiés et diff ; le mode premier parent clarifie les commits de merge." },
+      { "title": "Branches, tags et commits", "content": "Créez une branche ou un tag, définissez la branche par défaut et inspectez le graphe des commits. La fiche d’un commit affiche auteur, date, parents, fichiers modifiés et diff ; le mode premier parent clarifie les commits de merge. Partout dans l’application, un identifiant long (commit, release, artefact) est abrégé à ses huit premiers caractères, avec la valeur complète en infobulle et un lien vers l’objet." },
       { "title": "Blame et historique", "content": "La vue Blame associe chaque ligne à son commit. La recherche de commits et les fiches de branche facilitent l’analyse d’un changement précis." },
       { "title": "Protections et pull requests", "content": "Les règles de branche peuvent exiger une pull request et empêcher suppression ou force-push. Les pull requests exposent source, cible, statut et actions de merge lorsque vos permissions le permettent." },
       { "title": "Temps réel et permissions", "content": "Les changements de branches, tags, commits et push sont diffusés en temps réel. Les actions de création, suppression, protection et merge restent soumises aux permissions du dépôt et du projet." }
@@ -63,8 +69,8 @@
     "description": "Définissez les cibles de déploiement, leurs serveurs, leurs approbations et les garde-fous des analyses dynamiques.",
     "icon": "layers",
     "sections": [
-      { "title": "Définition", "content": "Un environnement appartient à un projet et possède un nom, une description et un type tel que Développement, Test, Staging ou Production. Associez les serveurs qui constituent cette cible." },
-      { "title": "Approbation", "content": "Activez **Approbation requise** pour suspendre un déploiement jusqu’à décision. Les instructions expliquent ce qui doit être vérifié et le délai d’approbation limite l’attente." },
+      { "title": "Définition", "content": "Un environnement appartient à un projet et possède un nom, une description et un type tel que Développement, Test, Staging ou Production. Associez les serveurs qui constituent cette cible. Le bouton **Dupliquer** d’une ligne crée une copie de l’environnement dans le même projet et l’ouvre." },
+      { "title": "Approbation", "content": "Activez **Approbation requise** pour suspendre un déploiement jusqu’à décision. Les instructions expliquent ce qui doit être vérifié et le délai d’approbation limite l’attente. Cette approbation est distincte de celle qu’un pipeline peut déclarer pour une étape : approuver l’une ne vaut jamais pour l’autre." },
       { "title": "DAST", "content": "Pour autoriser une analyse dynamique, activez DAST et déclarez explicitement si l’environnement est éphémère et s’il contient des données réelles. La liste des hôtes autorisés borne les cibles que le scanner peut contacter." },
       { "title": "Utilisation dans les pipelines", "content": "Un pipeline sélectionne l’environnement pour résoudre ses serveurs et ses règles d’approbation. La page d’exécution indique la cible retenue et bloque une opération dont les préconditions ne sont pas satisfaites." }
     ]
@@ -75,14 +81,17 @@
     "description": "Concevez, validez et exécutez des workflows CI/CD traçables avec logs, résultats, artefacts, qualité et contrôles de déploiement.",
     "icon": "account_tree",
     "sections": [
+      { "title": "Liste des pipelines", "content": "L’en-tête bascule entre deux vues, **Catalogue** et **Exécutions**, chacune avec son nombre ; l’adresse garde la vue choisie. **Créer** reste visible ; **Importer** (depuis un fichier YAML) est dans le menu « ⋮ ». Le catalogue se filtre par recherche, déclencheur, modèle, favoris et pipelines avec enfants, et sa synthèse des statuts est cliquable. Chaque ligne porte l’étoile des favoris, **Exécuter** avec sa flèche **Options**, et un menu « ⋮ » (Modifier, Mettre à jour lorsqu’une version plus récente du modèle existe)." },
       { "title": "Créer un pipeline", "content": "Choisissez le projet, le serveur ou la portée, puis définissez nom, description, branche source et déclencheur. Un pipeline peut partir de zéro, d’un modèle ou d’une définition Git gérée dans le dépôt." },
+      { "title": "Page d’un pipeline", "content": "La page s’ouvre sur l’onglet Exécutions : quatre tuiles (taux de succès, durée moyenne, dernier succès, dernière note) puis le tableau des exécutions, qui défile sans pagination. **Exécuter** est la seule action visible ; le menu « ⋮ » regroupe Modifier, Simulation, les actions de modèle (Mettre à jour, Promouvoir, Extraire) selon le cas, et Supprimer. Si le pipeline est modifié ailleurs pendant votre édition, un bandeau propose de recharger au lieu d’écraser vos changements." },
       { "title": "Éditeur YAML et visuel", "content": "Le mode YAML offre formatage et validation. Le mode visuel organise stages, jobs, steps, dépendances, agent, système d’exploitation et variables. Vous pouvez ajouter, dupliquer, déplacer ou supprimer les éléments sans perdre la définition équivalente." },
-      { "title": "Validation et dry-run", "content": "**Valider YAML** contrôle la structure. Le dry-run prépare la commande résolue sans exécuter les effets. Utilisez le diff avant sauvegarde pour comprendre les changements entre version enregistrée et version courante." },
+      { "title": "Validation et dry-run", "content": "**Valider** contrôle la structure du YAML. La simulation (dry-run, menu « ⋮ ») prépare la commande résolue sans exécuter les effets. Utilisez le diff avant sauvegarde pour comprendre les changements entre version enregistrée et version courante." },
+      { "title": "Lancer une exécution", "content": "**Exécuter** lance sur les valeurs par défaut des paramètres déclarés et ouvre directement la nouvelle exécution ; une question n’est posée que si un paramètre obligatoire n’a pas de valeur par défaut. **Options** permet de choisir branche et paramètres. Au lancement, Aetheus refuse en quelques secondes une exécution certaine d’échouer : étape qu’aucun exécuteur ne peut prendre, étape d’analyse sans exécuteur à jour (le message dit de mettre à jour l’agent depuis sa page serveur), artefact de release retenu manquant ou invalide. Quand ce refus touche un lancement automatique (planification, push, webhook), personne n’est là pour le lire : il apparaît dans la liste du pipeline comme une exécution en échec qui porte le motif, et les abonnés du projet reçoivent la notification « Lancement automatique refusé »." },
       { "title": "Variables, secrets et connexions", "content": "Les bibliothèques fournissent les valeurs non sensibles, les coffres les secrets masqués et les connexions de service les identifiants d’intégration. Les paramètres de modèle et de run complètent ces valeurs au démarrage." },
-      { "title": "Déclencheurs", "content": "Une exécution peut être manuelle, planifiée, issue d’un webhook ou déclenchée par un autre pipeline. La branche et le commit sont figés pour assurer la reproductibilité. Les approbations d’environnement peuvent suspendre la progression." },
-      { "title": "Suivi d’une exécution", "content": "La fiche de run affiche statut, progression, stages, steps, durée, commandes, sorties et logs. Vous pouvez suivre les logs, rechercher, replier commande ou sortie, copier les logs et naviguer rapidement en haut ou en bas." },
-      { "title": "Annuler et relancer", "content": "Une exécution active peut être annulée. Une exécution terminée peut être relancée sur le même commit, la tête de branche ou seulement les steps échoués selon les options disponibles. La lignée montre les runs parents et enfants." },
-      { "title": "Résultats et livrables", "content": "Les onglets regroupent tests, couverture par fichier ou assembly, lint, complexité, artefacts et release. Les gates d’analyse affichent rapports, nouveaux constats, bloqueurs, avertissements et producteurs manquants." },
+      { "title": "Déclencheurs et approbations", "content": "Une exécution peut être manuelle, planifiée, issue d’un webhook ou déclenchée par un autre pipeline. La branche et le commit sont figés pour assurer la reproductibilité. Deux approbations distinctes peuvent suspendre une étape : celle que déclare le pipeline et celle de l’environnement ciblé. Quand les deux s’appliquent, le pipeline demande d’abord la sienne, puis l’environnement ; approuver l’une ne vaut pas pour l’autre." },
+      { "title": "Suivi d’une exécution", "content": "La page s’affiche dès l’exécution chargée ; exécutions enfants, gate, métriques et approbations arrivent ensuite. La vue d’ensemble montre statut, tuiles, attestation de compatibilité et une chronologie où chaque étape se déplie en ses steps ; une étape de déclenchement se déplie sur l’exécution enfant. La tuile **Lignée**, après Dépôt source, dit d’où vient l’exécution (l’exécution parente, sinon la personne qui l’a lancée, sinon « Automatique ») et quelles exécutions elle a lancées à son tour, chacune en lien avec son statut ; parmi ces dernières, une exécution d’un pipeline que vous ne pouvez pas lire n’y figure pas. L’onglet Journaux permet de suivre, rechercher, replier commande ou sortie, copier et aller en haut ou en bas ; faire défiler à la main arrête le suivi jusqu’à votre retour en fin de journal." },
+      { "title": "Annuler et relancer", "content": "Une exécution active peut être annulée : la confirmation dit **Arrêter**, et **Revenir** la ferme sans rien faire. Une exécution terminée peut être relancée sur le même commit, la tête de branche ou seulement les steps échoués selon les options disponibles. La lignée montre les runs parents et enfants." },
+      { "title": "Résultats et livrables", "content": "L’onglet Artefacts est un tableau avec **Télécharger** sur chaque ligne. L’onglet Couverture affiche les jauges de couverture des lignes et des branches (vert à partir de 80 %, orange à partir de 50 %, rouge en dessous), leur tendance et une arborescence par projet (taux et lignes couvertes) qui s’ouvre sur ses fichiers. Les onglets Résultats des tests, Lint et Qualité du code complètent. L’onglet Gate affiche rapports, nouveaux constats, bloqueurs, avertissements et producteurs manquants ; l’onglet YAML montre la définition exécutée." },
       { "title": "Flotte et modèles", "content": "La flotte compare les pipelines liés à un modèle, leur version épinglée et la dernière version disponible. Elle permet d’ouvrir les mises à jour compatibles et d’identifier les références historiques non épinglées." },
       { "title": "Temps réel et accès", "content": "Progression, steps, logs, résultats et fin d’exécution arrivent en temps réel et sont réconciliés après reconnexion. Les actions visibles dépendent des permissions sur le pipeline, le projet, le serveur et l’environnement." }
     ]
@@ -108,8 +117,9 @@
     "icon": "data_object",
     "sections": [
       { "title": "Portée et héritage", "content": "Une bibliothèque appartient à une portée autorisée, par exemple projet, environnement ou couple projet-serveur. Les vues globales et contextuelles indiquent l’origine d’une ressource héritée." },
-      { "title": "Entrées", "content": "Ajoutez des paires clé-valeur, modifiez-les ou supprimez-les. Les clés servent de références dans les définitions de pipeline ; utilisez une convention stable pour éviter les collisions." },
-      { "title": "Import et export", "content": "Exportez la bibliothèque pour la sauvegarder ou la déplacer, puis importez un fichier compatible. Vérifiez les clés avant sauvegarde, car un import peut remplacer la valeur associée à une clé existante." },
+      { "title": "Entrées", "content": "Ajoutez des paires clé-valeur, modifiez-les ou supprimez-les. Chaque ligne propose **Copier la clé** et **Copier la valeur**. Les clés servent de références dans les définitions de pipeline ; utilisez une convention stable pour éviter les collisions." },
+      { "title": "Import et export", "content": "Le menu **Outils** propose l’export, pour sauvegarder ou déplacer la bibliothèque, et l’import d’un fichier compatible. Vérifiez les clés avant sauvegarde, car un import peut remplacer la valeur associée à une clé existante." },
+      { "title": "Ports", "content": "Sur une bibliothèque enregistrée, le menu **Outils** propose aussi **Vérifier**, qui confronte ses valeurs de ports au registre des ports d’un serveur et à ce que l’agent a vu en écoute, et **Allouer**, qui réserve des ports libres sur un serveur et les écrit dans la bibliothèque." },
       { "title": "Versions", "content": "L’historique permet de consulter les versions enregistrées et le nombre d’entrées. Les droits de lecture et d’écriture découlent de la portée propriétaire." }
     ]
   },
@@ -120,9 +130,10 @@
     "icon": "lock",
     "sections": [
       { "title": "Portée et chiffrement", "content": "Un coffre appartient à une portée autorisée et ses valeurs sont chiffrées au repos. Les listes n’affichent jamais les secrets en clair et les logs appliquent le masquage." },
-      { "title": "Secrets", "content": "Ajoutez une clé, une valeur et éventuellement une date d’expiration. **Copier la référence** fournit la syntaxe à utiliser dans le pipeline sans copier la valeur secrète." },
-      { "title": "Rotation", "content": "La rotation crée une nouvelle valeur pour une clé existante tout en conservant la traçabilité des versions. Mettez à jour les systèmes externes concernés avant de retirer une ancienne valeur." },
-      { "title": "Import, export et historique", "content": "L’export ne contient que les clés, jamais les valeurs. L’import ajoute ou met à jour les secrets fournis. L’historique indique versions et dates sans révéler le contenu." }
+      { "title": "Secrets", "content": "Ajoutez une clé, une valeur et éventuellement une date d’expiration. Dans le tableau, **Copier la clé** copie le nom, **Copier la valeur** copie le secret sans jamais l’afficher (l’action est auditée) et **Copier la référence** fournit la syntaxe à utiliser dans le pipeline." },
+      { "title": "Générer une valeur", "content": "À côté du champ valeur, lors d’un ajout, d’une modification ou d’une rotation, **Générer** crée une valeur sûre selon le modèle déduit du nom de la clé. Sa flèche propose d’autres façons de générer : 32 ou 64 lettres et chiffres, ou 64 caractères hexadécimaux (32 octets)." },
+      { "title": "Rotation", "content": "**Tourner** demande confirmation, puis la nouvelle valeur d’une clé existante ; la rotation conserve la traçabilité des versions. Mettez à jour les systèmes externes concernés avant de retirer une ancienne valeur." },
+      { "title": "Import, export et historique", "content": "L’export ne contient que les clés, jamais les valeurs. L’import ajoute ou met à jour les secrets fournis. L’historique indique versions, dates et auteur sans conserver ni révéler le contenu." }
     ]
   },
   {
@@ -133,6 +144,7 @@
     "sections": [
       { "title": "Liste et détection", "content": "Les releases sont associées à un projet et peuvent provenir des tags Git ou du workflow de livraison. La liste expose version, statut, branche et dernière activité." },
       { "title": "Provenance", "content": "La fiche détaille tag, branche, commit, pipeline et run source. Ces liens permettent de remonter de la version publiée à la définition et au code exacts." },
+      { "title": "Création et entrées de la build", "content": "La fiche indique le pipeline et l’exécution de création (« Non enregistrée » pour une release publiée avant ce suivi), l’exécution qui a construit les livrables quand elle diffère, et la dernière exécution qui a enregistré la release. Les entrées de la build listent les artefacts consommés, avec l’exécution qui les a produits, même après leur suppression par la rétention, et les paquets issus du SBOM." },
       { "title": "Livrables", "content": "Les artefacts et autres livrables rattachés sont listés avec leur destination. Une release exploitable conserve un lien vers les octets retenus, pas seulement vers des métadonnées." },
       { "title": "Promotion et rollback", "content": "La promotion fait avancer une release vers l’environnement choisi selon les contrôles du pipeline. Le rollback sélectionne une version antérieure compatible et lance le contrat prévu ; il ne remplace pas les vérifications d’environnement." }
     ]
@@ -155,19 +167,20 @@
     "description": "Suivez les commandes envoyées aux agents, leur progression, leur résultat et les logs associés.",
     "icon": "task_alt",
     "sections": [
-      { "title": "Liste", "content": "La liste globale ou contextuelle affiche les tâches accessibles avec statut, serveur, origine et dates. Les vues projet et serveur appliquent automatiquement leur filtre." },
-      { "title": "Cycle de vie", "content": "Une tâche passe par les états en attente, assignée, en cours puis succès, échec ou annulation. Les changements reçus en temps réel retirent les tâches terminées du suivi actif et actualisent les listes." },
+      { "title": "Liste", "content": "La liste globale ou contextuelle affiche les tâches accessibles avec statut, serveur, origine et dates. Les vues projet et serveur appliquent automatiquement leur filtre, et le badge de statut prend la couleur de l’état (succès en vert, échec en rouge)." },
+      { "title": "Cycle de vie", "content": "Une tâche passe par les états en attente, assignée, en cours puis succès, échec ou annulation. Les changements reçus en temps réel retirent les tâches terminées du suivi actif et actualisent les listes. Le bouton des tâches de la barre du haut affiche le nombre de tâches en cours." },
       { "title": "Exécution par l’agent", "content": "L’agent réclame une tâche compatible avec ses capacités et ses créneaux de concurrence. Une tâche assignée n’est pas redistribuée automatiquement afin d’éviter de répéter un effet externe." },
-      { "title": "Logs", "content": "Ouvrez ou surveillez l’identifiant de tâche dans la console de logs. Les sorties en cours sont diffusées en direct et les sorties persistées restent consultables après terminaison." }
+      { "title": "Logs", "content": "Ouvrez ou surveillez l’identifiant de tâche dans la page Journaux en direct. Les sorties en cours sont diffusées en direct et les sorties persistées restent consultables après terminaison." }
     ]
   },
   {
     "key": "logs",
-    "title": "Logs de tâches",
-    "description": "Surveillez en direct la sortie d’une tâche précise et contrôlez l’affichage des valeurs masquées.",
+    "title": "Journaux en direct",
+    "description": "Suivez en direct la sortie d’une tâche exécutée par un agent et contrôlez l’affichage des valeurs masquées.",
     "icon": "receipt_long",
     "sections": [
-      { "title": "Choisir une tâche", "content": "Saisissez l’identifiant numérique puis sélectionnez **Surveiller**. La console rejoint le groupe temps réel de cette tâche et affiche les lignes reçues. Un changement d’identifiant nécessite de relancer la surveillance." },
+      { "title": "À quoi sert la page", "content": "La page affiche, au fur et à mesure qu’elle s’écrit, la sortie d’une tâche exécutée par un agent : une installation, une commande ou une étape de pipeline. Elle sert à suivre une tâche précise en direct, pas à parcourir l’historique des journaux." },
+      { "title": "Choisir une tâche", "content": "Saisissez l’identifiant numérique de la tâche, visible dans la liste des Tâches, dans le champ placé sous le titre, puis sélectionnez **Observer**. La console rejoint le groupe temps réel de cette tâche et affiche les lignes reçues. Un changement d’identifiant nécessite de relancer l’observation." },
       { "title": "Connexion et attente", "content": "L’état Connecté confirme la liaison au hub de logs. Si aucune ligne n’est encore disponible, la tâche peut ne pas avoir démarré, ne rien produire ou être déjà terminée sans log conservé." },
       { "title": "Masquage", "content": "**Afficher masqué** conserve la protection des secrets. **Afficher non masqué** ne restaure que les données que le backend autorise à révéler ; les secrets définitivement masqués dans la source ne peuvent pas être récupérés." },
       { "title": "Effacer", "content": "**Effacer** vide uniquement la console locale. Cette action ne supprime pas les logs persistés ni la tâche. La page ne fournit pas de filtres globaux par agent, pipeline ou niveau." }
@@ -176,12 +189,12 @@
   {
     "key": "alerts",
     "title": "Alertes",
-    "description": "Définissez des règles sur les métriques serveur et traitez les alertes déclenchées et leur état de lecture.",
+    "description": "Définissez des règles sur les métriques serveur et consultez les alertes déclenchées pendant votre session.",
     "icon": "notification_important",
     "sections": [
       { "title": "Règles", "content": "Une règle possède un nom, un serveur, une métrique, un seuil, une durée soutenue, une sévérité et un état actif ou désactivé. La durée évite de déclencher sur un pic trop bref." },
-      { "title": "Créer et modifier", "content": "Sélectionnez la métrique et le serveur, définissez le seuil et la durée, puis enregistrez. Désactivez temporairement une règle au lieu de la supprimer si vous souhaitez conserver sa configuration." },
-      { "title": "Alertes récentes", "content": "Les déclenchements affichent message, sévérité, serveur et date. Le compteur de navigation représente les éléments non lus ; **Tout marquer comme lu** remet ce compteur à zéro." },
+      { "title": "Créer et modifier", "content": "**Créer** ouvre le formulaire : sélectionnez la métrique et le serveur, définissez le seuil et la durée, puis enregistrez. Désactivez temporairement une règle au lieu de la supprimer si vous souhaitez conserver sa configuration." },
+      { "title": "Alertes récentes", "content": "La section Alertes récentes liste les déclenchements reçus pendant votre session (50 au plus) avec date, sévérité, serveur et message. Le compteur de navigation représente les éléments non lus. Le bouton **Effacer les alertes récentes**, dans le menu « ⋮ » de la section, vide cette liste et remet le compteur à zéro." },
       { "title": "Temps réel", "content": "Les nouveaux déclenchements et les changements de règles sont poussés en temps réel. Les canaux externes éventuels sont configurés séparément par l’administrateur dans Règles de notification." }
     ]
   },
@@ -192,8 +205,9 @@
     "icon": "shield",
     "sections": [
       { "title": "Portefeuille", "content": "Le portefeuille compare projets, notes, posture, scanners et volume de constats. Filtrez par organisation, projet, pipeline, branche, commit, catégorie ou période, puis recherchez un constat précis." },
+      { "title": "Qualité d’un projet", "content": "Dans un projet, Qualité s’ouvre sur une vue d’ensemble : note globale, domaine limitant, commit évalué (lien vers sa page), date, dernière analyse (lien vers l’exécution) et dernière release (lien vers sa fiche). L’onglet Constats liste les constats ouverts ; **Tout exporter**, dans le menu « ⋮ » du projet, télécharge le prompt IA de tous les constats dans un fichier Markdown." },
       { "title": "Rapports et provenance", "content": "Chaque donnée conserve sa source, son outil, le pipeline run, la branche et le commit. Les rapports agrègent tests, couverture, lint, vulnérabilités, SBOM et autres producteurs configurés." },
-      { "title": "Détail d’un constat", "content": "La fiche affiche règle, catégorie, fichier, ligne, symbole, extrait, première et dernière occurrence, rapports associés et documentation externe. Les occurrences montrent la persistance du problème entre analyses." },
+      { "title": "Détail d’un constat", "content": "La fiche affiche règle, catégorie, fichier, ligne en badge, bouton **Ouvrir le fichier** et, quand il est lisible, le passage de code en cause avec les lignes concernées surlignées. Branche et commit mènent à leur page. Symbole, première et dernière occurrence, rapports associés et documentation externe complètent ; les occurrences montrent la persistance du problème entre analyses." },
       { "title": "Décisions", "content": "Changez le statut avec une justification et, si nécessaire, une date d’expiration. L’historique conserve auteur, date, raison et décision afin de distinguer correction, acceptation temporaire et faux positif." },
       { "title": "Ticket et assistance IA", "content": "Créez un ticket lorsque l’intégration le permet. Le prompt IA rassemble le contexte du constat ; prévisualisez-le, copiez-le ou téléchargez-le en Markdown avant de l’utiliser avec un outil autorisé." },
       { "title": "Gates de pipeline", "content": "Les pages de run indiquent constats nouveaux, bloqueurs, avertissements, rapports et producteurs manquants. Une gate incomplète n’est pas considérée comme une réussite silencieuse." }
@@ -254,7 +268,7 @@
     "description": "Cadrez la propriété des projets, serveurs et membres et administrez les règles communes à une organisation.",
     "icon": "apartment",
     "sections": [
-      { "title": "Créer et modifier", "content": "Définissez nom, slug et description. Le slug identifie durablement l’organisation dans les sélecteurs et intégrations ; choisissez-le avec soin." },
+      { "title": "Créer et modifier", "content": "Définissez nom, slug et description. Le slug identifie durablement l’organisation dans les sélecteurs et intégrations ; choisissez-le avec soin. La recherche en haut de page est partagée avec Utilisateurs et Rôles." },
       { "title": "Membres", "content": "Ajoutez un utilisateur avec le rôle voulu ou retirez-le. Le rôle Owner contrôle l’organisation. Les modifications d’appartenance et de permissions sont propagées aux sessions concernées." },
       { "title": "Projets", "content": "La fiche réunit les projets détenus et permet leur affectation selon les actions disponibles. Les ressources d’une organisation deviennent visibles aux membres selon leurs rôles et permissions effectives." },
       { "title": "Quality gates", "content": "Les paramètres de qualité communs peuvent définir les attentes appliquées aux projets de l’organisation. Une modification doit être évaluée avec les pipelines qui consomment ces règles." },
@@ -267,7 +281,7 @@
     "description": "Composez les droits par type et ressource, attribuez les rôles aux utilisateurs et inspectez leur historique.",
     "icon": "admin_panel_settings",
     "sections": [
-      { "title": "Rôles", "content": "Créez un rôle avec nom, description et état actif, ou clonez un rôle existant comme point de départ. Un rôle désactivé ne doit plus accorder ses permissions." },
+      { "title": "Rôles", "content": "Créez un rôle avec nom, description et état actif, ou clonez un rôle existant comme point de départ. Un rôle désactivé ne doit plus accorder ses permissions. La recherche en haut de page est partagée avec Utilisateurs et Organisations." },
       { "title": "Matrice de permissions", "content": "La matrice combine type de ressource, portée et niveau Lecture, Écriture ou Administration. Les actions de masse appliquent un niveau à plusieurs lignes ; relisez la matrice avant sauvegarde." },
       { "title": "Utilisateurs", "content": "Ajoutez ou retirez des utilisateurs depuis l’onglet du rôle. Un utilisateur peut cumuler plusieurs rôles et ses droits effectifs sont l’union des attributions autorisées." },
       { "title": "Accès effectif", "content": "Les organisations et permissions directes complètent les rôles. Les changements prennent effet en direct et peuvent afficher une boîte de dialogue bloquante à l’utilisateur concerné." },
@@ -280,11 +294,11 @@
     "description": "Gérez les comptes, mots de passe, organisations, rôles, TOTP et permissions effectives.",
     "icon": "group",
     "sections": [
-      { "title": "Liste", "content": "Recherchez par identifiant ou e-mail, filtrez l’état et consultez rôles et date de création. Les comptes actifs et désactivés sont clairement distingués." },
+      { "title": "Liste et recherche", "content": "Utilisateurs, Organisations et Rôles partagent une seule recherche, à droite de leurs liens de section. Chaque section affiche entre crochets son nombre de résultats lorsqu’il est positif, et la recherche vous conduit à la section quand elle est la seule à en avoir. La liste montre rôles, état et date de création ; les comptes actifs et désactivés sont clairement distingués." },
       { "title": "Créer et modifier", "content": "Renseignez identifiant, e-mail, mot de passe initial et état. L’option **Doit changer le mot de passe** impose un renouvellement à la prochaine connexion." },
-      { "title": "Sécurité", "content": "Changez ou réinitialisez le mot de passe et contrôlez l’état TOTP. Les mots de passe respectent la longueur minimale et ne sont jamais réaffichés." },
+      { "title": "Sécurité", "content": "Changez ou réinitialisez le mot de passe et contrôlez l’état TOTP. Les mots de passe respectent la longueur minimale et ne sont jamais réaffichés. Il n’existe pas de réinitialisation en libre-service : un utilisateur qui a perdu son mot de passe doit demander à un administrateur de le réinitialiser ici." },
       { "title": "Rôles et organisations", "content": "Attribuez les rôles et ajoutez l’utilisateur aux organisations autorisées. Le retrait d’une organisation supprime l’accès hérité correspondant." },
-      { "title": "Permissions effectives", "content": "La vue détaille type de ressource, permission et origine, notamment le rôle qui l’accorde. Actualisez après une modification pour vérifier le résultat réel." },
+      { "title": "Permissions effectives", "content": "La vue détaille type de ressource, permission et origine, notamment le rôle qui l’accorde. Elle se recharge d’elle-même quand un utilisateur, un rôle ou une organisation change, sans bouton Actualiser." },
       { "title": "Suppression", "content": "La suppression d’un compte est une action administrative sensible. Vérifiez ses appartenances et la propriété des ressources avant confirmation." }
     ]
   },
@@ -302,14 +316,14 @@
   },
   {
     "key": "ai-runner-profiles",
-    "title": "Profils de runners IA",
+    "title": "Profils d’exécuteur IA",
     "description": "Déclarez les exécutables IA autorisés, leurs délais et leur politique d’utilisation de données externes.",
     "icon": "smart_toy",
     "sections": [
       { "title": "Profils", "content": "Chaque profil possède un nom, un binaire, un timeout et une autorisation de données externes. Les tâches IA sélectionnent un profil plutôt qu’une commande libre." },
       { "title": "Créer et modifier", "content": "Utilisez un chemin de binaire installé et maîtrisé sur le runner. Adaptez le timeout à la charge réelle sans transformer une exécution bloquée en attente illimitée." },
       { "title": "Données externes", "content": "Activez cette option uniquement si le runner est autorisé à transmettre le contexte hors de l’infrastructure. Les définitions de tâches indiquent également ce choix pour rendre le risque visible." },
-      { "title": "Suppression", "content": "Avant de supprimer un profil, vérifiez qu’aucune définition de tâche active ne le référence." }
+      { "title": "Suppression", "content": "Avant de supprimer un profil, vérifiez qu’aucune définition de tâche active ne le référence. La suppression retire ce choix partagé et ne répare pas les définitions existantes." }
     ]
   },
   {
@@ -319,9 +333,9 @@
     "icon": "inventory",
     "sections": [
       { "title": "Créer un flux", "content": "Définissez nom, type NuGet ou npm et URL amont. Utilisez une URL de registre compatible avec le type choisi." },
-      { "title": "Paquets suivis", "content": "**Gérer les paquets** ouvre le catalogue du flux. Ajoutez ou retirez les paquets dont les versions doivent être résolues et synchronisées." },
-      { "title": "Synchronisation", "content": "La synchronisation interroge l’amont, enregistre les versions prises en charge et signale échecs, paquets non supportés ou limitation de débit. La vue se met à jour lorsque le service hébergé termine un changement." },
-      { "title": "Actualiser et supprimer", "content": "Actualisez pour relire l’état persistant. Supprimer un flux retire sa configuration et son suivi ; vérifiez auparavant les consommateurs du catalogue." }
+      { "title": "Paquets suivis", "content": "**Paquets** ouvre le catalogue du flux. Ajoutez ou retirez les paquets dont les versions doivent être résolues et synchronisées ; **Synchroniser** lance une synchronisation depuis ce catalogue." },
+      { "title": "Synchronisation", "content": "La synchronisation interroge l’amont, enregistre les versions prises en charge et signale échecs, paquets non supportés ou limitation de débit ; le résumé compte les paquets synchronisés, en échec et non supportés. La vue se met à jour lorsque le service hébergé termine un changement." },
+      { "title": "Suivi en direct et suppression", "content": "La liste suit les changements en direct, sans bouton Actualiser. Supprimer un flux retire sa configuration et son suivi ; vérifiez auparavant les consommateurs du catalogue." }
     ]
   },
   {
@@ -339,37 +353,39 @@
   },
   {
     "key": "plugins",
-    "title": "Plugins",
-    "description": "Enregistrez et administrez les extensions connues de la plateforme.",
+    "title": "Extensions",
+    "description": "Enregistrez et administrez les extensions (plugins) connues de la plateforme.",
     "icon": "extension",
     "sections": [
-      { "title": "Catalogue", "content": "Recherchez les plugins et consultez nom, auteur, version, type, statut et date de création." },
+      { "title": "Catalogue", "content": "Recherchez les extensions et consultez nom, auteur, version, type, statut et date de création. La page est l’entrée Extensions du menu Administration." },
       { "title": "Enregistrer", "content": "Fournissez les métadonnées et le point d’entrée attendus par le type de plugin. L’enregistrement ne remplace pas l’installation de ses dépendances dans l’environnement d’exécution." },
       { "title": "Modifier et désenregistrer", "content": "Mettez à jour les métadonnées ou le statut lorsqu’une version change. Désenregistrer retire l’extension de la plateforme ; vérifiez qu’aucune configuration active n’en dépend." }
     ]
   },
   {
     "key": "audit",
-    "title": "Journal d’audit",
-    "description": "Recherchez les actions sensibles et vérifiez l’intégrité de la chaîne d’audit.",
+    "title": "Journaux d’audit",
+    "description": "Recherchez les actions sensibles, lisez-les en clair et vérifiez l’intégrité de la chaîne d’audit.",
     "icon": "policy",
     "sections": [
-      { "title": "Rechercher", "content": "Filtrez par texte, action, type d’entité et période. Chaque entrée expose horodatage, utilisateur, action, entité et identifiant." },
-      { "title": "Détails", "content": "Ouvrez une entrée pour consulter les détails enregistrés et les copier lors d’une investigation. Les valeurs secrètes ne doivent pas apparaître dans l’audit." },
-      { "title": "Intégrité", "content": "**Vérifier la chaîne** contrôle les liens cryptographiques entre entrées. Le résultat distingue les entrées intactes, une rupture précise ou une vérification indisponible." },
+      { "title": "Rechercher", "content": "Chaque colonne filtre depuis son en-tête : période (heure comprise), utilisateur, action (choix multiple avec recherche), type d’entité, identifiant et détails. Le tri et les filtres sont appliqués par le serveur à tout le journal, et les nouvelles entrées arrivent en direct." },
+      { "title": "Actions", "content": "Chaque action a un libellé lisible, en français comme en anglais, et une couleur selon la nature du changement : rouge pour une suppression, une révocation, un échec ou un blocage ; orange pour une rotation, une réinitialisation, une révélation ou une désactivation ; vert pour une création, un ajout ou une activation ; couleur d’accent pour une modification ; gris pour le reste." },
+      { "title": "Détails", "content": "L’icône œil ouvre les détails enregistrés d’une entrée ; l’icône de copie les copie lors d’une investigation. Les valeurs secrètes ne doivent pas apparaître dans l’audit." },
+      { "title": "Intégrité", "content": "**Vérifier**, dans l’en-tête, permet de vérifier la chaîne : il contrôle les liens cryptographiques entre entrées. Le badge affiché distingue une chaîne intègre (avec son nombre d’entrées), une rupture détectée à une entrée précise ou une vérification indisponible." },
       { "title": "Interprétation", "content": "Une chaîne intacte prouve la cohérence des enregistrements disponibles, pas l’absence d’une action externe non auditée. Croisez avec les logs système et les ressources concernées." }
     ]
   },
   {
     "key": "system-logs",
-    "title": "Logs système",
-    "description": "Analysez les logs du backend avec filtres, corrélation, export et rafraîchissement automatique.",
+    "title": "Journaux système",
+    "description": "Analysez les logs du backend avec filtres appliqués par le serveur, corrélation, export CSV et suivi en direct.",
     "icon": "description",
     "sections": [
-      { "title": "Filtres", "content": "Filtrez par fichier, niveau, catégorie, texte, identifiant de corrélation et période. **Effacer les filtres** permet de revenir à la vue générale." },
-      { "title": "Navigation", "content": "Actualisez manuellement, activez le rafraîchissement automatique ou chargez davantage de lignes. Le compteur indique combien d’entrées sont actuellement affichées." },
-      { "title": "Détails et corrélation", "content": "Ouvrez le message complet et copiez le message ou l’identifiant de corrélation. Recherchez ce même identifiant pour suivre une requête à travers plusieurs composants." },
-      { "title": "Export et purge", "content": "Téléchargez le fichier sélectionné ou exportez les résultats en CSV. La purge est une action administrative destructive soumise à confirmation et ne doit être utilisée qu’en respectant la politique de rétention." }
+      { "title": "Filtres", "content": "La barre du haut filtre par fichier, niveau, période et texte. Les en-têtes de colonnes ajoutent tri et filtres sur la date, le niveau, la catégorie, le message et l’identifiant de corrélation. Tous ces filtres et le tri sont appliqués par le serveur à l’ensemble du journal, pas seulement aux lignes affichées." },
+      { "title": "Navigation", "content": "Le tableau lit le journal bloc par bloc pendant le défilement : il n’y a plus de bouton « Charger plus » ni d’actualisation manuelle. La page suit les fichiers de logs en direct." },
+      { "title": "Détails et corrélation", "content": "Cliquez une ligne ou son icône œil pour ouvrir le message complet ; l’icône est rouge lorsqu’une exception est jointe. Copiez le message ou l’identifiant de corrélation, puis filtrez sur ce même identifiant pour suivre une requête à travers plusieurs composants." },
+      { "title": "Requêtes des robots", "content": "Les requêtes refusées qui ne correspondent à aucune route de l’application, typiquement des robots qui cherchent des failles, sont comptées par minute au lieu d’être écrites une par une. Un refus sur une vraie route et toute erreur serveur gardent leur propre ligne, avec la raison du refus." },
+      { "title": "Export et purge", "content": "**Exporter CSV** exporte les lignes qui répondent aux filtres de la barre du haut ; **Télécharger** récupère le fichier sélectionné. **Purger** supprime, après confirmation, les fichiers de logs de plus de 30 jours : cette purge est une action administrative destructive, à utiliser en respectant la politique de rétention." }
     ]
   },
   {
@@ -387,25 +403,26 @@
   {
     "key": "settings",
     "title": "Paramètres utilisateur",
-    "description": "Gérez profil, apparence, langue, notifications, mot de passe, TOTP et jetons d’accès personnels.",
+    "description": "Gérez apparence, langue, préférences de notification, mot de passe, TOTP et jetons d’accès personnels.",
     "icon": "settings",
     "sections": [
-      { "title": "Profil", "content": "Modifiez le nom affiché et consultez identifiant, rôle et informations du compte. Le nom d’utilisateur reste l’identifiant de connexion." },
-      { "title": "Apparence et langue", "content": "Choisissez thème clair ou sombre et langue française ou anglaise. Le thème est conservé dans le navigateur ; la langue recharge les ressources et le catalogue d’aide correspondant." },
-      { "title": "Préférences de notification", "content": "Activez ou désactivez e-mails, alertes de pipeline et alertes serveur pour votre compte. Ces préférences sont distinctes des canaux et règles globaux administrés par la plateforme." },
-      { "title": "Mot de passe", "content": "Fournissez le mot de passe actuel, le nouveau et sa confirmation. Un compte marqué **Doit changer le mot de passe** est dirigé vers le parcours obligatoire après connexion." },
-      { "title": "Authentification à deux facteurs", "content": "Activez TOTP en scannant le QR code ou en utilisant la clé manuelle, puis vérifiez un code. Conservez les codes de récupération hors de l’application. La désactivation exige une confirmation." },
+      { "title": "Apparence", "content": "L’onglet Apparence règle l’aspect de tout le site, deux réglages par ligne : mode (clair, sombre ou celui du système), thème, palette et densité. **Thème**, dans le menu utilisateur, mène directement à ces réglages ; le mode peut aussi y être changé." },
+      { "title": "Langue", "content": "Dans le même onglet, choisissez le français ou l’anglais. La langue recharge les ressources de l’application et le catalogue d’aide correspondant." },
+      { "title": "Préférences de notification", "content": "Un interrupteur par type d’événement, groupé par ce qui le déclenche, décide de ce qui vous est notifié pour les projets que vous suivez. Suivez un projet avec **Suivre** dans son menu « ⋮ » ; la section Projets suivis permet de **Ne plus suivre**. Aucun canal d’envoi n’est encore configuré : rien n’est envoyé, les notifications sont listées dans Mes notifications. Ces préférences sont distinctes des canaux et règles globaux administrés par la plateforme." },
+      { "title": "Mes notifications", "content": "La cloche de la barre du haut affiche le nombre de notifications non lues et les dernières reçues ; **Tout marquer lu** les marque lues et **Voir tout** ouvre la page Mes notifications. Cette page liste date, événement, sujet, canal et état de lecture, avec tri et filtres par colonne ; chaque notification peut y être marquée comme lue." },
+      { "title": "Mot de passe", "content": "Dans l’onglet Sécurité, fournissez le mot de passe actuel, le nouveau et sa confirmation. Un compte marqué **Doit changer le mot de passe** est dirigé vers le parcours obligatoire après connexion. Il n’existe pas de réinitialisation en libre-service : le lien **Mot de passe perdu** de la page de connexion invite à la demander à un administrateur." },
+      { "title": "Authentification à deux facteurs", "content": "Dans l’onglet Sécurité, activez TOTP en scannant le QR code ou en utilisant la clé manuelle, puis vérifiez un code. Conservez les codes de récupération hors de l’application. La désactivation demande votre mot de passe." },
       { "title": "Jetons d’accès personnels", "content": "Créez un jeton avec nom, portée et expiration. La valeur complète n’est révélée qu’une fois : copiez-la immédiatement et stockez-la dans un gestionnaire de secrets. La liste montre préfixe, statut, création, expiration et dernière utilisation ; révoquez tout jeton compromis." },
-      { "title": "À propos", "content": "L’onglet À propos affiche la version de l’application et les informations générales utiles au support." }
+      { "title": "À propos", "content": "L’onglet À propos présente en lignes étiquetées la version de l’application, votre nom d’utilisateur et votre rôle, informations utiles au support. Le nom d’utilisateur, identifiant de connexion, ne se modifie pas ici." }
     ]
   },
   {
     "key": "platform-settings",
-    "title": "Paramètres plateforme",
+    "title": "Paramètres de la plateforme",
     "description": "Administrez les secrets partagés, jetons d’enregistrement et quality gates de la plateforme.",
     "icon": "tune",
     "sections": [
-      { "title": "Général", "content": "Les paramètres généraux contrôlent les comportements globaux exposés par cette version. Enregistrez chaque groupe après modification et vérifiez les composants qui le consomment." },
+      { "title": "Général", "content": "Les paramètres généraux contrôlent les comportements globaux exposés par cette version. Chaque ligne a son propre bouton Enregistrer ; vérifiez ensuite les composants qui consomment le réglage modifié." },
       { "title": "Secrets", "content": "Ajoutez ou mettez à jour une clé secrète partagée. Les valeurs sont protégées et peuvent être affichées temporairement selon les droits. Supprimer un secret peut interrompre une intégration ; identifiez ses consommateurs avant confirmation." },
       { "title": "Jetons d’enregistrement", "content": "Générez un jeton pour enrôler un agent, copiez-le pendant qu’il est disponible et surveillez expiration et utilisation. Révoquez les jetons inutiles ou exposés." },
       { "title": "Quality gates", "content": "Configurez les seuils globaux proposés aux analyses et pipelines. Les règles plus spécifiques peuvent compléter ou remplacer ces valeurs selon leur portée." }
@@ -417,11 +434,39 @@
     "description": "Point d’entrée des fonctions réservées aux administrateurs de la plateforme.",
     "icon": "admin_panel_settings",
     "sections": [
-      { "title": "Identités et accès", "content": "Utilisateurs, Organisations et Rôles gèrent comptes, appartenance, propriété des ressources et permissions effectives." },
-      { "title": "Supervision et conformité", "content": "Journal d’audit vérifie les actions et l’intégrité de chaîne. Logs système aide au diagnostic. Tableaux de bord configure la vue d’accueil partagée." },
-      { "title": "Intégrations", "content": "Règles de notification, Profils de runners IA, Flux de paquets, Registre de paquets et Plugins configurent les services transverses." },
-      { "title": "Plateforme et API", "content": "Paramètres plateforme regroupe secrets, jetons d’enregistrement et quality gates. Référence API expose le contrat OpenAPI du backend actif." },
+      { "title": "Page d’accueil", "content": "La page Administration présente une tuile par entrée du menu Administration, en trois groupes (Utilisateurs et accès, Supervision, Plateforme). Chaque tuile reprend l’icône du menu et une courte description, et mène à sa page." },
+      { "title": "Utilisateurs et accès", "content": "Utilisateurs, Organisations et Rôles gèrent identités et accès : comptes, appartenance, propriété des ressources et permissions effectives. Les trois pages partagent une seule recherche." },
+      { "title": "Supervision", "content": "Journaux d’audit vérifie les actions et l’intégrité de chaîne. Journaux système aide au diagnostic. Performance mesure les temps de réponse de l’API. Règles de notification configure les canaux et règles d’envoi." },
+      { "title": "Plateforme et API", "content": "Paramètres de la plateforme regroupe secrets, jetons d’enregistrement et quality gates. Profils d’exécuteur IA, Flux de paquets, Registre de paquets et Extensions configurent les intégrations transverses. Tableaux de bord configure la vue d’accueil partagée et Référence API expose le contrat OpenAPI du backend actif." },
       { "title": "Contrôle d’accès", "content": "Le menu Administration n’est visible qu’aux administrateurs. Chaque écran applique en plus ses propres contrôles et confirmations ; l’aide ne confère aucun droit supplémentaire." }
+    ]
+  },
+  {
+    "key": "supervision",
+    "title": "Supervision",
+    "description": "Toutes les applications supervisées des projets auxquels vous avez accès, puis, dans chaque projet, leur disponibilité, leur télémétrie et leur ingestion.",
+    "icon": "monitor_heart",
+    "sections": [
+      { "title": "Une liste pour tous les projets", "content": "**Supervision**, entrée du menu latéral sous Projets, rassemble les applications surveillées de tous les projets que vous pouvez lire. Ouvrez-en une pour arriver sur la page Supervision de son projet, déjà positionnée sur cette application. La liste est filtrée par vos droits côté serveur." },
+      { "title": "Totaux", "content": "Au-dessus de la liste, des tuiles additionnent toutes les applications visibles : nombre d’applications (en ligne, en alerte), visiteurs actuels, visiteurs uniques du jour, de la semaine et du mois, sessions et pages vues du mois. Les tuiles d’audience n’apparaissent que si au moins une application mesure son audience. C’est une somme par application : une personne qui visite deux applications compte une fois dans chacune." },
+      { "title": "Statut et personnes en ligne", "content": "Le statut vient de la sonde de disponibilité : disponible, dégradé, indisponible ou inconnu, et « Depuis » indique son dernier changement. Les personnes en ligne n’apparaissent que pour les applications dont l’analytique web est active ; la colonne est masquée si aucune ne l’a." },
+      { "title": "Dernier événement", "content": "Le dernier événement est la télémétrie la plus récente reçue de l’application, traces, métriques, journaux ou analytique web. « Jamais » signifie que rien n’est jamais arrivé : l’application n’est pas configurée pour remonter ses données. Une date ancienne sur une application disponible signifie qu’elle a remonté puis s’est arrêtée, ce qui désigne en général un déploiement qui ne transmet plus ses réglages de télémétrie." },
+      { "title": "Applications d’un projet", "content": "Dans un projet, la section Supervision liste ses applications : statut, nom, URL de sonde, serveur hôte, disponibilité sur 24 h (barres vertes en ligne, rouges hors ligne) et sur 7 jours, temps de réponse. Le serveur hôte est celui choisi à l’enregistrement ; sinon, quand Aetheus le déduit des hôtes virtuels Apache de la flotte, il est nommé avec la mention « sonde backend » et mène à sa page. « Hors flotte (sonde backend) » signifie qu’aucun serveur n’a été trouvé." },
+      { "title": "Télémétrie", "content": "Sous la liste, choisissez une application pour ses onglets Visiteurs, Pages les plus vues (toutes les routes du mois), Performance, Journaux, Erreurs et Ingestion. Performance remplace l’ancien onglet Métriques : une vue générale (routes mesurées, requêtes, route la plus lente au p95), le tableau par route (appels, p50, p95, p99, maximum) sur les 24 dernières heures de l’application, puis **Explorer une métrique** à la demande. Ces temps viennent du paquet Aetheus.Telemetry 0.2.0 ou plus récent. Journaux et Erreurs s’exportent en Markdown selon les filtres et le tri. L’onglet Visiteurs commence par la date du dernier événement reçu, tenue à jour en direct ; un visiteur connecté est compté par son compte, quel que soit son appareil, et la page de connexion n’est pas mesurée." },
+      { "title": "Ingestion", "content": "L’onglet Ingestion gère la clé d’ingestion, la mesure d’audience et les seuils de métriques. La clé n’est affichée qu’une fois : copiez-la aussitôt. **Régénérer la clé** demande une confirmation, car la clé actuelle cesse immédiatement de fonctionner et chaque émetteur doit recevoir la nouvelle ; **Revenir** annule. **Révoquer** coupe la clé après confirmation. La toute première génération, sans clé à remplacer, agit directement." }
+    ]
+  },
+  {
+    "key": "performance",
+    "title": "Performance",
+    "description": "Le temps de réponse de l’API, route par route, et ce que ce navigateur a réellement attendu, pour mesurer avant de corriger.",
+    "icon": "speed",
+    "sections": [
+      { "title": "Ce que le serveur a mesuré", "content": "Chaque requête API est chronométrée par le serveur sur l’instrument même qu’exporte la télémétrie. Trois onglets, chacun avec sa propre adresse : « Appels les plus lents » liste les vingt requêtes les plus longues ; « Par route » donne le nombre d’appels, les 50e, 95e et 99e centiles et le maximum de chaque route ; « Ce navigateur » est décrit plus bas. Les routes sont affichées sous forme de gabarit : aucun identifiant ni valeur de requête n’est conservé." },
+      { "title": "La fenêtre", "content": "Les chiffres couvrent les 24 dernières heures de l’instance en cours. Après un redémarrage ou un déploiement, la fenêtre repart du démarrage de l’instance et la page indique depuis quand elle compte. Un plafond borne la mémoire ; quand il est atteint, les requêtes les plus anciennes sont écartées et la page le signale." },
+      { "title": "Ce navigateur", "content": "« Ce navigateur » liste les appels API les plus lents de votre session tels que vous les avez attendus, réseau et serveur ensemble, avec la taille de chaque réponse. Comparez avec les chiffres du serveur : un appel lent ici et rapide côté serveur désigne le réseau ou la taille de la réponse, pas le serveur." },
+      { "title": "Tout exporter en Markdown", "content": "**Tout exporter en Markdown** télécharge dans un seul fichier toutes les lignes brutes des trois tableaux, à faire lire par une IA. Le tableau du navigateur y contient tous les appels de la session, pas seulement les plus lents." },
+      { "title": "Applications supervisées", "content": "La même mesure par route existe pour chaque application supervisée qui utilise le paquet Aetheus.Telemetry 0.2.0 ou plus récent, télémétrie activée : ouvrez l’onglet Performance de sa télémétrie, dans la section Supervision de son projet. À partir de la version 1.0.0 du paquet, l’onglet dit depuis quand les requêtes sont comptées (la fenêtre couvre 24 heures au plus et repart à zéro au redémarrage de l’application) et une même route n’apparaît plus sous deux casses. Un p95 calculé sur moins de 20 appels, ou un p99 sur moins de 100, vaut le maximum : il est affiché en gris, comme un ordre de grandeur. Sous le tableau, « Tout exporter en .md » télécharge la fenêtre, les chiffres et toutes les routes." }
     ]
   }
 ]

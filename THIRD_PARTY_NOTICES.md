@@ -2,6 +2,15 @@
 
 This repository uses third-party packages under their respective licenses. Package versions are centrally declared in `Directory.Packages.props`. CI enforces vulnerability scans and project SPDX headers; the redistributed-dependency license inventory is reviewed manually and is not currently protected by a fail-closed CI guard.
 
+## OmniEurope.Blazor
+
+- Component: `OmniEurope.Blazor`
+- Purpose: component library for the maintained Blazor WebAssembly interface
+- License: EUPL-1.2
+- Source: nuget.org package `OmniEurope.Blazor` (version pinned in `Directory.Packages.props`)
+
+The OmniEurope.Blazor source and redistributed assets remain under EUPL-1.2.
+
 ## NetArchTest.Rules
 
 - Package: `NetArchTest.Rules` 1.3.2
@@ -11,6 +20,15 @@ This repository uses third-party packages under their respective licenses. Packa
 - Compliance note: the NuGet package metadata does not expose a license expression, so this local inventory records the upstream repository license explicitly.
 
 The upstream copyright and MIT license text apply to NetArchTest.Rules. No project code is relicensed by this notice.
+
+## DnsClient
+
+- Package: `DnsClient` 1.8.0
+- Purpose: TXT, MX, A/AAAA and PTR lookups for the mail DNS verification and diagnostics of the backend
+- License: Apache-2.0 (NuGet license expression)
+- Upstream: `MichaCo/DnsClient.NET`
+
+The upstream copyright and Apache-2.0 license apply to DnsClient. No project code is relicensed by this notice.
 
 ## External analysis tools
 

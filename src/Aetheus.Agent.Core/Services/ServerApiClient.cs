@@ -86,6 +86,12 @@ public sealed class ServerApiClient(
             ct).ConfigureAwait(false);
     }
 
+    public async Task ReportObservedPortsAsync(
+        int serverId, ObservedPortsReportDto report, CancellationToken ct = default)
+    {
+        await PostAsync($"api/servers/{serverId}/ports/observed", report, ct).ConfigureAwait(false);
+    }
+
     public async Task ReportBackupResultAsync(int runId, BackupExecuteResultDto result, CancellationToken ct = default)
     {
         await PostAsync($"api/backups/runs/{runId}/result", result, ct).ConfigureAwait(false);
@@ -116,6 +122,15 @@ public sealed class ServerApiClient(
 
     public async Task<PipelineArtifactDto?> UploadArtifactAsync(int runId, string name, string? stageName, Stream zipContent, CancellationToken ct = default)
     {
+        // Past the threshold a single request cannot carry the artifact, and the old answer was to
+        // split it into four separately named artifacts reassembled by `cat` in three YAML files.
+        // Parts keep it one artifact, with a digest per part and one for the whole.
+        if (zipContent.CanSeek
+            && zipContent.Length - zipContent.Position > ArtifactChunkPlan.ChunkThresholdBytes)
+        {
+            return await UploadArtifactInPartsAsync(runId, name, stageName, zipContent, ct).ConfigureAwait(false);
+        }
+
         // Transfer client: no retry (the stream is partially consumed on failure) and a
         // timeout sized for multi-hundred-MB uploads, unlike the 30s RPC pipeline.
         using var client = httpClientFactory.CreateClient("AetheusServerTransfer");
@@ -134,6 +149,83 @@ public sealed class ServerApiClient(
         await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<PipelineArtifactDto>(JsonOptions, ct).ConfigureAwait(false);
     }
+
+    /// <summary>How many times one part is re-sent before the upload is abandoned. A part is the
+    /// unit of retry precisely so a network cut does not cost the whole gigabyte.</summary>
+    private const int PartAttempts = 3;
+
+    private async Task<PipelineArtifactDto?> UploadArtifactInPartsAsync(
+        int runId, string name, string? stageName, Stream content, CancellationToken ct)
+    {
+        var plan = await ArtifactChunkPlan.BuildAsync(content, ct).ConfigureAwait(false);
+        using var client = httpClientFactory.CreateClient("AetheusServerTransfer");
+
+        var query = $"name={Uri.EscapeDataString(name)}";
+        if (!string.IsNullOrEmpty(stageName)) query += $"&stageName={Uri.EscapeDataString(stageName)}";
+
+        using var beginResponse = await client.PostAsync(
+            $"api/artifacts/upload/{runId}/begin?{query}&totalParts={plan.Chunks.Count}&sha256={plan.Sha256}",
+            content: null, ct).ConfigureAwait(false);
+        await EnsureSuccessAsync(beginResponse, ct).ConfigureAwait(false);
+        var session = await beginResponse.Content
+            .ReadFromJsonAsync<ChunkedUploadSessionDto>(JsonOptions, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server accepted the upload but returned no session.");
+
+        try
+        {
+            foreach (var chunk in plan.Chunks)
+                await SendPartAsync(client, runId, session.UploadId, content, chunk, ct).ConfigureAwait(false);
+
+            using var complete = await client.PostAsync(
+                $"api/artifacts/upload/{runId}/complete/{session.UploadId}?{query}", content: null, ct)
+                .ConfigureAwait(false);
+            await EnsureSuccessAsync(complete, ct).ConfigureAwait(false);
+            return await complete.Content.ReadFromJsonAsync<PipelineArtifactDto>(JsonOptions, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Abandon rather than leave a gigabyte of parts for the 24h sweeper to find. Best-effort:
+            // the failure being reported is the one that matters, not this cleanup.
+            try
+            {
+                using var _ = await client.DeleteAsync(
+                    $"api/artifacts/upload/{runId}/{session.UploadId}", CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception cleanup) when (cleanup is HttpRequestException or TaskCanceledException) { } // best-effort abandon; the original failure is rethrown below
+            throw;
+        }
+    }
+
+    private static async Task SendPartAsync(
+        HttpClient client, int runId, string uploadId, Stream content, ArtifactChunk chunk, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                // A fresh window per attempt: the previous one was partially consumed, which is
+                // exactly why the single-request upload could not be retried at all.
+                using var window = new ArtifactChunkStream(content, chunk);
+                using var body = new StreamContent(window);
+                body.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+                using var response = await client.PostAsync(
+                    $"api/artifacts/upload/{runId}/part/{uploadId}/{chunk.Index}?sha256={chunk.Sha256}",
+                    body, ct).ConfigureAwait(false);
+                await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (attempt < PartAttempts && ex is HttpRequestException or IOException)
+            {
+                // Only transport failures are retried. A 4xx means the server refused these bytes,
+                // and re-sending the same bytes would be refused the same way.
+                await Task.Delay(TimeSpan.FromSeconds(attempt * 2), ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>What <c>begin</c> returns. Only the id is used; the rest is the server's echo of what
+    /// it recorded, kept out of the agent so the two do not have to agree on more than they must.</summary>
+    private sealed record ChunkedUploadSessionDto(string UploadId);
 
     public async Task<Stream?> DownloadArtifactAsync(int artifactId, int deployRunId, CancellationToken ct = default)
     {
@@ -296,6 +388,23 @@ public sealed class ServerApiClient(
     public async Task<Dictionary<int, string>> GetTaskStatusesAsync(List<int> taskIds, CancellationToken ct = default)
     {
         return await PostAsync<Dictionary<int, string>>("api/tasks/statuses", taskIds, ct).ConfigureAwait(false) ?? new();
+    }
+
+    public async Task<IReadOnlyList<string>?> GetActiveWorkspaceSlotsAsync(CancellationToken ct = default)
+    {
+        // Null on any failure: the reaper deletes nothing rather than guess that no run is alive.
+        try
+        {
+            using var client = httpClientFactory.CreateClient("AetheusServer");
+            using var response = await client.GetAsync("api/pipelines/runs/active-workspaces", ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content
+                .ReadFromJsonAsync<List<string>>(JsonOptions, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return null;
+        }
     }
 
     public async Task<List<AppProbeConfigDto>> GetAppProbesAsync(CancellationToken ct = default)

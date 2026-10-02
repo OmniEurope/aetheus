@@ -18,6 +18,7 @@ public sealed class HeartbeatService(
     IRkhunterCollector rkhunterCollector,
     ISecurityUpdatesCollector securityUpdatesCollector,
     IFirewallCollector firewallCollector,
+    IListeningPortsCollector listeningPortsCollector,
     ISudoersHashCollector sudoersHashCollector,
     IDockerStorageMaintenance dockerStorageMaintenance,
     IShellRunner shell,
@@ -65,6 +66,10 @@ public sealed class HeartbeatService(
         SlowInventoryTtl, securityUpdatesCollector.CollectAsync, timeProvider, static () => new SecurityUpdatesDataDto(), logger, "security updates");
     private readonly CachedCollector<FirewallDataDto> _firewallCache = new(
         SlowInventoryTtl, firewallCollector.CollectAsync, timeProvider, static () => new FirewallDataDto(), logger, "firewall");
+    // PLAN-005 lot 2: same slow-inventory rhythm as the other module probes. The on-demand scan
+    // (OperationKind.PortsObserve) is what an operator uses when that period is too long to wait.
+    private readonly CachedCollector<List<ObservedPortDto>> _listeningPortsCache = new(
+        SlowInventoryTtl, listeningPortsCollector.CollectAsync, timeProvider, static () => [], logger, "listening ports");
     private readonly CachedCollector<Dictionary<string, string>> _sudoersCache = new(
         SlowInventoryTtl, sudoersHashCollector.CollectAsync, timeProvider, static () => new Dictionary<string, string>(), logger, "sudoers");
     private readonly CachedCollector<bool> _dockerAvailableCache = new(
@@ -78,8 +83,13 @@ public sealed class HeartbeatService(
     private readonly CachedCollector<List<string>> _scannerDiagnosticsCache = new(
         SlowInventoryTtl, ct => ScannerCapabilityProbe.CollectAsync(shell, options.Value.WorkDirectory, timeProvider, ct),
         timeProvider, static () => [], logger, "scanner capability diagnostics");
+    // Recette R2-015: off the heartbeat path. `docker system df` and the recursive directory sizes take
+    // longer than the collection budget during builds, which made every beat time out, cancel the
+    // measurement, start it again on the next beat and report "timed out" / "quarantined" each time.
+    // The refresh now runs in the background on its own, longer rhythm, is never cancelled by the beat
+    // budget, and the beat reports the last completed measurement (its CollectedAtUtc says how old).
     private readonly CachedCollector<StorageDiagnosticsDto> _storageDiagnosticsCache = new(
-        SlowInventoryTtl, dockerStorageMaintenance.CollectDiagnosticsAsync, timeProvider,
+        AgentRuntimeDefaults.StorageDiagnosticsTtl, dockerStorageMaintenance.CollectDiagnosticsAsync, timeProvider,
         static () => new StorageDiagnosticsDto(), logger, "storage diagnostics");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -100,8 +110,42 @@ public sealed class HeartbeatService(
         if (stoppingToken.IsCancellationRequested)
             return;
 
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        while (await WaitForNextBeatAsync(timer, stoppingToken).ConfigureAwait(false))
             await TryCollectAndSendHeartbeatAsync(stoppingToken).ConfigureAwait(false);
+    }
+
+    // The timer accepts one waiter at a time, so a tick wait cut short by a request is kept for the
+    // next iteration instead of being started again.
+    private Task<bool>? _pendingTick;
+
+    /// <summary>
+    /// The next beat is due at the timer's tick, or at once when a finished service action asked for one
+    /// (<see cref="AgentRuntimeHealth.RequestHeartbeat"/>, recette R-508).
+    /// </summary>
+    private async Task<bool> WaitForNextBeatAsync(PeriodicTimer timer, CancellationToken stoppingToken)
+    {
+        _pendingTick ??= timer.WaitForNextTickAsync(stoppingToken).AsTask();
+        using var requestWait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var requested = runtimeHealth.WaitForHeartbeatRequestAsync(requestWait.Token);
+        if (await Task.WhenAny(_pendingTick, requested).ConfigureAwait(false) == requested)
+        {
+            await requested.ConfigureAwait(false);
+            return true;
+        }
+
+        await requestWait.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await requested.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The abandoned wait for a request: the tick came first.
+        }
+
+        var ticked = await _pendingTick.ConfigureAwait(false);
+        _pendingTick = null;
+        return ticked;
     }
 
     private async Task<bool> TryCollectAndSendHeartbeatAsync(CancellationToken stoppingToken)
@@ -140,17 +184,19 @@ public sealed class HeartbeatService(
         var rkhunterTask = _rkhunterCache.GetAsync(collectorToken);
         var securityUpdatesTask = _securityUpdatesCache.GetAsync(collectorToken);
         var firewallTask = _firewallCache.GetAsync(collectorToken);
+        var listeningPortsTask = _listeningPortsCache.GetAsync(collectorToken);
         var sudoersTask = _sudoersCache.GetAsync(collectorToken);
         var dockerAvailableTask = _dockerAvailableCache.GetAsync(collectorToken);
         var pipelineRunnerAvailableTask = _pipelineRunnerAvailableCache.GetAsync(collectorToken);
         var deploymentAvailableTask = _deploymentAvailableCache.GetAsync(collectorToken);
         var capDiagnosticsTask = _capDiagnosticsCache.GetAsync(collectorToken);
         var scannerDiagnosticsTask = _scannerDiagnosticsCache.GetAsync(collectorToken);
-        var storageDiagnosticsTask = _storageDiagnosticsCache.GetAsync(collectorToken);
+        // Stopping token, not the collector token: the beat neither waits for this refresh nor cancels it.
+        var storageDiagnosticsTask = _storageDiagnosticsCache.GetAsync(ct);
         var allCollectors = Task.WhenAll(
             servicesTask, dockerTask, apacheTask, certbotTask, mailTask, teamspeakTask,
-            portsentryTask, rkhunterTask, securityUpdatesTask, firewallTask, sudoersTask,
-            dockerAvailableTask, pipelineRunnerAvailableTask, capDiagnosticsTask, scannerDiagnosticsTask, storageDiagnosticsTask);
+            portsentryTask, rkhunterTask, securityUpdatesTask, firewallTask, listeningPortsTask, sudoersTask,
+            dockerAvailableTask, pipelineRunnerAvailableTask, capDiagnosticsTask, scannerDiagnosticsTask);
         allCollectors = Task.WhenAll(allCollectors, deploymentAvailableTask);
 
         var timeoutTask = Task.Delay(_collectionTimeout, timeProvider, ct);
@@ -173,7 +219,7 @@ public sealed class HeartbeatService(
             capDiagnosticsTask, _capDiagnosticsCache.LastValueOr(new List<string>()));
         if (!collectorsCompleted)
         {
-            capabilityDiagnostics = [.. capabilityDiagnostics, "Heartbeat inventory collection timed out; cached or partial data reported"];
+            capabilityDiagnostics = [.. capabilityDiagnostics, HeartbeatCollectionDiagnostics.CollectionTimedOut];
         }
         var quarantinedCollectors = GetQuarantinedCollectorNames();
         if (quarantinedCollectors.Count > 0)
@@ -181,7 +227,7 @@ public sealed class HeartbeatService(
             capabilityDiagnostics =
             [
                 .. capabilityDiagnostics,
-                $"Heartbeat collectors quarantined: {string.Join(", ", quarantinedCollectors)}"
+                HeartbeatCollectionDiagnostics.Quarantined(quarantinedCollectors)
             ];
         }
 
@@ -227,13 +273,20 @@ public sealed class HeartbeatService(
             SecurityUpdates = CompletedValueOr(
                 securityUpdatesTask, _securityUpdatesCache.LastValueOr(new SecurityUpdatesDataDto())),
             Firewall = CompletedValueOr(firewallTask, _firewallCache.LastValueOr(new FirewallDataDto())),
+            // Reported only when this beat's scan actually completed. Falling back to the cached list
+            // would restate an old scan as a fresh one, and the backend replaces the whole observed
+            // source with what it receives - stale data would read as "these ports are listening now".
+            ObservedPorts = listeningPortsTask.Status == TaskStatus.RanToCompletion
+                ? listeningPortsTask.Result
+                : [],
+            ObservedPortsAvailable = listeningPortsTask.Status == TaskStatus.RanToCompletion,
             SudoersHashes = sudoersHashes,
             SudoersInventoryAvailable = _sudoersCache.HasValue,
             CapabilityDiagnostics = capabilityDiagnostics,
             ScannerCapabilities = EnsureScannerManifestIdentity(CompletedValueOr(
                 scannerDiagnosticsTask, _scannerDiagnosticsCache.LastValueOr(new List<string>()))),
-            StorageDiagnostics = CompletedValueOr(
-                storageDiagnosticsTask, _storageDiagnosticsCache.LastValueOr(new StorageDiagnosticsDto()))
+            StorageDiagnostics = WithLiveBuildState(CompletedValueOr(
+                storageDiagnosticsTask, _storageDiagnosticsCache.LastValueOr(new StorageDiagnosticsDto())))
         };
 
         var response = await apiClient.SendHeartbeatAsync(agentState.ServerId!.Value, heartbeat, ct).ConfigureAwait(false);
@@ -285,6 +338,16 @@ public sealed class HeartbeatService(
     private static T CompletedValueOr<T>(Task<T> task, T fallback) =>
         task.Status == TaskStatus.RanToCompletion ? task.Result : fallback;
 
+    // The measured sizes may be minutes old; the build state must not be, because the backend raises
+    // the deployment-only build alert from it. It costs nothing to read, so every beat reads it live.
+    private StorageDiagnosticsDto WithLiveBuildState(StorageDiagnosticsDto measured) => measured with
+    {
+        BuilderName = dockerStorageMaintenance.BuilderName,
+        DeploymentOnly = dockerStorageMaintenance.DeploymentOnly,
+        BuildActive = dockerStorageMaintenance.BuildActive,
+        LastBuildAttemptAtUtc = dockerStorageMaintenance.LastBuildAttemptAtUtc
+    };
+
     private static List<string> EnsureScannerManifestIdentity(IEnumerable<string> diagnostics)
     {
         var reported = diagnostics.ToList();
@@ -312,8 +375,7 @@ public sealed class HeartbeatService(
             ("docker availability", _dockerAvailableCache.IsCollectionInFlight),
             ("pipeline runner", _pipelineRunnerAvailableCache.IsCollectionInFlight),
             ("capability diagnostics", _capDiagnosticsCache.IsCollectionInFlight),
-            ("scanner capability diagnostics", _scannerDiagnosticsCache.IsCollectionInFlight),
-            ("storage diagnostics", _storageDiagnosticsCache.IsCollectionInFlight)
+            ("scanner capability diagnostics", _scannerDiagnosticsCache.IsCollectionInFlight)
         ];
         return collectors.Where(collector => collector.InFlight).Select(collector => collector.Name).ToList();
     }

@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -31,6 +29,27 @@ public class AdministrationTests : BunitContext
         Assert.Contains("AuditLogs", cut.Markup);
         Assert.Contains("Plugins", cut.Markup);
         Assert.Contains("Dashboards", cut.Markup);
+    }
+
+    /// <summary>Recette R-456: one tile per page of the side menu's Administration group, none missing,
+    /// with the icon that menu gives it, and a description under each title.</summary>
+    [Fact]
+    public void Tiles_MatchTheAdministrationMenu_PageForPageAndIconForIcon()
+    {
+        var navMenu = File.ReadAllText(Path.Combine(Architecture.RepositoryScan.Root, "src", "Aetheus.Front", "Layout", "NavMenu.razor"));
+        var menu = System.Text.RegularExpressions.Regex
+            .Matches(navMenu, @"Icon=""@IconFor\(""(?<icon>[a-z_]+)""\)"" Href=""(?<href>admin/[a-z-]+)""")
+            .ToDictionary(match => "/" + match.Groups["href"].Value, match => match.Groups["icon"].Value);
+        var tiles = Administration.Groups.SelectMany(group => group.Tiles).ToList();
+
+        Assert.True(menu.Count >= 14, $"Only {menu.Count} administration menu entries read: the scan is broken.");
+        Assert.Equal(menu.Keys.Order(), tiles.Select(tile => tile.Href).Order());
+        Assert.All(tiles, tile => Assert.Equal(menu[tile.Href], tile.Icon));
+
+        SetupDefaultResponses();
+        var cut = Render<Administration>();
+        Assert.Equal(tiles.Count, cut.FindAll("a.admin-tile-link .omni-settings-tile").Count);
+        Assert.Equal(tiles.Count, cut.FindAll("a.admin-tile-link .omni-settings-hint").Count);
     }
 
     [Fact]

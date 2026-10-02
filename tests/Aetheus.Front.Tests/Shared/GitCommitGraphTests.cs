@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -35,6 +33,28 @@ public class GitCommitGraphTests : BunitContext
         Assert.Contains("main", cut.Markup);
         Assert.Contains("feature work", cut.Markup);
         Assert.Contains("init", cut.Markup);
+    }
+
+    [Fact]
+    public void EachSha_LinksToItsCommitPage_WhenTheRepositoryIsKnown()
+    {
+        // Recette R-373: the short SHA is the link to the commit.
+        var cut = Render<GitCommitGraph>(p => p.Add(c => c.Commits, Chain()).Add(c => c.RepoId, 4));
+
+        var links = cut.FindAll(".git-graph-sha a.short-id__text");
+        Assert.Equal(
+            ["/git-repositories/4/commits/ccc333", "/git-repositories/4/commits/bbb222", "/git-repositories/4/commits/aaa111"],
+            links.Select(link => link.GetAttribute("href")));
+        Assert.Equal("ccc333", links[0].TextContent);
+    }
+
+    [Fact]
+    public void WithoutARepository_TheShaStaysText()
+    {
+        var cut = Render<GitCommitGraph>(p => p.Add(c => c.Commits, Chain()));
+
+        Assert.Empty(cut.FindAll(".git-graph-sha a"));
+        Assert.Equal(3, cut.FindAll(".git-graph-sha .short-id__text").Count);
     }
 
     [Fact]

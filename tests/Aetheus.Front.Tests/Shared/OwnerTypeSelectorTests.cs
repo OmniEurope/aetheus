@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 
@@ -147,7 +145,10 @@ public class OwnerTypeSelectorTests : BunitContext
             .GetField("_kind", Priv)!
             .GetValue(cut.Instance)!;
         Assert.Equal(OwnerTypeSelector.OwnerKind.Project, kind);
-        Assert.Single(cut.FindAll(".rz-dropdown"));
+        Assert.Single(cut.FindAll(".omni-drop-down"));
+
+        cut.Find(".omni-drop-down").Change("1");
+        Assert.Equal(2, projectId);
     }
 
     [Fact]

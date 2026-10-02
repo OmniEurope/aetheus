@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Docker;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 

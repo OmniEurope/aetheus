@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Resources;
-using Aetheus.Front.Services;
-using Bunit;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests;
 
 public class NotifyHelperTests
 {
-    private readonly NotificationService _notification = new();
+    private readonly OmniOverlayService _overlay = new(new FakeTimeProvider());
     private readonly IStringLocalizer<AppStrings> _localizer = Substitute.For<IStringLocalizer<AppStrings>>();
     private readonly NotifyHelper _sut;
 
@@ -22,7 +20,7 @@ public class NotifyHelperTests
             .Returns(ci => new LocalizedString((string)ci[0], (string)ci[0]));
         _localizer[Arg.Any<string>(), Arg.Any<object[]>()]
             .Returns(ci => new LocalizedString((string)ci[0], (string)ci[0]));
-        _sut = new NotifyHelper(_notification, _localizer);
+        _sut = new NotifyHelper(_overlay, _localizer);
     }
 
     [Fact]
@@ -30,8 +28,8 @@ public class NotifyHelperTests
     {
         _sut.Success("SuccessTitle", "SuccessMessage");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Success, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Success, msg.Severity);
         Assert.Equal("SuccessTitle", msg.Summary);
         Assert.Equal("SuccessMessage", msg.Detail);
     }
@@ -41,8 +39,8 @@ public class NotifyHelperTests
     {
         _sut.Success("SuccessTitle", "Value {0}", "arg1");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Success, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Success, msg.Severity);
         Assert.Equal("Value arg1", msg.Detail);
     }
 
@@ -51,8 +49,8 @@ public class NotifyHelperTests
     {
         _sut.Error("ErrorTitle", "ErrorMessage");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Error, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Danger, msg.Severity);
         Assert.Equal("ErrorTitle", msg.Summary);
         Assert.Equal("ErrorMessage", msg.Detail);
     }
@@ -62,8 +60,8 @@ public class NotifyHelperTests
     {
         _sut.Error("ErrorTitle", "{0} then {1}", "arg1", "arg2");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Error, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Danger, msg.Severity);
         Assert.Equal("arg1 then arg2", msg.Detail);
     }
 
@@ -72,8 +70,8 @@ public class NotifyHelperTests
     {
         _sut.Info("InfoTitle", "InfoMessage");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Info, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Info, msg.Severity);
         Assert.Equal("InfoTitle", msg.Summary);
         Assert.Equal("InfoMessage", msg.Detail);
     }
@@ -83,8 +81,8 @@ public class NotifyHelperTests
     {
         _sut.Info("InfoTitle", "Raw info message");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Info, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Info, msg.Severity);
         Assert.Equal("Raw info message", msg.Detail);
     }
 
@@ -93,8 +91,8 @@ public class NotifyHelperTests
     {
         _sut.Warning("WarnTitle", "WarnMessage");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Warning, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Warning, msg.Severity);
         Assert.Equal("WarnTitle", msg.Summary);
         Assert.Equal("WarnMessage", msg.Detail);
     }
@@ -104,18 +102,22 @@ public class NotifyHelperTests
     {
         _sut.Warning("WarnTitle", "{0}-{1}", "a", "b");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Warning, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Warning, msg.Severity);
         Assert.Equal("a-b", msg.Detail);
     }
 
-    [Fact]
-    public void Notify_WithSeverityTitleAndRawMessage_HonorsSeverity()
+    [Theory]
+    [InlineData(OmniSeverity.Info)]
+    [InlineData(OmniSeverity.Success)]
+    [InlineData(OmniSeverity.Warning)]
+    [InlineData(OmniSeverity.Danger)]
+    public void Notify_WithOmniSeverity_HonorsSeverity(OmniSeverity severity)
     {
-        _sut.Notify(NotificationSeverity.Info, "Title", "Raw message");
+        _sut.Notify(severity, "Title", "Raw message");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Info, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(severity, msg.Severity);
         Assert.Equal("Title", msg.Summary);
         Assert.Equal("Raw message", msg.Detail);
     }
@@ -125,9 +127,10 @@ public class NotifyHelperTests
     {
         _sut.Success("SuccessSummary");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Success, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Success, msg.Severity);
         Assert.Equal("SuccessSummary", msg.Summary);
+        Assert.Equal(string.Empty, msg.Detail);
     }
 
     [Fact]
@@ -135,21 +138,9 @@ public class NotifyHelperTests
     {
         _sut.Error("ErrorSummary");
 
-        var msg = Assert.Single(_notification.Messages);
-        Assert.Equal(NotificationSeverity.Error, msg.Severity);
+        var msg = Assert.Single(_overlay.Toasts());
+        Assert.Equal(OmniSeverity.Danger, msg.Severity);
         Assert.Equal("ErrorSummary", msg.Summary);
-    }
-
-    [Fact]
-    public void Error_ForAdmin_AddsLogLinkContent()
-    {
-        using var context = new BunitContext();
-        BunitTestHelper.RegisterServices(context, isAdmin: true);
-        var helper = context.Services.GetRequiredService<NotifyHelper>();
-        var notifications = context.Services.GetRequiredService<NotificationService>();
-
-        helper.ErrorRaw("Failure", "Details", "request-42", reportClientError: false);
-
-        Assert.NotNull(Assert.Single(notifications.Messages).DetailContent);
+        Assert.Equal(string.Empty, msg.Detail);
     }
 }

@@ -2,20 +2,19 @@
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
-using Aetheus.Front.Shared;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using AngleSharp.Dom;
 using Bunit;
+using Bunit.Rendering;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Sections;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Shared;
 
 /// <summary>
 /// The three release actions that go through a dialog: triggering a build, promoting, and rolling
-/// back. All of them were unreachable in tests because the real Radzen dialog never completes under
+/// back. All of them were unreachable in tests because the real dialog never completes under
 /// bUnit, so the rules that matter were unprotected: a rollback must be refused outright when the
 /// preview says it cannot restore anything, and a promotion must not happen without a confirmation.
 /// </summary>
@@ -30,7 +29,7 @@ public sealed class ReleasesListActionTests : BunitContext
     {
         _handler = BunitTestHelper.RegisterServices(this);
         BunitTestHelper.UseImmediateDialogs(this);
-        _dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        _dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>
         {
             Items = [new ProjectDto { Id = 1, Name = "aetheus", Status = ProjectStatus.Active }],
@@ -72,7 +71,24 @@ public sealed class ReleasesListActionTests : BunitContext
         return cut;
     }
 
-    private static IElement Action(IRenderedComponent<ReleasesList> cut, string title) =>
+    /// <summary>
+    /// Recette R-218: inside a project the sync action is contributed to the host's header outlet,
+    /// so the list is rendered next to a <see cref="SectionOutlet"/> carrying that section name,
+    /// exactly as the project page hosts it.
+    /// </summary>
+    private IRenderedComponent<ContainerFragment> RenderInProjectHost(int projectId) =>
+        Render(builder =>
+        {
+            builder.OpenComponent<SectionOutlet>(0);
+            builder.AddAttribute(1, nameof(SectionOutlet.SectionName), PipelinesList.HeaderActionsSection);
+            builder.CloseComponent();
+            builder.OpenComponent<ReleasesList>(2);
+            builder.AddAttribute(3, nameof(ReleasesList.ProjectId), (int?)projectId);
+            builder.CloseComponent();
+        });
+
+    private static IElement Action<TComponent>(IRenderedComponent<TComponent> cut, string title)
+        where TComponent : IComponent =>
         cut.FindAll("button").First(button =>
             string.Equals(button.GetAttribute("title"), title, StringComparison.Ordinal));
 
@@ -254,18 +270,13 @@ public sealed class ReleasesListActionTests : BunitContext
     // ---------- refresh and sync ----------
 
     [Fact]
-    public void RefreshingReloadsTheGrid()
+    public void HasNoRefreshButton_TheListFollowsTheReleasesHub()
     {
+        // Recette R-181: the releases hub keeps the list current, so the Refresh button is gone.
         var cut = RenderList(Release());
-        var before = _handler.Requests.Count(request =>
-            request.Url.Contains("api/releases", StringComparison.Ordinal));
 
-        Action(cut, "Refresh").Click();
-
-        cut.WaitForAssertion(
-            () => Assert.True(_handler.Requests.Count(request =>
-                request.Url.Contains("api/releases", StringComparison.Ordinal)) > before),
-            TimeSpan.FromSeconds(2));
+        Assert.DoesNotContain(cut.FindAll("button"), button =>
+            button.GetAttribute("aria-label") == "Refresh" || button.GetAttribute("title") == "Refresh");
     }
 
     [Fact]
@@ -273,7 +284,7 @@ public sealed class ReleasesListActionTests : BunitContext
     {
         WireReleases(Release());
         _handler.SetJsonResponse(HttpMethod.Post, "api/releases/sync/1", new List<ReleaseDto> { Release(2, "1.1.0") });
-        var cut = Render<ReleasesList>(parameters => parameters.Add(list => list.ProjectId, 1));
+        var cut = RenderInProjectHost(1);
         cut.WaitForState(() => cut.Markup.Contains("1.0.0", StringComparison.Ordinal), TimeSpan.FromSeconds(2));
 
         Action(cut, "SyncReleases").Click();
@@ -286,12 +297,77 @@ public sealed class ReleasesListActionTests : BunitContext
     {
         WireReleases(Release());
         _handler.SetJsonResponse(HttpMethod.Post, "api/releases/sync/1", new List<ReleaseDto>());
-        var cut = Render<ReleasesList>(parameters => parameters.Add(list => list.ProjectId, 1));
+        var cut = RenderInProjectHost(1);
         cut.WaitForState(() => cut.Markup.Contains("1.0.0", StringComparison.Ordinal), TimeSpan.FromSeconds(2));
 
         Action(cut, "SyncReleases").Click();
 
         cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/releases/sync/1")), TimeSpan.FromSeconds(2));
         Assert.Contains("1.0.0", cut.Markup);
+    }
+    // ---------- PLAN-007: grade and redeploy ----------
+
+    [Fact]
+    public void AReleaseWithoutASealedGradeReadsNotQualified()
+    {
+        var cut = RenderList(
+            Release(id: 1, version: "c-sealed") with { AssuranceGrade = AnalysisGrade.C },
+            Release(id: 2, version: "c-fast"));
+
+        Assert.Equal("C", Assert.Single(cut.FindAll(".grade-badge")).TextContent.Trim());
+        Assert.Contains("ReleaseNotQualified", cut.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedeployingThePreviousDeploymentRunsTheDeployPipelineWithItsVersion()
+    {
+        _handler.SetJsonResponse(HttpMethod.Post, "api/pipelines/40/run", new PipelineRunDto { Id = 77, PipelineId = 40 });
+        _dialog.ConfirmResult = true;
+        var cut = RenderList(Release(id: 2, version: "c-previous", status: ReleaseStatus.Superseded) with
+        {
+            IsPreviousDeployment = true,
+            RedeployPipelineId = 40
+        });
+
+        Action(cut, "Redeploy").Click();
+
+        cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/pipelines/40/run")), TimeSpan.FromSeconds(2));
+        Assert.Equal("c-previous", LastBody<Dictionary<string, string>>("POST", "api/pipelines/40/run")["candidateVersion"]);
+    }
+
+    [Fact]
+    public void APreviousDeploymentTheGateWouldRefuseIsShownDisabled()
+    {
+        _dialog.ConfirmResult = true;
+        var cut = RenderList(Release(id: 2, version: "c-fast", status: ReleaseStatus.Superseded) with
+        {
+            IsPreviousDeployment = true
+        });
+
+        Assert.True(Action(cut, "RedeployUnavailable").HasAttribute("disabled"));
+        Assert.False(Sent("POST", "/run"));
+    }
+
+    /// <summary>PLAN-003 2.7: "Revenir à N-1" runs the project's revert pipeline, with no parameter:
+    /// the host knows which colour and release it kept in reserve.</summary>
+    [Fact]
+    public void TheLiveReleaseReturnsToNMinusOneThroughTheRevertPipeline()
+    {
+        _handler.SetJsonResponse(HttpMethod.Post, "api/pipelines/55/run", new PipelineRunDto { Id = 78, PipelineId = 55 });
+        _dialog.ConfirmResult = true;
+        var cut = RenderList(Release(id: 3, version: "c-live", status: ReleaseStatus.Deployed) with { RevertPipelineId = 55 });
+
+        Action(cut, "RevertToPrevious").Click();
+
+        cut.WaitForAssertion(() => Assert.True(Sent("POST", "api/pipelines/55/run")), TimeSpan.FromSeconds(2));
+        Assert.DoesNotContain("candidateVersion", LastBody<Dictionary<string, string>>("POST", "api/pipelines/55/run").Keys);
+    }
+
+    [Fact]
+    public void WithoutARevertPipelineTheLiveReleaseOffersNoQuickReturn()
+    {
+        var cut = RenderList(Release(id: 3, version: "c-live", status: ReleaseStatus.Deployed));
+
+        Assert.DoesNotContain("RevertToPrevious", cut.Markup, StringComparison.Ordinal);
     }
 }

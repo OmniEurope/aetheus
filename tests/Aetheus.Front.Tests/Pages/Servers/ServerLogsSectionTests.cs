@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -54,100 +51,123 @@ public class ServerLogsSectionTests : BunitContext
     }
 
     [Fact]
-    public void Page_InitiallyOne()
+    public void FirstBlock_AsksPageOneOfFifty()
     {
         var cut = RenderSection();
-        var page = (int)typeof(ServerLogsSection).GetField("_page", Priv)!.GetValue(cut.Instance)!;
-        Assert.Equal(1, page);
+        cut.WaitForState(() => cut.Markup.Contains("Build started"), TimeSpan.FromSeconds(2));
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("api/servers/1/logs", StringComparison.Ordinal)
+            && r.Url.Contains("page=1", StringComparison.Ordinal)
+            && r.Url.Contains("pageSize=50", StringComparison.Ordinal));
     }
 
     [Fact]
     public void Loading_InitiallyFalse()
     {
         var cut = RenderSection();
+        cut.WaitForState(() => cut.Markup.Contains("Build started"), TimeSpan.FromSeconds(2));
         var loading = (bool)typeof(ServerLogsSection).GetField("_loading", Priv)!.GetValue(cut.Instance)!;
         Assert.False(loading);
     }
 
+    /// <summary>The grid reads older entries block by block: the second block of 50 is page 2, and it
+    /// replaces the rows the section hands the grid for that block (replaces the former Load more button).</summary>
     [Fact]
-    public async Task LoadMoreAsync_IncrementsPageAndAppends()
+    public async Task LoadLogsAsync_SecondBlock_AsksPageTwo()
     {
         var cut = RenderSection();
-        cut.WaitForState(() =>
+        cut.WaitForState(() => cut.Markup.Contains("Build started"), TimeSpan.FromSeconds(2));
+        _handler.SetJsonResponse(HttpMethod.Get, "page=2", new PaginatedResult<TaskLogDto>
         {
-            var r = typeof(ServerLogsSection).GetField("_result", Priv)!.GetValue(cut.Instance);
-            return r is not null;
-        }, TimeSpan.FromSeconds(2));
+            Items = [new TaskLogDto { Id = 3, Message = "Deploy started", Level = TaskLogLevel.Info }],
+            TotalCount = 51
+        });
 
-        // Stub page-2 response
-        _handler.SetJsonResponse("api/servers/1/logs", MakeLogPage(
-            new TaskLogDto { Id = 3, Message = "Deploy started", Level = TaskLogLevel.Info }
-        ));
+        await cut.InvokeAsync(() => InvokeLoad(cut, new GridLoadArgs { Skip = 50, Top = 50 }));
 
-        var method = typeof(ServerLogsSection).GetMethod("LoadMoreAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-
-        var page = (int)typeof(ServerLogsSection).GetField("_page", Priv)!.GetValue(cut.Instance)!;
-        Assert.Equal(2, page);
-
-        var result = (PaginatedResult<TaskLogDto>?)typeof(ServerLogsSection)
-            .GetField("_result", Priv)!.GetValue(cut.Instance);
-        Assert.NotNull(result);
-        Assert.Equal(3, result!.Items.Count);
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("page=2", StringComparison.Ordinal));
+        var logs = (List<TaskLogDto>)typeof(ServerLogsSection).GetField("_logs", Priv)!.GetValue(cut.Instance)!;
+        Assert.Equal("Deploy started", Assert.Single(logs).Message);
+        Assert.Equal(51, (int)typeof(ServerLogsSection).GetField("_totalCount", Priv)!.GetValue(cut.Instance)!);
+        Assert.False((bool)typeof(ServerLogsSection).GetField("_loading", Priv)!.GetValue(cut.Instance)!);
     }
 
     [Fact]
-    public async Task LoadMoreAsync_SetsLoadingFalseAfterCompletion()
+    public async Task LoadLogsAsync_Failure_ShowsTheErrorAndARetryClearsIt()
     {
         var cut = RenderSection();
-        cut.WaitForState(() =>
-        {
-            var r = typeof(ServerLogsSection).GetField("_result", Priv)!.GetValue(cut.Instance);
-            return r is not null;
-        }, TimeSpan.FromSeconds(2));
+        cut.WaitForState(() => cut.Markup.Contains("Build started"), TimeSpan.FromSeconds(2));
+        _handler.SetResponse(HttpMethod.Get, "page=2", System.Net.HttpStatusCode.InternalServerError);
 
-        _handler.SetJsonResponse("api/servers/1/logs", MakeLogPage());
+        await cut.InvokeAsync(() => InvokeLoad(cut, new GridLoadArgs { Skip = 50, Top = 50 }));
 
-        var method = typeof(ServerLogsSection).GetMethod("LoadMoreAsync", Priv)!;
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+        Assert.True((bool)typeof(ServerLogsSection).GetField("_loadFailed", Priv)!.GetValue(cut.Instance)!);
+        cut.Render();
+        Assert.Contains("LoadFailed", cut.Markup);
 
-        var loading = (bool)typeof(ServerLogsSection).GetField("_loading", Priv)!.GetValue(cut.Instance)!;
-        Assert.False(loading);
-    }
-
-    [Fact]
-    public async Task LoadMoreAsync_FailureKeepsPageForRetry()
-    {
-        var cut = RenderSection();
-        cut.WaitForState(() => typeof(ServerLogsSection).GetField("_result", Priv)!.GetValue(cut.Instance) is not null);
-        _handler.SetResponse(
-            HttpMethod.Get,
-            "page=2",
-            System.Net.HttpStatusCode.InternalServerError);
-        var method = typeof(ServerLogsSection).GetMethod("LoadMoreAsync", Priv)!;
-
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-
-        Assert.Equal(1, (int)typeof(ServerLogsSection).GetField("_page", Priv)!.GetValue(cut.Instance)!);
-        Assert.True((bool)typeof(ServerLogsSection).GetField("_loadMoreError", Priv)!.GetValue(cut.Instance)!);
         _handler.SetJsonResponse(HttpMethod.Get, "page=2", MakeLogPage(
             new TaskLogDto { Id = 3, Message = "retry", Level = TaskLogLevel.Info }));
+        await cut.InvokeAsync(() => InvokeLoad(cut, new GridLoadArgs { Skip = 50, Top = 50 }));
 
-        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
-
-        Assert.Equal(2, (int)typeof(ServerLogsSection).GetField("_page", Priv)!.GetValue(cut.Instance)!);
-        Assert.False((bool)typeof(ServerLogsSection).GetField("_loadMoreError", Priv)!.GetValue(cut.Instance)!);
+        Assert.False((bool)typeof(ServerLogsSection).GetField("_loadFailed", Priv)!.GetValue(cut.Instance)!);
         Assert.Equal(2, _handler.Requests.Count(request => request.Url.Contains("page=2", StringComparison.Ordinal)));
     }
 
+    /// <summary>Recette R-210 / R-224: the level multi-select and the time range set in the headers reach
+    /// the API, so they narrow the whole log of the server and not only the loaded entries.</summary>
+    [Fact]
+    public async Task HeaderFilters_LevelAndTimeRange_ReachTheApi()
+    {
+        var cut = RenderSection();
+        cut.WaitForState(() => cut.Markup.Contains("Build started"), TimeSpan.FromSeconds(2));
+        var grid = cut.FindComponent<AetheusDataGrid<TaskLogDto>>().Instance.Grid!;
+        var levels = OmniDataGridFilterValues.Join(["Error", "Warning"]);
+
+        await cut.InvokeAsync(() => grid.SetFiltersAsync(new Dictionary<string, string?>
+        {
+            ["Level"] = levels,
+            ["Timestamp"] = OmniDataGridDateRange.Join("2026-09-01", "2026-09-02")
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/servers/1/logs", StringComparison.Ordinal)
+                && url.Contains("Field=Level", StringComparison.Ordinal)
+                && url.Contains("Operator=In", StringComparison.Ordinal)
+                && url.Contains(levels, StringComparison.Ordinal)
+                && url.Contains("Field=Timestamp", StringComparison.Ordinal)
+                && url.Contains("Operator=GreaterThanOrEqual", StringComparison.Ordinal);
+        }));
+    }
+
+    [Fact]
+    public async Task LoadLogsAsync_Sort_ReachesTheApi()
+    {
+        var cut = RenderSection();
+        cut.WaitForState(() => cut.Markup.Contains("Build started"), TimeSpan.FromSeconds(2));
+
+        await cut.InvokeAsync(() => InvokeLoad(cut, new GridLoadArgs
+        {
+            Skip = 0,
+            Top = 50,
+            Sorts = [new GridSortDescriptor("Level", GridSortOrder.Descending)]
+        }));
+
+        Assert.Contains(_handler.Requests, r => r.Url.Contains("sortBy=Level", StringComparison.Ordinal)
+            && r.Url.Contains("sortDescending=True", StringComparison.Ordinal));
+    }
+
+    private static Task InvokeLoad(IRenderedComponent<ServerLogsSection> cut, GridLoadArgs args) =>
+        (Task)typeof(ServerLogsSection).GetMethod("LoadLogsAsync", Priv)!.Invoke(cut.Instance, [args])!;
+
     [Theory]
-    [InlineData(TaskLogLevel.Error, BadgeStyle.Danger)]
-    [InlineData(TaskLogLevel.Warning, BadgeStyle.Warning)]
-    [InlineData(TaskLogLevel.Info, BadgeStyle.Info)]
-    public void GetLevelBadge_ReturnsExpected(TaskLogLevel level, BadgeStyle expected)
+    [InlineData(TaskLogLevel.Error, OmniTone.Danger)]
+    [InlineData(TaskLogLevel.Warning, OmniTone.Warning)]
+    [InlineData(TaskLogLevel.Info, OmniTone.Accent)]
+    public void GetLevelBadge_ReturnsExpected(TaskLogLevel level, OmniTone expected)
     {
         var method = typeof(ServerLogsSection).GetMethod("GetLevelBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)level])!;
+        var result = (OmniTone)method.Invoke(null, [(object)level])!;
         Assert.Equal(expected, result);
     }
 
@@ -155,7 +175,7 @@ public class ServerLogsSectionTests : BunitContext
     public void GetLevelBadge_UnknownLevel_ReturnsLight()
     {
         var method = typeof(ServerLogsSection).GetMethod("GetLevelBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)(TaskLogLevel)99])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(object)(TaskLogLevel)99])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 }

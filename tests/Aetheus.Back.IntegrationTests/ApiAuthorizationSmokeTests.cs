@@ -42,6 +42,11 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/releases")]
     [InlineData("/api/pipelines")]
     [InlineData("/api/pipelines/runs/1/checkpoint-resume-preview")]
+    [InlineData("/api/pipelines/runs/1/lineage")]
+    [InlineData("/api/pipelines/1/runs/1/stage-baselines")]
+    // PLAN-007 lot 7: PipelineApprovalsController is its own controller under /api/pipelines.
+    [InlineData("/api/pipelines/approvals/pending")]
+    [InlineData("/api/admin/performance")]
     [InlineData("/api/pipelines/templates")]
     [InlineData("/api/work-items")]
     [InlineData("/api/service-connections")]
@@ -50,11 +55,15 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/vaults")]
     [InlineData("/api/tasks")]
     [InlineData("/api/variable-libraries")]
+    // PLAN-005 lot 5: PortAllocationController is a distinct controller nested under a library, so the
+    // /api/variable-libraries literal above does not prove ITS [Authorize] is wired.
+    [InlineData("/api/variable-libraries/1/ports/servers")]
     [InlineData("/api/settings")]
     [InlineData("/api/environments")]
     [InlineData("/api/git/repos")]
     [InlineData("/api/git/connections")]
     [InlineData("/api/notifications/channels")]
+    [InlineData("/api/notifications/me/unread-count")]
     [InlineData("/api/auth/registration-tokens")]
     [InlineData("/api/agent/installer/linux")]
     [InlineData("/api/personal-access-tokens")]
@@ -86,6 +95,7 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/servers/1/apps")]
     [InlineData("/api/servers/1/modules")]
     [InlineData("/api/servers/1/configuration/export")]
+    [InlineData("/api/servers/1/ports")]
     public async Task ProtectedGetEndpoint_Anonymous_Returns401(string route)
     {
         using var client = fixture.CreateAnonymousClient();
@@ -106,12 +116,16 @@ public sealed class ApiAuthorizationSmokeTests(ApiSmokeFixture fixture)
     [InlineData("POST", "/api/vaults")]
     [InlineData("POST", "/api/environments")]
     [InlineData("POST", "/api/servers/1/docker/action")]
+    // ServerPortObservationController (PLAN-005 lot 2) is mutation-only: without this its [Authorize]
+    // is proven by no anonymous-rejection case, the GET facet being unable to see it.
+    [InlineData("POST", "/api/servers/1/ports/observe")]
     // CronController is mutation-only (no GET) - without these it would be invisible to the GET
     // coverage guard AND absent from any anonymous-rejection sweep.
     [InlineData("POST", "/api/servers/1/cron")]
     [InlineData("DELETE", "/api/servers/1/cron")]
     // ClientErrorsController is mutation-only too, and its single POST writes attacker-controlled text
     // straight into the server log - an anonymous caller must never reach it.
+    [InlineData("POST", "/api/pipelines/setup/readiness")]
     [InlineData("POST", "/api/client-errors")]
     [InlineData("PUT", "/api/users/1")]
     [InlineData("PUT", "/api/agent-pools/1")]

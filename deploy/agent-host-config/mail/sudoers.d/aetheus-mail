@@ -1,0 +1,13 @@
+# Aetheus Agent - mail setup + incremental management (S-FEAT-W8KN). Each helper is the security
+# boundary: root-owned, agent-non-writable, re-validates every argument, reads passwords from stdin.
+# noexec is intentionally omitted (the helpers must exec apt-get / postconf / postmap / systemctl /
+# doveadm / opendkim-genkey). mail-setup provisions one domain; mail-manage does the incremental ops.
+Cmnd_Alias AETHEUS_MAIL = #{MAIL_SETUP_HELPER_PATH}#
+Cmnd_Alias AETHEUS_MAIL_MANAGE = #{MAIL_MANAGE_HELPER_PATH}#
+Defaults!AETHEUS_MAIL timestamp_timeout=0
+Defaults!AETHEUS_MAIL env_reset
+Defaults!AETHEUS_MAIL secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults!AETHEUS_MAIL_MANAGE timestamp_timeout=0
+Defaults!AETHEUS_MAIL_MANAGE env_reset
+Defaults!AETHEUS_MAIL_MANAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_MAIL, AETHEUS_MAIL_MANAGE

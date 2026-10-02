@@ -1,0 +1,72 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Environments
+@using Microsoft.AspNetCore.Components.Sections
+@* Recette R-218/R-221: the create action sits on the title line (the host's page header), and the
+   column header filters replace the search row. *@
+@if (true)
+{
+    <SectionContent SectionName="@Aetheus.Front.Components.Shared.PipelinesList.HeaderActionsSection">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@NewEnvironment" Disabled="@(!_canWrite)" title="@(!_canWrite ? L["InsufficientPermissions"] : "")"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    </SectionContent>
+}
+
+<AetheusDataGrid @ref="_grid" TItem="EnvironmentDto" Data="@_environments"
+    Count="@_totalCount" PageSize="20" IsLoading="@_loading" LoadData="@OnLoadData"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<EnvironmentDto>(_environments, _totalCount))"
+    RowClick="@(env => Nav.NavigateTo($"/environments/{env.Id}"))"
+    EmptyText="@L["NoEnvironmentsFound"]" FullHeight="true">
+    <EmptyTemplate>
+        <EmptyState Icon="layers" Title="@L["NoEnvironmentsFound"]" Description="@L["EmptyEnvironmentsHint"]">
+            <ActionContent>
+                @if (_canWrite)
+                {
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@NewEnvironment"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                }
+            </ActionContent>
+        </EmptyState>
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="EnvironmentDto" Property="Name" Title="@L["Name"]" MinWidth="10rem" Filterable="true" >
+            <Template Context="env">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.None">
+                        <a href="/environments/@env.Id" class="pipeline-name-link">@env.Name</a>
+                        @if (!IsProjectScope && !string.IsNullOrEmpty(env.ProjectName))
+                        {
+                            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-m-0">@env.ProjectName</OmniText>
+                        }
+                    </OmniStack>
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="EnvironmentDto" Property="Type" Title="@L["Type"]" Width="140px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@TypeText" >
+            <Template Context="env">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@EnvironmentHelper.TypeStyle(env.Type)">@L.Localize(env.Type)</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="EnvironmentDto" Property="Description" Title="@L["Description"]" MinWidth="10rem" Filterable="true" />
+        <OmniDataGridColumn TItem="EnvironmentDto" Title="@L["Servers"]" Width="100px" TextAlign="OmniDataGridTextAlign.Center" Sortable="false" Filterable="false" >
+            <Template Context="env">
+                <CountBadge Value="@env.Servers.Count" Variant="OmniTone.Neutral" />
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="EnvironmentDto" Property="RequireApproval" Title="@L["Approval"]" Width="110px" TextAlign="OmniDataGridTextAlign.Center" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@YesNoText" >
+            <Template Context="env">
+                @if (env.RequireApproval)
+                {
+                    <OmniIcon Name="OmniIconName.CheckCircle" Class="omni-u-text-warning" />
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="EnvironmentDto" Property="UpdatedAt" Title="@L["Updated"]" FormatString="{0:g}" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+        <OmniDataGridColumn TItem="EnvironmentDto" Title="" Width="60px" Sortable="false" TextAlign="OmniDataGridTextAlign.Center" Filterable="false" >
+            <Template Context="env">
+                @* STD-BTN exception chosen by the user (recette R-438, 2026-09-28): the copy (duplicate) button is blue on every row. *@
+                <span @onclick:stopPropagation="true">
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => DuplicateEnvironment(env))" Disabled="@(!_canWrite)" title="@L["Duplicate"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                </span>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

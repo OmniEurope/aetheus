@@ -1,0 +1,134 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using Microsoft.AspNetCore.Components.Forms
+
+@if (!Embedded)
+{
+    <PageTitle>@L["PipelineTemplates"] - Aetheus</PageTitle>
+}
+
+@if (!Embedded)
+{
+    <OmniPageHeader Title="@L["PipelineTemplates"]" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("description")" /></Icon>
+        <Badges>
+            <HelpLink PageKey="templates" />
+        </Badges>
+    </OmniPageHeader>
+}
+
+<div class="pipeline-list-toolbar">
+    <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+        <div class="pipeline-list-spacer"></div>
+        @if (_canWrite)
+        {
+            <OmniOverflowMenu Label="@L["Tools"]">
+                <OmniMenuItem OnClick="@OnImportClickAsync"><Icon><OmniIcon Name="OmniIconName.Upload" /></Icon><ChildContent>@L["Import"]</ChildContent></OmniMenuItem>
+            </OmniOverflowMenu>
+            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@CreateTemplate" title="@L["NewTemplate"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        }
+    </OmniRow>
+</div>
+
+@if (_showImporter)
+{
+    <OmniUpload MaximumFileSize="1048576"
+                AllowedContentTypes="@YamlContentTypes"
+                FilesSelected="@OnFileSelectedAsync" />
+}
+
+@if (_loadFailed)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">
+        @L["LoadFailed"]
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadTemplatesAsync" title="@L["Retry"]"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+    </OmniAlert>
+}
+else
+{
+    <AetheusDataGrid @ref="_grid" Data="@_templates" TItem="PipelineTemplateSummaryDto" IsLoading="@_loading"
+        RowClick="@EditTemplate" FullHeight="true" Virtualize="@(_templates.Count > 20)" PageSize="20">
+        <EmptyTemplate>
+            <EmptyState Icon="description" Title="@L["NoRecords"]" Description="@L["EmptyTemplatesHint"]">
+                <ActionContent>
+                    @if (_canWrite)
+                    {
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@CreateTemplate" title="@L["NewTemplate"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                    }
+                </ActionContent>
+            </EmptyState>
+        </EmptyTemplate>
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="PipelineTemplateSummaryDto" Property="Name" Title="@L["Name"]" Width="12rem" Filterable="true" >
+                <Template Context="template">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                        <a href="@($"/templates/{template.Id}")" class="pipeline-name-link" title="@template.Name"
+                            @onclick:stopPropagation="true">@template.Name</a>
+                    </OmniStack>
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateSummaryDto" Property="Version" Title="@L["VersionShort"]"
+                Width="5rem" Filterable="false" TextAlign="OmniDataGridTextAlign.Center">
+                <Template Context="template">@($"v{template.Version}")</Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateSummaryDto" Property="Description" Title="@L["Description"]" Width="8rem" Filterable="true" >
+                <Template Context="template"><span title="@template.Description">@template.Description</span></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateSummaryDto" Property="UpdatedAt" Title="@L["Updated"]"
+                Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+                <Template Context="template">
+                    @if (template.UpdatedAt.Year < 2000)
+                    {
+                        <span>@L["Never"]</span>
+                    }
+                    else
+                    {
+                        <span title="@template.UpdatedAt.ToString("F")">@RelativeTime.FormatAgo(L, template.UpdatedAt)</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateSummaryDto" Property="PipelineCount" Title="@L["Pipelines"]"
+                Width="6.5rem" Filterable="false" TextAlign="OmniDataGridTextAlign.Center">
+                <Template Context="template">
+                    @if (template.PipelineCount > 0)
+                    {
+                        <a href="@($"/pipelines?templateId={template.Id}")" class="pipeline-name-link"
+                            title="@string.Format(L["ViewPipelinesUsingTemplate"], template.Name)"
+                            @onclick:stopPropagation="true">@template.PipelineCount</a>
+                    }
+                    else
+                    {
+                        <span>0</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateSummaryDto" Property="LatestRunAt" Title="@L["LatestRunShort"]"
+                Width="7.5rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+                <Template Context="template">
+                    @if (template.LatestRunAt is { } latestRunAt)
+                    {
+                        <span title="@latestRunAt.ToString("F")">@RelativeTime.FormatAgo(L, latestRunAt)</span>
+                    }
+                    else
+                    {
+                        <span>@L["Never"]</span>
+                    }
+                </Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PipelineTemplateSummaryDto" Title="@L["Actions"]" Width="8rem"
+                Sortable="false" Filterable="false" TextAlign="OmniDataGridTextAlign.End">
+                <Template Context="template">
+                    <span @onclick:stopPropagation="true">
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => UseTemplate(template))" title="@L["UseTemplate"]" Label="@L["UseTemplate"]"><OmniIcon Name="OmniIconName.Add" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ViewHistory(template))" title="@L["VersionHistoryTitle"]" Label="@L["Versions"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ExportTemplateAsync(template))" title="@L["Export"]" Label="@L["Export"]"><OmniIcon Name="OmniIconName.Download" /></OmniButton>
+                        @if (_canWrite)
+                        {
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => EditTemplate(template))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteTemplateAsync(template))" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                        }
+                    </span>
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+}

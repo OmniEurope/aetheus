@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 public class ServerCronSectionMethodTests

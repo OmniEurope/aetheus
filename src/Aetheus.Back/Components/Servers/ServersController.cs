@@ -11,6 +11,7 @@ namespace Aetheus.Back.Components.Servers;
 [ProducesResponseType(StatusCodes.Status404NotFound)]
 public class ServersController(
     IServerLifecycleService lifecycle,
+    IServerRetirementService retirement,
     IServerHeartbeatService heartbeats,
     IServerServiceManagementService services,
     IServerAgentContactService agentContact,
@@ -32,6 +33,15 @@ public class ServersController(
         if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<ServerDto>());
         return Ok(await lifecycle.GetServersAsync(
             request, type, status, compatibility, accessibleIds, ct));
+    }
+
+    /// <summary>Recette R-211: the OS, agent versions and tags the servers list's column filters offer.</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<ServerFilterValuesDto>> GetServerFilterValues(CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Server, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new ServerFilterValuesDto());
+        return Ok(await lifecycle.GetServerFilterValuesAsync(accessibleIds, ct));
     }
 
     [HttpGet("agent-compatibility-summary")]
@@ -72,14 +82,39 @@ public class ServersController(
         return Ok(server);
     }
 
+    // PLAN-004 R-11: DELETE retires the server. Its row and links stay, its agent tokens are revoked,
+    // it leaves every list and dispatch, and reinstalling the agent on the same machine revives it.
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> DeleteServer(int id, CancellationToken ct)
+    public async Task<IActionResult> RetireServer(int id, CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Server, id, Permission.Admin, ct))
             return Forbid();
 
-        var deleted = await lifecycle.DeleteServerAsync(id, ct);
-        if (!deleted) return NotFound();
+        var retired = await retirement.RetireServerAsync(id, User.Identity?.Name ?? "unknown", ct);
+        if (!retired) return NotFound();
+        return NoContent();
+    }
+
+    [HttpGet("retired")]
+    public async Task<ActionResult<PaginatedResult<RetiredServerDto>>> GetRetiredServers(
+        [FromQuery] PaginationRequest request, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Server, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<RetiredServerDto>());
+        return Ok(await retirement.GetRetiredServersAsync(request, accessibleIds, ct));
+    }
+
+    // The former hard delete, only for a server already retired (409 otherwise). Irreversible: it
+    // also deletes the server's backup policies, which could not outlive their target host.
+    [HttpDelete("{id:int}/permanent")]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> PurgeServer(int id, CancellationToken ct)
+    {
+        if (!await authz.HasPermissionAsync(User, ResourceType.Server, id, Permission.Admin, ct))
+            return Forbid();
+
+        var purged = await retirement.PurgeServerAsync(id, User.Identity?.Name ?? "unknown", ct);
+        if (!purged) return NotFound();
         return NoContent();
     }
 

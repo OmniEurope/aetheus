@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
 using Aetheus.Front.Tests.TestDoubles;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Shared;
 
 /// <summary>
 /// Behavioural tests for DialogCloseButton.razor.cs: clicking the button invokes
-/// DialogService.Close (captured by a spy), and the optional Text parameter overrides the
+/// OmniDialogService.Close (captured by a spy), and the optional Text parameter overrides the
 /// default "Close" label.
 /// </summary>
 public class DialogCloseButtonTests : BunitContext
@@ -19,12 +17,12 @@ public class DialogCloseButtonTests : BunitContext
     public DialogCloseButtonTests()
     {
         BunitTestHelper.RegisterServices(this);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
     }
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     [Fact]
     public void Click_InvokesDialogClose()

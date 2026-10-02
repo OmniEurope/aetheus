@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Services;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,14 +16,64 @@ public class UserNotificationServiceReconnectTests : BunitContext
 {
     private static readonly BindingFlags Priv = BindingFlags.NonPublic | BindingFlags.Instance;
 
-    public UserNotificationServiceReconnectTests() => BunitTestHelper.RegisterServices(this);
+    private readonly BunitTestHelper.TestHandler _handler;
+
+    public UserNotificationServiceReconnectTests() => _handler = BunitTestHelper.RegisterServices(this);
 
     private UserNotificationService CreateService() => new(
         Services.GetRequiredService<HubConnectionFactory>(),
         Services.GetRequiredService<AuthStateProvider>(),
         Services.GetRequiredService<ApiClient>(),
         Services.GetRequiredService<PermissionService>(),
-        TimeProvider.System);
+        TimeProvider.System)
+    { DebounceMilliseconds = 1 };
+
+    private static Task ReconcileAsync(UserNotificationService sut) =>
+        (Task)typeof(UserNotificationService).GetMethod("ReconcileAsync", Priv)!.Invoke(sut, null)!;
+
+    private static UserPermissionSummaryDto Summary(params EffectivePermissionDto[] permissions) =>
+        new() { EffectivePermissions = [.. permissions] };
+
+    private static EffectivePermissionDto Read(ResourceType type, int? id = null) =>
+        new() { ResourceType = type, ResourceId = id, Permission = Permission.Read };
+
+    [Fact]
+    public async Task Reconcile_WhenThePageNeverLoadedItsPermissions_LoadsThem_WithoutPrompting()
+    {
+        // The page loaded while the backend was still starting: the permission set was never loaded.
+        _handler.SetJsonResponse("api/users/me/permissions", Summary(Read(ResourceType.Project), Read(ResourceType.Server, 4)));
+        var permissions = Services.GetRequiredService<PermissionService>();
+        permissions.Clear();
+        Assert.False(permissions.IsLoaded);
+        var sut = CreateService();
+        var prompted = false;
+        sut.OnPermissionsChanged += () => prompted = true;
+
+        await ReconcileAsync(sut);
+        await Task.Delay(50, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.False(prompted);
+        Assert.True(permissions.IsLoaded);
+        Assert.True(permissions.CanRead(ResourceType.Server, 4));
+        await sut.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenTheLoadedPermissionsReallyDiffer_StillPrompts()
+    {
+        var permissions = Services.GetRequiredService<PermissionService>();
+        permissions.SetPermissions([Read(ResourceType.Project)], isAdmin: false);
+        _handler.SetJsonResponse("api/users/me/permissions", Summary(Read(ResourceType.Project), Read(ResourceType.Server, 4)));
+        var sut = CreateService();
+        var prompted = false;
+        sut.OnPermissionsChanged += () => prompted = true;
+
+        await ReconcileAsync(sut);
+        await Task.Delay(200, Xunit.TestContext.Current.CancellationToken);
+
+        Assert.True(prompted);
+        await sut.DisposeAsync();
+    }
 
     private static object? GetPrivate(UserNotificationService sut, string field) =>
         typeof(UserNotificationService).GetField(field, Priv)!.GetValue(sut);

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -49,6 +48,12 @@ public interface IPipelineRunService
     Task<List<PipelineRunDto>> GetActiveRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, CancellationToken ct = default);
     Task<List<PipelineRunDto>> GetRecentRunsAsync(List<int>? accessiblePipelineIds = null, int? projectId = null, int? serverId = null, CancellationToken ct = default);
     Task<PipelineRunDto?> GetRunAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Opaque workspace slots of the runs still in flight. An agent reaping stale run workspaces
+    /// keeps these and deletes the rest, so the answer must never omit a live run.
+    /// </summary>
+    Task<List<string>> GetActiveWorkspaceSlotsAsync(CancellationToken ct = default);
     Task<PipelineRunQueueStateDto> GetRunQueueStateAsync(int runId, CancellationToken ct = default);
     Task<DryRunResultDto?> DryRunAsync(int pipelineId, Dictionary<string, string>? additionalVars = null, CancellationToken ct = default);
 
@@ -61,7 +66,7 @@ public interface IPipelineRunService
     /// <summary>
     /// F-EXEC-1: every server id the pipeline's stages could resolve to (pool &gt; environment &gt;
     /// agent precedence, ANY status). The caller MUST verify the triggering principal holds
-    /// <see cref="Aetheus.Shared.Enums.Permission.Admin"/> on each before launching - pipeline
+    /// <see cref="Aetheus.Shared.Components.Auth.Permission.Admin"/> on each before launching - pipeline
     /// steps are free-form shell (= RCE), so this mirrors the F-15 gate on <c>POST /api/tasks</c>.
     /// Returns an empty set when the pipeline/YAML is invalid or matches no server (the run cannot
     /// execute, so there is nothing to authorize).
@@ -72,15 +77,33 @@ public interface IPipelineRunService
     /// F-EXEC-1b: non-interactive trigger (webhook / scheduler). There is no
     /// <see cref="System.Security.Claims.ClaimsPrincipal"/>, so the run is authorized against
     /// the pipeline OWNER (<c>Pipeline.CreatedByUsername</c>): the pipeline must be owned and
-    /// the owner must hold <see cref="Aetheus.Shared.Enums.Permission.Admin"/> on every
+    /// the owner must hold <see cref="Aetheus.Shared.Components.Auth.Permission.Admin"/> on every
     /// resolvable target server. Fail-closed - returns <c>null</c> without launching when the
     /// pipeline is unowned or the owner lacks the required permission (the breach is logged and
     /// audited). Mirrors the interactive F-EXEC-1 gate for the no-principal paths.
     /// </summary>
     Task<PipelineRunDto?> TriggerAutomatedRunAsync(int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// Launches a run prepared by <see cref="PrepareAutomatedRunAsync"/> for an automated trigger. A
+    /// refusal is recorded as a failed run carrying the reason and told to the project's subscribers
+    /// (recette R-522), then thrown again.
+    /// </summary>
+    Task<PipelineRunDto?> TriggerPreparedAutomatedRunAsync(
+        PipelineRunPreparation preparation, string triggerSource,
+        Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records a refused automated launch as a failed run carrying the reason. For a caller whose own
+    /// transaction rolled back the record the launcher made; does nothing for an unknown pipeline.
+    /// </summary>
+    Task RecordRefusedAutomatedLaunchAsync(
+        int pipelineId, string triggerSource, string reason,
+        IReadOnlyDictionary<string, string>? additionalVariables = null, CancellationToken ct = default);
+
     /// <summary>Resolves and authorizes an automated run without persisting it. Callers that
-    /// coordinate replacement must complete this phase before cancelling an existing run.</summary>
+    /// coordinate replacement must complete this phase before cancelling an existing run. A refused
+    /// preparation is recorded as a failed run carrying the reason, then thrown again.</summary>
     Task<PipelineRunPreparation?> PrepareAutomatedRunAsync(
         int pipelineId,
         string triggerSource,
@@ -92,7 +115,7 @@ public interface IPipelineRunService
     /// hop. There is no caller principal at the chaining link, so the child run is authorized against the
     /// CHILD pipeline's OWNER - the upstream caller may administer one pipeline's servers but not the next
     /// hop's. Fail-closed: returns <c>null</c> without launching when the child is unowned or its owner
-    /// lacks <see cref="Aetheus.Shared.Enums.Permission.Admin"/> on a resolvable target (audited as
+    /// lacks <see cref="Aetheus.Shared.Components.Auth.Permission.Admin"/> on a resolvable target (audited as
     /// <c>BlockedUnauthorizedChainedRun</c>).
     /// </summary>
     Task<PipelineRunDto?> TriggerChainedRunAsync(int childPipelineId, Dictionary<string, string> upstreamVariables, CancellationToken ct = default);
@@ -121,6 +144,9 @@ public interface IPipelineRunService
     Task FailStuckRunAsync(int runId, CancellationToken ct = default);
 
     Task<bool> ResumeAfterApprovalAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>Applies a refused or expired approval; see <see cref="IPipelineRunControlService.ApplyRefusalAsync"/>.</summary>
+    Task<PipelineStatus?> ApplyRefusalAsync(int runId, CancellationToken ct = default);
 
     /// <summary>Re-runs ONLY the failed steps of a previously-failed run (resets them to Pending and
     /// re-schedules), instead of starting a whole new run. Returns the updated run, or null if the

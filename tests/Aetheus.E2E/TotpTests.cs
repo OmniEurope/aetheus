@@ -18,7 +18,7 @@ public class TotpTests : E2ETestBase
     public async Task Settings_SecurityTab_ShowsTotpSetup()
     {
         await Page.GotoAsync($"{FrontendUrl}/settings");
-        await Page.WaitForSelectorAsync(".rz-tabview", new() { Timeout = 10000 });
+        await Page.WaitForSelectorAsync(".omni-tabs", new() { Timeout = 10000 });
         var securityTab = Page.GetByRole(AriaRole.Tab, new() { Name = "Security", Exact = true });
         await Expect(securityTab).ToBeVisibleAsync();
         await securityTab.ClickAsync();
@@ -79,15 +79,15 @@ public class TotpTests : E2ETestBase
 
         await Page.AddInitScriptAsync("localStorage.clear()");
         await Page.GotoAsync($"{FrontendUrl}/login", new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await Page.FillAsync("input[name='Username']", username);
-        await Page.FillAsync("input[name='Password']", password);
+        await Page.FillAsync("#Username", username);
+        await Page.FillAsync("#Password", password);
         await Page.ClickAsync("button[type='submit']");
         await Expect(Page.GetByRole(AriaRole.Button, new() { Name = "Use a recovery code" }))
             .ToBeVisibleAsync();
 
         await Page.GetByRole(AriaRole.Button, new() { Name = "Use a recovery code" }).ClickAsync();
-        await Expect(Page.Locator("input[name='RecoveryCode']")).ToBeVisibleAsync();
-        await Page.FillAsync("input[name='RecoveryCode']", recoveryCode);
+        await Expect(Page.Locator("#oe-pages-auth-login-3")).ToBeVisibleAsync();
+        await Page.FillAsync("#oe-pages-auth-login-3", recoveryCode);
         await Page.ClickAsync("button[type='submit']");
 
         await Page.WaitForURLAsync(url => new Uri(url).AbsolutePath == "/");
@@ -111,7 +111,13 @@ public class TotpTests : E2ETestBase
             .ToArray();
         var counter = BitConverter.GetBytes(DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30);
         if (BitConverter.IsLittleEndian) Array.Reverse(counter);
+        // CA5350 flags SHA-1, correctly in general. TOTP is the exception: RFC 6238 defines the
+        // default algorithm as HMAC-SHA-1, and every authenticator app implements that. Using
+        // anything else here would compute codes no real client would accept, so the test would pass
+        // against an implementation that is wrong.
+#pragma warning disable CA5350 // Do Not Use Weak Cryptographic Algorithms
         var hash = HMACSHA1.HashData(secret, counter);
+#pragma warning restore CA5350
         var offset = hash[^1] & 0x0f;
         var binary = ((hash[offset] & 0x7f) << 24)
             | (hash[offset + 1] << 16)

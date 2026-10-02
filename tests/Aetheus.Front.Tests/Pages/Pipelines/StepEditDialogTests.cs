@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages;
@@ -52,7 +49,7 @@ public class StepEditDialogTests : BunitContext
     {
         var cut = Render<StepEditDialog>();
 
-        Assert.Contains("Cancel", cut.Markup);
+        Assert.Contains("GoBack", cut.Markup);
     }
 
     [Fact]

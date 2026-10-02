@@ -1,0 +1,481 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/pipelines/new"
+@page "/pipelines/{Id:int}"
+
+<PageTitle>@(_isNew ? L["NewPipeline"] : _pipeline?.Name ?? L["Pipeline"]) - Aetheus</PageTitle>
+
+@if (_isNew || (!_loading && _pipeline is not null))
+{
+    @* Recette R-421 (standard, 2026-09-28): Run is the page's one visible action; Edit, which only
+       switches to the edit tab, is the first entry of the "..." menu (OmniPageHeader MenuContent, R-395). *@
+    RenderFragment pipelineMenu = @<text>
+        <OmniMenuItem OnClick="@(() => _selectedTab = 1)"><Icon><OmniIcon Name="OmniIconName.Edit" /></Icon><ChildContent>@L["Edit"]</ChildContent></OmniMenuItem>
+        <OmniMenuItem OnClick="@OnDryRun"><Icon><OmniIcon Name="OmniIconName.Flask" /></Icon><ChildContent>@L["DryRun"]</ChildContent></OmniMenuItem>
+        @if (_fleetItem is { Freshness: PipelineFleetFreshness.Outdated, LatestVersion: not null }
+            && Permissions.CanWrite(ResourceType.Pipeline, Id))
+        {
+            <OmniMenuItem OnClick="@OnUpdateTemplate"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["UpdatePipelineTemplate"]</ChildContent></OmniMenuItem>
+        }
+        @if (_canTemplateWrite)
+        {
+            @if (HasTemplateReference)
+            {
+                <OmniMenuItem OnClick="@OnPromoteTemplate"><Icon><OmniIcon Name="OmniIconName.Upload" /></Icon><ChildContent>@L["PromoteToTemplate"]</ChildContent></OmniMenuItem>
+            }
+            else
+            {
+                <OmniMenuItem OnClick="@OnExtractTemplate"><Icon><OmniIcon Name="OmniIconName.Add" /></Icon><ChildContent>@L["ExtractAsTemplate"]</ChildContent></OmniMenuItem>
+            }
+        }
+        <OmniMenuItem OnClick="@OnDelete"><Icon><OmniIcon Name="OmniIconName.Delete" /></Icon><ChildContent>@L["Delete"]</ChildContent></OmniMenuItem>
+    </text>;
+    <OmniPageHeader Title="@(_isNew ? L["NewPipeline"] : _pipeline?.Name ?? "")" ShowBack="@(!string.IsNullOrWhiteSpace(BackHref))" Subtitle="@Breadcrumb.Subtitle()" MenuContent="@(_isNew ? null : pipelineMenu)">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("account_tree")" /></Icon>
+        <Actions>
+            @if (!_isNew)
+            {
+                <OmniSplitButton Class="@(_running ? "btn-busy" : null)" aria-busy="@(_running ? "true" : null)" Text="@L["Run"]" OnClick="@OnRun" Variant="OmniButtonVariant.Primary" Busy="@_running"><Icon><OmniIcon Name="OmniIconName.Play" /></Icon><ChildContent>
+                    <OmniMenuItem OnClick="@OnRunWithOptionsAsync">@L["RunWithOptions"]</OmniMenuItem>
+                </ChildContent></OmniSplitButton>
+            }
+        </Actions>
+    </OmniPageHeader>
+
+    @* Recette R-181: the definition was changed elsewhere while this page holds unsaved edits. *@
+    @if (_changedElsewhere)
+    {
+        <OmniAlert Severity="OmniSeverity.Info" Class="pipeline-changed-elsewhere">
+            @L["PipelineChangedElsewhere"]
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnRefresh"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["ReloadNow"]</span></OmniButton>
+        </OmniAlert>
+    }
+
+    @if (HasLegacyTemplateReference)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning">
+            @L["LegacyTemplateReferenceWarning"]
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@PinLegacyTemplateAsync"><OmniIcon Name="OmniIconName.Save" /> <span>@L["PinTemplateVersion"]</span></OmniButton>
+        </OmniAlert>
+    }
+}
+
+@if (_isNew)
+{
+    @* New pipeline: show edit form directly *@
+    <div>
+        <OmniTemplateForm TModel="PipelineModel" Model="@_model" OnValidSubmit="@OnSubmit">
+            <OmniDataAnnotationsValidator Localizer="@L" />
+            <OmniRow Gap="OmniSpacing.Large" Class="omni-u-mt-sm">
+                <OmniColumn Span="12" MediumSpan="6">
+                    <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+                        <OmniFormField Label="@L["Name"]" For="Name">
+                            <OmniTextBox @bind-Value="_model.Name" Id="Name" />
+                            <ValidationMessage For="@(() => _model.Name)" />
+                        </OmniFormField>
+                        <OmniFormField Label="@L["Description"]" For="Description">
+                            <OmniTextBox @bind-Value="_model.Description" Id="Description" />
+                        </OmniFormField>
+                    </OmniStack>
+                </OmniColumn>
+                <OmniColumn Span="12" MediumSpan="6">
+                    <OwnerTypeSelector Projects="@_projects"
+                        @bind-ProjectId="_model.ProjectId"
+                        @bind-EnvironmentId="_model.EnvironmentId"
+                        @bind-ProjectServerId="_model.ProjectServerId" />
+                </OmniColumn>
+            </OmniRow>
+
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-mt-lg omni-u-mb-xs">@L["YamlDefinition"]</OmniText>
+            @if (_templates.Count > 0)
+            {
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["Template"]:</OmniText>
+                    <OmniDropDown aria-label="@L["SelectTemplate"]" TValue="int?" Options="@(_templates.ToOptions(item => (int?)item.Id, item => item.Name))"
+                        Placeholder="@L["SelectTemplate"]" AllowEmpty="true" @bind-Value="_selectedTemplateId"
+                        @bind-Value:after="@(() => OnTemplateSelected(_selectedTemplateId))" Class="tpl-select" />
+                </OmniStack>
+            }
+            @if (_templateParameters.Selection?.Parameters.Count > 0)
+            {
+                <OmniCard Class="omni-u-mb-md">
+                    <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">@L["TemplateParameters"]</OmniText>
+                    <OmniRow Gap="OmniSpacing.Large">
+                        @foreach (var parameter in _templateParameters.Selection.Parameters)
+                        {
+                            var parameterHelp = Aetheus.Front.Components.Pipelines.ParameterText.Pick(parameter.Description, parameter.DescriptionFr);
+                            var describedBy = ParameterHelpRow.DescribedBy("tpl-param", parameter.Name, parameterHelp);
+                            var parameterValue = TemplateParameterValue(parameter.Name);
+                            var parameterFieldId = $"tpl-param-{parameter.Name}";
+                            <OmniColumn Span="12" MediumSpan="6">
+                                <ParameterHelpRow Description="@parameterHelp" DescriptionId="@(describedBy ?? string.Empty)">
+                                    <OmniFormField Label="@(Aetheus.Front.Components.Pipelines.ParameterText.Pick(parameter.DisplayName, parameter.DisplayNameFr) ?? parameter.Name)" Class="omni-u-w-100" For="@parameterFieldId">
+                                        @if (parameter.AllowedValues.Count > 0)
+                                        {
+                                            <OmniDropDown Id="@parameterFieldId" TValue="string" Options="@(parameter.AllowedValues.ToOptions(item => (string)item, item => item))"
+                                                Value="@TemplateParameterValue(parameter.Name)"
+                                                ValueChanged="@(value => OnTemplateParameterChanged(parameter.Name, value))"
+                                                ValueExpression="@(() => parameterValue)"
+                                                AllowEmpty="@(!parameter.Required)" AriaDescribedBy="@describedBy" Class="omni-u-w-100" />
+                                        }
+                                        else if (string.Equals(parameter.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <OmniDropDown Id="@parameterFieldId" TValue="string" Options="@((new[] { "true", "false" }).ToOptions(item => (string)item, item => item))"
+                                                Value="@TemplateParameterValue(parameter.Name)"
+                                                ValueChanged="@(value => OnTemplateParameterChanged(parameter.Name, value))"
+                                                ValueExpression="@(() => parameterValue)"
+                                                AriaDescribedBy="@describedBy" Class="omni-u-w-100" />
+                                        }
+                                        else
+                                        {
+                                            <OmniTextBox Id="@parameterFieldId" Value="@parameterValue"
+                                                ValueChanged="@(value => OnTemplateParameterChanged(parameter.Name, value))"
+                                                ValueExpression="@(() => parameterValue)"
+                                                AriaDescribedBy="@describedBy" Class="omni-u-w-100" />
+                                        }
+                                    </OmniFormField>
+                                </ParameterHelpRow>
+                            </OmniColumn>
+                        }
+                    </OmniRow>
+                </OmniCard>
+            }
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-sm">
+                <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnValidateYaml" Class="@(_validating ? "btn-busy" : null)" Busy="@(_validating)"><OmniIcon Name="OmniIconName.CheckCircle" /> <span>@L["ValidateYaml"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnFormatYaml"><OmniIcon Name="OmniIconName.TextAlignLeft" /> <span>@L["FormatYaml"]</span></OmniButton>
+                @if (_yamlValid.HasValue)
+                {
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@(_yamlValid.Value ? OmniTone.Success : OmniTone.Danger)">@(_yamlValid.Value ? L["Valid"] : L["Invalid"])</OmniBadge>
+                }
+            </OmniStack>
+
+            <MonacoEditor @ref="_monacoEditor" Value="@_model.YamlDefinition"
+                ValueChanged="@OnYamlValueChanged" DebouncedValueChanged="@OnDebouncedYamlChanged"
+                OnBlur="@OnValidateYaml" OnSave="@OnSubmit" />
+        </OmniTemplateForm>
+    </div>
+}
+else if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" Class="omni-u-mt-lg" />
+}
+else
+{
+    <div class="pipeline-detail-page">
+    <UrlSyncedTabs Slugs="@(new[] { "runs", "edit", "visual", "settings" })" @bind-SelectedIndex="_selectedTab" class="pipeline-detail-tabs">
+        <Tabs>
+            <OmniTabsItem Key="runs" Title="@L["Runs"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("history"))" /></Icon><ChildContent>
+                @* Tiles read from the loaded page of runs, so they answer "what is the state of this
+                   pipeline right now" without opening a run: the sealed grade of the latest run, how
+                   often it passes, how long it takes, and when it last went green. Recette R-417: each
+                   tile is an icon and label line, then its value on a line of its own (the grade badge
+                   included); the gap sits on the card body, where OmniCard puts the content. *@
+                <OmniRow Gap="OmniSpacing.Medium" Class="pipeline-runs-summary">
+                    <OmniColumn Span="12" SmallSpan="6" MediumSpan="3">
+                        <OmniCard Class="analysis-summary-card pipeline-runs-summary-card">
+                            <span class="pipeline-runs-summary-label">
+                                <OmniIcon Name="OmniIconName.Medal" />
+                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["LatestGrade"]</OmniText>
+                            </span>
+                            <div class="pipeline-runs-summary-value">
+                                @if (RunsSummary.LatestGrade is { } grade)
+                                {
+                                    <GradeBadge Value="@grade" />
+                                }
+                                else
+                                {
+                                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["NotAvailableShort"]</OmniText>
+                                }
+                            </div>
+                        </OmniCard>
+                    </OmniColumn>
+                    <OmniColumn Span="12" SmallSpan="6" MediumSpan="3">
+                        <OmniCard Class="analysis-summary-card pipeline-runs-summary-card">
+                            <span class="pipeline-runs-summary-label">
+                                <OmniIcon Name="OmniIconName.CheckCircle" />
+                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["SuccessRate"]</OmniText>
+                            </span>
+                            <div class="pipeline-runs-summary-value">
+                                <OmniHeading Level="OmniHeadingLevel.H6">@RunsSummary.SuccessRateLabel(L["NotAvailableShort"])</OmniHeading>
+                            </div>
+                        </OmniCard>
+                    </OmniColumn>
+                    <OmniColumn Span="12" SmallSpan="6" MediumSpan="3">
+                        <OmniCard Class="analysis-summary-card pipeline-runs-summary-card">
+                            <span class="pipeline-runs-summary-label">
+                                <OmniIcon Name="OmniIconName.Timer" />
+                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["AverageDuration"]</OmniText>
+                            </span>
+                            <div class="pipeline-runs-summary-value">
+                                <OmniHeading Level="OmniHeadingLevel.H6">@RunsSummary.AverageDurationLabel(L["NotAvailableShort"])</OmniHeading>
+                            </div>
+                        </OmniCard>
+                    </OmniColumn>
+                    <OmniColumn Span="12" SmallSpan="6" MediumSpan="3">
+                        <OmniCard Class="analysis-summary-card pipeline-runs-summary-card">
+                            <span class="pipeline-runs-summary-label">
+                                <OmniIcon Name="OmniIconName.CalendarCheck" />
+                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["LastSuccess"]</OmniText>
+                            </span>
+                            <div class="pipeline-runs-summary-value">
+                                <OmniHeading Level="OmniHeadingLevel.H6">@RunsSummary.LastSuccessLabel(L["NotAvailableShort"])</OmniHeading>
+                            </div>
+                        </OmniCard>
+                    </OmniColumn>
+                </OmniRow>
+                @if (_runs.Count == 0 && !RunsFiltered)
+                {
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mt-lg">@L["NoRunsYet"]</OmniText>
+                }
+                else
+                {
+                    <Aetheus.Front.Components.Shared.AetheusDataGrid FullHeight="true" @ref="_runsGrid" TItem="PipelineRunDto"
+                        Data="@_runs" Count="@_runsTotalCount" PageSize="@_runsPageSize"
+                        LoadData="@OnRunsLoadDataAsync"
+                        Virtualize="@AetheusGrid.RemoteVirtualization"
+                        VirtualData="@(() => new OmniDataGridResult<PipelineRunDto>(_runs, _runsTotalCount))"
+                        RowClick="@(run => Nav.NavigateTo(PipelineRunPresentation.Href(run.Id, ProjectId, ServerId)))" class="pipeline-runs-grid">
+                        <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="PipelineRunDto" Property="Id" Title="@L["ID"]" Width="@PipelineRunPresentation.IdColumnWidth(_runs.Concat(_firstRunsPage))" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" >
+                                <Template Context="run">
+                                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center" @onclick:stopPropagation="true">
+                                        <NavLink href="@PipelineRunPresentation.Href(run.Id, ProjectId, ServerId)" class="pipeline-name-link">#@run.Id</NavLink>
+                                        @if (PipelineRunPresentation.CanCancel(run))
+                                        {
+                                            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnCancelRunAsync(run))" title="@L["CancelRun"]" Label="@L["CancelRun"]"><OmniIcon Name="OmniIconName.Prohibit" /></OmniButton>
+                                        }
+                                        @if (PipelineRunPresentation.IsFailed(run))
+                                        {
+                                            @* R-492 (2026-09-30): Rerun is the main action of a failed run's row, blue. *@
+                                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnRun" Class="@(_running ? "btn-busy" : null)" Busy="@(_running)" title="@L["Rerun"]" Label="@L["Rerun"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                                        }
+                                    </OmniStack>
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PipelineRunDto" Property="Status" Title="@L["Status"]" Width="200px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@RunStatusText" >
+                                <Template Context="run">
+                                    @{ var cur = PipelineRunPresentation.CurrentStep(run); }
+                                    @if (run.Status == PipelineStatus.Running)
+                                    {
+                                        @* A running run has no final state to badge yet; showing its current
+                                           step in place of the badge is more useful than a static label. *@
+                                        @if (cur is not null)
+                                        {
+                                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="pipeline-run-current-step">
+                                                <div class="run-tl-dot run-timeline-dot-running"><span class="run-timeline-pulse"></span></div>
+                                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@cur</OmniText>
+                                            </OmniStack>
+                                        }
+                                        else
+                                        {
+                                            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="pipeline-run-current-step">
+                                                <AetheusLoader Size="OmniControlSize.Small" />
+                                                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@L["PreparingRun"]</OmniText>
+                                            </OmniStack>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
+                                            <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineRunPresentation.Badge(run.Status)">@L.Localize(run.Status)</OmniBadge>
+                                            @* The gate letter rides with the status because it qualifies it: a
+                                               green run that scored D is not the same result as a green run. *@
+                                            @if (run.GateGrade.HasValue)
+                                            {
+                                                <GradeBadge Value="@run.GateGrade" Title="@L["GateGrade"]" Class="pipeline-gate-grade-badge" />
+                                            }
+                                        </OmniStack>
+                                    }
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PipelineRunDto" Property="StartedAt" Title="@L["Started"]" FormatString="{0:g}" Width="150px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+                            <OmniDataGridColumn TItem="PipelineRunDto" Property="CompletedAt" Title="@L["Completed"]" FormatString="{0:g}" Width="150px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+                            @* Sortable on the stored end instant, not on the rendered text: the elapsed
+                               time is derived, so there is no column to sort and a text sort would order
+                               "9m" after "10m". SortProperty hands the server a real field, and a run
+                               still going has no CompletedAt, which is exactly "longest running". *@
+                            @* Duration is computed, never stored, so it has no DTO property to bind. The
+                               sort key is resolved server-side against (CompletedAt ?? now) - StartedAt:
+                               sorting on CompletedAt instead, as this column used to, ordered by end
+                               date while claiming to order by length - two different orders whenever
+                               runs do not last the same time. *@
+                            <OmniDataGridColumn TItem="PipelineRunDto" Title="@L["Duration"]" Width="120px"
+                                SortProperty="Duration" Filterable="false">
+                                <Template Context="run">
+                                    @* FormatDuration returns an em dash while CompletedAt is null, so a running
+                                       run showed no duration at all - exactly when it is most useful. The shared
+                                       live component ticks for a running run and formats a finished one. *@
+                                    <PipelineRunLiveDuration StartedAt="@run.StartedAt" CompletedAt="@run.CompletedAt"
+                                                             IsRunning="@PipelineRunPresentation.CanCancel(run)" />
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PipelineRunDto" Property="CommitHash" Title="@L["Commit"]" Width="130px" Filterable="true" >
+                                <Template Context="run">
+                                    @if (!string.IsNullOrWhiteSpace(run.CommitHash))
+                                    {
+                                        @* Recette R-373: the commit's Aetheus page (git graph, else the
+                                           resolved internal repository), never RepositoryUrl, which points
+                                           at the smart-HTTP endpoint; text when no page is known. *@
+                                        <ShortId Value="@run.CommitHash" Href="@PipelineRunRepositoryResolver.RunCommitHref(run)"
+                                                 Copyable="false" Class="pipeline-name-link" />
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PipelineRunDto" Property="BranchName" Title="@L["SourceBranch"]" Width="150px" Filterable="true" >
+                                <Template Context="run">
+                                    @if (!string.IsNullOrWhiteSpace(run.BranchName))
+                                    {
+                                        @if (PipelineRunRepositoryResolver.RunBranchHref(run) is { } branchHref)
+                                        {
+                                            <NavLink href="@branchHref" class="pipeline-name-link"
+                                                     @onclick:stopPropagation="true" title="@run.BranchName">
+                                                <span>@run.BranchName</span>
+                                            </NavLink>
+                                        }
+                                        else
+                                        {
+                                            <span><span>@run.BranchName</span></span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="PipelineRunDto" Title="@L["Server"]" Width="160px" Sortable="false" Filterable="false">
+                                <Template Context="run">
+                                    @{ var runServer = run.Steps.FirstOrDefault(s => !s.IsSystem && s.ServerName is not null); }
+                                    @if (runServer is not null)
+                                    {
+                                        @if (runServer.ServerId is { } serverId)
+                                        {
+                                            <NavLink href="@($"servers/{serverId}")" class="pipeline-name-link" @onclick:stopPropagation="true">
+                                                <span>@runServer.ServerName</span>
+                                            </NavLink>
+                                        }
+                                        else
+                                        {
+                                            <span>@runServer.ServerName</span>
+                                        }
+                                    }
+                                </Template>
+                            </OmniDataGridColumn>
+                        </Columns>
+                    </Aetheus.Front.Components.Shared.AetheusDataGrid>
+                }
+            </ChildContent></OmniTabsItem>
+            <OmniTabsItem Key="edit" Title="@L["Edit"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("edit"))" /></Icon><ChildContent>
+                @* Compact meta (name + description inline) + toolbar; the editor fills the remaining
+                   viewport height so the definition uses 100% of the space with no page scrollbar. *@
+                <div class="pipeline-edit-form"><OmniTemplateForm TModel="PipelineModel" Model="@_model" OnValidSubmit="@OnSubmit">
+                    <OmniDataAnnotationsValidator Localizer="@L" />
+                    <div class="pipeline-edit-meta">
+                        <OmniFormField Label="@L["Name"]" Class="pipeline-edit-name" For="Name">
+                            <OmniTextBox @bind-Value="_model.Name" Id="Name" />
+                            <ValidationMessage For="@(() => _model.Name)" />
+                        </OmniFormField>
+                        <OmniFormField Label="@L["Description"]" Class="pipeline-edit-desc" For="Description">
+                            <OmniTextBox @bind-Value="_model.Description" Id="Description" />
+                        </OmniFormField>
+                    </div>
+                    <div class="pipeline-edit-toolbar">
+                        <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0 omni-u-me-sm">@L["YamlDefinition"]</OmniText>
+                        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnValidateYaml" Class="@(_validating ? "btn-busy" : null)" Busy="@(_validating)"><OmniIcon Name="OmniIconName.CheckCircle" /> <span>@L["ValidateYaml"]</span></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnFormatYaml"><OmniIcon Name="OmniIconName.TextAlignLeft" /> <span>@L["FormatYaml"]</span></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _showDiff = !_showDiff)"><OmniIcon Name="OmniIconName.GitDiff" /> <span>@(_showDiff ? L["HideDiff"] : L["ShowDiff"])</span></OmniButton>
+                        @if (_yamlValid.HasValue)
+                        {
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@(_yamlValid.Value ? OmniTone.Success : OmniTone.Danger)">@(_yamlValid.Value ? L["Valid"] : L["Invalid"])</OmniBadge>
+                        }
+                    </div>
+
+                    @* Editor left; Ctrl+Click on a `pipeline: <name>` ref opens that pipeline's read-only
+                       definition in the peek pane on the right (same viewer as the run YAML tab). *@
+                    <div class="pipeline-edit-body">
+                        <div class="pipeline-yaml-editor">
+                            <MonacoEditor @ref="_monacoEditor" Value="@_model.YamlDefinition"
+                                ValueChanged="@OnYamlValueChanged" DebouncedValueChanged="@OnDebouncedYamlChanged"
+                                OnBlur="@OnValidateYaml" OnSave="@OnSubmit" OnPipelineRefClicked="@OnEditorPipelineRef" />
+                        </div>
+
+                        @if (_showDiff)
+                        {
+                            <div class="pipeline-yaml-editor">
+                                <MonacoDiffViewer OriginalValue="@_savedYaml" ModifiedValue="@_model.YamlDefinition" />
+                            </div>
+                        }
+
+                        @if (_peekName is not null)
+                        {
+                            <PipelineDefinitionPeek PipelineName="@_peekName" ProjectId="@(_pipeline?.ProjectId)"
+                                OnClose="@(() => { _peekName = null; })" />
+                        }
+                    </div>
+                </OmniTemplateForm></div>
+            </ChildContent></OmniTabsItem>
+            <OmniTabsItem Key="visual" Title="@L["Visual"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("account_tree"))" /></Icon><ChildContent>
+                <VisualPipelineEditor YamlDefinition="@_model.YamlDefinition"
+                                      YamlDefinitionChanged="@OnVisualYamlChanged"
+                                      BaseTemplateYaml="@_baseTemplateYaml"
+                                      PipelineId="@Id"
+                                      AvailableServers="@_serverNames"
+                                      AvailableLibraries="@_libraryNames"
+                                      AvailableVaults="@_vaultNames" />
+            </ChildContent></OmniTabsItem>
+            <OmniTabsItem Key="settings" Title="@L["Settings"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("settings"))" /></Icon><ChildContent>
+                <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large" Class="omni-u-mt-sm">
+                    <OmniRow Gap="OmniSpacing.Large">
+                        <OmniColumn Span="12" MediumSpan="6">
+                            <OwnerTypeSelector Projects="@_projects"
+                                @bind-ProjectId="_model.ProjectId"
+                                @bind-EnvironmentId="_model.EnvironmentId"
+                                @bind-ProjectServerId="_model.ProjectServerId" />
+                        </OmniColumn>
+                    </OmniRow>
+                    @if (_sourceBranches.Count > 0)
+                    {
+                        <OmniRow Gap="OmniSpacing.Large">
+                            <OmniColumn Span="12" MediumSpan="6">
+                                <OmniFormField Label="@L["SourceBranch"]" For="oe-formfield-pages-pipelines-pipelineedit-6">
+                                    <OmniDropDown Id="oe-formfield-pages-pipelines-pipelineedit-6" TValue="string" Options="@(_sourceBranches.ToOptions(item => (string)item, item => item))" @bind-Value="_model.SourceBranch"
+                                        Placeholder="@L["SourceBranch"]" />
+                                </OmniFormField>
+                            </OmniColumn>
+                        </OmniRow>
+                    }
+                    else if (_projects.Any(project => project.Id == _model.ProjectId && !string.IsNullOrWhiteSpace(project.RepositoryUrl)))
+                    {
+                        <OmniRow Gap="OmniSpacing.Large">
+                            <OmniColumn Span="12" MediumSpan="6">
+                                <OmniFormField Label="@L["SourceBranch"]" For="external-source-branch">
+                                    <OmniTextBox Id="external-source-branch" @bind-Value="_model.SourceBranch"
+                                        Placeholder="@L["SourceBranch"]" />
+                                </OmniFormField>
+                            </OmniColumn>
+                        </OmniRow>
+                    }
+                    <OmniRow Gap="OmniSpacing.Large">
+                        <OmniColumn Span="12" MediumSpan="6">
+                            <OmniStack Gap="OmniSpacing.XSmall">
+                                <OmniText Element="OmniTextElement.Strong">@L["TriggerType"]</OmniText>
+                                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-p-sm">
+                                    @(_pipeline is not null ? L.Localize(_pipeline.TriggerType) : L["DefinedInYaml"])
+                                </OmniText>
+                            </OmniStack>
+                        </OmniColumn>
+                    </OmniRow>
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnSubmit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["SaveSettings"]</span></OmniButton>
+                    </OmniStack>
+                </OmniStack>
+            </ChildContent></OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+    </div>
+}

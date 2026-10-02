@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 
@@ -28,7 +26,8 @@ public class NotificationServiceTests
             _httpFactory,
             Substitute.For<ILogger<NotificationService>>(),
             _encryption,
-            TimeProvider.System);
+            TimeProvider.System,
+            Substitute.For<IUserNotificationService>());
     }
 
     [Fact]

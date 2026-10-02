@@ -1,0 +1,90 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+<OmniPageHeader Title="@L["PersonalAccessTokens"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("key")" /></Icon>
+</OmniPageHeader>
+<OmniText Element="OmniTextElement.Paragraph" Class="omni-u-mb-lg">@L["PatPageDescription"]</OmniText>
+
+@if (_revealedToken is not null)
+{
+    <OmniCard Class="omni-u-mb-lg">
+        <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Medium">
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                <OmniIcon Name="OmniIconName.Warning" />
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["PatRevealTitle"]</OmniText>
+            </OmniStack>
+            <OmniText Element="OmniTextElement.Paragraph">@L["PatRevealWarning"]</OmniText>
+            <OmniTextBox Value="@_revealedToken" ReadOnly="true" Class="omni-u-w-100" aria-label="@L["PersonalAccessTokens"]"  ValueExpression="@(() => _revealedToken)"/>
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@CopyRevealedAsync"><OmniIcon Name="OmniIconName.Copy" /> <span>@L["Copy"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@DismissReveal"><OmniIcon Name="OmniIconName.Check" /> <span>@L["Done"]</span></OmniButton>
+            </OmniStack>
+        </OmniStack>
+    </OmniCard>
+}
+
+<OmniCard Class="omni-u-mb-lg">
+    <OmniTemplateForm TModel="NewTokenModel" Model="@_form" OnValidSubmit="@CreateAsync">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.End">
+            <OmniFormField Label="@L["PatName"]" For="Name">
+                <OmniTextBox @bind-Value="_form.Name"
+
+                    Id="Name" maxlength="64" />
+                <ValidationMessage For="@(() => _form.Name)" />
+            </OmniFormField>
+            <OmniFormField Label="@L["PatScope"]" For="oe-formfield-pages-settings-personalaccesstokens-2">
+                <OmniDropDown Id="oe-formfield-pages-settings-personalaccesstokens-2" TValue="PatScope" @bind-Value="_form.Scope"
+                              Options="@Scopes.Select(scope => new OmniOption<PatScope>(scope, ScopeLabel(scope))).ToArray()" />
+            </OmniFormField>
+            <OmniFormField For="oe-pages-settings-personalaccesstokens-numeric-1"><LabelContent>@L["PatExpirationDays"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_form.ExpirationDays" Minimum="1" Maximum="90" Id="oe-pages-settings-personalaccesstokens-numeric-1" /></ChildContent></OmniFormField>
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_creating ? "btn-busy" : null)" Busy="@(_creating)" title="@L["PatCreate"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+        </OmniRow>
+    </OmniTemplateForm>
+</OmniCard>
+
+<AetheusDataGrid FullHeight="true" @ref="_grid" Data="@_tokens" Count="@_totalCount" TItem="PersonalAccessTokenDto"
+                IsLoading="@_loading" LoadData="@LoadDataAsync" PageSize="25"
+                Virtualize="@AetheusGrid.RemoteVirtualization"
+                VirtualData="@(() => new OmniDataGridResult<PersonalAccessTokenDto>(_tokens, _totalCount))"
+                class="aetheus-grid-fullheight">
+    <EmptyTemplate>
+        <EmptyState Icon="key_off" Title="@L["PatEmptyTitle"]" Description="@L["PatEmptyDescription"]" />
+    </EmptyTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="PersonalAccessTokenDto" Property="Name" Title="@L["PatName"]" Filterable="true" />
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Property="Scope" Title="@L["PatScope"]" Width="150px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ScopeText" >
+            <Template Context="t">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@(t.Scope == PatScope.ReadOnly ? OmniTone.Accent : OmniTone.Warning)">@ScopeLabel(t.Scope)</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Property="TokenPrefix" Title="@L["PatTokenPrefix"]" Width="160px" Filterable="true" />
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Property="CreatedAt" Title="@L["PatCreatedAt"]" Width="160px" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Property="ExpiresAt" Title="@L["PatExpires"]" Width="160px" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Property="LastUsedAt" Title="@L["PatLastUsed"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" >
+            <Template Context="t">
+                @if (t.LastUsedAt.HasValue)
+                {
+                    @t.LastUsedAt.Value.ToString("g")
+                }
+                else
+                {
+                    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted">@L["PatNever"]</OmniText>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Title="@L["PatStatus"]" Width="120px" Sortable="false" Filterable="false" >
+            <Template Context="t">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@StatusStyle(t)">@StatusLabel(t)</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PersonalAccessTokenDto" Title="@L["Actions"]" Width="90px" Sortable="false" Filterable="false" >
+            <Template Context="t">
+                @if (IsRevocable(t))
+                {
+                    <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RevokeAsync(t))" title="@L["PatRevoke"]"><OmniIcon Name="OmniIconName.Prohibit" /></OmniButton>
+                }
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</AetheusDataGrid>

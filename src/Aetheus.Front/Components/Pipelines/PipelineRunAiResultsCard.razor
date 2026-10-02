@@ -1,0 +1,42 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* Extracted from PipelineRun.razor (audit 360, A360-75): the page sat 8 lines over the 600-line
+   budget, which is why the size guard could not be extended to .razor files. This block was the
+   natural seam - it renders one self-contained card and needs nothing from the page but its data
+   and a callback. *@
+@if (Results.Count > 0)
+{
+    <OmniCard Class="omni-u-p-md omni-u-mb-lg">
+        <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">
+            <OmniIcon Name="OmniIconName.Brain" Class="run-tile-icon" /> @L["AiRunResults"]
+        </OmniText>
+        <OmniDataGrid Items="@Results" TItem="AiRunResultDto"
+ Class="omni-u-w-100" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="AiRunResultDto" Property="ProfileName" Title="@L["AiRunnerProfile"]" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect">
+                    <Template Context="result">
+                        @result.ProfileName
+                        @if (result.SendsDataExternally)
+                        {
+                            <OmniIcon Name="OmniIconName.CloudArrowUp" Class="omni-u-text-warning omni-u-ms-xs"
+                                        title="@L["ExternalData"]" />
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="AiRunResultDto" Property="Verdict" Title="@L["Verdict"]" Width="6.875rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@VerdictText">
+                    <Template Context="result">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@(result.Verdict == AiVerdict.Pass ? OmniTone.Success : result.Verdict == AiVerdict.Fail ? OmniTone.Danger : OmniTone.Accent)">@L.Localize(result.Verdict)</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="AiRunResultDto" Property="DurationMs" Title="@L["Duration"]" Width="6.875rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators">
+                <Template Context="result">@TimeSpan.FromMilliseconds(result.DurationMs).ToString(@"mm\:ss")</Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="AiRunResultDto" Title="@L["Actions"]" Width="4.375rem" Sortable="false">
+                    <Template Context="result">
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OnView.InvokeAsync(result))" title="@L["View"]"><OmniIcon Name="OmniIconName.Eye" /></OmniButton>
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+        </OmniDataGrid>
+    </OmniCard>
+}

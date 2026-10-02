@@ -1,0 +1,33 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@* Recette R-361: one error group opened from its row of the telemetry Errors grid. Shows every field
+   the group carries (type, message, occurrences, first/last seen, fingerprint) and the only trace the
+   ingestion keeps, the top stack frame; closing leaves the grid as it was. *@
+<OmniStack Gap="OmniSpacing.Medium" Class="app-error-detail">
+    <dl class="app-error-detail-facts">
+        <dt>@L["ErrorType"]</dt>
+        <dd class="omni-u-mono">@Error.ExceptionType</dd>
+        <dt>@L["Occurrences"]</dt>
+        <dd><CountBadge Value="@Error.OccurrenceCount" Variant="OmniTone.Danger" /></dd>
+        <dt>@L["FirstSeen"]</dt>
+        <dd>@Error.FirstSeenAt.ToString("g", System.Globalization.CultureInfo.CurrentCulture)</dd>
+        <dt>@L["LastSeen"]</dt>
+        <dd>@Error.LastSeenAt.ToString("g", System.Globalization.CultureInfo.CurrentCulture)</dd>
+        @if (!string.IsNullOrWhiteSpace(Error.Fingerprint))
+        {
+            <dt>@L["ErrorFingerprint"]</dt>
+            <dd class="omni-u-mono">@Error.Fingerprint</dd>
+        }
+    </dl>
+    <OmniCodeBlock Code="@Error.Message" Title="@L["Message"]" Wrap="true" Class="app-error-detail-message code-block-bounded code-block-tall" />
+    @if (string.IsNullOrWhiteSpace(Error.TopFrame))
+    {
+        <OmniHeading Level="OmniHeadingLevel.H6" Class="omni-u-m-0">@L["ErrorTopFrame"]</OmniHeading>
+        <OmniText Tone="OmniTextTone.Muted" Class="app-error-detail-no-frame">@L["ErrorNoTopFrame"]</OmniText>
+    }
+    else
+    {
+        <OmniCodeBlock Code="@Error.TopFrame" Title="@L["ErrorTopFrame"]" Wrap="true" Class="app-error-detail-frame code-block-bounded code-block-tall" />
+    }
+    <DialogFooter OnCancel="@(() => Dialog.Close())" CancelText="@L["Close"]" />
+</OmniStack>

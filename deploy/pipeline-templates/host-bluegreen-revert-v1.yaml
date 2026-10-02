@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: EUPL-1.2
+# "Revenir à N-1" (PLAN-003 2.7): puts traffic back on the colour the last blue-green commit kept
+# running in reserve, then records the release that colour serves as the deployed one.
+#
+# Seconds, not minutes: nothing is built, restored, started or migrated. The schema is expand/contract,
+# so the previous release can serve it, and the configuration that served the reserve is put back as
+# it was. The colour this leaves becomes the reserve in turn, so running it again returns to N.
+#
+# Refused by the agent, with the reason, when there is nothing safe to return to: no reserve (a later
+# deployment recycled it, or it was retired), a deployment in flight, or a reserve that no longer
+# answers its readiness probe - then the way back is a redeploy of the previous release.
+#
+# A consumer supplies the same identity variables as for host-bluegreen-deploy and extends this
+# template; the stages carry its environment.
+name: host-bluegreen-revert-template
+trigger: manual
+
+variables:
+  BG_PROJECT: ""
+  BG_STATE_DIR: ""
+  BG_ENV_FILE: ""
+  BG_COMPOSE_FILES: ""
+  BG_PORTS: ""
+  BG_UPSTREAM_CONF: ""
+  BG_RELOAD_HELPER: ""
+
+stages:
+  - name: Revert
+    group: Deploy
+    execution_role: deploy
+    os: linux
+    steps:
+      - name: Put traffic back on the colour kept in reserve
+        type: bluegreen-revert
+        project: "$(BG_PROJECT)"
+        state_dir: "$(BG_STATE_DIR)"
+        env_file: "$(BG_ENV_FILE)"
+        compose_files: "$(BG_COMPOSE_FILES)"
+        ports: "$(BG_PORTS)"
+        upstream_conf: "$(BG_UPSTREAM_CONF)"
+        reload_helper: "$(BG_RELOAD_HELPER)"
+        outputs: [BLUEGREEN_REVERTED_REVISION]
+        timeout_seconds: 300
+
+  - name: Record release
+    group: Release
+    execution_role: deploy
+    os: linux
+    depends_on: [Revert]
+    steps:
+      # The revision the reserve serves is the release version the deployment that started it
+      # recorded (BG_REVISION), so the release it names is marked deployed and the one it replaced
+      # superseded, exactly as a deployment would.
+      - name: Mark the release now serving as deployed
+        type: release
+        version: "$(BLUEGREEN_REVERTED_REVISION)"
+        deployed: true
+        timeout_seconds: 300

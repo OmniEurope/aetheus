@@ -1,0 +1,29 @@
+# Aetheus Agent - Apache management. Item #6 of the plan; see
+# docs/contracts/security.md#controlled-sudo-escalation for the rules every
+# line below must satisfy.
+
+# 1. Test the config through a fixed root-owned helper. This alias intentionally omits noexec:
+#    apache2ctl must exec apache2, and the helper accepts no arguments or variable paths.
+#    The reload helper joins it for the same reason: it runs configtest before applying, so it too
+#    must exec apache2. It exists because a typed blue-green step invokes "sudo -n <path>" with a
+#    single argv element and therefore cannot reach the three-word systemctl grant below.
+# 2. systemd reload + lifecycle. These fixed argv commands retain noexec.
+# Every entry uses an EXACT fully-resolved binary path + fixed argv string. No wildcards.
+Cmnd_Alias AETHEUS_APACHE_TEST = #{APACHE_CONFIGTEST_HELPER_PATH}#, \
+    #{APACHE_RELOAD_HELPER_PATH}#
+Cmnd_Alias AETHEUS_APACHE_MANAGE = \
+    /bin/systemctl reload apache2.service, \
+    /bin/systemctl start apache2.service, \
+    /bin/systemctl stop apache2.service, \
+    /bin/systemctl restart apache2.service
+
+Defaults!AETHEUS_APACHE_MANAGE noexec
+Defaults!AETHEUS_APACHE_MANAGE timestamp_timeout=0
+Defaults!AETHEUS_APACHE_MANAGE env_reset
+Defaults!AETHEUS_APACHE_MANAGE secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults!AETHEUS_APACHE_TEST timestamp_timeout=0
+Defaults!AETHEUS_APACHE_TEST env_reset
+Defaults!AETHEUS_APACHE_TEST secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_APACHE_MANAGE
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_APACHE_TEST

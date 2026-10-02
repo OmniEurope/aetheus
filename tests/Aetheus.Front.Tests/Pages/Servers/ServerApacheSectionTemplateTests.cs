@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -174,44 +171,43 @@ public class ServerApacheSectionTemplateTests : BunitContext
     [Fact]
     public void GetStatusBadge_Running_ReturnsSuccess()
     {
-        Assert.Equal(BadgeStyle.Success, ServerApacheSection.GetStatusBadge(true));
+        Assert.Equal(OmniTone.Success, ServerApacheSection.GetStatusBadge(true));
     }
 
     [Fact]
     public void GetStatusBadge_Stopped_ReturnsDanger()
     {
-        Assert.Equal(BadgeStyle.Danger, ServerApacheSection.GetStatusBadge(false));
+        Assert.Equal(OmniTone.Danger, ServerApacheSection.GetStatusBadge(false));
     }
 
     [Fact]
-    public void ShowConfirm_SetsConfirmFields()
+    public void StopButton_IsDisabled_WhileAnotherApacheActionRuns()
     {
-        var server = BuildServer();
+        // PLAN-005 lot 4: Stop carries no veil of its own, so its Disabled keeps the "an action is
+        // running" interlock; without it Stop could be sent in the middle of a Restart.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse(HttpMethod.Post, "api/servers/1/apache/action", async ct =>
+        {
+            await release.Task.WaitAsync(ct);
+            return new { };
+        });
         var cut = Render<ServerApacheSection>(p =>
         {
-            p.Add(x => x.Server, server);
+            p.Add(x => x.Server, BuildServer(isRunning: true));
             p.Add(x => x.ServerId, 1);
         });
-        var method = SectionType.GetMethod("ShowConfirm", Priv)!;
-        method.Invoke(cut.Instance, ["MyTitle", "MyMessage", (Func<Task>)(() => Task.CompletedTask)]);
-        Assert.Equal("MyTitle", (string)SectionType.GetField("_confirmTitle", Priv)!.GetValue(cut.Instance)!);
-        Assert.Equal("MyMessage", (string)SectionType.GetField("_confirmMessage", Priv)!.GetValue(cut.Instance)!);
-        Assert.True((bool)SectionType.GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-    }
+        AngleSharp.Dom.IElement Button(string text) => cut.FindAll("button").Single(b => b.TextContent.Trim() == text);
+        Assert.False(Button("Stop").HasAttribute("disabled"));
 
-    [Fact]
-    public void ConfirmCancelled_HidesConfirm()
-    {
-        var server = BuildServer();
-        var cut = Render<ServerApacheSection>(p =>
+        Button("Restart").Click();
+
+        cut.WaitForAssertion(() =>
         {
-            p.Add(x => x.Server, server);
-            p.Add(x => x.ServerId, 1);
+            Assert.Contains("btn-busy", Button("Restart").ClassName, StringComparison.Ordinal);
+            Assert.True(Button("Stop").HasAttribute("disabled"));
         });
-        SectionType.GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        var method = SectionType.GetMethod("ConfirmCancelled", Priv)!;
-        method.Invoke(cut.Instance, []);
-        Assert.False((bool)SectionType.GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
+        release.SetResult();
+        cut.WaitForAssertion(() => Assert.False(Button("Stop").HasAttribute("disabled")));
     }
 
     [Fact]

@@ -1,0 +1,63 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/logs"
+@using Microsoft.AspNetCore.SignalR.Client
+
+<PageTitle>@L["LiveLogs"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["LiveLogs"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("terminal")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="logs" />
+    </Badges>
+    <Actions>
+        @if (_hubConnection?.State == HubConnectionState.Connected)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@L["Connected"]</OmniBadge>
+        }
+    </Actions>
+    <MenuContent>
+        <OmniMenuItem OnClick="@(() => _logs.Clear())"><Icon><OmniIcon Name="OmniIconName.Broom" /></Icon><ChildContent>@L["Clear"]</ChildContent></OmniMenuItem>
+        @if (Auth.IsAdmin && _currentWatchId.HasValue)
+        {
+            <OmniMenuItem OnClick="@ToggleUnmasked"><Icon><OmniIcon Name="@(_showUnmasked ? OmniIconName.EyeSlash : OmniIconName.Eye)" /></Icon><ChildContent>@(_showUnmasked ? L["ShowMasked"] : L["ShowUnmasked"])</ChildContent></OmniMenuItem>
+        }
+    </MenuContent>
+</OmniPageHeader>
+
+@* Recette R-403: the title alone at the top; under it, what the page is for and the task to follow. *@
+<OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mb-md">@L["LiveLogsDescription"]</OmniText>
+<OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.End" Gap="OmniSpacing.Small" Class="live-logs-watch omni-u-mb-md">
+    <OmniFormField For="live-logs-task-id"><LabelContent>@L["TaskId"]</LabelContent><ChildContent>
+        <OmniNumeric @bind-Value="_taskIdFilter" Id="live-logs-task-id" Minimum="1" TValue="int?" />
+    </ChildContent></OmniFormField>
+    @* Never disabled (recette R-090): the number field commits on blur, so a Watch button disabled until
+       then swallowed the very click that committed it, and the page looked dead. Empty, it does nothing. *@
+    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@StartWatching"><OmniIcon Name="OmniIconName.Eye" /> <span>@L["Watch"]</span></OmniButton>
+</OmniStack>
+
+<div class="live-log-panel" @ref="_logContainer">
+    @if (_logs.Count == 0)
+    {
+        @if (_currentWatchId.HasValue)
+        {
+            <EmptyState Icon="terminal" Title="@L["NoLogEntriesYet"]" Description="@L["WaitingForLogEntries"]" />
+        }
+        else
+        {
+            <EmptyState Icon="manage_search" Title="@L["SelectTaskToWatch"]" Description="@L["SelectTaskToWatchDescription"]" />
+        }
+    }
+    else
+    {
+        @foreach (var log in _logs)
+        {
+            <div class="log-entry log-level-@log.Level.ToString().ToLowerInvariant()">
+                <span class="log-timestamp">[@log.Timestamp.ToString("HH:mm:ss.fff")]</span>
+                <span class="log-task-id">[Task#@log.TaskId]</span>
+                <span>[@log.Level]</span> @((MarkupString)HighlightMasked(log.Message))
+            </div>
+        }
+    }
+</div>
+
+

@@ -1,0 +1,30 @@
+# Version guard (STD-SDKPIN): one PR per newer version, never a build failure.
+# Three ecosystems: the .NET SDK floor in global.json, the MCR image tags/digests
+# in the Dockerfiles, and the NuGet packages (Directory.Packages.props or .csproj).
+version: 2
+updates:
+  - package-ecosystem: "dotnet-sdk"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "sdk"]
+  - package-ecosystem: "docker"
+    directory: "/deploy/docker"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "docker"]
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "nuget"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    # STD-SDKPIN (ADR-048): the three Roslyn packages follow the global.json floor's compiler, never
+    # the latest release; a newer Roslyn than the host compiler is refused (CS9057).
+    ignore:
+      - dependency-name: "Microsoft.CodeAnalysis.CSharp"
+      - dependency-name: "Microsoft.CodeAnalysis.CSharp.Workspaces"
+      - dependency-name: "Microsoft.CodeAnalysis.Workspaces.Common"

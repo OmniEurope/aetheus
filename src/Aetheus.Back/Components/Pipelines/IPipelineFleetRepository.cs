@@ -11,4 +11,10 @@ internal interface IPipelineFleetRepository
         CancellationToken ct);
 
     Task<PipelineFleetRow?> GetAsync(int pipelineId, CancellationToken ct);
+
+    /// <summary>Recette R-224: the distinct template names the pipelines in scope reference.</summary>
+    Task<List<string>> GetTemplateNamesAsync(
+        IReadOnlyCollection<int>? organizationIds,
+        IReadOnlyCollection<int>? accessiblePipelineIds,
+        CancellationToken ct);
 }

@@ -231,3 +231,262 @@ test("captures only explicitly enabled bounded browser signals", async () => {
   assert.equal(listeners.has("unhandledrejection"), false);
   assert.equal(listeners.has("load"), false);
 });
+
+test("identify() attaches the authenticated user id to subsequent events only", async () => {
+  const payloads = [];
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      globalPrivacyControl: false,
+      doNotTrack: "0",
+      sendBeacon: (_endpoint, blob) => {
+        payloads.push(blob);
+        return true;
+      }
+    }
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { pathname: "/account" },
+      doNotTrack: "0",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }
+  });
+  Object.defineProperty(globalThis, "history", {
+    configurable: true,
+    value: { pushState: () => undefined, replaceState: () => undefined }
+  });
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => "6b40f4fd-53ac-4f84-8c9e-9fac6feec6e1" }
+  });
+
+  const analytics = createAetheusAnalytics({ routeResolver: (pathname) => pathname });
+  analytics.install();
+  analytics.identify("internal-user-42");
+  globalThis.window.location.pathname = "/account/settings";
+  analytics.trackPageView();
+
+  const events = await Promise.all(payloads.map((payload) => payload.text().then(JSON.parse)));
+  assert.equal(events.length, 2);
+  assert.equal("authenticatedUserId" in events[0], false);
+  assert.equal(events[1].authenticatedUserId, "internal-user-42");
+
+  analytics.stop();
+});
+
+test("isSignedIn adds a bare signedIn flag, never an account, and fails closed", async () => {
+  const payloads = [];
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      globalPrivacyControl: false,
+      doNotTrack: "0",
+      sendBeacon: (_endpoint, blob) => {
+        payloads.push(blob);
+        return true;
+      }
+    }
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { pathname: "/servers" },
+      doNotTrack: "0",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }
+  });
+  Object.defineProperty(globalThis, "history", {
+    configurable: true,
+    value: { pushState: () => undefined, replaceState: () => undefined }
+  });
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => "6b40f4fd-53ac-4f84-8c9e-9fac6feec6e1" }
+  });
+
+  let answer = true;
+  const analytics = createAetheusAnalytics({
+    routeResolver: (pathname) => pathname,
+    isSignedIn: () => {
+      if (answer === "throw") throw new Error("app not started");
+      return answer;
+    }
+  });
+  analytics.install();
+  answer = false;
+  globalThis.window.location.pathname = "/projects";
+  analytics.trackPageView();
+  answer = "throw";
+  globalThis.window.location.pathname = "/releases";
+  analytics.trackPageView();
+
+  const events = await Promise.all(payloads.map((payload) => payload.text().then(JSON.parse)));
+  assert.equal(events.length, 3);
+  assert.equal(events[0].signedIn, true);
+  assert.equal("authenticatedUserId" in events[0], false);
+  assert.equal("signedIn" in events[1], false);
+  assert.equal("signedIn" in events[2], false);
+
+  analytics.stop();
+});
+
+test("heartbeat refreshes LastSeenAtUtc on a schedule without changing the route dedup", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const payloads = [];
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      globalPrivacyControl: false,
+      doNotTrack: "0",
+      sendBeacon: (_endpoint, blob) => {
+        payloads.push(blob);
+        return true;
+      }
+    }
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { pathname: "/dashboard" },
+      doNotTrack: "0",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }
+  });
+  Object.defineProperty(globalThis, "history", {
+    configurable: true,
+    value: { pushState: () => undefined, replaceState: () => undefined }
+  });
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => "6b40f4fd-53ac-4f84-8c9e-9fac6feec6e1" }
+  });
+
+  const analytics = createAetheusAnalytics({ routeResolver: (pathname) => pathname });
+  analytics.install();
+  t.mock.timers.tick(75_000);
+  t.mock.timers.tick(75_000);
+  analytics.stop();
+  t.mock.timers.tick(75_000);
+
+  return Promise.all(payloads.map((payload) => payload.text().then(JSON.parse))).then((events) => {
+    assert.deepEqual(
+      events.map((event) => event.kind),
+      ["page_view", "heartbeat", "heartbeat"]
+    );
+    assert.equal(events.every((event) => event.route === "/dashboard"), true);
+  });
+});
+
+function browserWithBeacon(pathname, search = "") {
+  const payloads = [];
+  const history = { pushState: () => undefined, replaceState: () => undefined };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      globalPrivacyControl: false,
+      doNotTrack: "0",
+      sendBeacon: (_endpoint, blob) => {
+        payloads.push(blob);
+        return true;
+      }
+    }
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { pathname, search },
+      doNotTrack: "0",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }
+  });
+  Object.defineProperty(globalThis, "history", { configurable: true, value: history });
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => "6b40f4fd-53ac-4f84-8c9e-9fac6feec6e1" }
+  });
+  return {
+    history,
+    navigate(nextPathname, nextSearch = "", replace = false) {
+      globalThis.window.location.pathname = nextPathname;
+      globalThis.window.location.search = nextSearch;
+      if (replace) history.replaceState({}, "", nextPathname + nextSearch);
+      else history.pushState({}, "", nextPathname + nextSearch);
+    },
+    events: () => Promise.all(payloads.map((payload) => payload.text().then(JSON.parse)))
+  };
+}
+
+test("R2-008: another entity or another ?tab= of the same route counts; the same address does not", async () => {
+  const browser = browserWithBeacon("/pipelines/12");
+  const analytics = createAetheusAnalytics({
+    routeResolver: (pathname) => pathname.replace(/\/\d+/g, "/{value}")
+  });
+  analytics.install();
+
+  browser.navigate("/pipelines/13");
+  browser.navigate("/pipelines/13", "?tab=runs");
+  browser.navigate("/pipelines/13", "?tab=runs", true);
+  browser.navigate("/pipelines/13", "?tab=yaml");
+
+  const events = await browser.events();
+  assert.deepEqual(events.map((event) => event.route), [
+    "/pipelines/{value}", "/pipelines/{value}", "/pipelines/{value}", "/pipelines/{value}"
+  ]);
+  assert.equal(JSON.stringify(events).includes("tab="), false);
+  analytics.stop();
+});
+
+test("R2-008: coming back to a measured page after an unmeasured one counts again", async () => {
+  const browser = browserWithBeacon("/projects");
+  const analytics = createAetheusAnalytics({
+    routeResolver: (pathname) => (pathname === "/login" ? undefined : pathname)
+  });
+  analytics.install();
+
+  browser.navigate("/login");
+  browser.navigate("/projects");
+
+  const events = await browser.events();
+  assert.deepEqual(events.map((event) => event.route), ["/projects", "/projects"]);
+  analytics.stop();
+});
+
+test("R2-008: holdUntilIdentified keeps the first page views and sends them with the identity", async () => {
+  const browser = browserWithBeacon("/projects");
+  const analytics = createAetheusAnalytics({
+    routeResolver: (pathname) => pathname,
+    holdUntilIdentified: true
+  });
+  analytics.install();
+  browser.navigate("/servers");
+
+  assert.equal((await browser.events()).length, 0);
+  analytics.identify("internal-user-42");
+  browser.navigate("/releases");
+
+  const events = await browser.events();
+  assert.deepEqual(events.map((event) => event.route), ["/projects", "/servers", "/releases"]);
+  assert.equal(events.every((event) => event.authenticatedUserId === "internal-user-42"), true);
+  analytics.stop();
+});
+
+test("R2-008: an anonymous identify() releases the held page views without an account", async () => {
+  const browser = browserWithBeacon("/projects");
+  const analytics = createAetheusAnalytics({
+    routeResolver: (pathname) => pathname,
+    holdUntilIdentified: true
+  });
+  analytics.install();
+  analytics.identify(undefined);
+
+  const events = await browser.events();
+  assert.equal(events.length, 1);
+  assert.equal("authenticatedUserId" in events[0], false);
+  analytics.stop();
+});

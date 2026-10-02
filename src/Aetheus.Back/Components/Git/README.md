@@ -58,9 +58,13 @@ External git connections (GitHub/GitLab), internal hosted repositories (GitLight
 - `IGitLightRepository` / `GitLightRepository` -- internal repo EF access
 - `GitBasicAuthenticationHandler` -- HTTP basic auth for smart HTTP via account credentials, owner-bound personal access tokens, or project-scoped pipeline-run clone tokens. `PatScopeEnforcementMiddleware` explicitly permits POST `git-upload-pack` for read-only PAT clone/fetch while denying `git-receive-pack` and unrelated writes.
 - `GitLightMaintenanceService` (in `Services/`, outside this module) -- background: `git gc`, housekeeping
+- `IExternalRepoMirrorService` / `ExternalRepoMirrorService`, `CreditedGitRunner`, `GitCredentialPayload` -- mirror mechanics for external repositories (clone, fetch, credentials), moved here from ExternalRepos so the orchestrator can reach them without depending on that module
+- `IExternalMirrorRefresher` / `ExternalMirrorRefresher` -- on-demand fetch of the mirror behind a repository slug; returns null on success or for a non-mirror repository, else the fetch failure reason. Called by `PipelineWorkspaceSourceResolver` just before a run pins the commit of a pipeline whose YAML names that mirror (`source: repository:`, recette R-534)
+- `GitDiffReader` -- bounded diff queries extracted from `GitLightCliService` (numstat, patch, changed paths, and `GetTreeBlobsAsync`, the full `path -> "mode sha"` tree listing used to compare the definition repository with the source repository); a truncated or failed answer is null, never a partial list
+- `GitLightMapper.IsAdditionalSource` -- marks a mirror that sits beside the project's own repository (exposed as `GitLightRepoDto.IsAdditionalSource`)
 - `GitRepoPathResolver` -- single source of truth for resolving an internal repo's on-disk path from `(projectId, slug)` with the path-traversal guard (OS-aware comparator: case-insensitive on Windows, case-sensitive on Linux). Replaces the three drifted copies in `GitLightService` / `GitSmartHttpService` / `ExternalRepoMirrorService` (M-git-6)
 
 ## Cross-Module Dependencies
 
 - Depends on: Audit, Pipelines (status reporting), Auth (basic auth handler), PersonalAccessTokens, Webhooks
-- Depended on by: ExternalRepos (mirror-as-internal-repo at the standard path; feature-flagged `Features:ExternalRepos`, ADR-018/020)
+- Depended on by: ExternalRepos (mirror-as-internal-repo at the standard path; always on since recette R-295, ADR-018/020); Pipelines (`IExternalMirrorRefresher` and `GetTreeBlobsAsync` for the `source:` block)

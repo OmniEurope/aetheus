@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Git;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Git;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -127,7 +125,7 @@ public class GitRepositoriesCoverageTests : BunitContext
         typeof(GitRepositories).GetField("_projectFilter", Priv)!.SetValue(cut.Instance, (int?)null);
 
         // With no filter, ShowCreateDialog must return BEFORE the dialog + post-dialog reload, so the
-        // api/git/repos GET count stays unchanged. (Reaching the real DialogService.OpenAsync would leave
+        // api/git/repos GET count stays unchanged. (Reaching the real OmniDialogService.OpenAsync would leave
         // the awaited Task unresolved and hang this test - so completing without a reload proves the early
         // return, not a tautology.)
         var reposLoadsBefore = _handler.Requests.Count(r => r.Method == "GET" && r.Url.Contains("api/git/repos"));
@@ -177,12 +175,12 @@ public class GitRepositoriesCoverageTests : BunitContext
         await cut.InvokeAsync(async () => await cut.Instance.DisposeAsync());
 
         // After dispose the handler is detached: restoring Write must NOT flip _canWrite back.
-        var writeAll = Enum.GetValues<Aetheus.Shared.Enums.ResourceType>()
+        var writeAll = Enum.GetValues<Aetheus.Shared.Components.Auth.ResourceType>()
             .Select(rt => new EffectivePermissionDto
             {
                 ResourceType = rt,
                 ResourceId = null,
-                Permission = Aetheus.Shared.Enums.Permission.Write
+                Permission = Aetheus.Shared.Components.Auth.Permission.Write
             })
             .ToList();
         permissions.SetPermissions(writeAll, isAdmin: false);
@@ -210,9 +208,9 @@ public class GitRepositoriesCoverageTests : BunitContext
         {
             new()
             {
-                ResourceType = Aetheus.Shared.Enums.ResourceType.Project,
+                ResourceType = Aetheus.Shared.Components.Auth.ResourceType.Project,
                 ResourceId = null,
-                Permission = Aetheus.Shared.Enums.Permission.Write
+                Permission = Aetheus.Shared.Components.Auth.Permission.Write
             }
         };
         await cut.InvokeAsync(() => permissions.SetPermissions(writeProject, isAdmin: false));

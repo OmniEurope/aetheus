@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
-using Radzen.Blazor;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -87,8 +84,8 @@ public class ProjectEditSectionTests : BunitContext
             .Add(x => x.Project, project));
 
         // The submit button carries the localized "Save" text and the save icon.
-        Assert.Contains(cut.FindAll("button"), b =>
-            b.TextContent.Contains("Save") && b.InnerHtml.Contains("save"));
+        Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("Save"));
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Save);
     }
 
     [Fact]
@@ -105,8 +102,8 @@ public class ProjectEditSectionTests : BunitContext
             .Add(x => x.Project, project));
 
         // The Delete button carries the localized "Delete" text and the delete icon.
-        Assert.Contains(cut.FindAll("button"), b =>
-            b.TextContent.Contains("Delete") && b.InnerHtml.Contains("delete"));
+        Assert.Contains(cut.FindAll("button.omni-button"), b => b.TextContent.Contains("Delete"));
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Delete);
     }
 
     [Fact]
@@ -153,10 +150,10 @@ public class ProjectEditSectionTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            var branchDropdown = Assert.Single(cut.FindComponents<RadzenDropDown<string>>());
+            var branchDropdown = Assert.Single(cut.FindComponents<OmniDropDown<string>>());
             Assert.Equal(
                 ["main", "develop", "release/next"],
-                Assert.IsAssignableFrom<IEnumerable<string>>(branchDropdown.Instance.Data));
+                branchDropdown.Instance.Options.Select(option => option.Value));
             Assert.Equal("develop", branchDropdown.Instance.Value);
         });
     }
@@ -184,7 +181,7 @@ public class ProjectEditSectionTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Empty(cut.FindComponents<RadzenDropDown<string>>());
+            Assert.Empty(cut.FindComponents<OmniDropDown<string>>());
             Assert.Contains("release/custom", cut.Markup);
         });
         Assert.DoesNotContain(
@@ -205,11 +202,11 @@ public class ProjectEditSectionTests : BunitContext
 
         var cut = Render<ProjectEditSection>(parameters =>
             parameters.Add(component => component.Project, project));
-        cut.Find("input[name='DefaultBranch']").Change("develop");
+        cut.Find("input#oe-pages-projects-projectdetailsections-projecteditsection-4").Input("develop");
 
         cut.Render(parameters => parameters.Add(component => component.Project, project));
 
-        Assert.Equal("develop", cut.Find("input[name='DefaultBranch']").GetAttribute("value"));
+        Assert.Equal("develop", cut.Find("input#oe-pages-projects-projectdetailsections-projecteditsection-4").GetAttribute("value"));
     }
 
     [Fact]
@@ -241,7 +238,8 @@ public class ProjectEditSectionTests : BunitContext
         {
             Assert.Contains("ProjectGitDefaultBranchMismatch", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("develop", cut.Markup, StringComparison.Ordinal);
-            Assert.Contains("main", cut.Markup, StringComparison.Ordinal);
+            var branchDropdown = Assert.Single(cut.FindComponents<OmniDropDown<string>>());
+            Assert.Contains("main", branchDropdown.Instance.Options.Select(option => option.Value));
         });
     }
 }

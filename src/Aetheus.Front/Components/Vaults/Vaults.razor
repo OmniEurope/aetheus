@@ -1,0 +1,11 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/vaults"
+
+<PageTitle>@L["Vaults"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["Vaults"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("lock")" /></Icon><Actions><Microsoft.AspNetCore.Components.Sections.SectionOutlet SectionName="@Aetheus.Front.Components.Shared.PipelinesList.HeaderActionsSection" /></Actions>
+</OmniPageHeader>
+
+@* 0-a: the global vaults list is the shared VaultsList with no scope filter. *@
+<VaultsList />

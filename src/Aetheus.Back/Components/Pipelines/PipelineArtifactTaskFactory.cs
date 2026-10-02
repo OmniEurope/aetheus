@@ -5,7 +5,6 @@ using Aetheus.Back.Components.AppBackups;
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -99,8 +98,8 @@ public sealed class PipelineArtifactTaskFactory(
             return;
         }
         var canBootstrap = stepDefinition.AllowMissing
-            && IsBootstrapReleaseSelector(releaseSelector)
-            && error?.Contains("has no retained artifact", StringComparison.Ordinal) == true;
+            && PipelineReleaseArtifactRules.IsBootstrapSelector(releaseSelector)
+            && error?.Contains(PipelineReleaseArtifactRules.NoRetainedArtifact, StringComparison.Ordinal) == true;
         if (!canBootstrap)
         {
             await FailRestoreArtifactsAsync(
@@ -127,25 +126,14 @@ public sealed class PipelineArtifactTaskFactory(
             .ConfigureAwait(false);
     }
 
-    private async Task<bool> IsMissingArtifactRequiredByPriorContractAsync(
+    private Task<bool> IsMissingArtifactRequiredByPriorContractAsync(
         string selector,
         int projectId,
         string? commitHash,
         string? artifactName,
-        CancellationToken ct)
-    {
-        if (string.Equals(selector, "previous-published", StringComparison.OrdinalIgnoreCase))
-            return IsGitCommitHash(commitHash)
-                && await artifactRepo.RequiresPreviousPublishedArtifactAsync(
-                    projectId, commitHash!, artifactName, ct).ConfigureAwait(false);
-        if (string.Equals(selector, "previous-deployed", StringComparison.OrdinalIgnoreCase))
-            return IsGitCommitHash(commitHash)
-                && await artifactRepo.RequiresPreviousDeployedArtifactAsync(
-                    projectId, commitHash!, artifactName, ct).ConfigureAwait(false);
-        return string.Equals(selector, "current-deployed", StringComparison.OrdinalIgnoreCase)
-            ? await artifactRepo.HasDeployedRollbackContractReleaseAsync(projectId, ct).ConfigureAwait(false)
-            : await artifactRepo.HasPublishedRollbackContractReleaseAsync(projectId, ct).ConfigureAwait(false);
-    }
+        CancellationToken ct) =>
+        PipelineReleaseArtifactRules.IsRequiredByPriorContractAsync(
+            artifactRepo, selector, projectId, commitHash, artifactName, ct);
 
     private async Task FailRestoreArtifactsAsync(
         int runId,
@@ -173,6 +161,7 @@ public sealed class PipelineArtifactTaskFactory(
         stepRun.Status = TaskExecutionStatus.Success;
         stepRun.StartedAt ??= now;
         stepRun.CompletedAt = now;
+        stepRun.SkippedReason = warning.Length <= 1000 ? warning : warning[..1000];
         await repo.AppendRunWarningsAsync(
             runId, [$"Restore-artifacts step '{stepRun.StepName}': {warning}"], ct).ConfigureAwait(false);
     }
@@ -200,6 +189,15 @@ public sealed class PipelineArtifactTaskFactory(
         if (!string.IsNullOrWhiteSpace(targetDirectory))
             restoreVars["AETHEUS_RESTORE_TARGET_DIR"] = targetDirectory;
 
+        // The selector is substituted exactly as ResolveSelector substitutes it, so a templated
+        // `artifact_source_selector: "$(VAR)"` that resolved the artifact as latest-successful is also
+        // recognised as latest-successful here, instead of being refused on the raw "$(VAR)" text.
+        var artifactSourceSelector = SubstituteVariables(
+            stepDefinition.ArtifactSourceSelector ?? string.Empty, legVariables).Trim();
+        if (ExpectedSourceCommitFor(legVariables, releaseSelector, artifactSourceSelector)
+            is { } expectedSourceCommit)
+            restoreVars["AETHEUS_RESTORE_EXPECTED_SOURCE_COMMIT"] = expectedSourceCommit;
+
         stepRun.ServerId = server.Id;
         var restoreTask = new ServerTask
         {
@@ -213,6 +211,8 @@ public sealed class PipelineArtifactTaskFactory(
             Operation = OperationKind.PipelineRestoreArtifacts
         };
         repo.TrackTask(restoreTask);
+        ArtifactInputRecorder.Track(repo, runId, stepRun, artifact, ArtifactInputKind.Restore, null,
+            timeProvider.GetUtcNow().UtcDateTime);
         MarkStepDispatched(stepRun, restoreTask);
     }
 
@@ -230,8 +230,23 @@ public sealed class PipelineArtifactTaskFactory(
         if (string.IsNullOrWhiteSpace(artifactName) || string.IsNullOrWhiteSpace(sourcePipelineName))
             return (null, "'release' or both 'artifact' and 'artifact_source_pipeline' are required.");
 
+        var (selector, selectorError) = ResolveSelector(stepDef, variables);
+        if (selectorError is not null) return (null, selectorError);
+
         var context = await ResolveArtifactContextAsync(runId, ct).ConfigureAwait(false);
         if (context.Error is not null) return (null, context.Error);
+
+        // Opt-in only: a step that asks for nothing keeps the lineage-then-same-commit resolution
+        // below untouched. Asking for latest-successful deliberately gives both of them up.
+        if (string.Equals(selector, LatestSuccessfulSelector, StringComparison.OrdinalIgnoreCase))
+        {
+            var latestArtifact = await artifactRepo.FindLatestSuccessfulPipelineArtifactAsync(
+                context.Context!.ProjectId, sourcePipelineName, artifactName, ct).ConfigureAwait(false);
+            return latestArtifact is null
+                ? (null, $"artifact '{artifactName}' was never produced by a successful {sourcePipelineName} run.")
+                : (latestArtifact, null);
+        }
+
         var lineageRootRunId = ResolveLineageRootRunId(runId, variables);
         var sourceRunId = await repo.FindTriggeredRunIdByPipelineNameAsync(
             lineageRootRunId, sourcePipelineName, ct).ConfigureAwait(false);
@@ -243,6 +258,26 @@ public sealed class PipelineArtifactTaskFactory(
         return existingArtifact is null
             ? (null, $"artifact '{artifactName}' was not found on a successful {sourcePipelineName} run at commit {context.Context.Run.CommitHash}.")
             : (existingArtifact, null);
+    }
+
+    internal const string SameCommitSelector = "same-commit";
+    internal const string LatestSuccessfulSelector = "latest-successful";
+
+    /// <summary>The step's artifact source selector, defaulted and validated. An unknown value is an
+    /// error rather than a fall-back to the default: silently widening or narrowing a provenance
+    /// lookup because a name was misspelled is exactly the failure this selector must not have.</summary>
+    private static (string Selector, string? Error) ResolveSelector(
+        PipelineStepDefinition stepDef, Dictionary<string, string> variables)
+    {
+        var selector = SubstituteVariables(stepDef.ArtifactSourceSelector ?? string.Empty, variables).Trim();
+        if (selector.Length == 0) return (SameCommitSelector, null);
+        if (string.Equals(selector, SameCommitSelector, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(selector, LatestSuccessfulSelector, StringComparison.OrdinalIgnoreCase))
+        {
+            return (selector, null);
+        }
+        return (selector,
+            $"'artifact_source_selector' must be '{SameCommitSelector}' or '{LatestSuccessfulSelector}', not '{selector}'.");
     }
 
     private async Task<(ArtifactResolutionContext? Context, string? Error)> ResolveArtifactContextAsync(
@@ -306,37 +341,58 @@ public sealed class PipelineArtifactTaskFactory(
         if (projectId is null)
             return (null, "the current run is not attached to a project.");
 
-        var artifactFilter = string.IsNullOrWhiteSpace(artifactName) ? null : artifactName;
-        PipelineArtifact? artifact;
-        var previousPublished = string.Equals(
-            releaseSelector, "previous-published", StringComparison.OrdinalIgnoreCase);
-        var previousDeployed = string.Equals(
-            releaseSelector, "previous-deployed", StringComparison.OrdinalIgnoreCase);
-        if (previousPublished || previousDeployed)
-        {
-            if (!IsGitCommitHash(releaseRun?.CommitHash))
-                return (null, "the current run has no verified source commit.");
-            artifact = previousDeployed
-                ? await artifactRepo.FindPreviousDeployedReleaseArtifactAsync(
-                    projectId.Value, releaseRun!.CommitHash!, artifactFilter, ct).ConfigureAwait(false)
-                : await artifactRepo.FindPreviousPublishedReleaseArtifactAsync(
-                    projectId.Value, releaseRun!.CommitHash!, artifactFilter, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            artifact = await artifactRepo.FindReleaseArtifactAsync(
-                projectId.Value, releaseSelector, artifactFilter, ct).ConfigureAwait(false);
-        }
-        return artifact is null
-            ? (null, $"release '{releaseSelector}' has no retained artifact in this project.")
-            : (artifact, null);
+        return await PipelineReleaseArtifactRules.FindAsync(
+            artifactRepo, projectId.Value, releaseRun?.CommitHash, releaseSelector, artifactName, ct)
+            .ConfigureAwait(false);
     }
 
-    private static bool IsBootstrapReleaseSelector(string? selector) =>
-        string.Equals(selector, "latest-published", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(selector, "previous-published", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(selector, "previous-deployed", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(selector, "current-deployed", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// D-04: the revision a restored artifact must prove it was built from, or null when there is
+    /// nothing to prove.
+    ///
+    /// The restore does this itself rather than each consumer rewriting the comparison in shell
+    /// afterwards. That is the whole correction: a consumer that forgot the verification stage used
+    /// to scan, grade or ship another commit's build with no warning at all, which is exactly what
+    /// the sealed delivery contract exists to prevent. Nothing is declared in YAML, so nothing can
+    /// be left out.
+    ///
+    /// A release selector is the one legitimate exception: restoring what is currently published or
+    /// deployed in order to compare against it means the artifact is EXPECTED to carry a different
+    /// commit, and demanding the run's own revision there would refuse every baseline comparison.
+    /// </summary>
+    internal static string? ExpectedSourceCommitFor(
+        IReadOnlyDictionary<string, string> legVariables,
+        string? releaseSelector,
+        string? artifactSourceSelector = null)
+    {
+        ArgumentNullException.ThrowIfNull(legVariables);
+        // ANY release selector, not just the four symbolic ones. The rule below already says why:
+        // restoring a release means the artifact is EXPECTED to carry a different commit. A named
+        // release is the same case - it names a build, and a build has its own revision.
+        //
+        // Restricting the exemption to the symbolic selectors made aetheus-deploy-prod work only
+        // while develop had not moved since the candidate was qualified. Run 2323 deployed candidate
+        // c-384f63d4 from develop at 61a6b12a and every candidate restore was refused with "built
+        // from 384f63d4, but this run was launched on 61a6b12a", which is the normal situation:
+        // deploy-prod reads its instructions from develop HEAD and promotes an older, qualified
+        // release. verify-release-ancestry.sh is what proves the two are related, not this check.
+        if (!string.IsNullOrWhiteSpace(releaseSelector)) return null;
+        // latest-successful is the second legitimate exception, and it was missing. The resolution
+        // above says it "deliberately gives up" lineage AND same-commit lookup: it takes the newest
+        // successful run of another pipeline, which by construction was built from another commit.
+        // Demanding this run's revision of it refused every such restore outright.
+        //
+        // aetheus-deploy-prod restores the nightly qualification verdict exactly this way (its own
+        // comment says a nightly runs on develop HEAD of that night, never on the commit being
+        // deployed), so run 2321 failed on "the restored artifact carries no source-commit" and no
+        // production deployment could complete. allow_missing did not save it: a refusal is not an
+        // absence.
+        if (string.Equals(artifactSourceSelector?.Trim(), LatestSuccessfulSelector, StringComparison.OrdinalIgnoreCase))
+            return null;
+        var commit = legVariables.GetValueOrDefault("BUILD_SOURCEVERSION");
+        return string.IsNullOrWhiteSpace(commit) ? null : commit;
+    }
+
 
     private static bool IsOptionalProducerArtifactUnavailable(
         PipelineStepDefinition step,

@@ -6,9 +6,6 @@ using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Analysis;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -243,6 +240,20 @@ public sealed class AnalysisServiceTests : IDisposable
         Assert.Single(gate.Findings);
         Assert.Equal(1, gate.FindingCount);
         Assert.Equal(1, gate.NewFindingCount);
+        Assert.Equal(0, gate.DecidedFindingCount);
+
+        // Recette R-527: once someone accepts it, the finding is still listed for the run but is no
+        // longer counted among what is left to do, new or not.
+        finding.Status = AnalysisFindingStatus.Accepted;
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var decided = await new AnalysisRepository(_db).GetRunGateAsync(
+            1, TestContext.Current.CancellationToken);
+
+        Assert.Single(decided.Findings);
+        Assert.Equal(0, decided.FindingCount);
+        Assert.Equal(0, decided.NewFindingCount);
+        Assert.Equal(1, decided.DecidedFindingCount);
     }
 
     [Fact]
@@ -514,12 +525,13 @@ public sealed class AnalysisServiceTests : IDisposable
     {
         var first = await _service.PublishReportAsync(2, Request(2), TestContext.Current.CancellationToken);
         var finding = Assert.Single(_db.AnalysisFindings);
-        await _service.CreateFindingDecisionAsync(finding.Id, new CreateAnalysisFindingDecisionRequest
-        {
-            Status = AnalysisFindingStatus.Accepted,
-            Reason = "Accepted temporarily while the affected component is replaced.",
-            ExpiresAt = _now.AddMinutes(5)
-        }, "security-admin", TestContext.Current.CancellationToken);
+        await new AnalysisFindingDecisionService(new AnalysisRepository(_db), _time, Substitute.For<IAuditService>())
+            .CreateFindingDecisionAsync(finding.Id, new CreateAnalysisFindingDecisionRequest
+            {
+                Status = AnalysisFindingStatus.Accepted,
+                Reason = "Accepted temporarily while the affected component is replaced.",
+                ExpiresAt = _now.AddMinutes(5)
+            }, "security-admin", TestContext.Current.CancellationToken);
         _time.Advance(TimeSpan.FromMinutes(10));
 
         await _service.PublishReportAsync(4, Request(4) with
@@ -1029,6 +1041,26 @@ public sealed class AnalysisServiceTests : IDisposable
         Assert.Equal("security", row.PipelineName);
         Assert.Equal("main", row.BranchName);
         Assert.Equal(AnalysisGateStatus.Warning, row.GateStatus);
+        Assert.Null(row.RepositoryId);
+    }
+
+    /// <summary>Recette R-373: a portfolio row names the internal repository its run built (matched by
+    /// the project and slug of the run's clone URL, whatever host it was re-homed to), so the commit
+    /// links to its Aetheus page.</summary>
+    [Fact]
+    public async Task GetPortfolioAsync_ResolvesTheInternalRepositoryOfTheReportRun()
+    {
+        var run = await _db.PipelineRuns.SingleAsync(item => item.Id == 1, TestContext.Current.CancellationToken);
+        run.RepositoryUrl = "https://host.docker.internal:5301/git/1/project.git";
+        var repository = new GitInternalRepo { ProjectId = 1, Name = "Project", Slug = "project" };
+        _db.GitInternalRepos.Add(repository);
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await _service.PublishReportAsync(1, Request(), TestContext.Current.CancellationToken);
+
+        var page = await _service.GetPortfolioAsync([1], new AnalysisPortfolioPaginationRequest(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(repository.Id, Assert.Single(page.Items).RepositoryId);
     }
 
     [Fact]

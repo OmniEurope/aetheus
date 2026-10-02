@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net.Http;
-using Aetheus.Front.Pages.Settings;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Settings;
 using Bunit;
-using Radzen.Blazor;
 
 namespace Aetheus.Front.Tests.Pages.Settings;
 
@@ -61,8 +58,8 @@ public class PersonalAccessTokensPageTests : BunitContext
         handler.SetPaginatedJsonResponse(HttpMethod.Get, "personal-access-tokens", Array.Empty<PersonalAccessTokenDto>());
 
         var cut = Render<PersonalAccessTokens>();
-        var grid = cut.FindComponent<RadzenDataGrid<PersonalAccessTokenDto>>();
-        await cut.InvokeAsync(grid.Instance.Reload);
+        var grid = cut.FindComponent<OmniDataGrid<PersonalAccessTokenDto>>();
+        await cut.InvokeAsync(grid.Instance.ReloadAsync);
 
         Assert.Contains("PatEmptyTitle", cut.Markup);
     }
@@ -80,7 +77,7 @@ public class PersonalAccessTokensPageTests : BunitContext
 
         var cut = Render<PersonalAccessTokens>();
 
-        cut.Find("input[name='Name']").Input("deploy");
+        cut.Find("input#Name").Input("deploy");
         cut.Find("button[type=\"submit\"]").Click();
 
         Assert.Contains("aeth_pat_SUPERSECRETVALUE1234567890", cut.Markup);
@@ -91,5 +88,36 @@ public class PersonalAccessTokensPageTests : BunitContext
         var request = System.Text.Json.JsonSerializer.Deserialize<CreatePersonalAccessTokenRequest>(
             body!, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
         Assert.Equal("deploy", request!.Name);
+    }
+
+    [Fact]
+    public async Task HeaderFilters_AreSentAsColumnFilters()
+    {
+        // Recette R-224: the scope list and the three date ranges are column filters of the endpoint.
+        var handler = BunitTestHelper.RegisterServices(this);
+        handler.SetPaginatedJsonResponse(HttpMethod.Get, "personal-access-tokens", new[] { Active(1, "ci") });
+        var cut = Render<PersonalAccessTokens>();
+        var grid = cut.FindComponent<AetheusDataGrid<PersonalAccessTokenDto>>();
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Top = 25,
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(PersonalAccessTokenDto.Scope), "ReadWrite", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(PersonalAccessTokenDto.ExpiresAt), "2026-10-01",
+                    OmniDataGridFilterOperator.GreaterThanOrEquals, OmniDataGridFilterOperator.LessThan, "2026-11-01")
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/personal-access-tokens?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=Scope", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Value=ReadWrite", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=ExpiresAt", StringComparison.Ordinal)
+                && url.Contains("Filters[1].SecondValue=2026-11-01", StringComparison.Ordinal);
+        }));
     }
 }

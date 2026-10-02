@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: EUPL-1.2
-using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Aetheus.Back.Components.Monitoring;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Pipelines;
 
 /// <summary>
 /// Stateless helpers for the pipeline-run engine (<see cref="PipelineRunService"/>): variable
-/// substitution/parsing, DTO mapping, condition evaluation, matrix expansion, isolation-policy checks
-/// and the per-step env scoping. Extracted from the former <c>PipelineRunService.Helpers.cs</c> /
-/// <c>.Tasks.cs</c> partials into a real collaborator. <c>partial</c> here is required only for the
+/// substitution/parsing, condition evaluation, matrix expansion, isolation-policy checks and the
+/// per-step env scoping. DTO mapping (run list projection / detail mapping) lives in the sibling
+/// <see cref="PipelineRunDtoMapper"/>. Extracted from the former <c>PipelineRunService.Helpers.cs</c>
+/// / <c>.Tasks.cs</c> partials into a real collaborator. <c>partial</c> here is required only for the
 /// <c>[GeneratedRegex]</c> source generator.
 /// </summary>
 public static partial class PipelineRunHelpers
@@ -62,26 +63,11 @@ public static partial class PipelineRunHelpers
         return masked;
     }
 
-    public static Dictionary<string, string> DeserializeResolvedVariables(string? json)
-    {
-        if (string.IsNullOrEmpty(json) || json == "{}")
-            return [];
+    // Recette R-263: both readers moved with the run list row to Monitoring.PipelineRunListRows.
+    public static Dictionary<string, string> DeserializeResolvedVariables(string? json) =>
+        PipelineRunListRows.DeserializeResolvedVariables(json);
 
-        return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? [];
-    }
-
-    public static List<string> DeserializeWarnings(string? json)
-    {
-        if (string.IsNullOrEmpty(json))
-            return [];
-
-        return (JsonSerializer.Deserialize<List<string>>(json) ?? [])
-            .Where(warning => !warning.StartsWith(
-                "Cancellation requested; always() teardown stages remain mandatory",
-                StringComparison.Ordinal))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-    }
+    public static List<string> DeserializeWarnings(string? json) => PipelineRunListRows.DeserializeWarnings(json);
 
     public static bool HasCancellationRequest(string? additionalVariablesJson) =>
         DeserializeResolvedVariables(additionalVariablesJson)
@@ -97,145 +83,7 @@ public static partial class PipelineRunHelpers
         catch (JsonException) { return []; }
     }
 
-    // --- DTO mapping ---
-
-    // Server-side EF projection for the run LIST (GetRunsPagedAsync): scalar run fields + step
-    // summary chips only. Deliberately omits the heavy per-run payload (YamlSnapshot, resolved
-    // variables, step commands, output variables, artifacts) that GetRunAsync loads - output
-    // variables especially must not flow through the list path, which bypasses secret masking.
-    public static readonly Expression<Func<PipelineRun, PipelineRunDto>> RunListProjection = r => new PipelineRunDto
-    {
-        Id = r.Id,
-        PipelineId = r.PipelineId,
-        ProjectId = r.Pipeline != null ? r.Pipeline.ProjectId : null,
-        PipelineName = r.Pipeline != null ? r.Pipeline.Name : string.Empty,
-        Status = r.Status,
-        ProjectedWarningsJson = r.WarningsJson,
-        StartedAt = r.StartedAt,
-        CompletedAt = r.CompletedAt,
-        BranchName = r.BranchName,
-        CommitHash = r.CommitHash,
-        RepositoryUrl = r.RepositoryUrl,
-        ProjectName = r.Pipeline != null && r.Pipeline.Project != null ? r.Pipeline.Project.Name : null,
-        // Worst letter wins: the enum is ordered A=0..F=5, so Max is the most severe grade the run
-        // earned. Read from the stored evaluations rather than recomputing the gate, which would mean
-        // one gate computation per listed row.
-        // A run with no evaluation of its own is completed by PipelineRunGradeHydration after
-        // materialisation (see there): a candidate delegates every analysis to a child run.
-        GateGrade = r.AnalysisEvaluations
-            .Where(evaluation => evaluation.Grade != null)
-            .Max(evaluation => evaluation.Grade),
-        Steps = r.StepRuns.OrderBy(s => s.Order).Select(s => new PipelineStepRunDto
-        {
-            Id = s.Id,
-            StepName = s.StepName,
-            StageName = s.StageName,
-            Status = s.Status,
-            ServerId = s.ServerId,
-            ServerName = s.Server != null ? s.Server.Name : null,
-            ServerOs = s.Server != null ? s.Server.OsDescription : null,
-            StartedAt = s.StartedAt,
-            CompletedAt = s.CompletedAt,
-            ExitCode = s.ExitCode,
-            RetryCount = s.RetryCount,
-            ContinueOnError = s.ContinueOnError,
-            MatrixLeg = s.MatrixLeg,
-            TaskId = s.TaskId,
-            IsSystem = s.IsSystem,
-            GroupName = s.GroupName,
-            SkippedCondition = s.SkippedCondition,
-            SkippedConditionVariables = DeserializeResolvedVariables(s.SkippedConditionVariablesJson),
-            TriggeredRunId = s.TriggeredRunId
-        }).ToList()
-    };
-
-    public static PipelineRunDto MapRunToDto(PipelineRun r) => new()
-    {
-        Id = r.Id,
-        PipelineId = r.PipelineId,
-        ProjectId = r.Pipeline?.ProjectId,
-        PipelineName = r.Pipeline?.Name ?? string.Empty,
-        Status = r.Status,
-        CancellationRequested = HasCancellationRequest(r.AdditionalVariablesJson),
-        StartedAt = r.StartedAt,
-        CompletedAt = r.CompletedAt,
-        BranchName = r.BranchName,
-        CommitHash = r.CommitHash,
-        RepositoryUrl = r.RepositoryUrl,
-        ProjectName = r.Pipeline?.Project?.Name,
-        YamlSnapshot = r.YamlSnapshot,
-        ResolvedVariables = DeserializeResolvedVariables(r.ResolvedVariablesJson),
-        Parameters = DeserializeResolvedVariables(r.ParametersJson),
-        Warnings = DeserializeWarnings(r.WarningsJson),
-        Steps = r.StepRuns.Select(s => new PipelineStepRunDto
-        {
-            Id = s.Id,
-            StepName = s.StepName,
-            StageName = s.StageName,
-            Status = s.Status,
-            ServerId = s.ServerId,
-            ServerName = s.Server?.Name,
-            ServerOs = s.Server?.OsDescription,
-            StartedAt = s.StartedAt,
-            CompletedAt = s.CompletedAt,
-            ExitCode = s.ExitCode,
-            FailureCode = s.Task?.FailureCode ?? s.FailureCode,
-            FailureReason = s.Task?.FailureReason ?? s.FailureReason,
-            OutputVariables = DeserializeResolvedVariables(s.OutputVariablesJson),
-            RetryCount = s.RetryCount,
-            ContinueOnError = s.ContinueOnError,
-            MatrixLeg = s.MatrixLeg,
-            TaskId = s.TaskId,
-            IsSystem = s.IsSystem,
-            GroupName = s.GroupName,
-            SkippedCondition = s.SkippedCondition,
-            SkippedConditionVariables = DeserializeResolvedVariables(s.SkippedConditionVariablesJson),
-            // Command is masked in GetRunAsync (async secret-masking) before reaching the client.
-            Command = s.Task?.Command,
-            IsContainerIsolated = !string.IsNullOrEmpty(s.Task?.ContainerImage)
-                || !string.IsNullOrEmpty(s.Task?.ContainerToolchain),
-            TriggeredRunId = s.TriggeredRunId
-        }).ToList(),
-        Artifacts = r.Artifacts.Select(artifact => PipelineArtifactMapper.ToRunDto(artifact, r)).ToList(),
-        TestResultSummary = r.TestResults.Count > 0 ? new PipelineTestResultSummaryDto
-        {
-            TotalTests = r.TestResults.Count,
-            Passed = r.TestResults.Count(t => t.Outcome == TestOutcome.Passed),
-            Failed = r.TestResults.Count(t => t.Outcome == TestOutcome.Failed),
-            Skipped = r.TestResults.Count(t => t.Outcome == TestOutcome.Skipped),
-            Errors = r.TestResults.Count(t => t.Outcome == TestOutcome.Error),
-            TotalDurationMs = r.TestResults.Sum(t => t.DurationMs)
-        } : null,
-        CoverageSummary = r.CoverageResults.Count > 0
-            ? CoverageSummaryMapper.Map(CoverageSummaryMapper.SelectCanonical(r.CoverageResults))
-            : null,
-        LintSummary = r.LintResults.Count > 0 ? new PipelineLintSummaryDto
-        {
-            Tool = r.LintResults[^1].Tool,
-            ErrorCount = r.LintResults[^1].ErrorCount,
-            WarningCount = r.LintResults[^1].WarningCount,
-            InfoCount = r.LintResults[^1].InfoCount,
-            Passed = r.LintResults[^1].ErrorCount == 0
-        } : null,
-        Metrics = r.RunMetrics.Select(m => new RunMetricDto
-        {
-            Key = m.Key,
-            Type = m.Type,
-            Value = m.Value,
-            Unit = m.Unit,
-            Threshold = m.Threshold,
-            StageName = m.StageName,
-            StepName = m.StepName
-        }).ToList()
-    };
-
-    public static PipelineRunDto HydrateListWarnings(PipelineRunDto run)
-        => PipelineRunGradeHydration.Apply(run with
-        {
-            Warnings = DeserializeWarnings(run.ProjectedWarningsJson),
-            ProjectedWarningsJson = null
-        });
-
+    // --- DTO mapping: PipelineRunDtoMapper (RunListProjection, MapRunToDto, HydrateListWarnings) ---
 
     // --- Fail-closed isolation enforcement ---
 

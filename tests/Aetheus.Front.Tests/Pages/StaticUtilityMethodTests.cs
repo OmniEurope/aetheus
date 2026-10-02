@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.Enums;
-using Radzen;
-using PipelinesComp = Aetheus.Front.Helpers.PipelineHelper;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
+using PipelinesComp = Aetheus.Front.Components.Shared.PipelineHelper;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -68,12 +66,15 @@ public class StaticUtilityMethodTests
     // --- PipelinesComp.GetRunBadge (delegates to PipelineHelper) ---
 
     [Theory]
-    [InlineData(PipelineStatus.Success, BadgeStyle.Success)]
-    [InlineData(PipelineStatus.Failed, BadgeStyle.Danger)]
-    [InlineData(PipelineStatus.Running, BadgeStyle.Info)]
-    [InlineData(PipelineStatus.Cancelled, BadgeStyle.Warning)]
-    [InlineData(PipelineStatus.Pending, BadgeStyle.Light)]
-    public void Pipelines_GetRunBadge_ReturnsExpected(PipelineStatus status, BadgeStyle expected)
+    [InlineData(PipelineStatus.Success, OmniTone.Success)]
+    [InlineData(PipelineStatus.Failed, OmniTone.Danger)]
+    [InlineData(PipelineStatus.Running, OmniTone.Accent)]
+    // PLAN-003 D13: amber is now Partial (finished with a swallowed failure); a cancelled run is a
+    // non-event, so it takes the neutral grey.
+    [InlineData(PipelineStatus.Cancelled, OmniTone.Info)]
+    [InlineData(PipelineStatus.Partial, OmniTone.Warning)]
+    [InlineData(PipelineStatus.Pending, OmniTone.Neutral)]
+    public void Pipelines_GetRunBadge_ReturnsExpected(PipelineStatus status, OmniTone expected)
     {
         Assert.Equal(expected, PipelinesComp.GetRunBadge(status));
     }

@@ -57,6 +57,16 @@ public sealed partial class DeliveryReproducibilityAuditTests
             Assert.Contains(InstallerSha256, file.Source, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("sha256sum", file.Source, StringComparison.Ordinal);
         });
+
+        // A literal SDK version handed to the installer (the E2E and simulator images cannot read
+        // global.json from their trimmed build contexts) is the global.json floor, never a drifted copy.
+        using var globalJson = JsonDocument.Parse(Read("global.json"));
+        var sdkVersion = globalJson.RootElement.GetProperty("sdk").GetProperty("version").GetString();
+        var literalSdkInstalls = candidates
+            .SelectMany(file => Regex.Matches(file.Source, @"\.sh --version (?<version>\d+\.\d+\.\d+) (?!--runtime)"))
+            .ToList();
+        Assert.Equal(3, literalSdkInstalls.Count);
+        Assert.All(literalSdkInstalls, match => Assert.Equal(sdkVersion, match.Groups["version"].Value));
     }
 
     [Fact]
@@ -86,7 +96,9 @@ public sealed partial class DeliveryReproducibilityAuditTests
     // Relative to Root, never on the absolute path: when the suite itself runs from a worktree, Root
     // already sits under .claude/worktrees/, so an absolute Contains() excluded every file in the
     // repository and left both scans below silently empty.
+    // The project's own worktree folder (.worktrees) holds full copies of the repository too.
     private static bool IsNestedWorktree(string path) => Path.GetRelativePath(Root, path)
-        .Replace('\\', '/')
-        .StartsWith(".claude/worktrees/", StringComparison.OrdinalIgnoreCase);
+        .Replace('\\', '/') is var relative
+        && (relative.StartsWith(".claude/worktrees/", StringComparison.OrdinalIgnoreCase)
+            || relative.StartsWith(".worktrees/", StringComparison.OrdinalIgnoreCase));
 }

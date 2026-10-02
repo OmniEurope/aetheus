@@ -163,6 +163,30 @@ internal sealed class PipelineServerResolver(AppDbContext db)
             .ConfigureAwait(false);
     }
 
+    public async Task<List<PipelineRunnerFacts>> GetRunnerFactsAsync(
+        IReadOnlyCollection<int> serverIds, CancellationToken ct = default)
+    {
+        if (serverIds.Count == 0) return [];
+        var rows = await db.Servers.AsNoTracking()
+            .Where(server => serverIds.Contains(server.Id))
+            .OrderBy(server => server.Name)
+            .Select(server => new
+            {
+                server.Id,
+                server.Name,
+                server.Status,
+                server.AgentProtocolVersion,
+                server.AgentCapabilitiesJson,
+                server.ScannerCapabilitiesJson
+            })
+            .ToListAsync(ct).ConfigureAwait(false);
+        return rows.Select(row => new PipelineRunnerFacts(
+                row.Id, row.Name, row.Status, row.AgentProtocolVersion,
+                ServerDataMapper.DeserializeDiagnostics(row.AgentCapabilitiesJson),
+                row.ScannerCapabilitiesJson))
+            .ToList();
+    }
+
     public async Task<List<int>> FindCandidateTargetServerIdsAsync(
         string? pool, string? environment, string? agent, OsType requiredOs,
         int? organizationId, bool deploymentStage, CancellationToken ct = default)
@@ -345,6 +369,16 @@ internal sealed class PipelineServerResolver(AppDbContext db)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<bool> HasRunnerWithDockerAsync(int? organizationId, CancellationToken ct = default)
+    {
+        var query = db.Servers
+            .WhereAgentCan(AgentCapabilities.PipelineBuild)
+            .Where(s => s.PipelineRunnerEnabled && s.DockerAvailable);
+        if (organizationId is { } orgId)
+            query = query.Where(s => s.OrganizationId == orgId);
+        return await query.AnyAsync(ct).ConfigureAwait(false);
+    }
+
     // Resolve the organization owning a pipeline by walking its owner chain
     // (Project | Environment→Project | ProjectServer→Project). Null if unresolvable (legacy orphan).
     public async Task<int?> GetPipelineOrganizationIdAsync(int pipelineId, CancellationToken ct = default)
@@ -408,9 +442,39 @@ internal sealed class PipelineServerResolver(AppDbContext db)
         if (pipeline.EnvironmentId is { } envId)
             return await db.Environments.Where(e => e.Id == envId).Select(e => e.ProjectId).FirstOrDefaultAsync(ct).ConfigureAwait(false);
         if (pipeline.ProjectServerId is { } psId)
-            return await db.ProjectServers.Where(ps => ps.Id == psId).Select(ps => (int?)ps.ProjectId).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            return await GetProjectServerProjectIdAsync(psId, ct).ConfigureAwait(false);
         return null;
     }
+
+    public async Task<DeploymentGateRelease?> FindDeploymentGateReleaseAsync(
+        int projectId, string releaseSelector, CancellationToken ct = default)
+    {
+        var releases = db.Releases.AsNoTracking().Where(release => release.ProjectId == projectId);
+        releases = int.TryParse(releaseSelector, out var releaseId)
+            ? releases.Where(release => release.Id == releaseId)
+            : releases.Where(release => release.Version == releaseSelector);
+        return await releases
+            .OrderByDescending(release => release.DetectedAt)
+            .Select(release => new DeploymentGateRelease(release.Id, release.Version, release.AssuranceGrade))
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<BranchAdvanceRelease?> FindBranchAdvanceReleaseAsync(
+        int projectId, string version, CancellationToken ct = default) =>
+        await db.Releases.AsNoTracking()
+            .Where(release => release.ProjectId == projectId && release.Version == version)
+            .OrderByDescending(release => release.DetectedAt)
+            .Select(release => new BranchAdvanceRelease(release.Id, release.Version, release.Status, release.CommitHash))
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+    /// <summary>Project a project-server row belongs to. Null when the row does not exist, which the
+    /// authorization callers treat as a refusal: there is no <c>ResourceType.ProjectServer</c> to check
+    /// directly, so the owning project's permission is what stands in for it.</summary>
+    public async Task<int?> GetProjectServerProjectIdAsync(int projectServerId, CancellationToken ct = default) =>
+        await db.ProjectServers.AsNoTracking()
+            .Where(projectServer => projectServer.Id == projectServerId)
+            .Select(projectServer => (int?)projectServer.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
     // S-FEAT-16: the project's default release version pattern (null when unset → caller falls back).
     public async Task<string?> GetProjectReleasePatternAsync(int projectId, CancellationToken ct = default) =>

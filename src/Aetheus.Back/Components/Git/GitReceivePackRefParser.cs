@@ -86,7 +86,7 @@ internal static class GitReceivePackRefParser
             return;
         }
 
-        updatedRefs.Add(new GitRefUpdate(parts[2], parts[1]));
+        updatedRefs.Add(new GitRefUpdate(parts[2], parts[1], parts[0]));
     }
 
     private static bool IsObjectId(string value)

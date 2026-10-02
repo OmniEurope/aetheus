@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Back.Components.PersonalAccessTokens;
 using Microsoft.AspNetCore.Authorization;
 
 namespace Aetheus.Back.Components.Auth;

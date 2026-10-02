@@ -6,10 +6,10 @@ namespace Aetheus.Agent.Core.Operations;
 
 /// <summary>
 /// S-FEAT-W8KN: typed install/uninstall of an OS package on a managed server. Linux only - runs
-/// <c>sudo -n /usr/bin/apt-get install|remove -y &lt;pkg&gt;</c> against the argv-exact
+/// <c>sudo -n /usr/bin/apt-get install|purge -y &lt;pkg&gt;</c> against the argv-exact
 /// <c>/etc/sudoers.d/aetheus-package</c> allow-list (provisioned by the server-management module's
 /// <c>--enable-package-manage</c> flag). The package name is re-validated against the closed
-/// <see cref="Aetheus.Shared.Constants.ManageablePackages"/> list before the call, and a package
+/// <see cref="Aetheus.Shared.Components.Servers.ManageablePackages"/> list before the call, and a package
 /// outside the sudoers allow-list is refused by sudo at the OS level - defence in depth.
 /// </summary>
 public sealed class PackageOperationExecutor(
@@ -17,6 +17,12 @@ public sealed class PackageOperationExecutor(
     ILogger<PackageOperationExecutor> logger) : IOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
+
+    /// <summary>The apt verb of an install, as the AETHEUS_PACKAGE allow-list names it.</summary>
+    internal const string InstallVerb = "install";
+
+    /// <summary>The apt verb of an uninstall: purge, never remove (recette R2-031).</summary>
+    internal const string UninstallVerb = "purge";
 
     public bool CanHandle(OperationKind kind) => kind is
         OperationKind.ServiceInstall or
@@ -37,10 +43,14 @@ public sealed class PackageOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        // apt-get install/remove must run as root and legitimately execs dpkg + maintainer scripts, so
+        // apt-get install/purge must run as root and legitimately execs dpkg + maintainer scripts, so
         // it goes through `sudo -n` (NOPASSWD) against the argv-exact AETHEUS_PACKAGE drop-in. The verb +
         // bare package name match the sudoers rule one-to-one; no shell, no string interpolation.
-        var verb = kind == OperationKind.ServiceInstall ? "install" : "remove";
+        // Recette R2-031: uninstall purges. `remove` kept the conffiles (/etc/dovecot, /etc/init.d/dovecot),
+        // which systemd turned back into a "generated" unit, so the service stayed listed as installed and
+        // could be neither started nor removed. `purge` also clears a package already left in the `rc`
+        // state by an earlier `remove`, so uninstalling again repairs it.
+        var verb = AptVerbFor(kind);
         timeoutSeconds = Math.Clamp(timeoutSeconds, _options.MinTimeoutSeconds, _options.MaxTimeoutSeconds);
 
         await AptLock.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -66,6 +76,10 @@ public sealed class PackageOperationExecutor(
             AptLock.Gate.Release();
         }
     }
+
+    // The apt verb of the operation, as the AETHEUS_PACKAGE allow-list names it.
+    internal static string AptVerbFor(OperationKind kind) =>
+        kind == OperationKind.ServiceInstall ? InstallVerb : UninstallVerb;
 
     // The full argv passed to `sudo` (unit-testable without spawning a process): `-n` (never prompt -
     // NOPASSWD is required), the absolute apt-get path, the verb, `-y`, and the bare package name -

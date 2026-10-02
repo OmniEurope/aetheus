@@ -8,7 +8,7 @@ public interface IEnvironmentRepository
 {
     Task<(List<Environment> Items, int TotalCount)> GetEnvironmentsPagedAsync(
         string? search, int? projectId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false);
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null);
     Task<Environment?> GetEnvironmentWithServersAsync(int id, CancellationToken ct = default);
     Task<Environment?> FindEnvironmentAsync(int id, CancellationToken ct = default);
     Task<Environment?> FindByNameAsync(string name, CancellationToken ct = default);

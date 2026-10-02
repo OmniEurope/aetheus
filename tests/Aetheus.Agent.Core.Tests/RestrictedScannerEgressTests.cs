@@ -2,8 +2,6 @@
 using System.Diagnostics;
 using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Analysis;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Agent.Core.Tests;

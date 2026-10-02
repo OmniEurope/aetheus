@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Validation;
 
 namespace Aetheus.Back.Components.Tasks;
 
@@ -14,6 +13,15 @@ public class TasksController(ITaskService taskService, IResourceAuthorizationSer
         var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Server, Permission.Read, ct);
         if (accessibleIds is { Count: 0 }) return Ok(new PaginatedResult<ServerTaskDto>());
         return Ok(await taskService.GetTasksAsync(request, accessibleIds, ct));
+    }
+
+    /// <summary>Recette R-212: the server names the task list's Server column filter offers.</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<TaskFilterValuesDto>> GetTaskFilterValues([FromQuery] int? serverId, CancellationToken ct)
+    {
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Server, Permission.Read, ct);
+        if (accessibleIds is { Count: 0 }) return Ok(new TaskFilterValuesDto());
+        return Ok(await taskService.GetTaskFilterValuesAsync(accessibleIds, serverId, ct));
     }
 
     /// <summary>
@@ -67,7 +75,7 @@ public class TasksController(ITaskService taskService, IResourceAuthorizationSer
             return BadRequest(new { error = "InvalidOperation", message = "Operation kind is required" });
 
         // Server-side defence-in-depth: enforce the same per-kind regex the agent uses.
-        // Single source of truth lives in Aetheus.Shared.Validation.OperationTargetValidator.
+        // Single source of truth lives in Aetheus.Shared.Components.Shared.OperationTargetValidator.
         if (!OperationTargetValidator.IsValid(request.Operation, request.Target))
             return BadRequest(new { error = "InvalidTarget", message = "Operation target format is invalid for the selected kind" });
 

@@ -18,95 +18,104 @@
 
 @inherits LayoutComponentBase
 @layout MainLayout
-@inject Aetheus.Front.Services.ServerDetailLoader Loader
+@inject Aetheus.Front.Components.Shared.ServerDetailLoader Loader
 @inject Microsoft.Extensions.Localization.IStringLocalizer<Aetheus.Front.Resources.AppStrings> L
 @inject Microsoft.AspNetCore.Components.NavigationManager Nav
 @inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
 
-@using Aetheus.Front.Helpers
-@using Aetheus.Front.Pages.Servers
-@using Aetheus.Shared.Enums
+@using Aetheus.Front.Components.Servers
 
 <CascadingValue Value="Loader" Name="ServerLoader">
-    @if (Loader.Server is null && !Loader.InitialLoadCompleted)
-    {
-        <AetheusLoader Size="AetheusLoaderSize.Large" />
-    }
-    else if (Loader.Server is null)
-    {
-        <RadzenStack AlignItems="AlignItems.Center" Gap="1rem" class="rz-p-8">
-            <RadzenIcon Icon="error" class="error-state-icon" />
-            <RadzenText TextStyle="TextStyle.H5">@L["ServerNotFound"]</RadzenText>
-            <Aetheus.Front.Shared.BrowserBackButton Text="@L["BackToServers"]" Title="@L["GoBack"]" />
-        </RadzenStack>
-    }
-    else
-    {
-        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"
-            class="rz-mb-4 detail-page-header" Gap="1rem">
-            <Aetheus.Front.Shared.BrowserBackButton Title="@L["GoBack"]" />
-            <RadzenText TextStyle="TextStyle.H4" class="rz-m-0 detail-page-title">@Loader.Server.Name</RadzenText>
-            @if (Loader.Server.Status == ServerStatus.Online)
+    @* Recette R2-035: OE's detail frame. The header is painted before the server arrives (PLAN-003 D4)
+       and the trail's server segment is a skeleton until the name is known; a skeleton stands for the
+       content while it loads, where a lone loader used to sit; an unknown server gives way to the
+       not-found state. @Body stays mounted (hidden) while loading, as the note above requires. *@
+    @* Recette R-199: the server's own actions (Configuration, Tools) belong to its Overview only; the
+       other sections keep their own actions (the pipelines section's New, for one, recette R-124).
+       Recette R-083: no status or compatibility badge in the header of a server page. Nothing waits
+       for the server in the header but its actions. *@
+    @{
+        RenderFragment? headerActions = Loader.Server is null ? null : @<text>
+            <Microsoft.AspNetCore.Components.Sections.SectionOutlet SectionName="@Aetheus.Front.Components.Shared.PipelinesList.HeaderActionsSection" />
+            @if (IsOverview)
             {
-                <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@L.Localize(Loader.Server.Status)" />
-            }
-            else
-            {
-                <span title="@ServerHeartbeatHelper.OfflineReason(L, Loader.Server.LastHeartbeat)">
-                    <RadzenBadge BadgeStyle="@ServerHeartbeatHelper.Severity(Loader.Server.LastHeartbeat)"
-                        Text="@L.Localize(Loader.Server.Status)" />
-                </span>
-            }
-            <AgentCompatibilityBadge Value="@Loader.Server.AgentCompatibility" />
-            <div class="flex-spacer"></div>
+            @* Recette R-200: "Configuration", the server's settings, rather than a bare "Edit". *@
             @if (_canWrite)
             {
-                <RadzenButton Icon="cell_tower" Text="@L["ContactAgent"]" Title="@L["ContactAgent"]" aria-label="@L["ContactAgent"]" Click="@OpenContactAgentDialog" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
-                <RadzenButton Icon="system_update_alt" Text="@L["UpdateAgent"]" Title="@L["UpdateAgent"]" aria-label="@L["UpdateAgent"]" Click="@UpdateAgentAsync" ButtonStyle="ButtonStyle.Light" Variant="Variant.Filled" />
-                <RadzenButton Icon="edit" Text="@L["Edit"]" Title="@L["Edit"]" aria-label="@L["Edit"]" Click="@OpenEditDialog" ButtonStyle="ButtonStyle.Info" Variant="Variant.Filled" />
-                <RadzenButton Icon="delete" Text="@L["Delete"]" Title="@L["Delete"]" aria-label="@L["Delete"]"
-                    Click="@OnDeleteServer" IsBusy="@_deleteBusy" BusyText="@L["Deleting"]"
-                    ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" />
+                <OmniButton Variant="OmniButtonVariant.Primary" title="@L["Configuration"]" Label="@L["Configuration"]"
+                            OnClick="@(_ => OpenEditDialog())">
+                    <OmniIcon Name="OmniIconName.Settings" />
+                    <span>@L["Configuration"]</span>
+                </OmniButton>
             }
-        </RadzenStack>
-
-        @if (_editVisible)
-        {
-            <RadzenCard class="rz-mb-4 edit-panel">
-                <RadzenText TextStyle="TextStyle.H5" class="rz-mb-2">@L["EditServer"]</RadzenText>
-                <RadzenRow Gap="1rem">
-                    <RadzenColumn SizeMD="6" Size="12">
-                        <RadzenStack Gap="0.25rem">
-                            <RadzenLabel Text="@L["Name"]" />
-                            <RadzenTextBox @bind-Value="_editName" MaxLength="100" />
-                        </RadzenStack>
-                    </RadzenColumn>
-                    <RadzenColumn SizeMD="3" Size="6">
-                        <RadzenStack Gap="0.25rem">
-                            <RadzenLabel Text="@L["Type"]" />
-                            <RadzenDropDown TValue="ServerType" Data="@_serverTypes" @bind-Value="_editType" />
-                        </RadzenStack>
-                    </RadzenColumn>
-                    <RadzenColumn SizeMD="3" Size="6">
-                        <RadzenStack Gap="0.25rem">
-                            <RadzenLabel Text="@L["TagsCommaSeparated"]" />
-                            <RadzenTextBox @bind-Value="_editTags" />
-                        </RadzenStack>
-                    </RadzenColumn>
-                </RadzenRow>
-                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-3">
-                    <RadzenButton Text="@L["Save"]" Icon="save" Click="@SaveEditAsync" IsBusy="@_editSaving" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" />
-                    <RadzenButton Icon="close" Text="@L["Cancel"]" Click="@(() => _editVisible = false)" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />
-                </RadzenStack>
-            </RadzenCard>
-        }
-
-        <AgentUpdateProgressCard @ref="_agentUpdateProgress" ServerId="Loader.Server.Id" Hub="Loader.Hub"
-            Request="@Loader.Server.AgentUpdateRequest"
-            OnRetry="@UpdateAgentAsync" />
+            @* Single tools menu: the agent actions plus the configuration import/export that used to be
+               discoverable only after navigating into the Configuration section, and the port check.
+               Port check needs Read only, so the menu itself is not gated on write. *@
+            <OmniOverflowMenu Label="@L["Tools"]">
+                @if (_canWrite)
+                {
+                    <OmniMenuItem OnClick="@OpenContactAgentDialog"><Icon><OmniIcon Name="OmniIconName.CellTower" /></Icon><ChildContent>@L["ContactAgent"]</ChildContent></OmniMenuItem>
+                    <OmniMenuItem OnClick="@UpdateAgentAsync"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["UpdateAgent"]</ChildContent></OmniMenuItem>
+                    <OmniMenuItem OnClick="@GoToConfiguration"><Icon><OmniIcon Name="OmniIconName.Upload" /></Icon><ChildContent>@L["ImportYaml"]</ChildContent></OmniMenuItem>
+                }
+                <OmniMenuItem OnClick="@GoToConfiguration"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["ExportYaml"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@OpenPortCheckDialog"><Icon><OmniIcon Name="OmniIconName.MagnifyingGlassPlus" /></Icon><ChildContent>@L["CheckPorts"]</ChildContent></OmniMenuItem>
+                @if (_canWrite)
+                {
+                    <OmniMenuItem OnClick="@OnRetireServer" Disabled="@_deleteBusy"><Icon><OmniIcon Name="OmniIconName.Delete" /></Icon><ChildContent>@L["RetireServer"]</ChildContent></OmniMenuItem>
+                }
+            </OmniOverflowMenu>
+            }
+        </text>;
     }
+    <OmniDetailShell State="@DetailState" BackHref="/servers" BackText="@L["BackToServers"]" NotFoundTitle="@L["ServerNotFound"]">
+        <Header>
+            @* PLAN-003 D7: the title is the SECTION (the breadcrumb leaf); the server name is an ancestor. *@
+            <OmniPageHeader ShowBack="true" Subtitle="@Breadcrumb.Subtitle()" Actions="@headerActions">
+                <Icon><OmniIcon Name="@MaterialIconMap.Resolve(SectionIcon)" /></Icon>
+            </OmniPageHeader>
+        </Header>
+        <ChildContent>
+            @if (Loader.Server is not null)
+            {
+                @if (_editVisible)
+                {
+                    <OmniCard Class="omni-u-mb-lg edit-panel">
+                        <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mb-sm">@L["EditServer"]</OmniHeading>
+                        <OmniRow Gap="OmniSpacing.Large">
+                            <OmniColumn Span="12" MediumSpan="6">
+                                <OmniStack Gap="OmniSpacing.XSmall">
+                                    <OmniLabel For="server-edit-name">@L["Name"]</OmniLabel>
+                                    <OmniTextBox Id="server-edit-name" @bind-Value="_editName" maxlength="100" />
+                                </OmniStack>
+                            </OmniColumn>
+                            <OmniColumn Span="6" MediumSpan="3">
+                                <OmniStack Gap="OmniSpacing.XSmall">
+                                    <OmniLabel For="server-edit-type">@L["Type"]</OmniLabel>
+                                    <OmniDropDown Id="server-edit-type" TValue="ServerType" name="server-edit-type" Options="@(_serverTypes.ToOptions(item => (ServerType)item, item => item))" @bind-Value="_editType" />
+                                </OmniStack>
+                            </OmniColumn>
+                            <OmniColumn Span="6" MediumSpan="3">
+                                <OmniStack Gap="OmniSpacing.XSmall">
+                                    <OmniLabel For="server-edit-tags">@L["TagsCommaSeparated"]</OmniLabel>
+                                    <OmniTextBox Id="server-edit-tags" @bind-Value="_editTags" />
+                                </OmniStack>
+                            </OmniColumn>
+                        </OmniRow>
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-md">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SaveEditAsync" Class="@(_editSaving ? "btn-busy" : null)" Busy="@(_editSaving)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _editVisible = false)"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+                        </OmniStack>
+                    </OmniCard>
+                }
 
-    <div class="blade-content" style="@(Loader.Server is null ? "display:none" : null)">
-        @Body
-    </div>
+                <AgentUpdateProgressCard @ref="_agentUpdateProgress" ServerId="Loader.Server.Id" Hub="Loader.Hub"
+                    Request="@Loader.Server.AgentUpdateRequest"
+                    OnRetry="@UpdateAgentAsync" />
+            }
+            <div class="blade-content">
+                @Body
+            </div>
+        </ChildContent>
+    </OmniDetailShell>
 </CascadingValue>

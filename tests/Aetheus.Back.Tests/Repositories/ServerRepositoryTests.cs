@@ -2,9 +2,9 @@
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
+using Aetheus.Back.Exceptions;
 using Microsoft.EntityFrameworkCore;
-using TaskExecutionStatus = Aetheus.Shared.Enums.TaskExecutionStatus;
+using TaskExecutionStatus = Aetheus.Shared.Components.Tasks.TaskExecutionStatus;
 
 namespace Aetheus.Back.Tests.Repositories;
 
@@ -165,16 +165,6 @@ public class ServerRepositoryTests : IDisposable
 
         var result = await _repo.FindServerAsync(s.Id, ct: TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-    }
-
-    [Fact]
-    public async Task RemoveServerAsync_DeletesServer()
-    {
-        var s = CreateServer("rm");
-        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
-
-        await _repo.RemoveServerAsync(s, ct: TestContext.Current.CancellationToken);
-        Assert.Equal(0, await _db.Servers.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -431,6 +421,77 @@ public class ServerRepositoryTests : IDisposable
         var (items, total) = await _repo.GetLogsPagedAsync(s.Id, 1, 3, ct: TestContext.Current.CancellationToken);
         Assert.Equal(5, total);
         Assert.Equal(3, items.Count);
+    }
+
+    [Fact]
+    public async Task GetLogsPagedAsync_LeavesOutTheAgentDirectiveLines()
+    {
+        var s = CreateServer("logs-directives");
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var task = new ServerTask { ServerId = s.Id, Name = "t", Command = "echo", Executor = ExecutorType.Shell, Status = TaskExecutionStatus.Pending };
+        _db.Tasks.Add(task);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.TaskLogs.AddRange(
+            new TaskLog { TaskId = task.Id, Message = "##aetheus[pipelinemetric key=cpu.percent]12", Timestamp = DateTime.UtcNow },
+            new TaskLog { TaskId = task.Id, Message = "##aetheus[setvariable name=X]1", Timestamp = DateTime.UtcNow },
+            new TaskLog { TaskId = task.Id, Message = "done: ##aetheus[setvariable name=X]1", Timestamp = DateTime.UtcNow },
+            new TaskLog { TaskId = task.Id, Message = "build succeeded", Timestamp = DateTime.UtcNow });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var (items, total) = await _repo.GetLogsPagedAsync(s.Id, 1, 10, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, total);
+        Assert.DoesNotContain(items, log => log.Message.StartsWith("##aetheus[", StringComparison.Ordinal));
+        Assert.Contains(items, log => log.Message == "build succeeded");
+    }
+
+    /// <summary>
+    /// Recette R-210 / R-224: the level list and the time range narrow the whole log of the server
+    /// before the count, and a requested sort replaces the newest-first order.
+    /// </summary>
+    [Fact]
+    public async Task GetLogsPagedAsync_AppliesColumnFiltersAndSort()
+    {
+        var s = CreateServer("logs-filtered");
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var task = new ServerTask { ServerId = s.Id, Name = "t", Command = "echo", Executor = ExecutorType.Shell, Status = TaskExecutionStatus.Pending };
+        _db.Tasks.Add(task);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var day = new DateTime(2026, 9, 10, 12, 0, 0, DateTimeKind.Utc);
+        var logs = new[]
+        {
+            (Log: new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Error, Message = "old error" }, At: day.AddDays(-5)),
+            (Log: new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Error, Message = "error a" }, At: day),
+            (Log: new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Warning, Message = "warning" }, At: day.AddHours(1)),
+            (Log: new TaskLog { TaskId = task.Id, Level = TaskLogLevel.Info, Message = "info" }, At: day.AddHours(2))
+        };
+        _db.TaskLogs.AddRange(logs.Select(entry => entry.Log));
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        // The context stamps an added log with the current time; the test's own times are set afterwards.
+        foreach (var (log, at) in logs) log.Timestamp = at;
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        List<GridFilter> filters =
+        [
+            new() { Field = "Level", Operator = GridFilterOperator.In, Value = $"Error{GridFilter.ListSeparator}Warning" },
+            new() { Field = "Timestamp", Operator = GridFilterOperator.GreaterThanOrEqual, Value = "2026-09-10T00:00:00" }
+        ];
+
+        var (items, total) = await _repo.GetLogsPagedAsync(
+            s.Id, 1, 10, filters, [new GridSort { Field = "Message", Descending = false }], TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, total);
+        Assert.Equal(["error a", "warning"], items.Select(log => log.Message));
+    }
+
+    [Fact]
+    public async Task GetLogsPagedAsync_UnknownColumn_IsABadRequest()
+    {
+        var s = CreateServer("logs-unknown");
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => _repo.GetLogsPagedAsync(
+            s.Id, 1, 10, [new GridFilter { Field = "OriginalMessage", Operator = GridFilterOperator.Contains, Value = "x" }],
+            ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]

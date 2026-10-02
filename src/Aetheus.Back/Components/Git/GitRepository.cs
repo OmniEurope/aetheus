@@ -50,11 +50,14 @@ public class GitRepository(AppDbContext db) : IGitRepository
     public async Task<(List<PullRequest> Items, int TotalCount)> GetPullRequestsPagedAsync(
         int gitConnectionId, string? search, int page, int pageSize,
         PullRequestStatus? status = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = true)
+        string? sortBy = null, bool sortDescending = true,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.PullRequests
             .AsNoTracking()
             .Where(p => p.GitConnectionId == gitConnectionId);
+        // Recette R-224: the grid's column header filters, before the count.
+        query = GitPullRequestListQuery.Columns.ApplyFilters(query, columnFilters);
 
         if (status.HasValue)
             query = query.Where(p => p.Status == status.Value);
@@ -89,6 +92,14 @@ public class GitRepository(AppDbContext db) : IGitRepository
 
         return (items, totalCount);
     }
+
+    public Task<List<string>> GetPullRequestAuthorsAsync(int gitConnectionId, CancellationToken ct = default) =>
+        db.PullRequests.AsNoTracking()
+            .Where(p => p.GitConnectionId == gitConnectionId && p.AuthorLogin != "")
+            .Select(p => p.AuthorLogin)
+            .Distinct()
+            .OrderBy(author => author)
+            .ToListAsync(ct);
 
     public async Task<PullRequest?> FindPullRequestByExternalIdAsync(int gitConnectionId, int externalId, CancellationToken ct = default)
     {

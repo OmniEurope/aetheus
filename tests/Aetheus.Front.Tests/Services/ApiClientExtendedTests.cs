@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -105,7 +102,7 @@ public class ApiClientExtendedTests : BunitContext
             ServerId = 10,
             DisplayName = "web",
             Host = "web01.example.com",
-            Type = Aetheus.Shared.Enums.ProjectServerType.AgentServer
+            Type = Aetheus.Shared.Components.Projects.ProjectServerType.AgentServer
         }, Xunit.TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
@@ -155,7 +152,7 @@ public class ApiClientExtendedTests : BunitContext
     {
         _handler.SetJsonResponse("api/logs/task/7/unmasked", new List<TaskLogDto>
         {
-            new() { Id = 1, Message = "secret=abc123", Level = Aetheus.Shared.Enums.TaskLogLevel.Info }
+            new() { Id = 1, Message = "secret=abc123", Level = Aetheus.Shared.Components.Logs.TaskLogLevel.Info }
         });
 
         var result = await _api.Monitoring.GetTaskLogsUnmaskedAsync(7, Xunit.TestContext.Current.CancellationToken);
@@ -168,7 +165,7 @@ public class ApiClientExtendedTests : BunitContext
     {
         _handler.SetJsonResponse("api/logs/task/8/unmasked", new List<TaskLogDto>
         {
-            new() { Id = 2, Message = "log line", Level = Aetheus.Shared.Enums.TaskLogLevel.Info }
+            new() { Id = 2, Message = "log line", Level = Aetheus.Shared.Components.Logs.TaskLogLevel.Info }
         });
 
         var result = await _api.Monitoring.GetTaskLogsUnmaskedAsync(8, CancellationToken.None);

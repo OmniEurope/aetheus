@@ -1,0 +1,177 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (_parseError)
+{
+    <div class="vp-error-banner">
+        <OmniIcon Name="OmniIconName.Error" />
+        <span>@L["InvalidYamlCannotVisualize"]</span>
+    </div>
+}
+else
+{
+    @* Pipeline-level settings (collapsible) *@
+    <OmniFieldset Collapsible="true" @bind-Expanded="_settingsExpanded"><Legend>@L["PipelineSettings"]</Legend><ChildContent>
+        <div class="vp-settings-panel">
+            <OmniRow Gap="OmniSpacing.Large">
+                <OmniColumn MediumSpan="4">
+                    <OmniFormField Label="@L["Trigger"]" For="oe-formfield-pages-pipelines-visualpipelineeditor-1">
+                        <OmniDropDown Id="oe-formfield-pages-pipelines-visualpipelineeditor-1" TValue="string" Value="@_definition.Trigger" ValueExpression="@(() => _definition.Trigger)"
+                                        Options="@(_triggerOptions.ToOptions(item => (string)item, item => item))" ValueChanged="@(val => OnTriggerChanged((string)val))" />
+                    </OmniFormField>
+                </OmniColumn>
+                <OmniColumn MediumSpan="4">
+                    <OmniFormField Label="@L["VariableLibraries"]" For="oe-formfield-pages-pipelines-visualpipelineeditor-2">
+                        <OmniMultiSelect Id="oe-formfield-pages-pipelines-visualpipelineeditor-2" TValue="string" Value="@_definition.VariableLibraries"
+                                         ValueChanged="OnLibrariesChanged"
+                                         ValueExpression="@(() => _definition.VariableLibraries)"
+                                         Options="@AvailableLibraries.Select(name => new OmniOption<string>(name, name)).ToArray()"
+                                         Filterable="true"
+                                         Placeholder="@L["SelectLibraries"]" />
+                    </OmniFormField>
+                </OmniColumn>
+                <OmniColumn MediumSpan="4">
+                    <OmniFormField Label="@L["Vaults"]" For="oe-formfield-pages-pipelines-visualpipelineeditor-3">
+                        <OmniMultiSelect Id="oe-formfield-pages-pipelines-visualpipelineeditor-3" TValue="string" Value="@_definition.Vaults"
+                                         ValueChanged="OnVaultsChanged"
+                                         ValueExpression="@(() => _definition.Vaults)"
+                                         Options="@AvailableVaults.Select(name => new OmniOption<string>(name, name)).ToArray()"
+                                         Filterable="true"
+                                         Placeholder="@L["SelectVaults"]" />
+                    </OmniFormField>
+                </OmniColumn>
+            </OmniRow>
+
+            @* Pipeline-level variables *@
+            <OmniFieldset Collapsible="true" Expanded="false" Class="omni-u-mt-sm"><Legend>@L["PipelineVariables"]</Legend><ChildContent>
+                <div class="vp-var-grid">
+                    @foreach (var kvp in _definition.Variables)
+                    {
+                        var key = kvp.Key;
+                        var value = kvp.Value;
+                        <OmniTextBox aria-label="@L["Key"]" Value="@key" Disabled="true" Class="icon-input-sm"  ValueExpression="@(() => key)"/>
+                        <OmniTextBox aria-label="@L["Value"]" Value="@value" Placeholder="@L["Value"]"
+                                       ValueChanged="@(val => OnPipelineVarChanged(key, val))"
+                                       Class="icon-input-sm" ValueExpression="@(() => value)" />
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnRemovePipelineVar(key))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                    }
+                </div>
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Class="omni-u-mt-sm">
+                    <OmniTextBox aria-label="@L["Key"]" @bind-Value="_newPipelineVarKey" Placeholder="@L["Key"]" Class="text-input-flex" />
+                    <OmniTextBox aria-label="@L["Value"]" @bind-Value="_newPipelineVarValue" Placeholder="@L["Value"]" Class="text-input-flex" />
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnAddPipelineVar" Disabled="@string.IsNullOrWhiteSpace(_newPipelineVarKey)" title="@L["Add"]"><OmniIcon Name="OmniIconName.Add" /></OmniButton>
+                </OmniStack>
+            </ChildContent></OmniFieldset>
+        </div>
+    </ChildContent></OmniFieldset>
+
+    @* Toolbar *@
+    <div class="vp-toolbar">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnAddStage" title="@L["AddStage"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+        <OmniDropDown aria-label="@L["StageTemplate"]" TValue="int?" Placeholder="@L["StageTemplate"]" Options="@(_stageTemplateItems.ToOptions(item => (int?)item.Value, item => item.Text))"
+                        Value="@_selectedStageTemplateId"
+                        ValueChanged="OnStageTemplateChanged"
+                        ValueExpression="@(() => _selectedStageTemplateId)"
+                        Class="w-rem-10 fs-13" />
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnUndo" Disabled="@(!CanUndo)" title="@L["Undo"]" Label="@L["Undo"]"><OmniIcon Name="OmniIconName.ArrowUUpLeft" /></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnRedo" Disabled="@(!CanRedo)" title="@L["Redo"]" Label="@L["Redo"]"><OmniIcon Name="OmniIconName.ArrowUUpRight" /></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnAutoLayout" title="@L["AutoLayout"]"><OmniIcon Name="OmniIconName.Sparkle" /> <span>@L["Arrange"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnZoomIn" title="@L["ZoomIn"]"><OmniIcon Name="OmniIconName.MagnifyingGlassPlus" /></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnZoomOut" title="@L["ZoomOut"]"><OmniIcon Name="OmniIconName.MagnifyingGlassMinus" /></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnFitView" title="@L["FitScreen"]"><OmniIcon Name="OmniIconName.FrameCorners" /></OmniButton>
+    </div>
+
+    <OmniAlert Severity="OmniSeverity.Info" Class="vp-editor-guide">
+        <OmniIcon Name="OmniIconName.Info" />
+        <span>@L["VisualPipelineGuide"]</span>
+    </OmniAlert>
+
+    @if (_baseDefinition is not null)
+    {
+        <OmniFieldset Collapsible="true" Expanded="true"><Legend>@L["InheritedElements"]</Legend><ChildContent>
+            <OmniRow Gap="OmniSpacing.Small">
+                @foreach (var item in ProvenanceItems)
+                {
+                    <OmniBadge Fill="OmniFill.Solid"
+                                 Tone="@ProvenanceStyle(item.Provenance)"
+                                 Class="@(item.Provenance == PipelineElementProvenance.Inherited ? "vp-provenance-inherited" : null)">@($"{ProvenanceText(item.Provenance)}: {item.Path}")</OmniBadge>
+                }
+            </OmniRow>
+        </ChildContent></OmniFieldset>
+    }
+
+    @* Canvas *@
+    <div id="@_canvasId" class="vp-canvas-outer" tabindex="0" @onkeydown="OnCanvasKeyDown">
+        @if (!_positionsLoaded && DisplayStages.Count > 0)
+        {
+            <div class="vp-empty-canvas">
+                <AetheusLoader Size="OmniControlSize.Small" />
+            </div>
+        }
+        <div class="@($"vp-canvas-inner{(_positionsLoaded ? string.Empty : " vp-canvas-inner-loading")}")">
+            @* SVG edge layer *@
+            <svg class="vp-edge-layer" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <marker id="arrow-default" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" class="vp-edge-arrow" />
+                    </marker>
+                    <marker id="arrow-selected" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" class="vp-edge-arrow-selected" />
+                    </marker>
+                </defs>
+                @foreach (var edge in _edges)
+                {
+                    var isSelected = edge.From == _selectedStageId || edge.To == _selectedStageId;
+                    var markerUrl = isSelected ? "url(#arrow-selected)" : "url(#arrow-default)";
+                    <path d="@edge.PathData" class="@(isSelected ? "vp-edge vp-edge-selected" : "vp-edge")"
+                          data-from="@edge.From" data-to="@edge.To" marker-end="@markerUrl" />
+                }
+            </svg>
+
+            @* Stage nodes *@
+            @if (DisplayStages.Count == 0)
+            {
+                <div class="vp-empty-canvas">
+                    <OmniIcon Name="OmniIconName.Graph" Class="icon-3xl" />
+                    <OmniText Element="OmniTextElement.Paragraph">@L["EmptyPipeline"]</OmniText>
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnAddStage" title="@L["AddStage"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+                </div>
+            }
+            else
+            {
+                @for (var i = 0; i < DisplayStages.Count; i++)
+                {
+                    var stage = DisplayStages[i];
+                    var stageId = i.ToString();
+                    var pos = _nodePositions.GetValueOrDefault(stageId);
+                    var isReadOnly = GetLocalStageIndex(i) < 0;
+                    <StageNode Stage="@stage"
+                               ElementId="@($"vp-node-{_canvasId}-{stageId}")"
+                               X="@(pos?.X ?? 0)" Y="@(pos?.Y ?? 0)"
+                               IsSelected="@(_selectedStageId == stageId)"
+                               ReadOnly="@isReadOnly"
+                               Provenance="@StageProvenance(stage)"
+                               AddStepText="@L["AddStep"]"
+                               Warnings="@GetStageWarnings(stage)"
+                               OnSelect="@(() => OnStageSelected(stageId))"
+                               OnDelete="@(() => OnDeleteStage(stageId))"
+                               OnDuplicate="@(() => OnDuplicateStage(stageId))"
+                               OnAddStep="@(() => OnAddStepToStage(stageId))"
+                               OnEditStep="@(idx => OnEditStepInStage(stageId, idx))" />
+                }
+            }
+        </div>
+    </div>
+
+    @* Stage edit panel *@
+    @if (_selectedStageId is not null && _selectedStageIndex >= 0 && _selectedStageIndex < _definition.Stages.Count)
+    {
+        <StageEditPanel Stage="@_definition.Stages[_selectedStageIndex]"
+                        AvailableServers="@AvailableServers"
+                        OtherStageNames="@GetOtherStageNames(_selectedStageIndex)"
+                        StageChanged="@OnSelectedStageChanged"
+                        OnClose="@(() => _selectedStageId = null)"
+                        OnDeleteStage="@(() => OnDeleteStage(_selectedStageId!))"
+                        EditStep="@(idx => OnEditStepInStage(_selectedStageId!, idx))"
+                        AddStep="@(() => OnAddStepToStage(_selectedStageId!))" />
+    }
+}

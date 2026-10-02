@@ -25,13 +25,9 @@ internal sealed class BlueGreenInitialDeployment(IShellRunner shell)
             return new ExecutorResult(1, false);
         }
 
-        if (!await BlueGreenUpstream.RestoreRecordedAsync(shell, context, confPath, reloadCommand, timeoutSeconds, ct).ConfigureAwait(false))
-        {
-            await onOutput(
-                $"Restoring the recorded configuration failed; manual intervention required. Journal retained at {context.JournalDir}.",
-                TaskLogLevel.Error).ConfigureAwait(false);
+        if (!await BlueGreenUpstream.RestoreRecordedOrReportAsync(
+                shell, context, confPath, reloadCommand, timeoutSeconds, onOutput, ct).ConfigureAwait(false))
             return new ExecutorResult(1, false);
-        }
         journal.Clear();
         await onOutput("##aetheus[setvariable name=BLUEGREEN_ROLLED_BACK]true", TaskLogLevel.Info).ConfigureAwait(false);
         await onOutput(

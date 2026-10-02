@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 
@@ -84,7 +82,8 @@ public class StageEditPanelTests : BunitContext
             .Add(x => x.AvailableServers, new List<string>())
             .Add(x => x.OtherStageNames, new List<string>()));
 
-        var closeBtn = cut.FindAll("button").FirstOrDefault(b => b.InnerHtml.Contains("close"));
+        var closeBtn = cut.FindComponents<OmniButton>().FirstOrDefault(button =>
+            button.FindComponents<OmniIcon>().Any(icon => icon.Instance.Name == OmniIconName.Close));
         Assert.NotNull(closeBtn);
     }
 
@@ -99,8 +98,9 @@ public class StageEditPanelTests : BunitContext
             .Add(x => x.OtherStageNames, new List<string>())
             .Add(x => x.OnClose, () => { closed = true; }));
 
-        var closeBtn = cut.FindAll("button").First(b => b.InnerHtml.Contains("close"));
-        await cut.InvokeAsync(() => closeBtn.Click());
+        var closeBtn = cut.FindComponents<OmniButton>().First(button =>
+            button.FindComponents<OmniIcon>().Any(icon => icon.Instance.Name == OmniIconName.Close));
+        await cut.InvokeAsync(() => closeBtn.Find("button").Click());
 
         Assert.True(closed);
     }
@@ -116,7 +116,7 @@ public class StageEditPanelTests : BunitContext
             .Add(x => x.OtherStageNames, new List<string>())
             .Add(x => x.OnDeleteStage, () => { deleted = true; }));
 
-        var deleteBtn = cut.FindAll("button").First(b => b.TextContent.Contains("DeleteStage"));
+        var deleteBtn = cut.FindAll("button").First(b => b.Names().Contains("DeleteStage"));
         await cut.InvokeAsync(() => deleteBtn.Click());
 
         Assert.True(deleted);
@@ -150,8 +150,8 @@ public class StageEditPanelTests : BunitContext
             .Add(x => x.AvailableServers, new List<string>())
             .Add(x => x.OtherStageNames, new List<string>()));
 
-        Assert.Contains("arrow_upward", cut.Markup);
-        Assert.Contains("arrow_downward", cut.Markup);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.Upgrade);
+        Assert.Contains(cut.FindComponents<OmniIcon>(), icon => icon.Instance.Name == OmniIconName.ArrowDown);
     }
 
     [Fact]

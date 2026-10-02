@@ -1,0 +1,134 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/organizations/{Id:int}"
+
+<PageTitle>@(_org?.Name ?? L["Organization"]) - Aetheus</PageTitle>
+
+<div class="iam-page iam-detail-page">
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_loadError)
+{
+    <OmniAlert Severity="OmniSeverity.Danger">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Medium">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["LoadFailed"]</OmniText>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@LoadAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+        </OmniStack>
+    </OmniAlert>
+}
+else if (_org is null)
+{
+    <OmniAlert Severity="OmniSeverity.Warning">@L["NotFound"]</OmniAlert>
+}
+else
+{
+    <OmniPageHeader Title="@_org.Name" ShowBack="true" Class="iam-entity-header" Subtitle="@Breadcrumb.Subtitle(L["OrganizationManagement"])">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("apartment")" /></Icon>
+        <Badges>
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@_org.Slug</OmniBadge>
+        </Badges>
+    </OmniPageHeader>
+
+    @if (!string.IsNullOrEmpty(_org.Description))
+    {
+        <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-mt-sm omni-u-text-muted">@_org.Description</OmniText>
+    }
+
+    <UrlSyncedTabs Slugs="@(new[] { "general", "members", "projects", "quality-gates", "audit" })">
+        <Tabs>
+            <OmniTabsItem Key="general" Title="@L["General"]">
+                <OmniCard Class="iam-detail-card">
+                <div class="form-narrow"><OmniTemplateForm TModel="OrgGeneralModel" Model="@_general" OnValidSubmit="@OnSaveGeneral">
+                    <OmniDataAnnotationsValidator Localizer="@L" />
+                    <OmniStack Gap="OmniSpacing.Large">
+                        <OmniFormField For="oe-pages-organizations-organizationdetail-1"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_general.Name" maxlength="100" Id="oe-pages-organizations-organizationdetail-1" />
+                            <ValidationMessage For="@(() => _general.Name)" />
+                        </ChildContent></OmniFormField>
+                        <OmniFormField For="oe-pages-organizations-organizationdetail-2"><LabelContent>@L["Slug"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_general.Slug" maxlength="100" Id="oe-pages-organizations-organizationdetail-2" />
+                            <ValidationMessage For="@(() => _general.Slug)" />
+                        </ChildContent></OmniFormField>
+                        <OmniFormField For="oe-pages-organizations-organizationdetail-3"><LabelContent>@L["Description"]</LabelContent><ChildContent>
+                            <OmniTextArea @bind-Value="_general.Description" MaxLength="500" Rows="3" Id="oe-pages-organizations-organizationdetail-3" />
+                            <ValidationMessage For="@(() => _general.Description)" />
+                        </ChildContent></OmniFormField>
+                    </OmniStack>
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+                        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_savingGeneral ? "btn-busy" : null)" Busy="@(_savingGeneral)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@OnDeleteOrganization"><OmniIcon Name="OmniIconName.Delete" /> <span>@L["DeleteOrganization"]</span></OmniButton>
+                    </OmniStack>
+                </OmniTemplateForm></div>
+                </OmniCard>
+            </OmniTabsItem>
+            <OmniTabsItem Key="members" Title="@L["Members"]">
+                <OmniCard Class="iam-detail-card">
+                <OmniStack Gap="OmniSpacing.Medium">
+                    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.End">
+                        <OmniFormField Label="@L["User"]" For="oe-formfield-pages-organizations-organizationdetail-1">
+                            <OmniDropDown Id="oe-formfield-pages-organizations-organizationdetail-1" TValue="int?" Options="@(_users.ToOptions(item => (int?)item.Id, item => item.Username))"
+                                Filterable="true" @bind-Value="_newUserId" Placeholder="@L["SelectUser"]" />
+                        </OmniFormField>
+                        <OmniFormField Label="@L["Role"]" For="oe-formfield-pages-organizations-organizationdetail-2">
+                            <OmniDropDown Id="oe-formfield-pages-organizations-organizationdetail-2" TValue="OrganizationRole" Options="@(_roleOptions.ToOptions(item => (OrganizationRole)item.Value, item => item.Text))" @bind-Value="_newUserRole" />
+                        </OmniFormField>
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnAddMember" Disabled="@(_newUserId is null)" title="@L["AddMember"]"><OmniIcon Name="OmniIconName.UserPlus" /> <span>@L["Add"]</span></OmniButton>
+                    </OmniStack>
+
+                    <OmniDataGrid @ref="_membersGrid" FillAvailableHeight="true" TItem="OrganizationMemberDto" Items="@_org.Members" KeyOf="@(row => row.Id)" NewRowHighlight="@(TimeSpan.FromSeconds(5))"
+                        OnRowClick="@(args => Nav.NavigateTo($"/users/{args.Item.UserId}"))" Class="aetheus-clickable-rows" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+                        <Columns>
+                            <OmniDataGridColumn Frozen="true" TItem="OrganizationMemberDto" Property="Username" Title="@L["Username"]" Filterable="true">
+                                <Template Context="m">
+                                    <span @onclick:stopPropagation="true"><OmniLink Href="@($"/users/{m.UserId}")">@m.Username</OmniLink></span>
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="OrganizationMemberDto" Property="Email" Title="@L["Email"]" Filterable="true" />
+                            <OmniDataGridColumn TItem="OrganizationMemberDto" Property="Role" Title="@L["Role"]" Width="11.25rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@RoleText">
+                                <Template Context="m">
+                                    <OmniDropDown aria-label="@L["Role"]" TValue="OrganizationRole" Value="@m.Role" ValueExpression="@(() => m.Role)" Options="@(_roleOptions.ToOptions(item => (OrganizationRole)item.Value, item => item.Text))"
+                                        ValueChanged="@(args => OnChangeMemberRole(m, (OrganizationRole)args!))" @onclick:stopPropagation="true" />
+                                </Template>
+                            </OmniDataGridColumn>
+                            <OmniDataGridColumn TItem="OrganizationMemberDto" Title="@L["Actions"]" MinWidth="9rem" Sortable="false">
+                                <Template Context="m">
+                                    <span @onclick:stopPropagation="true"><OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => OnRemoveMember(m))" title="@L["Remove"]" Label="@L["Remove"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton></span>
+                                </Template>
+                            </OmniDataGridColumn>
+                        </Columns>
+                    </OmniDataGrid>
+                </OmniStack>
+                </OmniCard>
+            </OmniTabsItem>
+
+            <OmniTabsItem Key="projects" Title="@L["Projects"]">
+                <OmniCard Class="iam-detail-card">
+                <OmniStack Gap="OmniSpacing.Medium">
+                    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["AssignProjectsHelp"]</OmniText>
+                    <OmniMultiSelect aria-label="@L["Projects"]" TValue="int" @bind-Value="_selectedProjectIds"
+                        @bind-Value:after="@(() => OnProjectsChangedAsync(_selectedProjectIds))"
+                        Options="@_allProjects.Select(project => new OmniOption<int>(project.Id, project.Name)).ToList()"
+                        Class="org-projects-listbox" Disabled="@_savingProjects" />
+                    @if (_savingProjects)
+                    {
+                        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["Saving"]</OmniText>
+                    }
+                </OmniStack>
+                </OmniCard>
+            </OmniTabsItem>
+
+            <OmniTabsItem Key="quality-gates" Title="@L["QualityGates"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("rule"))" /></Icon><ChildContent>
+                <div class="iam-quality-surface">
+                <QualityGatePolicyEditor Scope="AnalysisPolicyScope.Organization"
+                    OrganizationId="@Id" CanEdit="true" />
+                </div>
+            </ChildContent></OmniTabsItem>
+
+            <OmniTabsItem Key="audit" Title="@L["AuditTrail"]">
+                <EntityAuditTrail EntityType="Organization" EntityId="@Id" />
+            </OmniTabsItem>
+        </Tabs>
+    </UrlSyncedTabs>
+}
+</div>

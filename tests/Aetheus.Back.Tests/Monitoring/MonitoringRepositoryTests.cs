@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Monitoring;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests;
@@ -22,7 +21,7 @@ public class MonitoringRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAllServersAsync_ReturnsAll()
+    public async Task GetDashboardServersAsync_ReturnsAll()
     {
         _db.Servers.AddRange(
             new Server { Name = "s1", Hostname = "h1" },
@@ -30,7 +29,7 @@ public class MonitoringRepositoryTests : IDisposable
         );
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var result = await _repo.GetAllServersAsync(ct: TestContext.Current.CancellationToken);
+        var result = await _repo.GetDashboardServersAsync(ct: TestContext.Current.CancellationToken);
         Assert.Equal(2, result.Count);
     }
 
@@ -181,11 +180,11 @@ public class MonitoringRepositoryTests : IDisposable
             });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Empty(await _repo.GetAllServersAsync([], TestContext.Current.CancellationToken));
+        Assert.Empty(await _repo.GetDashboardServersAsync([], TestContext.Current.CancellationToken));
         Assert.Equal(0, await _repo.CountPendingTasksAsync([], TestContext.Current.CancellationToken));
         Assert.Equal(
             [allowedServer.Id],
-            (await _repo.GetAllServersAsync(
+            (await _repo.GetDashboardServersAsync(
                 [allowedServer.Id],
                 TestContext.Current.CancellationToken)).Select(server => server.Id));
         Assert.Equal(
@@ -281,6 +280,92 @@ public class MonitoringRepositoryTests : IDisposable
             take: 2);
 
         Assert.Equal([3, 4], result.Select(metric => metric.CpuPercent));
+    }
+
+    /// <summary>Recette R-480: the tile shows ten groups, so ten roots are read with the runs they
+    /// triggered (children and grandchildren), and an older root beyond the ten is not read at all.</summary>
+    [Fact]
+    public async Task R480_RecentRuns_ReadsTheShownGroupsWithTheirDescendants_AndNoOlderRoot()
+    {
+        var pipeline = new Pipeline { Name = "p", YamlDefinition = "y" };
+        _db.Pipelines.Add(pipeline);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var now = DateTime.UtcNow;
+        var roots = Enumerable.Range(0, 12)
+            .Select(index => new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Success, StartedAt = now.AddMinutes(-index * 10) })
+            .ToList();
+        var child = new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Running, StartedAt = now.AddMinutes(1) };
+        var grandChild = new PipelineRun { PipelineId = pipeline.Id, Status = PipelineStatus.Running, StartedAt = now.AddMinutes(2) };
+        _db.PipelineRuns.AddRange(roots);
+        _db.PipelineRuns.AddRange(child, grandChild);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.AddRange(
+            new PipelineStepRun { PipelineRunId = roots[3].Id, StageName = "s", StepName = "child", TriggeredRunId = child.Id },
+            new PipelineStepRun { PipelineRunId = child.Id, StageName = "s", StepName = "grandchild", TriggeredRunId = grandChild.Id });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetRecentRunsAsync(10, null, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(12, result.Count);
+        Assert.Contains(result, run => run.Id == child.Id);
+        Assert.Contains(result, run => run.Id == grandChild.Id);
+        Assert.DoesNotContain(result, run => run.Id == roots[10].Id || run.Id == roots[11].Id);
+        Assert.Equal(result.OrderByDescending(run => run.StartedAt).Select(run => run.Id), result.Select(run => run.Id));
+    }
+
+    /// <summary>Recette R-480: a run triggered by a run the caller cannot read is a group of its own.</summary>
+    [Fact]
+    public async Task R480_RecentRuns_AChildOfAnUnreadableParent_IsItsOwnGroup()
+    {
+        var hidden = new Pipeline { Name = "hidden", YamlDefinition = "y" };
+        var shown = new Pipeline { Name = "shown", YamlDefinition = "y" };
+        _db.Pipelines.AddRange(hidden, shown);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var parent = new PipelineRun { PipelineId = hidden.Id, StartedAt = DateTime.UtcNow.AddMinutes(-1) };
+        var child = new PipelineRun { PipelineId = shown.Id, StartedAt = DateTime.UtcNow };
+        _db.PipelineRuns.AddRange(parent, child);
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        _db.PipelineStepRuns.Add(new PipelineStepRun { PipelineRunId = parent.Id, StageName = "s", StepName = "t", TriggeredRunId = child.Id });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetRecentRunsAsync(10, [], [shown.Id], TestContext.Current.CancellationToken);
+
+        Assert.Equal([child.Id], result.Select(run => run.Id));
+    }
+
+    /// <summary>Recette R-480: the server rows come back as the tile's DTO, online first then by heartbeat.</summary>
+    [Fact]
+    public async Task R480_DashboardServers_AreProjected_OnlineFirst_ThenMostRecentlyActive()
+    {
+        var now = DateTime.UtcNow;
+        _db.Servers.AddRange(
+            new Server { Name = "off", Hostname = "off", Status = ServerStatus.Offline, LastHeartbeat = now, SudoersBaseline = "secret-ish" },
+            new Server
+            {
+                Name = "old",
+                Hostname = "old",
+                Status = ServerStatus.Online,
+                LastHeartbeat = now.AddHours(-1),
+                OsDescription = "Ubuntu",
+                PipelineRunnerEnabled = true,
+                DeploymentTargetAvailable = true,
+                PackageManagementAvailable = true,
+                CapabilityDiagnosticsJson = "[\"sudo blocked\"]"
+            },
+            new Server { Name = "new", Hostname = "new", Status = ServerStatus.Online, LastHeartbeat = now },
+            new Server { Name = "never", Hostname = "never", Status = ServerStatus.Offline, PipelineRunnerEnabled = true });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetDashboardServersAsync(ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(["new", "old", "off", "never"], result.Select(server => server.Name));
+        Assert.Equal("Ubuntu", result[1].OsDescription);
+        // The tile's capability icons: build, deploy, manage, and the diagnostics tooltip.
+        Assert.Equal(((bool?)true, (bool?)true, (bool?)true), (result[1].PipelineRunnerEnabled, result[1].DeploymentTargetAvailable, result[1].PackageManagementAvailable));
+        Assert.Equal(["sudo blocked"], result[1].CapabilityDiagnostics);
+        Assert.Equal(((bool?)false, (bool?)false, (bool?)false), (result[0].PipelineRunnerEnabled, result[0].DeploymentTargetAvailable, result[0].PackageManagementAvailable));
+        // Never phoned home: unknown capabilities (the tile's question mark), not "none".
+        Assert.Equal(((bool?)null, (bool?)null, (bool?)null), (result[3].PipelineRunnerEnabled, result[3].DeploymentTargetAvailable, result[3].PackageManagementAvailable));
     }
 
     public void Dispose() => _db.Dispose();

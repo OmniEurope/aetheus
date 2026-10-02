@@ -17,18 +17,13 @@ namespace Aetheus.Agent.Core.Operations;
 public sealed class SystemPackageUpgradeExecutor(
     IOptions<AetheusAgentOptions> options,
     IShellRunner shell,
-    ILogger<SystemPackageUpgradeExecutor> logger) : IOperationExecutor
+    ILogger<SystemPackageUpgradeExecutor> logger) : EnvironmentOperationExecutor
 {
     private readonly AetheusAgentOptions _options = options.Value;
 
-    public bool CanHandle(OperationKind kind) => kind == OperationKind.SystemPackageUpgrade;
+    public override bool CanHandle(OperationKind kind) => kind == OperationKind.SystemPackageUpgrade;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
-        => ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken)
     {

@@ -1,0 +1,79 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Create/Edit project as a dialog. Project == null => create mode; otherwise edit mode.
+   Closes with the resulting ProjectDto on success (caller refreshes); a delete navigates away. *@
+<OmniTemplateForm TModel="ProjectFormModel" Model="@_model" OnValidSubmit="@OnSubmit">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniStack Gap="OmniSpacing.Large">
+                <OmniFormField Label="@L["Name"]" Class="omni-u-w-100" For="project-form-name">
+                    <OmniTextBox @bind-Value="_model.Name"
+                        Id="project-form-name" Class="omni-u-w-100" />
+                    <ValidationMessage For="@(() => _model.Name)" />
+                </OmniFormField>
+                <OmniFormField Label="@L["Description"]" Class="omni-u-w-100" For="Description">
+                    <OmniTextArea @bind-Value="_model.Description"
+                        Id="Description" Rows="3" Class="omni-u-w-100" />
+                    <ValidationMessage For="@(() => _model.Description)" />
+                </OmniFormField>
+            </OmniStack>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniStack Gap="OmniSpacing.Large">
+                <OmniFormField Label="@L["RepositoryUrl"]" Class="omni-u-w-100" For="RepositoryUrl">
+                    <OmniTextBox @bind-Value="_model.RepositoryUrl" Id="RepositoryUrl"
+                        Placeholder="@L["PlaceholderRepositoryUrl"]" Class="omni-u-w-100" />
+                </OmniFormField>
+                <OmniFormField Label="@L["DefaultBranch"]" Class="omni-u-w-100" For="DefaultBranch">
+                    <OmniTextBox @bind-Value="_model.DefaultBranch"
+                        Id="DefaultBranch" Placeholder="main" Class="omni-u-w-100" />
+                </OmniFormField>
+                @if (!_isNew)
+                {
+                    <OmniFormField Label="@L["Status"]" Class="omni-u-w-100" For="oe-formfield-pages-projects-projectformdialog-5">
+                        <OmniDropDown Id="oe-formfield-pages-projects-projectformdialog-5" @bind-Value="_model.Status" Options="@_statusOptions" Class="omni-u-w-100" />
+                    </OmniFormField>
+                }
+            </OmniStack>
+        </OmniColumn>
+    </OmniRow>
+
+    <OmniFormField Label="@L["TagsCommaSeparated"]" Class="omni-u-mt-md omni-u-w-100" For="Tags">
+        <OmniTextBox @bind-Value="_model.TagsRaw"
+            Id="Tags" Class="omni-u-w-100" />
+    </OmniFormField>
+
+    @* S-FEAT-15 / S-FEAT-16: per-project CI/CD settings (blank = global / built-in default). *@
+    <OmniText Element="OmniTextElement.Strong" Class="omni-u-mt-lg omni-u-mb-sm omni-u-text-muted">@L["ProjectCiSettings"]</OmniText>
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="project-artifact-retention"><LabelContent>@L["ArtifactRetentionDays"]</LabelContent><ChildContent>
+                <OmniNumeric @bind-Value="_model.ArtifactRetentionDays" Minimum="1" Maximum="3650" Id="project-artifact-retention" />
+                <ValidationMessage For="@(() => _model.ArtifactRetentionDays)" />
+            </ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="project-artifact-latest-retention"><LabelContent>@L["ArtifactLatestRetentionDays"]</LabelContent><ChildContent>
+                <OmniNumeric @bind-Value="_model.ArtifactLatestRetentionDays" Minimum="1" Maximum="3650" Id="project-artifact-latest-retention" />
+                <ValidationMessage For="@(() => _model.ArtifactLatestRetentionDays)" />
+            </ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField Label="@L["ReleaseNumberingPattern"]" Class="omni-u-w-100" For="ReleaseNumberingPattern">
+                <OmniTextBox @bind-Value="_model.ReleaseNumberingPattern"
+                    Id="ReleaseNumberingPattern" Placeholder="1.0.$(BUILD_BUILDID)" Class="omni-u-w-100" />
+                <ValidationMessage For="@(() => _model.ReleaseNumberingPattern)" />
+            </OmniFormField>
+        </OmniColumn>
+    </OmniRow>
+
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+        @if (!_isNew)
+        {
+            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@OnDelete" Disabled="@_saving"><OmniIcon Name="OmniIconName.Delete" /> <span>@L["Delete"]</span></OmniButton>
+        }
+        <div class="flex-spacer"></div>
+        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="@MaterialIconMap.Resolve((_isNew ? "add" : "save"))" /> <span>@(_isNew ? L["Create"] : L["Save"])</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => Dialog.Close())" ButtonType="OmniButtonType.Button" Disabled="@_saving"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+    </OmniStack>
+</OmniTemplateForm>

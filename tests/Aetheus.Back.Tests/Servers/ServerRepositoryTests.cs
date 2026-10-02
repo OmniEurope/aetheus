@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests;
@@ -191,19 +190,6 @@ public class ServerRepositoryTests : IDisposable
 
         var result = await _repo.FindServerAsync(s.Id, ct: TestContext.Current.CancellationToken);
         Assert.NotNull(result);
-    }
-
-    // --- RemoveServerAsync ---
-
-    [Fact]
-    public async Task RemoveServerAsync_Removes()
-    {
-        var s = new Server { Name = "s", Hostname = "h" };
-        _db.Servers.Add(s);
-        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
-
-        await _repo.RemoveServerAsync(s, ct: TestContext.Current.CancellationToken);
-        Assert.Equal(0, await _db.Servers.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     // --- GetServerWithCollectionsAsync ---

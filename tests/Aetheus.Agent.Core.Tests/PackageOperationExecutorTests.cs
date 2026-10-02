@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Agent.Core.Configuration;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -40,11 +39,18 @@ public class PackageOperationExecutorTests
             new[] { "-n", "/usr/bin/apt-get", "install", "-y", "nginx" },
             PackageOperationExecutor.BuildAptArgv("install", "nginx"));
 
+    // Recette R2-031: an uninstall purges. `remove` left the conffiles (/etc/dovecot, /etc/init.d/dovecot)
+    // behind, so the service stayed listed as installed; `purge` also clears a package left in `rc` state.
     [Fact]
-    public void BuildAptArgv_Remove_ProducesExactArgv()
-        => Assert.Equal(
-            new[] { "-n", "/usr/bin/apt-get", "remove", "-y", "postfix" },
-            PackageOperationExecutor.BuildAptArgv("remove", "postfix"));
+    public void Uninstall_PurgesThePackage_NeverRemovesIt()
+    {
+        Assert.Equal("install", PackageOperationExecutor.AptVerbFor(OperationKind.ServiceInstall));
+        Assert.Equal("purge", PackageOperationExecutor.AptVerbFor(OperationKind.ServiceUninstall));
+        Assert.Equal(
+            new[] { "-n", "/usr/bin/apt-get", "purge", "-y", "dovecot-core" },
+            PackageOperationExecutor.BuildAptArgv(
+                PackageOperationExecutor.AptVerbFor(OperationKind.ServiceUninstall), "dovecot-core"));
+    }
 
     // Fresh-box guard: install first refreshes the apt index via this argv-exact `apt-get update`.
     [Fact]

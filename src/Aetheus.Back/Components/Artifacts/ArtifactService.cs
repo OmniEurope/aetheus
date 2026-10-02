@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Collections.Concurrent;
-using Aetheus.Back.Components.GitGraph;
-using Aetheus.Back.Components.Pipelines;
-using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Artifacts;
@@ -16,7 +13,9 @@ public sealed class ArtifactService(
     // IArtifactRepository; the writes stayed where they were.
     IConfiguration configuration,
     ILogger<ArtifactService> logger,
-    IDbTransactionScope? transaction = null) : IArtifactService
+    IDbTransactionScope? transaction = null,
+    IPostgresLeaderLease? operationLock = null,
+    TimeProvider? timeProvider = null) : IArtifactService
 {
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ProjectUploadLocks = new();
 
@@ -69,12 +68,34 @@ public sealed class ArtifactService(
             .Select(group => group.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id).First().Id)
             .ToHashSet();
 
-        foreach (var artifact in builds.Where(a => !protectedIds.Contains(a.Id)))
+        // A checkpoint resume holds a retention lease on the artifacts it reuses; evicting one would
+        // break that resume. Leased artifacts are skipped here and revalidated under the lock below,
+        // since a lease can be taken after this query.
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
+        var candidates = builds.Where(a => !protectedIds.Contains(a.Id) && !IsLeased(a, now));
+
+        foreach (var artifact in candidates)
         {
             try
             {
-                await storage.DeleteArtifactAsync(artifact.FilePath, ct).ConfigureAwait(false);
-                await repo.RemoveAsync(artifact, ct).ConfigureAwait(false);
+                // R-463: the same per-artifact lock as the expiry cleanup and the checkpoint reuse, so
+                // two paths never delete one artifact at the same time.
+                var evicted = false;
+                if (operationLock is null)
+                    evicted = await EvictUnlessLeasedAsync(artifact, now, ct).ConfigureAwait(false);
+                else
+                    await operationLock.RunSerializedAsync(
+                        ArtifactRetentionLock.For(artifact.Id),
+                        async lockToken => evicted = await EvictUnlessLeasedAsync(artifact, now, lockToken).ConfigureAwait(false),
+                        ct).ConfigureAwait(false);
+                if (!evicted)
+                {
+                    logger.LogInformation(
+                        "Artifact quota eviction: kept build artifact {ArtifactId}, a checkpoint resume holds its retention lease",
+                        artifact.Id);
+                    continue;
+                }
+
                 used = Math.Max(0, used - artifact.SizeBytes);
                 logger.LogInformation(
                     "Artifact quota eviction: deleted build artifact {ArtifactId} ({Size} bytes) for project {ProjectId}",
@@ -93,6 +114,19 @@ public sealed class ArtifactService(
             "Artifact upload rejected for project {ProjectId}: quota cannot fit {Incoming} bytes ({Used}/{Quota} bytes used)",
             projectId, incomingSizeBytes, used, _projectQuotaBytes);
         throw new ConflictException("Project artifact storage quota cannot fit this artifact without deleting retained artifacts.");
+    }
+
+    private static bool IsLeased(PipelineArtifact artifact, DateTime now) =>
+        artifact.RetentionLeaseExpiresAt is { } leaseExpiresAt && leaseExpiresAt > now;
+
+    private async Task<bool> EvictUnlessLeasedAsync(PipelineArtifact artifact, DateTime now, CancellationToken ct)
+    {
+        if (await repo.HasActiveRetentionLeaseAsync(artifact.Id, now, ct).ConfigureAwait(false))
+            return false;
+
+        await storage.DeleteArtifactAsync(artifact.FilePath, ct).ConfigureAwait(false);
+        await repo.RemoveAsync(artifact, ct).ConfigureAwait(false);
+        return true;
     }
 
     private bool HasCapacity(long usedBytes, long incomingSizeBytes) =>
@@ -143,7 +177,10 @@ public sealed class ArtifactService(
     public async Task<PaginatedResult<PipelineArtifactDto>> GetProjectArtifactsAsync(int projectId, ProjectArtifactsRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
-        var (items, totalCount) = await repo.GetByProjectPagedAsync(projectId, request.Policy, request.PipelineId, page, pageSize, ct).ConfigureAwait(false);
+        var (items, totalCount) = await repo.GetByProjectPagedAsync(
+            projectId, request.Policy, request.PipelineId, page, pageSize, ct,
+            request.Filters, request.SortBy,
+            request.SortBy is null || request.SortDescending).ConfigureAwait(false);
 
         return new PaginatedResult<PipelineArtifactDto>
         {
@@ -153,6 +190,10 @@ public sealed class ArtifactService(
             PageSize = pageSize
         };
     }
+
+    /// <summary>Recette R-210: the names the project artifacts grid's checkable filters offer.</summary>
+    public Task<ProjectArtifactFilterValuesDto> GetProjectArtifactFilterValuesAsync(int projectId, CancellationToken ct = default) =>
+        repo.GetProjectFilterValuesAsync(projectId, ct);
 
     public async Task<PipelineArtifactDto?> GetArtifactAsync(int id, CancellationToken ct = default)
     {
@@ -181,6 +222,19 @@ public sealed class ArtifactService(
     {
         var artifact = await repo.FindAsync(artifactId, ct).ConfigureAwait(false);
         if (artifact is null) return null;
+
+        // The two ids arrive independently, so nothing but this check keeps them in the same project.
+        // Fail-closed on an unresolvable owner: an artifact or release whose project cannot be named
+        // is refused rather than promoted across a tenancy boundary.
+        var artifactProjectId = await repo.GetArtifactOwningProjectIdAsync(artifactId, ct).ConfigureAwait(false);
+        var releaseProjectId = await repo.GetReleaseProjectIdAsync(releaseId, ct).ConfigureAwait(false);
+        if (artifactProjectId is not { } owner || releaseProjectId is not { } target || owner != target)
+        {
+            logger.LogWarning(
+                "Refused promotion of artifact {ArtifactId} (project {ArtifactProject}) to release {ReleaseId} (project {ReleaseProject}): different or unresolvable owners.",
+                artifactId, artifactProjectId, releaseId, releaseProjectId);
+            return null;
+        }
 
         await retention.ApplyReleaseRetentionAsync(artifact, releaseId, ct).ConfigureAwait(false);
         logger.LogInformation("Artifact {Id} promoted to release {ReleaseId}", artifactId, releaseId);
@@ -250,6 +304,9 @@ public sealed class ArtifactService(
 
     public async Task<bool> IsAgentAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default) =>
         await repo.IsServerAssignedToRunAsync(runId, serverId, ct).ConfigureAwait(false);
+
+    public async Task<int?> GetOwningProjectIdAsync(int artifactId, CancellationToken ct = default) =>
+        await repo.GetArtifactOwningProjectIdAsync(artifactId, ct).ConfigureAwait(false);
 
     public async Task<(DeployDownloadStatus Status, Stream? Stream, string? FileName)> OpenArtifactForAgentAsync(
         int artifactId, int deployRunId, int agentServerId, CancellationToken ct = default)

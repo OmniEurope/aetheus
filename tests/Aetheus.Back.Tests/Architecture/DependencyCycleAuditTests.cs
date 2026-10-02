@@ -55,13 +55,21 @@ public class DependencyCycleAuditTests
     /// </summary>
     private static readonly Dictionary<string, int> ModuleLayers = new(StringComparer.Ordinal)
     {
+        // L-1 - the shared helpers every module uses (grid query map, SSRF guard, safe XML, mappers of
+        // shared entities). It reaches no module at all: it sat at L5 only because it registered two
+        // modules' event handlers and located a server repository, both moved out on 2026-09-25, which
+        // had left twenty lower modules pointing up at it.
+        ["Shared"] = -1,
+
         // L0 - storage that reaches nothing.
+        // Security holds the CSP violation collector: it logs what the browser refused and touches
+        // no other module, so it belongs at the bottom where it can gain no dependency by accident.
+        ["Security"] = 0,
         ["Audit"] = 0,
         ["GitGraph"] = 0,
         ["Artifacts"] = 0,
 
         // L1 - foundations: identity, configuration, delivery channels.
-        ["Alerts"] = 1,
         ["AgentPools"] = 1,
         ["Dashboards"] = 1,
         ["Environments"] = 1,
@@ -76,6 +84,9 @@ public class DependencyCycleAuditTests
         // entity itself rather than injecting the module that owns it.
         ["ModuleLinks"] = 1,
         ["Monitoring"] = 1,
+        // Who holds which port on which server. Storage only - it reaches no other module, and the
+        // orchestrator above reads it through IPortRegistryService.
+        ["PortRegistry"] = 1,
         ["ServiceConnections"] = 1,
         ["Settings"] = 1,
         ["Users"] = 1,
@@ -85,7 +96,14 @@ public class DependencyCycleAuditTests
         ["WorkItems"] = 1,
 
         // L2 - execution and access primitives.
+        // Alerts sends through Notifications (L1): an alert is a producer of notifications, so it sits
+        // above the channel it uses (raised from L1 on 2026-09-25, when the source guard found the call;
+        // nothing depends on Alerts, so no cycle can form).
+        ["Alerts"] = 2,
         ["AppMonitoring"] = 2,
+        // PLAN-005 lot 5: sits above PortRegistry and VariableLibraries, both L1 and therefore blind
+        // to each other, and owns the one act that needs both - reserve a port, write its variable.
+        ["PortAllocation"] = 2,
         ["Auth"] = 2,
         ["Plugins"] = 2,
         ["SystemLogs"] = 2,
@@ -112,7 +130,6 @@ public class DependencyCycleAuditTests
         ["AiTasks"] = 5,
         ["AppBackups"] = 5,
         ["Mail"] = 5,
-        ["Shared"] = 5,
         ["Teamspeak"] = 5,
 
         // L6 - the orchestrator.
@@ -252,6 +269,78 @@ public class DependencyCycleAuditTests
             + "domain event, an own-read over the shared entity, or moving the code to the module "
             + "that owns the concern - rather than raising the module's layer:\n  "
             + string.Join("\n  ", violations));
+    }
+
+    /// <summary>
+    /// The same downward rule, read from the source instead of the constructors. The constructor graph
+    /// cannot see a static helper, a DTO, a domain event, a constant or a service located at run time
+    /// (<c>GetRequiredService</c>): 49 such upward references had piled up behind a green guard
+    /// (2026-09-25). Every <c>using Aetheus.Back.Components.X</c> and every fully qualified
+    /// <c>Aetheus.Back.Components.X.Type</c> written in a module's files must point strictly downward.
+    /// An unused upward <c>using</c> fails too: it is the first step of the next upward call.
+    /// </summary>
+    [Fact]
+    public void Components_Module_Source_References_Only_Point_Downward()
+    {
+        var files = RepositoryScan.Enumerate(
+            Path.Combine(RepositoryScan.Root, "src", "Aetheus.Back", "Components"), "*.cs");
+        RepositoryScan.AssertScanned(files.Count, 300, "Components source files");
+
+        var violations = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var path in files)
+        {
+            var text = File.ReadAllText(path);
+            var module = System.Text.RegularExpressions.Regex.Match(
+                text, @"(?m)^namespace\s+Aetheus\.Back\.Components\.(\w+)").Groups[1].Value;
+            if (!ModuleLayers.TryGetValue(module, out var fromLayer)) continue;
+
+            var lines = text.Split('\n');
+            for (var number = 0; number < lines.Length; number++)
+            {
+                var line = lines[number];
+                if (line.TrimStart().StartsWith("namespace ", StringComparison.Ordinal)
+                    || line.TrimStart().StartsWith("//", StringComparison.Ordinal)
+                    || line.TrimStart().StartsWith("///", StringComparison.Ordinal))
+                    continue;
+                foreach (System.Text.RegularExpressions.Match reference in System.Text.RegularExpressions.Regex.Matches(
+                             line, @"Aetheus\.Back\.Components\.(\w+)"))
+                {
+                    var target = reference.Groups[1].Value;
+                    if (target == module || !ModuleLayers.TryGetValue(target, out var toLayer)) continue;
+                    if (fromLayer <= toLayer)
+                        violations.Add($"{module}(L{fromLayer}) -> {target}(L{toLayer})  "
+                            + $"{Path.GetRelativePath(RepositoryScan.Root, path)}:{number + 1}");
+                }
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "Components source references that do not run strictly downward (using directives or "
+            + "fully qualified names). Move the helper, event or constant to the module that owns it at "
+            + "the lower layer, read the shared entity locally, or raise a domain event - never raise "
+            + "the module's layer to make the reference legal:\n  " + string.Join("\n  ", violations));
+    }
+
+    /// <summary>
+    /// A <c>global using</c> reaches every file of the assembly, so it may only name a module that sits
+    /// at or below every other one; anything higher would be an upward reference nobody wrote.
+    /// </summary>
+    [Fact]
+    public void Global_Usings_Only_Name_Bottom_Modules()
+    {
+        var globals = RepositoryScan.Enumerate(Path.Combine(RepositoryScan.Root, "src", "Aetheus.Back"), "*.cs")
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .SelectMany(path => System.Text.RegularExpressions.Regex.Matches(
+                File.ReadAllText(path), @"(?m)^\s*global\s+using\s+Aetheus\.Back\.Components\.(\w+)"))
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        Assert.NotEmpty(globals);
+
+        // Layer 0 and below: storage and shared helpers, which depend on no other module.
+        var tooHigh = globals.Where(module => !ModuleLayers.TryGetValue(module, out var layer) || layer > 0).ToList();
+        Assert.True(tooHigh.Count == 0,
+            "global using of a module above the bottom layers: " + string.Join(", ", tooHigh));
     }
 
     /// <summary>

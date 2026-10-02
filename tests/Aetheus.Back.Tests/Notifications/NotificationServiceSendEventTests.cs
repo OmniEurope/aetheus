@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -26,7 +25,8 @@ public class NotificationServiceSendEventTests
             _httpFactory,
             Substitute.For<Microsoft.Extensions.Logging.ILogger<NotificationService>>(),
             _encryption,
-            TimeProvider.System);
+            TimeProvider.System,
+            Substitute.For<IUserNotificationService>());
     }
 
     [Fact]
@@ -102,7 +102,8 @@ public class NotificationServiceSendEventTests
             _httpFactory,
             Substitute.For<Microsoft.Extensions.Logging.ILogger<NotificationService>>(),
             _encryption,
-            TimeProvider.System);
+            TimeProvider.System,
+            Substitute.For<IUserNotificationService>());
 
         await service.SendEventAsync(
             "deploy",
@@ -278,7 +279,7 @@ public class NotificationServiceSendEventTests
         };
         _repo.FindRuleAsync(1, Arg.Any<CancellationToken>()).Returns(rule);
 
-        var result = await _sut.UpdateRuleAsync(1, new Aetheus.Shared.DTOs.UpdateNotificationRuleRequest
+        var result = await _sut.UpdateRuleAsync(1, new Aetheus.Shared.Components.Notifications.UpdateNotificationRuleRequest
         {
             EventType = "new.event",
             FilterJson = "{\"filter\":true}",
@@ -295,7 +296,7 @@ public class NotificationServiceSendEventTests
         _repo.FindRuleAsync(99, Arg.Any<CancellationToken>())
             .Returns((NotificationRule?)null);
 
-        Assert.Null(await _sut.UpdateRuleAsync(99, new Aetheus.Shared.DTOs.UpdateNotificationRuleRequest(), ct: TestContext.Current.CancellationToken));
+        Assert.Null(await _sut.UpdateRuleAsync(99, new Aetheus.Shared.Components.Notifications.UpdateNotificationRuleRequest(), ct: TestContext.Current.CancellationToken));
     }
 
     private sealed class FakeHandler : HttpMessageHandler

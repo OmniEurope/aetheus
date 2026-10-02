@@ -67,6 +67,18 @@ public sealed class E2eDatabaseIsolationAuditTests
     }
 
     [Fact]
+    public void RemoteCompose_DefaultsToProduction()
+    {
+        var remoteCompose = File.ReadAllText(Path.Combine(RepoRoot(), "deploy", "compose", "remote.compose.yml"));
+
+        Assert.Contains("ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}", remoteCompose, StringComparison.Ordinal);
+        Assert.Contains("Database=${DB_NAME:-aetheus}", remoteCompose, StringComparison.Ordinal);
+        Assert.Contains("POSTGRES_DB=${DB_NAME:-aetheus}", remoteCompose, StringComparison.Ordinal);
+        Assert.Contains("BackgroundServices__ServerHeartbeatTimeout=${SERVER_HEARTBEAT_TIMEOUT:-00:02:00}", remoteCompose, StringComparison.Ordinal);
+        Assert.Contains("pg_isready -U ${DB_USER} -d ${DB_NAME:-aetheus}", remoteCompose, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void IntegrationFactory_DisablesConcurrentDemoContentStartupSeeding()
     {
         var factory = File.ReadAllText(Path.Combine(

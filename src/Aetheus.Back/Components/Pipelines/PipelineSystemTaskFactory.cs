@@ -3,7 +3,6 @@ using System.Text.Json;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
 namespace Aetheus.Back.Components.Pipelines;
@@ -148,7 +147,16 @@ public sealed class PipelineSystemTaskFactory(
 
         var taskVars = resolvedVars;
         if (isPrepare && hasRepo)
-            taskVars = AddCloneCredentials(runId, run, resolvedVars);
+        {
+            if (MirrorCloneUrl.IsCurrentInternalClone(configuration, run.RepositoryUrl))
+                taskVars = AddCloneCredentials(runId, run, resolvedVars);
+            else
+            {
+                taskVars = new Dictionary<string, string>(resolvedVars, StringComparer.OrdinalIgnoreCase);
+                taskVars.Remove("GIT_USERNAME");
+                taskVars.Remove("GIT_PASSWORD");
+            }
+        }
 
         var task = new ServerTask
         {

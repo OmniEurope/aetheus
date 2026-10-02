@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.Enums;
 using Bunit;
-using AlertsPage = Aetheus.Front.Pages.Alerts.Alerts;
+using AlertsPage = Aetheus.Front.Components.Alerts.Alerts;
 
 namespace Aetheus.Front.Tests.Pages.AlertsExtended;
 
@@ -24,13 +23,13 @@ public class AlertsExtendedTests : BunitContext
     // ── GetMetricBadgeStyle - all enum values ─────────────────────────────────
 
     [Theory]
-    [InlineData(MetricType.Cpu, Radzen.BadgeStyle.Warning)]
-    [InlineData(MetricType.Memory, Radzen.BadgeStyle.Info)]
-    [InlineData(MetricType.Disk, Radzen.BadgeStyle.Danger)]
-    public void GetMetricBadgeStyle_ReturnsExpected(MetricType metric, Radzen.BadgeStyle expected)
+    [InlineData(MetricType.Cpu, OmniTone.Warning)]
+    [InlineData(MetricType.Memory, OmniTone.Accent)]
+    [InlineData(MetricType.Disk, OmniTone.Danger)]
+    public void GetMetricBadgeStyle_ReturnsExpected(MetricType metric, OmniTone expected)
     {
         var method = typeof(AlertsPage).GetMethod("GetMetricBadgeStyle", Stat)!;
-        var result = (Radzen.BadgeStyle)method.Invoke(null, [metric])!;
+        var result = (OmniTone)method.Invoke(null, [metric])!;
         Assert.Equal(expected, result);
     }
 
@@ -38,20 +37,20 @@ public class AlertsExtendedTests : BunitContext
     public void GetMetricBadgeStyle_Default_ReturnsLight()
     {
         var method = typeof(AlertsPage).GetMethod("GetMetricBadgeStyle", Stat)!;
-        var result = (Radzen.BadgeStyle)method.Invoke(null, [(MetricType)999])!;
-        Assert.Equal(Radzen.BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(MetricType)999])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ── GetSeverityBadgeStyle - all enum values ────────────────────────────────
 
     [Theory]
-    [InlineData(AlertSeverity.Critical, Radzen.BadgeStyle.Danger)]
-    [InlineData(AlertSeverity.Warning, Radzen.BadgeStyle.Warning)]
-    [InlineData(AlertSeverity.Info, Radzen.BadgeStyle.Info)]
-    public void GetSeverityBadgeStyle_ReturnsExpected(AlertSeverity severity, Radzen.BadgeStyle expected)
+    [InlineData(AlertSeverity.Critical, OmniTone.Danger)]
+    [InlineData(AlertSeverity.Warning, OmniTone.Warning)]
+    [InlineData(AlertSeverity.Info, OmniTone.Accent)]
+    public void GetSeverityBadgeStyle_ReturnsExpected(AlertSeverity severity, OmniTone expected)
     {
         var method = typeof(AlertsPage).GetMethod("GetSeverityBadgeStyle", Stat)!;
-        var result = (Radzen.BadgeStyle)method.Invoke(null, [severity])!;
+        var result = (OmniTone)method.Invoke(null, [severity])!;
         Assert.Equal(expected, result);
     }
 
@@ -59,7 +58,7 @@ public class AlertsExtendedTests : BunitContext
     public void GetSeverityBadgeStyle_Default_ReturnsLight()
     {
         var method = typeof(AlertsPage).GetMethod("GetSeverityBadgeStyle", Stat)!;
-        var result = (Radzen.BadgeStyle)method.Invoke(null, [(AlertSeverity)999])!;
-        Assert.Equal(Radzen.BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(AlertSeverity)999])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 }

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using Aetheus.Back.Components.Git;
+using Aetheus.Back.Tests.Git;
 
 namespace Aetheus.Back.Tests.Pipelines;
 
@@ -24,6 +26,7 @@ public sealed class PipelineGitFetchIntegrationTests
             Git(work, "add", "base.txt");
             Git(work, "commit", "-m", "base");
             Git(work, "remote", "add", "origin", origin);
+            GitFixtureGuard.AssertOwnedBy(work, root);
             Git(work, "push", "-u", "origin", "main");
 
             Git(work, "checkout", "-b", "release/1");
@@ -78,6 +81,9 @@ public sealed class PipelineGitFetchIntegrationTests
             CreateNoWindow = true
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        // WHY: pre-push hook env inheritance incident - GIT_DIR/GIT_INDEX_FILE would redirect this
+        // fixture git call to the real repository.
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(start);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("git did not start");
         var output = process.StandardOutput.ReadToEnd();
         var error = process.StandardError.ReadToEnd();

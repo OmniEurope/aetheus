@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# In-house rules for the delivery surface: the shell scripts and container definitions that a
+# control plane runs on real hosts. The existing aetheus-security.yml covers application code
+# patterns; these cover the part of this repository that has root on a server.
+#
+# Every rule here is written narrow on purpose. A SAST rule that fires on the merely suspicious gets
+# switched off, and a switched-off rule protects nothing; each of these describes an act that is
+# wrong in this repository rather than a shape that is sometimes wrong somewhere.
+rules:
+  - id: aetheus.shell.pipe-remote-to-shell
+    languages: [generic]
+    paths:
+      include:
+        - "*.sh"
+        - "*.bash"
+    severity: ERROR
+    message: >-
+      A download piped straight into a shell executes whatever the server answers, with no digest and
+      no way to review it. Fetch to a file, verify it, then run it.
+    metadata:
+      cwe: CWE-494
+      category: security
+    pattern-either:
+      - pattern: curl ... | sh
+      - pattern: curl ... | bash
+      - pattern: wget ... | sh
+      - pattern: wget ... | bash
+
+  - id: aetheus.shell.world-writable-mode
+    languages: [generic]
+    paths:
+      include:
+        - "*.sh"
+        - "*.bash"
+    severity: ERROR
+    message: >-
+      Mode 777 lets every local account rewrite the file or directory. On a runner that also builds
+      other projects, that is a handover of whatever runs from there.
+    metadata:
+      cwe: CWE-732
+      category: security
+    pattern-either:
+      - pattern: chmod 777 ...
+      - pattern: chmod -R 777 ...
+      - pattern: chmod a+rwx ...
+
+  - id: aetheus.compose.privileged-container
+    languages: [yaml]
+    paths:
+      include:
+        - "*compose*.yml"
+        - "*compose*.yaml"
+      exclude:
+        # The disposable local VPS simulators boot systemd as PID 1 on a developer's machine and are
+        # never deployed anywhere. Excluding them by name keeps the rule at zero findings today,
+        # which is what makes a new one mean something.
+        - "*vpssim*"
+    severity: ERROR
+    message: >-
+      A privileged container is not isolated from its host: it can reach the host's devices and
+      kernel. If a capability is genuinely needed, name that capability instead.
+    metadata:
+      cwe: CWE-250
+      category: security
+    pattern: |
+      privileged: true
+
+  - id: aetheus.compose.docker-socket-mount
+    languages: [yaml]
+    paths:
+      include:
+        - "*compose*.yml"
+        - "*compose*.yaml"
+    severity: ERROR
+    message: >-
+      Mounting the Docker socket into a container gives it control of the daemon, which is control of
+      the host. An agent that must build images does so through its own runner, not through a mount.
+    metadata:
+      cwe: CWE-250
+      category: security
+    pattern-regex: /var/run/docker\.sock
+
+  - id: aetheus.csharp.disabled-tls-validation
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      Accepting every server certificate turns TLS into encryption without authentication, which is
+      the half that stops an interception. Pin or trust a CA instead.
+    metadata:
+      cwe: CWE-295
+      category: security
+    pattern-either:
+      - pattern: $H.ServerCertificateCustomValidationCallback = $F.DangerousAcceptAnyServerCertificateValidator;
+      - pattern: $H.ServerCertificateCustomValidationCallback = (...) => true;
+      - pattern: $H.RemoteCertificateValidationCallback = (...) => true;
+
+  - id: aetheus.csharp.binary-formatter
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      BinaryFormatter deserialization builds arbitrary object graphs from its input and is removed
+      from modern .NET for that reason. Use a schema-bound serializer.
+    metadata:
+      cwe: CWE-502
+      category: security
+    # Only the constructor. `$F.Deserialize($X)` would have covered the call site too and would have
+    # matched every JsonSerializer.Deserialize in the repository: a rule that fires on the correct
+    # answer is a rule someone turns off.
+    pattern: new BinaryFormatter(...)

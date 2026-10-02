@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Text.RegularExpressions;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Constants;
 
 namespace Aetheus.Back.Tests.Architecture;
 
@@ -14,7 +13,9 @@ namespace Aetheus.Back.Tests.Architecture;
 /// the drop-in straight from the install script and asserts:
 /// <list type="bullet">
 ///   <item>the INSTALL entries == <see cref="ManageablePackages.All"/> (resolved apt names),</item>
-///   <item>the REMOVE entries == <see cref="ManageablePackages.Removable"/> (protected packages excluded),</item>
+///   <item>the PURGE entries == <see cref="ManageablePackages.Removable"/> (protected packages excluded),</item>
+///   <item>no <c>apt-get remove</c> entry is left (recette R2-031: an uninstall purges; <c>remove</c> kept
+///   the conffiles and the service stayed listed as installed),</item>
 ///   <item><c>apt-get update</c> is allow-listed (fresh-box index refresh before install).</item>
 /// </list>
 /// </summary>
@@ -23,18 +24,23 @@ public class ManageablePackagesSudoersAuditTests
     [Fact]
     public void SudoersDropIn_MatchesManageablePackages_All_And_Removable()
     {
-        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", "install-agent-linux.sh"));
+        // R-249: the drop-in is the package/sudoers.d/aetheus-package template the installer renders.
+        Assert.Contains(
+            "render_host_config package/sudoers.d/aetheus-package \"$PACKAGE_MANAGE_SUDOERS_FILE\"",
+            LinuxHostConfigTemplates.Installer(),
+            StringComparison.Ordinal);
+        var script = LinuxHostConfigTemplates.Read("package/sudoers.d/aetheus-package");
 
         // Isolate the Cmnd_Alias AETHEUS_PACKAGE block (up to the Defaults!AETHEUS_PACKAGE lines).
         var blockStart = script.IndexOf("Cmnd_Alias AETHEUS_PACKAGE", StringComparison.Ordinal);
-        Assert.True(blockStart >= 0, "Cmnd_Alias AETHEUS_PACKAGE not found in install-agent-linux.sh");
+        Assert.True(blockStart >= 0, "Cmnd_Alias AETHEUS_PACKAGE not found in package/sudoers.d/aetheus-package");
         var blockEnd = script.IndexOf("Defaults!AETHEUS_PACKAGE", blockStart, StringComparison.Ordinal);
         Assert.True(blockEnd > blockStart, "Defaults!AETHEUS_PACKAGE terminator not found");
         var block = script[blockStart..blockEnd];
 
         var installs = Regex.Matches(block, @"apt-get install -y ([^,\s\\]+)")
             .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var removes = Regex.Matches(block, @"apt-get remove -y ([^,\s\\]+)")
+        var purges = Regex.Matches(block, @"apt-get purge -y ([^,\s\\]+)")
             .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         Assert.Equal(
@@ -44,8 +50,11 @@ public class ManageablePackagesSudoersAuditTests
 
         Assert.Equal(
             ManageablePackages.Removable.OrderBy(x => x, StringComparer.OrdinalIgnoreCase),
-            removes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase),
+            purges.OrderBy(x => x, StringComparer.OrdinalIgnoreCase),
             StringComparer.OrdinalIgnoreCase);
+
+        // R2-031: the uninstall verb is purge; a leftover `remove` grant is the old half-uninstall.
+        Assert.DoesNotMatch(@"apt-get remove\b", block);
 
         Assert.Matches(@"apt-get update", block);
     }
@@ -58,7 +67,12 @@ public class ManageablePackagesSudoersAuditTests
         // the exact argv the agent sends via `sudo -n ...`. Pin the full command form to the agent's
         // own BuildAptArgv/BuildAptUpdateArgv (dropping the leading `-n`, which is a sudo flag, not
         // part of the sudoers Cmnd match).
-        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", "install-agent-linux.sh"));
+        // R-249: the drop-in is the package/sudoers.d/aetheus-package template the installer renders.
+        Assert.Contains(
+            "render_host_config package/sudoers.d/aetheus-package \"$PACKAGE_MANAGE_SUDOERS_FILE\"",
+            LinuxHostConfigTemplates.Installer(),
+            StringComparison.Ordinal);
+        var script = LinuxHostConfigTemplates.Read("package/sudoers.d/aetheus-package");
         var blockStart = script.IndexOf("Cmnd_Alias AETHEUS_PACKAGE", StringComparison.Ordinal);
         var blockEnd = script.IndexOf("Defaults!AETHEUS_PACKAGE", blockStart, StringComparison.Ordinal);
         var block = script[blockStart..blockEnd];
@@ -71,11 +85,12 @@ public class ManageablePackagesSudoersAuditTests
 
         // Every installable package's exact install argv must appear verbatim.
         foreach (var pkg in ManageablePackages.All)
-            Assert.Contains(Cmnd(PackageOperationExecutor.BuildAptArgv("install", pkg)), block, StringComparison.Ordinal);
+            Assert.Contains(Cmnd(PackageOperationExecutor.BuildAptArgv(PackageOperationExecutor.InstallVerb, pkg)), block, StringComparison.Ordinal);
 
-        // Every removable package's exact remove argv must appear verbatim.
+        // Every removable package's exact uninstall argv (the verb the executor really sends) must appear verbatim.
+        Assert.Equal("purge", PackageOperationExecutor.UninstallVerb);
         foreach (var pkg in ManageablePackages.Removable)
-            Assert.Contains(Cmnd(PackageOperationExecutor.BuildAptArgv("remove", pkg)), block, StringComparison.Ordinal);
+            Assert.Contains(Cmnd(PackageOperationExecutor.BuildAptArgv(PackageOperationExecutor.UninstallVerb, pkg)), block, StringComparison.Ordinal);
     }
 
     private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;

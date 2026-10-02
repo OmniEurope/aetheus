@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.WorkItems;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;

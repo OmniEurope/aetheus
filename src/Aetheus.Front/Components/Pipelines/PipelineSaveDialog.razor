@@ -1,0 +1,20 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Large">
+    @if (Branches.Count > 0)
+    {
+        <OmniFormField Label="@L["CommitBranch"]" For="oe-formfield-pages-pipelines-pipelinesavedialog-1">
+            <OmniDropDown Id="oe-formfield-pages-pipelines-pipelinesavedialog-1" TValue="string" Options="@(Branches.ToOptions(item => (string)item, item => item))" @bind-Value="_branch" />
+        </OmniFormField>
+    }
+
+    <OmniAlert Severity="OmniSeverity.Info">
+        @L["PipelineSaveCommitPreview"]
+    </OmniAlert>
+
+    <MonacoDiffViewer OriginalValue="@SavedYaml" ModifiedValue="@DraftYaml" />
+
+    <DialogFooter OnCancel="Cancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="Confirm"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+    </DialogFooter>
+</OmniStack>

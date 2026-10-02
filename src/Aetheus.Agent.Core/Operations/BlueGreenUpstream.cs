@@ -45,6 +45,34 @@ internal static class BlueGreenUpstream
     }
 
     /// <summary>
+    /// Reads the upstream file and the reload helper every traffic move needs, reporting whether both
+    /// were supplied. The caller names what it could not do without them.
+    /// </summary>
+    internal static bool TryReadTargets(
+        IReadOnlyDictionary<string, string> envVars, out string confPath, out string reloadCommand)
+    {
+        confPath = envVars.GetValueOrDefault("AETHEUS_BG_UPSTREAM_CONF", string.Empty).Trim();
+        reloadCommand = envVars.GetValueOrDefault("AETHEUS_BG_RELOAD_HELPER", string.Empty).Trim();
+        return confPath.Length > 0 && reloadCommand.Length > 0;
+    }
+
+    /// <summary>
+    /// <see cref="RestoreRecordedAsync"/> for an undo step: a failed restore is reported as the
+    /// manual-intervention error, naming the journal kept for it.
+    /// </summary>
+    internal static async Task<bool> RestoreRecordedOrReportAsync(
+        IShellRunner shell, BlueGreenContext context, string confPath, string reloadCommand,
+        int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct)
+    {
+        if (await RestoreRecordedAsync(shell, context, confPath, reloadCommand, timeoutSeconds, ct).ConfigureAwait(false))
+            return true;
+        await onOutput(
+            $"Restoring the recorded configuration failed; manual intervention required. Journal retained at {context.JournalDir}.",
+            TaskLogLevel.Error).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>
     /// Puts back the configuration snapshotted when the transaction opened, reading the snapshot from
     /// the journal itself. Both undo paths need exactly this, so it lives with the rest of the
     /// upstream handling rather than in the executor that decides which undo to run.

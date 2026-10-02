@@ -1,0 +1,62 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@using static Aetheus.Front.Components.Pipelines.PipelineRunFormatting
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+@* PLAN-003 lot 1: the run page uses THE page header like every other route. The title is the run
+   itself; the back arrow and the trail lead to its pipeline. R-496: the header no longer repeats what
+   the overview tiles say (pipeline name, status, candidate verdict, parent pipeline); it keeps the
+   badges that call for attention. *@
+<OmniPageHeader Title="@($"{L["PipelineRun"]} #{Run.Id}")" ShowBack="@(!string.IsNullOrWhiteSpace(PipelineHref))"
+                                 Class="pipeline-run-page-header" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("account_tree")" /></Icon>
+    <Badges>
+        @* D15: the states that used to stack banners above the tabs. Each is one badge whose tooltip
+           carries the short reason; the full detail lives in the overview tab. *@
+        @if (WaitingReasonCount > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent"
+                         title="@L["RunWaitingTitle"]"><Icon><OmniIcon Name="OmniIconName.Hourglass" /></Icon><ChildContent>@L["RunWaitingTitle"]</ChildContent></OmniBadge>
+        }
+        @if (GateIncomplete)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning"
+                         title="@L["AnalysisGateIncompleteTitle"]"><Icon><OmniIcon Name="OmniIconName.Warning" /></Icon><ChildContent>@L["AnalysisGateIncompleteTitle"]</ChildContent></OmniBadge>
+        }
+        @if (BlockingWarningCount > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Danger">@string.Format(L["BlockingWarningsCount"], BlockingWarningCount)</OmniBadge>
+        }
+        @if (InfoWarningCount > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@string.Format(L["WarningsCount"], InfoWarningCount)</OmniBadge>
+        }
+    </Badges>
+    <Actions>
+        @if (CanRerun)
+        {
+            @* Recette R-137: an action button is primary. Recette R-320: each rerun choice has its icon. *@
+            <OmniSplitButton Variant="OmniButtonVariant.Primary" Class="@(Rerunning ? "btn-busy" : null)" aria-busy="@(Rerunning ? "true" : null)" Text="@L["Rerun"]" OnClick="@(() => RerunRequested.InvokeAsync(null))" Busy="@Rerunning"
+                aria-label="@L["Rerun"]"><Icon><OmniIcon Name="OmniIconName.Refresh" /></Icon><ChildContent>
+                <OmniMenuItem OnClick="@(() => RerunRequested.InvokeAsync("current"))"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["RerunCurrent"]</span></OmniMenuItem>
+                <OmniMenuItem OnClick="@(() => RerunRequested.InvokeAsync("sameCommit"))"><OmniIcon Name="OmniIconName.GitCommit" /> <span>@L["RerunSameCommit"]</span></OmniMenuItem>
+                <OmniMenuItem OnClick="@(() => RerunRequested.InvokeAsync("branchHead"))"><OmniIcon Name="OmniIconName.GitFork" /> <span>@L["RerunBranchHead"]</span></OmniMenuItem>
+                <OmniMenuItem OnClick="@(() => RerunRequested.InvokeAsync("resumeCheckpoints"))"><OmniIcon Name="OmniIconName.Play" /> <span>@L["ResumeCheckpoints"]</span></OmniMenuItem>
+            </ChildContent></OmniSplitButton>
+        }
+    </Actions>
+    <MenuContent>
+        <OmniMenuItem OnClick="EditRequested"><Icon><OmniIcon Name="OmniIconName.Edit" /></Icon><ChildContent>@L["Edit"]</ChildContent></OmniMenuItem>
+        @if (Run.ResolvedVariables.Count > 0)
+        {
+            <OmniMenuItem OnClick="VariablesRequested"><Icon><OmniIcon Name="OmniIconName.BracketsCurly" /></Icon><ChildContent>@L["ResolvedVariables"]</ChildContent></OmniMenuItem>
+        }
+        @if (RunInProgress)
+        {
+            <OmniMenuItem OnClick="CancelRequested"><Icon><OmniIcon Name="OmniIconName.Prohibit" /></Icon><ChildContent>@L["CancelRun"]</ChildContent></OmniMenuItem>
+        }
+        @if (CanRerun && HasFailedSteps)
+        {
+            <OmniMenuItem OnClick="RetryFailedRequested"><Icon><OmniIcon Name="OmniIconName.Refresh" /></Icon><ChildContent>@L["RerunFailedSteps"]</ChildContent></OmniMenuItem>
+        }
+    </MenuContent>
+</OmniPageHeader>

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Settings;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Settings;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages.Settings;
 
@@ -95,12 +95,12 @@ public class AdminSettingsDeepTests : BunitContext
         var savingKeys = (HashSet<string>)typeof(AdminSettings).GetField("_savingKeys", Priv)!.GetValue(cut.Instance)!;
         savingKeys.Add("MaxWorkers");
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("SaveSetting", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["MaxWorkers"])!);
 
         // Already-saving key → early return before any API call or toast.
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
     }
 
     // ── SaveSetting - missing key in buffer, skips ─────────────────────────────
@@ -112,12 +112,12 @@ public class AdminSettingsDeepTests : BunitContext
         var cut = Render<AdminSettings>();
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"), TimeSpan.FromSeconds(3));
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("SaveSetting", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["NonExistentKey"])!);
 
         // Key absent from edit buffer → TryGetValue guard returns, no toast emitted.
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
     }
 
     // ── SaveSetting - success ─────────────────────────────────────────────────
@@ -133,13 +133,13 @@ public class AdminSettingsDeepTests : BunitContext
         var buffer = (Dictionary<string, string>)typeof(AdminSettings).GetField("_editBuffer", Priv)!.GetValue(cut.Instance)!;
         buffer["MaxWorkers"] = "8";
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("SaveSetting", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["MaxWorkers"])!);
 
         // API returns true → success toast, and the key is released from _savingKeys.
-        Assert.Single(notif.Messages);
-        Assert.Equal(Radzen.NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
         var savingKeys = (HashSet<string>)typeof(AdminSettings).GetField("_savingKeys", Priv)!.GetValue(cut.Instance)!;
         Assert.DoesNotContain("MaxWorkers", savingKeys);
     }
@@ -156,14 +156,14 @@ public class AdminSettingsDeepTests : BunitContext
         typeof(AdminSettings).GetField("_newSecretKey", Priv)!.SetValue(cut.Instance, "");
         typeof(AdminSettings).GetField("_newSecretValue", Priv)!.SetValue(cut.Instance, "");
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("AddSecret", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // Empty key/value → a Warning toast and no secret refresh.
-        Assert.Single(notif.Messages);
-        Assert.Equal(Radzen.NotificationSeverity.Warning, notif.Messages[0].Severity);
-        Assert.Equal("SecretFieldsRequired", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Warning, notif.Toasts()[0].Severity);
+        Assert.Equal("SecretFieldsRequired", notif.Toasts()[0].Detail);
     }
 
     // ── AddSecret - success ────────────────────────────────────────────────────
@@ -192,13 +192,13 @@ public class AdminSettingsDeepTests : BunitContext
         typeof(AdminSettings).GetField("_newSecretKey", Priv)!.SetValue(cut.Instance, "MY_KEY");
         typeof(AdminSettings).GetField("_newSecretValue", Priv)!.SetValue(cut.Instance, "my_value");
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("AddSecret", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // API returns BadRequest → CreateSecretAsync null → Error toast, inputs stay filled.
-        Assert.Single(notif.Messages);
-        Assert.Equal(Radzen.NotificationSeverity.Error, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Danger, notif.Toasts()[0].Severity);
         var key = (string)typeof(AdminSettings).GetField("_newSecretKey", Priv)!.GetValue(cut.Instance)!;
         Assert.Equal("MY_KEY", key);
     }
@@ -234,12 +234,12 @@ public class AdminSettingsDeepTests : BunitContext
         // POST returns NotFound → CreateRegistrationTokenAsync null → "SaveFailed" Error toast.
         _handler.SetResponse("api/auth/registration-tokens", System.Net.HttpStatusCode.NotFound);
 
-        var notif = Services.GetRequiredService<Radzen.NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("GenerateToken", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
-        Assert.Single(notif.Messages);
-        Assert.Equal(Radzen.NotificationSeverity.Error, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Danger, notif.Toasts()[0].Severity);
     }
 
     // ── ToggleTokenReveal ─────────────────────────────────────────────────────

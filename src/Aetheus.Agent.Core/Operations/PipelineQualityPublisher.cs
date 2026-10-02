@@ -175,6 +175,12 @@ internal static class PipelineQualityPublisher
         var (runId, stageName, baseDirectory, startedAt) = context;
         var patterns = PipelineTargetPatterns.ParseOptional(target);
         patterns ??= ["**/*.sarif"];
+        // A control plane older than analysis_category sends nothing: code quality, as before.
+        if (!LintAnalysisCategories.TryParse(envVars.GetValueOrDefault(LintAnalysisCategories.VariableName), out var category))
+        {
+            await onOutput($"Unknown lint category '{envVars[LintAnalysisCategories.VariableName]}'.", TaskLogLevel.Error).ConfigureAwait(false);
+            return new ExecutorResult(-1, false);
+        }
 
         var files = patterns
             .SelectMany(pattern => WorkspaceFileMatcher.GetMatchingFiles(baseDirectory, pattern))
@@ -189,16 +195,18 @@ internal static class PipelineQualityPublisher
             await onOutput($"Publishing lint report from {relativePath}...", TaskLogLevel.Info).ConfigureAwait(false);
             try
             {
-                await apiClient.PublishLintAsync(runId, sarif, stageName, relativePath, ct).ConfigureAwait(false);
+                // The lint store is the code-quality view; accessibility findings live only as analysis.
+                if (category == AnalysisCategory.CodeQuality)
+                    await apiClient.PublishLintAsync(runId, sarif, stageName, relativePath, ct).ConfigureAwait(false);
                 var artifactId = await AnalysisArtifactUploader.UploadFileAsync(
                     apiClient, runId, "analysis-pipeline-sarif-lint", stageName,
                     relativePath, file, ct).ConfigureAwait(false);
                 var analysis = await apiClient.PublishAnalysisReportAsync(runId, new PublishAnalysisReportRequest
                 {
                     ScannerKey = "pipeline-sarif-lint",
-                    ScannerName = "Pipeline SARIF Lint",
+                    ScannerName = category == AnalysisCategory.CodeQuality ? "Pipeline SARIF Lint" : $"Pipeline SARIF {category}",
                     ScannerVersion = "1",
-                    Category = AnalysisCategory.CodeQuality,
+                    Category = category,
                     Status = AnalysisReportStatus.Passed,
                     Format = AnalysisReportFormat.Sarif,
                     ReportContent = sarif,

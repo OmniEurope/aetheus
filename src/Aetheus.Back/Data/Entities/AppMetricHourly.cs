@@ -11,6 +11,17 @@ public class AppMetricHourly
     public int MonitoredAppId { get; set; }
     public string MetricName { get; set; } = string.Empty;
 
+    /// <summary>Same attribute set as the source <see cref="AppMetricSample.AttributesJson"/>, so distinct
+    /// logical series sharing one metric name (for example one HTTP route per attribute set) roll up
+    /// separately instead of being averaged together into one misleading line.</summary>
+    public string? AttributesJson { get; set; }
+
+    public string? Unit { get; set; }
+
+    /// <summary>For <see cref="MetricKind.Sum"/>, the aggregated values below are already deltas/rates
+    /// between consecutive raw points, not the raw cumulative counter.</summary>
+    public MetricKind Kind { get; set; } = MetricKind.Gauge;
+
     /// <summary>Start of the aggregated hour (UTC, truncated).</summary>
     public DateTime HourUtc { get; set; }
 

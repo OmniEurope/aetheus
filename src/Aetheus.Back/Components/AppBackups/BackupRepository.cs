@@ -10,7 +10,8 @@ internal sealed class BackupRepository(AppDbContext db) : IBackupRepository
 
     public async Task<(List<BackupPolicy> Items, int TotalCount)> GetPoliciesPagedAsync(
         IReadOnlyCollection<int>? projectIds, string? search, string? sortBy,
-        bool sortDescending, int page, int pageSize, CancellationToken ct = default)
+        bool sortDescending, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.BackupPolicies.AsNoTracking().AsQueryable();
         if (projectIds is not null)
@@ -19,6 +20,8 @@ internal sealed class BackupRepository(AppDbContext db) : IBackupRepository
             query = query.Where(p => p.Name.Contains(search)
                 || (p.Project != null && p.Project.Name.Contains(search))
                 || (p.Server != null && p.Server.Name.Contains(search)));
+        // Recette R-224: the grid's column header filters, after the scope and before the count.
+        query = BackupListQuery.PolicyColumns.ApplyFilters(query, columnFilters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         var ordered = OrderPolicies(query, sortBy, sortDescending);
@@ -96,11 +99,14 @@ internal sealed class BackupRepository(AppDbContext db) : IBackupRepository
 
     public async Task<(List<BackupRun> Items, int TotalCount)> GetRunsForPolicyPagedAsync(
         int policyId, string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.BackupRuns.AsNoTracking().Where(r => r.BackupPolicyId == policyId);
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(r => r.Message != null && r.Message.Contains(search));
+        // Recette R-224: the run grid's column header filters, before the count.
+        query = BackupListQuery.RunColumns.ApplyFilters(query, columnFilters);
 
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
         var ordered = (sortBy, sortDescending) switch

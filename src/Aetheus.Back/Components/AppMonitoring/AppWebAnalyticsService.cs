@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.AppMonitoring.Ingest;
 using Aetheus.Back.Components.Notifications;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -9,6 +10,8 @@ public sealed class AppWebAnalyticsService(
     IAppMonitoringRepository apps,
     INotificationService notifications,
     AppIngestGate ingestGate,
+    IAppTelemetryChangePublisher telemetryChanges,
+    IMemoryCache cache,
     IConfiguration configuration,
     TimeProvider timeProvider) : IAppWebAnalyticsService
 {
@@ -17,8 +20,21 @@ public sealed class AppWebAnalyticsService(
         IReadOnlyList<AppWebAnalyticsIngestEvent> events,
         CancellationToken ct = default)
     {
+        var outcome = await StoreAsync(appId, events, ct).ConfigureAwait(false);
+        // R-469: the open Visitors tab re-reads its figures and the date of the last event, as the Logs
+        // and Errors tabs do after an OTLP batch. Pushed once the per-app gate is released.
+        if (outcome.Accepted > 0)
+            await telemetryChanges.PublishAsync(appId, ct).ConfigureAwait(false);
+        return outcome;
+    }
+
+    private async Task<WebAnalyticsIngestOutcome> StoreAsync(
+        int appId,
+        IReadOnlyList<AppWebAnalyticsIngestEvent> events,
+        CancellationToken ct)
+    {
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var gate = ingestGate.For(appId);
+        var gate = ingestGate.ForAnalytics(appId);
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -30,7 +46,8 @@ public sealed class AppWebAnalyticsService(
             var rejected = events.Count - capped.Count;
             var invalid = capped.RemoveAll(item => !IsAllowed(item, app, now));
             rejected += invalid;
-            var routes = await repository.GetRouteNamesAsync(appId, ct).ConfigureAwait(false);
+            var routes = await LoadRouteNamesAsync(appId, ct).ConfigureAwait(false);
+            var knownRoutes = routes.Count;
             var cardinalityRejected = capped.RemoveAll(item =>
             {
                 if (routes.Contains(item.Route))
@@ -52,10 +69,10 @@ public sealed class AppWebAnalyticsService(
                     ct).ConfigureAwait(false);
             }
 
-            var storageBytes = await repository.EstimateStorageBytesAsync(appId, ct).ConfigureAwait(false);
-            var budgetBytes = app.AnalyticsStorageBudgetBytes > 0
-                ? app.AnalyticsStorageBudgetBytes
-                : AppMonitoringDefaults.DefaultAnalyticsStorageBudgetBytes;
+            if (routes.Count > knownRoutes)
+                cache.Set(RouteNamesCacheKey(appId), routes, IngestSnapshotLifetime);
+            var storageBytes = await EstimateStorageBytesAsync(appId, ct).ConfigureAwait(false);
+            var budgetBytes = BudgetOf(app.AnalyticsStorageBudgetBytes);
             var usagePercent = (int)Math.Min(100, storageBytes * 100 / budgetBytes);
             var alertLevel = usagePercent >= 95 ? 95 : usagePercent >= 85 ? 85 : usagePercent >= 70 ? 70 : 0;
             if (alertLevel > app.AnalyticsQuotaAlertLevel)
@@ -69,13 +86,10 @@ public sealed class AppWebAnalyticsService(
                 }, ct).ConfigureAwait(false);
             }
 
-            if (usagePercent >= 100)
-            {
-                app.AnalyticsRejectedCount += capped.Count;
-                await repository.RecordRejectionAsync(appId, "quota", capped.Count, now, ct).ConfigureAwait(false);
-                await apps.SaveChangesAsync(ct).ConfigureAwait(false);
-                return new WebAnalyticsIngestOutcome(0, 0, rejected + capped.Count);
-            }
+            // Recette R2-007: the audience rolls instead of refusing. At the budget, the oldest raw rows of
+            // the app go until it is back under RollTargetPercent of it, and the batch is accepted.
+            if (storageBytes >= budgetBytes)
+                await RollAsync(appId, budgetBytes, ct).ConfigureAwait(false);
 
             var sessionTimeout = Math.Clamp(
                 configuration.GetValue(
@@ -105,6 +119,85 @@ public sealed class AppWebAnalyticsService(
         }
     }
 
+    /// <summary>
+    /// Recette R-487: how long the two figures every batch read under the lock are trusted. The route
+    /// set was a DISTINCT over the page aggregates and the storage estimate six counts, both paid by
+    /// each call. The route set only grows through this ingestion, which writes it back; the estimate
+    /// is at most a minute behind, so the quota may be passed by what a minute of events weighs.
+    /// </summary>
+    internal static readonly TimeSpan IngestSnapshotLifetime = TimeSpan.FromSeconds(60);
+
+    private static string RouteNamesCacheKey(int appId) => $"analytics-routes:{appId}";
+
+    private static string StorageCacheKey(int appId) => $"analytics-storage:{appId}";
+
+    /// <summary>A working copy of the app's route set; the caller writes it back when it grew.</summary>
+    private async Task<HashSet<string>> LoadRouteNamesAsync(int appId, CancellationToken ct)
+    {
+        if (cache.TryGetValue<HashSet<string>>(RouteNamesCacheKey(appId), out var cached) && cached is not null)
+            return new HashSet<string>(cached, StringComparer.Ordinal);
+        var routes = await repository.GetRouteNamesAsync(appId, ct).ConfigureAwait(false);
+        cache.Set(RouteNamesCacheKey(appId), new HashSet<string>(routes, StringComparer.Ordinal), IngestSnapshotLifetime);
+        return routes;
+    }
+
+    /// <summary>Recette R2-007: the share of its budget an app is brought back under when it reaches it.</summary>
+    internal const int RollTargetPercent = 90;
+
+    private static long BudgetOf(long configuredBytes) => configuredBytes > 0
+        ? configuredBytes
+        : AppMonitoringDefaults.DefaultAnalyticsStorageBudgetBytes;
+
+    /// <summary>
+    /// Recette R2-007: brings one app back under <see cref="RollTargetPercent"/> of its budget (oldest raw
+    /// events first, then sessions, then period identities) and refreshes the cached estimate with what
+    /// remains, so the next batches do not roll again on a stale figure.
+    /// </summary>
+    private async Task<int> RollAsync(int appId, long budgetBytes, CancellationToken ct)
+    {
+        var trimmed = await repository.TrimToAsync(appId, budgetBytes * RollTargetPercent / 100, ct)
+            .ConfigureAwait(false);
+        cache.Set(StorageCacheKey(appId), trimmed.RemainingBytes, IngestSnapshotLifetime);
+        return trimmed.Total;
+    }
+
+    /// <summary>
+    /// Recette R2-007: the hourly sweep's pass. Every app whose audience data reached its budget is rolled
+    /// back under it, under the same per-app gate as the ingestion, so a batch never reads an estimate
+    /// the roll is changing. Returns the rows removed.
+    /// </summary>
+    public async Task<int> RollStorageAsync(CancellationToken ct = default)
+    {
+        var removed = 0;
+        foreach (var budget in await repository.GetStorageBudgetsAsync(ct).ConfigureAwait(false))
+        {
+            var gate = ingestGate.ForAnalytics(budget.AppId);
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var budgetBytes = BudgetOf(budget.BudgetBytes);
+                var storageBytes = await repository.EstimateStorageBytesAsync(budget.AppId, ct).ConfigureAwait(false);
+                if (storageBytes >= budgetBytes)
+                    removed += await RollAsync(budget.AppId, budgetBytes, ct).ConfigureAwait(false);
+                else
+                    cache.Set(StorageCacheKey(budget.AppId), storageBytes, IngestSnapshotLifetime);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+        return removed;
+    }
+
+    private async Task<long> EstimateStorageBytesAsync(int appId, CancellationToken ct)
+    {
+        if (cache.TryGetValue<long>(StorageCacheKey(appId), out var cached)) return cached;
+        var bytes = await repository.EstimateStorageBytesAsync(appId, ct).ConfigureAwait(false);
+        cache.Set(StorageCacheKey(appId), bytes, IngestSnapshotLifetime);
+        return bytes;
+    }
+
     public async Task<AppWebAnalyticsSummaryDto?> GetSummaryAsync(
         int appId,
         int days,
@@ -123,9 +216,7 @@ public sealed class AppWebAnalyticsService(
             AppWebAnalyticsRepository.WeekStart(now),
             new DateOnly(now.Year, now.Month, 1),
             today.AddDays(-(days - 1)),
-            app.AnalyticsStorageBudgetBytes > 0
-                ? app.AnalyticsStorageBudgetBytes
-                : AppMonitoringDefaults.DefaultAnalyticsStorageBudgetBytes,
+            BudgetOf(app.AnalyticsStorageBudgetBytes),
             app.AnalyticsRejectedCount,
             app.AnalyticsLastIngestAt,
             ct).ConfigureAwait(false);
@@ -171,7 +262,7 @@ public sealed class AppWebAnalyticsService(
     private static bool IsSupportedPayload(AppWebAnalyticsIngestEvent item) =>
         item.Kind switch
         {
-            "page_view" => item.DurationMs is null && item.ErrorType is null,
+            "page_view" or "heartbeat" => item.DurationMs is null && item.ErrorType is null,
             "browser_performance" => item.DurationMs is >= 0 and <= 300_000
                                      && item.ErrorType is null,
             "browser_error" => item.DurationMs is null

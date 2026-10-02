@@ -1,0 +1,8 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Servers
+@* Standard dismiss button for dialogs opened via DialogService.OpenAsync. Guarantees every dialog
+   has at least one button to close it, with the shared close icon and label. *@
+
+<OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(_ => Dialog.Close())">
+    <OmniIcon Name="OmniIconName.Close" /> @(Text ?? L["Close"])
+</OmniButton>

@@ -516,7 +516,6 @@ FRONT_URL="https://localhost:5401"
 BACK_URL="https://localhost:5301/health/live"
 COVERAGE_DIR="$ROOT/TestResults/Coverage"
 REPORT_DIR="$ROOT/TestResults/CoverageReport"
-RUN_SETTINGS="$ROOT/coverage.runsettings"
 DEV_DB_COMPOSE="$ROOT/deploy/compose/dev-db.compose.yml"
 E2E_DB_COMPOSE="$ROOT/deploy/compose/e2e-db.compose.yml"
 # E2E runs against its OWN PostgreSQL (:15433), NEVER the shared dev DB (:15432). The E2E backend's
@@ -691,8 +690,10 @@ invoke_test_run() {
     local start_ts
     start_ts=$(date +%s)
 
-    dotnet test "$target" --no-build --configuration "$TEST_CONFIGURATION" \
-        --logger "console;verbosity=minimal" "$@" \
+    # Microsoft.Testing.Platform mode of `dotnet test` (global.json "test.runner"): the project is
+    # named by --project, and its summary is a "Test run summary:" block, one counter per line. It runs
+    # from the repository root: the runner comes from the global.json of the working directory.
+    (cd "$ROOT" && exec dotnet test --project "$target" --no-build --configuration "$TEST_CONFIGURATION" --no-progress "$@") \
         >"$tmp_out" 2>"$tmp_err" &
     local pid=$!
 
@@ -718,17 +719,14 @@ invoke_test_run() {
         done
     fi
 
-    local summary_line
-    summary_line="$(echo "$combined" | grep -E "Test summary:|(Passed|Failed)!.*Total:" | tail -n 1)"
-
-    local passed=0 failed=0 total=0 skipped=0
-    if [[ "$summary_line" =~ total:\ *([0-9]+).*failed:\ *([0-9]+).*succeeded:\ *([0-9]+) ]]; then
-        total=${BASH_REMATCH[1]}; failed=${BASH_REMATCH[2]}; passed=${BASH_REMATCH[3]}
-        if [[ "$summary_line" =~ skipped:\ *([0-9]+) ]]; then skipped=${BASH_REMATCH[1]}; fi
-    elif [[ "$summary_line" =~ Failed:\ *([0-9]+).*Passed:\ *([0-9]+).*Total:\ *([0-9]+) ]]; then
-        failed=${BASH_REMATCH[1]}; passed=${BASH_REMATCH[2]}; total=${BASH_REMATCH[3]}
-        if [[ "$summary_line" =~ Skipped:\ *([0-9]+) ]]; then skipped=${BASH_REMATCH[1]}; fi
-    fi
+    summary_counter() {
+        local value
+        value="$(sed -n "s/^[[:space:]]*$1:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p" <<<"$combined" | tail -n 1)"
+        echo "${value:-0}"
+    }
+    local passed failed total skipped
+    total="$(summary_counter total)"; failed="$(summary_counter failed)"
+    passed="$(summary_counter succeeded)"; skipped="$(summary_counter skipped)"
 
     echo ""
     echo "${C_DGRAY}  ----------------------------------------${C_RESET}"
@@ -759,6 +757,8 @@ invoke_coverage_report() {
         echo "${C_RED}  Expected exactly 3 product coverage reports in $COVERAGE_DIR, found 0.${C_RESET}"
         return 1
     fi
+    # coverlet.MTP stamps its reports; give them the coverage.cobertura.xml layout the CI readers use.
+    sh "$ROOT/deploy/scripts/normalize-coverage-report.sh" "$COVERAGE_DIR" >/dev/null || return 1
     local xml_files
     mapfile -t xml_files < <(find "$COVERAGE_DIR" -type f -name "coverage.cobertura.xml" -print 2>/dev/null | sort)
     if [[ ${#xml_files[@]} -ne 3 ]]; then
@@ -1013,7 +1013,7 @@ if [[ $TEST_BACK -eq 1 || $TEST_FRONT -eq 1 || $TEST_AGENT -eq 1 || $TEST_ANALYZ
         BACK_TEST_DIR="$ROOT/tests/Aetheus.Back.Tests"
         extra=()
         if [[ $COVERAGE -eq 1 ]]; then
-            extra=(--collect "XPlat Code Coverage" --results-directory "$COVERAGE_DIR" --settings "$RUN_SETTINGS")
+            extra=(--coverlet --results-directory "$COVERAGE_DIR")
         fi
         invoke_test_run "$BACK_TEST_DIR" "Running backend unit tests..." "${extra[@]}"
         TEST_LABELS+=("Back")
@@ -1028,7 +1028,7 @@ if [[ $TEST_BACK -eq 1 || $TEST_FRONT -eq 1 || $TEST_AGENT -eq 1 || $TEST_ANALYZ
         FRONT_TEST_DIR="$ROOT/tests/Aetheus.Front.Tests"
         extra=()
         if [[ $COVERAGE -eq 1 ]]; then
-            extra=(--collect "XPlat Code Coverage" --results-directory "$COVERAGE_DIR" --settings "$RUN_SETTINGS")
+            extra=(--coverlet --results-directory "$COVERAGE_DIR")
         fi
         invoke_test_run "$FRONT_TEST_DIR" "Running frontend unit tests..." "${extra[@]}"
         TEST_LABELS+=("Front")
@@ -1045,7 +1045,7 @@ if [[ $TEST_BACK -eq 1 || $TEST_FRONT -eq 1 || $TEST_AGENT -eq 1 || $TEST_ANALYZ
         AGENT_TEST_DIR="$ROOT/tests/Aetheus.Agent.Core.Tests"
         extra=()
         if [[ $COVERAGE -eq 1 ]]; then
-            extra=(--collect "XPlat Code Coverage" --results-directory "$COVERAGE_DIR" --settings "$RUN_SETTINGS")
+            extra=(--coverlet --results-directory "$COVERAGE_DIR")
         fi
         invoke_test_run "$AGENT_TEST_DIR" "Running agent-core unit tests..." "${extra[@]}"
         TEST_LABELS+=("Agent.Core")

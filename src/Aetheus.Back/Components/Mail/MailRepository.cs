@@ -26,7 +26,7 @@ public class MailRepository(AppDbContext db) : IMailRepository
 
     public async Task<(List<MailDomain> Items, int Total)> GetDomainsPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.MailDomains.AsNoTracking().Where(item => item.ServerId == serverId);
         if (!string.IsNullOrWhiteSpace(search))
@@ -34,6 +34,8 @@ public class MailRepository(AppDbContext db) : IMailRepository
             var pattern = $"%{search.Trim()}%";
             query = query.Where(item => EF.Functions.ILike(item.Name, pattern));
         }
+        // Recette R-210: the header filters, after the server scope and before the count.
+        query = MailListQuery.DomainColumns.ApplyFilters(query, filters);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {
@@ -41,6 +43,8 @@ public class MailRepository(AppDbContext db) : IMailRepository
             ("isactive", true) => query.OrderByDescending(item => item.IsActive).ThenBy(item => item.Name).ThenBy(item => item.Id),
             ("createdat", false) => query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
             ("createdat", true) => query.OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id),
+            ("dkimselector", false) => query.OrderBy(item => item.DkimSelector).ThenBy(item => item.Name).ThenBy(item => item.Id),
+            ("dkimselector", true) => query.OrderByDescending(item => item.DkimSelector).ThenBy(item => item.Name).ThenBy(item => item.Id),
             (_, true) => query.OrderByDescending(item => item.Name).ThenBy(item => item.Id),
             _ => query.OrderBy(item => item.Name).ThenBy(item => item.Id)
         };
@@ -68,7 +72,7 @@ public class MailRepository(AppDbContext db) : IMailRepository
 
     public async Task<(List<MailAccount> Items, int Total)> GetAccountsPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.MailAccounts.AsNoTracking().Where(item => item.MailDomain.ServerId == serverId);
         if (!string.IsNullOrWhiteSpace(search))
@@ -76,6 +80,8 @@ public class MailRepository(AppDbContext db) : IMailRepository
             var pattern = $"%{search.Trim()}%";
             query = query.Where(item => EF.Functions.ILike(item.Email, pattern));
         }
+        // Recette R-210 / R-224: the header filters, after the server scope and before the count.
+        query = MailListQuery.AccountColumns.ApplyFilters(query, filters);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {
@@ -157,7 +163,7 @@ public class MailRepository(AppDbContext db) : IMailRepository
 
     public async Task<(List<MailAlias> Items, int Total)> GetAliasesPagedAsync(
         int serverId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? filters = null)
     {
         var query = db.MailAliases.AsNoTracking().Where(item => item.MailDomain.ServerId == serverId);
         if (!string.IsNullOrWhiteSpace(search))
@@ -167,6 +173,8 @@ public class MailRepository(AppDbContext db) : IMailRepository
                 EF.Functions.ILike(item.SourceEmail, pattern) ||
                 EF.Functions.ILike(item.DestinationEmail, pattern));
         }
+        // Recette R-210: the header filters, after the server scope and before the count.
+        query = MailListQuery.AliasColumns.ApplyFilters(query, filters);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch
         {

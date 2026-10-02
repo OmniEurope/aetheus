@@ -3,18 +3,16 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.JSInterop;
 using NSubstitute;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests;
 
@@ -32,19 +30,41 @@ internal static class BunitTestHelper
         // the grid shows; that virtualization is actually declared on every grid is enforced separately
         // by GridCapabilityAuditTests, and its behaviour is verified in the browser.
         AetheusGrid.Virtualization = false;
+        AetheusGrid.RemoteVirtualization = false;
 
         var handler = new TestHandler();
         handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
-        handler.SetJsonResponse("api/external-repos/enabled", false);
+        // PLAN-003 lot 30: no pipeline requirement is unmet unless a test says otherwise.
+        handler.SetJsonResponse("api/pipelines/setup/unmet", new List<UnmetRequirementDto>());
+        // Recette R-295: external repositories are always on; no project has one unless a test says so.
+        handler.SetResponse("api/external-repos/project/", System.Net.HttpStatusCode.NotFound);
+        // PLAN-003 lot 20: a run with no successful predecessor has no usual durations.
+        handler.SetJsonResponse("/stage-baselines", new RunStageBaselinesDto());
+        // PLAN-007 lot 7: no approval waits unless a test says otherwise (top bar, home page).
+        handler.SetJsonResponse("api/pipelines/approvals/pending", new List<PendingApprovalDto>());
+        // R-112 to R-116: no notification, preference or subscription unless a test says otherwise
+        // (the bell and the menu entry render on every layout).
+        handler.SetJsonResponse("api/notifications/me/unread-count", 0);
+        handler.SetPaginatedJsonResponse("api/notifications/me?", new List<NotificationDeliveryDto>());
+        handler.SetJsonResponse("api/notifications/me/preferences", new List<NotificationPreferenceDto>());
+        handler.SetJsonResponse("api/notifications/me/subscriptions", new List<ProjectSubscriptionDto>());
         handler.SetResponse(HttpMethod.Get, "health/live", HttpStatusCode.ServiceUnavailable);
+        // Recette R2-021: the deployed front is the one the test runs unless a test says otherwise.
+        handler.SetRawResponse("appsettings.json", "{\"App\":{\"Version\":\"test-version\"}}");
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
         var apiClient = new ApiClient(http);
 
         ctx.Services.AddSingleton(apiClient);
-        ctx.Services.AddSingleton<NotificationService>();
-        ctx.Services.AddSingleton<DialogService>();
-        ctx.Services.AddSingleton<TooltipService>();
-        ctx.Services.AddSingleton<ContextMenuService>();
+        ctx.Services.AddSingleton<PageLoadActivity>();
+        // The overlay service counts toast lifetimes on a clock that stands still, so a toast a
+        // test raised is still there when the test reads it however slow the run; NotifyHelperTests
+        // moves a clock of its own to prove the durations. Registered before AddOmniEuropeBlazor,
+        // whose TryAdd then keeps it.
+        ctx.Services.AddScoped(_ => new OmniOverlayService(new FakeTimeProvider()));
+        ctx.Services.AddOmniEuropeBlazor();
+        ctx.Services.AddAetheusGridPresets();
+        ctx.Services.AddScoped<AppDialogs>();
+        ctx.Services.AddScoped<OmniDialogService>();
 
         var authJs = Substitute.For<IJSRuntime>();
         var testToken = authenticated ? CreateTestToken(isAdmin) : null;
@@ -83,6 +103,9 @@ internal static class BunitTestHelper
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<AuthStateProvider>()));
         ctx.Services.AddScoped<BreadcrumbService>();
+        ctx.Services.AddScoped<IOmniBreadcrumbResolver, AetheusBreadcrumbResolver>();
+        ctx.Services.AddScoped<Aetheus.Front.Components.Settings.SiteAppearanceState>();
+        ctx.Services.AddScoped<Aetheus.Front.Components.Users.AdminIdentitySearch>();
         ctx.Services.AddScoped<ProjectNavContextService>();
         ctx.Services.AddScoped(sp => new ClientErrorReporter(
             http,
@@ -104,6 +127,10 @@ internal static class BunitTestHelper
         var httpFactoryMock = Substitute.For<IHttpClientFactory>();
         httpFactoryMock.CreateClient(Arg.Any<string>()).Returns(new HttpClient { BaseAddress = new Uri("http://test/") });
         ctx.Services.AddSingleton(httpFactoryMock);
+        // Recette R2-021: the deployed front version is read through the test handler (a test that sets
+        // "appsettings.json" there decides it); the handler is shared, so the client must not dispose it.
+        ctx.Services.AddSingleton(new Aetheus.Front.Layout.ApplicationVersionState(
+            () => new HttpClient(handler, disposeHandler: false), new Uri("http://test/"), "test-version"));
 
         var permissionService = new PermissionService();
         if (authenticated)
@@ -125,6 +152,16 @@ internal static class BunitTestHelper
             sp.GetRequiredService<AuthStateProvider>(),
             sp.GetRequiredService<HubConnectionFactory>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<TaskTrackerService>.Instance));
+        ctx.Services.AddSingleton(sp => new PendingApprovalsService(
+            sp.GetRequiredService<ApiClient>(),
+            sp.GetRequiredService<AuthStateProvider>(),
+            sp.GetRequiredService<HubConnectionFactory>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PendingApprovalsService>.Instance));
+        ctx.Services.AddSingleton(sp => new Aetheus.Front.Components.Notifications.UserNotificationsFeed(
+            sp.GetRequiredService<ApiClient>(),
+            sp.GetRequiredService<AuthStateProvider>(),
+            TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Aetheus.Front.Components.Notifications.UserNotificationsFeed>.Instance));
         ctx.Services.AddSingleton(sp => new AlertNotificationService(
             sp.GetRequiredService<AuthStateProvider>(),
             sp.GetRequiredService<HubConnectionFactory>()));
@@ -153,9 +190,9 @@ internal static class BunitTestHelper
     }
 
     public static void UseImmediateDialogs(BunitContext ctx) =>
-        ctx.Services.AddSingleton<DialogService>(services => new ImmediateDialogService(
-            services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(),
-            services.GetRequiredService<IJSRuntime>()));
+        ctx.Services.AddScoped<OmniDialogService>(services => new ImmediateDialogService(
+            services.GetRequiredService<AppDialogs>(),
+            services.GetRequiredService<OmniOverlayService>()));
 
     public static StringContent Json<T>(T obj) =>
         new(JsonSerializer.Serialize(obj, JsonOpts), System.Text.Encoding.UTF8, "application/json");
@@ -216,6 +253,18 @@ internal static class BunitTestHelper
         }
     }
 
+    /// <summary>
+    /// Mocks the three list endpoints probed by <see cref="Aetheus.Front.Components.Dashboards.InstanceWelcomeWizard"/>,
+    /// which the dashboard renders whenever the instance still has at most one project. Without them a
+    /// dashboard test fails on an unmocked request instead of on what it actually asserts.
+    /// </summary>
+    public static void SetOnboardingWizardResponses(TestHandler handler)
+    {
+        handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/git/repos", Array.Empty<GitLightRepoDto>());
+        handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/environments", Array.Empty<EnvironmentDto>());
+        handler.SetPaginatedJsonResponse(HttpMethod.Get, "api/variable-libraries", Array.Empty<VariableLibraryDto>());
+    }
+
     internal sealed class TestHandler : HttpMessageHandler
     {
         private readonly Dictionary<string, Func<HttpResponseMessage>> _responses = new(StringComparer.OrdinalIgnoreCase);
@@ -265,6 +314,11 @@ internal static class BunitTestHelper
             };
 
         public void SetRawResponse(HttpMethod method, string urlContains, string body, string contentType)
+            => SetRawResponse(method, urlContains, body, contentType, HttpStatusCode.OK);
+
+        /// <summary>A body returned verbatim with the given status, so a test can feed the exact bytes a
+        /// backend error path writes (the middleware's error object, a ProblemDetails, plain text).</summary>
+        public void SetRawResponse(HttpMethod method, string urlContains, string body, string contentType, HttpStatusCode status)
         {
             _asyncMethodResponses.RemoveAll(response =>
                 string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
@@ -272,7 +326,7 @@ internal static class BunitTestHelper
             _methodResponses.RemoveAll(response =>
                 string.Equals(response.Method, method.Method, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(response.UrlContains, urlContains, StringComparison.OrdinalIgnoreCase));
-            _methodResponses.Add((method.Method, urlContains, () => new HttpResponseMessage(HttpStatusCode.OK)
+            _methodResponses.Add((method.Method, urlContains, () => new HttpResponseMessage(status)
             {
                 Content = new StringContent(body, System.Text.Encoding.UTF8, contentType)
             }));

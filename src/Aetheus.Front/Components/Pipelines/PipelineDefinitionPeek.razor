@@ -1,0 +1,42 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* Read-only right split pane: shows a referenced pipeline's live definition. Its own `pipeline:` refs
+   are themselves clickable (navigates within this pane); wrap/copy are independent; close bubbles up. *@
+@if (_currentName is not null)
+{
+    <div class="run-yaml-pane run-yaml-peek">
+        <div class="run-logs-header">
+            <OmniIcon Name="OmniIconName.Graph" Class="run-tl-chip-icon" />
+            <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@(_current?.Name ?? _currentName)</OmniText>
+            @if (_current is { } pp)
+            {
+                <a href="/pipelines/@pp.Id" class="pipeline-name-link" title="@L["OpenPipeline"]"><OmniIcon Name="OmniIconName.OpenExternal" /></a>
+            }
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral" Class="run-system-label">@L["ReadOnly"]</OmniBadge>
+            <div class="pipeline-list-spacer"></div>
+            @if (_current is not null)
+            {
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => _wrap = !_wrap)" title="@L["WrapLinesHint"]"><OmniIcon Name="OmniIconName.ArrowElbowDownLeft" /> <span>@L["WrapLines"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CopyAsync"><OmniIcon Name="OmniIconName.Copy" /> <span>@L["Copy"]</span></OmniButton>
+            }
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OnClose.InvokeAsync())" title="@L["Close"]" Label="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+        </div>
+        @if (_loading)
+        {
+            <div class="run-yaml-code run-yaml-empty"><AetheusLoader Size="OmniControlSize.Small" /></div>
+        }
+        else if (_current is { } pk)
+        {
+            <div class="run-yaml-code @(_wrap ? "run-yaml-wrap" : "")">
+                @foreach (var yl in PipelineYamlLines.Parse(pk.YamlDefinition))
+                {
+                    <div class="yaml-line">@if (yl.PipelineRef is { } pref){@yl.Text<span class="yaml-pipeline-link" role="link" tabindex="0" title="@L["PeekPipelineDefinition"]" @onclick="@(() => PeekAsync(pref))" @onkeydown="@(async e => { if (e.Key == "Enter" || e.Key == " ") await PeekAsync(pref); })">@pref</span>}else{@yl.Text}</div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="run-yaml-code run-yaml-empty">@L["PipelineNotFound"]</div>
+        }
+    </div>
+}

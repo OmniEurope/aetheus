@@ -2,9 +2,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Front.Tests;
 
@@ -131,19 +128,52 @@ public class ApiClientTests
     }
 
     [Fact]
-    public async Task DeleteServerAsync_ReturnsTrue()
+    public async Task RetireServerAsync_SendsTheDeleteThatRetires_AndReportsSuccess()
     {
         var (api, h) = Create();
         h.Response = new HttpResponseMessage(HttpStatusCode.OK);
-        Assert.True(await api.Servers.DeleteServerAsync(1, Xunit.TestContext.Current.CancellationToken));
+        Assert.True(await api.Servers.RetireServerAsync(1, Xunit.TestContext.Current.CancellationToken));
+        Assert.Equal(HttpMethod.Delete, h.LastRequest?.Method);
+        Assert.Equal("http://test/api/servers/1", h.RequestUris.Single());
     }
 
     [Fact]
-    public async Task DeleteServerAsync_ReturnsFalse()
+    public async Task RetireServerAsync_ReturnsFalse()
     {
         var (api, h) = Create();
         h.Response = new HttpResponseMessage(HttpStatusCode.NotFound);
-        Assert.False(await api.Servers.DeleteServerAsync(1, Xunit.TestContext.Current.CancellationToken));
+        Assert.False(await api.Servers.RetireServerAsync(1, Xunit.TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PurgeServerAsync_TargetsThePermanentEndpoint()
+    {
+        var (api, h) = Create();
+        h.Response = new HttpResponseMessage(HttpStatusCode.NoContent);
+        Assert.True(await api.Servers.PurgeServerAsync(4, Xunit.TestContext.Current.CancellationToken));
+        Assert.Equal(HttpMethod.Delete, h.LastRequest?.Method);
+        Assert.Equal("http://test/api/servers/4/permanent", h.RequestUris.Single());
+    }
+
+    [Fact]
+    public async Task PurgeServerAsync_Conflict_ReturnsFalse()
+    {
+        var (api, h) = Create();
+        h.Response = new HttpResponseMessage(HttpStatusCode.Conflict);
+        Assert.False(await api.Servers.PurgeServerAsync(4, Xunit.TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GetRetiredServersAsync_PagesAndSortsTheRetiredList()
+    {
+        var (api, h) = Create();
+        h.Response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = Json(new PaginatedResult<RetiredServerDto> { Items = [new RetiredServerDto { Id = 4, Name = "vps2577917" }], TotalCount = 1 })
+        };
+        var result = await api.Servers.GetRetiredServersAsync(2, 10, "RetiredAt", true, Xunit.TestContext.Current.CancellationToken);
+        Assert.Equal(4, Assert.Single(result.Items).Id);
+        Assert.Equal("http://test/api/servers/retired?page=2&pageSize=10&sortBy=RetiredAt&sortDescending=True", h.RequestUris.Single());
     }
 
     // --- Tasks ---
@@ -1577,7 +1607,7 @@ public class ApiClientTests
             Content = new StringContent(yaml, System.Text.Encoding.UTF8, "text/plain")
         };
 
-        var result = await api.PipelineTemplates.ResolvePipelineTemplateAsync(12, 1, Xunit.TestContext.Current.CancellationToken);
+        var result = await api.PipelineTemplates.ResolvePipelineTemplateAsync(12, 1, ct: Xunit.TestContext.Current.CancellationToken);
 
         Assert.Equal(yaml, result);
         Assert.EndsWith("api/pipelines/templates/12/resolve?version=1", h.LastRequest!.RequestUri!.ToString());

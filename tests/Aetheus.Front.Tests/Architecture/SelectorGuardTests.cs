@@ -19,9 +19,8 @@ namespace Aetheus.Front.Tests.Architecture;
 ///    referenced by a test is a stale selector that would time out; this fails the build
 ///    instead, pointing at the offending file:line.
 ///
-/// Framework (Radzen) classes - the <c>rz-</c> prefix - are intentionally excluded: they
-/// live in the Radzen package, not in <c>src/</c>, so they can't be resolved against app
-/// source and aren't ours to keep in sync.
+/// Framework classes with the <c>rz-</c> or <c>omni-</c> prefixes are intentionally excluded:
+/// they live in packages, not in <c>src/</c>, so they cannot be resolved against app source.
 ///
 /// The scan reads the .cs files from disk (no Roslyn dependency) and resolves the repo
 /// root the same way the other architecture guards do - walk up to <c>Aetheus.slnx</c>.
@@ -119,8 +118,8 @@ public class SelectorGuardTests
             {
                 foreach (var cls in ExtractTargetedClasses(StripLineComment(lines[i])))
                 {
-                    // Radzen framework classes live in the package, not src/ - not ours to verify.
-                    if (cls.StartsWith("rz-", StringComparison.Ordinal)) continue;
+                    if (cls.StartsWith("rz-", StringComparison.Ordinal)
+                        || cls.StartsWith("omni-", StringComparison.Ordinal)) continue;
                     classesChecked++;
 
                     if (!frontClasses.Contains(cls))

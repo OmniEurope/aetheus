@@ -14,7 +14,7 @@ public sealed class TaskQueueNotifier(
         string? serverNameOverride = null,
         CancellationToken ct = default)
     {
-        var dto = MapToDto(task);
+        var dto = TaskDtoMapper.ToMaskedDto(task);
         if (!string.IsNullOrEmpty(serverNameOverride) && string.IsNullOrEmpty(dto.ServerName))
             dto = dto with { ServerName = serverNameOverride };
 
@@ -36,23 +36,4 @@ public sealed class TaskQueueNotifier(
                 dto.ServerId);
         }
     }
-
-    private static ServerTaskDto MapToDto(ServerTask task) => new()
-    {
-        Id = task.Id,
-        ServerId = task.ServerId,
-        ServerName = task.Server?.Name ?? string.Empty,
-        ServerStatus = task.Server?.Status ?? ServerStatus.Online,
-        Name = task.Name,
-        Command = "[masked]",
-        Executor = task.Executor,
-        Status = task.Status,
-        PipelineRunId = task.PipelineRunId,
-        PipelineStepRunId = task.PipelineStepRunId,
-        CreatedAt = task.CreatedAt,
-        StartedAt = task.StartedAt,
-        CompletedAt = task.CompletedAt,
-        ExitCode = task.ExitCode,
-        TimeoutSeconds = task.TimeoutSeconds
-    };
 }

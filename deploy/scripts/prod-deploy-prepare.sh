@@ -12,7 +12,7 @@
 #   2. the production state directory, which lives outside the tree an agent reinstall purges;
 #   3. secret-zero, which is reused verbatim and NEVER regenerated while persistent state exists;
 #   4. the payload, loaded as images tagged by revision and verified against those tags;
-#   5. the run variables Compose interpolates.
+#   5. the run variables Compose interpolates, and the run-local upstream template the switch renders.
 #
 # It performs no cutover and holds no transaction: a failure here leaves the live colour serving.
 set -eu
@@ -25,8 +25,12 @@ fail() {
 # --- 1. Provenance -------------------------------------------------------------------------------
 [ "${AETHEUS_USE_PIPELINE_ARTIFACTS:-false}" = true ] \
   || fail "Production deployment requires the immutable CI artifact; local image builds are forbidden."
-[ "${BUILD_SOURCEBRANCH:-}" = main ] \
-  || fail "Production deployment workflow must run from the protected main branch."
+# F4: main no longer leads a deployment, it trails it - fast-forwarded to the deployed commit only
+# AFTER a successful deploy (by the backend, once the release is recorded as deployed). The pipeline's own
+# source_branch is develop now, so this guard checks that instead of main; verify-release-ancestry.sh
+# still proves the checked-out branch actually contains the release commit being deployed.
+[ "${BUILD_SOURCEBRANCH:-}" = develop ] \
+  || fail "Production deployment workflow must run from the develop branch."
 
 WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
 ARTIFACT_DIR="$WORKSPACE/.pipeline-artifacts"
@@ -39,10 +43,25 @@ case "$ARTIFACT_COMMIT" in *[!0-9a-fA-F]*) fail "CI artifact source revision is 
 echo ">>> Deploy workflow ${BUILD_SOURCEVERSION:-unknown} is promoting immutable candidate source $ARTIFACT_COMMIT"
 
 # --- 2. Production state directory ----------------------------------------------------------------
-ENV_FILE="${PROD_ENV_FILE:?PROD_ENV_FILE is required}"
-LEGACY_ENV_FILE="${LEGACY_PROD_ENV_FILE:-}"
+# ENV_FILE, LEGACY_ENV_FILE and STATE_DIR come from the aetheus.prod library (PLAN-003 2.1).
+ENV_FILE="${ENV_FILE:?ENV_FILE is required}"
+LEGACY_ENV_FILE="${LEGACY_ENV_FILE:-}"
+DECLARED_STATE_DIR="${STATE_DIR:-}"
 STATE_DIR="$(dirname "$ENV_FILE")"
-[ "$STATE_DIR" = /var/lib/aetheus-production ] || fail "Production state directory is unexpected: $STATE_DIR"
+# The blue-green steps are handed STATE_DIR and this script works in ENV_FILE's directory: the two
+# must be one directory, or the journal and the secrets would live apart.
+[ -z "$DECLARED_STATE_DIR" ] || [ "$DECLARED_STATE_DIR" = "$STATE_DIR" ] \
+  || fail "ENV_FILE ($ENV_FILE) does not live in STATE_DIR ($DECLARED_STATE_DIR)."
+# Shape, not one literal path. The boundary this guard exists for is that the state directory is a
+# real, direct child of /var/lib and not something a mis-set variable turned into /etc or a home
+# directory: files are written and removed under it. Pinning the exact name on top of that only made
+# the library unable to name its own directory.
+case "$STATE_DIR" in
+  *..*) fail "Production state directory contains a traversal: $STATE_DIR" ;;
+  /var/lib/*/*) fail "Production state directory must be a direct child of /var/lib: $STATE_DIR" ;;
+  /var/lib/?*) ;;
+  *) fail "Production state directory must live under /var/lib: $STATE_DIR" ;;
+esac
 [ ! -L "$STATE_DIR" ] || fail "Production state directory is symbolic."
 
 for command_name in awk cat chmod cmp cp date dirname docker find grep install mv openssl sed stat tar tr; do
@@ -53,6 +72,9 @@ docker --version
 # --- 3. Payload, loaded and verified by revision --------------------------------------------------
 # Loaded before the state bootstrap below, which needs the backend image to run its one privileged
 # step from an immutable, already-verified artifact rather than from anything on the host.
+# shellcheck source=deploy-identity.sh
+. "$WORKSPACE/deploy/scripts/deploy-identity.sh"
+deploy_image_repos
 gzip -dc "$ARTIFACT_DIR/aetheus-back.tar.gz" | docker load
 gzip -dc "$ARTIFACT_DIR/aetheus-front.tar.gz" | docker load
 gzip -dc "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz" | docker import \
@@ -61,11 +83,11 @@ gzip -dc "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz" | docker import \
   --change 'WORKDIR /src' \
   --change 'USER pwuser' \
   --change "LABEL org.opencontainers.image.revision=$ARTIFACT_COMMIT" \
-  - "aetheus-browser-smoke:${ARTIFACT_COMMIT}" >/dev/null
+  - "$PROJECT_SLUG-browser-smoke:${ARTIFACT_COMMIT}" >/dev/null
 
-AETHEUS_BACK_IMAGE="aetheus-back:${ARTIFACT_COMMIT}"
-AETHEUS_FRONT_IMAGE="aetheus-front:${ARTIFACT_COMMIT}"
-AETHEUS_BROWSER_SMOKE_IMAGE="aetheus-browser-smoke:${ARTIFACT_COMMIT}"
+AETHEUS_BACK_IMAGE="$BACK_IMAGE_REPO:${ARTIFACT_COMMIT}"
+AETHEUS_FRONT_IMAGE="$FRONT_IMAGE_REPO:${ARTIFACT_COMMIT}"
+AETHEUS_BROWSER_SMOKE_IMAGE="$PROJECT_SLUG-browser-smoke:${ARTIFACT_COMMIT}"
 for image in "$AETHEUS_BACK_IMAGE" "$AETHEUS_FRONT_IMAGE" "$AETHEUS_BROWSER_SMOKE_IMAGE"; do
   [ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" \
     = "$ARTIFACT_COMMIT" ] || fail "Image revision is invalid: $image"
@@ -76,10 +98,13 @@ done
 # socket for this deployment. A root process inside that immutable image, with a bind limited to the
 # one intended directory, only fixes ownership and mode so every later secret operation stays
 # unprivileged and fail-closed. It refuses outright to remap a directory that already holds anything.
-[ -d /var/lib/aetheus-agent ] && [ ! -L /var/lib/aetheus-agent ] \
+# The agent names its own work directory on every task (AETHEUS_AGENT_WORK_DIRECTORY), so the host
+# layout is not restated here.
+AGENT_WORK_DIR="${AETHEUS_AGENT_WORK_DIRECTORY:?AETHEUS_AGENT_WORK_DIRECTORY is required}"
+[ -d "$AGENT_WORK_DIR" ] && [ ! -L "$AGENT_WORK_DIR" ] \
   || fail "Canonical agent work directory is missing or symbolic."
-AGENT_UID="$(stat -c %u /var/lib/aetheus-agent)"
-AGENT_GID="$(stat -c %g /var/lib/aetheus-agent)"
+AGENT_UID="$(stat -c %u "$AGENT_WORK_DIR")"
+AGENT_GID="$(stat -c %g "$AGENT_WORK_DIR")"
 case "$AGENT_UID" in ''|*[!0-9]*) fail "Invalid agent uid." ;; esac
 case "$AGENT_GID" in ''|*[!0-9]*) fail "Invalid agent gid." ;; esac
 STATE_BOOTSTRAP_REQUIRED=false
@@ -114,6 +139,8 @@ fi
   || fail "Production state directory bootstrap did not establish the required ownership and mode."
 
 # --- 4. Secret-zero: migrate once, reuse verbatim, fail closed ------------------------------------
+# Dated copies are named after the file they copy: .env-prod-20260912T101500Z in production.
+ENV_BACKUP_PREFIX="$(basename "$ENV_FILE")"
 [ ! -L "$ENV_FILE" ] || fail "Production environment file must not be a symbolic link."
 if [ -n "$LEGACY_ENV_FILE" ]; then
   [ ! -L "$LEGACY_ENV_FILE" ] || fail "Legacy production environment file must not be a symbolic link."
@@ -128,7 +155,7 @@ if [ -n "$LEGACY_ENV_FILE" ]; then
   fi
 fi
 if [ ! -f "$ENV_FILE" ]; then
-  LATEST_ENV_BACKUP="$(find "$STATE_DIR" -maxdepth 1 -type f -name '.env-prod-????????T??????Z' \
+  LATEST_ENV_BACKUP="$(find "$STATE_DIR" -maxdepth 1 -type f -name "$ENV_BACKUP_PREFIX-????????T??????Z" \
     -printf '%T@ %p\n' 2>/dev/null | sort -nr | sed -n '1s/^[^ ]* //p')"
   if [ -n "$LATEST_ENV_BACKUP" ]; then
     echo ">>> Restoring production secrets from installation backup $LATEST_ENV_BACKUP"
@@ -162,22 +189,17 @@ if [ ! -f "$ENV_FILE" ]; then
   PREPARE_UMASK="$(umask)"
   umask 177
   ENV_FILE_TMP="$ENV_FILE.first-deploy.$$"
-  cat > "$ENV_FILE_TMP" <<EOF
-APPNAME=aetheus
-ENV=prod
-API_BASE_URL=${PUBLIC_API_URL:?PUBLIC_API_URL is required}
-APP_VERSION=${APP_VERSION:?APP_VERSION is required}
-DB_USER=aetheus
-DB_PASSWORD=$(openssl rand -hex 24)
-JWT_KEY=$(openssl rand -hex 32)
-ADMIN_PASSWORD=$(openssl rand -hex 16)
-ENCRYPTION_KEY=$(openssl rand -hex 32)
-ENCRYPTION_SALT=$(openssl rand -hex 16)
-DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY=$(openssl rand -hex 32)
-FRONT_URL=${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
-FRONT_URL_ACCEPT=${PUBLIC_APP_URL}
-FRONT_URL_PROD=${PUBLIC_APP_URL}
-EOF
+  # R-248: the keys, their order and the non-secret values come from the versioned template; the
+  # secrets it marks (#{SECRET_HEX_<N>}#) are generated here by `openssl rand -hex <N>` and exist
+  # nowhere else. The template travels with the checkout, like this script.
+  ENV_SAMPLE="$WORKSPACE/deploy/env/prod.env.sample"
+  if ! PUBLIC_API_URL="${PUBLIC_API_URL:?PUBLIC_API_URL is required}" \
+    APP_VERSION="${APP_VERSION:?APP_VERSION is required}" \
+    PUBLIC_APP_URL="${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}" \
+    sh "$WORKSPACE/deploy/scripts/render-env-sample.sh" "$ENV_SAMPLE" > "$ENV_FILE_TMP"; then
+    rm -f "$ENV_FILE_TMP"
+    fail "Could not render $ENV_SAMPLE; no production environment was written."
+  fi
   chmod 600 "$ENV_FILE_TMP"
   if ! ln "$ENV_FILE_TMP" "$ENV_FILE" 2>/dev/null; then
     rm -f "$ENV_FILE_TMP"
@@ -198,7 +220,7 @@ umask "${PREPARE_UMASK:-$(umask)}"
 # its previous value.
 if ! grep -q "^DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY=.\+" "$ENV_FILE"; then
   echo ">>> Back-filling DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY in $ENV_FILE"
-  ENV_BACKFILL_BACKUP="$STATE_DIR/.env-prod-$(date -u +"%Y%m%dT%H%M%SZ")"
+  ENV_BACKFILL_BACKUP="$STATE_DIR/$ENV_BACKUP_PREFIX-$(date -u +"%Y%m%dT%H%M%SZ")"
   [ -f "$ENV_BACKFILL_BACKUP" ] || cp -p "$ENV_FILE" "$ENV_BACKFILL_BACKUP"
   chmod 600 "$ENV_BACKFILL_BACKUP"
   # Written through a temporary copy and moved into place, so a failure mid-write cannot leave the
@@ -215,6 +237,13 @@ if ! grep -q "^DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY=.\+" "$ENV_FILE"; then
   mv "$ENV_BACKFILL_TMP" "$ENV_FILE"
   umask "$PREPARE_UMASK"
 fi
+# The public URLs follow the libraries, the secrets do not move. API_BASE_URL is what the front calls
+# and FRONT_URL what the API accepts as an origin; both were written once at the first deploy, so a
+# host renamed in the library (api.aetheus, PLAN-003 2.1) would otherwise never reach them. Only these
+# two lines are rewritten, after a dated copy, through a temporary file moved into place.
+sh "$WORKSPACE/deploy/scripts/reconcile-env-urls.sh" "$ENV_FILE" \
+  "API_BASE_URL=${PUBLIC_API_URL:?PUBLIC_API_URL is required}" \
+  "FRONT_URL=${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}"
 for REQUIRED_SECRET in APPNAME ENV DB_USER DB_PASSWORD JWT_KEY ADMIN_PASSWORD ENCRYPTION_KEY ENCRYPTION_SALT \
   DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY; do
   grep -q "^${REQUIRED_SECRET}=.\+" "$ENV_FILE" \
@@ -223,8 +252,8 @@ done
 # The very first deploy happens after the agent installation, so the installer could not back up a
 # file that did not exist yet. Create the initial dated recovery copy here; later reinstalls create
 # additional dated copies before any cleanup.
-if ! find "$STATE_DIR" -maxdepth 1 -type f -name '.env-prod-????????T??????Z' -print -quit | grep -q .; then
-  ENV_BACKUP="$STATE_DIR/.env-prod-$(date -u +"%Y%m%dT%H%M%SZ")"
+if ! find "$STATE_DIR" -maxdepth 1 -type f -name "$ENV_BACKUP_PREFIX-????????T??????Z" -print -quit | grep -q .; then
+  ENV_BACKUP="$STATE_DIR/$ENV_BACKUP_PREFIX-$(date -u +"%Y%m%dT%H%M%SZ")"
   cp -p "$ENV_FILE" "$ENV_BACKUP.tmp.$$"
   chmod 600 "$ENV_BACKUP.tmp.$$"
   mv "$ENV_BACKUP.tmp.$$" "$ENV_BACKUP"
@@ -245,7 +274,14 @@ else
   echo ">>> This candidate carries no documentation site; its publication will be skipped."
 fi
 
-# --- 6. Run variables the Compose files interpolate -----------------------------------------------
+# --- 6. The upstream template the switch renders --------------------------------------------------
+# bluegreen-switch substitutes the ports and the colour and nothing else; the Define name belongs to
+# the environment (UPSTREAM_DEFINE, aetheus.prod) and is resolved here, into a copy local to this run.
+UPSTREAM_DEFINE="${UPSTREAM_DEFINE:?UPSTREAM_DEFINE is required}" \
+  sh "$WORKSPACE/deploy/scripts/render-apache-upstream.sh" --define-only \
+  "$WORKSPACE/.pipeline/configs/apache/aetheus-upstream.conf" "$WORKSPACE/.bluegreen-upstream.conf"
+
+# --- 7. Run variables the Compose files interpolate -----------------------------------------------
 # Published, not exported: the cutover steps run as separate tasks in separate processes, and a
 # `compose_env:` entry the run does not define is refused before a task is ever created.
 #
@@ -254,4 +290,5 @@ fi
 echo "##aetheus[setvariable name=AETHEUS_BACK_IMAGE]$AETHEUS_BACK_IMAGE"
 echo "##aetheus[setvariable name=AETHEUS_FRONT_IMAGE]$AETHEUS_FRONT_IMAGE"
 echo "##aetheus[setvariable name=SOURCE_COMMIT]$ARTIFACT_COMMIT"
+echo "##aetheus[setvariable name=AETHEUS_BROWSER_SMOKE_IMAGE]$AETHEUS_BROWSER_SMOKE_IMAGE"
 echo "Production host prepared for $ARTIFACT_COMMIT; the cutover steps own the environment from here."

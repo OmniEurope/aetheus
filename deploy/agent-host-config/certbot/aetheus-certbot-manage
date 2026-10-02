@@ -1,0 +1,81 @@
+#!/bin/sh
+# Aetheus Agent certbot-manage helper - root-owned, invoked via /etc/sudoers.d/aetheus-certbot.
+# Args: $1 = verb (renew|renew-all|delete|revoke|normalize|renewal-check), $2 = cert lineage name
+# (only for renew, delete and revoke).
+set -eu
+ACME_WEBROOT=#{ACME_WEBROOT}#
+RENEWAL_DIR=/etc/letsencrypt/renewal
+ACME_ALIAS=/etc/apache2/conf-enabled/aetheus-acme-webroot.conf
+STATE_DIR=/var/lib/aetheus-certbot
+valid_name() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$'; }
+# authenticator value of a renewal file ("" when absent).
+renewal_authenticator() {
+    sed -n 's/^[[:space:]]*authenticator[[:space:]]*=[[:space:]]*//p' "$1" | head -n 1 | tr -d '\r '
+}
+# Every web root a renewal file names: webroot_path plus each [[webroot_map]] entry, one per line.
+renewal_webroots() {
+    awk -F '=' '
+        /^\[\[webroot_map\]\]/ { in_map = 1; next }
+        /^\[/ { in_map = 0 }
+        in_map && NF > 1 { print $2 }
+        /^[[:space:]]*webroot_path[[:space:]]*=/ { print $2 }
+    ' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr -d '\r' | grep -v '^$' | sort -u
+}
+command -v certbot >/dev/null 2>&1 || { echo "certbot not installed" >&2; exit 1; }
+verb="${1:-}"
+case "$verb" in
+  normalize)
+    # Without the Aetheus ACME alias Apache does not serve the web root, so standalone lineages
+    # (a server without a web site) are left alone: converting them would break their renewal.
+    if [ ! -f "$ACME_ALIAS" ]; then
+        echo "Aetheus ACME alias not enabled in Apache: no lineage converted."
+        exit 0
+    fi
+    certbot reconfigure --help >/dev/null 2>&1 \
+        || { echo "certbot reconfigure is unavailable (certbot 2.3 or newer is required)" >&2; exit 1; }
+    mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"
+    failed=0
+    converted=0
+    for conf in "$RENEWAL_DIR"/*.conf; do
+        [ -f "$conf" ] || continue
+        name=$(basename "$conf" .conf)
+        valid_name "$name" || { echo "skipping lineage with an invalid name: $name" >&2; failed=1; continue; }
+        if [ "$(renewal_authenticator "$conf")" = webroot ] && [ "$(renewal_webroots "$conf")" = "$ACME_WEBROOT" ]; then
+            echo "$name: already renews through $ACME_WEBROOT"
+            continue
+        fi
+        # reconfigure runs a dry-run renewal with the new settings and only saves them when it passes.
+        if certbot reconfigure --cert-name "$name" --webroot --webroot-path "$ACME_WEBROOT" --non-interactive; then
+            echo "$name: now renews through $ACME_WEBROOT"
+            converted=$((converted + 1))
+        else
+            echo "$name: reconfigure failed, previous renewal settings kept" >&2
+            failed=1
+        fi
+    done
+    echo "normalize: $converted lineage(s) converted"
+    exit "$failed" ;;
+  renewal-check)
+    # A real renewal rehearsal against the staging CA; its outcome is recorded for the agent collector.
+    mkdir -p "$STATE_DIR"
+    chmod 755 "$STATE_DIR"
+    rc=0
+    certbot renew --dry-run --non-interactive || rc=$?
+    printf 'checked_at=%s\nexit_code=%s\n' "$(date +%s)" "$rc" > "$STATE_DIR/renewal-check.tmp"
+    chmod 644 "$STATE_DIR/renewal-check.tmp"
+    mv -f "$STATE_DIR/renewal-check.tmp" "$STATE_DIR/renewal-check"
+    exit "$rc" ;;
+  renew-all)
+    certbot renew --non-interactive ;;
+  renew)
+    name="${2:-}"; valid_name "$name" || { echo "invalid cert name" >&2; exit 2; }
+    certbot renew --cert-name "$name" --non-interactive ;;
+  delete)
+    name="${2:-}"; valid_name "$name" || { echo "invalid cert name" >&2; exit 2; }
+    certbot delete --cert-name "$name" --non-interactive ;;
+  revoke)
+    name="${2:-}"; valid_name "$name" || { echo "invalid cert name" >&2; exit 2; }
+    certbot revoke --cert-name "$name" --delete-after-revoke --non-interactive ;;
+  *)
+    echo "unknown certbot-manage verb: $verb" >&2; exit 2 ;;
+esac

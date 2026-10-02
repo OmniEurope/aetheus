@@ -1,21 +1,34 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <!-- QA executes CI outputs in an isolated container whose NuGet cache path differs from the build agent.
          Keep test discovery independent from Microsoft.NET.Test.Sdk's generated package-path import. -->
     <IsTestProject>true</IsTestProject>
+    <!-- Two runners, on purpose. In the repository, global.json puts `dotnet test` in
+         Microsoft.Testing.Platform mode, which refuses any project that is not on it: the NUnit runner
+         does that. The browser image (Dockerfile.e2e) carries no global.json and is driven with the
+         VSTest arguments of run-qa-e2e-suite.sh and of the agent's production smoke step, and that
+         agent is the one already installed on the host when a release reaches it: Microsoft.NET.Test.Sdk
+         keeps that invocation working. Both are set here and not only in tests/Directory.Build.props,
+         because the image receives the root Directory.Build.props and this project, not the tests/
+         directory files.
+         The NUnit runner is only switched on where global.json is: once it is, the project is a
+         Microsoft.Testing.Platform application, and on a .NET 10 SDK that platform's MSBuild targets
+         refuse the VSTest target outright ("Testing with VSTest target is no longer supported"). -->
+    <EnableNUnitRunner Condition="Exists('$(MSBuildThisFileDirectory)../../global.json')">true</EnableNUnitRunner>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Deque.AxeCore.Playwright" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Microsoft.Playwright.NUnit" />
     <PackageReference Include="NUnit" />
     <PackageReference Include="NUnit.Analyzers" />
     <PackageReference Include="NUnit3TestAdapter" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,287 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+@using Microsoft.AspNetCore.Components.Forms
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else
+{
+    <OmniCard Class="quality-gate-activation-card omni-u-mb-lg">
+        <div class="quality-gate-activation-copy">
+            <div class="quality-gate-activation-icon" aria-hidden="true">
+                <OmniIcon Name="OmniIconName.ShieldCheck" />
+            </div>
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.XLarge">
+                <OmniRow Gap="OmniSpacing.XLarge">
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Success">@L["QualityGateOptionalBadge"]</OmniBadge>
+                    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Accent">YAML</OmniBadge>
+                </OmniRow>
+                <OmniHeading Level="OmniHeadingLevel.H5">@L["QualityGateOptionalTitle"]</OmniHeading>
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">
+                    @L["QualityGateOptionalDescription"]
+                </OmniText>
+            </OmniStack>
+        </div>
+        <OmniCodeBlock Code="@YamlExample" Title="@L["QualityGateYamlExample"]" Language="yaml" Class="quality-gate-yaml-panel" />
+    </OmniCard>
+
+    <OmniRow Gap="OmniSpacing.Medium" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="omni-u-mb-md">
+        <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.XSmall">
+            <OmniHeading Level="OmniHeadingLevel.H5">@L["QualityGates"]</OmniHeading>
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted">@L["QualityGatesInheritanceHelp"]</OmniText>
+        </OmniStack>
+        @if (CanEdit)
+        {
+            <OmniRow Gap="OmniSpacing.Small">
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ApplyPresetAsync(false))" Class="@(_applying ? "btn-busy" : null)" Busy="@(_applying)" title="@L["QualityGateRecommended"]"><OmniIcon Name="OmniIconName.CheckCircle" /> <span>@L["Recommended"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ApplyPresetAsync(true))" Class="@(_applying ? "btn-busy" : null)" Busy="@(_applying)"><OmniIcon Name="OmniIconName.ShieldCheck" /> <span>@L["QualityGateStrict"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="OpenImportAsync" Disabled="@_applying"><OmniIcon Name="OmniIconName.Upload" /> <span>@L["Import"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="ExportAsync"><OmniIcon Name="OmniIconName.Download" /> <span>@L["Export"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="BeginAdd" title="@L["QualityGateAddRule"]"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+            </OmniRow>
+        }
+    </OmniRow>
+
+    @if (_showImporter)
+    {
+        <OmniUpload MaximumFileSize="1048576"
+                    AllowedContentTypes="@JsonContentTypes"
+                    FilesSelected="ImportAsync" />
+    }
+
+    @if (_showForm)
+    {
+        <OmniCard Class="omni-u-mb-md analysis-governance-form">
+            <OmniTemplateForm TModel="PolicyFormModel" Model="@_form" OnValidSubmit="@SaveAsync">
+                <OmniDataAnnotationsValidator Localizer="@L" />
+                <OmniRow Gap="OmniSpacing.Large">
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField Label="@L["QualityGateRuleType"]" For="oe-formfield-shared-qualitygatepolicyeditor-1">
+                            <OmniDropDown Id="oe-formfield-shared-qualitygatepolicyeditor-1" TValue="QualityGateRuleKind" Options="@(_ruleKinds.ToOptions(item => (QualityGateRuleKind)item.Value, item => item.Text))" @bind-Value="_form.Kind"
+                                Label="@L["QualityGateRuleType"]" />
+                        </OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField Label="@L["Name"]" For="PolicyName">
+                            <OmniTextBox Id="PolicyName" @bind-Value="_form.Name" maxlength="200"
+                                aria-label="@L["Name"]" />
+                            <OmniRequiredValidator TValue="string" For="@(() => _form.Name)" Message="@L["RequiredField"]" />
+                        </OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField For="oe-shared-qualitygatepolicyeditor-3"><LabelContent>@L["QualityGatePolicyKey"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.PolicyKey"
+                                maxlength="200" Disabled="@_lockPolicyKey"
+                                aria-label="@L["QualityGatePolicyKey"]" Id="oe-shared-qualitygatepolicyeditor-3" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField Label="@L["Category"]" For="oe-formfield-shared-qualitygatepolicyeditor-3">
+                            <OmniDropDown Id="oe-formfield-shared-qualitygatepolicyeditor-3" TValue="AnalysisCategory?" Options="@(_categories.ToOptions(item => (AnalysisCategory?)item.Value, item => item.Text))"
+                                @bind-Value="_form.Category" AllowEmpty="true"
+                                Label="@L["Category"]" />
+                        </OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="4">
+                        <OmniFormField For="oe-shared-qualitygatepolicyeditor-5"><LabelContent>@L["AnalysisScanner"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.ScannerKey" maxlength="100"
+                                aria-label="@L["AnalysisScanner"]" Id="oe-shared-qualitygatepolicyeditor-5" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    @if (_form.Kind == QualityGateRuleKind.Finding)
+                    {
+                        <OmniColumn Span="12" MediumSpan="4">
+                            <OmniFormField For="oe-shared-qualitygatepolicyeditor-6"><LabelContent>@L["AnalysisRule"]</LabelContent><ChildContent>
+                                <OmniTextBox @bind-Value="_form.RuleId" maxlength="300"
+                                    aria-label="@L["AnalysisRule"]" Id="oe-shared-qualitygatepolicyeditor-6" />
+                            </ChildContent></OmniFormField>
+                        </OmniColumn>
+                        <OmniColumn Span="12" MediumSpan="4">
+                            <OmniFormField Label="@L["Severity"]" For="oe-formfield-shared-qualitygatepolicyeditor-4">
+                                <OmniDropDown Id="oe-formfield-shared-qualitygatepolicyeditor-4" TValue="AnalysisSeverity?" Options="@(_severities.ToOptions(item => (AnalysisSeverity?)item.Value, item => item.Text))"
+                                    @bind-Value="_form.SeverityThreshold" AllowEmpty="true"
+                                    Label="@L["Severity"]" />
+                            </OmniFormField>
+                        </OmniColumn>
+                        <OmniColumn Span="12" MediumSpan="4">
+                            <OmniCheckBox @bind-Value="_form.NewFindingsOnly">@L["QualityGateNewFindingsOnly"]</OmniCheckBox>
+                        </OmniColumn>
+                    }
+                    else
+                    {
+                        <OmniColumn Span="12" MediumSpan="4">
+                            <OmniFormField Label="@L["AnalysisMetricKey"]" For="MetricKey">
+                                <OmniTextBox Id="MetricKey" @bind-Value="_form.MetricKey" maxlength="300"
+                                    aria-label="@L["AnalysisMetricKey"]" />
+                                <OmniRequiredValidator TValue="string" For="@(() => _form.MetricKey)" Message="@L["RequiredField"]" />
+                            </OmniFormField>
+                        </OmniColumn>
+                        <OmniColumn Span="12" MediumSpan="4">
+                            <OmniFormField Label="@L["AnalysisOperator"]" For="oe-formfield-shared-qualitygatepolicyeditor-6">
+                                <OmniDropDown Id="oe-formfield-shared-qualitygatepolicyeditor-6" TValue="AnalysisPolicyOperator?" Options="@(_operators.ToOptions(item => (AnalysisPolicyOperator?)item.Value, item => item.Text))" @bind-Value="_form.Operator"
+                                    Label="@L["AnalysisOperator"]" />
+                            </OmniFormField>
+                        </OmniColumn>
+                        <OmniColumn Span="12" MediumSpan="4">
+                            <OmniFormField For="quality-gate-threshold"><LabelContent>@L["AnalysisThreshold"]</LabelContent><ChildContent>
+                                <OmniNumeric TValue="double?" @bind-Value="_form.Threshold" aria-label="@L["AnalysisThreshold"]" Id="quality-gate-threshold" />
+                                <OmniRequiredValidator TValue="double?" For="@(() => _form.Threshold)" Message="@L["RequiredField"]" />
+                            </ChildContent></OmniFormField>
+                        </OmniColumn>
+                    }
+                    <OmniColumn Span="12" MediumSpan="3">
+                        <OmniFormField For="oe-shared-qualitygatepolicyeditor-11"><LabelContent>@L["Branch"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.BranchPattern" maxlength="300"
+                                aria-label="@L["Branch"]" Id="oe-shared-qualitygatepolicyeditor-11" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="3">
+                        <OmniFormField For="oe-shared-qualitygatepolicyeditor-12"><LabelContent>@L["Environment"]</LabelContent><ChildContent>
+                            <OmniTextBox @bind-Value="_form.EnvironmentPattern" maxlength="300"
+                                aria-label="@L["Environment"]" Id="oe-shared-qualitygatepolicyeditor-12" />
+                        </ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="2">
+                        <OmniFormField Label="@L["Behavior"]" For="oe-formfield-shared-qualitygatepolicyeditor-7">
+                            <OmniDropDown Id="oe-formfield-shared-qualitygatepolicyeditor-7" TValue="AnalysisGateBehavior" Options="@(_behaviors.ToOptions(item => (AnalysisGateBehavior)item.Value, item => item.Text))" @bind-Value="_form.Behavior"
+                                Label="@L["Behavior"]" />
+                        </OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="2">
+                        <OmniFormField For="oe-shared-qualitygatepolicyeditor-numeric-1"><LabelContent>@L["Priority"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_form.Priority"
+                                aria-label="@L["Priority"]" Id="oe-shared-qualitygatepolicyeditor-numeric-1" /></ChildContent></OmniFormField>
+                    </OmniColumn>
+                    <OmniColumn Span="12" MediumSpan="2">
+                        <OmniCheckBox @bind-Value="_form.Enabled">@L["Enabled"]</OmniCheckBox>
+                    </OmniColumn>
+                </OmniRow>
+                <OmniRow Gap="OmniSpacing.Small" Class="omni-u-mt-md">
+                    <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="PreviewAsync" Class="@(_previewing ? "btn-busy" : null)" Busy="@(_previewing)" title="@L["QualityGatePreview"]"><OmniIcon Name="OmniIconName.Eye" /> <span>@L["Preview"]</span></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="CancelEdit"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+                </OmniRow>
+            </OmniTemplateForm>
+        </OmniCard>
+    }
+
+    @if (_preview is not null)
+    {
+        <OmniAlert Severity="OmniSeverity.Info" Class="omni-u-mb-md">
+            <OmniText Element="OmniTextElement.Strong">@L["QualityGateEffectivePreview"]</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph">@L["QualityGateSnapshotHash"]: <code>@_preview.SnapshotHash</code></OmniText>
+            <OmniText Element="OmniTextElement.Paragraph">
+                @L["QualityGateEffectiveRuleCount", _preview.Policies.Count(item => item.IsEffective)]
+            </OmniText>
+            <OmniText Element="OmniTextElement.Paragraph">
+                @L["QualityGateExpectedProducers"]:
+                @(_preview.ExpectedProducers.Count == 0 ? L["None"].Value : string.Join(", ", _preview.ExpectedProducers))
+            </OmniText>
+            @if (_preview.Conflicts.Count > 0)
+            {
+                <OmniText Element="OmniTextElement.Paragraph">
+                    @L["QualityGateConflicts"]: @string.Join(", ", _preview.Conflicts)
+                </OmniText>
+            }
+            @if (_preview.LatestRunGate is not null)
+            {
+                <OmniText Element="OmniTextElement.Paragraph">
+                    @L["QualityGateLatestRunVerdict", _preview.LatestRunGate.PipelineRunId]:
+                    <strong>@_preview.LatestRunGate.Status</strong>
+                    · @L["AnalysisGrade"]:
+                    <strong>@(_preview.LatestRunGate.Grade?.OverallGrade?.ToString() ?? L["Incomplete"])</strong>
+                </OmniText>
+            }
+        </OmniAlert>
+    }
+
+    <OmniCard Class="quality-gate-rules-card">
+        <div class="quality-gate-stat-strip">
+            <div><strong>@_policies.Count</strong><span>@L["QualityGateRuleCount"]</span></div>
+            <div><strong>@_policies.Count(item => item.IsInherited)</strong><span>@L["QualityGateInheritedCount"]</span></div>
+            <div><strong>@_policies.Count(item => !item.IsInherited)</strong><span>@L["QualityGateLocalCount"]</span></div>
+        </div>
+        <OmniDataGrid Items="@_policies" TItem="AnalysisPolicyDto"
+            EmptyText="@L["NoRecords"]" Class="analysis-table quality-gate-table" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="AnalysisPolicyDto" Property="Name" Title="@L["Name"]" Filterable="true" />
+                <OmniDataGridColumn TItem="AnalysisPolicyDto" Property="PolicyKey" Title="@L["QualityGatePolicyKey"]" Filterable="true" />
+                @* Recette R-210: origin, behavior and status read Scope, Behavior and IsEffective, so they filter. *@
+                <OmniDataGridColumn TItem="AnalysisPolicyDto" Property="Scope" Title="@L["QualityGateOrigin"]" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ScopeText">
+                    <Template Context="item">
+                        <OmniBadge Fill="OmniFill.Solid"
+                            Tone="@(item.IsInherited ? OmniTone.Neutral : OmniTone.Accent)">@ScopeLabel(item.Scope)</OmniBadge>
+                        @if (item.IsOverride)
+                        {
+                            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["QualityGateOverride"]</OmniBadge>
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="AnalysisPolicyDto" Title="@L["QualityGateCriterion"]" Sortable="false">
+                    <Template Context="item">@Criterion(item)</Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="AnalysisPolicyDto" Property="Behavior" Title="@L["Behavior"]" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@BehaviorText">
+                    <Template Context="item">@BehaviorLabel(item.Behavior)</Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="AnalysisPolicyDto" Property="Version" Title="@L["Version"]" Width="6rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+                <OmniDataGridColumn TItem="AnalysisPolicyDto" Property="IsEffective" Title="@L["Status"]" Width="8rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@EffectiveText">
+                    <Template Context="item">
+                        <OmniBadge Fill="OmniFill.Solid"
+                            Tone="@(item.IsEffective ? OmniTone.Success : OmniTone.Danger)">@(item.IsEffective ? L["Enabled"].Value : L["Disabled"].Value)</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                @if (CanEdit)
+                {
+                    <OmniDataGridColumn TItem="AnalysisPolicyDto" Title="@L["Actions"]" Filterable="false" Sortable="false"
+                        TextAlign="OmniDataGridTextAlign.End" Width="13rem">
+                        <Template Context="item">
+                            @if (CanEditDirectly(item))
+                            {
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => BeginEdit(item))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowHistoryAsync(item))" title="@L["QualityGateHistory"]" Label="@L["QualityGateHistory"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                            }
+                            else
+                            {
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => BeginOverride(item))" title="@L["QualityGateOverride"]" Label="@L["QualityGateOverride"]"><OmniIcon Name="OmniIconName.GitDiff" /></OmniButton>
+                            }
+                            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => BeginDuplicate(item))" title="@L["Duplicate"]" Label="@L["Duplicate"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                        </Template>
+                    </OmniDataGridColumn>
+                }
+            </Columns>
+        </OmniDataGrid>
+    </OmniCard>
+
+    @if (_historyPolicy is not null)
+    {
+        <OmniCard Class="omni-u-mt-md">
+            <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Justify="OmniJustification.Between">
+                <OmniHeading Level="OmniHeadingLevel.H5">
+                    @L["QualityGateHistoryFor", _historyPolicy.Name]
+                </OmniHeading>
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _historyPolicy = null)" Label="@L["Close"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+            </OmniRow>
+            <OmniDataGrid Items="@_revisions" TItem="AnalysisPolicyRevisionDto"
+ EmptyText="@L["NoRecords"]" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3" MaxHeight="@AetheusGrid.ScrollMaxHeight">
+                <Columns>
+                    <OmniDataGridColumn Frozen="true" TItem="AnalysisPolicyRevisionDto" Property="Version"
+                        Title="@L["Version"]" Width="7rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+                    <OmniDataGridColumn TItem="AnalysisPolicyRevisionDto" Property="CreatedAt"
+                        Title="@L["CreatedAt"]" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" />
+                    <OmniDataGridColumn TItem="AnalysisPolicyRevisionDto" Property="SnapshotHash"
+                        Title="@L["QualityGateSnapshotHash"]" Filterable="true" />
+                    @if (CanEdit)
+                    {
+                        <OmniDataGridColumn TItem="AnalysisPolicyRevisionDto" Title="@L["Actions"]" Filterable="false"
+                            Sortable="false" TextAlign="OmniDataGridTextAlign.End" Width="9rem">
+                            <Template Context="revision">
+                                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => RollbackAsync(revision))" Disabled="@(revision.Version == _historyPolicy.Version || _applying)" title="@L["Restore"]" Label="@L["Restore"]"><OmniIcon Name="OmniIconName.ArrowUUpLeft" /></OmniButton>
+                            </Template>
+                        </OmniDataGridColumn>
+                    }
+                </Columns>
+            </OmniDataGrid>
+        </OmniCard>
+    }
+}

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Constants;
 
 namespace Aetheus.Back.Tests.Architecture;
 
@@ -57,6 +56,16 @@ public class CliContractAuditTests
         Assert.Contains("ToString(\"O\", CultureInfo.InvariantCulture)", program, StringComparison.Ordinal);
         Assert.Contains("GetAsync(\"health/ready\", ct)", program, StringComparison.Ordinal);
         Assert.Contains("internal sealed class AetheusApiClient", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CliIsPackagedAsAnInstallableDotnetTool()
+    {
+        var project = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Aetheus.Cli", "Aetheus.Cli.csproj"));
+
+        Assert.Contains("<PackAsTool>true</PackAsTool>", project, StringComparison.Ordinal);
+        Assert.Contains("<ToolCommandName>aetheus</ToolCommandName>", project, StringComparison.Ordinal);
+        Assert.Contains("<PackageReadmeFile>cli.md</PackageReadmeFile>", project, StringComparison.Ordinal);
     }
 
     private static int Count(string source, string value) =>

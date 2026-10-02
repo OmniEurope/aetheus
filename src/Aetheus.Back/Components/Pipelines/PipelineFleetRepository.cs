@@ -17,6 +17,8 @@ internal sealed class PipelineFleetRepository(AppDbContext db) : IPipelineFleetR
             fleet = fleet.Where(item => item.TemplateId == request.TemplateId.Value);
         if (request.Freshness.HasValue)
             fleet = fleet.Where(item => item.Freshness == request.Freshness.Value);
+        // Recette R-224: the grid's column header filters, after the scope and before the count.
+        fleet = PipelineFleetQuery.Columns.ApplyFilters(fleet, request.Filters);
         fleet = Sort(fleet, request.SortBy, request.SortDescending);
         var totalCount = await fleet.CountAsync(ct).ConfigureAwait(false);
         var (page, pageSize) = request.Normalize();
@@ -170,6 +172,17 @@ internal sealed class PipelineFleetRepository(AppDbContext db) : IPipelineFleetR
                 OwnerType = "ProjectServer",
                 OrganizationId = 0
             });
+
+    public Task<List<string>> GetTemplateNamesAsync(
+        IReadOnlyCollection<int>? organizationIds,
+        IReadOnlyCollection<int>? accessiblePipelineIds,
+        CancellationToken ct) =>
+        FilterPipelines(db.Pipelines.AsNoTracking(), new PipelineFleetPaginationRequest(), organizationIds, accessiblePipelineIds)
+            .Where(pipeline => pipeline.TemplateReferenceName != null && pipeline.TemplateReferenceName != "")
+            .Select(pipeline => pipeline.TemplateReferenceName!)
+            .Distinct()
+            .OrderBy(name => name)
+            .ToListAsync(ct);
 
     public Task<PipelineFleetRow?> GetAsync(int pipelineId, CancellationToken ct) =>
         Project(db.Pipelines.AsNoTracking().Where(pipeline => pipeline.Id == pipelineId))

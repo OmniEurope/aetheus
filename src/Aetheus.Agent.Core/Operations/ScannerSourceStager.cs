@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace Aetheus.Agent.Core.Operations;
@@ -12,7 +13,15 @@ internal static class ScannerSourceStager
     private const int MaxStagedSourceEntries = 200_000;
     private const long MaxStagedSourceBytes = 20L * 1024 * 1024 * 1024;
 
-    [DllImport("libc", SetLastError = true, EntryPoint = "link")]
+    // CA5392 asks for DefaultDllImportSearchPaths, which selects among Windows DLL search paths and
+    // has no effect on the Unix loader; this call is Linux-only by construction.
+    // CA2101 asks for an explicit string marshaling: given here rather than suppressed, because a
+    // path is exactly the kind of argument where an implicit ANSI conversion silently mangles
+    // non-ASCII characters, and this one names a file the scanner then reads.
+    [SuppressMessage("Security", "CA5392:Use DefaultDllImportSearchPaths attribute for P/Invokes",
+        Justification = "libc on Linux; the attribute only constrains the Windows DLL search order.")]
+    [DllImport("libc", SetLastError = true, EntryPoint = "link",
+        CharSet = CharSet.Ansi, BestFitMapping = false, ThrowOnUnmappableChar = true)]
     private static extern int CreateHardLinkUnix(string existingPath, string newPath);
 
     internal static string EnsureDockerVisibleSource(

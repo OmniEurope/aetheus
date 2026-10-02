@@ -8,10 +8,24 @@ internal sealed class CertbotCertificateConfiguration : IEntityTypeConfiguration
 {
     public void Configure(EntityTypeBuilder<CertbotCertificate> builder)
     {
+        builder.Property(e => e.Authenticator).HasMaxLength(100);
+        builder.Property(e => e.WebrootPath).HasMaxLength(4096);
         builder.HasIndex(e => new { e.ServerId, e.Name }).IsUnique();
         builder.HasOne(e => e.Server)
                .WithMany(s => s.CertbotCertificates)
                .HasForeignKey(e => e.ServerId)
+               .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+internal sealed class CertbotStateConfiguration : IEntityTypeConfiguration<CertbotState>
+{
+    public void Configure(EntityTypeBuilder<CertbotState> builder)
+    {
+        builder.HasIndex(e => e.ServerId).IsUnique();
+        builder.HasOne(e => e.Server)
+               .WithOne(s => s.CertbotState)
+               .HasForeignKey<CertbotState>(e => e.ServerId)
                .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -5,8 +5,7 @@ using System.Text;
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.IntegrationTests;
@@ -38,7 +37,17 @@ public sealed class ArtifactDownloadIntegrationTests(PostgresFixture fixture)
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var storage = scope.ServiceProvider.GetRequiredService<IArtifactStorageService>();
 
-            var pipeline = new Pipeline { Name = "dl-pipeline", YamlDefinition = "stages: []" };
+            // The pipeline needs a real owning project: authorization resolves the artifact's owner
+            // transitively through it (ArtifactRepository.GetArtifactOwningProjectIdAsync), and an
+            // owner that cannot be named is refused. Before F-003 a null owner skipped the permission
+            // check entirely, which is what this fixture used to rely on.
+            var organizationId = await db.Organizations.OrderBy(o => o.Id).Select(o => o.Id)
+                .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
+            var project = new Project { Name = "dl-project", OrganizationId = organizationId };
+            db.Projects.Add(project);
+            await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            var pipeline = new Pipeline { Name = "dl-pipeline", ProjectId = project.Id, YamlDefinition = "stages: []" };
             db.Pipelines.Add(pipeline);
             await db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -52,7 +61,7 @@ public sealed class ArtifactDownloadIntegrationTests(PostgresFixture fixture)
             {
                 PipelineRunId = run.Id,
                 PipelineId = pipeline.Id,
-                ProjectId = null, // null project skips the per-project permission check on download
+                ProjectId = null, // realistic: the artifact's own column is null, the owner comes from the pipeline
                 Name = "drop",
                 FilePath = relativePath,
                 SizeBytes = payload.Length,

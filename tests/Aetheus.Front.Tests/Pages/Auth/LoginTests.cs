@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -56,8 +54,8 @@ public class LoginTests : BunitContext
         _handler.SetJsonResponse("auth/login", new LoginResponse { Token = "jwt-token" });
         var cut = Render<Login>();
 
-        cut.Find("input[name='Username']").Input("admin");
-        cut.Find("input[name='Password']").Input("aetheus-dev-admin-pwd");
+        cut.Find("input#Username").Input("admin");
+        cut.Find("input#Password").Input("aetheus-dev-admin-pwd");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(
@@ -103,6 +101,66 @@ public class LoginTests : BunitContext
     }
 
     [Fact]
+    public void ForgotPassword_IsATextLinkInTheCardFooter_AndLoginIsTheFormsOnlyButton()
+    {
+        _handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
+        var cut = Render<Login>();
+
+        // Recette R-376: Login is blue and the only action button of the form (the password field's
+        // own eye apart); the forgotten password is no longer a button beside it.
+        var actions = cut.Find("form").QuerySelectorAll("button")
+            .Where(button => button.Closest(".omni-password") is null)
+            .ToList();
+        var login = Assert.Single(actions);
+        Assert.Equal("submit", login.GetAttribute("type"));
+        Assert.Contains("omni-button--primary", login.ClassList);
+
+        var link = cut.Find(".omni-login-shell .omni-card__footer a.login-forgot-link");
+        Assert.Equal("ForgotPassword", link.TextContent.Trim());
+        Assert.Contains("forgot=true", link.GetAttribute("href"), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("false", link.GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("#login-forgot-hint"));
+    }
+
+    /// <summary>
+    /// Recette R-375: the form's action sits at the end of its row, like every card action. OE 1.4.0's
+    /// sign-in shell has no actions slot (its footer is a block for the links), and the submit button
+    /// must stay inside the form, so the row is OE's end-justified stack, with no local alignment rule.
+    /// </summary>
+    [Fact]
+    public void LoginAction_IsAtTheEndOfItsRow_InsideTheForm()
+    {
+        _handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
+        var cut = Render<Login>();
+
+        var login = cut.Find("form button[type='submit']");
+        var row = login.ParentElement!;
+        Assert.Contains("omni-stack--horizontal", row.ClassList);
+        Assert.Contains("omni-stack--justify-end", row.ClassList);
+        var last = row.Children.Last();
+        Assert.Equal("BUTTON", last.TagName);
+        Assert.Equal("submit", last.GetAttribute("type"));
+        Assert.Null(login.Closest(".omni-card__footer"));
+    }
+
+    [Fact]
+    public void ForgotInTheAddress_ShowsTheHint_AndTheLinkClosesItKeepingTheReturnUrl()
+    {
+        _handler.SetJsonResponse("api/auth/public-demo", new PublicDemoInfoDto());
+        Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()
+            .NavigateTo("/login?ReturnUrl=%2Fservers&forgot=true");
+
+        var cut = Render<Login>();
+
+        Assert.Contains("ForgotPasswordHint", cut.Find("#login-forgot-hint").TextContent, StringComparison.Ordinal);
+        var link = cut.Find("a.login-forgot-link");
+        Assert.Equal("true", link.GetAttribute("aria-expanded"));
+        var href = link.GetAttribute("href")!;
+        Assert.DoesNotContain("forgot=", href, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ReturnUrl=%2Fservers", href, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Renders_LoginForm_Unauthenticated()
     {
         var handler2 = BunitTestHelper.RegisterServices(this, authenticated: false);
@@ -138,9 +196,9 @@ public class LoginTests : BunitContext
         _handler.SetJsonResponse("auth/login", new LoginResponse { Token = "jwt-token" });
         var cut = Render<Login>();
 
-        cut.Find("input[name='Username']").Input("admin");
-        cut.Find("input[name='Password']").Input("secret");
-        cut.Find("input.labeled-toggle-native-input").Change(true);
+        cut.Find("input#Username").Input("admin");
+        cut.Find("input#Password").Input("secret");
+        cut.Find("input.omni-checkbox").Change(true);
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(

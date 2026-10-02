@@ -11,7 +11,7 @@ namespace Aetheus.Agent.Core.Tests;
 /// <c>/etc/sudoers.d/aetheus-mail</c> drop-in. If the agent shells out to a binary the installer
 /// never deposits (the exact <c>mail-manage</c> gap this guard was added for), every incremental mail
 /// op fails at runtime with no compile-time signal. This test resolves the script's shell variables
-/// and asserts the path contract, the heredoc that writes each helper, and the sudoers grant.
+/// and asserts the path contract, the template rendered into each helper (R-249), and the sudoers grant.
 /// </summary>
 public sealed class MailHelperPathAuditTests
 {
@@ -23,21 +23,29 @@ public sealed class MailHelperPathAuditTests
     public void ManageHelperPath_matches_install_script()
         => Assert.Equal(MailOperationExecutor.ManageHelperPath, ResolveHelperPath("MAIL_MANAGE_HELPER_PATH"));
 
+    // R-249: each helper is a template under deploy/agent-host-config the installer renders to its path.
     [Theory]
-    [InlineData("MAIL_SETUP_HELPER_PATH")]
-    [InlineData("MAIL_MANAGE_HELPER_PATH")]
-    public void Each_helper_is_written_by_a_heredoc(string varName)
+    [InlineData("MAIL_SETUP_HELPER_PATH", "mail/mail-setup")]
+    [InlineData("MAIL_MANAGE_HELPER_PATH", "mail/mail-manage")]
+    public void Each_helper_is_rendered_from_its_template(string varName, string template)
     {
         var script = ReadInstallScript();
-        Assert.Matches(new Regex($@"cat > ""\${Regex.Escape(varName)}""", RegexOptions.None), script);
+        Assert.Matches(
+            new Regex($@"render_host_config {Regex.Escape(template)} ""\${Regex.Escape(varName)}""", RegexOptions.None),
+            script);
+        Assert.StartsWith("#!/bin/sh\n", LinuxHostConfigTemplates.Read(template), StringComparison.Ordinal);
     }
 
     [Fact]
     public void Sudoers_grants_both_mail_helpers()
     {
-        var script = ReadInstallScript();
-        Assert.Contains("Cmnd_Alias AETHEUS_MAIL = $MAIL_SETUP_HELPER_PATH", script, StringComparison.Ordinal);
-        Assert.Contains("Cmnd_Alias AETHEUS_MAIL_MANAGE = $MAIL_MANAGE_HELPER_PATH", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "render_host_config mail/sudoers.d/aetheus-mail \"$MAIL_MANAGE_SUDOERS_FILE\"",
+            ReadInstallScript(),
+            StringComparison.Ordinal);
+        var script = LinuxHostConfigTemplates.Read("mail/sudoers.d/aetheus-mail");
+        Assert.Contains("Cmnd_Alias AETHEUS_MAIL = #{MAIL_SETUP_HELPER_PATH}#", script, StringComparison.Ordinal);
+        Assert.Contains("Cmnd_Alias AETHEUS_MAIL_MANAGE = #{MAIL_MANAGE_HELPER_PATH}#", script, StringComparison.Ordinal);
         // The NOPASSWD grant must reference both aliases, else mail-manage is written but unusable.
         Assert.Matches(new Regex(@"NOPASSWD:\s*AETHEUS_MAIL\b.*\bAETHEUS_MAIL_MANAGE\b"), script);
     }

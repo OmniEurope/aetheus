@@ -1,0 +1,147 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+<OmniDataGrid Items="@DisplayItems" TItem="PipelineDependencyDto"
+    MaxHeight="@(FillHeight ? null : AetheusGrid.ScrollMaxHeight)"
+    ScrollMode="@(Virtualize ? OmniDataGridScrollMode.Virtual : OmniDataGridScrollMode.All)" VirtualizationOverscanCount="3" FillAvailableHeight="@FillHeight"
+    ExpandMode="OmniDataGridRowMode.Single" RowRender="@OnRowRender" OnRowClick="@(args => OnRowClick(args.Item))"
+    Class="@GridCssClass">
+    <DetailTemplate Context="pipeline">
+        @* Recette R-121: one list, and only a row that launches other pipelines expands; its detail is
+           those children, in YAML execution order. *@
+        <div class="pipeline-dependency-details">
+            <div class="pipeline-relation-header">
+                <span class="pipeline-relation-header-icon" aria-hidden="true">
+                    <OmniIcon Name="@MaterialIconMap.Resolve("account_tree")" />
+                </span>
+                <OmniText Element="OmniTextElement.Strong" Class="omni-u-m-0">@L["ChildPipelines"]</OmniText>
+                <CountBadge Value="@pipeline.References.Count" Variant="OmniTone.Neutral" />
+            </div>
+            <ol class="pipeline-relation-list pipeline-relation-list-execution">
+                @for (var index = 0; index < pipeline.References.Count; index++)
+                {
+                    var relation = pipeline.References[index];
+                    <li class="pipeline-relation-item">
+                        @if (relation.Id.HasValue)
+                        {
+                            <a href="@PipelineHref(relation.Id.Value)" class="pipeline-relation-card">
+                                <span class="pipeline-relation-marker" aria-hidden="true">@((index + 1).ToString())</span>
+                                <span class="pipeline-relation-name">@relation.Name</span>
+                                <OmniIcon Name="OmniIconName.ArrowRight" Class="pipeline-relation-open" />
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="pipeline-relation-card pipeline-relation-card-static">
+                                <span class="pipeline-relation-marker" aria-hidden="true">@((index + 1).ToString())</span>
+                                <span class="pipeline-relation-name">@relation.Name</span>
+                            </span>
+                        }
+                    </li>
+                }
+            </ol>
+        </div>
+    </DetailTemplate>
+    <Columns>
+        <OmniDataGridColumn Frozen="true" TItem="PipelineDependencyDto" Property="Name" Title="@L["Pipeline"]" MinWidth="11rem" Filterable="true">
+            <Template Context="pipeline">
+                <a href="@PipelineHref(pipeline.Id)" class="pipeline-name-link" @onclick:stopPropagation="true">@pipeline.Name</a>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PipelineDependencyDto" Property="ProjectName" Title="@L["Project"]" Width="10rem" Filterable="true"
+            FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true"
+            Visible="@GroupByProject" Class="pipeline-project-column" HeaderClass="pipeline-project-column">
+            <Template Context="pipeline">
+                <span class="pipeline-project-context">@(pipeline.ProjectName ?? L["Unassigned"])</span>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PipelineDependencyDto" Title="@L["RecentRunsColumn"]" Width="8rem"
+            Sortable="false" Filterable="false">
+            <Template Context="pipeline">
+                <div class="pipeline-run-history-cell">
+                    <PipelineRunHistory Runs="@pipeline.RecentRuns" ProjectId="@pipeline.ProjectId" ServerId="@ServerId" />
+                    @if (pipeline.RecentRuns.FirstOrDefault()?.GateGrade is { } lastGrade)
+                    {
+                        <GradeBadge Value="@lastGrade" Title="@L["LastRunGrade"]" />
+                    }
+                </div>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PipelineDependencyDto" Property="TriggerType" Title="@L["Trigger"]" Width="8rem" Filterable="true"
+            FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@TriggerText"
+            Class="pipeline-secondary-column" HeaderClass="pipeline-secondary-column">
+            <Template Context="pipeline">@L.Localize(pipeline.TriggerType)</Template>
+        </OmniDataGridColumn>
+        @* Recette R-213: the model column filters on the model name the cell shows (or "autonomous"). *@
+        <OmniDataGridColumn TItem="PipelineDependencyDto" Key="@TemplateColumn" Value="@TemplateValue" Title="@L["Template"]" Width="11rem"
+            Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true"
+            Visible="@FleetAvailable">
+            <Template Context="pipeline">
+                @if (FleetItem(pipeline.Id) is { } fleetItem)
+                {
+                    @if (fleetItem.TemplateId is { } templateId)
+                    {
+                        <a href="@($"/templates/{templateId}")" class="pipeline-template-link"
+                            title="@fleetItem.TemplateName" @onclick:stopPropagation="true">@fleetItem.TemplateName</a>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(fleetItem.TemplateName))
+                    {
+                        <span title="@fleetItem.TemplateName">@fleetItem.TemplateName</span>
+                    }
+                    else
+                    {
+                        <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@L["AutonomousPipeline"]</OmniBadge>
+                    }
+                }
+            </Template>
+        </OmniDataGridColumn>
+        @* Recette R-213: the status column filters on the catalogue statuses of the summary chips, with
+           the same rules (PipelineCatalogView), a row passing when it matches any chosen status. *@
+        <OmniDataGridColumn TItem="PipelineDependencyDto" Key="@StatusColumn" Title="@L["Status"]" Width="9rem"
+            Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect"
+            FilterValues="@StatusCandidates" FormatFilterValue="@StatusText" FilterPredicate="@StatusPredicate"
+            Visible="@FleetAvailable">
+            <Template Context="pipeline">
+                @if (FleetItem(pipeline.Id) is { } fleetItem)
+                {
+                    @if (fleetItem.Freshness == PipelineFleetFreshness.OffCatalog)
+                    {
+                        <span title="@L["AutonomousPipeline"]">—</span>
+                    }
+                    else
+                    {
+                        <span class="pipeline-template-status" title="@TemplateStatusTitle(fleetItem)">
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@FreshnessStyle(fleetItem.Freshness)">@FreshnessText(fleetItem.Freshness)</OmniBadge>
+                            @if (fleetItem.PinnedVersion is { } pinnedVersion)
+                            {
+                                <span>@($"v{pinnedVersion}")</span>
+                            }
+                        </span>
+                    }
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="PipelineDependencyDto" Title="@L["Actions"]" Width="13rem" Sortable="false" TextAlign="OmniDataGridTextAlign.End"
+            Class="pipeline-actions-column" HeaderClass="pipeline-actions-column">
+            <Template Context="pipeline">
+                @* Recette R-123: Run stays on the row, and so does the star (R-119 keeps it inline); edit
+                   and the model update move into the row's "..." menu. The star is a ghost icon button
+                   (R-410). Run is blue on every row: a STD-BTN exception chosen by the user (R-414,
+                   2026-09-28), where the importance rule keeps a repeated row action discreet. *@
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End" Class="pipeline-row-actions" @onclick:stopPropagation="true">
+                    <OmniButton Variant="OmniButtonVariant.Ghost" OnClick="@(() => SetFavorite(pipeline.Id, !IsFavorite(pipeline.Id)))" Disabled="@PendingFavoritePipelineIds.Contains(pipeline.Id)" Class="@(IsFavorite(pipeline.Id) ? "pipeline-favorite-button active" : "pipeline-favorite-button")" title="@(IsFavorite(pipeline.Id) ? L["RemovePipelineFromFavorites"] : L["AddPipelineToFavorites"])" Label="@(IsFavorite(pipeline.Id) ? L["RemovePipelineFromFavorites"] : L["AddPipelineToFavorites"])"><OmniIcon Name="@MaterialIconMap.Resolve((IsFavorite(pipeline.Id) ? "star" : "star_border"))" /></OmniButton>
+                    <OmniSplitButton Text="@L["Run"]" OnClick="@(() => RunPipeline(pipeline.Id, null))"
+                        aria-label="@L["RunPipelineAction"]" title="@L["RunPipelineAction"]" Disabled="@(!CanWrite)" Variant="OmniButtonVariant.Primary"><Icon><OmniIcon Name="OmniIconName.Play" /></Icon><ChildContent>
+                        <OmniMenuItem OnClick="@(() => RunPipeline(pipeline.Id, "options"))">@L["RunWithOptions"]</OmniMenuItem>
+                    </ChildContent></OmniSplitButton>
+                    <OmniOverflowMenu Label="@L["MoreActions"]">
+                        <OmniMenuItem OnClick="@(() => EditPipeline(pipeline.Id))" Disabled="@(!CanWrite)" title="@(CanWrite ? null : L["InsufficientPermissions"].Value)"><Icon><OmniIcon Name="OmniIconName.Edit" /></Icon><ChildContent>@L["Edit"]</ChildContent></OmniMenuItem>
+                        @if (FleetItem(pipeline.Id) is { Freshness: PipelineFleetFreshness.Outdated, LatestVersion: { } latestVersion })
+                        {
+                            <OmniMenuItem OnClick="@(() => UpdatePipelineTemplate(pipeline.Id, latestVersion))" Disabled="@(!CanWrite)" title="@TemplateStatusTitle(FleetItem(pipeline.Id)!)"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["Update"]</ChildContent></OmniMenuItem>
+                        }
+                    </OmniOverflowMenu>
+                </OmniStack>
+            </Template>
+        </OmniDataGridColumn>
+    </Columns>
+</OmniDataGrid>

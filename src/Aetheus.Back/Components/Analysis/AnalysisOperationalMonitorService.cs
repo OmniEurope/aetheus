@@ -2,7 +2,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Aetheus.Back.Components.Notifications;
-using Aetheus.Shared.Analysis;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Back.Components.Analysis;
@@ -134,12 +133,23 @@ public sealed class AnalysisOperationalMonitorService(
                         server.OrganizationId, null, server.ServerId, capability));
                 else if (capability.StartsWith("scanner:", StringComparison.Ordinal)
                          && (capability.Contains(":degraded:", StringComparison.Ordinal)
-                             || capability.Contains(":unavailable:", StringComparison.Ordinal)))
+                             || capability.Contains(":unavailable:", StringComparison.Ordinal))
+                         && !IsPermanentlyOutOfScope(capability))
                     issues.Add(new($"scanner-capability:{server.ServerId}:{capability.Split(':')[1]}",
                         "analysis.operational.scanner-unavailable", server.OrganizationId, null, server.ServerId, capability));
             }
         }
     }
+
+    /// <summary>
+    /// A scanner the host can never run, as opposed to one that is merely broken right now. The probe
+    /// reports both as <c>unavailable</c>, but only one of them is worth waking an operator: a Windows
+    /// or arm64 runner will not grow x64 Linux support, so the alert would repeat every cooldown with
+    /// nothing to be done about it, and an alert nobody can act on is what teaches people to ignore
+    /// the rest. The capability is still reported on the server, so the fact stays visible.
+    /// </summary>
+    private static bool IsPermanentlyOutOfScope(string capability) =>
+        capability.EndsWith(":verified binary supports Linux x64 only", StringComparison.Ordinal);
 
     private static void AddStorageIssues(
         ICollection<AnalysisOperationalIssue> issues,

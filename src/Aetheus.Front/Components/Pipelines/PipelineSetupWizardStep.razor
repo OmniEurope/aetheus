@@ -1,0 +1,65 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@if (Step == 0)
+{
+    <OmniStack Gap="OmniSpacing.Large" Class="pipeline-setup-step">
+        <OmniHeading Level="OmniHeadingLevel.H5">@L["SelectPipelineProject"]</OmniHeading>
+        <OmniFormField Label="@L["Project"]" Class="omni-u-w-100" For="oe-formfield-pages-pipelines-pipelinesetupwizardstep-1">
+            <OmniDropDown Id="oe-formfield-pages-pipelines-pipelinesetupwizardstep-1" TValue="int?" Options="@(Projects.ToOptions(item => (int?)item.Id, item => item.Name))"
+                            Value="@ProjectId" ValueChanged="@ProjectIdChanged" ValueExpression="@(() => ProjectId)" Class="omni-u-w-100" />
+        </OmniFormField>
+        <OmniFormField Label="@L["PipelinePrefix"]" Class="omni-u-w-100" For="oe-formfield-pages-pipelines-pipelinesetupwizardstep-2">
+            <OmniTextBox Id="oe-formfield-pages-pipelines-pipelinesetupwizardstep-2" Value="@Prefix" ValueChanged="@PrefixChanged" Class="omni-u-w-100"  ValueExpression="@(() => Prefix)"/>
+        </OmniFormField>
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["PipelinePrefixHint"]</OmniText>
+    </OmniStack>
+}
+else if (Step == 1)
+{
+    <div class="pipeline-setup-step">
+        <OmniHeading Level="OmniHeadingLevel.H5">@L["ApplicationArchitecture"]</OmniHeading>
+        <div class="pipeline-setup-options">
+            @Option(OmniIconName.Monitor, L["Frontend"], L["FrontendPipelineHint"], Frontend, FrontendChanged)
+            @Option(OmniIconName.Globe, L["Backend"], L["BackendPipelineHint"], Backend, BackendChanged)
+            @Option(OmniIconName.Database, L["Database"], L["DatabasePipelineHint"], Database, DatabaseChanged)
+        </div>
+    </div>
+}
+else if (Step == 2)
+{
+    <div class="pipeline-setup-step">
+        <OmniHeading Level="OmniHeadingLevel.H5">@L["SelectPipelineCapabilities"]</OmniHeading>
+        <div class="pipeline-setup-options">
+            @Option(OmniIconName.Wrench, "CI", L["CiPipelineHint"], Ci, CiChanged)
+            @Option(OmniIconName.ChartLine, L["Quality"], L["QualityPipelineHint"], Quality, QualityChanged)
+            @Option(OmniIconName.ShieldCheck, L["Security"], L["SecurityPipelineHint"], Security, SecurityChanged)
+            @Option(OmniIconName.Flask, "QA", L["QaPipelineHint"], Qa, QaChanged)
+            @Option(OmniIconName.CheckCircle, L["Candidate"], L["CandidatePipelineHint"], Candidate, CandidateChanged)
+            @Option(OmniIconName.Timer, L["Nightly"], L["NightlyPipelineHint"], Nightly, NightlyChanged)
+            @Option(OmniIconName.RocketLaunch, L["ProductionDeployment"], L["ProductionPipelineHint"], Production, ProductionChanged)
+            @Option(OmniIconName.Lightning, L["FastDeploy"], L["FastPipelineHint"], FastDeploy, FastDeployChanged)
+            @Option(OmniIconName.Reset, L["Rollback"], L["RollbackPipelineHint"], Rollback, RollbackChanged)
+            @Option(OmniIconName.Package, L["Packages"], L["PackagesPipelineHint"], Packages, PackagesChanged)
+        </div>
+    </div>
+}
+else
+{
+    <div class="pipeline-setup-step">
+        <OmniHeading Level="OmniHeadingLevel.H5">@L["PipelinesToCreate"]</OmniHeading>
+        <OmniAlert Severity="OmniSeverity.Info">
+            @ProjectName · @ArchitectureSummary · @SummaryItems.Count @L["Pipelines"]
+        </OmniAlert>
+        <div class="pipeline-setup-summary">
+            @foreach (var item in SummaryItems)
+            {
+                <div><OmniIcon Name="OmniIconName.Graph" /><strong>@item.Name</strong><span>@item.TemplateName</span></div>
+            }
+        </div>
+        @if (ProjectId is { } projectId)
+        {
+            <PipelineSetupReadinessPanel ProjectId="@projectId" Readiness="@Readiness" Loading="@ReadinessLoading"
+                TemplateNames="@SummaryItems.Select(item => item.TemplateName).ToList()"
+                OnProvisioned="@OnRequirementsProvisioned" />
+        }
+    </div>
+}

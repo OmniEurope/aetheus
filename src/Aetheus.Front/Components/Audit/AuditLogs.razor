@@ -1,0 +1,56 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/audit"
+@page "/audit"
+
+<PageTitle>@L["AuditLogs"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["AuditLogs"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("policy")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="audit" />
+    </Badges>
+    <Actions>
+        @if (_chainResult is not null)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="@(_chainResult.IsValid ? OmniTone.Success : OmniTone.Danger)">@(_chainResult.IsValid ? string.Format(L["AuditChainIntactCount"], _chainResult.TotalEntries) : string.Format(L["AuditBreakAt"], _chainResult.FirstInvalidId))</OmniBadge>
+        }
+        else if (_chainChecked)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@L["AuditIntegrityUnavailable"]</OmniBadge>
+        }
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@VerifyChainAsync" Class="@(_verifyingChain ? "btn-busy" : null)" Busy="@(_verifyingChain)"><OmniIcon Name="OmniIconName.ShieldCheck" /> <span>@L["AuditVerifyChain"]</span></OmniButton>
+        @* Recette R-181: no Refresh, new entries arrive over the admin hub. *@
+    </Actions>
+</OmniPageHeader>
+<AetheusDataGrid @ref="_grid" TItem="AuditLogDto" Data="@_logs" Count="@_count" LoadData="@LoadData"
+    PageSize="20" AllowSorting="true" IsLoading="@_loading" Density="OmniDensity.Compact" FullHeight="true"
+    Virtualize="@AetheusGrid.RemoteVirtualization"
+    VirtualData="@(() => new OmniDataGridResult<AuditLogDto>(_logs, _count))">
+    <Columns>
+        @* Recette R-238: every filter is a column header filter sent to the server, the date range
+           included (the two date pickers above the grid are gone). *@
+        <OmniDataGridColumn Frozen="true" TItem="AuditLogDto" Property="Timestamp" Title="@L["Timestamp"]" Width="180px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
+            <Template Context="log">
+                <span title="@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")">@RelativeTime.FormatAgo(L, log.Timestamp)</span>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="AuditLogDto" Property="Username" Title="@L["User"]" Width="140px" Filterable="true" />
+        <OmniDataGridColumn TItem="AuditLogDto" Property="Action" Title="@L["Action"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_actionOptions" FormatFilterValue="@ActionText" FilterSearchable="true" >
+            <Template Context="log">
+                <OmniBadge Fill="OmniFill.Solid" Tone="@AuditActionPresentation.Badge(log.Action)">@ActionText(log.Action)</OmniBadge>
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="AuditLogDto" Property="EntityType" Title="@L["EntityType"]" Width="160px" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@_entityOptions" FilterSearchable="true" />
+        <OmniDataGridColumn TItem="AuditLogDto" Property="EntityId" Title="@L["ID"]" Width="80px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators" />
+        <OmniDataGridColumn TItem="AuditLogDto" Title="@L["Actions"]" MinWidth="15rem" Sortable="false" Filterable="false">
+            <Template Context="log">
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowDetailsDialogAsync(log))" title="@L["ViewDetails"]" Label="@L["ViewDetails"]"><OmniIcon Name="OmniIconName.Eye" /></OmniButton>
+                @if (!string.IsNullOrWhiteSpace(log.Details))
+                {
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => CopyDetailsAsync(log.Details))" title="@L["CopyDetails"]" Label="@L["CopyDetails"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                }
+            </Template>
+        </OmniDataGridColumn>
+        <OmniDataGridColumn TItem="AuditLogDto" Property="Details" Title="@L["Details"]" Filterable="true" />
+    </Columns>
+</AetheusDataGrid>

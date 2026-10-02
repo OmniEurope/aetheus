@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for an Aetheus agent self-update request
+
+[Path]
+PathExists=#{AGENT_UPDATE_REQUEST_FILE}#
+Unit=aetheus-agent-upgrade.service
+
+[Install]
+WantedBy=multi-user.target

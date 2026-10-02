@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Analysis;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Analysis;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Analysis;
@@ -12,41 +10,51 @@ public sealed class AnalysisPortfolioTests : BunitContext
 
     public AnalysisPortfolioTests() => _handler = BunitTestHelper.RegisterServices(this);
 
+    /// <summary>
+    /// Recette R-224: the filter bar above the grid is gone; the grid filters itself from its column headers,
+    /// whose checkable lists come from the filter-values endpoint (the rows are loaded page by page).
+    /// </summary>
     [Fact]
-    public void Filters_ExposeAccessibleNames()
+    public void FilterBar_IsReplacedByTheColumnHeaderFilters()
     {
-        _handler.SetPaginatedJsonResponse("api/projects", Array.Empty<ProjectDto>());
         _handler.SetJsonResponse("api/analysis/portfolio/projects", new List<AnalysisPortfolioProjectDto>());
+        _handler.SetJsonResponse("api/analysis/portfolio/filter-values", new AnalysisPortfolioFilterValuesDto
+        {
+            Organizations = ["Acme"],
+            Projects = ["Website"],
+            Scanners = ["semgrep"]
+        });
         _handler.SetPaginatedJsonResponse("api/analysis/portfolio", Array.Empty<AnalysisPortfolioRowDto>());
 
         var cut = Render<AnalysisPortfolio>();
 
-        cut.WaitForState(
-            () => cut.FindAll("[aria-label='Search']").Count == 1,
-            TimeSpan.FromSeconds(3));
-
-        var expectedLabels = new[]
-        {
-            "Search",
-            "Organization",
-            "Project",
-            "Pipeline",
-            "Category",
-            "Branch",
-            "Commit",
-            "From",
-            "To"
-        };
-
-        var labelsWithInvalidCount = expectedLabels
-            .Where(label => cut.FindAll($"[aria-label='{label}']").Count != 1)
-            .ToArray();
-        Assert.Empty(labelsWithInvalidCount);
-
-        foreach (var label in new[] { "Organization", "Pipeline", "From", "To" })
-            Assert.Single(cut.FindAll($"input[aria-label='{label}']"));
-
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            request.Url.Contains("api/analysis/portfolio/filter-values", StringComparison.Ordinal)), TimeSpan.FromSeconds(3));
+        Assert.Empty(cut.FindAll(".analysis-portfolio-filters"));
+        Assert.Empty(cut.FindAll("[aria-label='Search']"));
         Assert.Contains("aetheus-grid-fullheight", cut.Find(".analysis-table").ClassList);
+    }
+
+    /// <summary>Recette R-224: a header filter reaches the portfolio API as a column filter.</summary>
+    [Fact]
+    public async Task HeaderFilter_ReachesTheApi()
+    {
+        _handler.SetJsonResponse("api/analysis/portfolio/projects", new List<AnalysisPortfolioProjectDto>());
+        _handler.SetJsonResponse("api/analysis/portfolio/filter-values", new AnalysisPortfolioFilterValuesDto());
+        _handler.SetPaginatedJsonResponse("api/analysis/portfolio", Array.Empty<AnalysisPortfolioRowDto>());
+        var cut = Render<AnalysisPortfolio>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(new GridLoadArgs
+        {
+            Skip = 0,
+            Top = 25,
+            Filters = [new GridFilterDescriptor("Category", "Secrets", OmniDataGridFilterOperator.Equals)]
+        }));
+
+        Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("api/analysis/portfolio?", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Category", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=Secrets", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -76,7 +84,10 @@ public sealed class AnalysisPortfolioTests : BunitContext
         {
             Assert.Contains("analysis-portfolio-project-card", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("Aetheus", cut.Markup, StringComparison.Ordinal);
-            Assert.Contains("analysis-grade-a", cut.Markup, StringComparison.Ordinal);
+            // PLAN-003 lot 18: one rendering. The grade is the shared badge, A reading as healthy.
+            var grade = cut.Find(".analysis-portfolio-grade");
+            Assert.Equal("A", grade.TextContent.Trim());
+            Assert.Contains("omni-badge--success", grade.ClassName, StringComparison.Ordinal);
         });
     }
 

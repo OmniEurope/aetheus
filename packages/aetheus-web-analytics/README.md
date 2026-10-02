@@ -25,6 +25,21 @@ must return the framework's route template instead of the concrete path, for exa
 neither mechanism resolves the current pathname. The identity resolver shown above is appropriate only
 when every non-numeric path segment is guaranteed to be public static navigation text.
 
+A background heartbeat (every 75s, paused while the tab is hidden) refreshes the visit's server-side
+`LastSeenAtUtc` on the current route without inflating page-view counts. Call `identify(userId)` with an
+opaque id already known to the host application (never an email or other raw PII) to mark subsequent
+events as authenticated; the backend hashes it server-side into `AuthenticatedPseudonym` and never stores
+it raw. `window.__AETHEUS_ANALYTICS_USER__`, if set before `install()`, seeds the same identity.
+
+**`identify()` requires the Aetheus public ingest endpoint** (`api/ingest/web-analytics/v1/public/{siteId}`).
+The self-hosted endpoint shipped by the `Aetheus.WebAnalytics` Razor Class Library refuses an
+`authenticatedUserId` (`AnalyticsBrowserEvent` is declared `JsonUnmappedMemberHandling.Disallow`) and
+derives identity server-side, through `AetheusWebAnalyticsOptions.AuthenticatedUserIdResolver`. It accepts
+heartbeats, and a bare `signedIn: true` flag set by the `isSignedIn: () => boolean` option: a host whose
+users authenticate against another origin (a bearer-token API) can then count signed-in visits without
+sending any account or token. Such a visit is counted per network prefix and per month, never under a
+stable identity.
+
 The same source is packaged by the Razor Class Library at
 `/_content/Aetheus.WebAnalytics/0.1.0/aetheus-web-analytics.js`. Pin the exact version and its SHA-384 SRI
 value; do not use an unversioned mutable URL.

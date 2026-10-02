@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Front.Pages.Shared;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -44,14 +40,23 @@ public sealed class PipelineFleetTests : BunitContext
         var load = typeof(PipelineFleet).GetMethod(
             "LoadDataAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await (Task)load.Invoke(cut.Instance,
-            [new Radzen.LoadDataArgs { Skip = 0, Top = 25, OrderBy = "PipelineName desc" }])!);
+            [new GridLoadArgs { Skip = 0, Top = 25, OrderBy = "PipelineName desc" }])!);
         cut.Render();
         cut.WaitForState(() => cut.Markup.Contains("outdated", StringComparison.Ordinal), TimeSpan.FromSeconds(2));
         Assert.Contains("Current", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("Outdated", cut.Markup, StringComparison.Ordinal);
         Assert.Contains("Update", cut.Markup, StringComparison.Ordinal);
-        Assert.Single(_handler.Requests, request =>
-            request.Method == "GET" && request.Url.Contains("api/pipelines/fleet", StringComparison.Ordinal));
+        // PLAN-003 lot 15: the grid is now the shared wrapper, which asks for its own first page,
+        // and this test also drives LoadDataAsync by hand to check the sort. Two fleet calls are
+        // therefore expected; what must never happen is the SAME page being fetched twice, which is
+        // the defect the original single-call assertion was guarding against.
+        var fleetUrls = _handler.Requests
+            .Where(request => request.Method == "GET"
+                && request.Url.Contains("api/pipelines/fleet", StringComparison.Ordinal))
+            .Select(request => request.Url)
+            .ToList();
+        Assert.NotEmpty(fleetUrls);
+        Assert.Equal(fleetUrls.Distinct(StringComparer.Ordinal).Count(), fleetUrls.Count);
         Assert.Null(typeof(PipelineFleet).GetField(
             "_groups", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance));
         Assert.Contains(_handler.Requests, request =>
@@ -89,7 +94,8 @@ public sealed class PipelineFleetTests : BunitContext
     [Fact]
     public async Task FilterLoadFailure_RemainsVisibleAfterSuccessfulGridLoad()
     {
-        _handler.SetResponse("api/pipelines/templates", System.Net.HttpStatusCode.ServiceUnavailable);
+        // Recette R-224: the Template column's values replaced the templates dropdown; their failure still shows.
+        _handler.SetResponse(HttpMethod.Get, "api/pipelines/fleet/filter-values", System.Net.HttpStatusCode.ServiceUnavailable);
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>());
         _handler.SetJsonResponse("api/pipelines/fleet", new PaginatedResult<PipelineFleetItemDto>());
         var cut = Render<PipelineFleet>();
@@ -97,11 +103,35 @@ public sealed class PipelineFleetTests : BunitContext
             "LoadDataAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
 
         await cut.InvokeAsync(() => (Task)load.Invoke(
-            cut.Instance, [new Radzen.LoadDataArgs { Skip = 0, Top = 25 }])!);
+            cut.Instance, [new GridLoadArgs { Skip = 0, Top = 25 }])!);
         cut.Render();
 
         Assert.Contains("FiltersLoadError", cut.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain(">LoadError<", cut.Markup, StringComparison.Ordinal);
+    }
+
+    /// <summary>Recette R-224: a header filter reaches the fleet API as a column filter, the project picker
+    /// still travels as its own parameter.</summary>
+    [Fact]
+    public async Task HeaderFilter_ReachesTheApi()
+    {
+        _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto>());
+        _handler.SetJsonResponse("api/pipelines/fleet/filter-values", new PipelineFleetFilterValuesDto { Templates = ["ci"] });
+        _handler.SetJsonResponse("api/pipelines/fleet", new PaginatedResult<PipelineFleetItemDto>());
+        var cut = Render<PipelineFleet>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadDataAsync(new GridLoadArgs
+        {
+            Skip = 0,
+            Top = 25,
+            Filters = [new GridFilterDescriptor("Freshness", "Outdated", OmniDataGridFilterOperator.Equals)]
+        }));
+
+        Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("api/pipelines/fleet?", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Freshness", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=Outdated", StringComparison.Ordinal));
+        Assert.DoesNotContain("AllTemplates", cut.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -251,8 +281,31 @@ public sealed class PipelineFleetTests : BunitContext
 
         update.WaitForAssertion(() => Assert.Contains("Retry", update.Markup));
         promote.WaitForAssertion(() => Assert.Contains("Retry", promote.Markup));
-        Assert.Contains("Cancel", update.Markup);
-        Assert.Contains("Cancel", promote.Markup);
+        Assert.Contains("GoBack", update.Markup);
+        Assert.Contains("GoBack", promote.Markup);
+    }
+
+    [Theory]
+    [InlineData("Forbidden")]
+    [InlineData("NotFound")]
+    public void PreviewRefusedOrMissing_StatesTheReasonWithoutOfferingRetry(string status)
+    {
+        var code = Enum.Parse<System.Net.HttpStatusCode>(status);
+        _handler.SetResponse("fleet-update/preview", code);
+        _handler.SetResponse("promote-template/preview", code);
+
+        var update = Render<PipelineFleetUpdateDialog>(parameters => parameters
+            .Add(component => component.PipelineId, 4)
+            .Add(component => component.TargetVersion, 2));
+        var promote = Render<PromotePipelineTemplateDialog>(parameters => parameters
+            .Add(component => component.PipelineId, 5));
+
+        // Neither answer changes if the reader clicks again, so neither may offer a retry. The
+        // client flattened every non-2xx to null before, which is what made all three look alike.
+        update.WaitForAssertion(() => Assert.DoesNotContain("Retry", update.Markup));
+        promote.WaitForAssertion(() => Assert.DoesNotContain("Retry", promote.Markup));
+        Assert.Contains("omni-alert--warning", update.Markup, StringComparison.Ordinal);
+        Assert.Contains("omni-alert--warning", promote.Markup, StringComparison.Ordinal);
     }
 
     private static Task InvokePrivateAsync(object instance, string methodName)

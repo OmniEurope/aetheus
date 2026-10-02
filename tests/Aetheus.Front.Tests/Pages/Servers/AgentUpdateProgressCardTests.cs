@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers;
-using Aetheus.Shared.Enums;
-using Radzen;
+using Aetheus.Front.Components.Servers;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -65,17 +63,17 @@ public class AgentUpdateProgressCardTests
     // === PhaseBadge (private static) ===
 
     [Theory]
-    [InlineData(AgentUpdatePhase.Done, BadgeStyle.Success)]
-    [InlineData(AgentUpdatePhase.Failed, BadgeStyle.Danger)]
-    [InlineData(AgentUpdatePhase.AgentOffline, BadgeStyle.Warning)]
-    [InlineData(AgentUpdatePhase.Queued, BadgeStyle.Info)]
-    [InlineData(AgentUpdatePhase.Downloading, BadgeStyle.Info)]
-    [InlineData(AgentUpdatePhase.PickedUp, BadgeStyle.Info)]
-    [InlineData(AgentUpdatePhase.LaunchingUpdater, BadgeStyle.Info)]
-    public void PhaseBadge_ReturnsExpected(AgentUpdatePhase phase, BadgeStyle expected)
+    [InlineData(AgentUpdatePhase.Done, OmniTone.Success)]
+    [InlineData(AgentUpdatePhase.Failed, OmniTone.Danger)]
+    [InlineData(AgentUpdatePhase.AgentOffline, OmniTone.Warning)]
+    [InlineData(AgentUpdatePhase.Queued, OmniTone.Accent)]
+    [InlineData(AgentUpdatePhase.Downloading, OmniTone.Accent)]
+    [InlineData(AgentUpdatePhase.PickedUp, OmniTone.Accent)]
+    [InlineData(AgentUpdatePhase.LaunchingUpdater, OmniTone.Accent)]
+    public void PhaseBadge_ReturnsExpected(AgentUpdatePhase phase, OmniTone expected)
     {
         var method = CardType.GetMethod("PhaseBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [phase])!;
+        var result = (OmniTone)method.Invoke(null, [phase])!;
         Assert.Equal(expected, result);
     }
 
@@ -83,8 +81,8 @@ public class AgentUpdateProgressCardTests
     public void PhaseBadge_Null_ReturnsInfo()
     {
         var method = CardType.GetMethod("PhaseBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [null])!;
-        Assert.Equal(BadgeStyle.Info, result);
+        var result = (OmniTone)method.Invoke(null, [null])!;
+        Assert.Equal(OmniTone.Accent, result);
     }
 
     // === PhaseLabel (private instance - uses localizer so test the key mapping) ===
@@ -175,7 +173,7 @@ public class AgentUpdateProgressCardTests
         var localizer = new BunitTestHelper.StubLocalizer();
         CardType.GetProperty("L", Priv)!.SetValue(instance, localizer);
         CardType.GetProperty("Toast", Priv)!.SetValue(instance,
-            new Aetheus.Front.Services.NotifyHelper(new Radzen.NotificationService(), localizer));
+            new Aetheus.Front.Components.Shared.NotifyHelper(new OmniEurope.Blazor.Components.OmniOverlayService(new Microsoft.Extensions.Time.Testing.FakeTimeProvider()), localizer));
         return instance;
     }
 

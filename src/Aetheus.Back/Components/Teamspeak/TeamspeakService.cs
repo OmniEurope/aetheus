@@ -66,7 +66,7 @@ public class TeamspeakService(ITeamspeakRepository repo, IServerRepository serve
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetChannelsPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<TeamspeakChannelDto>
         {
             Items = items.Select(channel => new TeamspeakChannelDto
@@ -92,7 +92,7 @@ public class TeamspeakService(ITeamspeakRepository repo, IServerRepository serve
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetClientsPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<TeamspeakClientDto>
         {
             Items = items.Select(client => new TeamspeakClientDto
@@ -114,12 +114,16 @@ public class TeamspeakService(ITeamspeakRepository repo, IServerRepository serve
         };
     }
 
+    /// <summary>Recette R-210: what the clients grid's checkable Platform filter offers.</summary>
+    public async Task<TeamspeakFilterValuesDto> GetFilterValuesAsync(int serverId, CancellationToken ct = default) =>
+        new() { Platforms = await repo.GetClientPlatformsAsync(serverId, ct).ConfigureAwait(false) };
+
     public async Task<PaginatedResult<TeamspeakBanDto>> GetBansAsync(
         int serverId, PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await repo.GetBansPagedAsync(
-            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            serverId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<TeamspeakBanDto>
         {
             Items = items.Select(ban => new TeamspeakBanDto

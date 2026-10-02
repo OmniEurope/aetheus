@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Analysis;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 
 namespace Aetheus.Back.Tests.Analysis;
 
@@ -149,31 +147,6 @@ public sealed class AnalysisGradeEngineTests
         Assert.Equal(64, first.SnapshotHash.Length);
     }
 
-    [Fact]
-    public void CombineLatestDomains_PreservesOlderRequiredDomainsFromDifferentRuns()
-    {
-        var quality = Summary(
-            AnalysisGradeDomain.Reliability,
-            AnalysisGrade.B,
-            EvaluatedAt.AddMinutes(-5));
-        var security = Summary(
-            AnalysisGradeDomain.Security,
-            AnalysisGrade.C,
-            EvaluatedAt);
-
-        var summary = AnalysisGradeEngine.CombineLatestDomains([security, quality]);
-
-        Assert.Equal(AnalysisGrade.C, summary.OverallGrade);
-        Assert.Equal(AnalysisGradeDomain.Security, summary.LimitingDomain);
-        Assert.Equal(AnalysisGradeCompleteness.Complete, summary.Completeness);
-        Assert.Contains(summary.Domains, domain =>
-            domain.Domain == AnalysisGradeDomain.Reliability
-            && domain.Grade == AnalysisGrade.B);
-        Assert.Contains(summary.Domains, domain =>
-            domain.Domain == AnalysisGradeDomain.Security
-            && domain.Grade == AnalysisGrade.C);
-    }
-
     private static AnalysisReport Report(AnalysisCategory category, AnalysisMetric metric) => new()
     {
         Id = 4,
@@ -192,43 +165,6 @@ public sealed class AnalysisGradeEngineTests
 
     private static AnalysisRunContext Context(string yaml) =>
         new(1, 2, 3, "main", new string('a', 40), "main", PipelineYaml: yaml);
-
-    private static AnalysisGradeSummaryDto Summary(
-        AnalysisGradeDomain domain,
-        AnalysisGrade grade,
-        DateTime evaluatedAt) => new()
-        {
-            OverallGrade = grade,
-            MinimumGrade = AnalysisGrade.C,
-            Completeness = AnalysisGradeCompleteness.Complete,
-            LimitingDomain = domain,
-            CommitHash = new string('a', 40),
-            EvaluatedAt = evaluatedAt,
-            Domains =
-        [
-            new AnalysisGradeDomainDto
-            {
-                Domain = domain,
-                Grade = grade,
-                Required = true,
-                Completeness = AnalysisGradeCompleteness.Complete,
-                CommitHash = new string('a', 40),
-                EvaluatedAt = evaluatedAt,
-                Measures =
-                [
-                    new AnalysisGradeMeasureDto
-                    {
-                        Key = $"grade.{domain}",
-                        Domain = domain,
-                        Grade = grade,
-                        Required = true,
-                        Observed = true,
-                        ObservedValue = 1
-                    }
-                ]
-            }
-        ]
-        };
 
     private const string QualityYaml = """
         stages:

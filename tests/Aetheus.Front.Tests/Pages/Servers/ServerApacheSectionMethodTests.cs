@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -260,13 +257,13 @@ public class ServerApacheSectionMethodTests : BunitContext
 
     // === OpenConfigEditorAsync ===
 
-    // Hardened rule #3: OpenConfigEditorAsync opens an ApacheConfigEditorDialog via DialogService.
+    // Hardened rule #3: OpenConfigEditorAsync opens an ApacheConfigEditorDialog via OmniDialogService.
     // Assert ONLY that OnOpen fires, then close immediately (never await OpenAsync first).
     [Fact]
     public async Task OpenConfigEditorAsync_OpensDialog()
     {
         var cut = RenderSection();
-        var dialog = Services.GetRequiredService<DialogService>();
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         var opened = false;
         dialog.OnOpen += (_, _, _, _) => opened = true;
 
@@ -290,37 +287,6 @@ public class ServerApacheSectionMethodTests : BunitContext
 
         // SaveApacheVHostConfigAsync PUTs to the vhost config endpoint (site name in the path).
         Assert.Contains(_handler.Requests, r => r.Method == "PUT" && r.Url.Contains("api/servers/30/apache/vhosts/example.com/config"));
-    }
-
-    // === ShowConfirm / ConfirmAccepted / ConfirmCancelled ===
-
-    [Fact]
-    public void ShowConfirm_SetsState()
-    {
-        var cut = RenderSection();
-        typeof(ServerApacheSection).GetMethod("ShowConfirm", Priv)!.Invoke(cut.Instance, ["T", "M", (Func<Task>)(() => Task.CompletedTask)]);
-        Assert.True((bool)typeof(ServerApacheSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-    }
-
-    [Fact]
-    public async Task ConfirmAccepted_ExecutesAndHides()
-    {
-        var cut = RenderSection();
-        var executed = false;
-        typeof(ServerApacheSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerApacheSection).GetField("_confirmAction", Priv)!.SetValue(cut.Instance, (Func<Task>)(() => { executed = true; return Task.CompletedTask; }));
-        await (Task)typeof(ServerApacheSection).GetMethod("ConfirmAccepted", Priv)!.Invoke(cut.Instance, [])!;
-        Assert.False((bool)typeof(ServerApacheSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
-        Assert.True(executed);
-    }
-
-    [Fact]
-    public void ConfirmCancelled_HidesDialog()
-    {
-        var cut = RenderSection();
-        typeof(ServerApacheSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerApacheSection).GetMethod("ConfirmCancelled", Priv)!.Invoke(cut.Instance, []);
-        Assert.False((bool)typeof(ServerApacheSection).GetField("_confirmVisible", Priv)!.GetValue(cut.Instance)!);
     }
 
     // === ToggleFollow / StopFollow ===
@@ -356,9 +322,9 @@ public class ServerApacheSectionMethodTests : BunitContext
     // === GetStatusBadge ===
 
     [Theory]
-    [InlineData(true, BadgeStyle.Success)]
-    [InlineData(false, BadgeStyle.Danger)]
-    public void GetStatusBadge_ReturnsExpected(bool running, BadgeStyle expected)
+    [InlineData(true, OmniTone.Success)]
+    [InlineData(false, OmniTone.Danger)]
+    public void GetStatusBadge_ReturnsExpected(bool running, OmniTone expected)
     {
         Assert.Equal(expected, ServerApacheSection.GetStatusBadge(running));
     }

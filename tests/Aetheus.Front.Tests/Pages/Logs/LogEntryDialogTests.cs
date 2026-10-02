@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Logs;
+using Aetheus.Front.Components.Logs;
 using Aetheus.Front.Tests.TestDoubles;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Logs;
 
@@ -40,8 +39,8 @@ public class LogEntryDialogTests : BunitContext
             .Add(c => c.Message, "boom")
             .Add(c => c.Exception, "stack-trace-here"));
 
-        // First button in the action row is "Copy".
-        cut.FindAll("button")[0].Click();
+        // First button of the action row is "Copy" (each code block above has its own copy button).
+        cut.FindAll(".dialog-footer button")[0].Click();
 
         // The clipboard JS interop was invoked with message + exception joined.
         JSInterop.VerifyInvoke("navigator.clipboard.writeText");
@@ -54,7 +53,7 @@ public class LogEntryDialogTests : BunitContext
     {
         var cut = Render<LogEntryDialog>(p => p.Add(c => c.Message, "just the message"));
 
-        cut.FindAll("button")[0].Click();
+        cut.FindAll(".dialog-footer button")[0].Click();
 
         JSInterop.VerifyInvoke("navigator.clipboard.writeText");
         var invocation = JSInterop.Invocations["navigator.clipboard.writeText"].Single();
@@ -64,16 +63,16 @@ public class LogEntryDialogTests : BunitContext
     [Fact]
     public void Close_InvokesDialogClose()
     {
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
         var cut = Render<LogEntryDialog>(p => p.Add(c => c.Message, "boom"));
-        var spy = (SpyDialogService)Services.GetRequiredService<DialogService>();
+        var spy = (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
         Assert.False(spy.Closed);
         // Second button in the action row is "Close".
-        cut.FindAll("button")[1].Click();
+        cut.FindAll(".dialog-footer button")[1].Click();
 
         Assert.True(spy.Closed);
     }

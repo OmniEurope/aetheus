@@ -5,9 +5,28 @@ namespace Aetheus.Back.Components.Vaults;
 
 public class VaultRepository(AppDbContext db, TimeProvider timeProvider) : IVaultRepository
 {
+    /// <summary>Recette R-210 / R-224: the header filters of the vaults list.</summary>
+    internal static readonly GridQueryMap<Vault> Columns = new GridQueryMap<Vault>()
+        .Text("Name", v => v.Name)
+        .Text("ProjectName", v => v.Project != null ? v.Project.Name : null)
+        .Text("Description", v => v.Description)
+        .Number("SecretCount", v => v.Secrets.Count)
+        .Date("CreatedAt", v => v.CreatedAt)
+        .Date("UpdatedAt", v => v.UpdatedAt);
+
+    /// <summary>Recette R-210: the project names present across the vaults the caller can read.</summary>
+    public async Task<VaultFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default)
+    {
+        var query = db.Vaults.AsNoTracking().Where(v => v.Project != null);
+        if (accessibleIds is not null)
+            query = query.Where(v => accessibleIds.Contains(v.Id));
+        var names = await query.Select(v => v.Project!.Name).Distinct().ToListAsync(ct).ConfigureAwait(false);
+        return new VaultFilterValuesDto { ProjectNames = [.. names.Order(StringComparer.OrdinalIgnoreCase)] };
+    }
+
     public async Task<(List<Vault> Items, int TotalCount)> GetVaultsPagedAsync(
         string? search, int? projectId, int? environmentId, int? projectServerId, int page, int pageSize, List<int>? accessibleIds = null, CancellationToken ct = default,
-        string? sortBy = null, bool sortDescending = false)
+        string? sortBy = null, bool sortDescending = false, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.Vaults.AsNoTracking().AsQueryable();
 
@@ -24,14 +43,27 @@ public class VaultRepository(AppDbContext db, TimeProvider timeProvider) : IVaul
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(v => v.Name.Contains(search) || v.Description.Contains(search));
 
+        query = Columns.ApplyFilters(query, columnFilters);
+
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
-        var items = await query
+        var rows = query
             .Include(v => v.Project)
             .Include(v => v.Environment)
             .Include(v => v.ProjectServer)
-            .Include(v => v.Secrets)
-            .OrderByProperty(sortBy, sortDescending, v => v.Name, fallbackDescending: false)
+            .Include(v => v.Secrets);
+
+        // The list shows the owning project as its own column, but ProjectName is not a property of
+        // the entity: resolved by name it would miss and fall back to Name, so the sort header would
+        // move the arrow and leave the rows untouched. Mapped to the navigation, as BackupRepository
+        // and GitLightRepository already do for the same column.
+        IQueryable<Vault> ordered = string.Equals(sortBy, "ProjectName", StringComparison.OrdinalIgnoreCase)
+            ? sortDescending
+                ? rows.OrderByDescending(v => v.Project!.Name)
+                : rows.OrderBy(v => v.Project!.Name)
+            : rows.OrderByProperty(sortBy, sortDescending, v => v.Name, fallbackDescending: false);
+
+        var items = await ordered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsSplitQuery()

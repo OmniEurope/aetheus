@@ -1,0 +1,44 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<OmniStack Gap="OmniSpacing.Large" Class="omni-u-p-sm">
+    @if (!_editMode)
+    {
+        <OmniFormField Label="@L["Type"]" For="oe-formfield-pages-projects-projectdetailsections-projectserverdialog-1">
+            <OmniDropDown Id="oe-formfield-pages-projects-projectdetailsections-projectserverdialog-1" TValue="ProjectServerType" Options="@(_serverTypes.ToOptions(item => (ProjectServerType)item, item => item))" Value="@Type"
+                            ValueChanged="@((ProjectServerType type) => OnTypeChanged(type))" ValueExpression="@(() => Type)" />
+        </OmniFormField>
+
+        @if (Type == ProjectServerType.AgentServer)
+        {
+            <OmniFormField Label="@L["AgentServer"]" For="oe-formfield-pages-projects-projectdetailsections-projectserverdialog-2">
+                <OmniDropDown Id="oe-formfield-pages-projects-projectdetailsections-projectserverdialog-2" TValue="int?" Options="@(AgentServers.ToOptions(item => (int?)item.Id, item => item.Name))" Value="@ServerId"
+                                Placeholder="@L["SelectServer"]"
+                                ValueChanged="@((int? id) => OnAgentServerSelected(id))" ValueExpression="@(() => ServerId)" />
+            </OmniFormField>
+        }
+    }
+
+    <OmniFormField For="oe-pages-projects-projectdetailsections-projectserverdialog-3"><LabelContent>@L["DisplayName"]</LabelContent><ChildContent>
+        <OmniTextBox @bind-Value="DisplayName" maxlength="200" Id="oe-pages-projects-projectdetailsections-projectserverdialog-3" />
+    </ChildContent></OmniFormField>
+
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="8">
+            <OmniFormField For="oe-pages-projects-projectdetailsections-projectserverdialog-4" Class="omni-u-w-100"><LabelContent>@L["Host"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="Host" maxlength="500" Id="oe-pages-projects-projectdetailsections-projectserverdialog-4" />
+            </ChildContent></OmniFormField>
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="4">
+            <OmniFormField For="oe-pages-projects-projectdetailsections-projectserverdialog-numeric-1"><LabelContent>@L["Port"]</LabelContent><ChildContent><OmniNumeric TValue="int?" @bind-Value="Port" Minimum="1" Maximum="65535" Id="oe-pages-projects-projectdetailsections-projectserverdialog-numeric-1" /></ChildContent></OmniFormField>
+        </OmniColumn>
+    </OmniRow>
+
+    <OmniFormField For="oe-pages-projects-projectdetailsections-projectserverdialog-6"><LabelContent>@L["Notes"]</LabelContent><ChildContent>
+        <OmniTextArea @bind-Value="Notes" MaxLength="2000" Rows="2" Id="oe-pages-projects-projectdetailsections-projectserverdialog-6" />
+    </ChildContent></OmniFormField>
+
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End">
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnSubmit" Class="@(Saving ? "btn-busy" : null)" Busy="@(Saving)"><OmniIcon Name="@MaterialIconMap.Resolve((_editMode ? "save" : "add"))" /> <span>@(_editMode ? L["Save"] : L["Add"])</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnCancel"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+    </OmniStack>
+</OmniStack>

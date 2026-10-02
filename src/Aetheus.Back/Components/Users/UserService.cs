@@ -12,7 +12,7 @@ public class UserService(IUserRepository repo, IHttpContextAccessor httpContextA
     {
         var (page, pageSize) = request.Normalize();
         var (items, totalCount) = await repo.GetUsersPagedProjectedAsync(
-            request.Search, page, pageSize, ct, request.SortBy, request.SortDescending)
+            request.Search, page, pageSize, ct, request.SortBy, request.SortDescending, request.Filters)
             .ConfigureAwait(false);
 
         return new PaginatedResult<UserDto>

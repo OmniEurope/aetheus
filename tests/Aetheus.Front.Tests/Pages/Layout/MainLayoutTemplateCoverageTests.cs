@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs.Organizations;
-using Aetheus.Shared.Enums;
+using Aetheus.Shared.Components.Organizations;
 using Bunit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using NSubstitute;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -72,9 +71,10 @@ public class MainLayoutTemplateCoverageTests : BunitContext
         RegisterWithAuth();
         var cut = Render<MainLayout>();
 
-        // The help action button and the user button live in the auth header.
+        // The help action button and the application menu, its trigger carrying the user name, live in the
+        // auth header.
         Assert.Contains("header-action-btn", cut.Markup);
-        Assert.Contains("display-name", cut.Markup);
+        Assert.Equal("user", cut.Find(".omni-header .omni-app-menu__trigger-name").TextContent);
     }
 
     // ── Skip-to-content link is always present once the chrome renders (line 12)
@@ -87,6 +87,15 @@ public class MainLayoutTemplateCoverageTests : BunitContext
 
         Assert.Contains("skip-link", cut.Markup);
         Assert.Contains("#main-content", cut.Markup);
+    }
+
+    private const string MenuTrigger = ".omni-app-menu__trigger";
+    private const string MenuCard = ".omni-app-menu__card";
+
+    private void OpenMenu(IRenderedComponent<MainLayout> cut)
+    {
+        cut.Find(MenuTrigger).Click();
+        cut.WaitForElement(MenuCard, TimeSpan.FromSeconds(10));
     }
 
     // ── Admin user, orgs loaded, no available orgs → "AllOrganizations" badge ──
@@ -102,19 +111,17 @@ public class MainLayoutTemplateCoverageTests : BunitContext
         var cut = Render<MainLayout>();
 
         // Force the "loaded but empty" state so the admin badge branch renders.
-        // (IsLoaded has a private setter; clicking the user button re-renders the menu.)
+        // (IsLoaded has a private setter; opening the menu re-renders it.)
         typeof(ActiveOrganizationService)
             .GetProperty("IsLoaded")!
             .SetValue(orgs, true);
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card", TimeSpan.FromSeconds(10));
+        OpenMenu(cut);
 
-        Assert.Contains("AllOrganizations", cut.Markup);
+        // The application's own row sits in OE's slot for it, under the identity.
+        Assert.Contains("AllOrganizations", cut.Find(".omni-app-menu__extra").TextContent, StringComparison.Ordinal);
     }
 
-    // ── Orgs loaded with available orgs → dropdown in the user menu ────────────
-    // Replaces the former top-bar loading-placeholder test: the placeholder was
-    // dropped when the picker moved into the (open-on-demand) user menu.
+    // ── Orgs loaded with available orgs → dropdown in the application menu ─────
 
     [Fact]
     public void OrgsLoaded_RendersOrgPickerInUserMenu()
@@ -124,44 +131,38 @@ public class MainLayoutTemplateCoverageTests : BunitContext
 
         var cut = Render<MainLayout>();
 
-        // Seed the "loaded with orgs" state AFTER the initial render (mirrors
-        // AdminUser_OrgsLoadedEmpty_RendersAllOrganizationsBadge): seeding before the
-        // render races with MainLayout.OnInitializedAsync's async org bootstrap, which
-        // made this test flaky under coverage instrumentation on CI. Clicking the user
-        // button re-renders the menu against the now-set state.
+        // Seed the "loaded with orgs" state AFTER the initial render: seeding before the render races
+        // with MainLayout.OnInitializedAsync's async org bootstrap, which made this test flaky under
+        // coverage instrumentation on CI. Opening the menu re-renders it against the now-set state.
         typeof(ActiveOrganizationService).GetProperty("Available")!
             .SetValue(orgs, new List<MyOrganizationDto>
             {
                 new(42, "Acme", "acme", OrganizationRole.Owner)
             });
         typeof(ActiveOrganizationService).GetProperty("IsLoaded")!.SetValue(orgs, true);
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card", TimeSpan.FromSeconds(10));
+        OpenMenu(cut);
 
-        // The active-organization dropdown now renders inside the user menu.
-        Assert.Contains("user-menu-org-picker", cut.Markup);
+        Assert.Single(cut.FindAll(".omni-app-menu__extra .user-menu-org-picker"));
     }
 
-    // ── Language label badge shows the current language (line 88) ─────────────
+    // ── Language row: the two languages, the current one selected ─────────────
 
     [Fact]
-    public void UserMenu_RendersCurrentLanguageBadge()
+    public void UserMenu_OffersBothLanguages_TheCurrentOneSelected()
     {
         RegisterWithAuth();
         var cut = Render<MainLayout>();
 
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card", TimeSpan.FromSeconds(10));
+        OpenMenu(cut);
 
-        // _currentLangLabel resolves to EN/FR depending on culture - assert one is shown.
-        Assert.True(
-            cut.Markup.Contains(">EN<") || cut.Markup.Contains(">FR<") ||
-            cut.Markup.Contains("EN") || cut.Markup.Contains("FR"),
-            "Expected a language badge (EN/FR) in the open user menu.");
-        Assert.Contains("Language", cut.Markup);
+        var menu = cut.FindComponent<OmniAppMenu>().Instance;
+        Assert.Equal(["fr-FR", "en"], menu.Languages!.Select(language => language.Code));
+        Assert.Equal(["LanguageFrench", "LanguageEnglish"], menu.Languages!.Select(language => language.Name));
+        Assert.Equal(MainLayout.CurrentLanguage, menu.Language);
+        Assert.Single(cut.FindAll(".omni-app-menu__language"));
     }
 
-    // ── Settings menu row click → navigates to /settings (line 100) ───────────
+    // ── Settings row click → navigates to /settings ───────────────────────────
 
     [Fact]
     public void UserMenu_SettingsRowClick_NavigatesToSettings()
@@ -170,61 +171,102 @@ public class MainLayoutTemplateCoverageTests : BunitContext
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         var cut = Render<MainLayout>();
 
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card", TimeSpan.FromSeconds(10));
+        OpenMenu(cut);
+        cut.Find(".omni-app-menu__settings").Click();
 
-        // The settings row is the menu section whose click handler navigates to /settings.
-        var settingsRow = cut.FindAll(".user-menu-section-clickable")
-            .First(el => el.TextContent.Contains("Settings"));
-        settingsRow.Click();
-
-        // Observe the navigation produced by the rendered event callback. Under the full parallel
-        // suite, bUnit can complete the click dispatch just after Click() returns even though the
-        // handler itself is synchronous (the same interaction boundary as the async logout below).
+        // The menu closes, then raises OnSettings; observe the navigation it produces rather than racing
+        // the dispatch under the full parallel suite.
         cut.WaitForAssertion(
             () => Assert.Contains("settings", nav.Uri),
             TimeSpan.FromSeconds(10));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(MenuCard)), TimeSpan.FromSeconds(10));
     }
 
-    // ── Logout menu row click → navigates to /login (line 106) ────────────────
+    // ── Sign-out button click → navigates to /login ───────────────────────────
 
     [Fact]
-    public void UserMenu_LogoutRowClick_NavigatesToLogin()
+    public void UserMenu_SignOutClick_NavigatesToLogin()
     {
         RegisterWithAuth();
         var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
         var cut = Render<MainLayout>();
 
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card", TimeSpan.FromSeconds(10));
+        OpenMenu(cut);
 
-        var logoutRow = cut.FindAll(".user-menu-section-clickable")
-            .First(el => el.TextContent.Contains("Logout"));
-        logoutRow.Click();
+        // Recette R-389, kept by OE: a grey button on the menu's last line, beside the version.
+        var lastLine = cut.Find(MenuCard).Children.Last();
+        Assert.Contains("omni-app-menu__footer", lastLine.ClassList);
+        var signOut = lastLine.QuerySelector("button.omni-app-menu__sign-out")!;
+        Assert.Contains("omni-button--secondary", signOut.ClassList);
+        signOut.Click();
 
-        // The click handler awaits two localStorage removals before navigating. Under the full
-        // parallel CI suite that continuation can complete just after Click() returns, so observe
-        // the user-visible navigation instead of racing the async logout continuation.
+        // The sign-out awaits the realtime stop and two localStorage removals before navigating; observe
+        // the user-visible navigation instead of racing that continuation.
         cut.WaitForAssertion(
             () => Assert.Contains("login", nav.Uri),
             TimeSpan.FromSeconds(10));
     }
 
-    // ── User-menu backdrop click closes the menu (line 77) ────────────────────
+    // ── The menu is OE's popover: trigger toggles, dismiss closes ─────────────
 
     [Fact]
-    public void UserMenu_BackdropClick_ClosesMenu()
+    public void UserMenu_TriggerClick_OpensPanelWithMenuCard()
     {
         RegisterWithAuth();
         var cut = Render<MainLayout>();
+        Assert.Empty(cut.FindAll(MenuCard));
 
-        cut.Find(".header-user-btn").Click();
-        cut.WaitForElement(".user-menu-card", TimeSpan.FromSeconds(10));
-        Assert.Contains("user-menu-card", cut.Markup);
+        OpenMenu(cut);
 
-        cut.Find(".user-menu-backdrop").Click();
+        Assert.Equal("true", cut.Find(MenuTrigger).GetAttribute("aria-expanded"));
+    }
+
+    [Fact]
+    public void UserMenu_SecondTriggerClick_ClosesPanel()
+    {
+        RegisterWithAuth();
+        var cut = Render<MainLayout>();
+        OpenMenu(cut);
+
+        cut.Find(MenuTrigger).Click();
+
         cut.WaitForAssertion(
-            () => Assert.DoesNotContain("user-menu-card", cut.Markup),
+            () => Assert.Empty(cut.FindAll(MenuCard)),
             TimeSpan.FromSeconds(10));
+        Assert.Equal("false", cut.Find(MenuTrigger).GetAttribute("aria-expanded"));
+    }
+
+    // No full-page backdrop: a click outside (fromKeyboard: false) or Escape (fromKeyboard: true) reaches
+    // the popover through omni-focus.js, which calls OnDismissRequestedAsync.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UserMenu_DismissRequest_EscapeOrOutsideClick_ClosesPanel(bool fromKeyboard)
+    {
+        RegisterWithAuth();
+        var cut = Render<MainLayout>();
+        OpenMenu(cut);
+
+        var popover = cut.FindComponent<OmniAppMenu>().FindComponent<OmniPopover>();
+        await cut.InvokeAsync(() => popover.Instance.OnDismissRequestedAsync(fromKeyboard));
+
+        cut.WaitForAssertion(
+            () => Assert.Empty(cut.FindAll(MenuCard)),
+            TimeSpan.FromSeconds(10));
+    }
+
+    // ── Navigation closes the menu the layout holds open ─────────────────────
+
+    [Fact]
+    public void UserMenu_Navigation_ClosesIt()
+    {
+        RegisterWithAuth();
+        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+        var cut = Render<MainLayout>();
+        OpenMenu(cut);
+
+        cut.InvokeAsync(() => nav.NavigateTo("/servers"));
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(MenuCard)), TimeSpan.FromSeconds(10));
     }
 }

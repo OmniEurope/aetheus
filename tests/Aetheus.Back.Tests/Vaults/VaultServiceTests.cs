@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Vaults;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
@@ -238,6 +236,35 @@ public class VaultServiceTests
             Arg.Any<CancellationToken>());
         await _transactionMock.Received(1).BeginTransactionAsync(Arg.Any<CancellationToken>());
         await _transactionMock.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateSecretAsync_HistoryKeepsTheNameAndAuthor_NeverTheValue()
+    {
+        var accessor = new Microsoft.AspNetCore.Http.HttpContextAccessor
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                    [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "alice")], "test"))
+            }
+        };
+        var sut = new VaultService(_repoMock, _encryptionMock, _transactionMock, _auditMock,
+            Substitute.For<IEntityChangeNotifier>(), TimeProvider.System, Substitute.For<IMemoryCache>(), accessor);
+        _repoMock.FindSecretAsync(10, Arg.Any<CancellationToken>())
+            .Returns(new VaultSecret { Id = 10, VaultId = 1, Key = "OLD", EncryptedValue = "old-enc" });
+        _encryptionMock.EncryptValue("new-secret").Returns("new-enc");
+        _repoMock.GetNextVersionAsync(10, Arg.Any<CancellationToken>()).Returns(2);
+        VaultSecretVersion? written = null;
+        await _repoMock.AddSecretVersionAsync(Arg.Do<VaultSecretVersion>(v => written = v), Arg.Any<CancellationToken>());
+
+        await sut.UpdateSecretAsync(1, 10, new UpdateVaultSecretRequest { Key = "NEW", Value = "new-secret" }, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(written);
+        Assert.Equal("NEW", written.Key);
+        Assert.Equal("alice", written.ChangedBy);
+        Assert.Equal(string.Empty, written.EncryptedValue);
+        Assert.True(written.ChangedAt.Year > 2000);
     }
 
     [Fact]

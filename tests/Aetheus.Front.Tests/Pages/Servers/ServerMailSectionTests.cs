@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -41,6 +38,7 @@ public class ServerMailSectionTests : BunitContext
             TotalCount = 1
         });
         _handler.SetJsonResponse("api/servers/10/mail/aliases", new PaginatedResult<MailAliasDto>());
+        _handler.SetJsonResponse("api/servers/10/mail/diagnostics", new MailDiagnosticsDto());
     }
 
     private IRenderedComponent<ServerMailSection> RenderSection(ServerDetailDto? server = null)
@@ -128,7 +126,7 @@ public class ServerMailSectionTests : BunitContext
         // The installed-server path re-runs LoadDataAsync, which re-GETs the mail domains list.
         // Clear the initial-render requests so we observe only the refresh-triggered fetch.
         _handler.Requests.Clear();
-        cut.InvokeAsync(cut.Instance.HandleTaskCompleted);
+        cut.InvokeAsync(() => cut.Instance.HandleTaskCompleted(new TaskCompletedNotification { TaskId = 1, ServerId = 10 }));
 
         cut.WaitForAssertion(() =>
             Assert.Contains(_handler.Requests, r => r.Method == "GET" && r.Url.Contains("api/servers/10/mail/domains")),
@@ -142,7 +140,7 @@ public class ServerMailSectionTests : BunitContext
 
         var method = typeof(ServerMailSection).GetMethod("ShowConfirm", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["Title", "Message", (Func<Task>)(() => Task.CompletedTask)])!);
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
 
         Assert.Equal("Title", dialog.LastTitle);
         Assert.Equal("Message", dialog.LastConfirmMessage);
@@ -154,7 +152,7 @@ public class ServerMailSectionTests : BunitContext
         var cut = RenderSection();
         var executed = false;
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.ConfirmResult = true;
         var method = typeof(ServerMailSection).GetMethod("ShowConfirm", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, ["Title", "Message", (Func<Task>)(() => { executed = true; return Task.CompletedTask; })])!);
@@ -188,19 +186,6 @@ public class ServerMailSectionTests : BunitContext
     }
 
     [Fact]
-    public async Task FetchLogsAsync_QueuesLogTask()
-    {
-        _handler.SetJsonResponse("api/servers/10/mail/logs", true);
-        var cut = RenderSection();
-
-        var method = typeof(ServerMailSection).GetMethod("FetchLogsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await (Task)method.Invoke(cut.Instance, [])!;
-
-        // GetMailLogsAsync POSTs the log request to the server's mail/logs endpoint.
-        Assert.Contains(_handler.Requests, r => r.Method == "POST" && r.Url.Contains("api/servers/10/mail/logs"));
-    }
-
-    [Fact]
     public async Task ShowDnsRecordsAsync_SetsDnsRecordsAndShowsDialog()
     {
         var dns = new MailDnsRecordsDto
@@ -219,7 +204,7 @@ public class ServerMailSectionTests : BunitContext
 
         var dnsField = typeof(ServerMailSection).GetField("_dnsRecords", BindingFlags.NonPublic | BindingFlags.Instance)!;
         Assert.NotNull(dnsField.GetValue(cut.Instance));
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         Assert.Equal(typeof(MailOperationDialog), dialog.LastComponent);
         Assert.Equal(MailDialogMode.DnsRecords, dialog.LastParameters!["Mode"]);
         Assert.Same(dnsField.GetValue(cut.Instance), dialog.LastParameters["DnsRecords"]);

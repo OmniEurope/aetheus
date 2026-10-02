@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
+using System.Text.RegularExpressions;
+using Aetheus.Front.Tests.Architecture;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Shared;
@@ -21,9 +21,26 @@ public sealed class AvailabilitySparklineTests : BunitContext
 
         var cut = Render<AvailabilitySparkline>(p => p.Add(c => c.Samples, samples));
 
-        Assert.Equal(2, cut.FindAll("rect").Count);
-        Assert.Contains("var(--rz-success)", cut.Markup);
-        Assert.Contains("var(--rz-danger)", cut.Markup);
+        var bars = cut.FindAll("rect");
+        Assert.Equal(2, bars.Count);
+        Assert.Contains("availability-sparkline-bar--up", bars[0].ClassName);
+        Assert.Contains("availability-sparkline-bar--down", bars[1].ClassName);
+        Assert.Null(bars[0].GetAttribute("fill"));
+        Assert.Equal("Uptime24hLegend", cut.Find("svg > title").TextContent);
+    }
+
+    /// <summary>Recette R-440: the bars were black because their colour named tokens that exist
+    /// nowhere. The classes must resolve to the OE status tokens in app.css.</summary>
+    [Theory]
+    [InlineData("availability-sparkline-bar--up", "--omni-color-success")]
+    [InlineData("availability-sparkline-bar--down", "--omni-color-danger")]
+    public void BarClass_FillsWithTheOeStatusToken(string cssClass, string token)
+    {
+        var css = File.ReadAllText(Path.Combine(RepositoryScan.Root, "src", "Aetheus.Front", "wwwroot", "css", "app.css"));
+
+        var rule = Regex.Match(css, @"\." + Regex.Escape(cssClass) + @"\s*\{(?<body>[^}]*)\}");
+        Assert.True(rule.Success, $"app.css has no .{cssClass} rule");
+        Assert.Contains($"fill: var({token})", rule.Groups["body"].Value, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -47,6 +64,6 @@ public sealed class AvailabilitySparklineTests : BunitContext
         var cut = Render<AvailabilitySparkline>(parameters => parameters.Add(component => component.Samples, samples));
 
         Assert.Equal(48, cut.FindAll("rect").Count);
-        Assert.Contains("var(--rz-danger)", cut.Markup, StringComparison.Ordinal);
+        Assert.Single(cut.FindAll("rect.availability-sparkline-bar--down"));
     }
 }

@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Aetheus.Agent.Core.Operations;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aetheus.Agent.Core.Tests;

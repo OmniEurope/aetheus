@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Alerts;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Repositories;

@@ -11,6 +11,12 @@ public interface IUserChangeNotifier
     /// <see cref="UserHub"/>. Called after the change is persisted and the authz cache invalidated.
     /// </summary>
     Task NotifyPermissionsChangedAsync(int userId, string reason, CancellationToken ct = default);
+
+    /// <summary>
+    /// Recette R-182: pushes <c>NotificationsChanged</c> to every connection of the given users, so
+    /// their bell, menu badge and /notifications page reload without waiting for the poll.
+    /// </summary>
+    Task NotifyNotificationsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -22,4 +28,10 @@ public sealed class UserChangeNotifier(IHubContext<UserHub> hub) : IUserChangeNo
 {
     public Task NotifyPermissionsChangedAsync(int userId, string reason, CancellationToken ct = default)
         => hub.Clients.User(userId.ToString()).SendAsync("PermissionsChanged", reason, ct);
+
+    public Task NotifyNotificationsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken ct = default) =>
+        userIds.Count == 0
+            ? Task.CompletedTask
+            : hub.Clients.Users(userIds.Distinct().Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList())
+                .SendAsync("NotificationsChanged", ct);
 }

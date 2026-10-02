@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: EUPL-1.2
+# Test corpus for .aetheus/security-rules/opengrep/aetheus-compose.yml (opengrep scan --test; a YAML target is named *.test.yaml).
+services:
+  exposed:
+    image: example/app:1.0
+    # ruleid: aetheus.compose.host-network
+    network_mode: host
+    # ruleid: aetheus.compose.added-capability
+    cap_add:
+      - NET_ADMIN
+    ports:
+      # ruleid: aetheus.compose.port-on-all-interfaces
+      - "0.0.0.0:8080:8080"
+  contained:
+    image: example/app:1.0
+    # ok: aetheus.compose.host-network
+    network_mode: bridge
+    ports:
+      # ok: aetheus.compose.port-on-all-interfaces
+      - "127.0.0.1:8081:8080"

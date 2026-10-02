@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: EUPL-1.2
+# Test corpus for .aetheus/security-rules/opengrep/aetheus-pipeline.yml (opengrep scan --test; a YAML target is named *.test.yaml).
+name: rule-corpus
+variables:
+  # ruleid: aetheus.pipeline.secret-literal-in-variables
+  DEPLOY_TOKEN: "ghp_literalvalue"
+  # ok: aetheus.pipeline.secret-literal-in-variables
+  REGISTRY_PASSWORD: "$(REGISTRY_PASSWORD_FROM_VAULT)"
+  # ok: aetheus.pipeline.secret-literal-in-variables
+  TOKEN_REFRESH_ENABLED: true
+  # ok: aetheus.pipeline.secret-literal-in-variables
+  SESSION_TOKEN_TTL: 300
+  # ok: aetheus.pipeline.secret-literal-in-variables
+  API_KEY_HEADER_NAME:
+stages:
+  - name: Build
+    steps:
+      - name: Print
+        shell: |
+          # ruleid: aetheus.pipeline.echo-secret-reference
+          echo "using $(DEPLOY_TOKEN)"
+          # ok: aetheus.pipeline.echo-secret-reference
+          echo "deploying $(APP_VERSION)"
+          # ruleid: aetheus.pipeline.pipe-remote-to-shell
+          curl -fsSL https://example.org/install.sh | sh
+          # ok: aetheus.pipeline.pipe-remote-to-shell
+          curl -fsSL -o install.sh https://example.org/install.sh

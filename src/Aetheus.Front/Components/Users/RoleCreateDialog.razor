@@ -1,0 +1,24 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+<EditForm Model="_model" OnValidSubmit="OnSubmit">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniStack Gap="OmniSpacing.Large">
+        <OmniFormField For="oe-pages-users-rolecreatedialog-1"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+            <OmniTextBox @bind-Value="_model.Name" maxlength="50" aria-label="@L["Name"]" Id="oe-pages-users-rolecreatedialog-1" />
+            <ValidationMessage For="@(() => _model.Name)" />
+        </ChildContent></OmniFormField>
+        <OmniFormField For="oe-pages-users-rolecreatedialog-2"><LabelContent>@L["Description"]</LabelContent><ChildContent>
+            <OmniTextArea @bind-Value="_model.Description" MaxLength="200" Rows="3" aria-label="@L["Description"]" Id="oe-pages-users-rolecreatedialog-2" />
+        </ChildContent></OmniFormField>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <OmniAlert Severity="OmniSeverity.Danger"><Icon><OmniIcon Name="OmniIconName.Error" /></Icon><ChildContent>@_error</ChildContent></OmniAlert>
+        }
+
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Justify="OmniJustification.End" Class="omni-u-mt-sm">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@Cancel"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+        </OmniStack>
+    </OmniStack>
+</EditForm>

@@ -14,11 +14,21 @@ public class PluginRepository(AppDbContext db) : IPluginRepository
             .ConfigureAwait(false);
     }
 
+    public Task<List<string>> GetAuthorsAsync(CancellationToken ct = default) =>
+        db.PluginRegistrations.AsNoTracking()
+            .Where(plugin => plugin.Author != null && plugin.Author != "")
+            .Select(plugin => plugin.Author!)
+            .Distinct()
+            .OrderBy(author => author)
+            .ToListAsync(ct);
+
     public async Task<(List<PluginRegistration> Items, int TotalCount)> GetPageAsync(
         string? search, string? sortBy, bool sortDescending,
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? columnFilters = null)
     {
-        var query = db.PluginRegistrations.AsNoTracking();
+        // Recette R-224: the grid's column header filters, before the count.
+        var query = PluginListQuery.Columns.ApplyFilters(db.PluginRegistrations.AsNoTracking(), columnFilters);
         if (!string.IsNullOrWhiteSpace(search))
         {
             var normalized = search.Trim().ToLowerInvariant();

@@ -10,8 +10,6 @@ using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -91,6 +89,27 @@ public class ReleaseServiceTests
         Assert.Equal(3, result.Items[0].SourcePipelineId);
         Assert.Equal("release-orchestrator", result.Items[0].SourcePipelineName);
         Assert.Equal(42, result.Items[0].PipelineRunId);
+    }
+
+    /// <summary>R-10: "Published" with "Failed" beside it says a deployment of this release failed.</summary>
+    [Fact]
+    public async Task GetReleasesAsync_ShowsTheOutcomeOfTheRunTheReleaseLastWentThrough()
+    {
+        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>(), null, false)
+            .Returns(([
+                new Release { Id = 1, ProjectId = 1, Version = "c-failed-deploy", Status = ReleaseStatus.Published, PipelineRunId = 2367, Project = new Project { Name = "App" } },
+                new Release { Id = 2, ProjectId = 1, Version = "c-never-run", Status = ReleaseStatus.Detected, Project = new Project { Name = "App" } }
+            ], 2));
+        _pipelineRepoMock.GetRunStatusesByIdsAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 2367 })),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, PipelineStatus> { [2367] = PipelineStatus.Failed });
+
+        var result = await _sut.GetReleasesAsync(
+            null, new PaginationRequest { Page = 1, PageSize = 10 }, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(PipelineStatus.Failed, result.Items[0].PipelineRunStatus);
+        Assert.Null(result.Items[1].PipelineRunStatus);
     }
 
     [Fact]
@@ -456,6 +475,64 @@ public class ReleaseServiceTests
         await _transactionMock.DidNotReceive().RollbackAsync(Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// Recette R2-001: the deploy run records the candidate's release as deployed with its OWN workspace
+    /// head, which may be a newer develop commit that was never deployed. The release keeps the commit
+    /// its candidate built; a branch advanced onto the release would otherwise name the wrong commit.
+    /// </summary>
+    [Theory]
+    [InlineData(true, ReleaseStatus.Published)] // Record release: marks the candidate as deployed
+    [InlineData(false, ReleaseStatus.Deployed)] // Rollback: demotes the release this run deployed
+    public async Task CreateReleaseFromPipelineAsync_RecordingDeploymentState_KeepsTheCandidateCommit(
+        bool deployed, ReleaseStatus statusBefore)
+    {
+        const string candidateCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string deployRunHead = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var existing = new Release
+        {
+            Id = 7,
+            ProjectId = 1,
+            Version = "1.1.0",
+            Status = statusBefore,
+            PipelineRunId = 43,
+            CommitHash = candidateCommit
+        };
+        _repoMock.GetDeployedProjectReleasesAsync(1, Arg.Any<CancellationToken>()).Returns([]);
+        _repoMock.FindByVersionAsync(1, "1.1.0", Arg.Any<CancellationToken>()).Returns(existing);
+        _artifactRepoMock.GetByRunAsync(43, Arg.Any<CancellationToken>()).Returns([]);
+        SetupHubClients();
+
+        await _sut.CreateReleaseFromPipelineAsync(
+            1, 43, "1.1.0", null, commitHash: deployRunHead, deployed: deployed,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(candidateCommit, existing.CommitHash);
+        Assert.Equal(deployed ? ReleaseStatus.Deployed : ReleaseStatus.Published, existing.Status);
+    }
+
+    [Fact]
+    public async Task CreateReleaseFromPipelineAsync_RepublishingAVersion_StillRecordsTheNewCommit()
+    {
+        var existing = new Release
+        {
+            Id = 7,
+            ProjectId = 1,
+            Version = "1.1.0",
+            Status = ReleaseStatus.Published,
+            PipelineRunId = 40,
+            CommitHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        };
+        _repoMock.FindByVersionAsync(1, "1.1.0", Arg.Any<CancellationToken>()).Returns(existing);
+        _artifactRepoMock.GetByRunAsync(43, Arg.Any<CancellationToken>()).Returns([]);
+        SetupHubClients();
+
+        await _sut.CreateReleaseFromPipelineAsync(
+            1, 43, "1.1.0", null, commitHash: "cccccccccccccccccccccccccccccccccccccccc",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("cccccccccccccccccccccccccccccccccccccccc", existing.CommitHash);
+    }
+
     [Fact]
     public async Task CreateReleaseFromPipelineAsync_LinksValidatedArtifactsFromCiRun()
     {
@@ -711,5 +788,49 @@ public class ReleaseServiceTests
 
         Assert.Equal(3, result[0].SourcePipelineId);
         Assert.Equal("release-orchestrator", result[0].SourcePipelineName);
+    }
+
+    [Fact]
+    public async Task GetReleasesAsync_ResolvesTheSourcePipelineFilter_ToTheReleasesOfThatRootPipeline()
+    {
+        // Recette R-224: the pipeline column shows the root of the release run's trigger chain, so its
+        // filter is resolved to release ids; the stored columns go to the query as they are.
+        _repoMock.GetReleaseFilterFactsAsync(null, Arg.Any<List<int>?>(), null, Arg.Any<CancellationToken>())
+            .Returns([new ReleaseFilterFact(1, "App", 10), new ReleaseFilterFact(2, "App", 20), new ReleaseFilterFact(3, "App", null)]);
+        _pipelineRepoMock.GetRootRunReferencesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, PipelineRunRootReference>
+            {
+                [10] = new(5, 3, "release-orchestrator"),
+                [20] = new(20, 4, "nightly")
+            });
+        _repoMock.GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>(), null, false, false,
+                Arg.Any<IReadOnlyList<GridFilter>?>(), Arg.Any<IReadOnlyCollection<int>?>())
+            .Returns((new List<Release>(), 0));
+        var status = new GridFilter { Field = "Status", Operator = GridFilterOperator.In, Value = "Published" };
+
+        await _sut.GetReleasesAsync(null, new PaginationRequest
+        {
+            Page = 1,
+            PageSize = 10,
+            Filters = [new GridFilter { Field = "SourcePipelineName", Operator = GridFilterOperator.In, Value = "RELEASE-orchestrator" }, status]
+        }, ct: TestContext.Current.CancellationToken);
+
+        await _repoMock.Received(1).GetReleasesPagedAsync(null, null, 1, 10, Arg.Any<List<int>?>(), Arg.Any<CancellationToken>(), null, false, false,
+            Arg.Is<IReadOnlyList<GridFilter>?>(filters => filters != null && filters.Count == 1 && filters[0] == status),
+            Arg.Is<IReadOnlyCollection<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 1 })));
+    }
+
+    [Fact]
+    public async Task GetReleaseFilterValuesAsync_ListsProjectsAndRootPipelines_OfTheScope()
+    {
+        _repoMock.GetReleaseFilterFactsAsync(null, null, 7, Arg.Any<CancellationToken>())
+            .Returns([new ReleaseFilterFact(1, "Shop", 10), new ReleaseFilterFact(2, "blog", 11), new ReleaseFilterFact(3, "Shop", null)]);
+        _pipelineRepoMock.GetRootRunReferencesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, PipelineRunRootReference> { [10] = new(10, 1, "deploy"), [11] = new(9, 1, "deploy") });
+
+        var values = await _sut.GetReleaseFilterValuesAsync(null, null, 7, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["blog", "Shop"], values.ProjectNames);
+        Assert.Equal(["deploy"], values.SourcePipelineNames);
     }
 }

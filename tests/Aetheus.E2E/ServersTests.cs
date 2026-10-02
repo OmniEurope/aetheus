@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Microsoft.Playwright;
+
 namespace Aetheus.E2E;
 
 [Category("E2E")]
@@ -22,62 +24,61 @@ public class ServersTests : E2ETestBase
 
         var grid = Page.Locator(".server-list-grid");
         await Expect(grid).ToBeVisibleAsync(new() { Timeout = 10000 });
-        var searchBox = Page.Locator(".server-list-search");
-        await Expect(searchBox).ToBeVisibleAsync(new() { Timeout = 10000 });
-        var typeDropdown = Page.Locator(".rz-dropdown").First;
-        await Expect(typeDropdown).ToBeVisibleAsync(new() { Timeout = 10000 });
-        var refreshButton = Page.Locator("button[title='Refresh']");
-        await Expect(refreshButton).ToBeVisibleAsync();
+        // Recette R-211: no filter bar above the list; each column filters from its header.
+        await Expect(Page.Locator(".server-list-search")).ToHaveCountAsync(0);
+        // The overflow menu "Tools" carries Update all agents, Port check and Retired servers.
+        var toolsMenu = Page.Locator("button[title='Tools']");
+        await Expect(toolsMenu).ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        // Radzen 10 RadzenDataGrid renders one `.rz-column-title` per column header.
-        var headers = Page.Locator(".rz-column-title");
+        // The data grid renders one `.omni-data-grid__title` per column header.
+        var headers = Page.Locator(".omni-data-grid__title");
         await Expect(headers.First).ToBeVisibleAsync(new() { Timeout = 10000 });
         var count = await headers.CountAsync();
         Assert.That(count, Is.GreaterThanOrEqualTo(5), "Servers grid should have at least 5 columns");
 
-        var badge = Page.Locator(".rz-badge").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex(@"\d+\s*total", System.Text.RegularExpressions.RegexOptions.IgnoreCase) });
-        await Expect(badge.First).ToBeVisibleAsync(new() { Timeout = 10000 });
+        // A healthy fleet shows no counter in the header (only what needs attention), so no "n total" badge.
 
-        var searchResponse = Page.WaitForResponseAsync(response =>
+        // The Name header filter reaches the API as a column filter and narrows the rows.
+        var nameHeader = grid.Locator("th[data-omni-col='Name']");
+        await nameHeader.Locator(".omni-data-grid__filter-menu-toggle").ClickAsync();
+        var nameResponse = Page.WaitForResponseAsync(response =>
             response.Request.Method == "GET"
             && response.Url.Contains("/api/servers?", StringComparison.OrdinalIgnoreCase)
-            && response.Url.Contains("search=web-01", StringComparison.OrdinalIgnoreCase));
-        await searchBox.FillAsync("web-01");
-        await searchBox.DispatchEventAsync("change");
-        var filteredResponse = await searchResponse.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.That(filteredResponse.Ok, Is.True, $"Server search returned HTTP {filteredResponse.Status}.");
+            && Uri.UnescapeDataString(response.Url).Contains("Filters[0].Field=Name", StringComparison.Ordinal));
+        await nameHeader.Locator("input.omni-data-grid__filter").First.FillAsync("web-01");
+        await Expect(nameHeader.Locator(".omni-data-grid__filter-apply")).ToHaveCountAsync(0);
+        var filteredResponse = await nameResponse.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.That(filteredResponse.Ok, Is.True, $"Server column filter returned HTTP {filteredResponse.Status}.");
         await Expect(grid.Locator("a.server-name-link").Filter(new() { HasText = "web-01" }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(grid.Locator("a.server-name-link").Filter(new() { HasText = "build-01" }))
             .ToHaveCountAsync(0);
 
-        await Page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" }).ClickAsync();
+        // The reset cross beside the header lifts the filter.
+        await nameHeader.Locator(".omni-data-grid__filter-reset").ClickAsync();
         await Expect(grid.Locator("a.server-name-link").Filter(new() { HasText = "build-01" }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
 
-        await typeDropdown.ClickAsync();
-        await Page.Locator(".rz-dropdown-panel:visible .rz-dropdown-item")
-            .Filter(new() { HasText = "Build" }).ClickAsync();
+        // Recette R-210: the Type column is a checkable list of the server types.
+        var typeHeader = grid.Locator("th[data-omni-col='Type']");
+        await typeHeader.Locator(".omni-data-grid__filter-menu-toggle").ClickAsync();
+        await typeHeader.Locator(".omni-multi-select__option", new() { HasText = "Build" })
+            .Locator("input.omni-multi-select__checkbox").CheckAsync();
         await Expect(grid.Locator("a.server-name-link").Filter(new() { HasText = "build-01" }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(grid.Locator("a.server-name-link").Filter(new() { HasText = "web-01" }))
             .ToHaveCountAsync(0);
 
-        var manualRefresh = Page.WaitForResponseAsync(response =>
-            response.Request.Method == "GET"
-            && response.Url.Contains("/api/servers?", StringComparison.OrdinalIgnoreCase));
-        await refreshButton.ClickAsync();
-        var refreshed = await manualRefresh.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.That(refreshed.Ok, Is.True, $"Server refresh returned HTTP {refreshed.Status}.");
-        await Expect(grid.Locator("a.server-name-link").Filter(new() { HasText = "build-01" }))
-            .ToBeVisibleAsync(new() { Timeout = 5000 });
+        // Recette R-181: Refresh left the Tools menu, the list follows the servers hub.
+        await toolsMenu.ClickAsync();
+        await Expect(Page.GetByText("Refresh", new() { Exact = true })).ToHaveCountAsync(0);
     }
 
     [Test]
     public async Task Servers_NavigateFromSidebar_Works()
     {
         await NavigateToAsync("");
-        var nav = Page.Locator(".rz-panel-menu");
+        var nav = Page.Locator(".omni-panel-menu");
         await nav.GetByText("Servers").ClickAsync();
 
         await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex("/servers"), new() { Timeout = 5000 });

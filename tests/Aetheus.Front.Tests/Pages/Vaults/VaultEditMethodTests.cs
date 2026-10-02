@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Vaults;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Vaults;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -20,40 +18,40 @@ public class VaultEditMethodTests : BunitContext
     public void GetExpiryBadge_Expired_ReturnsDanger()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(-1)])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(-1)])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
     public void GetExpiryBadge_ExpiringSoon_ReturnsWarning()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(7)])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(7)])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
     public void GetExpiryBadge_FarFuture_ReturnsLight()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(30)])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(30)])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Fact]
     public void GetExpiryBadge_ExactlyToday_ReturnsDanger()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow])!;
-        Assert.Equal(BadgeStyle.Danger, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow])!;
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
     public void GetExpiryBadge_Boundary14Days_ReturnsWarning()
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(14)])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(14)])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     private IRenderedComponent<VaultEdit> RenderNew()

@@ -1,0 +1,180 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/variable-libraries/new"
+@page "/variable-libraries/{Id:int}"
+
+<PageTitle>@(_isNew ? L["NewVariableLibrary"] : _detail?.Name ?? L["VariableLibrary"]) - Aetheus</PageTitle>
+
+@* Recette R-288: no entry-count badge; R-284: Edit and Delete of the library live in the ⋮ menu.
+   Recette R-275: no header body at all, an empty one showed a phone toggle that opened nothing. *@
+<OmniPageHeader Title="@(_isNew ? L["NewVariableLibrary"] : _detail?.Name ?? "")" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("data_object")" /></Icon>
+</OmniPageHeader>
+
+@if (_loading)
+{
+    <AetheusLoader Size="OmniControlSize.Large" />
+}
+else if (_loadFailed || (!_isNew && _detail is null))
+{
+    <OmniAlert Severity="OmniSeverity.Danger">
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["LoadError"]</OmniText>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryLoadAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+        </OmniStack>
+    </OmniAlert>
+}
+else
+{
+    @* Recette R-284: an existing library opens on its entries; its properties form shows from the
+       ⋮ menu's Edit, so the page no longer starts with a form that is rarely changed. *@
+    @if (_isNew || _editingProperties)
+    {
+    <OmniTemplateForm TModel="LibraryModel" Model="@_model" OnValidSubmit="@OnSubmit">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        <OmniRow Gap="OmniSpacing.Large">
+            <OmniColumn Span="12" MediumSpan="6">
+                <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+                    <OmniFormField Label="@L["Name"]" For="Name">
+                        <OmniTextBox @bind-Value="_model.Name"
+
+                            Id="Name" />
+                        <ValidationMessage For="@(() => _model.Name)" />
+                    </OmniFormField>
+                    <OmniFormField Label="@L["Description"]" For="Description">
+                        <OmniTextArea @bind-Value="_model.Description"
+
+                            Id="Description" Rows="3" />
+                    </OmniFormField>
+                </OmniStack>
+            </OmniColumn>
+            <OmniColumn Span="12" MediumSpan="6">
+                <OwnerTypeSelector Projects="@_projects"
+                    @bind-ProjectId="_model.ProjectId"
+                    @bind-EnvironmentId="_model.EnvironmentId"
+                    @bind-ProjectServerId="_model.ProjectServerId" />
+            </OmniColumn>
+        </OmniRow>
+
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Class="omni-u-mt-lg">
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_saving ? "btn-busy" : null)" Busy="@(_saving)"><OmniIcon Name="@MaterialIconMap.Resolve((_isNew ? "add" : "save"))" /> <span>@(_isNew ? L["Create"] : L["Save"])</span></OmniButton>
+            @if (!_isNew)
+            {
+                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@CancelPropertiesEdit"><OmniIcon Name="OmniIconName.Close" /> <span>@L["Cancel"]</span></OmniButton>
+            }
+        </OmniStack>
+    </OmniTemplateForm>
+    }
+
+    @if (!_isNew && _detail is not null)
+    {
+        <OmniHeading Level="OmniHeadingLevel.H5" Class="@(_editingProperties ? "omni-u-mt-2xl omni-u-mb-sm" : "omni-u-mb-sm")">@L["Entries"]</OmniHeading>
+
+        <OmniTemplateForm TModel="NewEntryModel" Model="@_newEntry" OnValidSubmit="@((EditContext context) => AddEntry((NewEntryModel)context.Model))">
+        <OmniDataAnnotationsValidator Localizer="@L" />
+        @* The key's validation message sits under the row, never inside it: inline, it appeared and
+           vanished as the key field lost focus, which moved "Add" sideways between the mouse press and
+           its release, so the click landed next to the button. *@
+        <OmniRow Gap="OmniSpacing.Small" Class="omni-u-mb-xs">
+            <OmniTextBox aria-label="@L["Key"]" @bind-Value="_newEntry.Key"
+
+                Placeholder="@L["Key"]" />
+            <OmniTextBox aria-label="@L["Value"]" @bind-Value="_newEntry.Value"
+
+                Placeholder="@L["Value"]" />
+            <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+            <div class="pipeline-list-spacer"></div>
+            <OmniOverflowMenu Label="@L["Tools"]">
+                <OmniMenuItem OnClick="@EditProperties"><Icon><OmniIcon Name="OmniIconName.Edit" /></Icon><ChildContent>@L["Edit"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@OnDelete"><Icon><OmniIcon Name="OmniIconName.Delete" /></Icon><ChildContent>@L["Delete"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@ExportEntries"><Icon><OmniIcon Name="OmniIconName.Download" /></Icon><ChildContent>@L["Export"]</ChildContent></OmniMenuItem>
+                <OmniMenuItem OnClick="@ImportEntries"><Icon><OmniIcon Name="OmniIconName.Upload" /></Icon><ChildContent>@L["Import"]</ChildContent></OmniMenuItem>
+                @* PLAN-005 lot 5: only on a saved library - allocating writes reservations on a
+                   server, which needs a library that already exists to hold them. *@
+                @if (!_isNew)
+                {
+                    <OmniMenuItem OnClick="@CheckPortsAsync"><Icon><OmniIcon Name="OmniIconName.MagnifyingGlassPlus" /></Icon><ChildContent>@L["CheckPorts"]</ChildContent></OmniMenuItem>
+                }
+                @if (!_isNew)
+                {
+                    <OmniMenuItem OnClick="@AllocatePortsAsync"><Icon><OmniIcon Name="OmniIconName.Archive" /></Icon><ChildContent>@L["PortAllocate"]</ChildContent></OmniMenuItem>
+                }
+            </OmniOverflowMenu>
+        </OmniRow>
+        <div class="library-entry-validation">
+            <ValidationMessage For="@(() => _newEntry.Key)" />
+        </div>
+        </OmniTemplateForm>
+
+        @if (_entriesLoadFailed)
+        {
+            <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mb-sm">
+                <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+                    <OmniText Element="OmniTextElement.Paragraph">@L["LoadFailed"]</OmniText>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@RetryEntriesAsync"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["Retry"]</span></OmniButton>
+                </OmniStack>
+            </OmniAlert>
+        }
+
+        <AetheusDataGrid FullHeight="true" @ref="_entriesGrid" Data="@_entries" Count="@_entryCount" TItem="VariableEntryDto"
+            IsLoading="@_entriesLoading" LoadData="@LoadEntriesAsync" PageSize="25"
+            AllowAltering="true" EditMode="OmniDataGridRowMode.Single" RowUpdate="@OnEntryUpdate" AllowSorting="true"
+            AllowFiltering="true" FilterMode="OmniDataGridFilterMode.Simple" AllowColumnResize="true" Virtualize="@AetheusGrid.RemoteVirtualization" VirtualizationOverscanCount="3"
+            VirtualData="@(() => new OmniDataGridResult<VariableEntryDto>(_entries, _entryCount))">
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="VariableEntryDto" Property="Key" Title="@L["Key"]" Filterable="true" >
+                    <Template Context="entry">
+                        @* Recette R-292: a copy button beside the key and beside the value, blue on every row: a STD-BTN
+                           exception chosen by the user (R-435, 2026-09-28). *@
+                        <span class="library-cell">
+                            <span class="clickable-cell" role="button" tabindex="0" @onclick="@(() => EditEntry(entry))"
+                                @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Key</span>
+                            <span @onclick:stopPropagation="true">
+                                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyAsync(entry.Key))" Class="library-copy-btn"
+                                            title="@L["CopyKey"]" Label="@L["CopyKey"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                            </span>
+                        </span>
+                    </Template>
+                    <EditTemplate Context="entry">
+                        <div @onkeydown="@(e => OnEntryKeyDown(e, entry))">
+                            <OmniTextBox aria-label="@L["Key"]" @bind-Value="_editEntryKey" Class="omni-u-w-100" />
+                        </div>
+                    </EditTemplate>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VariableEntryDto" Property="Value" Title="@L["Value"]" Filterable="true" >
+                    <Template Context="entry">
+                        <span class="library-cell">
+                            <span class="clickable-cell" role="button" tabindex="0" @onclick="@(() => EditEntry(entry))"
+                                @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Value</span>
+                            <span @onclick:stopPropagation="true">
+                                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyAsync(entry.Value))" Class="library-copy-btn"
+                                            title="@L["CopyValue"]" Label="@L["CopyValue"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                            </span>
+                        </span>
+                    </Template>
+                    <EditTemplate Context="entry">
+                        <div @onkeydown="@(e => OnEntryKeyDown(e, entry))">
+                            <OmniTextBox aria-label="@L["Value"]" @bind-Value="_editEntryValue" Class="omni-u-w-100" />
+                        </div>
+                    </EditTemplate>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VariableEntryDto" Title="@L["Versions"]" Width="90px" TextAlign="OmniDataGridTextAlign.Center" Sortable="false" Filterable="false" >
+                    <Template Context="entry">
+                        <CountBadge Value="@entry.VersionCount" Variant="OmniTone.Neutral" />
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="VariableEntryDto" Title="" Width="160px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
+                    <Template Context="entry">
+                        @* Recette R-293: every action filled; Edit in the secondary variant. *@
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowVersions(entry))" title="@L["History"]" Label="@L["History"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => EditEntry(entry))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteEntry(entry))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                    </Template>
+                    <EditTemplate Context="entry">
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => _entriesGrid!.UpdateRow(entry))" title="@L["Save"]"><OmniIcon Name="OmniIconName.Check" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => _entriesGrid!.CancelEditRow(entry))" title="@L["Cancel"]"><OmniIcon Name="OmniIconName.Close" /></OmniButton>
+                    </EditTemplate>
+                </OmniDataGridColumn>
+            </Columns>
+        </AetheusDataGrid>
+    }
+}

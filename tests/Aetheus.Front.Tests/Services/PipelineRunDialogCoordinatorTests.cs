@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Services;
 
@@ -36,7 +32,7 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             });
         handler.SetJsonResponse("api/pipelines/5/parameters", new List<PipelineRunParameterDto>());
 
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         await Services.GetRequiredService<PipelineRunDialogCoordinator>().ConfigureLaunchAsync(5);
         var openedParameters = dialog.LastParameters;
 
@@ -74,7 +70,7 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             new() { Name = "flavour", DisplayName = "Flavour", Type = "string", Default = "fast" }
         });
 
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         await Services.GetRequiredService<PipelineRunDialogCoordinator>().ConfigureLaunchAsync(5);
 
         var declared = Assert.IsType<List<PipelineRunParameterDto>>(dialog.LastParameters!["Parameters"]);
@@ -109,7 +105,7 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             new() { Name = "flavour", DisplayName = "Flavour", Type = "string", Default = "fast" },
             new() { Name = "dryRun", DisplayName = "Dry run", Type = "boolean", Default = "false", Required = true }
         });
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
 
         var result = await Services.GetRequiredService<PipelineRunDialogCoordinator>()
             .ResolveDefaultParametersAsync(5);
@@ -134,7 +130,7 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             new() { Name = "candidateVersion", DisplayName = "Candidate", Type = "string", Required = true }
         });
         handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "deploy" });
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = null;
 
         var result = await Services.GetRequiredService<PipelineRunDialogCoordinator>()
@@ -145,7 +141,7 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
     }
 
     /// <summary>
-    /// The deploy dialog shows the project's recent releases next to the version field: the value
+    /// The deploy dialog shows the project's restorable releases next to the version field: the value
     /// stays typed and confirmed (M-051), the list is a picking aid.
     /// </summary>
     [Fact]
@@ -163,14 +159,17 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             Items = [new ReleaseDto { Id = 1, Version = "1.1.482", Status = ReleaseStatus.Published }],
             TotalCount = 1
         });
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = null;
 
         await Services.GetRequiredService<PipelineRunDialogCoordinator>().ResolveDefaultParametersAsync(5);
 
         var offered = Assert.IsType<List<ReleaseDto>>(dialog.LastParameters!["AvailableReleases"]);
         Assert.Equal("1.1.482", Assert.Single(offered).Version);
-        Assert.Contains(handler.Requests, r => r.Url.Contains("api/releases") && r.Url.Contains("projectId=3"));
+        Assert.Equal(1, dialog.LastParameters!["AvailableReleaseTotal"]);
+        // R-10: every release whose payload is retained, in one request the grid then pages.
+        Assert.Contains(handler.Requests, r => r.Url.Contains("api/releases") && r.Url.Contains("projectId=3")
+            && r.Url.Contains("pageSize=200") && r.Url.Contains("deployable=true"));
     }
 
     /// <summary>A pipeline without a project shows nothing and, above all, fetches nothing.</summary>
@@ -184,12 +183,35 @@ public sealed class PipelineRunDialogCoordinatorTests : BunitContext
             new() { Name = "note", DisplayName = "Note", Type = "string", Required = true }
         });
         handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "ci" });
-        var dialog = (ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = null;
 
         await Services.GetRequiredService<PipelineRunDialogCoordinator>().ResolveDefaultParametersAsync(5);
 
         Assert.Empty(Assert.IsType<List<ReleaseDto>>(dialog.LastParameters!["AvailableReleases"]));
         Assert.DoesNotContain(handler.Requests, r => r.Url.Contains("api/releases"));
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task Releases_AreFetchedOnlyWhenAParameterTakesAVersion(bool versionParameter, int releaseCalls)
+    {
+        // PLAN-005 lot 5 / D37: aetheus-candidate takes no version and used to fetch the project's
+        // releases anyway; aetheus-deploy-prod takes one and fetches them once.
+        var handler = BunitTestHelper.RegisterServices(this);
+        BunitTestHelper.UseImmediateDialogs(this);
+        handler.SetJsonResponse("api/pipelines/5/source", new PipelineSourceDto());
+        handler.SetJsonResponse("api/pipelines/5/parameters", versionParameter
+            ? new List<PipelineRunParameterDto> { new() { Name = "candidateVersion", Type = "string", Required = true } }
+            : new List<PipelineRunParameterDto> { new() { Name = "dryRun", Type = "boolean", Default = "false" } });
+        handler.SetJsonResponse("api/pipelines/5", new PipelineDto { Id = 5, Name = "app", ProjectId = 3 });
+        handler.SetJsonResponse("api/releases", new PaginatedResult<ReleaseDto> { Items = [new ReleaseDto { Id = 1, Version = "1.0.0" }] });
+
+        var dialog = (ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
+        await Services.GetRequiredService<PipelineRunDialogCoordinator>().ConfigureLaunchAsync(5);
+
+        Assert.Equal(releaseCalls, handler.Requests.Count(request => request.Url.Contains("api/releases", StringComparison.Ordinal)));
+        Assert.Equal(versionParameter, dialog.LastParameters!["AvailableReleases"] is not null);
     }
 }

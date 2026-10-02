@@ -31,7 +31,11 @@ internal sealed class AgentReleaseCatalog : IAgentReleaseCatalog, IHostedService
                 throw new InvalidOperationException(
                     $"Agent release manifest is required outside Development: {manifestPath}");
 
-            _logger.LogWarning(
+            // Information, not a warning: outside Development the branch above throws, so reaching
+            // here means a developer machine with no release archives built - the expected state, not
+            // something to act on. Logging it as a warning trained the eye to skip a level that should
+            // stay worth reading.
+            _logger.LogInformation(
                 "Agent release manifest is absent; Development uses assembly version {Version} without release archives",
                 Current.SoftwareVersion);
             return;

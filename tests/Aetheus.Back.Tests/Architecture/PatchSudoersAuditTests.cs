@@ -15,10 +15,15 @@ public class PatchSudoersAuditTests
     [Fact]
     public void PatchDropIn_ArgvForm_MatchesUpgradeExecutor()
     {
-        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "scripts", "install-agent-linux.sh"));
+        // R-249: the drop-in is the patch/sudoers.d/aetheus-patch template the installer renders.
+        Assert.Contains(
+            "render_host_config patch/sudoers.d/aetheus-patch \"$PATCH_MANAGE_SUDOERS_FILE\"",
+            LinuxHostConfigTemplates.Installer(),
+            StringComparison.Ordinal);
+        var script = LinuxHostConfigTemplates.Read("patch/sudoers.d/aetheus-patch");
 
         var blockStart = script.IndexOf("Cmnd_Alias AETHEUS_PATCH", StringComparison.Ordinal);
-        Assert.True(blockStart >= 0, "Cmnd_Alias AETHEUS_PATCH not found in install-agent-linux.sh");
+        Assert.True(blockStart >= 0, "Cmnd_Alias AETHEUS_PATCH not found in patch/sudoers.d/aetheus-patch");
         var blockEnd = script.IndexOf("Defaults!AETHEUS_PATCH", blockStart, StringComparison.Ordinal);
         Assert.True(blockEnd > blockStart, "Defaults!AETHEUS_PATCH terminator not found");
         var block = script[blockStart..blockEnd];

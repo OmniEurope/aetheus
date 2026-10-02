@@ -1,0 +1,37 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@inherits Aetheus.Front.Components.Shared.EntityEditDialogBase
+
+<OmniTemplateForm TModel="EditModel" Model="@_model" OnValidSubmit="@SubmitAsync">
+    <OmniDataAnnotationsValidator Localizer="@L" />
+    <OmniRow Gap="OmniSpacing.Large">
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField For="oe-pages-packagefeeds-packagefeededitdialog-1" Class="omni-u-w-100"><LabelContent>@L["Name"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="_model.Name" Id="oe-pages-packagefeeds-packagefeededitdialog-1" />
+            </ChildContent></OmniFormField>
+            <ValidationMessage For="@(() => _model.Name)" />
+        </OmniColumn>
+        <OmniColumn Span="12" MediumSpan="6">
+            <OmniFormField Label="@L["Type"]" Class="omni-u-w-100" For="oe-formfield-pages-packagefeeds-packagefeededitdialog-1">
+                <OmniDropDown Id="oe-formfield-pages-packagefeeds-packagefeededitdialog-1" @bind-Value="_model.FeedType" Options="@_types" @bind-Value:after="OnTypeChanged" />
+            </OmniFormField>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">
+                @L["PackageFeedCreationSupportedTypes"]
+            </OmniText>
+        </OmniColumn>
+        <OmniColumn Span="12">
+            <OmniFormField For="oe-pages-packagefeeds-packagefeededitdialog-3" Class="omni-u-w-100"><LabelContent>@L["UpstreamUrl"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="_model.UpstreamUrl" Id="oe-pages-packagefeeds-packagefeededitdialog-3" />
+            </ChildContent></OmniFormField>
+            <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted">@L["PackageFeedUpstreamHint"]</OmniText>
+            <ValidationMessage For="@(() => _model.UpstreamUrl)" />
+        </OmniColumn>
+        <OmniColumn Span="12">
+            <OmniFormField For="oe-pages-packagefeeds-packagefeededitdialog-4" Class="omni-u-w-100"><LabelContent>@L["Description"]</LabelContent><ChildContent>
+                <OmniTextBox @bind-Value="_model.Description" Id="oe-pages-packagefeeds-packagefeededitdialog-4" />
+            </ChildContent></OmniFormField>
+        </OmniColumn>
+    </OmniRow>
+    <DialogFooter OnCancel="@Cancel">
+        <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Create"]</span></OmniButton>
+    </DialogFooter>
+</OmniTemplateForm>

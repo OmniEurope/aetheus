@@ -4,7 +4,6 @@ using Aetheus.Back.Components.Servers.Events;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

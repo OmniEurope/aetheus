@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Helpers;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using NSubstitute;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -24,7 +22,7 @@ public class SmallHelpersSweepTests : BunitContext
     public SmallHelpersSweepTests()
     {
         _handler = BunitTestHelper.RegisterServices(this);
-        _handler.SetPaginatedJsonResponse<Aetheus.Shared.DTOs.GitLightRepoDto>(
+        _handler.SetPaginatedJsonResponse<Aetheus.Shared.Components.Git.GitLightRepoDto>(
             HttpMethod.Get,
             "api/git/repos?page=1&pageSize=100&projectId=",
             []);
@@ -137,7 +135,7 @@ public class SmallHelpersSweepTests : BunitContext
     {
         // Year < 2000 means "never reported"
         var result = ServerHeartbeatHelper.Severity(new DateTime(1990, 1, 1));
-        Assert.Equal(BadgeStyle.Danger, result);
+        Assert.Equal(OmniTone.Danger, result);
     }
 
     [Fact]
@@ -147,7 +145,7 @@ public class SmallHelpersSweepTests : BunitContext
         // a very recent heartbeat (within the danger window) is Warning, not Success.
         var recent = DateTime.Now.AddSeconds(-10);
         var result = ServerHeartbeatHelper.Severity(recent);
-        Assert.Equal(BadgeStyle.Warning, result);
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
@@ -156,7 +154,7 @@ public class SmallHelpersSweepTests : BunitContext
         // Anything below StaleDangerSeconds (recently lost) → Warning
         var stale = DateTime.Now.AddSeconds(-(ServerHeartbeatHelper.StaleDangerSeconds - 60));
         var result = ServerHeartbeatHelper.Severity(stale);
-        Assert.Equal(BadgeStyle.Warning, result);
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     [Fact]
@@ -165,7 +163,18 @@ public class SmallHelpersSweepTests : BunitContext
         // Beyond StaleDangerSeconds (300s)
         var dead = DateTime.Now.AddSeconds(-(ServerHeartbeatHelper.StaleDangerSeconds + 60));
         var result = ServerHeartbeatHelper.Severity(dead);
-        Assert.Equal(BadgeStyle.Danger, result);
+        Assert.Equal(OmniTone.Danger, result);
+    }
+
+    [Fact]
+    public void ServerHeartbeatHelper_SeverityOmni_GradesOfflineWithoutShowingGreen()
+    {
+        Assert.Equal(OmniTone.Danger,
+            ServerHeartbeatHelper.SeverityOmni(new DateTime(1990, 1, 1)));
+        Assert.Equal(OmniTone.Warning,
+            ServerHeartbeatHelper.SeverityOmni(DateTime.Now.AddSeconds(-10)));
+        Assert.Equal(OmniTone.Danger,
+            ServerHeartbeatHelper.SeverityOmni(DateTime.Now.AddSeconds(-(ServerHeartbeatHelper.StaleDangerSeconds + 60))));
     }
 
     // ── ServerHeartbeatHelper.OfflineReason ──────────────────────────────────
@@ -214,12 +223,12 @@ public class SmallHelpersSweepTests : BunitContext
     private static readonly BindingFlags PrivStatic = BindingFlags.NonPublic | BindingFlags.Static;
 
     [Theory]
-    [InlineData(ServerStatus.Online, BadgeStyle.Success)]
-    [InlineData(ServerStatus.Offline, BadgeStyle.Danger)]
-    public void ProjectServersSection_GetStatusBadge_ReturnsExpected(ServerStatus status, BadgeStyle expected)
+    [InlineData(ServerStatus.Online, OmniTone.Success)]
+    [InlineData(ServerStatus.Offline, OmniTone.Danger)]
+    public void ProjectServersSection_GetStatusBadge_ReturnsExpected(ServerStatus status, OmniTone expected)
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object?)status])!;
+        var result = (OmniTone)method.Invoke(null, [(object?)status])!;
         Assert.Equal(expected, result);
     }
 
@@ -227,16 +236,16 @@ public class SmallHelpersSweepTests : BunitContext
     public void ProjectServersSection_GetStatusBadge_Null_ReturnsLight()
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object?)null])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(object?)null])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     [Fact]
     public void ProjectServersSection_GetStatusBadge_Disabled_ReturnsLight()
     {
         var method = typeof(ProjectServersSection).GetMethod("GetStatusBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object?)ServerStatus.Disabled])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(object?)ServerStatus.Disabled])!;
+        Assert.Equal(OmniTone.Neutral, result);
     }
 
     // ProjectLibrariesSection.NewLibrary moved to VariableLibrariesList (project scope) - its
@@ -247,14 +256,14 @@ public class SmallHelpersSweepTests : BunitContext
     [Fact]
     public void ProjectEditSection_OnParametersSet_WithProject_PopulatesModel()
     {
-        var project = new Aetheus.Shared.DTOs.ProjectDetailDto
+        var project = new Aetheus.Shared.Components.Projects.ProjectDetailDto
         {
             Id = 5,
             Name = "Test Project",
             Description = "A test",
             RepositoryUrl = "https://git.example.com/repo.git",
             DefaultBranch = "develop",
-            Status = Aetheus.Shared.Enums.ProjectStatus.Active,
+            Status = Aetheus.Shared.Components.Projects.ProjectStatus.Active,
             Tags = ["tag1", "tag2"]
         };
 
@@ -280,9 +289,9 @@ public class SmallHelpersSweepTests : BunitContext
     public void ProjectEditSection_OnParametersSet_NullProject_StatusOptionsPopulated()
     {
         var cut = Render<ProjectEditSection>(p =>
-            p.Add(x => x.Project, (Aetheus.Shared.DTOs.ProjectDetailDto?)null));
+            p.Add(x => x.Project, (Aetheus.Shared.Components.Projects.ProjectDetailDto?)null));
 
-        var statusOptions = (List<object>)typeof(ProjectEditSection)
+        var statusOptions = (System.Collections.IList)typeof(ProjectEditSection)
             .GetField("_statusOptions", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
 

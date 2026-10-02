@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Aetheus.Back.Configuration;
+using Aetheus.Back.Services;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -16,7 +17,8 @@ public sealed class AppTelemetryRetentionService(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
     ILogger<AppTelemetryRetentionService> logger,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private static readonly Meter Meter = new("Aetheus.AppMonitoring.Retention", "1.0.0");
     private static readonly Histogram<double> Duration =
@@ -26,7 +28,20 @@ public sealed class AppTelemetryRetentionService(
     private static readonly Counter<long> Failures =
         Meter.CreateCounter<long>("aetheus.retention.failures");
 
+    /// <summary>R-462: the hourly sweep runs on one backend only. Without a leader lease both blue-green
+    /// colours aggregated the same hour at the same time, and the second insert hit the unique index of
+    /// the hourly rollups (Npgsql 23505) every hour, which also skipped that sweep's purges.</summary>
+    internal const string LeaseName = "aetheus:app-telemetry-retention";
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (leaderLease is null)
+            await RunLeaderLoopAsync(stoppingToken).ConfigureAwait(false);
+        else
+            await leaderLease.RunAsLeaderAsync(LeaseName, RunLeaderLoopAsync, stoppingToken).ConfigureAwait(false);
+    }
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(BackendRuntimeDefaults.MaintenanceInterval);
 
@@ -119,7 +134,7 @@ public sealed class AppTelemetryRetentionService(
             AppMonitoringDefaults.MinimumAggregationLookbackHours,
             AppMonitoringDefaults.MaximumAggregationLookbackHours);
         // On the startup catch-up pass, widen the floor to backfill hours missed during a longer downtime
-        // (default 48 h, bounded so we never load the whole 7-day raw window into memory at once). Steady-state
+        // (default 48 h, rolled up one hour at a time by AggregateHourByHourAsync). Steady-state
         // hourly sweeps keep the short lookback so they stay cheap.
         var startupCatchUpHours = Math.Clamp(
             configuration.GetValue("AppMonitoring:StartupCatchUpHours", AppMonitoringDefaults.DefaultStartupCatchUpHours),
@@ -139,15 +154,19 @@ public sealed class AppTelemetryRetentionService(
             AppMonitoringDefaults.MaximumVisitorRetentionDays);
         var visitorCutoff = DateOnly.FromDateTime(now).AddDays(-visitorRetentionDays);
 
-        // Availability (phase 1)
-        var aggregated = await repo.AggregateRawIntoHourlyAsync(currentHourStart, aggFloor, ct).ConfigureAwait(false);
+        // Availability (phase 1) and metrics (phase 2): raw -> hourly, one hour at a time
+        var (aggregated, metricsAggregated) =
+            await AggregateHourByHourAsync(aggFloor, currentHourStart, ct).ConfigureAwait(false);
+
+        // Availability (phase 1): purge raw and hourly
         var purgedRaw = await repo.PurgeRawOlderThanAsync(rawCutoff, ct).ConfigureAwait(false);
         var purgedHourly = await repo.PurgeHourlyOlderThanAsync(hourlyCutoff, ct).ConfigureAwait(false);
 
-        // Metrics (phase 2): raw -> hourly, purge both
-        var metricsAggregated = await metricRepo.AggregateRawIntoHourlyAsync(currentHourStart, aggFloor, ct).ConfigureAwait(false);
+        // Metrics (phase 2): purge raw and hourly
         var purgedMetricRaw = await metricRepo.PurgeRawOlderThanAsync(metricDetailedCutoff, ct).ConfigureAwait(false);
         var purgedMetricHourly = await metricRepo.PurgeHourlyOlderThanAsync(metricAggregateCutoff, ct).ConfigureAwait(false);
+        // R-477: a name whose last sample has just been purged leaves the explorer and the name cap.
+        await metricRepo.PruneMetricNamesAsync(ct).ConfigureAwait(false);
 
         // Logs (phase 3): purge only (no aggregate). Trace/error groups use the independent trace window.
         var purgedLogs = await logRepo.PurgeOlderThanAsync(logCutoff, ct).ConfigureAwait(false);
@@ -183,22 +202,48 @@ public sealed class AppTelemetryRetentionService(
             DateOnly.FromDateTime(now).AddMonths(-analyticsAggregateMonths),
             now.AddDays(-analyticsRejectionDays),
             ct).ConfigureAwait(false);
+        // Recette R2-007: after the age-based purge, an app still at its audience budget rolls its
+        // oldest raw rows off, so it never sits at the budget waiting for the next batch to roll it.
+        var analyticsRolled = await scope.ServiceProvider.GetRequiredService<IAppWebAnalyticsService>()
+            .RollStorageAsync(ct).ConfigureAwait(false);
         var keyMaintenance = await analyticsConfiguration.MaintainKeysAsync(now, ct).ConfigureAwait(false);
 
         var changed = aggregated + metricsAggregated + purgedRaw + purgedHourly + purgedMetricRaw
             + purgedMetricHourly
-            + purgedLogs + purgedErrors + purgedVisitors + analyticsPurged.Total
+            + purgedLogs + purgedErrors + purgedVisitors + analyticsPurged.Total + analyticsRolled
             + keyMaintenance.Rotated + keyMaintenance.PurgedVersions;
         if (changed > 0)
         {
             logger.LogInformation(
-                "App telemetry sweep: aggregated {Agg} health + {MetAgg} metric hourly; purged health {PR}/{PH}, metric {PMR}/{PMH}, logs {PL}, errors {PE}, visitor identities {PV}, analytics {PA}; keys rotated {KR}, historical versions purged {KP}",
+                "App telemetry sweep: aggregated {Agg} health + {MetAgg} metric hourly; purged health {PR}/{PH}, metric {PMR}/{PMH}, logs {PL}, errors {PE}, visitor identities {PV}, analytics {PA}, audience rows rolled over budget {AR}; keys rotated {KR}, historical versions purged {KP}",
                 aggregated, metricsAggregated, purgedRaw, purgedHourly, purgedMetricRaw, purgedMetricHourly,
-                purgedLogs, purgedErrors, purgedVisitors, analyticsPurged.Total,
+                purgedLogs, purgedErrors, purgedVisitors, analyticsPurged.Total, analyticsRolled,
                 keyMaintenance.Rotated, keyMaintenance.PurgedVersions);
         }
         return purgedRaw + purgedHourly + purgedMetricRaw + purgedMetricHourly
-               + purgedLogs + purgedErrors + purgedVisitors + analyticsPurged.Total
+               + purgedLogs + purgedErrors + purgedVisitors + analyticsPurged.Total + analyticsRolled
                + keyMaintenance.PurgedVersions;
+    }
+
+    /// <summary>
+    /// R2-020: rolls up each completed hour of [floor, current hour) on its own, in its own scope, so the
+    /// memory of one hour (read samples, tracked rollups) is released before the next one. The startup
+    /// catch-up used to read its whole 48-hour window at once and died in a 1 GB container
+    /// (System.OutOfMemoryException). An hour already rolled up costs a few counts.
+    /// </summary>
+    private async Task<(int Health, int Metrics)> AggregateHourByHourAsync(
+        DateTime floorUtc, DateTime currentHourStartUtc, CancellationToken ct)
+    {
+        var health = 0;
+        var metrics = 0;
+        for (var hour = floorUtc; hour < currentHourStartUtc; hour = hour.AddHours(1))
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            health += await scope.ServiceProvider.GetRequiredService<IAppMonitoringRepository>()
+                .AggregateHourAsync(hour, ct).ConfigureAwait(false);
+            metrics += await scope.ServiceProvider.GetRequiredService<IAppMetricRepository>()
+                .AggregateHourAsync(hour, ct).ConfigureAwait(false);
+        }
+        return (health, metrics);
     }
 }

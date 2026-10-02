@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -118,7 +117,7 @@ public class DockerRelationsGraphTests : BunitContext
     {
         var cut = Render<DockerRelationsGraph>(p => p.Add(x => x.Docker, MakeDockerData()));
 
-        cut.FindAll(".labeled-toggle-native-input")[2].Change(false);
+        cut.FindAll("input.omni-checkbox")[2].Change(false);
 
         Assert.False(cut.Instance.KindFilter["network"]);
         var json = cut.Instance.BuildData();

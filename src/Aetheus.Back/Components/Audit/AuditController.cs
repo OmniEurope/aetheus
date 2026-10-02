@@ -20,12 +20,15 @@ public class AuditController(IAuditService auditService, IAuditChainService chai
         [FromQuery] DateTime? dateTo = null,
         [FromQuery, StringLength(50)] string? sortBy = null,
         [FromQuery] bool sortDescending = true,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery(Name = "Filters"), MaxLength(PaginationRequest.MaxFilters)] List<GridFilter>? filters = null)
     {
         page = Math.Max(1, page);
         pageSize = PaginationDefaults.Clamp(pageSize);
+        // Recette R-238: the grid's header filters travel as the generic column filters, beside the
+        // typed parameters other callers still send.
         return Ok(await auditService.GetLogsPagedAsync(page, pageSize, search, action, entityType, entityId, dateFrom, dateTo, ct,
-            sortBy, sortDescending));
+            sortBy, sortDescending, filters is { Count: > 0 } ? filters : null));
     }
 
     [HttpGet("actions")]

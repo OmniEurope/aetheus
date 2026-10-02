@@ -1,0 +1,104 @@
+#!/bin/sh
+# Aetheus Agent certbot-issue helper - root-owned, invoked via /etc/sudoers.d/aetheus-certbot.
+# Args: $1 = primary domain. Env: AETHEUS_CERTBOT_DOMAINS (comma list), AETHEUS_CERTBOT_EMAIL,
+# AETHEUS_CERTBOT_MODE (production or local).
+set -eu
+# Under /var/www, not under the agent state directory. Apache runs as www-data and cannot traverse
+# /var/lib/aetheus-agent, so it answered 403 on every challenge served from there and no new
+# certificate could be issued - docs.aetheus.sonytumen.com could never get one. Moving the web root
+# to the tree Apache is meant to read fixes that without loosening the agent directory, and the
+# challenge files are public, single-use and short-lived by design.
+ACME_WEBROOT=#{ACME_WEBROOT}#
+ACME_CONF=/etc/apache2/conf-available/aetheus-acme-webroot.conf
+LIVE_DIR=/etc/letsencrypt/live
+SITES_AVAIL=/etc/apache2/sites-available
+SITES_ENABLED=/etc/apache2/sites-enabled
+valid_domain() { printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9._-]{1,253}$'; }
+
+primary="${1:-}"
+valid_domain "$primary" || { echo "invalid primary domain" >&2; exit 2; }
+domains="${AETHEUS_CERTBOT_DOMAINS:-$primary}"
+email="${AETHEUS_CERTBOT_EMAIL:-}"
+mode="${AETHEUS_CERTBOT_MODE:-production}"
+case "$mode" in production|local) ;; *) echo "invalid certificate mode" >&2; exit 2;; esac
+# The email is agent-influenced env input to a root-run certbot: validate it
+# with the same discipline as domains (basic shape, no leading '-', no spaces).
+if [ -n "$email" ]; then
+    printf '%s' "$email" | grep -Eq '^[^@[:space:]-][^@[:space:]]*@[^@[:space:]]+$' \
+        || { echo "invalid email" >&2; exit 2; }
+fi
+
+# Build validated -d args.
+set --
+san_names=""
+OLDIFS=$IFS; IFS=','
+for d in $domains; do
+    d=$(printf '%s' "$d" | tr -d ' ')
+    [ -n "$d" ] || continue
+    valid_domain "$d" || { echo "invalid domain in list: $d" >&2; exit 2; }
+    set -- "$@" -d "$d"
+    if [ -n "$san_names" ]; then san_names="$san_names,DNS:$d"; else san_names="DNS:$d"; fi
+done
+IFS=$OLDIFS
+if [ "$#" -eq 0 ]; then set -- -d "$primary"; san_names="DNS:$primary"; fi
+
+# Real ACME through a stable webroot shared by every managed vhost.
+# --expand: when a lineage already covers a SUBSET of the requested names (e.g. adding an api host to an
+#   existing apex+app cert), reissue and REPLACE it to cover all of them instead of erroring on the
+#   interactive "expand?" prompt (which -n turns into a hard failure).
+# --keep-until-expiring: when the requested names EXACTLY match a still-valid cert, keep it (idempotent -
+#   no needless reissue, so repeated runs don't burn the Let's Encrypt duplicate-cert rate limit).
+if [ "$mode" = local ]; then
+    echo "local certificate mode selected - ACME is not contacted."
+fi
+if [ "$mode" = production ]; then
+    command -v certbot >/dev/null 2>&1 || { echo "certbot not installed" >&2; exit 1; }
+    mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"
+    cat > "$ACME_CONF" <<CONF
+#{include:certbot/aetheus-acme-webroot.conf}#
+CONF
+    a2enconf aetheus-acme-webroot >/dev/null
+    apache2ctl configtest
+    systemctl reload apache2
+    if [ -n "$email" ]; then set -- "$@" -m "$email"; else set -- "$@" --register-unsafely-without-email; fi
+    certbot certonly --webroot --webroot-path "$ACME_WEBROOT" --non-interactive --agree-tos --expand --keep-until-expiring "$@" \
+        || { echo "certbot ACME validation failed for $primary" >&2; exit 1; }
+    echo "certbot: real certificate obtained for $primary"
+    exit 0
+fi
+
+# Local-only certificate in the LE layout + an SSL vhost proxying to the same upstream as :80.
+command -v openssl >/dev/null 2>&1 || { echo "openssl missing - cannot create local cert" >&2; exit 1; }
+dir="$LIVE_DIR/$primary"
+# Never replace an existing CA-issued certificate, even in an explicitly local environment.
+if [ -f "$dir/fullchain.pem" ]; then
+    _subj=$(openssl x509 -in "$dir/fullchain.pem" -noout -subject 2>/dev/null)
+    _iss=$(openssl x509 -in "$dir/fullchain.pem" -noout -issuer 2>/dev/null)
+    if [ -n "$_subj" ] && [ "${_subj#subject}" != "${_iss#issuer}" ]; then
+        echo "keeping the existing CA-issued certificate for $primary (refusing to overwrite a real cert with self-signed)." >&2
+        exit 1
+    fi
+fi
+mkdir -p "$dir"
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$dir/privkey.pem" -out "$dir/fullchain.pem" \
+    -subj "/CN=$primary" -addext "subjectAltName=$san_names" 2>/dev/null
+chmod 600 "$dir/privkey.pem"
+
+http_site="$SITES_AVAIL/${primary}.conf"
+ssl_site="$SITES_AVAIL/${primary}-ssl.conf"
+proxy_line=$(grep -E '^[[:space:]]*ProxyPass[[:space:]]+/' "$http_site" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*//')
+[ -n "$proxy_line" ] || proxy_line="ProxyPass / http://127.0.0.1:8090/"
+proxy_rev=$(printf '%s' "$proxy_line" | sed 's/^ProxyPass/ProxyPassReverse/')
+cat > "$ssl_site" <<VHOST
+#{include:certbot/local-ssl-site.conf}#
+VHOST
+a2enmod ssl >/dev/null 2>&1 || true
+ln -sfn "$ssl_site" "$SITES_ENABLED/${primary}-ssl.conf"
+if apache2ctl configtest 2>&1; then
+    apache2ctl graceful 2>/dev/null || systemctl reload apache2
+    echo "local self-signed HTTPS configured for $primary."
+    exit 0
+fi
+echo "apache configtest failed after writing the SSL vhost for $primary" >&2
+exit 1

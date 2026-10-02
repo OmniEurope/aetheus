@@ -54,7 +54,7 @@ internal static class PipelineCoveragePublisher
         return new ExecutorResult(0, false);
     }
 
-    private static async Task<string?> FindCoverageFileAsync(
+    internal static async Task<string?> FindCoverageFileAsync(
         string baseDir,
         IReadOnlyCollection<string> patterns,
         Func<string, TaskLogLevel, Task> onOutput)
@@ -73,9 +73,19 @@ internal static class PipelineCoveragePublisher
                 TaskLogLevel.Error).ConfigureAwait(false);
             return null;
         }
+        var workspace = Path.TrimEndingDirectorySeparator(Path.GetFullPath(baseDir)) + Path.DirectorySeparatorChar;
         foreach (var pattern in patterns.Where(pattern => !pattern.Contains('*') && !pattern.Contains('?')))
         {
-            var candidate = Path.Combine(baseDir, pattern);
+            // targetFiles comes from the pipeline YAML. An absolute or ../ pattern makes Path.Combine
+            // drop the workspace, and the diagnostic below would tell the run log whether any path of
+            // the host exists: only a candidate inside the workspace is probed.
+            var candidate = Path.GetFullPath(Path.Combine(baseDir, pattern));
+            if (!candidate.StartsWith(workspace, StringComparison.Ordinal))
+            {
+                await onOutput($"Coverage pattern '{pattern}' points outside the workspace; not probed.", TaskLogLevel.Error)
+                    .ConfigureAwait(false);
+                continue;
+            }
             await onOutput(
                 $"Coverage candidate missing: '{candidate}' (file={File.Exists(candidate)}, directory={Directory.Exists(Path.GetDirectoryName(candidate))})",
                 TaskLogLevel.Error).ConfigureAwait(false);
@@ -217,6 +227,7 @@ internal static class PipelineCoveragePublisher
         };
         startInfo.ArgumentList.Add("rev-parse");
         startInfo.ArgumentList.Add("HEAD");
+        GitRepositoryEnvironment.Neutralize(startInfo.Environment);
         using var process = System.Diagnostics.Process.Start(startInfo);
         if (process is null) return false;
         var actual = (await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false)).Trim();

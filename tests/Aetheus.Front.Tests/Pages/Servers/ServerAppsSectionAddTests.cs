@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -150,8 +147,8 @@ public class ServerAppsSectionAddTests : BunitContext
     {
         var method = typeof(ServerAppsSection)
             .GetMethod("GetAppStatusBadge", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (BadgeStyle)method.Invoke(null, [(ServerAppStatus)999])!;
-        Assert.Equal(BadgeStyle.Warning, result);
+        var result = (OmniTone)method.Invoke(null, [(ServerAppStatus)999])!;
+        Assert.Equal(OmniTone.Warning, result);
     }
 
     // ── _addVisible panel ─────────────────────────────────────────────────────

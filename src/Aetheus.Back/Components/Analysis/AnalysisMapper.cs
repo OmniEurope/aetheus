@@ -29,7 +29,8 @@ internal static class AnalysisMapper
         NewFindingCount = row.NewFindingCount,
         BlockerCount = row.BlockerCount,
         WarningCount = row.WarningCount,
-        CompletedAt = row.CompletedAt
+        CompletedAt = row.CompletedAt,
+        RepositoryId = row.RepositoryId
     };
 
     public static AnalysisReportDto ToDto(AnalysisReportRow row)

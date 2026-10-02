@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.Enums;
-using Radzen;
 
 namespace Aetheus.Front.Tests;
 
@@ -23,10 +20,10 @@ public class ServerTypeHelperTests
     }
 
     [Theory]
-    [InlineData(ServerType.Normal, BadgeStyle.Info)]
-    [InlineData(ServerType.Build, BadgeStyle.Warning)]
-    [InlineData(ServerType.Docker, BadgeStyle.Light)]
-    public void GetBadgeStyle_ReturnsExpectedStyle(ServerType type, BadgeStyle expected)
+    [InlineData(ServerType.Normal, OmniTone.Accent)]
+    [InlineData(ServerType.Build, OmniTone.Warning)]
+    [InlineData(ServerType.Docker, OmniTone.Neutral)]
+    public void GetBadgeStyle_ReturnsExpectedStyle(ServerType type, OmniTone expected)
     {
         Assert.Equal(expected, ServerTypeHelper.GetBadgeStyle(type));
     }
@@ -34,6 +31,6 @@ public class ServerTypeHelperTests
     [Fact]
     public void GetBadgeStyle_UnknownType_ReturnsLight()
     {
-        Assert.Equal(BadgeStyle.Light, ServerTypeHelper.GetBadgeStyle((ServerType)999));
+        Assert.Equal(OmniTone.Neutral, ServerTypeHelper.GetBadgeStyle((ServerType)999));
     }
 }

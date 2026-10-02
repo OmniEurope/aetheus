@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
 using Bunit;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -31,7 +29,7 @@ public class VaultEditTests : BunitContext
         _handler.SetJsonResponse("api/projects", new PaginatedResult<ProjectDto> { Items = [], TotalCount = 0 });
 
         var cut = Render<VaultEdit>();
-        cut.Find("input[name='Name']").Input("observability-package-publication");
+        cut.Find("input#vault-name").Input("observability-package-publication");
 
         var model = typeof(VaultEdit)
             .GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -148,14 +146,14 @@ public class VaultEditTests : BunitContext
     }
 
     [Theory]
-    [InlineData(-1, BadgeStyle.Danger)]
-    [InlineData(7, BadgeStyle.Warning)]
-    [InlineData(30, BadgeStyle.Light)]
-    public void GetExpiryBadge_ReturnsExpected(int daysFromNow, BadgeStyle expected)
+    [InlineData(-1, OmniTone.Danger)]
+    [InlineData(7, OmniTone.Warning)]
+    [InlineData(30, OmniTone.Neutral)]
+    public void GetExpiryBadge_ReturnsExpected(int daysFromNow, OmniTone expected)
     {
         var method = typeof(VaultEdit).GetMethod("GetExpiryBadge", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
-        var result = (BadgeStyle)method.Invoke(null, [DateTime.UtcNow.AddDays(daysFromNow)])!;
+        var result = (OmniTone)method.Invoke(null, [DateTime.UtcNow.AddDays(daysFromNow)])!;
         Assert.Equal(expected, result);
     }
 
@@ -202,8 +200,9 @@ public class VaultEditTests : BunitContext
 
         // The existing-vault branch renders the delete button (localized "Delete" label + delete
         // icon); a new vault omits it. Target that button specifically rather than "any button exists".
-        Assert.Contains(cut.FindAll("button"), b =>
-            b.TextContent.Contains("Delete") && b.InnerHtml.Contains("delete"));
+        // Recette R-287: the vault's Delete sits in the tools menu, which renders its items once open.
+        cut.Find(".omni-overflow-menu__trigger").Click();
+        Assert.Contains(cut.FindAll(".omni-menu__item"), item => item.TextContent.Contains("Delete"));
     }
 
     private void SetupExistingVault(int id = 1)

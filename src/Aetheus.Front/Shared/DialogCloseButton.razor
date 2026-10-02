@@ -1,5 +1,0 @@
-@* SPDX-License-Identifier: EUPL-1.2 *@
-@* Standard dismiss button for dialogs opened via DialogService.OpenAsync. Guarantees every dialog
-   has at least one button to close it, with the homogeneous "close" look (Light + close icon). *@
-
-<RadzenButton Text="@(Text ?? L["Close"])" Icon="close" Click="@(() => Dialog.Close())" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" />

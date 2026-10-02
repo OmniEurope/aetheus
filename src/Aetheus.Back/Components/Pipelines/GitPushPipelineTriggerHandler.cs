@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Git.Events;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -43,7 +41,7 @@ internal sealed class GitPushPipelineTriggerHandler(
             var pipelines = await pipelineService
                 .GetWebhookTriggeredPipelinesForProjectAsync(push.ProjectId, ct).ConfigureAwait(false);
             foreach (var pipeline in pipelines)
-                await TryTriggerPushPipelineAsync(pipeline, push.RefUpdates, ct).ConfigureAwait(false);
+                await TryTriggerPushPipelineAsync(pipeline, push, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -53,15 +51,23 @@ internal sealed class GitPushPipelineTriggerHandler(
 
     private async Task TryTriggerPushPipelineAsync(
         PipelineDto pipeline,
-        IReadOnlyList<GitRefUpdate> updatedRefs,
+        GitPushProcessedEvent push,
         CancellationToken ct)
     {
         var definition = YamlParsingHelper.ParseAndValidate(pipeline.YamlDefinition, logger);
         var matchingUpdate = definition is null
             ? null
-            : updatedRefs.FirstOrDefault(update =>
+            : push.RefUpdates.FirstOrDefault(update =>
                 PipelineBranchFilter.Matches(definition.Branches, update.Reference, logger));
         if (matchingUpdate is null) return;
+        if (await PushOnlyTouchesIgnoredPathsAsync(definition!, push, matchingUpdate, ct).ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Push to {Reference} only touches paths_ignore entries of pipeline {PipelineId} "
+                + "({PipelineName}); no run created.",
+                matchingUpdate.Reference, pipeline.Id, pipeline.Name);
+            return;
+        }
         var variables = new Dictionary<string, string>
         {
             ["WEBHOOK_REF"] = matchingUpdate.Reference,
@@ -82,6 +88,40 @@ internal sealed class GitPushPipelineTriggerHandler(
     }
 
     /// <summary>
+    /// Whether the push changed nothing this pipeline cares about (PLAN-006 lot 8.5).
+    ///
+    /// Fail-open at every step, because a skipped run is invisible: a branch this push creates has
+    /// no range to diff, a repository whose diff cannot be read is unknown rather than unchanged,
+    /// and either way the run happens. Only a fully-read list whose every entry matches skips.
+    /// </summary>
+    private async Task<bool> PushOnlyTouchesIgnoredPathsAsync(
+        PipelineYamlDefinition definition,
+        GitPushProcessedEvent push,
+        GitRefUpdate update,
+        CancellationToken ct)
+    {
+        if (definition.PathsIgnore.Count == 0) return false;
+        if (push.DiskPath.Length == 0) return false;
+        // A new branch: git announces all-zero as the previous id, so there is no range. Build it.
+        if (update.OldObjectId.Length == 0 || update.OldObjectId.All(character => character == '0'))
+            return false;
+
+        IReadOnlyList<string>? changed;
+        try
+        {
+            changed = await cli.GetChangedPathsAsync(
+                push.DiskPath, update.OldObjectId, update.NewObjectId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not read the changed paths of {Reference}; the run proceeds.", update.Reference);
+            return false;
+        }
+
+        return PipelinePathFilter.ShouldSkip(definition.PathsIgnore, changed, logger);
+    }
+
+    /// <summary>
     /// Latest-wins: prepare and authorize the replacement BEFORE cancelling anything, so a refused
     /// run does not leave the pipeline with nothing running.
     /// </summary>
@@ -99,8 +139,8 @@ internal sealed class GitPushPipelineTriggerHandler(
         logger.LogInformation(
             "Git push latest-wins requested cancellation of {Count} superseded run(s) for pipeline {PipelineId}",
             activeRunIds.Count, pipeline.Id);
-        var replacement = await pipelineRunService.TriggerPreparedRunAsync(
-            preparation, variables, ct: ct).ConfigureAwait(false);
+        var replacement = await pipelineRunService.TriggerPreparedAutomatedRunAsync(
+            preparation, "GitPush", variables, ct).ConfigureAwait(false);
         if (replacement is null)
             logger.LogWarning(
                 "Git push replacement for pipeline {PipelineId} could not be persisted", pipeline.Id);

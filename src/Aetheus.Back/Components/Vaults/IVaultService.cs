@@ -4,6 +4,7 @@ namespace Aetheus.Back.Components.Vaults;
 
 public interface IVaultService
 {
+    Task<VaultFilterValuesDto> GetFilterValuesAsync(List<int>? accessibleIds, CancellationToken ct = default);
     Task<PaginatedResult<VaultDto>> GetVaultsAsync(int? projectId, int? environmentId = null, int? projectServerId = null, PaginationRequest? request = null, List<int>? accessibleIds = null, CancellationToken ct = default);
     Task<VaultDetailDto?> GetVaultDetailAsync(int id, CancellationToken ct = default);
     Task<List<string>> GetVaultNamesAsync(int? projectId, List<int>? accessibleIds = null, CancellationToken ct = default);
@@ -14,6 +15,8 @@ public interface IVaultService
     Task<VaultSecretDto?> UpdateSecretAsync(int vaultId, int secretId, UpdateVaultSecretRequest request, CancellationToken ct = default);
     Task<VaultSecretDto?> RotateSecretAsync(int vaultId, int secretId, RotateVaultSecretRequest request, CancellationToken ct = default);
     Task<bool> DeleteSecretAsync(int vaultId, int secretId, CancellationToken ct = default);
+    /// <summary>Recette R-292: one secret's clear value, for the copy button; every read is audited.</summary>
+    Task<string?> RevealSecretValueAsync(int vaultId, int secretId, CancellationToken ct = default);
     Task<List<VaultSecretVersionDto>> GetSecretVersionsAsync(int vaultId, int secretId, CancellationToken ct = default);
     Task<int> PurgeHistoricalSecretVersionsAsync(
         int vaultId,

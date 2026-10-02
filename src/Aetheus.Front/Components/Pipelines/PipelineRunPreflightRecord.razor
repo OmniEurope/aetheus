@@ -1,0 +1,28 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@* What the launch preflight verified to let this run start. The refusal path was loud (a 400 and an
+   audit entry) and the accepted path silent, so a run dying on an environment gave no way to tell
+   whether that environment had been checked at launch or never looked at. *@
+@if (Checks.Count > 0)
+{
+    <OmniCard Class="omni-u-p-md omni-u-mb-lg">
+        <OmniText Element="OmniTextElement.Strong" Class="omni-u-mb-sm">
+            <OmniIcon Name="OmniIconName.ListChecks" Class="run-tile-icon" /> @L["PreflightRecordTitle"]
+        </OmniText>
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted omni-u-mb-sm">
+            @L["PreflightRecordHint"]
+        </OmniText>
+        @foreach (var check in Checks)
+        {
+            <div class="run-preflight-check">
+                <OmniIcon Name="@MaterialIconMap.Resolve(check.Satisfied ? "check_circle" : "cancel")" Class="@(check.Satisfied ? "run-preflight-ok" : "run-preflight-ko")" />
+                <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@check.Kind</OmniBadge>
+                <span class="run-preflight-subject">@check.Subject</span>
+                @if (check.Detail is { Length: > 0 } detail)
+                {
+                    <span class="run-preflight-detail">@detail</span>
+                }
+            </div>
+        }
+    </OmniCard>
+}

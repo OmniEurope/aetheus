@@ -1,0 +1,13 @@
+# Aetheus Agent - fleet OS patching. A single EXACT argv (no wildcards): whole-box apt-get upgrade.
+# The agent runs a non-mutating 'apt-get -s upgrade' simulation FIRST (unprivileged, no sudo) and
+# aborts on any critical package (Aetheus.Shared.Constants.CriticalPackages) before ever calling this.
+Cmnd_Alias AETHEUS_PATCH = \
+    /usr/bin/apt-get upgrade -y
+
+Defaults!AETHEUS_PATCH timestamp_timeout=0
+Defaults!AETHEUS_PATCH env_reset
+Defaults!AETHEUS_PATCH secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+# Keep DEBIAN_FRONTEND so the upgrade runs non-interactively (no debconf tty prompt -> exit 100).
+Defaults!AETHEUS_PATCH env_keep += "DEBIAN_FRONTEND"
+
+#{AGENT_USER}# ALL=(root) NOPASSWD: AETHEUS_PATCH

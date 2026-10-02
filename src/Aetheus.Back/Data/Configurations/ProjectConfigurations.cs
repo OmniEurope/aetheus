@@ -67,6 +67,11 @@ internal sealed class ReleaseConfiguration : IEntityTypeConfiguration<Release>
                .WithMany()
                .HasForeignKey(e => e.PipelineRunId)
                .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(e => e.CreatedByPipelineRunId);
+        builder.HasOne(e => e.CreatedByPipelineRun)
+               .WithMany()
+               .HasForeignKey(e => e.CreatedByPipelineRunId)
+               .OnDelete(DeleteBehavior.SetNull);
     }
 }
 

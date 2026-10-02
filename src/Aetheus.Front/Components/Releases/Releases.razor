@@ -1,0 +1,17 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/releases"
+
+<PageTitle>@L["Releases"] - Aetheus</PageTitle>
+
+@* Recette R-275: the global list contributes no header action (the project scope does), so no empty
+   actions section: on a phone it showed a toggle that opened nothing. Recette R-416: the help link
+   rides in the header, as on the Git repositories page, instead of a toolbar row above the grid. *@
+<OmniPageHeader Title="@L["Releases"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("new_releases")" /></Icon>
+    <Badges>
+        <HelpLink PageKey="releases" />
+    </Badges>
+</OmniPageHeader>
+
+@* 0-a: the global Releases list is the shared ReleasesList with no scope filter. *@
+<ReleasesList />

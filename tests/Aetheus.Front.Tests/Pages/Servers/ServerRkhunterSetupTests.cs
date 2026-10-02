@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
@@ -62,7 +59,7 @@ public class ServerRkhunterSetupTests : BunitContext
     public async Task OpenSetupDialogAsync_Success_SubmitsDialogModel()
     {
         var cut = RenderNotInstalled();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = new ServerSetupDialogModel { MailOnWarning = "ops@example.com" };
         var method = typeof(ServerRkhunterSection).GetMethod("OpenSetupDialogAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.ComponentModel.DataAnnotations;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -44,12 +45,34 @@ public sealed class AppTelemetryController(
 
     [HttpGet("apps/{id:int}/metrics/series")]
     public async Task<ActionResult<MetricSeriesDto>> GetMetricSeries(
-        int id, [FromQuery] string metric, [FromQuery] int hours = 24, CancellationToken ct = default)
+        int id,
+        [FromQuery] string metric,
+        [FromQuery] string? attributes = null,
+        [FromQuery] int hours = 24,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(metric))
             return BadRequest(new ApiError { Message = "metric query parameter is required." });
         if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
-        return Ok(await telemetry.GetMetricSeriesAsync(id, metric, hours, ct));
+        return Ok(await telemetry.GetMetricSeriesAsync(id, metric, attributes, hours, ct));
+    }
+
+    [HttpGet("apps/{id:int}/metrics/series-groups")]
+    public async Task<ActionResult<List<string?>>> GetMetricSeriesGroups(
+        int id, [FromQuery] string metric, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(metric))
+            return BadRequest(new ApiError { Message = "metric query parameter is required." });
+        if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
+        return Ok(await telemetry.GetMetricSeriesGroupsAsync(id, metric, ct));
+    }
+
+    /// <summary>R-455: the application's per-route timings, as its Aetheus.Telemetry package last exported them.</summary>
+    [HttpGet("apps/{id:int}/performance")]
+    public async Task<ActionResult<AppPerformanceReportDto>> GetPerformance(int id, CancellationToken ct = default)
+    {
+        if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
+        return Ok(await telemetry.GetPerformanceAsync(id, ct));
     }
 
     // --- visitors ---
@@ -142,20 +165,41 @@ public sealed class AppTelemetryController(
     [HttpGet("apps/{id:int}/logs")]
     public async Task<ActionResult<PaginatedResult<AppLogEntryDto>>> GetLogs(
         int id, [FromQuery] int hours = 24, [FromQuery] int? minSeverity = null,
-        [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 100, CancellationToken ct = default)
+        [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 100,
+        [FromQuery, StringLength(50)] string? sortBy = null, [FromQuery] bool sortDescending = true,
+        CancellationToken ct = default,
+        [FromQuery(Name = "Filters"), MaxLength(PaginationRequest.MaxFilters)] List<GridFilter>? filters = null)
     {
         if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
-        return Ok(await telemetry.GetLogsAsync(id, hours, minSeverity, search, page, pageSize, ct));
+        // Recette R-358: the log grid's sort and header filters, checked against the allow-list of
+        // AppLogQuery; an unknown key or an unparsable value is a 400.
+        return Ok(await telemetry.GetLogsAsync(id, hours, minSeverity, search, page, pageSize, ct,
+            filters is { Count: > 0 } ? filters : null, sortBy, sortDescending));
     }
 
     // --- errors (Read) ---
 
     [HttpGet("apps/{id:int}/errors")]
     public async Task<ActionResult<PaginatedResult<AppErrorEventDto>>> GetErrors(
-        int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+        int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 50,
+        [FromQuery, StringLength(50)] string? sortBy = null, [FromQuery] bool sortDescending = true,
+        CancellationToken ct = default,
+        [FromQuery(Name = "Filters"), MaxLength(PaginationRequest.MaxFilters)] List<GridFilter>? filters = null)
     {
         if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
-        return Ok(await telemetry.GetErrorsAsync(id, page, pageSize, ct));
+        // The error grid's sort and header filters, checked against the allow-list of AppErrorQuery; an
+        // unknown key or an unparsable value is a 400.
+        return Ok(await telemetry.GetErrorsAsync(id, page, pageSize, ct,
+            filters is { Count: > 0 } ? filters : null, sortBy, sortDescending));
+    }
+
+    /// <summary>The candidates of the error grid's exception-type filter: every type the app stored,
+    /// not only those of the rows on screen.</summary>
+    [HttpGet("apps/{id:int}/errors/exception-types")]
+    public async Task<ActionResult<List<string>>> GetErrorExceptionTypes(int id, CancellationToken ct = default)
+    {
+        if (await GateAsync(id, Permission.Read, ct) is { } fail) return fail;
+        return Ok(await telemetry.GetErrorExceptionTypesAsync(id, ct));
     }
 
     /// <summary>Resolves the app's parent Project and checks the required permission. Returns a failing

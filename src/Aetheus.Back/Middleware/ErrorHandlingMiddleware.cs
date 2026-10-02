@@ -43,8 +43,13 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
         }
     }
 
+    /// <summary>R-464: the reason of a refused request, kept for <see cref="RequestErrorLoggingMiddleware"/>
+    /// so its warning says why (a 400 of the template resolver used to say only "HTTP 400").</summary>
+    public const string ErrorReasonItem = "Aetheus.ErrorReason";
+
     private static async Task WriteErrorAsync(HttpContext context, HttpStatusCode statusCode, string message)
     {
+        context.Items[ErrorReasonItem] = message;
         context.Response.StatusCode = (int)statusCode;
         context.Response.ContentType = "application/json";
         var error = new ApiError

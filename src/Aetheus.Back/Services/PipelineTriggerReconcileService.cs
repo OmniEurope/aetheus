@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Collections.Concurrent;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Microsoft.Extensions.Options;
@@ -24,6 +25,12 @@ public sealed class PipelineTriggerReconcileService(
     TimeProvider timeProvider,
     IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
+    /// <summary>How many sweeps may try to re-apply one stranded run's decision before giving up on it.</summary>
+    private const int MaxStrandedAttempts = 5;
+
+    /// <summary>Attempts spent per stranded run. The service is a singleton, so this survives sweeps.</summary>
+    private readonly ConcurrentDictionary<int, int> _strandedAttempts = new();
+
     private readonly TimeSpan _interval = options.Value.TriggerReconcileInterval;
     private readonly TimeSpan _grace = options.Value.TriggerStepGrace;
     private readonly TimeSpan _schedulerGrace = options.Value.SchedulerRecoveryGrace;
@@ -71,6 +78,134 @@ public sealed class PipelineTriggerReconcileService(
         await ReconcileStalledCancellationsAsync(scope, repo, now, ct).ConfigureAwait(false);
         await ReconcileStalledSchedulingAsync(scope, repo, now, ct).ConfigureAwait(false);
         await FailStuckRunsAsync(scope, repo, now, ct).ConfigureAwait(false);
+        // Before the expiry pass: an approval of an ended run is closed, not timed out, and deciding
+        // one would now be refused anyway.
+        await CloseApprovalsOfEndedRunsAsync(repo, now, ct).ConfigureAwait(false);
+        await ExpireStaleApprovalsAsync(scope, repo, now, ct).ConfigureAwait(false);
+        await ResolveStrandedApprovalsAsync(scope, repo, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// PLAN-005 lot 3 / D34. The finalizer closes a run's pending approvals when it ends the run, but
+    /// not every path that ends a run goes through it (a cancellation, a launch failure), and runs
+    /// that ended before this existed, run 2323 among them, still carry one. This sweep closes every
+    /// approval still Pending on an ended run, whichever way it ended.
+    /// </summary>
+    private async Task CloseApprovalsOfEndedRunsAsync(IPipelineRepository repo, DateTime now, CancellationToken ct)
+    {
+        var closed = await repo.CloseApprovalsOfEndedRunsAsync(null, now, EndedRunApprovals.Reason, ct).ConfigureAwait(false);
+        if (closed > 0)
+            logger.LogWarning("Closed {Count} approval(s) still pending on runs that had already ended", closed);
+    }
+
+    /// <summary>
+    /// Finishes an approval decision that was recorded but never applied to its run.
+    ///
+    /// DecideApprovalAsync resolves the approval row first and only then moves the run, so anything
+    /// between the two - a failed transition, a restart - leaves the run in WaitingForApproval with
+    /// nothing pending on it. The run page then shows the waiting status and no decision to make,
+    /// because there is none, and the timeout sweep above cannot reach it either: that one only reads
+    /// pending rows. Run 2152 sat like that for eight days.
+    ///
+    /// This does not invent a decision. It re-applies the one already recorded: an approved run is
+    /// resumed, a rejected or timed-out one is failed. Both operations are the same ones the decide
+    /// path runs, and both are no-ops if something else got there first.
+    /// </summary>
+    private async Task ResolveStrandedApprovalsAsync(
+        AsyncServiceScope scope, IPipelineRepository repo, CancellationToken ct)
+    {
+        var stranded = await repo.GetStrandedApprovalRunsAsync(ct).ConfigureAwait(false) ?? [];
+        if (stranded.Count == 0) return;
+
+        var runService = scope.ServiceProvider.GetRequiredService<IPipelineRunService>();
+        foreach (var (runId, lastDecision) in stranded)
+        {
+            // A run whose re-application keeps failing is stranded for a reason this sweep cannot fix, and
+            // retrying it every tick forever would bury the log under one LogCritical per tick per run
+            // while changing nothing. After MaxStrandedAttempts it is left alone, said once, for a human.
+            var attempts = _strandedAttempts.AddOrUpdate(runId, 1, (_, count) => count + 1);
+            if (attempts > MaxStrandedAttempts)
+            {
+                if (attempts == MaxStrandedAttempts + 1)
+                    logger.LogError(
+                        "Run {RunId} did not leave its stranded approval state after {Attempts} attempts; giving up on it",
+                        runId, MaxStrandedAttempts);
+                continue;
+            }
+
+            try
+            {
+                switch (lastDecision)
+                {
+                    case ApprovalStatus.Approved:
+                        logger.LogWarning(
+                            "Run {RunId} was approved but never resumed; re-applying the resume", runId);
+                        await runService.ResumeAfterApprovalAsync(runId, ct).ConfigureAwait(false);
+                        break;
+                    case ApprovalStatus.Rejected or ApprovalStatus.TimedOut:
+                        logger.LogWarning(
+                            "Run {RunId} was {Decision} but never failed; re-applying the failure",
+                            runId, lastDecision);
+                        await runService.ApplyRefusalAsync(runId, ct).ConfigureAwait(false);
+                        break;
+                    default:
+                        // No approval row at all. CheckAndCreateApprovalAsync writes one before moving the
+                        // run, so this is a row deleted underneath a waiting run rather than a race, and
+                        // there is no recorded decision to re-apply. Named, not guessed at.
+                        logger.LogError(
+                            "Run {RunId} waits for an approval that does not exist; it can only be cancelled by hand",
+                            runId);
+                        break;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                logger.LogCritical(ex, "Run {RunId} failed to leave its stranded approval state", runId);
+                continue;
+            }
+
+            // Left the list, or at least was acted on without throwing: forget its attempt count so a
+            // later, unrelated stranding of the same run starts from a clean budget.
+            _strandedAttempts.TryRemove(runId, out _);
+        }
+    }
+
+    // Pass 4 (F2): a WaitingForApproval run whose environment's ApprovalTimeoutMinutes has elapsed
+    // since the request was raised is auto-decided TimedOut, which PipelineApprovalService resolves
+    // exactly like a human Rejected decision - the run fails and the person waiting on it is unblocked
+    // instead of the run sitting parked forever. Reuses the same decide path a human approval takes
+    // (repo.TryResolveApprovalAsync's ExecuteUpdate CAS on Status == Pending), so a decision landing
+    // concurrently with this sweep can only win once.
+    private async Task ExpireStaleApprovalsAsync(AsyncServiceScope scope, IPipelineRepository repo, DateTime now, CancellationToken ct)
+    {
+        var expiredIds = await repo.GetExpiredPendingApprovalIdsAsync(now, ct).ConfigureAwait(false) ?? [];
+        if (expiredIds.Count == 0) return;
+
+        var approvalService = scope.ServiceProvider.GetRequiredService<IPipelineApprovalService>();
+        foreach (var approvalId in expiredIds)
+        {
+            try
+            {
+                var decided = await approvalService.DecideApprovalAsync(
+                    approvalId,
+                    new ApprovalDecisionRequest { Decision = ApprovalStatus.TimedOut, Comments = "Approval timed out: nobody decided within the environment's approval timeout." },
+                    ct).ConfigureAwait(false);
+                if (decided is not null)
+                    logger.LogWarning("Approval {ApprovalId} (run {RunId}) expired after its timeout; the run was failed", approvalId, decided.PipelineRunId);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                logger.LogCritical(ex, "Approval {ApprovalId} failed to expire cleanly; leaving it pending for a later retry", approvalId);
+            }
+        }
     }
 
     private async Task ReconcileStalledCancellationsAsync(
@@ -143,7 +278,9 @@ public sealed class PipelineTriggerReconcileService(
         PipelineStepRun step, int childId, bool childExists, PipelineStatus childStatus, DateTime now)
     {
         if (childExists && childStatus == PipelineStatus.Success) return TaskExecutionStatus.Success;
-        if (childExists && childStatus is PipelineStatus.Failed or PipelineStatus.Cancelled) return TaskExecutionStatus.Failed;
+        // A Partial child finished with a failure inside it, so the waiting trigger step fails too:
+        // the same rule ResolveCompletedTriggerStepAsync applies on the live path.
+        if (childExists && childStatus.IsUnsuccessful()) return TaskExecutionStatus.Failed;
         if (!childExists)
         {
             logger.LogWarning("Trigger step {StepId} (run {ParentRun}) waits on missing child run {ChildRun}; failing it",

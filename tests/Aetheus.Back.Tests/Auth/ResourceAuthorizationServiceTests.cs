@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Security.Claims;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 
@@ -345,14 +344,16 @@ public class ResourceAuthorizationServiceTests
     public async Task AuthzCacheEvictor_Expiration_RemovesDormantUsername()
     {
         var evictor = new AuthzCacheEvictor();
-        var token = evictor.TokenFor("one-shot-user", TimeSpan.FromMilliseconds(20));
+        // One second, not 20 ms: on a loaded machine a 20 ms token expired before the first assertion
+        // could see it tracked (failed once on 2026-09-25, passed alone right after).
+        var token = evictor.TokenFor("one-shot-user", TimeSpan.FromSeconds(1));
 
         Assert.Equal(1, evictor.TrackedUserCount);
         // Cancellation and registered callbacks are observed on separate thread-pool turns. A fixed
         // sleep races on a loaded CI runner: HasChanged can already be true while the dictionary-removal
         // callback is still queued. Wait for the behavior under test with a strict upper bound instead.
         var wait = Stopwatch.StartNew();
-        while (evictor.TrackedUserCount != 0 && wait.Elapsed < TimeSpan.FromSeconds(5))
+        while (evictor.TrackedUserCount != 0 && wait.Elapsed < TimeSpan.FromSeconds(10))
             await Task.Delay(10, TestContext.Current.CancellationToken);
 
         Assert.True(token.HasChanged);

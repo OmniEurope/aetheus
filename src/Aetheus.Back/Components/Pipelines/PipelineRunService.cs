@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.AiTasks;
 using Aetheus.Back.Components.AppBackups;
 using Aetheus.Back.Components.Artifacts;
-using Aetheus.Back.Components.ExternalRepos;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.GitGraph;
 using Aetheus.Back.Components.Pipelines.Events;
@@ -11,9 +10,6 @@ using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services.DomainEvents;
-using Aetheus.Shared.Analysis;
-using Aetheus.Shared.Helpers;
-using Aetheus.Shared.Validation;
 using Microsoft.AspNetCore.SignalR;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
 
@@ -32,6 +28,7 @@ public class PipelineRunService(
     IPipelineRunLauncher launcher,
     IPipelineRunScheduler scheduler,
     IPipelineRunPreflightService preflight,
+    IPipelineAdvisoryPreflightBuilder advisoryPreflight,
     IPipelineRunReader runReader) : IPipelineRunService, IPipelineLauncher
 {
     internal const string SystemPrepareStage = "System:Prepare";
@@ -39,6 +36,9 @@ public class PipelineRunService(
     internal const string CancellationRequestedVariable = "__AETHEUS_CANCEL_REQUESTED";
     internal const string SourceCommitVariable = "AETHEUS_SOURCE_COMMIT";
     internal const string SourceBranchVariable = "AETHEUS_RUN_BRANCH";
+    // Recette R-534: set only on a run whose workspace comes from another repository (source: block).
+    internal const string DefinitionCommitVariable = "AETHEUS_DEFINITION_COMMIT";
+    internal const string DefinitionBranchVariable = "AETHEUS_DEFINITION_BRANCH";
     internal const string ResumeSourceRunVariable = "AETHEUS_RESUME_SOURCE_RUN_ID";
     internal const string HostWorkspaceVariable = "AETHEUS_HOST_WORKSPACE";
 
@@ -80,6 +80,16 @@ public class PipelineRunService(
         int pipelineId, string triggerSource, Dictionary<string, string>? additionalVariables = null,
         CancellationToken ct = default)
         => launcher.PrepareAutomatedRunAsync(pipelineId, triggerSource, additionalVariables, ct);
+
+    public Task<PipelineRunDto?> TriggerPreparedAutomatedRunAsync(
+        PipelineRunPreparation preparation, string triggerSource,
+        Dictionary<string, string>? additionalVariables = null, CancellationToken ct = default)
+        => launcher.TriggerPreparedAutomatedRunAsync(preparation, triggerSource, additionalVariables, ct);
+
+    public Task RecordRefusedAutomatedLaunchAsync(
+        int pipelineId, string triggerSource, string reason,
+        IReadOnlyDictionary<string, string>? additionalVariables = null, CancellationToken ct = default)
+        => launcher.RecordRefusedAutomatedLaunchAsync(pipelineId, triggerSource, reason, additionalVariables, ct);
 
     public Task<PipelineRunDto?> RerunAsync(int sourceRunId, RerunMode mode, CancellationToken ct = default)
         => launcher.RerunAsync(sourceRunId, mode, ct);
@@ -218,8 +228,8 @@ public class PipelineRunService(
         preflight.ValidateUniqueDeploymentTargets(definition, resolvedVars);
 
         var organizationId = await repo.GetPipelineOrganizationIdAsync(pipeline.Id, ct).ConfigureAwait(false);
-        return await preflight
-            .BuildAdvisoryPreflightAsync(definition, resolvedVars, warnings, organizationId, ct)
+        return await advisoryPreflight
+            .BuildAsync(definition, resolvedVars, warnings, organizationId, preparation.EffectiveProjectId, ct)
             .ConfigureAwait(false);
     }
 
@@ -287,6 +297,9 @@ public class PipelineRunService(
     public Task<bool> ResumeAfterApprovalAsync(int runId, CancellationToken ct = default) =>
         control.ResumeAfterApprovalAsync(runId, scheduler, launcher, ct);
 
+    public Task<PipelineStatus?> ApplyRefusalAsync(int runId, CancellationToken ct = default) =>
+        control.ApplyRefusalAsync(runId, scheduler, launcher, ct);
+
     public async Task<PipelineRunDto?> RetryFailedStepsAsync(int runId, CancellationToken ct = default)
         => await control.RetryFailedStepsAsync(runId, scheduler, launcher, ct).ConfigureAwait(false)
             ? await GetRunAsync(runId, ct).ConfigureAwait(false)
@@ -305,6 +318,21 @@ public class PipelineRunService(
             && IsGitCommitHash(commit)
                 ? commit
                 : null;
+
+    /// <summary>The revision a run's definition, templates and <c>.pipeline/configs</c> files come from:
+    /// the definition's own when the workspace is checked out from another repository, else the run's.</summary>
+    internal static string? ResolveDefinitionCommit(PipelineRun run) =>
+        DeserializeResolvedVariables(run.AdditionalVariablesJson).TryGetValue(DefinitionCommitVariable, out var commit)
+        && IsGitCommitHash(commit)
+            ? commit
+            : run.CommitHash;
+
+    /// <summary>The branch a run's definition was read on, under the same rule.</summary>
+    internal static string? ResolveDefinitionBranch(PipelineRun run) =>
+        DeserializeResolvedVariables(run.AdditionalVariablesJson).TryGetValue(DefinitionBranchVariable, out var branch)
+        && !string.IsNullOrWhiteSpace(branch)
+            ? branch
+            : run.BranchName;
 
     internal static string? ResolveRunBranch(IReadOnlyDictionary<string, string>? additionalVariables)
     {
@@ -335,4 +363,12 @@ public class PipelineRunService(
 
     public Task<bool> IsServerAssignedToRunAsync(int runId, int serverId, CancellationToken ct = default)
         => repo.IsServerAssignedToRunAsync(runId, serverId, ct);
+
+    public async Task<List<string>> GetActiveWorkspaceSlotsAsync(CancellationToken ct = default)
+    {
+        // The slot, not the run id, is what an agent can match against a directory on disk. Deriving
+        // it here keeps the hash in one place instead of asking every agent to reimplement it.
+        var runIds = await repo.GetAllActiveRunIdsAsync(ct).ConfigureAwait(false);
+        return [.. runIds.Select(PipelineCommandBuilder.GetWorkspaceSlot)];
+    }
 }

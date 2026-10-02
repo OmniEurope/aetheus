@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Artifacts;
-using Aetheus.Back.Components.Releases;
-using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Components.Logs;
+using Aetheus.Back.Components.Tasks.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services.DomainEvents;
 
@@ -92,6 +91,18 @@ internal sealed class TaskCompletionFinalizer(
             if (closure.RollbackId is { } rollbackId)
                 await domainEvents.DispatchAsync(
                     new RollbackDeploymentSucceededEvent(rollbackId), ct).ConfigureAwait(false);
+
+            // Consequences of the deployment, not conditions for it: DispatchAsync keeps handler
+            // failures out of the closure's failure path, so a post-deployment observer can never
+            // turn a live release into a failed step.
+            if (closure.ReleaseId is { } deployedReleaseId)
+                await domainEvents.DispatchAsync(
+                    new ReleaseDeployedEvent(
+                        deployedReleaseId,
+                        task.PipelineRunId,
+                        stepRun?.StageName,
+                        closure.RollbackId is not null),
+                    ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

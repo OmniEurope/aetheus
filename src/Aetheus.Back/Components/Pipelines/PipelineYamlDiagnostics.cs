@@ -1,39 +1,32 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Reflection;
 using YamlDotNet.RepresentationModel;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace Aetheus.Back.Components.Pipelines;
 
+/// <summary>
+/// Names every key of a pipeline YAML that the running backend does not bind. The deserializer skips
+/// such keys so that a definition written for a newer backend still runs (recette R2-041); this walk is
+/// what keeps the skip visible, in the editor's validation result and in the run's warnings.
+/// </summary>
 internal static class PipelineYamlDiagnostics
 {
-    private static readonly HashSet<string> KnownTopLevelKeys =
-    [
-        "name", "trigger", "schedule", "source_branch", "branches", "supersede_running", "on_success", "extends", "parameters",
-        "variables", "variable_libraries", "vaults", "stages"
-    ];
+    // Derived from the definitions the deserializer binds, with its own naming convention:
+    // four hand-kept lists drifted from them, and the editor announced that honoured fields such as
+    // confirm_minutes, reload_helper or deployed "will be ignored". The walk follows the property types,
+    // so a nested block (isolation, strategy, a step's outputs...) is checked the same way.
+    private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> KnownKeys = new();
 
-    private static readonly HashSet<string> KnownStageKeys =
-    [
-        "name", "agent", "os", "group", "environment", "pool", "execution_role", "condition",
-        "depends_on", "variables", "steps", "jobs", "matrix", "strategy", "artifacts", "remove"
-    ];
-
-    private static readonly HashSet<string> KnownJobKeys =
-    [
-        "name", "agent", "os", "pool", "environment", "execution_role", "condition",
-        "variables", "steps", "matrix", "strategy", "artifacts", "remove"
-    ];
-
-    private static readonly HashSet<string> KnownStepKeys =
-    [
-        "name", "shell", "condition", "checkout", "working_directory", "timeout_seconds",
-        "retry_count", "continue_on_error", "type", "version", "changelog", "target_files",
-        "pipeline", "variables", "inherit_source", "source_branch", "source_commit", "artifact", "artifact_source_pipeline", "release", "target_directory", "allow_missing", "app",
-        "compose", "health_timeout_seconds", "health_url", "backup_run", "min_coverage",
-        "coverage_tool", "coverage_language", "coverage_version", "max_complexity", "scanner", "analysis_scope",
-        "analysis_preset", "analysis_rules", "analysis_grading",
-        "target_url", "target_classification", "active", "api_specification_url", "api_specification_format",
-        "config_files", "remove"
-    ];
+    /// <summary>Returns the unknown-key warnings of <paramref name="yaml"/> (empty when it does not parse).</summary>
+    public static List<string> UnknownPropertyWarnings(string yaml, ILogger logger)
+    {
+        var warnings = new List<string>();
+        AppendUnknownPropertyWarnings(yaml, warnings, logger);
+        return warnings;
+    }
 
     public static void AppendUnknownPropertyWarnings(string yaml, List<string> warnings, ILogger logger)
     {
@@ -45,26 +38,7 @@ internal static class PipelineYamlDiagnostics
             if (yamlStream.Documents.Count == 0 || yamlStream.Documents[0].RootNode is not YamlMappingNode root)
                 return;
 
-            AppendMappingWarnings(root, KnownTopLevelKeys, "top-level", warnings);
-            var stagesNode = root.Children.FirstOrDefault(k => Scalar(k.Key) == "stages").Value;
-            if (stagesNode is not YamlSequenceNode stages)
-                return;
-
-            foreach (var stage in stages.Children.OfType<YamlMappingNode>())
-            {
-                var stageName = Scalar(stage.Children.FirstOrDefault(k => Scalar(k.Key) == "name").Value) ?? "?";
-                AppendMappingWarnings(stage, KnownStageKeys, $"stage '{stageName}'", warnings);
-                AppendStepWarnings(stage, "steps", warnings);
-
-                var jobsNode = stage.Children.FirstOrDefault(k => Scalar(k.Key) == "jobs").Value;
-                if (jobsNode is not YamlSequenceNode jobs)
-                    continue;
-                foreach (var job in jobs.Children.OfType<YamlMappingNode>())
-                {
-                    AppendMappingWarnings(job, KnownJobKeys, "job", warnings);
-                    AppendStepWarnings(job, "steps", warnings);
-                }
-            }
+            AppendMappingWarnings(root, typeof(PipelineYamlDefinition), "top-level", warnings);
         }
         catch (Exception ex) when (ex is YamlDotNet.Core.YamlException or InvalidCastException or InvalidOperationException)
         {
@@ -72,25 +46,70 @@ internal static class PipelineYamlDiagnostics
         }
     }
 
-    private static void AppendStepWarnings(YamlMappingNode parent, string key, List<string> warnings)
+    private static void AppendMappingWarnings(YamlMappingNode node, Type type, string context, List<string> warnings)
     {
-        var node = parent.Children.FirstOrDefault(item => Scalar(item.Key) == key).Value;
-        if (node is not YamlSequenceNode steps)
-            return;
-        foreach (var step in steps.Children.OfType<YamlMappingNode>())
-            AppendMappingWarnings(step, KnownStepKeys, "step", warnings);
-    }
-
-    private static void AppendMappingWarnings(
-        YamlMappingNode node, HashSet<string> knownKeys, string context, List<string> warnings)
-    {
+        var known = KnownKeys.GetOrAdd(type, KeysOf);
         foreach (var item in node.Children)
         {
             var key = Scalar(item.Key) ?? string.Empty;
-            if (!knownKeys.Contains(key))
+            if (!known.TryGetValue(key, out var propertyType))
+            {
                 warnings.Add($"Unknown {context} property '{key}' will be ignored.");
+                continue;
+            }
+            AppendValueWarnings(item.Value, propertyType, $"{context} > {key}", warnings);
         }
     }
+
+    private static void AppendValueWarnings(YamlNode value, Type type, string context, List<string> warnings)
+    {
+        var target = Nullable.GetUnderlyingType(type) ?? type;
+        if (value is YamlMappingNode mapping && IsDefinition(target))
+        {
+            AppendMappingWarnings(mapping, target, context, warnings);
+            return;
+        }
+        if (value is not YamlSequenceNode sequence || ElementType(target) is not { } element)
+            return;
+        foreach (var child in sequence.Children.OfType<YamlMappingNode>())
+            AppendMappingWarnings(child, element, ItemContext(element, child, context), warnings);
+    }
+
+    // The three levels people write most keep the short labels the editor has always shown.
+    private static string ItemContext(Type element, YamlMappingNode item, string parentContext)
+    {
+        if (element == typeof(PipelineStageDefinition))
+            return $"stage '{Scalar(item.Children.FirstOrDefault(k => Scalar(k.Key) == "name").Value) ?? "?"}'";
+        if (element == typeof(PipelineJobDefinition)) return "job";
+        if (element == typeof(PipelineStepDefinition)) return "step";
+        return parentContext;
+    }
+
+    private static Type? ElementType(Type type)
+    {
+        if (type == typeof(string) || typeof(IDictionary).IsAssignableFrom(type)) return null;
+        var enumerable = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+            ? type
+            : type.GetInterfaces().FirstOrDefault(candidate =>
+                candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        var element = enumerable?.GetGenericArguments()[0];
+        return element is not null && IsDefinition(element) ? element : null;
+    }
+
+    // Only the pipeline contract types are walked: a dictionary (variables, config_files) has free keys,
+    // and a scalar has none.
+    private static bool IsDefinition(Type type) =>
+        type.IsClass && type != typeof(string)
+        && !typeof(IEnumerable).IsAssignableFrom(type)
+        && type.Namespace?.StartsWith("Aetheus.", StringComparison.Ordinal) == true;
+
+    private static IReadOnlyDictionary<string, Type> KeysOf(Type type) =>
+        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.SetMethod is { IsPublic: true })
+            .ToDictionary(
+                property => UnderscoredNamingConvention.Instance.Apply(property.Name),
+                property => property.PropertyType,
+                StringComparer.Ordinal);
 
     private static string? Scalar(YamlNode? node) => (node as YamlScalarNode)?.Value;
 }

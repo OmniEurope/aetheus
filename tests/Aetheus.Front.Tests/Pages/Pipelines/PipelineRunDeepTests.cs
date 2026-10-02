@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Pipelines;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Pipelines;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Pipelines;
@@ -21,6 +19,8 @@ public class PipelineRunDeepTests : BunitContext
             "api/ai/results",
             []);
         _handler.SetResponse(HttpMethod.Get, "api/analysis/runs/", System.Net.HttpStatusCode.NoContent);
+        // The run history: a finished run reads it too now, for the per-step drift against the last run.
+        _handler.SetPaginatedJsonResponse<PipelineRunDto>(HttpMethod.Get, "/runs?pageSize=50", []);
     }
 
     private static PipelineRunDto MakeRun(PipelineStatus status, List<PipelineStepRunDto>? steps = null) =>
@@ -89,7 +89,7 @@ public class PipelineRunDeepTests : BunitContext
                 Status = TaskExecutionStatus.Failed
             }
         ]) with
-        { Warnings = ["no online server matches agent 'linux'"] };
+        { Id = 10, Warnings = ["no online server matches agent 'linux'"] };
         _handler.SetJsonResponse("api/pipelines/runs/10", run);
 
         var cut = Render<PipelineRun>(p => p.Add(x => x.RunId, 10));
@@ -104,7 +104,8 @@ public class PipelineRunDeepTests : BunitContext
     {
         var run = MakeRun(PipelineStatus.Success, [
             new PipelineStepRunDto { Id = 1, StepName = "s1", StageName = "Stage1", Status = TaskExecutionStatus.Success }
-        ]);
+        ]) with
+        { Id = 5 };
         _handler.SetJsonResponse("api/pipelines/runs/5", run);
 
         var cut = Render<PipelineRun>(p => p.Add(x => x.RunId, 5));

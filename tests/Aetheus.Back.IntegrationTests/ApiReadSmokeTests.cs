@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
+using System.Net.Http.Json;
 
 namespace Aetheus.Back.IntegrationTests;
 
@@ -26,6 +27,7 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/projects")]
     [InlineData("/api/servers")]
     [InlineData("/api/servers/names")]
+    [InlineData("/api/servers/1/ports")]
     [InlineData("/api/users")]
     [InlineData("/api/users/me")]
     [InlineData("/api/users/roles")]
@@ -46,6 +48,7 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/releases")]
     [InlineData("/api/pipelines")]
     [InlineData("/api/pipelines/templates")]
+    [InlineData("/api/pipelines/approvals/pending")]
     [InlineData("/api/service-connections")]
     [InlineData("/api/test-suites")]
     [InlineData("/api/webhooks")]
@@ -60,11 +63,13 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/git/repos")]
     [InlineData("/api/git/connections")]
     [InlineData("/api/notifications/channels")]
+    [InlineData("/api/notifications/me/unread-count")]
     [InlineData("/api/auth/registration-tokens")]
     [InlineData("/api/personal-access-tokens")]
     [InlineData("/api/backups")]
     [InlineData("/api/analysis/policies/global")]
     [InlineData("/api/ai/profiles")]
+    [InlineData("/api/admin/performance")]
     // Covers both AppMonitoringController and AppTelemetryController (shared api/appmonitoring prefix).
     [InlineData("/api/appmonitoring/summary")]
     [InlineData("/metrics")]
@@ -122,6 +127,7 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
     [InlineData("/api/work-items?projectId=")]
     [InlineData("/api/artifacts/project/")]
     [InlineData("/api/gitgraph/project/")]
+    [InlineData("/api/pipelines/setup/unmet?projectId=")]
     public async Task ProjectScopedGet_AsAdmin_ReturnsNonEmpty200(string prefix)
     {
         using var client = fixture.CreateAdminClient();
@@ -141,6 +147,70 @@ public sealed class ApiReadSmokeTests(ApiSmokeFixture fixture)
         using var client = fixture.CreateAdminClient();
         var route = $"/api/pipelines/runs/{fixture.PipelineRunId}/checkpoint-resume-preview";
 
+        using var response = await client.GetAsync(
+            route, cancellationToken: TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"GET {route} returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body)}");
+        Assert.False(string.IsNullOrWhiteSpace(body),
+            $"GET {route} returned 200 with an empty body.");
+    }
+
+    [Fact]
+    public async Task RunLineage_AsAdmin_ReturnsNonEmpty200()
+    {
+        // R-498: the audit lookup and the bounded text match of the downstream runs, on PostgreSQL.
+        using var client = fixture.CreateAdminClient();
+        var route = $"/api/pipelines/runs/{fixture.PipelineRunId}/lineage";
+
+        using var response = await client.GetAsync(
+            route, cancellationToken: TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"GET {route} returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body)}");
+        Assert.Contains("downstream", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunStageBaselines_AsAdmin_ReturnsNonEmpty200()
+    {
+        using var client = fixture.CreateAdminClient();
+        var route = $"/api/pipelines/{fixture.PipelineId}/runs/{fixture.PipelineRunId}/stage-baselines";
+
+        using var response = await client.GetAsync(
+            route, cancellationToken: TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"GET {route} returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body)}");
+        Assert.False(string.IsNullOrWhiteSpace(body),
+            $"GET {route} returned 200 with an empty body.");
+    }
+
+    /// <summary>
+    /// PLAN-005 lot 5: the allocation controller's read path (candidate servers for a library). It
+    /// needs a real library, so the library is created through its own API first - which is why this
+    /// route carries no literal and the guard exempts its prefix, pointing here.
+    /// </summary>
+    [Fact]
+    public async Task VariableLibraryPortTargets_AsAdmin_ReturnsNonEmpty200()
+    {
+        using var client = fixture.CreateAdminClient();
+
+        using var created = await client.PostAsJsonAsync(
+            "/api/variable-libraries",
+            new CreateVariableLibraryRequest { Name = $"ports-read-{Guid.NewGuid():N}"[..40] },
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var library = await created.Content.ReadFromJsonAsync<VariableLibraryDto>(
+            IntegrationJsonOptions.Default, cancellationToken: TestContext.Current.CancellationToken);
+
+        var route = $"/api/variable-libraries/{library!.Id}/ports/servers";
         using var response = await client.GetAsync(
             route, cancellationToken: TestContext.Current.CancellationToken);
 

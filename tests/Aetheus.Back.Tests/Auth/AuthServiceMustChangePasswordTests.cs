@@ -3,8 +3,8 @@ using System.IdentityModel.Tokens.Jwt;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Auth;
 using Aetheus.Back.Components.Organizations;
+using Aetheus.Back.Components.Shared;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -70,6 +70,24 @@ public class AuthServiceMustChangePasswordTests
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         return jwt.Claims.Any(c =>
             c.Type == AetheusClaimTypes.MustChangePassword && c.Value == "true");
+    }
+
+    [Fact]
+    public async Task R471_TheToken_CarriesAnOpaqueAudienceIdentifier_ThatIsNotTheAccount()
+    {
+        _repo.FindUserWithRolesAsync("testuser", Arg.Any<CancellationToken>())
+            .Returns(MakeUser(mustChangePassword: false));
+
+        var response = await _sut.LoginAsync(new LoginRequest { Username = "testuser", Password = Password }, TestContext.Current.CancellationToken);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(response!.Token);
+        var visitor = jwt.Claims.Single(claim => claim.Type == AetheusClaimTypes.AnalyticsVisitor).Value;
+        Assert.Equal(AuthTokenHelper.AnalyticsVisitorId("aetheus-dev-key-minimum-32-bytes!!", "1"), visitor);
+        Assert.Matches("^[A-Za-z0-9_-]{22}$", visitor);
+        Assert.DoesNotContain("testuser", visitor, StringComparison.OrdinalIgnoreCase);
+        // One identifier per account, and another key gives other identifiers.
+        Assert.NotEqual(visitor, AuthTokenHelper.AnalyticsVisitorId("aetheus-dev-key-minimum-32-bytes!!", "2"));
+        Assert.NotEqual(visitor, AuthTokenHelper.AnalyticsVisitorId("another-key-of-at-least-32-bytes!!!", "1"));
     }
 
     [Fact]

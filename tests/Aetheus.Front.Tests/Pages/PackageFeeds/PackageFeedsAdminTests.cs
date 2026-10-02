@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.PackageFeeds;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.PackageFeeds;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.PackageFeeds;
 
@@ -59,7 +56,7 @@ public class PackageFeedsAdminTests : BunitContext
         var load = typeof(PackageFeedsAdmin).GetMethod("LoadDataAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         await cut.InvokeAsync(async () => await (Task)load.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25, OrderBy = "PackageCount desc" }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25, OrderBy = "PackageCount desc" }])!);
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("page=2", StringComparison.Ordinal)

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -21,8 +18,12 @@ public class ProjectTasksSectionRenderTests : BunitContext
     {
         _handler.SetJsonResponse("api/projects/1/tasks", new PaginatedResult<ServerTaskDto> { Items = [], TotalCount = 0 });
         var cut = Render<ProjectTasksSection>(p => p.Add(x => x.ProjectId, 1));
-        cut.WaitForState(() => cut.Markup.Contains("Tasks"), TimeSpan.FromSeconds(2));
-        Assert.Contains("Tasks", cut.Markup);
+        // The redundant "Tasks" section heading was removed (the breadcrumb leaf already carries it),
+        // so an empty section is identified by the grid's own empty text. Recette R-184: no search box.
+        cut.WaitForState(() => cut.Markup.Contains("NoRecords", StringComparison.Ordinal), TimeSpan.FromSeconds(2));
+        Assert.DoesNotContain("aetheus-loader-logo", cut.Markup, StringComparison.Ordinal);
+        Assert.Empty(cut.FindAll(".pipeline-list-search"));
+        Assert.Empty(cut.FindAll(".rz-data-row"));
     }
 
     [Fact]

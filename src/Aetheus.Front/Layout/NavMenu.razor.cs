@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Microsoft.AspNetCore.Components.Routing;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Layout;
 
@@ -12,10 +13,9 @@ public partial class NavMenu : IDisposable
     [Inject] private UserNotificationService UserNotify { get; set; } = default!;
     [Inject] private ProjectNavContextService ProjectNav { get; set; } = default!;
     [Inject] private NotifyHelper Toast { get; set; } = default!;
-    [Inject] private DialogService Dialog { get; set; } = default!;
+    [Inject] private AppDialogs Dialog { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
 
-    [Parameter] public EventCallback OnNavigate { get; set; }
 
     private string _currentPath = string.Empty;
     private bool _permDialogOpen;
@@ -49,11 +49,7 @@ public partial class NavMenu : IDisposable
                     null,
                     // STD-DIALOG exception: a permissions change invalidates the current UI contract;
                     // the user must acknowledge it and reload instead of dismissing the warning.
-                    new DialogOptions {
-                        Width = "440px",
-                        ShowClose = false,
-                        CloseDialogOnOverlayClick = false,
-                        CloseDialogOnEsc = false, AutoFocusFirstElement = false });
+                    new AppDialogOptions { Width = AppDialogWidth.Narrow, Dismissible = false });
             }
             finally
             {
@@ -82,7 +78,7 @@ public partial class NavMenu : IDisposable
         // lives under the top-level git-repositories route. Keeping it in the
         // projects section preserves the submenu when navigating from a project
         // tile to its Git tab.
-        ["projects"] = ["projects", "pipelines", "analysis", "backups", "templates", "releases", "variable-libraries", "vaults", "environments", "git-repositories", "artifacts", "service-connections", "ai-tasks"],
+        ["projects"] = ["projects", "pipelines", "analysis", "monitoring", "backups", "templates", "releases", "variable-libraries", "vaults", "environments", "git-repositories", "artifacts", "service-connections", "ai-tasks"],
         ["settings"] = ["settings"],
         ["admin"] = ["admin", "users", "audit", "plugins", "dashboards", "api-reference"],
     };
@@ -150,6 +146,13 @@ public partial class NavMenu : IDisposable
     }
 
     private void OnAlertCountChanged() => InvokeAsync(StateHasChanged);
+
+    private static RenderFragment IconFor(string material) => builder =>
+    {
+        builder.OpenComponent<OmniIcon>(0);
+        builder.AddComponentParameter(1, nameof(OmniIcon.Name), MaterialIconMap.Resolve(material));
+        builder.CloseComponent();
+    };
 
     public void Dispose()
     {

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Users;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Users;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Users;
 
@@ -43,7 +41,7 @@ public class RolesDeepTests : BunitContext
         var cut = Render<Roles>();
         var load = typeof(Roles).GetMethod("LoadDataAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)load.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 0, Top = 25 }])!);
+            [new GridLoadArgs { Skip = 0, Top = 25 }])!);
         cut.Render();
         return cut;
     }
@@ -77,8 +75,8 @@ public class RolesDeepTests : BunitContext
         var cut = await RenderLoadedAsync();
         cut.WaitForState(() => !cut.Markup.Contains("rz-progressbar-circular"));
 
-        // OnCreate opens the RoleCreateDialog via the DialogService.
-        var dialog = Services.GetRequiredService<DialogService>();
+        // OnCreate opens the RoleCreateDialog via the OmniDialogService.
+        var dialog = Services.GetRequiredService<OmniDialogService>();
         Type? openedDialog = null;
         dialog.OnOpen += (_, type, _, _) => openedDialog = type;
 

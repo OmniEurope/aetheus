@@ -5,11 +5,17 @@
     <InternalsVisibleTo Include="Aetheus.Back.IntegrationTests" />
   </ItemGroup>
 
+  <PropertyGroup Condition="'$(DotNetWatchBuild)' == 'true'">
+    <!-- Agent archives change during startup and must not trigger a watch restart. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);wwwroot/downloads/**</DefaultItemExcludes>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Asp.Versioning.Http" />
     <PackageReference Include="Asp.Versioning.Mvc" />
     <PackageReference Include="BCrypt.Net-Next" />
     <PackageReference Include="Cronos" />
+    <PackageReference Include="DnsClient" />
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />

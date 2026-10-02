@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Settings;
-using Aetheus.Shared.DTOs;
+using Aetheus.Front.Components.Settings;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
+using OmniEurope.Blazor.Components;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -41,7 +40,7 @@ public class AdminSettingsExtendedTests : BunitContext
         var cut = Render<AdminSettings>();
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("CopyToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["tok-abc-123"])!);
 
@@ -49,8 +48,8 @@ public class AdminSettingsExtendedTests : BunitContext
         // clipboard and the user gets a single success toast.
         var copy = JSInterop.Invocations.Single(i => i.Identifier == "navigator.clipboard.writeText");
         Assert.Equal("tok-abc-123", copy.Arguments[0]);
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
     }
 
     [Fact]
@@ -62,12 +61,12 @@ public class AdminSettingsExtendedTests : BunitContext
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
         // Buffer is empty; key "NonExistent" is not in _editBuffer - covers the TryGetValue guard
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("SaveSetting", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["NonExistent"])!);
 
         // Guard returns before any API call → no toast.
-        Assert.Empty(notif.Messages);
+        Assert.Empty(notif.Toasts());
     }
 
     [Fact]
@@ -79,14 +78,14 @@ public class AdminSettingsExtendedTests : BunitContext
         var cut = Render<AdminSettings>();
         cut.WaitForState(() => cut.Markup.Length > 50, TimeSpan.FromSeconds(2));
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("SaveSetting", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, ["SiteName"])!);
 
         // API returns true → success toast surfaces "SettingSaved".
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Success, notif.Messages[0].Severity);
-        Assert.Equal("SettingSaved", notif.Messages[0].Detail);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Success, notif.Toasts()[0].Severity);
+        Assert.Equal("SettingSaved", notif.Toasts()[0].Detail);
     }
 
     [Fact]
@@ -146,13 +145,13 @@ public class AdminSettingsExtendedTests : BunitContext
 
         _handler.SetResponse("api/auth/registration-tokens", System.Net.HttpStatusCode.NotFound);
 
-        var notif = Services.GetRequiredService<NotificationService>();
+        var notif = Services.GetRequiredService<OmniOverlayService>();
         var method = typeof(AdminSettings).GetMethod("GenerateToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
 
         // POST 404 → CreateRegistrationTokenAsync null → "SaveFailed" Error toast.
-        Assert.Single(notif.Messages);
-        Assert.Equal(NotificationSeverity.Error, notif.Messages[0].Severity);
+        Assert.Single(notif.Toasts());
+        Assert.Equal(OmniSeverity.Danger, notif.Toasts()[0].Severity);
     }
 
     [Fact]

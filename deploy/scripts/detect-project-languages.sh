@@ -8,6 +8,9 @@ test -d "$PROJECT_ROOT" || {
     exit 2
 }
 
+# tests/security-rules holds the annotated corpus of the house OpenGrep rules (`# ruleid:` / `# ok:`
+# samples, never run or compiled). It is not product code in any language, so it must not switch a
+# language lint on by itself.
 find_product_file() {
     find "$PROJECT_ROOT" \
         \( -type d \( \
@@ -15,6 +18,7 @@ find_product_file() {
             -o -name bin -o -name obj -o -name node_modules -o -name .venv \
             -o -name target -o -name build -o -name TestResults \
             -o -name .analysis-coverage -o -name coverage \
+            -o -path '*/tests/security-rules' \
         \) -prune \) -o \
         \( "$@" -type f -print -quit \)
 }

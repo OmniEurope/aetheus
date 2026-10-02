@@ -74,13 +74,13 @@ public class MainLayoutReconnexionTests : BunitContext
 
         // After the grace period elapses, the dialog appears. Wait on the MARKUP (not just the field) so
         // the child ConnectionLostDialog has actually re-rendered with Visible=true before asserting.
-        cut.WaitForAssertion(() => Assert.Contains("connection-lost-mask", cut.Markup), TimeSpan.FromSeconds(5));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".omni-connection-overlay")), TimeSpan.FromSeconds(5));
         Assert.True(GetField<bool>(cut.Instance, "_showOfflineDialog"));
 
         // Reconnect: the dialog closes again, without a page reload.
         await InvokeHandleConnectionStateChanged(cut, true);
         Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
-        Assert.DoesNotContain("connection-lost-mask", cut.Markup);
+        Assert.Empty(cut.FindAll(".omni-connection-overlay"));
     }
 
     // ── (b) drop-at-startup (never connected) still surfaces the dialog ───────
@@ -100,7 +100,7 @@ public class MainLayoutReconnexionTests : BunitContext
         Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog")); // still within the grace period
         _time.Advance(TimeSpan.FromSeconds(2));
 
-        cut.WaitForAssertion(() => Assert.Contains("connection-lost-mask", cut.Markup), TimeSpan.FromSeconds(5));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".omni-connection-overlay")), TimeSpan.FromSeconds(5));
         Assert.True(GetField<bool>(cut.Instance, "_showOfflineDialog"));
     }
 
@@ -118,7 +118,7 @@ public class MainLayoutReconnexionTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
-            Assert.DoesNotContain("connection-lost-mask", cut.Markup);
+            Assert.Empty(cut.FindAll(".omni-connection-overlay"));
         }, TimeSpan.FromSeconds(1));
     }
 
@@ -136,8 +136,37 @@ public class MainLayoutReconnexionTests : BunitContext
         {
             Assert.True(cut.Instance.BackendConnected);
             Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
-            Assert.DoesNotContain("connection-lost-mask", cut.Markup);
+            Assert.Empty(cut.FindAll(".omni-connection-overlay"));
         }, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Reconnect_DuringTheLivenessProbe_DoesNotOpenTheOverlayAfterwards()
+    {
+        // Candidate 2444: the hub came back while the grace period's health/live probe was in
+        // flight. Reconnecting cancels that probe, a cancelled probe answers "not live", and the
+        // overlay opened on a connected page and stayed there.
+        var probeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handler.SetAsyncJsonResponse<object>(HttpMethod.Get, "health/live", async ct =>
+        {
+            probeStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new object();
+        });
+        var cut = Render<MainLayout>();
+        SetField(cut.Instance, "_connectAttempted", true);
+
+        await InvokeHandleConnectionStateChanged(cut, false);
+        _time.Advance(TimeSpan.FromSeconds(2));
+        await probeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), Xunit.TestContext.Current.CancellationToken);
+
+        await InvokeHandleConnectionStateChanged(cut, true);
+
+        cut.WaitForAssertion(() => Assert.Null(GetField<CancellationTokenSource?>(cut.Instance, "_offlineDelayCts")),
+            TimeSpan.FromSeconds(5));
+        await Task.Delay(200, Xunit.TestContext.Current.CancellationToken);
+        Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
+        Assert.Empty(cut.FindAll(".omni-connection-overlay"));
     }
 
     [Fact]
@@ -155,6 +184,20 @@ public class MainLayoutReconnexionTests : BunitContext
         Assert.False(GetField<bool>(cut.Instance, "_showOfflineDialog"));
         Assert.False(GetField<bool>(cut.Instance, "_connectAttempted"));
         Assert.Null(GetField<CancellationTokenSource?>(cut.Instance, "_offlineDelayCts"));
-        Assert.DoesNotContain("connection-lost-mask", cut.Markup);
+        Assert.Empty(cut.FindAll(".omni-connection-overlay"));
+    }
+
+    // ── OnManualReconnect with an expired session → redirect to /login ────
+
+    [Fact]
+    public async Task OnManualReconnect_SessionExpired_RedirectsToLogin()
+    {
+        var cut = Render<MainLayout>();
+        var nav = Services.GetRequiredService<Bunit.TestDoubles.BunitNavigationManager>();
+
+        var method = LayoutType.GetMethod("OnManualReconnect", Priv)!;
+        await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance, [])!);
+
+        Assert.Contains("login", nav.Uri);
     }
 }

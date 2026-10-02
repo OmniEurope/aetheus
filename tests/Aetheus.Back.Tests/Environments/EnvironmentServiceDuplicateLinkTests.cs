@@ -17,7 +17,7 @@ public class EnvironmentServiceDuplicateLinkTests
     private readonly EnvironmentService _sut;
 
     public EnvironmentServiceDuplicateLinkTests() =>
-        _sut = new EnvironmentService(_repo, _audit, _notifier, Substitute.For<IServiceScopeFactory>());
+        _sut = new EnvironmentService(_repo, _audit, _notifier, Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>());
 
     private static Environment EmptyEnv(string name, int projectId = 1, int id = 0) => new()
     {

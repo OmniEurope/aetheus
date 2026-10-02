@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Run ordinary collections in parallel. Tests that start real OS processes remain grouped in
        ProcessSpawningTestCollection, which is explicitly non-parallel to preserve CI stability. -->
@@ -7,14 +7,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="coverlet.MTP" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +23,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aetheus.Agent.Core\Aetheus.Agent.Core.csproj" />
     <ProjectReference Include="..\..\src\Aetheus.Agent.Linux\Aetheus.Agent.Linux.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests that only exist on one OS: see tests/Shared/PlatformSpecificTests.cs. -->
+    <Compile Include="..\Shared\PlatformSpecificTests.cs" Link="Shared\PlatformSpecificTests.cs" />
   </ItemGroup>
 
 </Project>

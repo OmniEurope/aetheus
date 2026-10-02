@@ -1,0 +1,88 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* R-116: the notification preferences of /settings, read from and saved to the server
+   (api/notifications/me/preferences), one switch per event type of the backend catalogue, and the
+   projects the user follows. Nothing is sent while no transport exists (R-117). *@
+
+@* Recette R-448: the panel takes the whole width of the tab and its tiles go two per row, instead of a
+   30rem column where everything stacked. *@
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Medium" Class="notification-preferences">
+    <OmniAlert Severity="OmniSeverity.Info">
+        <Icon><OmniIcon Name="OmniIconName.Info" /></Icon>
+        <ChildContent>@L["NotificationPreferencesIntro"]</ChildContent>
+    </OmniAlert>
+
+    @if (_loading)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+    }
+    else if (_loadFailed)
+    {
+        <OmniText Tone="OmniTextTone.Muted">@L["NotificationPreferencesUnavailable"]</OmniText>
+    }
+    else
+    {
+        @* Recette R-233: the events are grouped by what raises them, one settings section per group, one
+           tile per event with its icon and its switch; the followed projects are a section of their own. *@
+        @foreach (var group in Groups)
+        {
+            <OmniSettingsSection Title="@L[group.TitleKey]">
+                <div class="settings-pair">
+                @foreach (var preference in group.Items)
+                {
+                    <OmniSettingsTile Title="@PreferenceText(preference)" Class="notification-preference-toggle">
+                        <Icon><OmniIcon Name="@NotificationLabels.EventIcon(preference.EventType)" /></Icon>
+                        <ChildContent>
+                            <OmniSwitch Value="@preference.IsEnabled" ValueExpression="@(() => preference.IsEnabled)" aria-label="@PreferenceText(preference)"
+                                        ValueChanged="@((bool value) => SaveAsync(preference.EventType, value))" />
+                        </ChildContent>
+                    </OmniSettingsTile>
+                }
+                </div>
+            </OmniSettingsSection>
+        }
+
+        <OmniSettingsSection Title="@L["NotificationSubscriptions"]" Description="@L["NotificationSubscriptionsHint"]">
+            @* Recette R2-034: following nothing is why nothing arrives; the empty state says so and offers
+               the way out, following every project the user can read. *@
+            @if (_subscriptions.Count == 0)
+            {
+                <OmniEmptyState Class="notification-subscriptions-empty" Title="@L["NotificationSubscriptionsEmpty"]"
+                                Description="@L["NotificationNoSubscriptionHint"]">
+                    <Icon><OmniIcon Name="OmniIconName.BellSlash" /></Icon>
+                    <Actions>
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="FollowAllAsync" Busy="@_followingAll"
+                                    Class="notification-follow-all" title="@L["NotificationFollowAllProjects"]">
+                            <OmniIcon Name="OmniIconName.Bell" />
+                            <span>@L["NotificationFollowAll"]</span>
+                        </OmniButton>
+                    </Actions>
+                </OmniEmptyState>
+            }
+            else
+            {
+                <div class="notification-subscriptions-actions">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="FollowAllAsync" Busy="@_followingAll"
+                                Class="notification-follow-all" title="@L["NotificationFollowAllProjects"]">
+                        <OmniIcon Name="OmniIconName.Bell" />
+                        <span>@L["NotificationFollowAll"]</span>
+                    </OmniButton>
+                </div>
+                <div class="settings-pair">
+                @foreach (var subscription in _subscriptions)
+                {
+                    <OmniSettingsTile Title="@subscription.ProjectName" Class="notification-subscription">
+                        <Icon><OmniIcon Name="OmniIconName.Folder" /></Icon>
+                        <ChildContent>
+                            <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => UnsubscribeAsync(subscription))"
+                                        Class="notification-unsubscribe">
+                                <OmniIcon Name="OmniIconName.BellSlash" />
+                                <span>@L["Unsubscribe"]</span>
+                            </OmniButton>
+                        </ChildContent>
+                    </OmniSettingsTile>
+                }
+                </div>
+            }
+        </OmniSettingsSection>
+    }
+</OmniStack>

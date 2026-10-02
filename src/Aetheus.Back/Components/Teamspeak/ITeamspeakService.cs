@@ -5,6 +5,7 @@ namespace Aetheus.Back.Components.Teamspeak;
 public interface ITeamspeakService
 {
     Task<TeamspeakDataDto> GetStateAsync(int serverId, CancellationToken ct = default);
+    Task<TeamspeakFilterValuesDto> GetFilterValuesAsync(int serverId, CancellationToken ct = default);
     Task<PaginatedResult<TeamspeakChannelDto>> GetChannelsAsync(
         int serverId, PaginationRequest request, CancellationToken ct = default);
     Task<PaginatedResult<TeamspeakClientDto>> GetClientsAsync(

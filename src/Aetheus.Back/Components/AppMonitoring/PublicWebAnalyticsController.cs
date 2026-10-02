@@ -18,7 +18,7 @@ public sealed class PublicWebAnalyticsController(
     {
         if (Request.Headers["Sec-GPC"] == "1" || Request.Headers["DNT"] == "1")
             return NoContent();
-        var origin = Request.Headers.Origin.FirstOrDefault();
+        var origin = ResolveOrigin();
         if (string.IsNullOrWhiteSpace(origin))
             return Forbid();
         var context = await configuration.ResolvePublicContextAsync(siteId, origin, ct).ConfigureAwait(false);
@@ -36,7 +36,7 @@ public sealed class PublicWebAnalyticsController(
     {
         if (Request.Headers["Sec-GPC"] == "1" || Request.Headers["DNT"] == "1")
             return NoContent();
-        var origin = Request.Headers.Origin.FirstOrDefault();
+        var origin = ResolveOrigin();
         if (string.IsNullOrWhiteSpace(origin))
             return Forbid();
         var publicContext = await configuration.ResolvePublicContextAsync(siteId, origin, ct).ConfigureAwait(false);
@@ -68,6 +68,26 @@ public sealed class PublicWebAnalyticsController(
             [prepared],
             ct).ConfigureAwait(false);
         return outcome.Replayed > 0 ? Conflict() : Accepted();
+    }
+
+    /// <summary>
+    /// A cross-origin <c>sendBeacon</c>/<c>fetch keepalive</c> POST always carries an <c>Origin</c> header,
+    /// but a same-origin one (host app served the snippet from the same site as the ingest endpoint) is not
+    /// guaranteed to. Falling back to the <c>Referer</c>'s authority (no same-site check here: the
+    /// per-app allow-list below remains the actual authorization boundary) avoids silently dropping
+    /// those legitimate events while still failing closed when neither header is present.
+    /// </summary>
+    private string? ResolveOrigin()
+    {
+        var origin = Request.Headers.Origin.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(origin))
+            return origin;
+
+        var referer = Request.Headers.Referer.FirstOrDefault();
+        if (Uri.TryCreate(referer, UriKind.Absolute, out var refererUri))
+            return refererUri.GetLeftPart(UriPartial.Authority);
+
+        return null;
     }
 
     private void AddCorsHeaders(string origin)

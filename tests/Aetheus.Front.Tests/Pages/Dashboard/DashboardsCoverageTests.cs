@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Dashboard;
+using Aetheus.Front.Components.Dashboards;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Dashboard;
 
@@ -25,11 +23,11 @@ public class DashboardsCoverageTests : BunitContext
     public DashboardsCoverageTests()
     {
         _handler = BunitTestHelper.RegisterServices(this, isAdmin: true);
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(), sp.GetRequiredService<IJSRuntime>()));
     }
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     private void SetupDashboards(List<DashboardDto>? list = null)
     {

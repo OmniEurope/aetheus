@@ -23,6 +23,25 @@ public sealed class AgentRuntimeHealth(TimeProvider timeProvider)
     public void MarkPollingSuccess() =>
         Interlocked.Exchange(ref _lastPollingSuccessUtcTicks, timeProvider.GetUtcNow().UtcTicks);
 
+    // Recette R-508: a service or package action has just changed what the host runs. The heartbeat
+    // loop sends the new state now rather than at its next tick, up to thirty seconds later, so the
+    // Services page shows the result of the action it just ran. One pending request at most.
+    private readonly SemaphoreSlim _heartbeatRequested = new(0, 1);
+    private readonly Lock _heartbeatRequestGate = new();
+
+    /// <summary>Asks the heartbeat loop for a beat as soon as it is free.</summary>
+    public void RequestHeartbeat()
+    {
+        lock (_heartbeatRequestGate)
+        {
+            if (_heartbeatRequested.CurrentCount == 0)
+                _heartbeatRequested.Release();
+        }
+    }
+
+    /// <summary>Completes when a beat has been asked for; consumes the request.</summary>
+    internal Task WaitForHeartbeatRequestAsync(CancellationToken ct) => _heartbeatRequested.WaitAsync(ct);
+
     public void BeginTask() => Interlocked.Increment(ref _activeTaskCount);
 
     public void EndTask() => Interlocked.Decrement(ref _activeTaskCount);

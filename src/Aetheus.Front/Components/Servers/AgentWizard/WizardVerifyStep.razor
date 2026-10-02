@@ -1,0 +1,65 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Verify step: SignalR-driven detection UI. *@
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+    <p>@L["WizardVerifyDescription"]</p>
+
+    @if (AgentFound)
+    {
+        <OmniAlert Severity="OmniSeverity.Success">
+            <OmniRow Gap="OmniSpacing.Medium" Align="OmniAlignment.Center">
+                <OmniIcon Name="OmniIconName.CheckCircle" Class="wizard-verify-success-icon" />
+                <strong>@string.Format(L["WizardAgentDetected"].Value, AgentName ?? string.Empty)</strong>
+                @if (DetectedServerId.HasValue)
+                {
+                    <a href="@($"/servers/{DetectedServerId.Value}/overview")">
+                        <OmniButton Variant="OmniButtonVariant.Primary" title="@L["ViewServer"]"><OmniIcon Name="OmniIconName.OpenExternal" /> <span>@L["Server"]</span></OmniButton>
+                    </a>
+                }
+            </OmniRow>
+        </OmniAlert>
+    }
+    else if (Listening)
+    {
+        @* Recette R-401: the search reads on the page's own surface (no dark panel), the countdown under it,
+           and stopping the search sits below the panel instead of inside it. *@
+        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Medium" Align="OmniAlignment.Center"
+                   Class="wizard-polling" role="status">
+            <OmniProgressBar Value="@Percent" ShowValue="false" Shape="OmniProgressShape.Circular" Label="@L["WizardPolling"]" />
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.XSmall">
+                <strong>@L["WizardPolling"]</strong>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0 wizard-polling-countdown">
+                    @string.Format(L["WizardPollingRemaining"].Value, RemainingSeconds, MaxSeconds)
+                </OmniText>
+            </OmniStack>
+        </OmniStack>
+        <div>
+            <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OnCancel"><OmniIcon Name="OmniIconName.Stop" /> <span>@L["WizardCancelCheck"].Value</span></OmniButton>
+        </div>
+    }
+    else if (TimedOut)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning">
+            @L["WizardVerifyTimeout"]
+        </OmniAlert>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnStart"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["WizardCheckConnection"].Value</span></OmniButton>
+    }
+    else
+    {
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OnStart"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["WizardCheckConnection"].Value</span></OmniButton>
+    }
+
+    @if (HubError is not null)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning">
+            @L["WizardHubError"]
+        </OmniAlert>
+    }
+
+    <OmniAlert Severity="OmniSeverity.Info">
+        <ol class="wizard-verify-list">
+            <li>@L["WizardVerifyStep1"]</li>
+            <li>@L["WizardVerifyStep2"]</li>
+            <li>@L["WizardVerifyStep3"]</li>
+        </ol>
+    </OmniAlert>
+</OmniStack>

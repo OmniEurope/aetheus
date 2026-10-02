@@ -1,0 +1,114 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* PLAN-005 lots 1 and 2 - the port registry, finally visible, crossed with what the agent really
+   sees listening. The reservations existed since the pipeline guard started declaring them, but no
+   page listed them: an operator hitting "port is already allocated" could read the holder only in a
+   run's rejection message. A discrepancy between the two sources is shown, never auto-corrected. *@
+
+<OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Large">
+    <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small" Align="OmniAlignment.Center">
+        <OmniIcon Name="OmniIconName.Graph" />
+        <div class="flex-spacer"></div>
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@ScanCaption</OmniText>
+        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@ObserveAsync" Disabled="@(!CanScan)" Class="@(_scanning ? "btn-busy" : null)" Busy="@(_scanning)" title="@ScanTooltip"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["PortScanRefresh"]</span></OmniButton>
+    </OmniStack>
+
+    <OmniText Element="OmniTextElement.Paragraph">@L["PortRegistryHint"]</OmniText>
+
+    @if (_scanError is not null)
+    {
+        <OmniAlert Severity="OmniSeverity.Warning">@_scanError</OmniAlert>
+    }
+
+    @if (CanWrite)
+    {
+        <OmniCard>
+            <OmniTemplateForm TModel="NewReservationModel" Model="@_form" OnValidSubmit="@((EditContext context) => AddAsync((NewReservationModel)context.Model))">
+                <OmniDataAnnotationsValidator Localizer="@L" />
+                <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.End">
+                    <OmniFormField For="oe-pages-servers-serverdetailsections-serverportssection-numeric-1"><LabelContent>@L["Port"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_form.Port" Minimum="1" Maximum="65535" Id="oe-pages-servers-serverdetailsections-serverportssection-numeric-1" /></ChildContent></OmniFormField>
+                    <OmniFormField For="oe-pages-servers-serverdetailsections-serverportssection-2"><LabelContent>@L["PortHolder"]</LabelContent><ChildContent>
+                        <OmniTextBox @bind-Value="_form.OwnerLabel" maxlength="@PortRegistryLimits.MaxOwnerLabelLength" Id="oe-pages-servers-serverdetailsections-serverportssection-2" />
+                    </ChildContent></OmniFormField>
+                    <OmniFormField Label="@L["PortLinkedProject"]" For="oe-formfield-pages-servers-serverdetailsections-serverportssection-1">
+                        <OmniDropDown Id="oe-formfield-pages-servers-serverdetailsections-serverportssection-1" TValue="int?" @bind-Value="_form.ProjectId" Options="@(_projects.ToOptions(item => (int?)item.Id, item => item.Name))" AllowEmpty="true"
+                            Placeholder="@L["PortNoProject"]" />
+                    </OmniFormField>
+                    <OmniButton Variant="OmniButtonVariant.Primary" ButtonType="OmniButtonType.Submit" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Add" /> <span>@L["Add"]</span></OmniButton>
+                    @* Allocation reuses the same holder and project: asking twice for the same two
+                       facts, once to reserve a chosen port and once to be handed free ones, would be
+                       two forms for one intent. *@
+                    <OmniFormField For="oe-pages-servers-serverdetailsections-serverportssection-numeric-2"><LabelContent>@L["PortAllocateCount"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_form.AllocateCount" Minimum="1"
+                            Maximum="@PortRegistryLimits.MaxPortsPerAllocation" Id="oe-pages-servers-serverdetailsections-serverportssection-numeric-2" /></ChildContent></OmniFormField>
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@AllocateAsync" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Archive" /> <span>@L["PortAllocate"]</span></OmniButton>
+                </OmniRow>
+            </OmniTemplateForm>
+            @if (_addError is not null)
+            {
+                <OmniAlert Severity="OmniSeverity.Danger" Class="omni-u-mt-md">@_addError</OmniAlert>
+            }
+
+            <OmniRow Gap="OmniSpacing.Large" Align="OmniAlignment.End" Class="omni-u-mt-md">
+                <OmniFormField For="oe-pages-servers-serverdetailsections-serverportssection-numeric-3"><LabelContent>@L["PortRangeFrom"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_rangeFrom" Minimum="1024" Maximum="65535" Id="oe-pages-servers-serverdetailsections-serverportssection-numeric-3" /></ChildContent></OmniFormField>
+                <OmniFormField For="oe-pages-servers-serverdetailsections-serverportssection-numeric-4"><LabelContent>@L["PortRangeTo"]</LabelContent><ChildContent><OmniNumeric TValue="int" @bind-Value="_rangeTo" Minimum="1024" Maximum="65535" Id="oe-pages-servers-serverdetailsections-serverportssection-numeric-4" /></ChildContent></OmniFormField>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@SaveRangeAsync" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
+                <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-m-0">@RangeCaption</OmniText>
+            </OmniRow>
+        </OmniCard>
+    }
+    else
+    {
+        <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted">@L["PortRegistryReadOnlyHint"]</OmniText>
+    }
+
+    @if (_loading)
+    {
+        <AetheusLoader Size="OmniControlSize.Small" />
+    }
+    else
+    {
+        <OmniDataGrid @ref="_grid" FillAvailableHeight="true" Items="@_rows" TItem="PortRow" KeyOf="@(row => row.Id)" NewRowHighlight="@(TimeSpan.FromSeconds(5))" ScrollMode="OmniDataGridScrollMode.Virtual" VirtualizationOverscanCount="3">
+            <EmptyContent>
+                <EmptyState Icon="lan" Title="@L["PortRegistryEmptyTitle"]" Description="@L["PortRegistryEmptyDescription"]" />
+            </EmptyContent>
+            <Columns>
+                <OmniDataGridColumn Frozen="true" TItem="PortRow" Property="Port" Title="@L["Port"]" Width="6.875rem" Filterable="true" />
+                <OmniDataGridColumn TItem="PortRow" Property="Protocol" Title="@L["PortProtocol"]" Width="6.875rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+                <OmniDataGridColumn TItem="PortRow" Property="OwnerLabel" Title="@L["PortHolder"]" MinWidth="12rem" Filterable="true" />
+                <OmniDataGridColumn TItem="PortRow" Property="ProjectName" Title="@L["PortLinkedProject"]" MinWidth="10rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterSearchable="true">
+                    <Template Context="row">
+                        @if (row.ProjectId is { } projectId)
+                        {
+                            <OmniLink Href="@($"projects/{projectId}")">@(row.ProjectName ?? $"#{projectId}")</OmniLink>
+                        }
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="PortRow" Property="Source" Title="@L["Source"]" Width="8.125rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@SourceText">
+                    <Template Context="row">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@SourceBadge(row.Source)">@L.Localize(row.Source)</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="PortRow" Property="Listening" Title="@L["PortListening"]" Width="8.75rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" FormatFilterValue="@ListeningFilterText">
+                    <Template Context="row">
+                        <OmniBadge Fill="OmniFill.Solid" Tone="@ListeningBadge(row.Listening)">@ListeningText(row.Listening)</OmniBadge>
+                    </Template>
+                </OmniDataGridColumn>
+                <OmniDataGridColumn TItem="PortRow" Property="DeclaredAt" Title="@L["PortDeclaredAt"]" Width="10.625rem" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+                <OmniDataGridColumn TItem="PortRow" Property="UpdatedAt" Title="@L["PortUpdatedAt"]" Width="10.625rem" FormatString="{0:g}" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
+                <OmniDataGridColumn TItem="PortRow" Title="@L["Actions"]" MinWidth="13rem" Sortable="false" Filterable="false">
+                    <Template Context="row">
+                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                            @if (CanWrite && row.Source == PortReservationSource.Observed)
+                            {
+                                <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ConvertAsync(row))" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)" title="@L["PortConvertToReservation"]" Label="@L["PortConvertToReservation"]"><OmniIcon Name="OmniIconName.Add" /></OmniButton>
+                            }
+                            @if (CanWrite)
+                            {
+                                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => ReleaseAsync(row))" Class="@(_busy ? "btn-busy" : null)" Busy="@(_busy)" title="@L["PortRelease"]" Label="@L["PortRelease"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
+                            }
+                        </OmniStack>
+                    </Template>
+                </OmniDataGridColumn>
+            </Columns>
+        </OmniDataGrid>
+    }
+</OmniStack>

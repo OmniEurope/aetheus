@@ -4,8 +4,6 @@ using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -88,6 +86,44 @@ public sealed class AppMonitoringServiceCrudTests
         Assert.Null(await _service.GetAppAsync(99, ct: TestContext.Current.CancellationToken));
         Assert.Equal("api", (await _service.GetAppAsync(2, ct: TestContext.Current.CancellationToken))!.Name);
         Assert.Equal(4, await _service.GetAppProjectIdAsync(2, ct: TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// Recette R-441: an app registered without a server is probed by the backend, yet runs on a fleet
+    /// server; the list names that server when one of its Apache virtual hosts serves the probe host.
+    /// A registered server is never replaced, and an unknown host stays "off-fleet".
+    /// </summary>
+    [Fact]
+    public async Task GetAppsForProject_NamesTheServerWhoseVirtualHostServesTheProbeUrl()
+    {
+        var backendProbed = new MonitoredApp { Id = 3, ProjectId = 4, Name = "aetheus", ProbeUrl = "https://Aetheus-API.example.com/health" };
+        var unknownHost = new MonitoredApp { Id = 5, ProjectId = 4, Name = "elsewhere", ProbeUrl = "https://other.example.org/" };
+        var registered = new MonitoredApp
+        {
+            Id = 6,
+            ProjectId = 4,
+            Name = "agent-probed",
+            ProbeUrl = "https://aetheus-api.example.com/",
+            ServerId = 9,
+            Server = new Server { Id = 9, Name = "web-09" }
+        };
+        _repo.GetAppsByProjectAsync(4, Arg.Any<CancellationToken>()).Returns([backendProbed, unknownHost, registered]);
+        _repo.GetVirtualHostServersAsync(
+                4,
+                Arg.Is<IReadOnlyCollection<string>>(hosts => hosts.Order().SequenceEqual(new[] { "aetheus-api.example.com", "other.example.org" })),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, AppHostingServer> { ["aetheus-api.example.com"] = new(7, "vps2577917") });
+
+        var apps = await _service.GetAppsForProjectAsync(4, ct: TestContext.Current.CancellationToken);
+
+        var hosted = apps.Single(app => app.Id == 3).HostingServer;
+        Assert.NotNull(hosted);
+        Assert.Equal(7, hosted.ServerId);
+        Assert.Equal("vps2577917", hosted.ServerName);
+        Assert.Null(apps.Single(app => app.Id == 3).ServerId);
+        Assert.Null(apps.Single(app => app.Id == 5).HostingServer);
+        Assert.Null(apps.Single(app => app.Id == 6).HostingServer);
+        Assert.Equal("web-09", apps.Single(app => app.Id == 6).ServerName);
     }
 
     [Theory]
@@ -247,6 +283,7 @@ public sealed class AppMonitoringServiceCrudTests
                 _time.GetUtcNow().UtcDateTime.AddMinutes(-5),
                 Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, int> { [1] = 3 });
+        _repo.GetAudienceTotalsAsync(default!, default, default, default, TestContext.Current.CancellationToken).ReturnsForAnyArgs(new List<AppAudiencePeriodTotal>());
 
         var summary = await _service.GetSummaryAsync(null, ct: TestContext.Current.CancellationToken);
 
@@ -260,5 +297,66 @@ public sealed class AppMonitoringServiceCrudTests
         Assert.Null(summary.Applications.Single(app => app.Name == "unknown").OnlineVisitorCount);
         Assert.Equal(["degraded-new", "down-old"], summary.Troubled.Select(x => x.Name));
         Assert.Equal("Web", summary.Troubled[0].ProjectName);
+    }
+
+    [Fact]
+    public async Task R468_GetSummary_AddsUpTheAudienceOfTheApplicationsThatMeasureIt()
+    {
+        var now = _time.GetUtcNow().UtcDateTime;
+        _repo.GetAppsForSummaryAsync(null, Arg.Any<CancellationToken>()).Returns(
+        [
+            new MonitoredApp { Id = 1, ProjectId = 1, Name = "site", AnalyticsEnabled = true },
+            new MonitoredApp { Id = 2, ProjectId = 2, Name = "shop", AnalyticsEnabled = true },
+            new MonitoredApp { Id = 3, ProjectId = 2, Name = "api" }
+        ]);
+        _repo.GetActiveVisitorCountsAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 1, 2 })), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, int> { [1] = 3, [2] = 4 });
+        _repo.GetAudienceTotalsAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { 1, 2 })),
+                DateOnly.FromDateTime(now), AppWebAnalyticsRepository.WeekStart(now), new DateOnly(now.Year, now.Month, 1),
+                Arg.Any<CancellationToken>())
+            .Returns(
+            [
+                new AppAudiencePeriodTotal(AnalyticsPeriodKind.Day, 5, 1, 6, 20),
+                new AppAudiencePeriodTotal(AnalyticsPeriodKind.Month, 40, 7, 90, 600)
+            ]);
+
+        var audience = (await _service.GetSummaryAsync(null, ct: TestContext.Current.CancellationToken)).Audience;
+
+        Assert.NotNull(audience);
+        Assert.Equal((2, 7, 5, 0, 40), (audience.ApplicationCount, audience.OnlineVisitors, audience.VisitorsToday, audience.VisitorsThisWeek, audience.VisitorsThisMonth));
+        Assert.Equal((7, 90, 600L), (audience.AuthenticatedVisitorsThisMonth, audience.SessionsThisMonth, audience.PageViewsThisMonth));
+    }
+
+    [Fact]
+    public async Task R468_GetSummary_HasNoAudience_WhenNoApplicationMeasuresIt()
+    {
+        _repo.GetAppsForSummaryAsync(null, Arg.Any<CancellationToken>()).Returns([new MonitoredApp { Id = 3, ProjectId = 2, Name = "api" }]);
+
+        var summary = await _service.GetSummaryAsync(null, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(summary.Audience);
+        await _repo.DidNotReceiveWithAnyArgs().GetAudienceTotalsAsync(default!, default, default, default, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetSummary_LastEvent_IsTheLatestOfOtlpAndWebAnalytics_AndNullWhenNothingArrived()
+    {
+        // PLAN-003 lot 28: "collected, then stopped" must be told apart from "never configured".
+        var otlp = new DateTime(2026, 8, 28, 21, 57, 0, DateTimeKind.Utc);
+        var web = otlp.AddHours(3);
+        _repo.GetAppsForSummaryAsync(null, Arg.Any<CancellationToken>()).Returns(
+        [
+            new MonitoredApp { Id = 1, ProjectId = 1, Name = "both", LastIngestAt = otlp, AnalyticsLastIngestAt = web },
+            new MonitoredApp { Id = 2, ProjectId = 1, Name = "otlp-only", LastIngestAt = otlp },
+            new MonitoredApp { Id = 3, ProjectId = 1, Name = "silent" }
+        ]);
+
+        var summary = await _service.GetSummaryAsync(null, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(web, summary.Applications.Single(app => app.Name == "both").LastEventAt);
+        Assert.Equal(otlp, summary.Applications.Single(app => app.Name == "otlp-only").LastEventAt);
+        Assert.Null(summary.Applications.Single(app => app.Name == "silent").LastEventAt);
     }
 }

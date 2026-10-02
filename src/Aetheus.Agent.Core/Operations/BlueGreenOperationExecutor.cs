@@ -23,8 +23,11 @@ public sealed class BlueGreenOperationExecutor(
     IShellRunner shell,
     IOptions<AetheusAgentOptions> options,
     IHttpClientFactory httpClientFactory,
-    ILogger<BlueGreenOperationExecutor> logger) : IOperationExecutor
+    ILogger<BlueGreenOperationExecutor> logger,
+    TimeProvider? timeProvider = null) : EnvironmentOperationExecutor
 {
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
     private readonly AetheusAgentOptions _options = options.Value;
 
     /// <summary>The one door to Compose; see <see cref="BlueGreenCompose"/> for why it is not inline.</summary>
@@ -36,20 +39,19 @@ public sealed class BlueGreenOperationExecutor(
     /// <summary>Closes an interrupted first deployment; see <see cref="BlueGreenInitialDeployment"/>.</summary>
     private readonly BlueGreenInitialDeployment _initialDeployment = new(shell);
 
-    public bool CanHandle(OperationKind kind) => kind
+    /// <summary>Returns traffic to the colour kept in reserve; see <see cref="BlueGreenRevert"/>.</summary>
+    private readonly BlueGreenRevert _revert = new(shell);
+
+    public override bool CanHandle(OperationKind kind) => kind
         is OperationKind.BlueGreenMigrate
         or OperationKind.BlueGreenUp
         or OperationKind.BlueGreenSwitch
         or OperationKind.BlueGreenCommit
         or OperationKind.BlueGreenRollback
-        or OperationKind.BlueGreenRetire;
+        or OperationKind.BlueGreenRetire
+        or OperationKind.BlueGreenRevert;
 
-    public Task<ExecutorResult> ExecuteAsync(
-        OperationKind kind, string target, int timeoutSeconds,
-        Func<string, TaskLogLevel, Task> onOutput, CancellationToken cancellationToken) =>
-        ExecuteAsync(kind, target, new Dictionary<string, string>(), timeoutSeconds, onOutput, cancellationToken);
-
-    public async Task<ExecutorResult> ExecuteAsync(
+    public override async Task<ExecutorResult> ExecuteAsync(
         OperationKind kind, string target, IReadOnlyDictionary<string, string> envVars,
         int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct)
     {
@@ -92,6 +94,10 @@ public sealed class BlueGreenOperationExecutor(
             OperationKind.BlueGreenSwitch => await SwitchAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
             OperationKind.BlueGreenRollback => await RollbackAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
             OperationKind.BlueGreenRetire => await RetireAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
+            OperationKind.BlueGreenRevert => await _revert.RevertAsync(
+                context!, journal, envVars, timeoutSeconds,
+                (colour, budget) => WaitForColourAsync(context!, colour, (int)budget.TotalSeconds, onOutput, ct),
+                onOutput, ct).ConfigureAwait(false),
             _ => await CommitAsync(context!, journal, timeoutSeconds, onOutput, ct).ConfigureAwait(false)
         };
     }
@@ -215,6 +221,17 @@ public sealed class BlueGreenOperationExecutor(
                 ? $"No colour is recorded as live; preparing {idle} as the initial deployment."
                 : $"Live colour is {live}; preparing {idle}.",
             TaskLogLevel.Info).ConfigureAwait(false);
+
+        // PLAN-003 2.7: the idle colour IS the reserve the last commit kept running. Rebuilding it ends
+        // that reserve, so the record goes first: a return to it after this point would be a return
+        // to whatever this deployment is about to start.
+        var reserve = new BlueGreenReserve(context);
+        if (reserve.Colour == idle)
+        {
+            reserve.Clear();
+            await onOutput($"The {idle} colour kept in reserve (N-1) is recycled for this deployment.", TaskLogLevel.Info)
+                .ConfigureAwait(false);
+        }
 
         // Clear the idle colour before rebuilding it: a container left behind by an earlier failed
         // deployment keeps its published ports, and Compose cannot bind them again. Non-fatal, since
@@ -348,6 +365,9 @@ public sealed class BlueGreenOperationExecutor(
         // journal still read PREPARED, and rollback would answer "nothing to undo" on a real cutover.
         journal.MarkSwitched();
         journal.WriteLiveColour(idle);
+        await BlueGreenConfirmation.ArmIfRequestedAsync(
+            _options.WorkDirectory, context.Project, revision, live, envVars, _time.GetUtcNow().UtcDateTime, onOutput)
+            .ConfigureAwait(false);
         await onOutput($"##aetheus[setvariable name=BLUEGREEN_SWITCHED_TO]{idle}", TaskLogLevel.Info).ConfigureAwait(false);
         await onOutput($"Traffic now points at {idle}. The previous colour is still running for rollback.", TaskLogLevel.Info)
             .ConfigureAwait(false);
@@ -370,28 +390,12 @@ public sealed class BlueGreenOperationExecutor(
         var previous = journal.PreviousLive;
         var revision = journal.Revision ?? string.Empty;
 
-        if (previous is "blue" or "green")
-        {
-            // Stop, never remove: the container stays available for an immediate manual rollback.
-            var stop = await _compose.StopColourAsync(context, previous, timeoutSeconds, ct).ConfigureAwait(false);
-            if (stop != 0)
-            {
-                // The deployment is live and healthy; failing the step here would misreport it.
-                await onOutput(
-                    $"Deployment is live, but the replaced {previous} colour could not be stopped.",
-                    TaskLogLevel.Warning).ConfigureAwait(false);
-                await onOutput("##aetheus[setvariable name=BLUEGREEN_OLD_COLOR_STOPPED]false", TaskLogLevel.Info)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                await onOutput("##aetheus[setvariable name=BLUEGREEN_OLD_COLOR_STOPPED]true", TaskLogLevel.Info)
-                    .ConfigureAwait(false);
-            }
-        }
+        // PLAN-003 2.7: the replaced colour is no longer stopped; it is kept running in reserve.
+        await new BlueGreenReserve(context).KeepPreviousAsync(journal, onOutput, ct).ConfigureAwait(false);
 
         if (revision.Length > 0) journal.WriteDeployedRevision(revision);
         journal.Commit();
+        BlueGreenConfirmation.Disarm(_options.WorkDirectory, context.Project);
         await onOutput($"Deployment committed{(revision.Length > 0 ? $" at {revision}" : string.Empty)}.", TaskLogLevel.Info)
             .ConfigureAwait(false);
         return new ExecutorResult(0, false);
@@ -433,7 +437,10 @@ public sealed class BlueGreenOperationExecutor(
         var state = journal.Exists ? journal.State : null;
         if (state is null or BlueGreenJournal.Committed)
         {
-            await onOutput("No open deployment transaction; nothing to retire.", TaskLogLevel.Info).ConfigureAwait(false);
+            // PLAN-003 2.7: with no transaction open, retiring means ending the reserve, never the live colour.
+            if (await new BlueGreenReserve(context).RetireAsync(journal, _compose, timeoutSeconds, onOutput, ct).ConfigureAwait(false) is { } retiredReserve)
+                return retiredReserve;
+            await onOutput("No open deployment transaction and no colour in reserve; nothing to retire.", TaskLogLevel.Info).ConfigureAwait(false);
             return new ExecutorResult(0, false);
         }
 
@@ -447,9 +454,7 @@ public sealed class BlueGreenOperationExecutor(
             return new ExecutorResult(1, false);
         }
 
-        var confPath = envVars.GetValueOrDefault("AETHEUS_BG_UPSTREAM_CONF", string.Empty).Trim();
-        var reloadCommand = envVars.GetValueOrDefault("AETHEUS_BG_RELOAD_HELPER", string.Empty).Trim();
-        if (confPath.Length == 0 || reloadCommand.Length == 0)
+        if (!BlueGreenUpstream.TryReadTargets(envVars, out var confPath, out var reloadCommand))
         {
             await onOutput(
                 "AETHEUS_BG_UPSTREAM_CONF and AETHEUS_BG_RELOAD_HELPER are required to retire a deployment.",
@@ -459,13 +464,9 @@ public sealed class BlueGreenOperationExecutor(
 
         // Order matters: move traffic off the colour before stopping it, so the window in which the
         // upstream points at a dead port is as short as the reload itself.
-        if (!await BlueGreenUpstream.RestoreRecordedAsync(shell, context, confPath, reloadCommand, timeoutSeconds, ct).ConfigureAwait(false))
-        {
-            await onOutput(
-                $"Restoring the recorded configuration failed; manual intervention required. Journal retained at {context.JournalDir}.",
-                TaskLogLevel.Error).ConfigureAwait(false);
+        if (!await BlueGreenUpstream.RestoreRecordedOrReportAsync(
+                shell, context, confPath, reloadCommand, timeoutSeconds, onOutput, ct).ConfigureAwait(false))
             return new ExecutorResult(1, false);
-        }
 
         var retired = journal.Idle;
         if (retired is "blue" or "green")
@@ -500,9 +501,7 @@ public sealed class BlueGreenOperationExecutor(
             return new ExecutorResult(1, false);
         }
 
-        var confPath = envVars.GetValueOrDefault("AETHEUS_BG_UPSTREAM_CONF", string.Empty).Trim();
-        var reloadCommand = envVars.GetValueOrDefault("AETHEUS_BG_RELOAD_HELPER", string.Empty).Trim();
-        if (confPath.Length == 0 || reloadCommand.Length == 0)
+        if (!BlueGreenUpstream.TryReadTargets(envVars, out var confPath, out var reloadCommand))
         {
             await onOutput(
                 "AETHEUS_BG_UPSTREAM_CONF and AETHEUS_BG_RELOAD_HELPER are required to restore traffic.",
@@ -539,17 +538,14 @@ public sealed class BlueGreenOperationExecutor(
             return new ExecutorResult(1, false);
         }
 
-        if (!await BlueGreenUpstream.RestoreRecordedAsync(shell, context, confPath, reloadCommand, timeoutSeconds, ct).ConfigureAwait(false))
-        {
-            await onOutput(
-                $"Restoring the previous configuration failed; manual intervention required. Journal retained at {context.JournalDir}.",
-                TaskLogLevel.Error).ConfigureAwait(false);
+        if (!await BlueGreenUpstream.RestoreRecordedOrReportAsync(
+                shell, context, confPath, reloadCommand, timeoutSeconds, onOutput, ct).ConfigureAwait(false))
             return new ExecutorResult(1, false);
-        }
 
         journal.WriteLiveColour(previous);
         await _compose.StopColourAsync(context, BlueGreenContext.Opposite(previous), timeoutSeconds, ct).ConfigureAwait(false);
         journal.Clear();
+        BlueGreenConfirmation.Disarm(_options.WorkDirectory, context.Project);
         await onOutput("##aetheus[setvariable name=BLUEGREEN_ROLLED_BACK]true", TaskLogLevel.Info).ConfigureAwait(false);
         await onOutput($"Traffic restored to {previous}.", TaskLogLevel.Warning).ConfigureAwait(false);
         return new ExecutorResult(0, false);

@@ -31,7 +31,7 @@ internal sealed class PersonalAccessTokenRepository(AppDbContext db) : IPersonal
 
     public async Task<(List<PersonalAccessToken> Items, int Total)> GetForUserPagedAsync(
         int userId, string? search, int page, int pageSize, string? sortBy, bool sortDescending,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyList<GridFilter>? columnFilters = null)
     {
         var query = db.PersonalAccessTokens
             .AsNoTracking()
@@ -43,6 +43,9 @@ internal sealed class PersonalAccessTokenRepository(AppDbContext db) : IPersonal
                 EF.Functions.ILike(token.Name, pattern) ||
                 EF.Functions.ILike(token.TokenPrefix, pattern));
         }
+
+        // Recette R-224: the header filters, after the owner scope and before the count.
+        query = PersonalAccessTokenListQuery.Columns.ApplyFilters(query, columnFilters);
 
         var total = await query.CountAsync(ct).ConfigureAwait(false);
         query = (sortBy?.Trim().ToLowerInvariant(), sortDescending) switch

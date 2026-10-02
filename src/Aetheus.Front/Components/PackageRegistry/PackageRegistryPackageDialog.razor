@@ -1,0 +1,31 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (_package is not null)
+{
+    <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted omni-u-mb-md">
+        @_package.Kind · @_package.Name
+    </OmniText>
+}
+    <AetheusDataGrid @ref="_grid" IsLoading="@_loading" Data="@_package?.Versions" TItem="PackageRegistryVersionDto" Virtualize="true"
+                  KeyProperty="Id" NewRowHighlight="@NewRowHighlight">
+        <Columns>
+            <OmniDataGridColumn Frozen="true" TItem="PackageRegistryVersionDto" Property="Version" Title="@L["Version"]" Filterable="true">
+                <Template Context="v"><span class="text-mono">@v.Version</span></Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PackageRegistryVersionDto" Property="SizeBytes" Title="@L["Size"]" Width="6.25rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.Number" FilterOperators="@GridFilterText.NumberOperators">
+                <Template Context="v">@DisplayFormatting.BinarySize(v.SizeBytes)</Template>
+            </OmniDataGridColumn>
+            <OmniDataGridColumn TItem="PackageRegistryVersionDto" Property="PublishedBy" Title="@L["PublishedBy"]" Width="8.75rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.MultiSelect" />
+            <OmniDataGridColumn TItem="PackageRegistryVersionDto" Property="CreatedAt" Title="@L["PublishedAt"]" Width="9.375rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true">
+                <Template Context="v">@v.CreatedAt.ToString("g")</Template>
+            </OmniDataGridColumn>
+            @* Recette R-210: the listed state is this column's value, so it filters on listed / unlisted. *@
+            <OmniDataGridColumn TItem="PackageRegistryVersionDto" Property="IsListed" Title="@L["Status"]" Width="8.125rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@ListedText">
+                <Template Context="v">
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ToggleListedAsync(v))" title="@(v.IsListed ? L["Unlist"] : L["Relist"])" Label="@(v.IsListed ? L["Unlist"] : L["Relist"])"><OmniIcon Name="@MaterialIconMap.Resolve((v.IsListed ? "visibility_off" : "visibility"))" /></OmniButton>
+                </Template>
+            </OmniDataGridColumn>
+        </Columns>
+    </AetheusDataGrid>
+
+<DialogFooter CancelText="@L["Close"]" OnCancel="@Close" />

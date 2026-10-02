@@ -48,7 +48,11 @@ public sealed class DeliveryPipelineTemplateSeeder(
                 "Reusable blue-green host cutover built from native step types, with an advisory evidence stage and an automatic rollback.",
                 "Application Delivery",
                 ["host-bluegreen-deploy-v1.yaml", "host-bluegreen-deploy-v2.yaml", "host-bluegreen-deploy-v3.yaml",
-                 "host-bluegreen-deploy-v4.yaml"]),
+                 "host-bluegreen-deploy-v4.yaml", "host-bluegreen-deploy-v5.yaml", "host-bluegreen-deploy-v6.yaml"]),
+            ["host-bluegreen-revert"] = (
+                "Return traffic to the colour a blue-green commit kept in reserve (N-1), in seconds.",
+                "Application Delivery",
+                ["host-bluegreen-revert-v1.yaml"]),
             ["application-deploy-prod"] = (
                 "Restore an immutable candidate and run the project's production deployment adapter.",
                 "Application Delivery",
@@ -313,6 +317,10 @@ public sealed class DeliveryPipelineTemplateSeeder(
                 "Separate the cutover's Compose variables from the identity only the starting step receives.",
             ("host-bluegreen-deploy", 4) =>
                 "Let the rollback run after a failure that never produced the run's image tags.",
+            ("host-bluegreen-deploy", 5) =>
+                "Hand one Compose variable list to every step; the control plane forwards what each step can resolve.",
+            ("host-bluegreen-deploy", 6) =>
+                "Arm a host-side confirmation window after the switch; the replaced colour stays in reserve.",
             _ => "Require an explicit immutable candidate release version."
         };
 }

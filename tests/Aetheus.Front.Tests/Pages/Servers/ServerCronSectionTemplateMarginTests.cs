@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 /// <summary>
 /// Template-branch margin coverage for ServerCronSection.razor and CronJobDialog.razor.
-/// The create/edit form now lives in CronJobDialog (a DialogService dialog rendered in a
+/// The create/edit form now lives in CronJobDialog (a OmniDialogService dialog rendered in a
 /// SEPARATE host) - so the dialog form/validation branches are exercised by rendering
 /// CronJobDialog DIRECTLY (hardened rule #4: in-render-tree, no separate-host hang).
 /// The section's own confirm panel + job rows are exercised against the section markup.
@@ -82,7 +79,7 @@ public class ServerCronSectionTemplateMarginTests : BunitContext
     }
 
     // Dialog Save closes the dialog with a CronJobSaveRequest carrying the form values
-    // (hardened rule #4: capture the close result via DialogService.OnClose, no hang).
+    // (hardened rule #4: capture the close result via OmniDialogService.OnClose, no hang).
     [Fact]
     public void CronJobDialog_RendersPrefilledForm_SaveWired()
     {
@@ -95,7 +92,7 @@ public class ServerCronSectionTemplateMarginTests : BunitContext
         // The extracted dialog renders the edit form prefilled with the job's values.
         Assert.Contains("0 2 * * *", cut.Markup);
         Assert.Contains("/bin/backup", cut.Markup);
-        // Save is present and clickable (closes the dialog via DialogService in the real flow).
+        // Save is present and clickable (closes the dialog via OmniDialogService in the real flow).
         cut.FindAll("button").First(b => b.TextContent.Contains("Save")).Click();
     }
 
@@ -109,22 +106,7 @@ public class ServerCronSectionTemplateMarginTests : BunitContext
             .Add(x => x.Schedule, "0 2 * * *")
             .Add(x => x.Command, "/bin/backup"));
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Cancel")).Click();
-    }
-
-    [Fact]
-    public void Renders_ConfirmPanelVisible_ShowsConfirmMarkup()
-    {
-        var cut = RenderSection(MakeServer(new CronJobDto { Id = "1", User = "root", Schedule = "0 * * * *", Command = "/bin/ls" }));
-
-        typeof(ServerCronSection).GetField("_confirmVisible", Priv)!.SetValue(cut.Instance, true);
-        typeof(ServerCronSection).GetField("_confirmTitle", Priv)!.SetValue(cut.Instance, "Delete job?");
-        typeof(ServerCronSection).GetField("_confirmMessage", Priv)!.SetValue(cut.Instance, "Are you sure?");
-        cut.Render(p => p.Add(x => x.Server, cut.Instance.Server).Add(x => x.ServerId, 77));
-
-        // The visible ConfirmDialog renders the title and message set on the section.
-        Assert.Contains("Delete job?", cut.Markup);
-        Assert.Contains("Are you sure?", cut.Markup);
+        cut.FindAll("button").First(b => b.TextContent.Contains("GoBack")).Click();
     }
 
     [Fact]

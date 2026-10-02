@@ -6,6 +6,10 @@ public interface IDockerStorageMaintenance
 {
     string BuilderName { get; }
     bool DeploymentOnly { get; }
+    /// <summary>A build holds the exclusive build lease right now. Cheap: read live by every heartbeat.</summary>
+    bool BuildActive { get; }
+    /// <summary>When a build last asked for the lease, or null when none has since the agent started.</summary>
+    DateTime? LastBuildAttemptAtUtc { get; }
     bool IsBuildCommand(string command);
     /// <summary>
     /// Returns false when <paramref name="waitBudget"/> elapses before the exclusive build lease frees.

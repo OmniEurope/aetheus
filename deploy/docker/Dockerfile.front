@@ -2,73 +2,30 @@
 # Dockerfile - Aetheus Frontend (Blazor WebAssembly)
 # =============================================================================
 # syntax=docker/dockerfile:1.7
-FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS build
-WORKDIR /src
-
-ENV NUGET_PACKAGES=/root/.nuget/packages \
-    DOTNET_NOLOGO=1 \
-    DOTNET_CLI_TELEMETRY_OPTOUT=1
-
-COPY Directory.Build.props .
-COPY Directory.Build.targets .
-# Central Package Management: restore needs Directory.Packages.props to resolve every PackageReference
-# version (without it: NU1015), and NuGet.config pins the sole feed. The back Dockerfile copies both;
-# the front was missing them, so the QA/deploy front image build failed at restore.
-COPY Directory.Packages.props .
-COPY NuGet.config .
-COPY scanner-manifest.json /scanner-manifest.json
-COPY src/Aetheus.Shared/Aetheus.Shared.csproj Aetheus.Shared/
-COPY src/Aetheus.Analyzers/Aetheus.Analyzers.csproj Aetheus.Analyzers/
-COPY src/Aetheus.Front/Aetheus.Front.csproj Aetheus.Front/
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet restore Aetheus.Front/Aetheus.Front.csproj
-
-COPY src/Aetheus.Shared/ Aetheus.Shared/
-COPY src/Aetheus.Analyzers/ Aetheus.Analyzers/
-COPY src/Aetheus.Front/ Aetheus.Front/
-
-# NOT --no-restore: the .csproj-only restore above does not pull the Blazor WASM runtime pack
-# (browser-wasm assets are resolved at publish/build time), so a --no-restore publish fails in
-# ResolvePackageAssets (MSB4018 / FallbackPackagePathResolver). Letting publish restore is cheap -
-# the nuget cache mount already holds every package from the restore layer above.
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet publish Aetheus.Front/Aetheus.Front.csproj \
-        -c Release \
-        -o /app/publish -p:StaticWebAssetsPublishFingerprint=false
-
-FROM mcr.microsoft.com/dotnet/sdk:10.0.202@sha256:adc02be8b87957d07208a4a3e51775935b33bad3317de8c45b1e67357b4c073b AS server-build
-WORKDIR /src
-
-ENV NUGET_PACKAGES=/root/.nuget/packages \
-    DOTNET_NOLOGO=1 \
-    DOTNET_CLI_TELEMETRY_OPTOUT=1
-
-# The analytics RCL relies on the repository-wide nullable and implicit-using policy.
-COPY Directory.Build.props .
-COPY Directory.Build.targets .
-COPY Directory.Packages.props .
-COPY NuGet.config .
-
-# The production static host receives the short-lived analytics credentials injected by
-# the Aetheus deploy stage. Keep the browser secret-free: the RCL pseudonymizes and exports
-# events server-side through the same-origin /aetheus-analytics endpoint.
-COPY src/Aetheus.Analyzers/ src/Aetheus.Analyzers/
-COPY src/Aetheus.WebAnalytics/ src/Aetheus.WebAnalytics/
-COPY packages/aetheus-web-analytics/src/aetheus-web-analytics.js packages/aetheus-web-analytics/src/aetheus-web-analytics.js
-COPY deploy/docker/StaticServer.csproj deploy/docker/StaticServer.csproj
-COPY deploy/docker/packages.lock.json deploy/docker/packages.lock.json
-COPY deploy/docker/StaticServer.Program.cs deploy/docker/StaticServer.Program.cs
-WORKDIR /src/deploy/docker
-
-RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet restore StaticServer.csproj --locked-mode \
-    && dotnet publish StaticServer.csproj -c Release -o /server/publish --no-restore --nologo
-
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.11@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
+#
+# Runtime only. Nothing is compiled here any more: the pipeline has already built the solution in
+# Release, and re-publishing the Blazor WebAssembly site plus its static host from a cold obj/ inside
+# this image compiled the same sources a second time, for several minutes, on every run.
+# deploy/scripts/publish-application.sh produces both on the host, into .pipeline-publish/:
+#   .pipeline-publish/frontend/wwwroot   the published site
+#   .pipeline-publish/static-server/     the ASP.NET host that serves it
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12@sha256:6a94333d37514e385650a3c81a55e5350b67253dbe136e9cf17e499c35606a8c AS runtime
 WORKDIR /app
 
-COPY --from=server-build /server/publish .
-COPY --from=build /app/publish/wwwroot ./wwwroot
+# curl is required by the compose healthcheck on this service, exactly as in Dockerfile.back. Without
+# a healthcheck, `docker compose up --wait` treats the container as ready the moment it is running,
+# and the blue-green deploy then probed a front whose server had not started listening yet: run 2218
+# died on `curl (7)` less than a second after the container came up. It sits before the COPY of the
+# publish on purpose: after it, every new publish invalidated this layer and apt ran again on each
+# build (release-fast 2355: 11.6 s, uncached).
+# openssl and libssl3t64 are named so apt takes the security candidate: the base image can lag the
+# Ubuntu fix (recette R2-028, CVE-2026-84782: aspnet:10.0.12 still ships 3.0.13-0ubuntu3.15).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl openssl libssl3t64 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY .pipeline-publish/static-server/ .
+COPY .pipeline-publish/frontend/wwwroot ./wwwroot
 
 COPY deploy/docker/entrypoint-front.sh /entrypoint.sh
 # chmod 0755 (absolute mode), NOT `chmod +x`: COPY preserves the build-context file's perms, and the
@@ -76,7 +33,18 @@ COPY deploy/docker/entrypoint-front.sh /entrypoint.sh
 # non-root `app` user cannot open it (`/bin/sh: cannot open /entrypoint.sh: Permission denied` -> crash-loop).
 # 0755 forces rwxr-xr-x = world-readable+executable. Same fix already applied to Dockerfile.back's entrypoint.
 RUN sed -i 's/\r//' /entrypoint.sh && chmod 0755 /entrypoint.sh
+# The host publish is what this image now IS, so a missing or empty one must stop the build rather
+# than produce an image that serves nothing and still answers its health probe.
+RUN test -s /app/StaticServer.dll && test -s /app/wwwroot/index.html
 RUN chown -R app:app /app/wwwroot
+
+# The publish is written on the host by the agent and COPY keeps its permissions, exactly like the
+# entrypoint above. An agent umask of 077 leaves StaticServer.runtimeconfig.json root-only, and the
+# .NET host then fails as InvalidConfigFile (0x80008093, exit 147) the moment USER app tries to read
+# it: production run 2229 crash-looped on that, and 2218 before it, hidden behind the missing
+# healthcheck. The old image never hit this because it published inside the container as root.
+# Same normalisation as Dockerfile.back, for the same reason.
+RUN chmod -R a+rX /app
 
 EXPOSE 8080
 

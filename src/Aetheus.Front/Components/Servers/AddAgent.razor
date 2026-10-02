@@ -1,0 +1,14 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/servers/add-agent"
+
+<PageTitle>@L["AddAgent"] - Aetheus</PageTitle>
+
+<div class="add-agent-page">
+    <OmniPageHeader Title="@L["AddAgent"]" ShowBack="true" Subtitle="@Breadcrumb.Subtitle()">
+        <Icon><OmniIcon Name="@MaterialIconMap.Resolve("computer")" /></Icon>
+    </OmniPageHeader>
+
+    <WizardDialog @ref="_wizard" Steps="@_steps" CanAdvance="@CanAdvance()" StepChanged="@OnStepChanged"
+        ValidateBeforeNext="@ValidateBeforeNextAsync"
+        OnFinishClicked="@OnFinish" OnCancelClicked="@GoBack" FinishText="@L["WizardDone"]" />
+</div>

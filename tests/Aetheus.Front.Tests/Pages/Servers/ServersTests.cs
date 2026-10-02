@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using ServersPage = Aetheus.Front.Pages.Servers.Servers;
+using ServersPage = Aetheus.Front.Components.Servers.Servers;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 public class ServersTests : BunitContext
@@ -37,7 +34,7 @@ public class ServersTests : BunitContext
         });
 
         var cut = Render<ServersPage>();
-        // RadzenDataGrid LoadData requires JS interop; verify page renders
+        // The data grid's LoadData requires JS interop; verify page renders
         Assert.Contains("Servers", cut.Markup);
     }
 
@@ -98,32 +95,18 @@ public class ServersTests : BunitContext
         Assert.Contains("Servers", cut.Markup);
     }
 
+    /// <summary>Recette R-211: a tag clicked in a row becomes the Tags column's own filter, sent to the API.</summary>
     [Fact]
-    public async Task ClearFilters_ResetsAll()
+    public async Task FilterByTag_SetsTheTagsColumnFilter()
     {
         _handler.SetJsonResponse("api/servers", new PaginatedResult<ServerDto> { Items = [], TotalCount = 0 });
         var cut = Render<ServersPage>();
 
-        cut.Instance._search = "test";
-        cut.Instance._typeFilter = ServerType.Docker;
-        cut.Instance._statusFilter = ServerStatus.Online;
+        await cut.InvokeAsync(() => cut.Instance.FilterByTag("production"));
 
-        await cut.Instance.ClearFilters();
-
-        Assert.Null(cut.Instance._search);
-        Assert.Null(cut.Instance._typeFilter);
-        Assert.Null(cut.Instance._statusFilter);
-    }
-
-    [Fact]
-    public async Task FilterByTag_SetsSearch()
-    {
-        _handler.SetJsonResponse("api/servers", new PaginatedResult<ServerDto> { Items = [], TotalCount = 0 });
-        var cut = Render<ServersPage>();
-
-        await cut.Instance.FilterByTag("production");
-
-        Assert.Equal("production", cut.Instance._search);
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Tags", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=production", StringComparison.Ordinal)));
     }
 }
 

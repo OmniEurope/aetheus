@@ -2,8 +2,6 @@
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.ServerApps;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests;
@@ -12,11 +10,13 @@ public class ServerAppServiceTests
 {
     private readonly IServerAppRepository _repoMock = Substitute.For<IServerAppRepository>();
     private readonly IAuditService _auditMock = Substitute.For<IAuditService>();
+    private readonly Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher _domainEventsMock =
+        Substitute.For<Aetheus.Back.Services.DomainEvents.IDomainEventDispatcher>();
     private readonly ServerAppService _sut;
 
     public ServerAppServiceTests()
     {
-        _sut = new ServerAppService(_repoMock, _auditMock, TimeProvider.System);
+        _sut = new ServerAppService(_repoMock, _auditMock, TimeProvider.System, _domainEventsMock);
     }
 
     [Fact]

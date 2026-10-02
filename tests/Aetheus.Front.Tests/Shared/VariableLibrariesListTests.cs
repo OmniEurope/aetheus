@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Shared;
-using Aetheus.Shared.DTOs;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -104,7 +102,7 @@ public class VariableLibrariesListTests : BunitContext
         });
         var cut = Render<VariableLibrariesList>(p => p.Add(x => x.ServerId, 7));
         var method = ListType.GetMethod("OnLoadData", Priv)!;
-        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new Radzen.LoadDataArgs { Skip = 1, Top = 1 }])!);
+        await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [new GridLoadArgs { Skip = 1, Top = 1 }])!);
 
         Assert.False((bool)ListType.GetField("_loading", Priv)!.GetValue(cut.Instance)!);
         var libraries = (List<VariableLibraryDto>)ListType.GetField("_libraries", Priv)!.GetValue(cut.Instance)!;

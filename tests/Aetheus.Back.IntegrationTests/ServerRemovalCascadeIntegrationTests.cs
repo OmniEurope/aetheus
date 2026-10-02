@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Servers;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.IntegrationTests;
 
 /// <summary>
-/// Exercises <see cref="ServerRepository.RemoveServerAsync"/> against real PostgreSQL. The
+/// Exercises <see cref="ServerRetirementRepository.PurgeServerAsync"/> against real PostgreSQL. The
 /// <c>Vault → ProjectServer → Server</c> chain uses <c>RESTRICT</c> FKs, so a naive
 /// <c>Servers.Remove</c> would throw <c>23503</c>; the repository instead deletes leaf-to-root
 /// inside a transaction. The InMemory unit provider neither enforces the FKs nor supports
@@ -18,7 +17,7 @@ public sealed class ServerRemovalCascadeIntegrationTests(PostgresFixture fixture
     : RelationalTestBase(fixture)
 {
     [Fact]
-    public async Task RemoveServerAsync_DeletesProjectServerAndOwnedVaultChain()
+    public async Task PurgeServerAsync_DeletesProjectServerAndOwnedVaultChain()
     {
         await ResetAndMigrateAsync();
         int serverId;
@@ -67,9 +66,9 @@ public sealed class ServerRemovalCascadeIntegrationTests(PostgresFixture fixture
 
         await using (var db = NewContext())
         {
-            var repo = new ServerRepository(db, TimeProvider.System);
-            var server = await db.Servers.FirstAsync(s => s.Id == serverId, cancellationToken: TestContext.Current.CancellationToken);
-            await repo.RemoveServerAsync(server, ct: TestContext.Current.CancellationToken);
+            var repo = new ServerRetirementRepository(db);
+            var server = await repo.FindServerIncludingRetiredAsync(serverId, TestContext.Current.CancellationToken);
+            await repo.PurgeServerAsync(server!, TestContext.Current.CancellationToken);
         }
 
         await using (var verify = NewContext())
@@ -80,6 +79,60 @@ public sealed class ServerRemovalCascadeIntegrationTests(PostgresFixture fixture
             Assert.Empty(await verify.Vaults.ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Empty(await verify.VaultSecrets.ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Empty(await verify.VaultSecretVersions.ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
+        }
+    }
+
+    /// <summary>
+    /// PLAN-004 R-11: a backup policy targets its server through a RESTRICT foreign key, so the former
+    /// hard delete failed with 23503 on any server that had one. The purge of a retired server now
+    /// deletes the server's policies (and, by cascade, their runs) in the same transaction.
+    /// </summary>
+    [Fact]
+    public async Task PurgeServerAsync_OfARetiredServerWithABackupPolicy_DeletesThePolicyInsteadOfFailing()
+    {
+        await ResetAndMigrateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        int serverId;
+
+        await using (var db = NewContext())
+        {
+            var org = new Organization { Name = "Org backup", Slug = "rmbackup", Description = "d" };
+            db.Organizations.Add(org);
+            await db.SaveChangesAsync(ct);
+            var project = new Project { Name = "Proj backup", Description = "d", OrganizationId = org.Id };
+            var server = new Server { Name = "node-backup", Hostname = "node-backup", OrganizationId = org.Id };
+            db.Projects.Add(project);
+            db.Servers.Add(server);
+            await db.SaveChangesAsync(ct);
+            serverId = server.Id;
+
+            var policy = new BackupPolicy { Name = "db", ProjectId = project.Id, ServerId = server.Id, ScheduleCron = "0 3 * * *" };
+            db.BackupPolicies.Add(policy);
+            await db.SaveChangesAsync(ct);
+            db.BackupRuns.Add(new BackupRun { BackupPolicyId = policy.Id });
+            await db.SaveChangesAsync(ct);
+        }
+
+        await using (var db = NewContext())
+        {
+            var repo = new ServerRetirementRepository(db);
+            var server = await repo.FindServerIncludingRetiredAsync(serverId, ct);
+            await repo.RetireAsync(server!, DateTime.UtcNow, ct);
+        }
+
+        await using (var db = NewContext())
+        {
+            var repo = new ServerRetirementRepository(db);
+            var server = await repo.FindServerIncludingRetiredAsync(serverId, ct);
+            Assert.NotNull(server?.DeletedAt);
+            Assert.Equal(1, await repo.PurgeServerAsync(server!, ct));
+        }
+
+        await using (var verify = NewContext())
+        {
+            Assert.False(await verify.Servers.IgnoreQueryFilters().AnyAsync(s => s.Id == serverId, ct));
+            Assert.False(await verify.BackupPolicies.AnyAsync(policy => policy.ServerId == serverId, ct));
+            Assert.Empty(await verify.BackupRuns.ToListAsync(ct));
         }
     }
 }

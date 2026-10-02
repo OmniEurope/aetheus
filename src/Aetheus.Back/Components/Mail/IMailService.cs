@@ -18,8 +18,8 @@ public interface IMailService
     Task<MailAccountDto> CreateAccountAsync(int serverId, CreateMailAccountRequest request, CancellationToken ct = default);
     Task<MailAccountDto> UpdateAccountAsync(int serverId, int accountId, UpdateMailAccountRequest request, CancellationToken ct = default);
     Task DeleteAccountAsync(int serverId, int accountId, CancellationToken ct = default);
-    Task ExecuteActionAsync(int serverId, MailActionRequest request, CancellationToken ct = default);
-    Task GetLogsAsync(int serverId, MailLogRequest request, CancellationToken ct = default);
+    Task<MailTaskQueuedDto> ExecuteActionAsync(int serverId, MailActionRequest request, CancellationToken ct = default);
+    Task<MailTaskQueuedDto> GetLogsAsync(int serverId, MailLogRequest request, CancellationToken ct = default);
     Task SetupAsync(int serverId, MailSetupRequest request, CancellationToken ct = default);
     Task<MailDnsRecordsDto> GetDnsRecordsAsync(int serverId, int domainId, CancellationToken ct = default);
 

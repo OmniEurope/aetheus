@@ -96,13 +96,10 @@ public sealed class IngestController(
         });
     }
 
-    private Task<int?> ResolveRequestAppIdAsync(CancellationToken ct)
-    {
-        var key = Request.Headers[KeyHeader].FirstOrDefault();
-        return string.IsNullOrWhiteSpace(key)
-            ? Task.FromResult<int?>(null)
-            : ingest.ResolveAppIdAsync(key, ct);
-    }
+    // A missing key goes to the service as well, which refuses it and reports it with the other refused
+    // keys (recette R2-013): the request line of an ingest 401 is no longer a warning of its own.
+    private Task<int?> ResolveRequestAppIdAsync(CancellationToken ct) =>
+        ingest.ResolveAppIdAsync(Request.Headers[KeyHeader].FirstOrDefault() ?? string.Empty, ct);
 
     private async Task<IActionResult> HandleAsync<T>(
         Func<JsonDocument, IReadOnlyList<T>> jsonParser,
@@ -112,11 +109,7 @@ public sealed class IngestController(
         Func<int, IMessage> protobufResponse,
         CancellationToken ct)
     {
-        var key = Request.Headers[KeyHeader].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(key))
-            return Unauthorized();
-
-        var appId = await ingest.ResolveAppIdAsync(key, ct);
+        var appId = await ResolveRequestAppIdAsync(ct);
         if (appId is null)
             return Unauthorized();
 

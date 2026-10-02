@@ -44,6 +44,23 @@ public class GitLightController(IGitLightService service, IResourceAuthorization
         return Ok(await service.GetRepositoriesPageAsync(null, accessibleIds, request, ct));
     }
 
+    /// <summary>Recette R-224: the default branches the list's checkable column filter offers, in the
+    /// same scope as the list (one project, or every project the caller can read).</summary>
+    [HttpGet("filter-values")]
+    public async Task<ActionResult<GitRepositoryFilterValuesDto>> GetRepositoryFilterValues(
+        [FromQuery] int? projectId, [FromServices] GitFilterValuesService filterValues, CancellationToken ct)
+    {
+        if (projectId is not null)
+        {
+            if (!await authz.HasPermissionAsync(User, ResourceType.Project, projectId.Value, Permission.Read, ct))
+                return Forbid();
+            return Ok(await filterValues.ForRepositoriesAsync(projectId, [projectId.Value], ct));
+        }
+
+        var accessibleIds = await authz.GetAccessibleResourceIdsAsync(User, ResourceType.Project, Permission.Read, ct);
+        return Ok(await filterValues.ForRepositoriesAsync(null, accessibleIds, ct));
+    }
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<GitLightRepoDto>> GetRepository(int id, CancellationToken ct)
     {
@@ -91,14 +108,40 @@ public class GitLightController(IGitLightService service, IResourceAuthorization
 
     [HttpGet("{repoId:int}/commits")]
     public async Task<ActionResult<PaginatedResult<GitLightCommitDto>>> GetCommits(
-        int repoId, [FromQuery, StringLength(255)] string? @ref, [FromQuery, StringLength(200)] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 30, CancellationToken ct = default)
+        int repoId, [FromQuery, StringLength(255)] string? @ref, [FromQuery, StringLength(200)] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 30, CancellationToken ct = default,
+        [FromQuery(Name = "Filters"), MaxLength(PaginationRequest.MaxFilters)] List<GridFilter>? filters = null)
     {
         var (ok, fail) = await CheckRepoAccessAsync(repoId, Permission.Read, ct);
         if (!ok) return fail!;
 
         page = Math.Max(page, 1);
         pageSize = PaginationDefaults.Clamp(pageSize);
-        return Ok(await service.GetCommitsAsync(repoId, @ref, page, pageSize, search, ct));
+        // Recette R-224 / R2-004 / R2-005: the grid's Message, Author, Branch and Date column filters.
+        var filter = GitCommitListQuery.Parse(filters);
+        return Ok(await service.GetCommitsAsync(repoId, @ref, page, pageSize, search, ct, filter));
+    }
+
+    /// <summary>R2-003: the repository at <paramref name="ref"/> (its default branch when omitted) as a zip,
+    /// streamed from <c>git archive</c>. Read access, like browsing the files.</summary>
+    [HttpGet("{repoId:int}/archive")]
+    public async Task<IActionResult> GetArchive(
+        int repoId, [FromQuery, StringLength(255)] string? @ref, [FromServices] GitArchiveService archives, CancellationToken ct)
+    {
+        var (ok, fail) = await CheckRepoAccessAsync(repoId, Permission.Read, ct);
+        if (!ok) return fail!;
+        var archive = await archives.GetArchiveAsync(repoId, @ref, ct);
+        if (archive is null) return NotFound();
+        return new FileStreamResult(archive.Content, "application/zip") { FileDownloadName = archive.FileName };
+    }
+
+    /// <summary>Recette R-224: the authors the commits and pull requests grids' Author filters offer.</summary>
+    [HttpGet("{repoId:int}/filter-values")]
+    public async Task<ActionResult<GitRepositoryDetailFilterValuesDto>> GetRepositoryDetailFilterValues(
+        int repoId, [FromServices] GitFilterValuesService filterValues, CancellationToken ct)
+    {
+        var (ok, fail) = await CheckRepoAccessAsync(repoId, Permission.Read, ct);
+        if (!ok) return fail!;
+        return Ok(await filterValues.ForRepositoryAsync(repoId, ct));
     }
 
     [HttpGet("{repoId:int}/commits/{sha}")]
@@ -348,7 +391,7 @@ public class GitLightController(IGitLightService service, IResourceAuthorization
     {
         var (ok, fail) = await CheckRepoAccessAsync(repoId, Permission.Admin, ct);
         if (!ok) return fail!;
-        var deleted = await service.DeleteBranchProtectionRuleAsync(ruleId, ct);
+        var deleted = await service.DeleteBranchProtectionRuleAsync(repoId, ruleId, ct);
         if (!deleted) return NotFound();
         return NoContent();
     }

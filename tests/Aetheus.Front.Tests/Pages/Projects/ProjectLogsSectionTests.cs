@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Projects.ProjectDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Projects.ProjectDetailSections;
 using Bunit;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -87,7 +84,7 @@ public class ProjectLogsSectionTests : BunitContext
 
         var method = typeof(ProjectLogsSection).GetMethod("OnLoadDataAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25 }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25 }])!);
 
         var page = (int)typeof(ProjectLogsSection).GetField("_page", Priv)!.GetValue(cut.Instance)!;
         Assert.Equal(2, page);
@@ -113,20 +110,20 @@ public class ProjectLogsSectionTests : BunitContext
 
         var method = typeof(ProjectLogsSection).GetMethod("OnLoadDataAsync", Priv)!;
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25 }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25 }])!);
 
         var loading = (bool)typeof(ProjectLogsSection).GetField("_loading", Priv)!.GetValue(cut.Instance)!;
         Assert.False(loading);
     }
 
     [Theory]
-    [InlineData(TaskLogLevel.Error, BadgeStyle.Danger)]
-    [InlineData(TaskLogLevel.Warning, BadgeStyle.Warning)]
-    [InlineData(TaskLogLevel.Info, BadgeStyle.Info)]
-    public void GetLevelBadge_ReturnsExpected(TaskLogLevel level, BadgeStyle expected)
+    [InlineData(TaskLogLevel.Error, OmniTone.Danger)]
+    [InlineData(TaskLogLevel.Warning, OmniTone.Warning)]
+    [InlineData(TaskLogLevel.Info, OmniTone.Accent)]
+    public void GetLevelBadge_ReturnsExpected(TaskLogLevel level, OmniTone expected)
     {
         var method = typeof(ProjectLogsSection).GetMethod("GetLevelBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)level])!;
+        var result = (OmniTone)method.Invoke(null, [(object)level])!;
         Assert.Equal(expected, result);
     }
 
@@ -134,7 +131,42 @@ public class ProjectLogsSectionTests : BunitContext
     public void GetLevelBadge_UnknownLevel_ReturnsLight()
     {
         var method = typeof(ProjectLogsSection).GetMethod("GetLevelBadge", PrivStatic)!;
-        var result = (BadgeStyle)method.Invoke(null, [(object)(TaskLogLevel)99])!;
-        Assert.Equal(BadgeStyle.Light, result);
+        var result = (OmniTone)method.Invoke(null, [(object)(TaskLogLevel)99])!;
+        Assert.Equal(OmniTone.Neutral, result);
+    }
+
+    [Fact]
+    public async Task HeaderFilters_AreColumnFilters_NotASearchTerm()
+    {
+        // Recette R-212: the Level list, the Time range and the Message text are real column filters of
+        // the project's logs endpoint; the first typed value is no longer turned into a search term.
+        var cut = RenderSection();
+        cut.WaitForState(() => cut.Markup.Contains("Deploy started"), TimeSpan.FromSeconds(2));
+        var grid = cut.FindComponent<AetheusDataGrid<TaskLogDto>>();
+        var separator = Aetheus.Shared.Components.Shared.GridFilter.ListSeparator;
+
+        await cut.InvokeAsync(() => grid.Instance.LoadData.InvokeAsync(new GridLoadArgs
+        {
+            Filters =
+            [
+                new GridFilterDescriptor(nameof(TaskLogDto.Level), $"Error{separator}Warning", OmniDataGridFilterOperator.In),
+                new GridFilterDescriptor(nameof(TaskLogDto.Timestamp), "2026-09-01T08:00:00Z",
+                    OmniDataGridFilterOperator.GreaterThanOrEquals, OmniDataGridFilterOperator.LessThan, "2026-09-01T12:00:00Z"),
+                new GridFilterDescriptor(nameof(TaskLogDto.Message), "failed", OmniDataGridFilterOperator.Contains)
+            ]
+        }));
+
+        cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
+        {
+            var url = Uri.UnescapeDataString(request.Url);
+            return url.Contains("api/projects/1/logs?", StringComparison.Ordinal)
+                && url.Contains("Filters[0].Field=Level", StringComparison.Ordinal)
+                && url.Contains($"Filters[0].Value=Error{separator}Warning", StringComparison.Ordinal)
+                && url.Contains("Filters[1].Field=Timestamp", StringComparison.Ordinal)
+                && url.Contains("Filters[1].SecondValue=2026-09-01T12:00:00Z", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Field=Message", StringComparison.Ordinal)
+                && url.Contains("Filters[2].Value=failed", StringComparison.Ordinal)
+                && !url.Contains("search=", StringComparison.Ordinal);
+        }));
     }
 }

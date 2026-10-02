@@ -53,7 +53,10 @@ public class SystemLogService : ISystemLogService
         DateTime? dateTo,
         int page,
         int pageSize,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? sortBy = null,
+        bool sortDescending = true,
+        IReadOnlyList<GridFilter>? filters = null)
     {
         if (!Directory.Exists(_logDirectory))
             return new PaginatedResult<SystemLogEntryDto> { Items = [], TotalCount = 0, Page = page, PageSize = pageSize };
@@ -85,9 +88,14 @@ public class SystemLogService : ISystemLogService
                 "System log query hit the {Cap}-entry in-memory cap; results truncated. Narrow the date range or file filter.",
                 MaxAggregatedEntries);
 
-        filtered.Sort((a, b) => b.Timestamp.CompareTo(a.Timestamp));
-        var totalCount = filtered.Count;
-        var items = filtered.Skip((page - 1) * pageSize).Take(pageSize)
+        // Recette R-453: the grid's header filters and sort apply to every entry kept above, newest
+        // first when the grid names no sort.
+        var query = SystemLogQuery.Columns.ApplyFilters(filtered.AsQueryable(), filters);
+        var ordered = SystemLogQuery.Columns.ApplySorts(query, SystemLogQuery.SortsOf(sortBy, sortDescending))
+            ?? query.OrderByDescending(entry => entry.Timestamp);
+        var matching = ordered.ToList();
+        var totalCount = matching.Count;
+        var items = matching.Skip((page - 1) * pageSize).Take(pageSize)
             .Select((e, i) => e with { Id = (page - 1) * pageSize + i + 1 })
             .ToList();
         return new PaginatedResult<SystemLogEntryDto>

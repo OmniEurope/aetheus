@@ -5,7 +5,7 @@ namespace Aetheus.Back.Tests.Architecture;
 public class AnalyzerDistributionAuditTests
 {
     [Fact]
-    public void BlockingRulesAndRazorInputsAreCentralized()
+    public void BlockingRulesUseSdkRazorInputsWithoutDuplicates()
     {
         var root = FindRepoRoot();
         var props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"));
@@ -14,8 +14,7 @@ public class AnalyzerDistributionAuditTests
             root, "src", "Aetheus.Front", "Aetheus.Front.csproj"));
 
         Assert.Contains("PRM001;PRM002;PRM003", props, StringComparison.Ordinal);
-        Assert.Contains("<AdditionalFiles Include=", targets, StringComparison.Ordinal);
-        Assert.Contains("**\\*.razor", targets, StringComparison.Ordinal);
+        Assert.DoesNotContain("<AdditionalFiles Include=", targets, StringComparison.Ordinal);
         Assert.DoesNotContain("<AdditionalFiles Include=", frontProject, StringComparison.Ordinal);
     }
 
@@ -54,6 +53,16 @@ public class AnalyzerDistributionAuditTests
             root, "src", "Aetheus.Analyzers", "AnalyzerReleases.Shipped.md")));
         Assert.True(File.Exists(Path.Combine(
             root, "src", "Aetheus.Analyzers", "AnalyzerReleases.Unshipped.md")));
+    }
+
+    [Fact]
+    public void MinimumSdkContractIsBuildEnforced()
+    {
+        var project = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "src", "Aetheus.Analyzers", "Aetheus.Analyzers.csproj"));
+
+        Assert.Contains("10.0.100", project, StringComparison.Ordinal);
+        Assert.Contains("VersionLessThan", project, StringComparison.Ordinal);
     }
 
     private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;

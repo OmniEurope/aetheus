@@ -4,8 +4,6 @@ using System.Text;
 using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Components.Releases;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -19,11 +17,12 @@ public class ReleasesControllerTests
     private readonly IResourceAuthorizationService _authzMock = Substitute.For<IResourceAuthorizationService>();
     private readonly IConfiguration _configMock = Substitute.For<IConfiguration>();
     private readonly IPipelineRunService _pipelineRunService = Substitute.For<IPipelineRunService>();
+    private readonly IReleaseDeploymentAnnouncer _announcer = Substitute.For<IReleaseDeploymentAnnouncer>();
     private readonly ReleasesController _sut;
 
     public ReleasesControllerTests()
     {
-        _sut = new ReleasesController(_serviceMock, _authzMock, _configMock, _pipelineRunService);
+        _sut = new ReleasesController(_serviceMock, _authzMock, _configMock, _pipelineRunService, _announcer);
         _sut.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -41,13 +40,31 @@ public class ReleasesControllerTests
         _pipelineRunService.GetRunPipelineContextAsync(42, Arg.Any<CancellationToken>()).Returns((5, 3));
         _serviceMock.CreateReleaseFromPipelineAsync(
                 3, 42, "1.2.3", null, null, null, null, null, true, Arg.Any<CancellationToken>())
-            .Returns(new ReleaseDto { Id = 9, ProjectId = 3, Version = "1.2.3" });
+            .Returns(new ReleaseDto { Id = 9, ProjectId = 3, Version = "1.2.3", Status = ReleaseStatus.Deployed });
 
         var result = await _sut.CreateRelease(
             new CreateReleaseRequest { PipelineRunId = 42, Version = "1.2.3", Deployed = true }, 3,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
+        // R-520: the release step's deployment is announced, with the run and the agent that recorded it.
+        await _announcer.Received(1).AnnounceAsync(9, 42, 7, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateRelease_NotMarkedDeployed_AnnouncesNoDeployment()
+    {
+        _pipelineRunService.IsServerAssignedToRunAsync(42, 7, Arg.Any<CancellationToken>()).Returns(true);
+        _pipelineRunService.GetRunPipelineContextAsync(42, Arg.Any<CancellationToken>()).Returns((5, 3));
+        _serviceMock.CreateReleaseFromPipelineAsync(
+                3, 42, "1.2.3", null, null, null, null, null, false, Arg.Any<CancellationToken>())
+            .Returns(new ReleaseDto { Id = 9, ProjectId = 3, Version = "1.2.3", Status = ReleaseStatus.Published });
+
+        await _sut.CreateRelease(
+            new CreateReleaseRequest { PipelineRunId = 42, Version = "1.2.3" }, 3,
+            TestContext.Current.CancellationToken);
+
+        await _announcer.DidNotReceiveWithAnyArgs().AnnounceAsync(default, default, default, TestContext.Current.CancellationToken);
     }
 
     [Fact]

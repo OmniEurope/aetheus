@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Net.Sockets;
+using Aetheus.Back.Services.DomainEvents;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -12,6 +13,7 @@ public static class PipelinesModuleExtensions
     {
         services.AddScoped<IPipelineRepository, PipelineRepository>();
         services.AddScoped<IPipelineRunLineageReader, PipelineRunLineageRepository>();
+        services.AddScoped<IPipelineRunLineageService, PipelineRunLineageService>();
         services.AddScoped<IPipelineFavoriteRepository, PipelineFavoriteRepository>();
         services.AddScoped<IPipelineFavoriteService, PipelineFavoriteService>();
         services.AddScoped<IPipelineGitService, PipelineGitService>();
@@ -31,6 +33,8 @@ public static class PipelinesModuleExtensions
         services.AddScoped<IPipelineDispatchServerResolver, PipelineDispatchServerResolver>();
         services.AddScoped<IPipelineStepTaskBuilder, PipelineStepTaskBuilder>();
         services.AddScoped<IPipelineAnalysisTaskFactory, PipelineAnalysisTaskFactory>();
+        services.AddScoped<IPipelineDotnetTestTaskFactory, PipelineDotnetTestTaskFactory>();
+        services.AddScoped<IPipelineGateStatusTaskFactory, PipelineGateStatusTaskFactory>();
         services.AddScoped<IPipelineDeploymentTaskFactory, PipelineDeploymentTaskFactory>();
         services.AddScoped<IPipelineHostOperationTaskFactory, PipelineHostOperationTaskFactory>();
         services.AddScoped<IPipelineArtifactTaskFactory, PipelineArtifactTaskFactory>();
@@ -38,12 +42,23 @@ public static class PipelinesModuleExtensions
         services.AddScoped<IPipelineRunFinalizer, PipelineRunFinalizer>();
         services.AddScoped<IPipelineRunParameterResolver, PipelineRunParameterResolver>();
         services.AddScoped<IPipelineCheckpointReuseService, PipelineCheckpointReuseService>();
+        services.AddScoped<IPipelineWorkspaceSourceResolver, PipelineWorkspaceSourceResolver>();
         services.AddScoped<IPipelineRunPreparationService, PipelineRunPreparationService>();
+        services.AddScoped<IPipelineRequirementsChecker, PipelineRequirementsChecker>();
+        services.AddScoped<IPipelineChildPipelineResolver, PipelineChildPipelineResolver>();
+        services.AddScoped<IPipelineAdvisoryPreflightBuilder, PipelineAdvisoryPreflightBuilder>();
+        services.AddScoped<IPipelineScannerManifestPreflight, PipelineScannerManifestPreflight>();
+        services.AddScoped<IPipelineReleaseArtifactPreflight, PipelineReleaseArtifactPreflight>();
         services.AddScoped<IPipelineRunPreflightService, PipelineRunPreflightService>();
+        services.AddScoped<IPipelineSetupReadinessService, PipelineSetupReadinessService>();
+        services.AddScoped<IPipelineRequirementsProvisioner, PipelineRequirementsProvisioner>();
+        services.AddScoped<IRunStageBaselineService, RunStageBaselineService>();
+        services.AddScoped<IPipelinePortRegistryGuard, PipelinePortRegistryGuard>();
         services.AddScoped<IPipelineRunDefinitionParser, PipelineRunDefinitionParser>();
         services.AddScoped<IPipelineRunControlService, PipelineRunControlService>();
         services.AddScoped<IPipelineSystemTaskFactory, PipelineSystemTaskFactory>();
         services.AddScoped<IPipelineTriggerStepCoordinator, PipelineTriggerStepCoordinator>();
+        services.AddScoped<IPipelineBranchAdvanceStep, PipelineBranchAdvanceStep>();
         services.AddScoped<IPipelineStepTaskDispatcher, PipelineStepTaskDispatcher>();
         services.AddScoped<IPipelineRunReader, PipelineRunReader>();
         services.AddScoped<IPipelineStageDispatchPlanner, PipelineStageDispatchPlanner>();
@@ -53,11 +68,17 @@ public static class PipelinesModuleExtensions
         services.AddScoped<IPipelineRunLauncher, PipelineRunLauncher>();
         services.AddScoped<IPipelineTemplateService, PipelineTemplateService>();
         services.AddScoped<IPipelineWebhookService, PipelineWebhookService>();
+        services.AddScoped<IPipelineOwnerAuthorization, PipelineOwnerAuthorization>();
         services.AddSingleton<IPostgresLeaderLease, PostgresLeaderLease>();
         // Pipeline chaining: trigger downstream pipelines when an upstream run succeeds (on_success:).
         services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineRunCompletedEvent>, PipelineRunCompletedDownstreamHandler>();
         // Orchestration: complete a waiting `type: trigger` step when its child run finishes.
         services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineRunCompletedEvent>, PipelineRunCompletedTriggerHandler>();
+        // Notifications: a failed or succeeded run, and an approval gate, become notification events.
+        services.AddScoped<PipelineRunNotificationPublisher>();
+        services.AddScoped<PipelineRefusedLaunchRecorder>();
+        services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineRunCompletedEvent>, PipelineRunCompletedNotificationHandler>();
+        services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineApprovalRequestedEvent>, PipelineApprovalRequestedNotificationHandler>();
         // Git announces a push; this module decides what it means for pipelines. Observer dispatch:
         // a push already written to disk must not be reported as failed because a trigger did not fire.
         services.AddScoped<
@@ -103,6 +124,12 @@ public static class PipelinesModuleExtensions
         services.AddHostedService<PipelineSchedulerService>();
         services.AddHostedService<PipelineRetentionService>();
         services.AddHostedService<PipelineTriggerReconcileService>();
+        // An environment linked to a project gets its pipelines copied into the project's repository.
+        services.AddScoped<IDomainEventHandler<Environments.EnvironmentLinkedToProjectEvent>, EnvironmentPipelinesCopyHandler>();
+
+        // Generic audit observers of this module's events (moved from the Shared module, 2026-09-25).
+        services.AddScoped<IDomainEventHandler<Events.PipelineRunCompletedEvent>, DomainEventAuditHandler<Events.PipelineRunCompletedEvent>>();
+        services.AddScoped<IDomainEventHandler<Events.PipelineApprovalRequestedEvent>, DomainEventAuditHandler<Events.PipelineApprovalRequestedEvent>>();
         return services;
     }
 }

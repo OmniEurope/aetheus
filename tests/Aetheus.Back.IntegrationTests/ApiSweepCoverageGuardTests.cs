@@ -56,9 +56,13 @@ public sealed class ApiSweepCoverageGuardTests
         ("api/servers/#/module-links", "read-tested via ServerScopedGet_AsAdmin (interpolated route)"),
         ("api/servers/#/configuration", "GET export returns 404 without a seeded config - not a success-read target"),
         ("api/pipelines/runs", "read-tested via CheckpointResumePreview_AsAdmin with an interpolated seeded run id"),
+        ("api/pipelines/#/runs/#/stage-baselines",
+            "read-tested via RunStageBaselines_AsAdmin with the seeded pipeline and run ids"),
         ("api/agent", "AgentInstaller: GET returns an install script, not a JSON collection"),
         ("api/external-repos", "ExternalRepos: gated by Features:ExternalRepos (off in test env) - 404 by design"),
         ("api/logs", "Logs: GET requires a seeded task id with on-disk logs"),
+        ("api/variable-libraries/#/ports",
+            "read-tested via VariableLibraryPortTargets_AsAdmin, which creates the library the route needs"),
         ("api/packages/nuget", "NuGet protocol reads require a PAT credential, not the admin JWT used by the generic read sweep"),
         ("api/packages/npm", "npm protocol reads require a PAT credential, not the admin JWT used by the generic read sweep"),
     ];
@@ -80,6 +84,8 @@ public sealed class ApiSweepCoverageGuardTests
             "OTLP ingest endpoint is [AllowAnonymous] (per-app ingest-key auth, not JWT) - no 401 to assert",
         ["Aetheus.Back.Components.AppMonitoring.PublicWebAnalyticsController"] =
             "Public browser analytics is anonymous by design and gated by declared origin, rate limit, body cap, and server-side pseudonymization",
+        ["Aetheus.Back.Components.Security.CspReportController"] =
+            "CSP violation reports are posted by the browser itself, with no session: [AllowAnonymous] by design, bounded by its own rate-limit partition, an 8 KiB body cap and 8 reports per batch",
     };
 
     /// <summary>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
 using Aetheus.Back.Components.Git;
+using Aetheus.Back.Tests.Git;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aetheus.Back.Tests;
@@ -30,6 +31,7 @@ public sealed class GitLightCliServiceRepoTests : IDisposable
         Git("config", "user.email", "test@example.com");
         Git("config", "user.name", "Test User");
         Git("config", "commit.gpgsign", "false");
+        GitFixtureGuard.AssertOwnedBy(_dir, _dir);
 
         File.WriteAllText(Path.Combine(_dir, "README.md"), "# Hello\nSecond line\n");
         Git("add", ".");
@@ -69,6 +71,9 @@ public sealed class GitLightCliServiceRepoTests : IDisposable
             CreateNoWindow = true
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
+        // WHY: pre-push hook env inheritance incident - GIT_DIR/GIT_INDEX_FILE would redirect this
+        // fixture git call to the real repository.
+        GitProcessStartInfoFactory.NeutralizeInheritedGitEnvironment(psi);
         using var p = Process.Start(psi)!;
         var output = p.StandardOutput.ReadToEnd();
         p.StandardError.ReadToEnd();
@@ -93,6 +98,32 @@ public sealed class GitLightCliServiceRepoTests : IDisposable
 
         Assert.Single(commits);
         Assert.Contains("initial", commits[0].Message);
+    }
+
+    /// <summary>
+    /// Recette R-224: the commits grid's Author filter keeps the commits whose author name is exactly one of
+    /// the ticked ones: "Bob" is neither "Bobby" nor "B.b" (the name is escaped, not read as a pattern).
+    /// </summary>
+    [Fact]
+    public async Task AuthorFilter_MatchesExactNames_AndCountsTheSame()
+    {
+        foreach (var author in new[] { "Bob <bob@example.com>", "Bobby <bobby@example.com>", "B.b <bdotb@example.com>" })
+        {
+            File.AppendAllText(Path.Combine(_dir, "app.txt"), author + Environment.NewLine);
+            Git("add", ".");
+            Git("commit", "-m", "change by " + author, "--author", author);
+        }
+        var ct = TestContext.Current.CancellationToken;
+
+        var bob = await _sut.GetCommitsAsync(_dir, null, 0, 10, ct: ct, filter: new GitCommitLogFilter { Authors = ["Bob"] });
+        var dotted = await _sut.GetCommitsAsync(_dir, null, 0, 10, ct: ct, filter: new GitCommitLogFilter { Authors = ["B.b"] });
+        var count = await _sut.GetCommitCountAsync(_dir, null, ct: ct, filter: new GitCommitLogFilter { Authors = ["Bob", "Test User"] });
+        var authors = await _sut.GetCommitAuthorsAsync(_dir, ct);
+
+        Assert.Equal(["Bob"], bob.Select(commit => commit.AuthorName));
+        Assert.Equal(["B.b"], dotted.Select(commit => commit.AuthorName));
+        Assert.Equal(3, count);
+        Assert.Equal(["B.b", "Bob", "Bobby", "Test User"], authors);
     }
 
     [Fact]
@@ -352,6 +383,33 @@ public sealed class GitLightCliServiceRepoTests : IDisposable
     [Fact]
     public async Task GetBlobAsync_PathStartingWithDash_Throws()
         => await Assert.ThrowsAsync<ArgumentException>(() => _sut.GetBlobAsync(_dir, "main", "-rf", ct: TestContext.Current.CancellationToken));
+
+    // --- Recette R-534: every file of a revision with its blob id, to compare two repositories ---
+
+    [Fact]
+    public async Task GetTreeBlobsAsync_ListsEveryFileOfTheRevision_WithItsModeAndBlobId()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Directory.CreateDirectory(Path.Combine(_dir, "src", "deep folder"));
+        File.WriteAllText(Path.Combine(_dir, "src", "deep folder", "file with space.txt"), "nested\n");
+        Git("add", ".");
+        Git("commit", "-m", "feat: nested file");
+
+        var first = await _sut.GetTreeBlobsAsync(_dir, _firstSha, ct);
+        var head = await _sut.GetTreeBlobsAsync(_dir, "main", ct);
+
+        Assert.NotNull(first);
+        Assert.NotNull(head);
+        Assert.Equal(["README.md"], first.Keys);
+        Assert.Equal(["README.md", "app.txt", "src/deep folder/file with space.txt"], head.Keys.Order(StringComparer.Ordinal));
+        // The same content is the same blob in both revisions: that equality is the whole comparison.
+        Assert.Equal(first["README.md"], head["README.md"]);
+        Assert.Matches("^100644 [0-9a-f]{40,64}$", head["app.txt"]);
+    }
+
+    [Fact]
+    public async Task GetTreeBlobsAsync_AnUnknownRevision_IsUnknown_NotAnEmptyTree()
+        => Assert.Null(await _sut.GetTreeBlobsAsync(_dir, "0000000000000000000000000000000000000000", TestContext.Current.CancellationToken));
 
     // --- Binary detection now scans content for a NUL byte (cross-platform, no /dev/null) ---
 

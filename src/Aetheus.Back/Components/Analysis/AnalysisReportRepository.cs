@@ -126,9 +126,44 @@ internal sealed class AnalysisReportRepository(AppDbContext db)
             .ConfigureAwait(false);
     }
 
+    /// <summary>Metrics inserted per SaveChanges. Each batch is detached once written, so the change
+    /// tracker never holds more than this many of them.</summary>
+    private const int MetricBatchSize = 2_000;
+
     public async Task AddReportAsync(AnalysisReport report, CancellationToken ct)
     {
+        // An architecture report carries ~39,000 metrics (candidate #2328). Inserted as one tracked
+        // graph they cost 6 to 7 s of EF fix-up on PostgreSQL, almost the whole ingestion (PLAN-007
+        // lot 6). The report goes first, then its metrics in detached batches: same rows, same
+        // transaction (the caller's), a bounded change tracker.
+        var metrics = report.Metrics.ToList();
+        report.Metrics.Clear();
         db.AnalysisReports.Add(report);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        if (metrics.Count == 0) return;
+
+        var autoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+        db.ChangeTracker.AutoDetectChangesEnabled = false;
+        try
+        {
+            foreach (var batch in metrics.Chunk(MetricBatchSize))
+            {
+                foreach (var metric in batch)
+                    metric.AnalysisReportId = report.Id;
+                db.AnalysisMetrics.AddRange(batch);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                foreach (var metric in batch)
+                    db.Entry(metric).State = EntityState.Detached;
+            }
+        }
+        finally
+        {
+            db.ChangeTracker.AutoDetectChangesEnabled = autoDetectChanges;
+        }
+        // The policy engine and the response read the metrics from the report. The report is detached
+        // first, so handing them back cannot make a later SaveChanges insert them a second time.
+        db.Entry(report).State = EntityState.Detached;
+        foreach (var metric in metrics)
+            report.Metrics.Add(metric);
     }
 }

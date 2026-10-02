@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Security.Claims;
 using Aetheus.Back.Components.Dashboards;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -102,5 +101,38 @@ public class DashboardsControllerTests
         var result = await _sut.DeleteDashboard(1, TestContext.Current.CancellationToken);
 
         Assert.IsType<NoContentResult>(result);
+    }
+
+    /// <summary>The deployment identity (NameIdentifier "bootstrap", no user row) is signed in: a 401
+    /// here would make the front end its session. It owns no dashboard and may not create one.</summary>
+    [Fact]
+    public async Task TheDeploymentIdentity_OwnsNoDashboard_AndIsNeverAnswered401()
+    {
+        var service = Substitute.For<IDashboardService>();
+        var sut = new DashboardsController(service)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [new Claim(ClaimTypes.NameIdentifier, "bootstrap")], "Bearer"))
+                }
+            }
+        };
+        var ct = TestContext.Current.CancellationToken;
+
+        var list = await sut.GetDashboards(ct);
+        var one = await sut.GetDashboard(1, ct);
+        var created = await sut.CreateDashboard(new CreateDashboardRequest(), ct);
+        var updated = await sut.UpdateDashboard(1, new UpdateDashboardRequest(), ct);
+        var deleted = await sut.DeleteDashboard(1, ct);
+
+        Assert.Empty(Assert.IsType<List<DashboardDto>>(Assert.IsType<OkObjectResult>(list.Result).Value));
+        Assert.IsType<NotFoundResult>(one.Result);
+        Assert.IsType<ForbidResult>(created.Result);
+        Assert.IsType<ForbidResult>(updated.Result);
+        Assert.IsType<NotFoundResult>(deleted);
+        Assert.Empty(service.ReceivedCalls());
     }
 }

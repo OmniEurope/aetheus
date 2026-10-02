@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Pipelines;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -20,6 +19,7 @@ public class PipelineTriggerReconcileServiceTests
 {
     private readonly IPipelineRepository _repo = Substitute.For<IPipelineRepository>();
     private readonly IPipelineRunService _runService = Substitute.For<IPipelineRunService>();
+    private readonly IPipelineApprovalService _approvalService = Substitute.For<IPipelineApprovalService>();
     private readonly PipelineTriggerReconcileService _sut;
 
     public PipelineTriggerReconcileServiceTests()
@@ -27,6 +27,7 @@ public class PipelineTriggerReconcileServiceTests
         var sp = Substitute.For<IServiceProvider>();
         sp.GetService(typeof(IPipelineRepository)).Returns(_repo);
         sp.GetService(typeof(IPipelineRunService)).Returns(_runService);
+        sp.GetService(typeof(IPipelineApprovalService)).Returns(_approvalService);
         var scope = Substitute.For<IServiceScope>();
         scope.ServiceProvider.Returns(sp);
         var scopeFactory = Substitute.For<IServiceScopeFactory>();
@@ -40,6 +41,10 @@ public class PipelineTriggerReconcileServiceTests
         _repo.GetStalledCancellationRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns([]);
         _repo.GetStuckRunningRunIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        _repo.GetExpiredPendingApprovalIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
             .Returns([]);
 
         _sut = new PipelineTriggerReconcileService(
@@ -213,6 +218,39 @@ public class PipelineTriggerReconcileServiceTests
     }
 
     [Fact]
+    public async Task Pass4_ExpiredPendingApproval_AutoDecidedTimedOut()
+    {
+        _repo.GetExpiredPendingApprovalIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([42]);
+        _approvalService.DecideApprovalAsync(42, Arg.Any<ApprovalDecisionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PipelineApprovalDto { Id = 42, PipelineRunId = 10, Status = ApprovalStatus.TimedOut });
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _approvalService.Received(1).DecideApprovalAsync(
+            42,
+            Arg.Is<ApprovalDecisionRequest>(r =>
+                r.Decision == ApprovalStatus.TimedOut && !string.IsNullOrWhiteSpace(r.Comments)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Pass4_OneApprovalThrows_ContinuesWithOtherApprovals()
+    {
+        _repo.GetExpiredPendingApprovalIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns([42, 43]);
+        _approvalService.DecideApprovalAsync(42, Arg.Any<ApprovalDecisionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<PipelineApprovalDto?>>(_ => throw new InvalidOperationException("transient failure"));
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _approvalService.Received(1).DecideApprovalAsync(
+            42, Arg.Any<ApprovalDecisionRequest>(), Arg.Any<CancellationToken>());
+        await _approvalService.Received(1).DecideApprovalAsync(
+            43, Arg.Any<ApprovalDecisionRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Reconcile_NothingStuck_TouchesNothing()
     {
         await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
@@ -226,5 +264,108 @@ public class PipelineTriggerReconcileServiceTests
         await _runService.DidNotReceive().ReconcileRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _runService.DidNotReceive().CancelRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _runService.DidNotReceive().FailStuckRunAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _approvalService.DidNotReceive().DecideApprovalAsync(
+            Arg.Any<int>(), Arg.Any<ApprovalDecisionRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    // --- Pass 6: approval decisions recorded but never applied to their run ---
+
+    [Fact]
+    public async Task ReconcileAsync_ApprovedRunNeverResumed_ReAppliesTheResume()
+    {
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
+            .Returns([new StrandedApprovalRun(2152, ApprovalStatus.Approved)]);
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).ResumeAfterApprovalAsync(2152, Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().TryTransitionPipelineRunStatusAsync(
+            2152, PipelineStatus.WaitingForApproval, PipelineStatus.Failed, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(ApprovalStatus.Rejected)]
+    [InlineData(ApprovalStatus.TimedOut)]
+    public async Task ReconcileAsync_RefusedRunNeverFailed_ReAppliesTheFailure(ApprovalStatus decision)
+    {
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
+            .Returns([new StrandedApprovalRun(2152, decision)]);
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        // Re-applied through the run service, which also runs a refused confirmation's Rollback.
+        await _runService.Received(1).ApplyRefusalAsync(2152, Arg.Any<CancellationToken>());
+        await _runService.DidNotReceive().ResumeAfterApprovalAsync(2152, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_RunWaitingWithNoApprovalAtAll_DecidesNothing()
+    {
+        // No recorded decision to re-apply, and inventing one would approve or fail a production
+        // deployment on the sweep's own authority. It is logged and left to a human.
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
+            .Returns([new StrandedApprovalRun(2152, null)]);
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.DidNotReceive().ResumeAfterApprovalAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().TryTransitionPipelineRunStatusAsync(
+            Arg.Any<int>(), PipelineStatus.WaitingForApproval, PipelineStatus.Failed, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_OneStrandedRunThrowing_DoesNotStopTheNext()
+    {
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
+            .Returns([new StrandedApprovalRun(1, ApprovalStatus.Approved), new StrandedApprovalRun(2, ApprovalStatus.Approved)]);
+        _runService.ResumeAfterApprovalAsync(1, Arg.Any<CancellationToken>())
+            .Returns<Task<bool>>(_ => throw new InvalidOperationException("boom"));
+
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(1).ResumeAfterApprovalAsync(2, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_RunThatNeverLeavesTheStrandedState_StopsBeingRetried()
+    {
+        // Without a budget, a run whose resume keeps failing is retried on every tick forever, writing one
+        // LogCritical per tick per run and changing nothing. Six sweeps, five attempts, then silence.
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
+            .Returns([new StrandedApprovalRun(2152, ApprovalStatus.Approved)]);
+        _runService.ResumeAfterApprovalAsync(2152, Arg.Any<CancellationToken>())
+            .Returns<Task<bool>>(_ => throw new InvalidOperationException("still stranded"));
+
+        for (var sweep = 0; sweep < 8; sweep++)
+            await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(5).ResumeAfterApprovalAsync(2152, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_RunThatRecovers_KeepsAFullBudgetForALaterStranding()
+    {
+        // The budget is spent on consecutive failures, not on the run's lifetime: a run that gets acted on
+        // without throwing forgets its count, so an unrelated stranding weeks later is not born exhausted.
+        _repo.GetStrandedApprovalRunsAsync(Arg.Any<CancellationToken>())
+            .Returns([new StrandedApprovalRun(2152, ApprovalStatus.Approved)]);
+
+        for (var sweep = 0; sweep < 8; sweep++)
+            await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        await _runService.Received(8).ResumeAfterApprovalAsync(2152, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task EveryTick_ClosesApprovalsLeftPendingOnEndedRuns_BeforeExpiringAny()
+    {
+        // PLAN-005 lot 3 / D34: covers every run that ended outside the finalizer, run 2323 among them.
+        await _sut.ReconcileAsync(TestContext.Current.CancellationToken);
+
+        Received.InOrder(() =>
+        {
+            _repo.CloseApprovalsOfEndedRunsAsync(null, Arg.Any<DateTime>(), EndedRunApprovals.Reason, Arg.Any<CancellationToken>());
+            _repo.GetExpiredPendingApprovalIdsAsync(Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+        });
     }
 }

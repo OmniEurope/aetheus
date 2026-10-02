@@ -3,7 +3,6 @@ using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Users;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;

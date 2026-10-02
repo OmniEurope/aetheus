@@ -1,41 +1,56 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Microsoft.Extensions.Time.Testing;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 public sealed class TeamspeakDataCoordinatorTests
 {
     [Fact]
-    public async Task RefreshTimer_FetchesAndPublishesNewServerState()
+    public async Task RefreshState_FetchesAndPublishesNewServerState()
     {
+        // R-181 / R-226: the server's heartbeat push refreshes the state here; the grids on screen then
+        // refresh themselves quietly through their own LoadData (see ServerTeamspeakSectionRenderTests).
         var handler = new BunitTestHelper.TestHandler();
         handler.SetJsonResponse("api/servers/5/teamspeak",
             new TeamspeakDataDto { IsInstalled = true, ServerName = "Before" });
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
-        var time = new FakeTimeProvider();
-        await using var coordinator = new TeamspeakDataCoordinator(
-            new ApiClient(http), time, TimeSpan.FromSeconds(30));
-        var refreshed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var coordinator = new TeamspeakDataCoordinator(new ApiClient(http));
+        var published = 0;
 
         await coordinator.ResetAsync(
             5,
             new TeamspeakDataDto { IsInstalled = true, ServerName = "Initial" },
-            () =>
-            {
-                if (coordinator.State.ServerName == "After") refreshed.TrySetResult();
-                return Task.CompletedTask;
-            });
+            () => { published++; return Task.CompletedTask; });
         handler.SetJsonResponse("api/servers/5/teamspeak",
             new TeamspeakDataDto { IsInstalled = true, ServerName = "After" });
+        var before = published;
 
-        time.Advance(TimeSpan.FromSeconds(30));
-        await refreshed.Task.WaitAsync(TimeSpan.FromSeconds(1), Xunit.TestContext.Current.CancellationToken);
+        await coordinator.RefreshStateAsync();
 
         Assert.Equal("After", coordinator.State.ServerName);
-        Assert.True(handler.Requests.Count(request => request.Url.Contains("/teamspeak", StringComparison.Ordinal)) >= 2);
+        Assert.True(published > before);
+    }
+
+    [Fact]
+    public async Task LoadBans_SendsTheGridHeaderFiltersToTheApi()
+    {
+        // Recette R-210: a header filter of the bans grid reaches the endpoint as a column filter.
+        var handler = new BunitTestHelper.TestHandler();
+        handler.SetJsonResponse("api/servers/5/teamspeak", new TeamspeakDataDto { IsInstalled = true });
+        handler.SetPaginatedJsonResponse("api/servers/5/teamspeak/bans",
+            new[] { new TeamspeakBanDto { BanId = 2, Nickname = "new" } });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
+        await using var coordinator = new TeamspeakDataCoordinator(new ApiClient(http));
+        await coordinator.ResetAsync(5, new TeamspeakDataDto(), () => Task.CompletedTask);
+
+        await coordinator.LoadBansAsync(1, 25, null, "Created", true,
+            [new Aetheus.Shared.Components.Shared.GridFilter { Field = "Nickname", Operator = Aetheus.Shared.Components.Shared.GridFilterOperator.Contains, Value = "ne" }]);
+
+        Assert.Equal(2, Assert.Single(coordinator.Bans).BanId);
+        Assert.Contains(handler.Requests, request =>
+            Uri.UnescapeDataString(request.Url).Contains("teamspeak/bans", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Field=Nickname", StringComparison.Ordinal)
+            && Uri.UnescapeDataString(request.Url).Contains("Filters[0].Value=ne", StringComparison.Ordinal));
     }
 
     [Fact]

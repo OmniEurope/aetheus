@@ -79,17 +79,34 @@ public sealed class AppErrorRepository(AppDbContext db) : IAppErrorRepository
     internal static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
-    public async Task<(List<AppErrorEvent> Items, int TotalCount)> GetErrorsAsync(int appId, int page, int pageSize, CancellationToken ct = default)
+    public async Task<(List<AppErrorEvent> Items, int TotalCount)> GetErrorsAsync(
+        int appId, int page, int pageSize, CancellationToken ct = default,
+        IReadOnlyList<GridFilter>? filters = null, string? sortBy = null, bool sortDescending = true)
     {
         var query = db.AppErrorEvents.AsNoTracking().Where(e => e.MonitoredAppId == appId);
+        // The grid's header filters narrow every group of the app before the count.
+        query = AppErrorQuery.Filters.ApplyFilters(query, filters);
+
         var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
-            .OrderByDescending(e => e.LastSeenAt)
+        // The requested column first, then most recently seen and the id, so pages never overlap.
+        var ordered = AppErrorQuery.Sorts.ApplySorts(query, AppErrorQuery.SortsOf(sortBy, sortDescending)) is { } sorted
+            ? sorted.ThenByDescending(e => e.LastSeenAt).ThenByDescending(e => e.Id)
+            : query.OrderByDescending(e => e.LastSeenAt).ThenByDescending(e => e.Id);
+        var items = await ordered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct).ConfigureAwait(false);
         return (items, totalCount);
     }
+
+    public async Task<List<string>> GetExceptionTypesAsync(int appId, int limit, CancellationToken ct = default) =>
+        await db.AppErrorEvents.AsNoTracking()
+            .Where(e => e.MonitoredAppId == appId)
+            .Select(e => e.ExceptionType)
+            .Distinct()
+            .OrderBy(type => type)
+            .Take(limit)
+            .ToListAsync(ct).ConfigureAwait(false);
 
     public async Task<int> PurgeOlderThanAsync(DateTime cutoff, CancellationToken ct = default)
     {

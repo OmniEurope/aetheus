@@ -15,10 +15,27 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
                                       && t.ExpiresAt > timeProvider.GetUtcNow().UtcDateTime, ct).ConfigureAwait(false);
     }
 
+    // PLAN-004 R-11: enrollment matching must see retired servers, so the same machine revives its
+    // row (same id, links intact) instead of enrolling a duplicate.
     public async Task<Server?> FindServerByHostnameAsync(string hostname, CancellationToken ct = default)
     {
         return await db.Servers
+            .IgnoreQueryFilters([ServerQueryFilters.ExcludeRetired])
             .FirstOrDefaultAsync(s => s.Hostname == hostname, ct).ConfigureAwait(false);
+    }
+
+    public async Task<Server?> FindServerByMachineIdHashAsync(
+        int organizationId, string machineIdHash, string hostname, CancellationToken ct = default)
+    {
+        // A hash is not a key (cloned images share one), so several rows may carry it: prefer the one
+        // that also has the reported hostname, then an active one, then the oldest, deterministically.
+        return await db.Servers
+            .IgnoreQueryFilters([ServerQueryFilters.ExcludeRetired])
+            .Where(s => s.OrganizationId == organizationId && s.MachineIdHash == machineIdHash)
+            .OrderBy(s => s.Hostname == hostname ? 0 : 1)
+            .ThenBy(s => s.DeletedAt == null ? 0 : 1)
+            .ThenBy(s => s.Id)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<User?> FindUserWithRolesAsync(string username, CancellationToken ct = default)
@@ -179,11 +196,14 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
 
     public async Task<int?> ValidateServerTokenHashAsync(string tokenHash, CancellationToken ct = default)
     {
+        // PLAN-004 R-11: retiring revokes the tokens; the explicit DeletedAt check also closes the race
+        // where a heartbeat already in flight renews a token right after the revocation.
         var serverToken = await db.ServerTokens
             .AsNoTracking()
             .FirstOrDefaultAsync(t => t.TokenHash == tokenHash
                                       && !t.IsRevoked
-                                      && t.ExpiresAt > timeProvider.GetUtcNow().UtcDateTime, ct).ConfigureAwait(false);
+                                      && t.ExpiresAt > timeProvider.GetUtcNow().UtcDateTime
+                                      && t.Server.DeletedAt == null, ct).ConfigureAwait(false);
         return serverToken?.ServerId;
     }
 
@@ -325,13 +345,33 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
             .ConfigureAwait(false);
     }
 
-    public async Task RevokeRefreshTokenAsync(int tokenId, int? replacedById, CancellationToken ct = default)
+    public async Task<RefreshToken?> FindRefreshTokenStateAsync(int tokenId, CancellationToken ct = default) =>
+        await db.RefreshTokens.AsNoTracking().FirstOrDefaultAsync(r => r.Id == tokenId, ct).ConfigureAwait(false);
+
+    public async Task<bool> RevokeRefreshTokenAsync(int tokenId, int? replacedById, CancellationToken ct = default)
     {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        if (db.Database.IsRelational())
+        {
+            // R-072: compare-and-set on "still active", so of two concurrent rotations of one token
+            // exactly one revokes it; the row lock makes the later UPDATE re-check and match nothing.
+            var revoked = await db.RefreshTokens
+                .Where(r => r.Id == tokenId && r.RevokedAt == null)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(r => r.RevokedAt, (DateTime?)now)
+                        .SetProperty(r => r.ReplacedById, replacedById),
+                    ct)
+                .ConfigureAwait(false);
+            return revoked == 1;
+        }
+
         var token = await db.RefreshTokens.FirstOrDefaultAsync(r => r.Id == tokenId, ct).ConfigureAwait(false);
-        if (token is null) return;
-        token.RevokedAt = timeProvider.GetUtcNow().UtcDateTime;
+        if (token is null || token.RevokedAt is not null) return false;
+        token.RevokedAt = now;
         token.ReplacedById = replacedById;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
     }
 
     public async Task RevokeAllUserRefreshTokensAsync(int userId, CancellationToken ct = default)
@@ -348,12 +388,22 @@ public class AuthRepository(AppDbContext db, TimeProvider timeProvider) : IAuthR
     public async Task DeleteExpiredRefreshTokensAsync(int userId, CancellationToken ct = default)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var dead = await db.RefreshTokens
-            .Where(r => r.UserId == userId && (r.ExpiresAt <= now || (r.RevokedAt != null && r.RevokedAt < now.AddMinutes(-5))))
-            .ToListAsync(ct).ConfigureAwait(false);
-        if (dead.Count > 0)
-            db.RefreshTokens.RemoveRange(dead);
-        // Caller's SaveChangesAsync flushes
+        var graceStart = now.AddMinutes(-5);
+        var dead = db.RefreshTokens
+            .Where(r => r.UserId == userId && (r.ExpiresAt <= now || (r.RevokedAt != null && r.RevokedAt < graceStart)));
+        if (db.Database.IsRelational())
+        {
+            // R-072: a set-based delete is idempotent. Staging tracked deletes made two concurrent
+            // refreshes of one user delete the same rows, and the later SaveChanges then failed with
+            // DbUpdateConcurrencyException (0 rows affected), which surfaced as HTTP 500.
+            await dead.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var staged = await dead.ToListAsync(ct).ConfigureAwait(false);
+        if (staged.Count > 0)
+            db.RefreshTokens.RemoveRange(staged);
+        // Non-relational store: the caller's SaveChangesAsync flushes.
     }
 
     public async Task<int> DeleteAllExpiredRefreshTokensAsync(DateTime utcNow, CancellationToken ct = default)

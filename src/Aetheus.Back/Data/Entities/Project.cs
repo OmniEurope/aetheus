@@ -28,7 +28,8 @@ public class Project
 
     // External-Git parity (Features:ExternalRepos). Source discriminant: when set, this project's
     // repository is an external mirror-backed connection; otherwise the source is the internal
-    // GitInternalRepo / RepositoryUrl. Exactly-one-source (XOR) is enforced at the service layer.
+    // GitInternalRepo / RepositoryUrl. An external repository attached beside the internal one (recette
+    // R-534) leaves this null: it is an additional source a pipeline names, not the project's source.
     public int? GitConnectionId { get; set; }
     public GitConnection? GitConnection { get; set; }
 

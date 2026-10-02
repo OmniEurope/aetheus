@@ -1,0 +1,47 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@*
+    The run page's approval region, extracted from PipelineRun.razor when adding the second state below
+    took that file over its 600-line budget. Two states, and the second is the point: a run parked on a
+    decision that is offered, and a run parked on one that is not.
+*@
+@if (Approval?.Pending is not null)
+{
+    <OmniAlert Severity="OmniSeverity.Warning" Title="@L["ApprovalRequiredTitle"]" Class="omni-u-mt-sm">
+        @* R-370: the pipeline's own approval and the environment's are told apart. *@
+        <div>@(Approval.Pending.Scope == ApprovalScope.Pipeline
+                  ? string.Format(L["PipelineApprovalRequiredDetail"], Approval.Pending.StageName)
+                  : string.Format(L["ApprovalRequiredDetail"], Approval.Pending.StageName, Approval.Pending.EnvironmentName))</div>
+        @if (!string.IsNullOrWhiteSpace(Approval.EnvironmentInstructions))
+        {
+            <div class="omni-u-mt-sm">@Approval.EnvironmentInstructions</div>
+        }
+        @* Recette R2-021: a newer Aetheus was deployed than the one this page runs. The approval that
+           confirms a production switch is answered from the new version, after checking it works:
+           the decision is offered again once the page is reloaded. *@
+        @if (VersionState.NewVersionAvailable)
+        {
+            <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Small" Align="OmniAlignment.Start" Class="omni-u-mt-md approval-reload-first">
+                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@L["ApprovalReloadFirst"]</OmniText>
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@Reload"><OmniIcon Name="OmniIconName.Refresh" /> <span>@L["ReloadNow"]</span></OmniButton>
+            </OmniStack>
+        }
+        else
+        {
+        <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Small" Class="omni-u-mt-md role-edit-stack">
+            <OmniTextArea aria-label="@L["ApprovalCommentsOptional"]" @bind-Value="Approval.Comments" Placeholder="@L["ApprovalCommentsOptional"]" Rows="2" Class="omni-u-w-100" />
+            <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
+                <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Approval.DecideAsync(ApprovalStatus.Approved))" Class="@(Approval.Deciding ? "btn-busy" : null)" Busy="@(Approval.Deciding)"><OmniIcon Name="OmniIconName.CheckCircle" /> <span>@L["Approve"]</span></OmniButton>
+                <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => Approval.DecideAsync(ApprovalStatus.Rejected))" Class="@(Approval.Deciding ? "btn-busy" : null)" Busy="@(Approval.Deciding)"><OmniIcon Name="OmniIconName.Prohibit" /> <span>@L["Reject"]</span></OmniButton>
+            </OmniStack>
+        </OmniStack>
+        }
+    </OmniAlert>
+}
+else if (Approval?.WaitingWithoutApproval == true)
+{
+    @* Run 2152 sat here for eight days showing nothing at all: the status said it waited on a human,
+       and the page offered no human anything to do. Saying which of the two reasons applies beats it. *@
+    <OmniAlert Severity="OmniSeverity.Danger" Title="@L["ApprovalMissingTitle"]" Class="omni-u-mt-sm">
+        <div>@L[Approval.LoadFailed ? "ApprovalLoadFailedDetail" : "ApprovalMissingDetail"]</div>
+    </OmniAlert>
+}

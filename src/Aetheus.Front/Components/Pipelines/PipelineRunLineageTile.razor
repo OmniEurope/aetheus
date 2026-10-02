@@ -1,0 +1,48 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@* Recette R-498: where the run comes from and what it started, in one tile of the overview. The origin
+   is the parent run when another run started this one, else the person who launched it, else
+   "automatic" (a schedule, a push, a webhook). Under it, the follow-up runs launched after this one
+   (recette R2-026: not the runs of its own trigger stages, already in the timeline). Each run named
+   here is a link. *@
+<OmniCard Class="run-overview-card run-lineage-tile">
+    <OmniText Element="OmniTextElement.Small" Tone="OmniTextTone.Muted" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Path" Class="run-tile-icon" /> @L["RunLineage"]</OmniText>
+    <div class="run-tile-main run-tile-main-rows">
+        <span class="run-tile-subrow">
+            @if (ParentPipeline is { } parentPipeline)
+            {
+                <span class="run-tile-sublabel">@L["ParentPipeline"]</span>
+                @if (ParentRunId is { } parentRunId)
+                {
+                    <a href="@PipelineRunPresentation.Href(parentRunId, ProjectId, ServerId)" class="pipeline-name-link run-tile-value run-lineage-parent" title="@parentPipeline">@parentPipeline #@parentRunId</a>
+                }
+                else
+                {
+                    <span class="run-tile-value run-lineage-parent" title="@parentPipeline">@parentPipeline</span>
+                }
+            }
+            else
+            {
+                <span class="run-tile-sublabel">@L["RunLaunchedBy"]</span>
+                <span class="run-tile-value run-lineage-actor" title="@ActorText">@ActorText</span>
+            }
+        </span>
+    </div>
+    <div class="run-tile-foot">
+        @if (_lineage is { Downstream.Count: > 0 } lineage)
+        {
+            <span class="run-tile-sublabel">@L["RunStarted"]</span>
+            @* Recette R2-026: the first follow-ups only, the full list behind "See all". *@
+            @foreach (var child in lineage.Downstream.Take(MaxShown))
+            {
+                <span class="run-tile-subrow">
+                    <a href="@PipelineRunPresentation.Href(child.RunId, child.ProjectId ?? ProjectId, ServerId)" class="pipeline-name-link run-tile-value run-lineage-child" title="@child.PipelineName">@child.PipelineName #@child.BuildNumber</a>
+                    <OmniBadge Fill="OmniFill.Solid" Tone="@PipelineRunPresentation.Badge(child.Status)">@L.Localize(child.Status)</OmniBadge>
+                </span>
+            }
+            @if (lineage.Downstream.Count > MaxShown)
+            {
+                <OmniButton Variant="OmniButtonVariant.Secondary" Size="OmniControlSize.Small" Class="run-lineage-see-all" OnClick="@ShowAllAsync"><OmniIcon Name="OmniIconName.ListBullets" /> <span>@L["SeeAll"] (@lineage.Downstream.Count)</span></OmniButton>
+            }
+        }
+    </div>
+</OmniCard>

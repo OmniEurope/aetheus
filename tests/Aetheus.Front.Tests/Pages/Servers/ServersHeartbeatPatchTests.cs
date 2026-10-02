@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Helpers;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
-using ServersPage = Aetheus.Front.Pages.Servers.Servers;
+using ServersPage = Aetheus.Front.Components.Servers.Servers;
 namespace Aetheus.Front.Tests.Pages.Servers;
 
 /// <summary>
@@ -124,9 +121,13 @@ public class ServersHeartbeatPatchTests : BunitContext
         var neverFiring = new TrailingReloadCoalescer(5000, (_, _) => new TaskCompletionSource<bool>().Task);
         typeof(ServersPage).GetField("_heartbeatCoalescer", Priv)!.SetValue(cut.Instance, neverFiring);
 
-        // A status filter is active → membership may change, so the handler defers to the
+        // A column filter is active → membership may change, so the handler defers to the
         // coalesced reload instead of patching the row synchronously.
-        cut.Instance._statusFilter = ServerStatus.Online;
+        typeof(ServersPage).GetField("_columnFilters", Priv)!.SetValue(cut.Instance,
+            new List<Aetheus.Shared.Components.Shared.GridFilter>
+            {
+                new() { Field = "Status", Operator = Aetheus.Shared.Components.Shared.GridFilterOperator.In, Value = "Online" }
+            });
 
         var method = typeof(ServersPage).GetMethod("OnHeartbeatAsync", Priv)!;
         var pending = (Task)method.Invoke(cut.Instance, [1, new ServerHeartbeatDto { AgentVersion = "2.0.0" }])!;

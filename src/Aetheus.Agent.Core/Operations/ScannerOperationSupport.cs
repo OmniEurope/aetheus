@@ -59,7 +59,7 @@ internal static class ScannerOperationSupport
             ? "Scanner runtime download failed because of a transient network error."
             : "Scanner runtime or verified binary is unavailable.";
 
-    internal static Task<bool> ValidateImageAssociationAsync(
+    internal static Task<ImageAssociationResult> ValidateImageAssociationAsync(
         ScannerManifestEntry scanner, string sourceDirectory,
         IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
         ScannerOperationValidator.ValidateImageAssociationAsync(scanner, sourceDirectory, envVars, ct);

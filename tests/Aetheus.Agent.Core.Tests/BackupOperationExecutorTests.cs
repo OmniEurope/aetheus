@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Agent.Core.Executors;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Agent.Core.Executors;
-using Aetheus.Shared.Constants;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -351,13 +348,13 @@ public class BackupOperationExecutorTests
             string source,
             int runId,
             int policyId) => new()
-        {
-            [BackupConstants.EngineEnvVar] = BackupDbEngine.None.ToString(),
-            [BackupConstants.RunIdEnvVar] = runId.ToString(),
-            [BackupConstants.PolicyIdEnvVar] = policyId.ToString(),
-            [BackupConstants.FilePathsEnvVar] = System.Text.Json.JsonSerializer.Serialize(new[] { source }),
-            [BackupConstants.RetentionEnvVar] = "2"
-        };
+            {
+                [BackupConstants.EngineEnvVar] = BackupDbEngine.None.ToString(),
+                [BackupConstants.RunIdEnvVar] = runId.ToString(),
+                [BackupConstants.PolicyIdEnvVar] = policyId.ToString(),
+                [BackupConstants.FilePathsEnvVar] = System.Text.Json.JsonSerializer.Serialize(new[] { source }),
+                [BackupConstants.RetentionEnvVar] = "2"
+            };
 
         internal Dictionary<string, string> RestoreEnvironment(string archive, int runId) => new()
         {

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Shared.Analysis;
 
 namespace Aetheus.Agent.Core.Tests;
 
@@ -105,6 +104,9 @@ public sealed class ScannerManifestTests
         Assert.Contains("/src/.claude", trivyIac.Arguments);
         Assert.Contains("/src/**/bin", trivyIac.Arguments);
         Assert.Contains("/src/**/obj", trivyIac.Arguments);
+        // The fixtures that prove the security rules are vulnerable on purpose: scanned as source, their
+        // test Dockerfile sealed the whole security grade at F (run 2359, three DS-0031 "critical").
+        Assert.Contains("/src/tests/security-rules", trivyIac.Arguments);
         Assert.All(manifest.Scanners.Where(scanner => scanner.Key == "trivy-dependencies"
                                                       || scanner.Key.StartsWith("trivy-image", StringComparison.Ordinal)), scanner =>
         {

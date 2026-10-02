@@ -75,7 +75,9 @@ public class ApacheController(IApacheService apacheService, IResourceAuthorizati
     [HttpGet("htaccess")]
     public async Task<IActionResult> GetHtaccess(
         int serverId,
-        [FromQuery, System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(500), System.ComponentModel.DataAnnotations.RegularExpression(@"^(/[a-zA-Z0-9._\-]+)+/?$")] string documentRoot,
+        // The (?!\.\.$) rejects a ".." segment: without it '.' and '-' in the class let
+        // "/var/www/../../etc" through, which is not what an absolute-path bound is for.
+        [FromQuery, System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(500), System.ComponentModel.DataAnnotations.RegularExpression(@"^(/(?!\.\.(?:/|$))[a-zA-Z0-9._\-]+)+/?$")] string documentRoot,
         CancellationToken ct)
     {
         if (!await authz.HasPermissionAsync(User, ResourceType.Server, serverId, Permission.Read, ct))

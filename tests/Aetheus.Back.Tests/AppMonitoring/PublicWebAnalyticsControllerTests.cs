@@ -2,7 +2,6 @@
 using System.Net;
 using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;

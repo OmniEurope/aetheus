@@ -2,8 +2,6 @@
 using System.Security.Claims;
 using Aetheus.Back.Components.Mail;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -177,9 +175,9 @@ public class MailControllerTests
     public async Task ExecuteAction_Authorized_ReturnsOk()
     {
         AllowWrite(1);
-        _serviceMock.ExecuteActionAsync(1, Arg.Any<MailActionRequest>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _serviceMock.ExecuteActionAsync(1, Arg.Any<MailActionRequest>(), Arg.Any<CancellationToken>()).Returns(new MailTaskQueuedDto { TaskId = 5 });
         var result = await _sut.ExecuteAction(1, new MailActionRequest(), TestContext.Current.CancellationToken);
-        Assert.IsType<OkResult>(result);
+        Assert.Equal(5, Assert.IsType<MailTaskQueuedDto>(Assert.IsType<OkObjectResult>(result.Result).Value).TaskId);
     }
 
     [Fact]
@@ -187,16 +185,16 @@ public class MailControllerTests
     {
         DenyWrite(1);
         var result = await _sut.ExecuteAction(1, new MailActionRequest(), TestContext.Current.CancellationToken);
-        Assert.IsType<ForbidResult>(result);
+        Assert.IsType<ForbidResult>(result.Result);
     }
 
     [Fact]
     public async Task GetLogs_Authorized_ReturnsOk()
     {
         AllowRead(1);
-        _serviceMock.GetLogsAsync(1, Arg.Any<MailLogRequest>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _serviceMock.GetLogsAsync(1, Arg.Any<MailLogRequest>(), Arg.Any<CancellationToken>()).Returns(new MailTaskQueuedDto { TaskId = 6 });
         var result = await _sut.GetLogs(1, new MailLogRequest(), TestContext.Current.CancellationToken);
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result.Result);
     }
 
     [Fact]

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Analysis;
-using Aetheus.Front.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Analysis;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,6 +10,52 @@ public sealed class AnalysisFindingDetailTests : BunitContext
     private readonly BunitTestHelper.TestHandler _handler;
 
     public AnalysisFindingDetailTests() => _handler = BunitTestHelper.RegisterServices(this);
+
+    [Fact]
+    public void R504_OpenedFromARun_TheFileLinkIsThatRunsCommit_NotTheLatestOccurrence()
+    {
+        Services.GetRequiredService<PermissionService>().SetPermissions([], isAdmin: true);
+        var latest = new AnalysisFindingOccurrenceDto
+        {
+            Id = 20,
+            PipelineRunId = 2480,
+            RepositoryId = 42,
+            FilePath = "src/Moved.cs",
+            StartLine = 9,
+            CommitHash = "latestcommit000",
+            BranchName = "develop"
+        };
+        var ofTheRun = new AnalysisFindingOccurrenceDto
+        {
+            Id = 11,
+            PipelineRunId = 2472,
+            RepositoryId = 42,
+            FilePath = "src/Sample.cs",
+            StartLine = 42,
+            CommitHash = "runcommit2472",
+            BranchName = "develop"
+        };
+        _handler.SetJsonResponse("api/analysis/findings/7", new AnalysisFindingDto
+        {
+            Id = 7,
+            ProjectId = 1,
+            Title = "Command injection",
+            Status = AnalysisFindingStatus.Open,
+            LatestOccurrence = latest
+        });
+        _handler.SetJsonResponse("api/analysis/findings/7/occurrences?take=100", new List<AnalysisFindingOccurrenceDto> { latest, ofTheRun });
+        _handler.SetJsonResponse("api/analysis/findings/7/decisions", new List<AnalysisFindingDecisionDto>());
+        _handler.SetJsonResponse("api/git/repos/42/blob", new GitLightBlobDto { Path = "src/Sample.cs", Content = "line" });
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        navigation.NavigateTo("/analysis/findings/7?run=2472");
+
+        var cut = Render<AnalysisFindingDetail>(parameters => parameters.Add(component => component.Id, 7));
+
+        cut.WaitForAssertion(() => Assert.Equal("src/Sample.cs", cut.Find(".analysis-source-location code").TextContent), TimeSpan.FromSeconds(3));
+        cut.Find(".analysis-source-location button.analysis-source-open").Click();
+        Assert.Contains("ref=runcommit2472", navigation.Uri);
+        Assert.Contains("path=src%2FSample.cs", navigation.Uri);
+    }
 
     [Fact]
     public void RendersBoundedSourceAndPipelineRunLink()
@@ -51,6 +94,11 @@ public sealed class AnalysisFindingDetailTests : BunitContext
         });
         _handler.SetJsonResponse("api/analysis/findings/7/occurrences?take=100", new List<AnalysisFindingOccurrenceDto> { occurrence });
         _handler.SetJsonResponse("api/analysis/findings/7/decisions", new List<AnalysisFindingDecisionDto>());
+        _handler.SetJsonResponse("api/git/repos/42/blob", new GitLightBlobDto
+        {
+            Path = "src/Sample.cs",
+            Content = string.Join('\n', Enumerable.Range(1, 60).Select(line => $"source line {line}"))
+        });
 
         var cut = Render<AnalysisFindingDetail>(parameters => parameters.Add(component => component.Id, 7));
 
@@ -59,18 +107,35 @@ public sealed class AnalysisFindingDetailTests : BunitContext
         Assert.Contains("Untrusted input reaches a command sink.", cut.Markup);
         Assert.Contains("pipelines/runs/88", cut.Markup);
         Assert.Equal("src/Sample.cs", cut.Find(".analysis-source-location code").TextContent);
-        Assert.Contains("Line 42-46", cut.Find(".analysis-source-location").TextContent);
-        var fileLink = cut.Find(".analysis-source-location-link");
-        Assert.Contains("/git-repositories/42?tab=files", fileLink.GetAttribute("href"));
-        Assert.Contains("ref=0123456789abcdef", fileLink.GetAttribute("href"));
-        Assert.Contains("path=src%2FSample.cs", fileLink.GetAttribute("href"));
-        Assert.Contains("line=42", fileLink.GetAttribute("href"));
+        // Recette R-433: the line is a badge, "Open the file" a standard button, the passage under them.
+        Assert.Contains("Line 42-46", cut.Find(".analysis-source-location .omni-badge").TextContent);
+        cut.Find(".analysis-source-location button.analysis-source-open").Click();
+        var fileHref = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().Uri;
+        Assert.Contains("/git-repositories/42?tab=files", fileHref);
+        Assert.Contains("ref=0123456789abcdef", fileHref);
+        Assert.Contains("path=src%2FSample.cs", fileHref);
+        Assert.Contains("line=42", fileHref);
+        Assert.Contains(_handler.Requests, request => request.Url.Contains("api/git/repos/42/blob?ref=0123456789abcdef&path=src%2FSample.cs", StringComparison.Ordinal));
+        var passage = cut.Find(".analysis-source-card .omni-code-viewer").TextContent;
+        Assert.Contains("source line 39", passage);
+        Assert.Contains("source line 49", passage);
+        Assert.DoesNotContain("source line 38", passage);
+        Assert.DoesNotContain("source line 50", passage);
+        // The passage keeps the file's line numbers (OE FirstLineNumber) and marks the finding's own lines.
+        var numbers = cut.FindAll(".analysis-source-card .omni-code-viewer__number").Select(number => number.TextContent).ToList();
+        Assert.Equal("39", numbers[0]);
+        Assert.Equal("49", numbers[^1]);
+        Assert.Equal(["42", "43", "44", "45", "46"], cut.FindAll(".analysis-source-card .omni-code-viewer__line--highlighted .omni-code-viewer__number")
+            .Select(number => number.TextContent));
         Assert.Contains("OpenGrep", cut.Find(".analysis-source-metadata").TextContent);
-        Assert.Contains("feature/security", cut.Find(".analysis-source-metadata").TextContent);
-        Assert.Contains("0123456789abcdef", cut.Find(".analysis-source-metadata").TextContent);
+        Assert.Contains(cut.FindAll(".analysis-source-metadata a"), link =>
+            link.TextContent.Contains("feature/security", StringComparison.Ordinal)
+            && link.GetAttribute("href") == "/git-repositories/42?tab=files&ref=feature%2Fsecurity");
+        Assert.Contains(cut.FindAll(".analysis-source-metadata a"), link =>
+            link.GetAttribute("href") == "/git-repositories/42/commits/0123456789abcdef");
         Assert.Contains("User-controlled data can execute an operating-system command.", cut.Find(".analysis-finding-problem").TextContent);
         Assert.Contains("Untrusted input reaches a command sink.", cut.Find(".analysis-source-excerpt").TextContent);
-        Assert.Equal(4, cut.FindAll(".analysis-finding-tabs .rz-tabview-nav button").Count);
+        Assert.Equal(4, cut.FindAll(".analysis-finding-tabs [role='tab']").Count);
         Assert.DoesNotContain("analysis-finding-prompt-source", cut.Markup);
         Assert.DoesNotContain("analysis-decision-card", cut.Markup);
     }
@@ -98,7 +163,7 @@ public sealed class AnalysisFindingDetailTests : BunitContext
 
         var buttons = cut.FindAll("button");
         await buttons.Single(button => button.TextContent.Contains("CopyAiPrompt", StringComparison.Ordinal)).ClickAsync(new());
-        await buttons.Single(button => button.TextContent.Contains("DownloadMarkdown", StringComparison.Ordinal)).ClickAsync(new());
+        await buttons.Single(button => button.Names().Contains("DownloadMarkdown", StringComparison.Ordinal)).ClickAsync(new());
         await buttons.Single(button => button.TextContent.Contains("AnalysisPromptPreview", StringComparison.Ordinal)).ClickAsync(new());
 
         Assert.Contains(JSInterop.Invocations, invocation => invocation.Identifier == "navigator.clipboard.writeText");
@@ -131,8 +196,8 @@ public sealed class AnalysisFindingDetailTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("analysis-decision-card", StringComparison.Ordinal), TimeSpan.FromSeconds(3));
         Assert.Contains("AnalysisDecisionHelp", cut.Find(".analysis-decision-card").TextContent);
         Assert.Equal(3, cut.FindAll(".analysis-decision-choice").Count);
-        Assert.Equal(2, cut.FindAll(".analysis-decision-details .rz-form-field").Count);
-        Assert.Empty(cut.FindAll(".analysis-decision-outcome .rz-dropdown"));
+        Assert.Equal(2, cut.FindAll(".analysis-decision-details .omni-form-field").Count);
+        Assert.Empty(cut.FindAll(".analysis-decision-outcome .omni-drop-down"));
         Assert.Contains("AnalysisDecisionReasonHint", cut.Find(".analysis-decision-card").TextContent);
         Assert.Contains("AnalysisDecisionHistory", cut.Markup);
     }
@@ -167,8 +232,8 @@ public sealed class AnalysisFindingDetailTests : BunitContext
         var cut = Render<AnalysisFindingDetail>(parameters => parameters.Add(component => component.Id, 10));
         cut.WaitForState(() => cut.Markup.Contains("analysis-decision-card", StringComparison.Ordinal), TimeSpan.FromSeconds(3));
 
-        cut.Find("textarea").Change("Risk accepted after architecture review.");
-        cut.Find("form.analysis-decision-form").Submit();
+        cut.Find("textarea").Input("Risk accepted after architecture review.");
+        cut.Find(".analysis-decision-form form").Submit();
 
         cut.WaitForAssertion(() => Assert.Contains(_handler.Requests, request =>
             request.Method == "POST" && request.Url.Contains("api/analysis/findings/10/decisions", StringComparison.Ordinal)));

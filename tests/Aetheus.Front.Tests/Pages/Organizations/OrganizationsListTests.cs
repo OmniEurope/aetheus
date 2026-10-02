@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.DTOs.Organizations;
+using Aetheus.Shared.Components.Organizations;
 using Bunit;
-using Radzen;
-using OrganizationsPage = Aetheus.Front.Pages.Organizations.Organizations;
+using OrganizationsPage = Aetheus.Front.Components.Organizations.Organizations;
 
 namespace Aetheus.Front.Tests.Pages;
 
@@ -62,7 +60,7 @@ public class OrganizationsListTests : BunitContext
         var method = typeof(OrganizationsPage).GetMethod("LoadDataAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         await cut.InvokeAsync(async () => await (Task)method.Invoke(cut.Instance,
-            [new LoadDataArgs { Skip = 25, Top = 25, OrderBy = "Slug desc" }])!);
+            [new GridLoadArgs { Skip = 25, Top = 25, OrderBy = "Slug desc" }])!);
 
         Assert.Contains(_handler.Requests, request =>
             request.Url.Contains("page=2", StringComparison.Ordinal)

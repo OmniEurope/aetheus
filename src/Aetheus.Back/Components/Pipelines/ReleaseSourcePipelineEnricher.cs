@@ -21,21 +21,18 @@ internal static class ReleaseSourcePipelineEnricher
         if (runIds.Count == 0)
             return mapped;
 
-        var roots = await repository.GetRootRunReferencesAsync(runIds, ct).ConfigureAwait(false);
-        if (roots is null || roots.Count == 0)
-            return mapped;
+        var roots = await repository.GetRootRunReferencesAsync(runIds, ct).ConfigureAwait(false) ?? [];
+        var statuses = await repository.GetRunStatusesByIdsAsync(runIds, ct).ConfigureAwait(false) ?? [];
 
         return mapped.Select(release =>
         {
-            if (!release.PipelineRunId.HasValue
-                || !roots.TryGetValue(release.PipelineRunId.Value, out var root))
-                return release;
-
-            return release with
-            {
-                SourcePipelineId = root.PipelineId,
-                SourcePipelineName = root.PipelineName
-            };
+            if (!release.PipelineRunId.HasValue) return release;
+            var runId = release.PipelineRunId.Value;
+            if (statuses.TryGetValue(runId, out var status))
+                release = release with { PipelineRunStatus = status };
+            return roots.TryGetValue(runId, out var root)
+                ? release with { SourcePipelineId = root.PipelineId, SourcePipelineName = root.PipelineName }
+                : release;
         }).ToList();
     }
 }

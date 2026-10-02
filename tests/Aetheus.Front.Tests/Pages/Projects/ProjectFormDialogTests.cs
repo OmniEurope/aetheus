@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Net;
 using System.Reflection;
-using Aetheus.Front.Pages.Projects;
-using Aetheus.Front.Services;
+using Aetheus.Front.Components.Projects;
 using Aetheus.Front.Tests.TestDoubles;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
-using Radzen;
 
 namespace Aetheus.Front.Tests.Pages.Projects;
 
@@ -18,7 +14,7 @@ namespace Aetheus.Front.Tests.Pages.Projects;
 /// Behavioural tests for ProjectFormDialog.razor(.cs). Covers the create vs. edit render paths
 /// (field prefill, submit label, Delete button presence) and the successful submit, which issues
 /// the real create/update API call and closes the dialog with the resulting <see cref="ProjectDto"/>
-/// payload (captured by a spy DialogService).
+/// payload (captured by a spy OmniDialogService).
 /// </summary>
 public class ProjectFormDialogTests : BunitContext
 {
@@ -34,15 +30,15 @@ public class ProjectFormDialogTests : BunitContext
     }
 
     /// <summary>
-    /// Registers a spy DialogService (lazy factory so the provider isn't built early) that records the
+    /// Registers a spy OmniDialogService (lazy factory so the provider isn't built early) that records the
     /// Close payload. OnSubmit lands on the spy, so we can assert exactly what was sent back to the caller.
     /// </summary>
     private void RegisterSpyDialog() =>
-        Services.AddSingleton<DialogService>(sp => new SpyDialogService(
+        Services.AddSingleton<OmniDialogService>(sp => new SpyDialogService(
             sp.GetRequiredService<NavigationManager>(),
             sp.GetRequiredService<IJSRuntime>()));
 
-    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<DialogService>();
+    private SpyDialogService Spy() => (SpyDialogService)Services.GetRequiredService<OmniDialogService>();
 
     private static ProjectDetailDto MakeProject() => new()
     {
@@ -77,7 +73,7 @@ public class ProjectFormDialogTests : BunitContext
     {
         var cut = Render<ProjectFormDialog>();
 
-        // The localizer stub echoes the key, so the RadzenFormField labels surface verbatim.
+        // The localizer stub echoes the key, so the OmniFormField labels surface verbatim.
         Assert.Contains("Name", cut.Markup);
         Assert.Contains("RepositoryUrl", cut.Markup);
         Assert.Contains("DefaultBranch", cut.Markup);
@@ -95,12 +91,12 @@ public class ProjectFormDialogTests : BunitContext
             new ProjectDto { Id = 7, Name = "Template Reuse Validation" });
         var cut = Render<ProjectFormDialog>();
 
-        cut.Find("input[name='Name']").Input("Template Reuse Validation");
-        cut.Find("textarea[name='Description']").Input("Local template reuse validation.");
-        cut.Find("input[name='RepositoryUrl']").Input("https://github.com/owner/repo.git");
-        cut.Find("input[name='DefaultBranch']").Input("develop");
-        cut.Find("input[name='Tags']").Input("local, template-reuse");
-        cut.Find("input[name='ReleaseNumberingPattern']").Input("2.0.$(BUILD_BUILDID)");
+        cut.Find("input#project-form-name").Input("Template Reuse Validation");
+        cut.Find("textarea#Description").Input("Local template reuse validation.");
+        cut.Find("input#RepositoryUrl").Input("https://github.com/owner/repo.git");
+        cut.Find("input#DefaultBranch").Input("develop");
+        cut.Find("input#Tags").Input("local, template-reuse");
+        cut.Find("input#ReleaseNumberingPattern").Input("2.0.$(BUILD_BUILDID)");
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() => Assert.True(Spy().Closed));

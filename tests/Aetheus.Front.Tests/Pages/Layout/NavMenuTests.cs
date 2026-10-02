@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
 using Aetheus.Front.Layout;
-using Aetheus.Front.Services;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
@@ -46,6 +45,26 @@ public class NavMenuTests : BunitContext
         Assert.Contains("Projects", cut.Markup);
         Assert.Contains("Settings", cut.Markup);
         Assert.Contains("HelpCenter", cut.Markup);
+    }
+
+    [Fact]
+    public void AlertsLink_NavigatesWithoutAnUnreadBadge()
+    {
+        var alertService = Services.GetRequiredService<AlertNotificationService>();
+        var nav = Services.GetRequiredService<NavigationManager>();
+        nav.NavigateTo("servers");
+        var cut = Render<NavMenu>();
+
+        var alerts = cut.Find("a[href='alerts']");
+        Assert.Null(alerts.GetAttribute("aria-describedby"));
+        Assert.Empty(cut.FindAll("#nav-alert-count"));
+
+        // The entry is a plain link the browser follows (bUnit does not), so follow it as the router would.
+        cut.InvokeAsync(() => nav.NavigateTo(alerts.GetAttribute("href")!));
+
+        Assert.Equal("alerts", nav.ToBaseRelativePath(nav.Uri));
+        Assert.Equal(0, alertService.UnreadCount);
+        Assert.Empty(cut.FindAll("#nav-alert-count"));
     }
 
     [Fact]

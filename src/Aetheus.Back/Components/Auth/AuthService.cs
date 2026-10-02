@@ -180,13 +180,14 @@ public class AuthService(
         return true;
     }
 
-    private static List<Claim> BuildUserClaims(User user, IEnumerable<string> roles)
+    private List<Claim> BuildUserClaims(User user, IEnumerable<string> roles)
     {
         var claims = new List<Claim>
         {
             new(ClaimTypes.Name, user.Username),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(AetheusClaimTypes.SecurityStamp, user.SecurityStamp)
+            new(AetheusClaimTypes.SecurityStamp, user.SecurityStamp),
+            new(AetheusClaimTypes.AnalyticsVisitor, AuthTokenHelper.AnalyticsVisitorId(jwtOptions.SigningKey, user.Id.ToString()))
         };
         // Carries the forced-change state through token renewal/refresh so the Front gate survives
         // a page reload; a token minted after the password is changed no longer includes it.
@@ -462,51 +463,41 @@ public class AuthService(
 
     // --- Refresh Token Rotation (F-012) ---
 
-    public async Task<LoginResponse?> RefreshTokenAsync(string refreshToken, CancellationToken ct = default)
+    public async Task<LoginResponse?> RefreshTokenAsync(string refreshToken, CancellationToken ct = default) =>
+        (await RefreshTokenWithReasonAsync(refreshToken, ct).ConfigureAwait(false)).Response;
+
+    public async Task<RefreshTokenOutcome> RefreshTokenWithReasonAsync(string refreshToken, CancellationToken ct = default)
     {
         var tokenHash = HashToken(refreshToken);
         var stored = await repo.FindRefreshTokenByHashAsync(tokenHash, ct).ConfigureAwait(false);
-        if (stored is null) return null;
+        if (stored is null) return RefreshTokenOutcome.Rejected(RefreshRejectionCodes.UnknownToken);
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
+        if (stored.IsRevoked) return await ReuseRevokedTokenAsync(stored, stored, now, ct).ConfigureAwait(false);
+        if (stored.IsExpired(now)) return RefreshTokenOutcome.Rejected(RefreshRejectionCodes.Expired);
+        if (stored.User is null || !stored.User.IsActive) return RefreshTokenOutcome.Rejected(RefreshRejectionCodes.UserInactive);
 
-        // Revoked token reuse → possible theft: revoke entire chain
-        if (stored.IsRevoked)
-        {
-            // Grace window: allow recently-revoked tokens (concurrent requests in flight)
-            if (stored.RevokedAt is not null && now - stored.RevokedAt.Value <= RefreshTokenGrace)
-            {
-                // Return the replacement token's response (if it exists and is still active)
-                if (stored.ReplacedById is not null)
-                {
-                    var user = stored.User;
-                    if (user is null || !user.IsActive) return null;
-                    var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-                    var claims = BuildUserClaims(user, roles);
-                    // Re-issue a fresh access token but DON'T create a new refresh token
-                    return GenerateTokenResponse(claims);
-                }
-            }
-            // Outside grace → revoke all user tokens (stolen token replay detection)
-            await repo.RevokeAllUserRefreshTokensAsync(stored.UserId, ct).ConfigureAwait(false);
-            return null;
-        }
-
-        if (stored.IsExpired(now)) return null;
-        if (stored.User is null || !stored.User.IsActive) return null;
-
-        // Rotate: mint new refresh token, revoke old one
+        // Rotate: mint the replacement, then revoke the old token only if it is still active.
         var newPlaintext = GenerateSecureToken();
-        var newHash = HashToken(newPlaintext);
         var newRefresh = new Data.Entities.RefreshToken
         {
             UserId = stored.UserId,
-            TokenHash = newHash,
+            TokenHash = HashToken(newPlaintext),
             ExpiresAt = now.Add(RefreshTokenLifetime),
             CreatedAt = now
         };
         await repo.AddRefreshTokenAsync(newRefresh, ct).ConfigureAwait(false);
-        await repo.RevokeRefreshTokenAsync(stored.Id, newRefresh.Id, ct).ConfigureAwait(false);
+        if (!await repo.RevokeRefreshTokenAsync(stored.Id, newRefresh.Id, ct).ConfigureAwait(false))
+        {
+            // R-072: a concurrent request rotated (or a logout revoked) this token after our read. Retire
+            // the replacement nobody will receive, then answer from the token's fresh state exactly as a
+            // request arriving just after that rotation would be answered: grace window or replay.
+            await repo.RevokeRefreshTokenAsync(newRefresh.Id, null, ct).ConfigureAwait(false);
+            var current = await repo.FindRefreshTokenStateAsync(stored.Id, ct).ConfigureAwait(false);
+            return current is null
+                ? RefreshTokenOutcome.Rejected(RefreshRejectionCodes.UnknownToken)
+                : await ReuseRevokedTokenAsync(stored, current, now, ct).ConfigureAwait(false);
+        }
 
         // Prune dead tokens opportunistically
         await repo.DeleteExpiredRefreshTokensAsync(stored.UserId, ct).ConfigureAwait(false);
@@ -516,7 +507,22 @@ public class AuthService(
         var r = u.UserRoles.Select(ur => ur.Role.Name).ToList();
         var c = BuildUserClaims(u, r);
         var response = GenerateTokenResponse(c);
-        return response with { RefreshToken = newPlaintext };
+        return new RefreshTokenOutcome(response with { RefreshToken = newPlaintext }, null);
+    }
+
+    // Reuse of a revoked refresh token. Within the grace window, a token rotated into a replacement belongs
+    // to a request that was already in flight: re-issue an access token only, never another refresh token.
+    // Outside it, or when it was revoked without a replacement, the reuse reads as theft: revoke the chain.
+    private async Task<RefreshTokenOutcome> ReuseRevokedTokenAsync(
+        Data.Entities.RefreshToken stored, Data.Entities.RefreshToken state, DateTime now, CancellationToken ct)
+    {
+        if (state.RevokedAt is { } revokedAt && now - revokedAt <= RefreshTokenGrace && state.ReplacedById is not null)
+        {
+            if (stored.User is not { IsActive: true } user) return RefreshTokenOutcome.Rejected(RefreshRejectionCodes.UserInactive);
+            return new RefreshTokenOutcome(GenerateTokenResponse(BuildUserClaims(user, user.UserRoles.Select(ur => ur.Role.Name).ToList())), null);
+        }
+        await repo.RevokeAllUserRefreshTokensAsync(stored.UserId, ct).ConfigureAwait(false);
+        return RefreshTokenOutcome.Rejected(RefreshRejectionCodes.Replay);
     }
 
     private async Task<LoginResponse> GenerateTokenResponseWithRefreshAsync(

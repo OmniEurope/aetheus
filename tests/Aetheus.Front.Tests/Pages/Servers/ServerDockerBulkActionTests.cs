@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -223,7 +221,7 @@ public class ServerDockerBulkActionTests : BunitContext
         var cut = RenderSection();
         var open = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)open.Invoke(cut.Instance, ["myapp"])!);
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
 
         Assert.Equal(typeof(DockerProjectDialog), dialog.LastComponent);
         Assert.Equal("myapp", dialog.LastParameters!["Project"]);
@@ -233,7 +231,7 @@ public class ServerDockerBulkActionTests : BunitContext
     public async Task OpenProjectZoom_ActionResult_RunsProjectBulkAction()
     {
         var cut = RenderSection();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = DockerContainerAction.Stop;
         var open = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", Priv)!;
         await cut.InvokeAsync(() => (Task)open.Invoke(cut.Instance, ["myapp"])!);

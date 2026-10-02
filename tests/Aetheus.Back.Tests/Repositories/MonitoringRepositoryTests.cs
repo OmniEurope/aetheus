@@ -2,7 +2,6 @@
 using Aetheus.Back.Components.Monitoring;
 using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aetheus.Back.Tests.Repositories;
@@ -22,21 +21,21 @@ public class MonitoringRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAllServersAsync_ReturnsAllServers()
+    public async Task GetDashboardServersAsync_ReturnsAllServers()
     {
         _db.Servers.AddRange(
             new Server { Name = "srv1", Hostname = "h1" },
             new Server { Name = "srv2", Hostname = "h2" });
         await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var result = await _repo.GetAllServersAsync(ct: TestContext.Current.CancellationToken);
+        var result = await _repo.GetDashboardServersAsync(ct: TestContext.Current.CancellationToken);
         Assert.Equal(2, result.Count);
     }
 
     [Fact]
-    public async Task GetAllServersAsync_Empty_ReturnsEmpty()
+    public async Task GetDashboardServersAsync_Empty_ReturnsEmpty()
     {
-        var result = await _repo.GetAllServersAsync(ct: TestContext.Current.CancellationToken);
+        var result = await _repo.GetDashboardServersAsync(ct: TestContext.Current.CancellationToken);
         Assert.Empty(result);
     }
 
@@ -90,7 +89,50 @@ public class MonitoringRepositoryTests : IDisposable
         var result = await _repo.GetRecentRunsAsync(2, ct: TestContext.Current.CancellationToken);
         Assert.Equal(2, result.Count);
         Assert.True(result[0].StartedAt > result[1].StartedAt);
-        Assert.NotNull(result[0].Pipeline);
+        Assert.Equal("p", result[0].PipelineName);
+    }
+
+    /// <summary>Recette R-373: a run whose snapshotted URL is an internal smart-HTTP clone URL carries
+    /// the id of the repository it names, whatever host the URL was re-homed to, so the dashboard links
+    /// its commit to the Aetheus page. An external URL, or a mirror path naming no repository, carries
+    /// none (the front then keeps the external link, or text).</summary>
+    [Fact]
+    public async Task GetRecentRunsAsync_ResolvesTheInternalRepositoryOfEachRun()
+    {
+        var pipeline = new Pipeline { Name = "p", ProjectId = 13 };
+        _db.Pipelines.Add(pipeline);
+        var repository = new GitInternalRepo { ProjectId = 13, Name = "Aetheus self", Slug = "aetheus-self" };
+        _db.GitInternalRepos.AddRange(
+            repository,
+            new GitInternalRepo { ProjectId = 14, Name = "Other", Slug = "aetheus-self" });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var now = DateTime.UtcNow;
+        _db.PipelineRuns.AddRange(
+            new PipelineRun { PipelineId = pipeline.Id, StartedAt = now, RepositoryUrl = "https://host.docker.internal:5301/git/13/aetheus-self.git" },
+            new PipelineRun { PipelineId = pipeline.Id, StartedAt = now.AddMinutes(-1), RepositoryUrl = "https://localhost:5301/git/13/aetheus-self" },
+            new PipelineRun { PipelineId = pipeline.Id, StartedAt = now.AddMinutes(-2), RepositoryUrl = "https://github.com/acme/aetheus-self.git" },
+            new PipelineRun { PipelineId = pipeline.Id, StartedAt = now.AddMinutes(-3), RepositoryUrl = "https://localhost:5301/git/13/unknown.git" });
+        await _db.SaveChangesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await _repo.GetRecentRunsAsync(10, null, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new int?[] { repository.Id, repository.Id, null, null }, result.Select(run => run.RepositoryId));
+    }
+
+    [Theory]
+    [InlineData("https://host.docker.internal:5301/git/13/aetheus-self.git", 13, "aetheus-self")]
+    [InlineData("https://localhost:5301/git/7/demo/", 7, "demo")]
+    [InlineData("https://github.com/acme/demo.git", null, null)]
+    [InlineData("https://git.example/git/0/demo.git", null, null)]
+    [InlineData("/srv/repos/demo", null, null)]
+    [InlineData(null, null, null)]
+    public void PipelineRunRepositoryLinks_ParsesOnlyTheMirrorPath(string? url, int? projectId, string? slug)
+    {
+        var path = PipelineRunRepositoryLinks.TryParse(url);
+
+        Assert.Equal(projectId, path?.ProjectId);
+        Assert.Equal(slug, path?.Slug);
     }
 
     [Fact]

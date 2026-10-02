@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: EUPL-1.2
+
+namespace Aetheus.Front.Components.Pipelines;
+
+/// <summary>
+/// Recette R-181, point 1 of the follow-up: the pipeline edit page has no Refresh entry. When the
+/// definition changes elsewhere (another tab, another user, a model update) the entities hub says so;
+/// the page reloads it at once when nothing is being edited, and otherwise shows a banner so an edit
+/// in progress is never overwritten silently.
+/// </summary>
+internal sealed class PipelineDefinitionLiveSync(HubConnectionFactory hubFactory, int pipelineId, Func<Task> onChanged)
+    : IAsyncDisposable
+{
+    private HubConnection? _hub;
+
+    public async Task StartAsync()
+    {
+        try
+        {
+            _hub = hubFactory.Create("entities");
+            _hub.On<ResourceType, int, string>("EntityChanged", (type, id, operation) =>
+                type == ResourceType.Pipeline && id == pipelineId && operation == "Updated"
+                    ? onChanged()
+                    : Task.CompletedTask);
+            _hub.RejoinOnReconnect(async () =>
+            {
+                await _hub.InvokeAsync("JoinEntityUpdates", ResourceType.Pipeline);
+                await onChanged();
+            });
+            await _hub.StartAsync();
+            await _hub.InvokeAsync("JoinEntityUpdates", ResourceType.Pipeline);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException
+            or Microsoft.AspNetCore.SignalR.HubException)
+        {
+            // Hub unavailable: the page keeps the definition it loaded.
+        }
+    }
+
+    /// <summary>True when the form differs from the pipeline as last loaded or saved.</summary>
+    public static bool HasUnsavedChanges(PipelineModel model, PipelineDto? saved) =>
+        saved is not null
+        && (model.Name != saved.Name
+            || (model.Description ?? string.Empty) != (saved.Description ?? string.Empty)
+            || model.YamlDefinition != saved.YamlDefinition
+            || model.ProjectId != saved.ProjectId
+            || model.EnvironmentId != saved.EnvironmentId
+            || model.ProjectServerId != saved.ProjectServerId);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null)
+            await _hub.DisposeAsync();
+    }
+}

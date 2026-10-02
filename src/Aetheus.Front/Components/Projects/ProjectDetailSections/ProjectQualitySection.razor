@@ -1,0 +1,193 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else
+{
+    <div class="@($"analysis-quality-workspace {(_qualitySectionIndex == 1 ? "analysis-quality-findings" : string.Empty)}")">
+        <UrlSyncedTabs Slugs="@QualitySectionSlugs" RenderAllPanels="true"
+                       @bind-SelectedIndex="_qualitySectionIndex"
+                       Change="OnQualitySectionChangedAsync"
+                       class="analysis-workspace-tabs">
+            <Tabs>
+                <OmniTabsItem Key="overview" Title="@L["AnalysisOverview"]"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("insights"))" /></Icon></OmniTabsItem>
+                <OmniTabsItem Key="findings" Title="@SectionText(L["AnalysisFindings"], _summary.OpenCount)"><Icon><OmniIcon Name="@MaterialIconMap.Resolve(("policy"))" /></Icon></OmniTabsItem>
+            </Tabs>
+        </UrlSyncedTabs>
+
+        <section class="analysis-workspace-panel" role="tabpanel">
+        @if (_qualitySectionIndex == 0)
+        {
+                @* Recette R-174: the hero is one band, the letter then a single reading line (title,
+                   limiting domain, commit, date). The letter keeps its size through
+                   analysis-grade-letter and its colour from the shared badge scale. *@
+                <OmniCard Class="analysis-grade-overview">
+                    <div class="analysis-grade-primary">
+                        <GradeBadge Value="@_summary.Grade?.OverallGrade" Title="@L["AnalysisGlobalGrade"]"
+                                    Class="analysis-grade-letter" />
+                        <div class="analysis-grade-headline">
+                            <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-m-0">@L["AnalysisGlobalGrade"]</OmniHeading>
+                            @if (_summary.Grade is null)
+                            {
+                                <OmniText Element="OmniTextElement.Span">@L["AnalysisGradeNotConfigured"]</OmniText>
+                            }
+                            else if (_summary.Grade.Completeness == AnalysisGradeCompleteness.Incomplete)
+                            {
+                                <OmniText Element="OmniTextElement.Span">@L["AnalysisGradeIncomplete"]</OmniText>
+                            }
+                            else
+                            {
+                                <OmniText Element="OmniTextElement.Span">@L["AnalysisLimitingDomain"]: @DomainLabel(_summary.Grade.LimitingDomain)</OmniText>
+                            }
+                            @* Recette R-430: the commit leads to its page, and the latest analysis run
+                               and the latest release are one click away. *@
+                            <span class="analysis-grade-meta">@L["Commit"]: @if (string.IsNullOrWhiteSpace(_summary.Grade?.CommitHash)) { @L["NotAvailable"] } else { <ShortId Value="@_summary.Grade.CommitHash" Href="@GradeCommitHref" Copyable="false" /> }</span>
+                            <span class="analysis-grade-meta">@L["Date"]: @(_summary.Grade?.EvaluatedAt?.ToString("g") ?? L["NotAvailable"])</span>
+                            @if (_summary.LastAnalysisRunId is { } lastRunId)
+                            {
+                                <span class="analysis-grade-meta">@L["LastRun"]: <OmniLink Href="@($"/pipelines/runs/{lastRunId}")">@($"#{lastRunId}")</OmniLink></span>
+                            }
+                            @if (_summary.LatestReleaseId is { } latestReleaseId)
+                            {
+                                <span class="analysis-grade-meta">@L["LatestRelease"]: <ShortId Value="@_summary.LatestReleaseVersion" Href="@($"/releases/{latestReleaseId}")" Copyable="false" /></span>
+                            }
+                        </div>
+                    </div>
+                    @if (_summary.Grade is not null)
+                    {
+                        @* Recette R-176: two wide columns, one line per measure (label, value, grade); a
+                           domain with nothing to show is a compact muted line after the cards. *@
+                        <div class="analysis-grade-domains">
+                            @foreach (var domain in QualityDomains.Where(HasDetails))
+                            {
+                                <section class="analysis-grade-domain">
+                                    <div class="analysis-grade-domain-heading">
+                                        <span>@domain.Label</span>
+                                        <GradeBadge Value="@domain.Grade" />
+                                    </div>
+                                    <div class="analysis-grade-domain-state">
+                                        @DomainState(domain)
+                                    </div>
+                                    @foreach (var measure in domain.Measures)
+                                    {
+                                        <div class="analysis-grade-measure">
+                                            <span class="analysis-grade-measure-label" title="@($"{MeasureLabel(measure.Key)} ({measure.Key})")">@MeasureLabel(measure.Key)</span>
+                                            <span class="analysis-grade-value">@MeasureText(measure)</span>
+                                            <GradeBadge Value="@measure.Grade" />
+                                            @if (measure.DistanceToNextGrade.HasValue && measure.NextGrade.HasValue)
+                                            {
+                                                <small class="analysis-grade-measure-hint">@L["AnalysisDistanceToGrade", measure.DistanceToNextGrade.Value.ToString("0.##"), measure.NextGrade]</small>
+                                            }
+                                        </div>
+                                    }
+                                    @if (domain.CrapScore.HasValue)
+                                    {
+                                        <div class="analysis-grade-measure" title="@L["AnalysisCrapExplanation"]">
+                                            <span class="analysis-grade-measure-label">@L["AnalysisCrapAverage"]</span>
+                                            <span class="analysis-grade-value">@domain.CrapScore.Value.ToString("0.0")</span>
+                                            <strong aria-label="@L["AnalysisAdvisory"]">–</strong>
+                                        </div>
+                                    }
+                                </section>
+                            }
+                        </div>
+                        @foreach (var domain in QualityDomains.Where(domain => !HasDetails(domain)))
+                        {
+                            <div class="analysis-grade-domain-empty">
+                                <span class="analysis-grade-measure-label">@domain.Label</span>
+                                <span class="analysis-grade-domain-state">@DomainState(domain)</span>
+                                <GradeBadge Value="@domain.Grade" />
+                            </div>
+                        }
+                    }
+                </OmniCard>
+
+                @* Recette R-311: a count card shows only when its count is at least one. *@
+                <OmniRow Gap="OmniSpacing.Large" Class="omni-u-mb-lg analysis-summary-row">
+                    @if (_summary.OpenCount > 0)
+                    {
+                        <OmniColumn Span="6" MediumSpan="4" LargeSpan="2">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenFindingsAsync(status: AnalysisFindingStatus.Open))" Class="analysis-summary-card analysis-summary-action" title="@L["AnalysisOpenFindings"]" Label="@L["AnalysisOpenFindings"]" data-quality-shortcut="open">
+                                <OmniIcon Name="OmniIconName.Bug" Size="OmniControlSize.Large" /><OmniText Element="OmniTextElement.Strong" Class="analysis-summary-figure">@_summary.OpenCount</OmniText><OmniText Element="OmniTextElement.Span" Class="analysis-summary-label">@L["AnalysisOpenFindings"]</OmniText>
+                            </OmniButton>
+                        </OmniColumn>
+                    }
+                    @if (_summary.NewCount > 0)
+                    {
+                        <OmniColumn Span="6" MediumSpan="4" LargeSpan="2">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenFindingsAsync(isNew: true))" Class="analysis-summary-card analysis-summary-action" title="@L["AnalysisNewFindings"]" Label="@L["AnalysisNewFindings"]" data-quality-shortcut="new">
+                                <OmniIcon Name="OmniIconName.Sparkle" Size="OmniControlSize.Large" /><OmniText Element="OmniTextElement.Strong" Class="analysis-summary-figure">@_summary.NewCount</OmniText><OmniText Element="OmniTextElement.Span" Class="analysis-summary-label">@L["AnalysisNewFindings"]</OmniText>
+                            </OmniButton>
+                        </OmniColumn>
+                    }
+                    @if (_summary.CriticalCount > 0)
+                    {
+                        <OmniColumn Span="6" MediumSpan="4" LargeSpan="2">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenFindingsAsync(status: AnalysisFindingStatus.Open, severity: AnalysisSeverity.Critical))" Class="analysis-summary-card analysis-summary-action analysis-critical" title="@L["Critical"]" Label="@L["Critical"]" data-quality-shortcut="critical">
+                                <OmniIcon Name="OmniIconName.ShieldWarning" Size="OmniControlSize.Large" /><OmniText Element="OmniTextElement.Strong" Class="analysis-summary-figure">@_summary.CriticalCount</OmniText><OmniText Element="OmniTextElement.Span" Class="analysis-summary-label">@L["Critical"]</OmniText>
+                            </OmniButton>
+                        </OmniColumn>
+                    }
+                    @if (_summary.HighCount > 0)
+                    {
+                        <OmniColumn Span="6" MediumSpan="4" LargeSpan="2">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenFindingsAsync(status: AnalysisFindingStatus.Open, severity: AnalysisSeverity.High))" Class="analysis-summary-card analysis-summary-action analysis-high" title="@L["High"]" Label="@L["High"]" data-quality-shortcut="high">
+                                <OmniIcon Name="OmniIconName.Warning" Size="OmniControlSize.Large" /><OmniText Element="OmniTextElement.Strong" Class="analysis-summary-figure">@_summary.HighCount</OmniText><OmniText Element="OmniTextElement.Span" Class="analysis-summary-label">@L["High"]</OmniText>
+                            </OmniButton>
+                        </OmniColumn>
+                    }
+                    @if (_summary.FixedCount > 0)
+                    {
+                        <OmniColumn Span="6" MediumSpan="4" LargeSpan="2">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OpenFindingsAsync(status: AnalysisFindingStatus.Fixed))" Class="analysis-summary-card analysis-summary-action" title="@L["Fixed"]" Label="@L["Fixed"]" data-quality-shortcut="fixed">
+                                <OmniIcon Name="OmniIconName.ShieldCheck" Size="OmniControlSize.Large" /><OmniText Element="OmniTextElement.Strong" Class="analysis-summary-figure">@_summary.FixedCount</OmniText><OmniText Element="OmniTextElement.Span" Class="analysis-summary-label">@L["Fixed"]</OmniText>
+                            </OmniButton>
+                        </OmniColumn>
+                    }
+                    <OmniColumn Span="6" MediumSpan="4" LargeSpan="2">
+                        <div class="analysis-summary-card analysis-summary-static" aria-label="@L["AnalysisLastRun"]">
+                            <OmniIcon Name="OmniIconName.Timer" Size="OmniControlSize.Large" /><OmniText Element="OmniTextElement.Strong" Class="analysis-summary-figure" title="@LastAnalysisText">@LastAnalysisText</OmniText><OmniText Element="OmniTextElement.Span" Class="analysis-summary-label">@L["AnalysisLastRun"]</OmniText>
+                        </div>
+                    </OmniColumn>
+                </OmniRow>
+
+                @if (!HasAny)
+                {
+                    <EmptyState Icon="insights" Title="@L["NoQualityData"]" Description="@L["NoQualityDataDescription"]" />
+                }
+                else
+                {
+                    <OmniRow Gap="OmniSpacing.Large">
+                        @if (_tests.Count >= 2)
+                        {
+                            <OmniColumn Span="12" LargeSpan="@ChartLargeSpan"><OmniCard Class="analysis-chart-card">
+                                <OmniText Element="OmniTextElement.Strong">@L["TestTrend"]</OmniText>
+                                <OmniChart Title="@L["TestTrend"]" AspectRatio="@ChartAspectRatio"><OmniLineSeries Data="@TestPassedPoints" Title="@L["Passed"]" ColorIndex="2" /><OmniLineSeries Data="@TestFailedPoints" Title="@L["Failed"]" ColorIndex="3" /><OmniCategoryAxis Labels="@OmniChartData.Labels(TestPassedPoints)" /><OmniLegend Items="@(new[] { L["Passed"].Value, L["Failed"].Value })" /></OmniChart>
+                            </OmniCard></OmniColumn>
+                        }
+                        @if (_complexity.Count >= 2)
+                        {
+                            <OmniColumn Span="12" LargeSpan="@ChartLargeSpan"><OmniCard Class="analysis-chart-card">
+                                <OmniText Element="OmniTextElement.Strong">@L["ComplexityTrend"]</OmniText>
+                                <OmniChart Title="@L["ComplexityTrend"]" AspectRatio="@ChartAspectRatio"><OmniLineSeries Data="@ComplexityCrapPoints" Title="@L["Crap"]" ColorIndex="3" /><OmniLineSeries Data="@ComplexityAveragePoints" Title="@L["AvgCyclomatic"]" ColorIndex="0" /><OmniCategoryAxis Labels="@OmniChartData.Labels(ComplexityCrapPoints)" /><OmniLegend Items="@(new[] { L["Crap"].Value, L["AvgCyclomatic"].Value })" /></OmniChart>
+                            </OmniCard></OmniColumn>
+                        }
+                    </OmniRow>
+                }
+        }
+        else
+        {
+                @* Recette R-221: no search row; the column header filters are the only filters. Recette
+                   R-431: "Export all" is an entry of the project header's "..." menu, not a row of its own. *@
+                 <AetheusDataGrid @ref="_findingsGrid" Data="@_findings" Count="@_findingCount" TItem="AnalysisFindingDto" LoadData="LoadFindingsAsync" RowClick="OpenFinding" AllowSorting="true" AllowFiltering="true" FilterMode="OmniDataGridFilterMode.Simple" PageSize="25" class="analysis-table aetheus-clickable-rows aetheus-grid-fullheight" AllowColumnResize="true" Virtualize="@AetheusGrid.RemoteVirtualization" VirtualData="@(() => new OmniDataGridResult<AnalysisFindingDto>(_findings, _findingCount))" FullHeight="true" VirtualizationOverscanCount="3">
+                    <Columns>
+                        @* Recette R-502: the one definition of a findings list, shared with the Gate tab of a run. *@
+                        <AnalysisFindingColumns Defaults="@_findingDefaults" />
+                    </Columns>
+                </AetheusDataGrid>
+        }
+        </section>
+    </div>
+}

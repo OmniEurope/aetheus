@@ -1,6 +1,8 @@
 window.dockerInterop = {
     scrollToBottom: function (elementClass) {
-        const el = document.querySelector('.' + elementClass);
+        // The class sits on OE's code block; the scrolling element is the <pre> inside it.
+        const block = document.querySelector('.' + elementClass);
+        const el = block && (block.querySelector('pre') || block);
         if (el) el.scrollTop = el.scrollHeight;
     },
     copyToClipboard: async function (text) {

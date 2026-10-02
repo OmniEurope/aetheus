@@ -14,14 +14,29 @@ public class Release
     public DateTime? PromotedAt { get; set; }
     public DateTime? RolledBackAt { get; set; }
     public int? PipelineRunId { get; set; }
+    /// <summary>Recette R-366: the run that first published this release. Unlike
+    /// <see cref="PipelineRunId"/> (the last run that recorded it, a deployment included) it is never
+    /// overwritten. Stamped by <c>ReleaseRepository</c>; null for releases published before it existed
+    /// and for releases only detected from a branch.</summary>
+    public int? CreatedByPipelineRunId { get; set; }
     public string? Changelog { get; set; }
     public int BuildNumber { get; set; }
     public string? CommitHash { get; set; }
     public string? TagName { get; set; }
 
+    // F1: the candidate's sealed assurance verdict (CANDIDATE_ASSURANCE_GRADE / CANDIDATE_DEPLOYABLE /
+    // CANDIDATE_BLOCKING_TESTS output variables published by the AssuranceSeal stage of the run that
+    // published this release), hydrated once at publish time so the UI and the automatic deploy chain
+    // do not need to re-parse step outputs. Null when the publishing run carries no such verdict (e.g.
+    // a legacy release, or one published outside the candidate pipeline).
+    public AnalysisGrade? AssuranceGrade { get; set; }
+    public bool? Deployable { get; set; }
+    public int? BlockingTestCount { get; set; }
+
     // Navigation
     public Project Project { get; set; } = null!;
     public PipelineRun? PipelineRun { get; set; }
+    public PipelineRun? CreatedByPipelineRun { get; set; }
 
     // Cross-linking (many-to-many): a release can bundle several artifacts, span several commits,
     // and relate to several branches. See GitCommit / GitBranch.

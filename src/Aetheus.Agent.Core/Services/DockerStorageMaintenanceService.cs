@@ -31,6 +31,17 @@ public sealed class DockerStorageMaintenanceService(
 
     public string BuilderName => ResolveBuilderName(_options.BuilderName, _agentOptions.Name);
     public bool DeploymentOnly => _options.DeploymentOnly;
+    public bool BuildActive => _buildGateHeld;
+
+    public DateTime? LastBuildAttemptAtUtc
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastBuildAttemptUtcTicks);
+            return ticks == 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
+        }
+    }
+
     private bool IsDryRun => _options.DryRun;
 
     public bool IsBuildCommand(string command)
@@ -207,16 +218,13 @@ public sealed class DockerStorageMaintenanceService(
         if (!workDirectory.IsComplete) partialPaths.Add("agent-work-directory");
         if (!installDirectory.IsComplete) partialPaths.Add("agent-install-directory");
         if (!nugetCache.IsComplete) partialPaths.Add("nuget-cache");
-        var lastBuildAttemptTicks = Interlocked.Read(ref _lastBuildAttemptUtcTicks);
         return new StorageDiagnosticsDto
         {
             BuilderName = BuilderName,
             DryRun = IsDryRun,
             DeploymentOnly = _options.DeploymentOnly,
-            BuildActive = _buildGateHeld,
-            LastBuildAttemptAtUtc = lastBuildAttemptTicks == 0
-                ? null
-                : new DateTime(lastBuildAttemptTicks, DateTimeKind.Utc),
+            BuildActive = BuildActive,
+            LastBuildAttemptAtUtc = LastBuildAttemptAtUtc,
             BuildCacheAvailable = builder.Available,
             DockerInventoryAvailable = docker.ExitCode == 0,
             BuildCacheBytes = builder.Total,

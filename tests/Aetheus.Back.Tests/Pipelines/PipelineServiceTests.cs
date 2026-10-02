@@ -7,8 +7,6 @@ using Aetheus.Back.Data;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Exceptions;
 using Aetheus.Back.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -87,7 +85,7 @@ public class PipelineServiceTests
         {
             new() { Id = 21, Status = PipelineStatus.Success }
         };
-        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(
+        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(
         [
             new PipelineDto { Id = 1, Name = "release", RecentRuns = recentRuns, YamlDefinition = "name: release\ntrigger: manual\non_success:\n  - pipeline: deploy\nstages: []" },
             new PipelineDto { Id = 2, Name = "deploy", YamlDefinition = "name: deploy\ntrigger: manual\nstages: []" }
@@ -109,7 +107,7 @@ public class PipelineServiceTests
     [Fact]
     public async Task GetDependencyGroupsAsync_UsesTriggerFromYamlInsteadOfStaleStoredValue()
     {
-        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(
+        _repoMock.GetPipelinesForDependencyGraphAsync(Arg.Any<List<int>?>(), Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(
         [
             new PipelineDto { Id = 1, Name = "hook", TriggerType = PipelineTriggerType.Manual,
                 YamlDefinition = "name: hook\ntrigger: webhook\nstages: []" }
@@ -889,6 +887,170 @@ public class PipelineServiceTests
     }
 
     [Fact]
+    public void ValidateYamlStrict_StageNamesWithSpaces_ReturnValid()
+    {
+        // A stage name is a label a human reads in the run view, and it may contain spaces. The
+        // reason it could not, in practice, was that the artifact bundle was named after it; that
+        // coupling is now broken by artifact_name.
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: Test backend
+                agent: linux-01
+                steps:
+                  - name: run
+                    shell: make test
+              - name: Build images
+                agent: linux-01
+                depends_on: [Test backend]
+                steps:
+                  - name: build
+                    shell: make images
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_TwoStagesPublishingTheSameArtifact_ReturnsError()
+    {
+        // The second publication replaces the first and the consumer restores whichever ran last,
+        // which is a silent wrong answer rather than a failure.
+        var yaml = """
+            name: ci
+            trigger: manual
+            stages:
+              - name: Package one
+                agent: linux-01
+                artifact_name: Payload-artifacts
+                artifacts:
+                  - "out/**"
+                steps:
+                  - name: one
+                    shell: make one
+              - name: Package two
+                agent: linux-01
+                artifact_name: Payload-artifacts
+                artifacts:
+                  - "out/**"
+                steps:
+                  - name: two
+                    shell: make two
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("both publish artifact 'Payload-artifacts'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_ARenamedProducerKeepingItsArtifactName_ReturnsValid()
+    {
+        // The point of the field: rename the stage, keep the name every consumer and every retained
+        // release already restores.
+        var yaml = """
+            name: nightly
+            trigger: manual
+            stages:
+              - name: Publish evidence
+                agent: linux-01
+                artifact_name: PublishNightlyEvidence-artifacts
+                artifacts:
+                  - ".nightly-evidence"
+                steps:
+                  - name: verify
+                    shell: test -s .nightly-evidence/x.json
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_UnknownArtifactSourceSelector_ReturnsError()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: restore
+                agent: linux-01
+                steps:
+                  - name: restore-evidence
+                    type: restore-artifacts
+                    artifact: Evidence-artifacts
+                    artifact_source_pipeline: nightly
+                    artifact_source_selector: newest-anywhere
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("artifact_source_selector", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_ArtifactSourceSelectorBesideRelease_ReturnsError()
+    {
+        // The selector widens an artifact_source_pipeline lookup and means nothing beside a release
+        // selector. Refused rather than ignored, so a definition cannot read as something it is not.
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: restore
+                agent: linux-01
+                steps:
+                  - name: restore-evidence
+                    type: restore-artifacts
+                    release: previous-deployed
+                    artifact: Evidence-artifacts
+                    artifact_source_selector: latest-successful
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("cannot combine 'release' with 'artifact_source_selector'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_LatestSuccessfulArtifactSourceSelector_ReturnsValid()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: restore
+                agent: linux-01
+                steps:
+                  - name: restore-evidence
+                    type: restore-artifacts
+                    artifact: Evidence-artifacts
+                    artifact_source_pipeline: nightly
+                    artifact_source_selector: latest-successful
+                    allow_missing: true
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        // The key is declared, not merely tolerated: an unknown-property warning would tell the
+        // author the selector is ignored, which it is not.
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
     public void ValidateYamlStrict_ShellShapedMatrixValue_ReturnsError()
     {
         // S-UX-MXVL: a matrix value carrying a shell metacharacter (backslash) must be rejected at SAVE
@@ -1144,8 +1306,11 @@ public class PipelineServiceTests
         Assert.Contains(result.Errors, e => e.Contains("shell") || e.Contains("checkout"));
     }
 
+    // Recette R2-041: an unknown key no longer refuses the definition (a backend must read a YAML written
+    // for the next version); it is accepted and named in a warning. These three tests asserted the former
+    // strict refusal and were turned around deliberately.
     [Fact]
-    public void ValidateYamlStrict_UnknownTopLevelProperty_IsRejected()
+    public void ValidateYamlStrict_UnknownTopLevelProperty_IsAcceptedWithAWarning()
     {
         var yaml = """
             name: deploy
@@ -1161,12 +1326,14 @@ public class PipelineServiceTests
 
         var result = _sut.ValidateYamlStrict(yaml);
 
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, error => error.Contains("custom_field", StringComparison.OrdinalIgnoreCase));
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        Assert.Empty(result.Errors);
+        Assert.Contains(result.Warnings, warning =>
+            warning == "Unknown top-level property 'custom_field' will be ignored.");
     }
 
     [Fact]
-    public void ValidateYamlStrict_UnknownStageProperty_IsRejected()
+    public void ValidateYamlStrict_UnknownStageProperty_IsAcceptedWithAWarning()
     {
         var yaml = """
             name: deploy
@@ -1182,13 +1349,13 @@ public class PipelineServiceTests
 
         var result = _sut.ValidateYamlStrict(yaml);
 
-        // 'timeout' is not a known stage-level property (KnownStageKeys), so it MUST be flagged.
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, error => error.Contains("timeout", StringComparison.OrdinalIgnoreCase));
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        Assert.Contains(result.Warnings, warning =>
+            warning == "Unknown stage 'build' property 'timeout' will be ignored.");
     }
 
     [Fact]
-    public void ValidateYamlStrict_UnknownStepProperty_IsRejected()
+    public void ValidateYamlStrict_UnknownStepProperty_IsAcceptedWithAWarning()
     {
         var yaml = """
             name: deploy
@@ -1204,8 +1371,72 @@ public class PipelineServiceTests
 
         var result = _sut.ValidateYamlStrict(yaml);
 
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        Assert.Contains(result.Warnings, warning =>
+            warning == "Unknown step property 'unknown_prop' will be ignored.");
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_KnownKeyWithTheWrongType_IsStillRejected()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: build
+                agent: linux-01
+                steps:
+                  - name: compile
+                    shell: dotnet build
+                    timeout_seconds: soon
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
         Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, error => error.Contains("unknown_prop", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(result.Errors);
+    }
+
+    [Theory]
+    [InlineData("main", true)]
+    [InlineData("$(TARGET_BRANCH)", true)]
+    [InlineData("", false)]
+    [InlineData("bad..name", false)]
+    public void ValidateYamlStrict_AdvanceBranchStep_RequiresAValidBranch(string branch, bool valid)
+    {
+        var yaml = $$"""
+            name: deploy
+            trigger: manual
+            stages:
+              - name: Advance main
+                environment: prod
+                steps:
+                  - name: Advance main
+                    type: advance-branch
+                    branch: "{{branch}}"
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.Equal(valid, result.IsValid);
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("'branch'", StringComparison.Ordinal));
+        if (!valid)
+            Assert.Contains(result.Errors, error => error.Contains("branch", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_AScalarWhereAListIsExpected_IsStillRejected()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages: build
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.NotEmpty(result.Errors);
     }
 
     [Fact]

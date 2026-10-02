@@ -3,15 +3,12 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Aetheus.Back.Components.AppBackups;
+using Aetheus.Back.Components.AppMonitoring;
 using Aetheus.Back.Components.Artifacts;
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
-using Aetheus.Shared.Validation;
 using static Aetheus.Back.Components.Pipelines.PipelineRunHelpers;
-
-using Aetheus.Back.Components.AppMonitoring;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -73,12 +70,16 @@ public sealed class PipelineHostOperationTaskFactory(
         int runId, CancellationToken ct)
     {
         var run = await repo.GetPipelineRunWithPipelineAsync(runId, ct).ConfigureAwait(false);
-        return run?.Pipeline?.ProjectId is { } projectId && IsGitCommitHash(run.CommitHash)
-            ? new ImmutableProjectRun(run, projectId)
+        return run?.Pipeline?.ProjectId is { } projectId
+            && PipelineRunService.ResolveDefinitionCommit(run) is { } definitionCommit
+            && IsGitCommitHash(definitionCommit)
+            ? new ImmutableProjectRun(run, projectId, definitionCommit)
             : null;
     }
 
-    private sealed record ImmutableProjectRun(PipelineRun Run, int ProjectId);
+    /// <param name="DefinitionCommit">The revision the versioned templates are read at: the run's own,
+    /// or its definition's when the workspace comes from another repository (recette R-534).</param>
+    private sealed record ImmutableProjectRun(PipelineRun Run, int ProjectId, string DefinitionCommit);
 
     // Apache reverse-proxy task: render a versioned .pipeline/configs template at the immutable run
     // commit, base64 it, and dispatch an OperationKind.ApacheConfigureProxy to the Apache-manage
@@ -131,11 +132,11 @@ public sealed class PipelineHostOperationTaskFactory(
         }
 
         var template = await pipelineGit.ReadProjectConfigAtRevisionAsync(
-            source.ProjectId, templatePath, source.Run.CommitHash!, ct,
+            source.ProjectId, templatePath, source.DefinitionCommit, ct,
             source.Run.Pipeline!.SourceRepositoryId).ConfigureAwait(false);
         if (template is null)
         {
-            await FailAsync($"template '{templatePath}' was not found at commit {source.Run.CommitHash}.")
+            await FailAsync($"template '{templatePath}' was not found at commit {source.DefinitionCommit}.")
                 .ConfigureAwait(false);
             return;
         }
@@ -202,12 +203,12 @@ public sealed class PipelineHostOperationTaskFactory(
             }
 
             var template = await pipelineGit.ReadProjectConfigAtRevisionAsync(
-                source.ProjectId, templatePath, source.Run.CommitHash!, ct,
+                source.ProjectId, templatePath, source.DefinitionCommit, ct,
                 source.Run.Pipeline!.SourceRepositoryId).ConfigureAwait(false);
             if (template is null)
             {
                 await FailAsync(
-                    $"template '{templatePath}' was not found at commit {source.Run.CommitHash}.")
+                    $"template '{templatePath}' was not found at commit {source.DefinitionCommit}.")
                     .ConfigureAwait(false);
                 return;
             }
@@ -455,6 +456,8 @@ public sealed class PipelineHostOperationTaskFactory(
             await FailAsync(bindingError).ConfigureAwait(false);
             return;
         }
+        if (binding!.SkippedComposeEnv.Count > 0)
+            await repo.AppendRunWarningsAsync(runId, [$"Blue-green step '{stepRun.StepName}': compose_env did not forward {string.Join(", ", binding.SkippedComposeEnv)}, which this run does not define at this point."], ct).ConfigureAwait(false);
 
         stepRun.ServerId = legServer.Id;
         var task = new ServerTask
@@ -538,7 +541,7 @@ public sealed class PipelineHostOperationTaskFactory(
         // and the run masks it out of its own log. The two identities are now separate everywhere.
         var required = forSmoke
             ? new[] { "AETHEUS_SMOKE_ADMIN_USER", "AETHEUS_SMOKE_ADMIN_PASSWORD" }
-            : ["DEPLOYMENT_BOOTSTRAP_USER", "DEPLOYMENT_BOOTSTRAP_PASSWORD", "BOOTSTRAP_STAMP", "DEPLOYMENT_BOOTSTRAP_EXPIRES_AT_UTC"];
+            : BlueGreenStepBinding.StartOnlyNames;
         // A pipeline that supplies every name itself needs no derivation, and must not be refused for
         // lacking a key it never uses. It still gets masked: a self-supplied credential is exactly as
         // sensitive as a derived one, and returning before RegisterRuntimeSecret used to publish it in

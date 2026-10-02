@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Reflection;
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -189,7 +187,7 @@ public class ServerDockerSectionDeepTests : BunitContext
     public async Task OpenPruneDialogAsync_ConfirmedSelectionPostsPrune()
     {
         var cut = RenderSection(3);
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = new DockerPruneDialogResult(true, true, false);
         var method = typeof(ServerDockerSection).GetMethod("OpenPruneDialogAsync", BF)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(cut.Instance, [])!);
@@ -220,7 +218,7 @@ public class ServerDockerSectionDeepTests : BunitContext
         var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", BF)!;
         await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["webapp"]));
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         Assert.Equal(typeof(DockerProjectDialog), dialog.LastComponent);
         Assert.Equal("webapp", dialog.LastParameters!["Project"]);
     }
@@ -235,7 +233,7 @@ public class ServerDockerSectionDeepTests : BunitContext
         var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", BF)!;
         await cut.InvokeAsync(() => method.Invoke(tab.Instance, ["webapp"]));
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         var server = Assert.IsType<ServerDetailDto>(dialog.LastParameters!["Server"]);
         var project = Assert.IsType<string>(dialog.LastParameters["Project"]);
         var matching = server.Docker.Containers.Where(container => container.Project == project).ToList();
@@ -251,7 +249,7 @@ public class ServerDockerSectionDeepTests : BunitContext
     {
         var cut = RenderSection(7);
         var tab = cut.FindComponent<DockerContainersTab>();
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         dialog.OpenResult = DockerContainerAction.Restart;
         var method = typeof(DockerContainersTab).GetMethod("OpenProjectZoom", BF)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["webapp"])!);
@@ -388,7 +386,7 @@ public class ServerDockerSectionDeepTests : BunitContext
         var method = typeof(DockerContainersTab).GetMethod("OpenResourceLimitsDialog", BF)!;
         await cut.InvokeAsync(() => (Task)method.Invoke(tab.Instance, ["abc123def456ghi"])!);
 
-        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<Radzen.DialogService>();
+        var dialog = (Aetheus.Front.Tests.TestDoubles.ImmediateDialogService)Services.GetRequiredService<OmniDialogService>();
         Assert.Equal(typeof(DockerResourceLimitsDialog), dialog.LastComponent);
         Assert.Equal("abc123def456ghi", dialog.LastParameters!["ContainerId"]);
         Assert.Equal(256, dialog.LastParameters["MemoryLimitMb"]);

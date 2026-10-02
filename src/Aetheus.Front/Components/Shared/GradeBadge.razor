@@ -1,0 +1,23 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@namespace Aetheus.Front.Components.Shared
+
+@*
+    PLAN-003 lot 18: the one way an analysis grade is drawn. Project tiles, the project overview and
+    the pipeline pages each used to roll their own <strong> with a colour class, so the same letter
+    could read healthy in one place and alarming in another. Everything goes through
+    GradeBadge here.
+
+    A missing grade is still rendered, as a neutral dash: on a card whose other rows are always
+    present, dropping the row entirely would shift everything below it.
+*@
+@if (Value is { } grade)
+{
+    <OmniBadge Fill="OmniFill.Solid" Tone="@VariantFor(grade)" Class="@($"grade-badge grade-badge--{grade.ToString().ToLowerInvariant()} {Class}")" title="@Title">
+        @grade.ToString()
+    </OmniBadge>
+}
+else
+{
+    <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral" Class="@($"grade-badge {Class}")" title="@Title">-</OmniBadge>
+}
+

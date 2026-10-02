@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Security.Claims;
 using Aetheus.Back.Components.Users;
 
 namespace Aetheus.Back.Components.Auth;
@@ -14,12 +15,15 @@ public class RoleService(
 {
     private static readonly string[] ProtectedRoles = ["Admin"];
 
+    /// <summary>The NameIdentifier of the bootstrap identity's token (see <c>AuthService.BuildBootstrapResponse</c>).</summary>
+    private const string BootstrapSubject = "bootstrap";
+
     public async Task<PaginatedResult<RoleDto>> GetRolesAsync(
         PaginationRequest request, CancellationToken ct = default)
     {
         var (page, pageSize) = request.Normalize();
         var (items, total) = await roleRepo.GetRolesPagedAsync(
-            request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return new PaginatedResult<RoleDto>
         {
             Items = items,
@@ -166,12 +170,43 @@ public class RoleService(
         return await BuildPermissionSummaryAsync(user, ct).ConfigureAwait(false);
     }
 
-    public async Task<UserPermissionSummaryDto?> GetMyPermissionsAsync(string username, CancellationToken ct = default)
+    public async Task<UserPermissionSummaryDto?> GetMyPermissionsAsync(ClaimsPrincipal principal, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (principal.FindFirstValue(ClaimTypes.NameIdentifier) == BootstrapSubject)
+            return await BuildBootstrapPermissionSummaryAsync(principal, ct).ConfigureAwait(false);
+
         var user = await userService.GetCurrentUserAsync(ct).ConfigureAwait(false);
         if (user is null) return null;
 
         return await BuildPermissionSummaryAsync(user, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Recette R2-014: the bootstrap identity (the deployment smoke test's run-scoped account, or the
+    /// configured bootstrap admin) is signed in without a user row, so the user lookup found nothing and
+    /// the endpoint answered 404 after every delivery. Its summary is read from its token instead: the
+    /// role claims it carries and the permissions those roles grant, nothing else (no organization
+    /// membership, which belongs to user rows). It is never looked up by name, so a user row that
+    /// happens to share the name lends it nothing.
+    /// </summary>
+    private async Task<UserPermissionSummaryDto> BuildBootstrapPermissionSummaryAsync(
+        ClaimsPrincipal principal, CancellationToken ct)
+    {
+        var roles = principal.Identities
+            .SelectMany(identity => identity.FindAll(identity.RoleClaimType))
+            .Select(claim => claim.Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var effective = roles.Count == 0
+            ? []
+            : await roleRepo.GetEffectivePermissionsForRolesAsync(roles, ct).ConfigureAwait(false);
+        return new UserPermissionSummaryDto
+        {
+            Username = principal.Identity?.Name ?? string.Empty,
+            Roles = roles,
+            EffectivePermissions = effective
+        };
     }
 
     private async Task<UserPermissionSummaryDto> BuildPermissionSummaryAsync(UserDto user, CancellationToken ct)
@@ -230,7 +265,7 @@ public class RoleService(
         await EnsureRoleExistsAsync(roleId, ct).ConfigureAwait(false);
         var (page, pageSize) = request.Normalize();
         var (items, total) = await roleRepo.GetUsersInRolePagedAsync(
-            roleId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct).ConfigureAwait(false);
+            roleId, request.Search, page, pageSize, request.SortBy, request.SortDescending, ct, request.Filters).ConfigureAwait(false);
         return ToPage(items, total, page, pageSize);
     }
 

@@ -20,22 +20,22 @@ public class TasksTests : E2ETestBase
         await WaitForNoSpinnerAsync();
         await WaitForDataGridAsync();
 
-        var grid = Page.Locator(".rz-datatable");
+        var grid = Page.Locator(".omni-data-grid");
         await Expect(grid).ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        // Radzen 10 RadzenDataGrid renders one `.rz-column-title` per column header.
-        var headers = Page.Locator(".rz-column-title");
+        // The data grid renders one `.omni-data-grid__title` per column header.
+        var headers = Page.Locator(".omni-data-grid__title");
         await Expect(headers.First).ToBeVisibleAsync(new() { Timeout = 10000 });
         var count = await headers.CountAsync();
         Assert.That(count, Is.GreaterThanOrEqualTo(6), "Tasks grid should have at least 6 columns");
 
-        var webDiagnostic = Page.Locator(".rz-data-grid-data tr")
+        var webDiagnostic = Page.Locator(".omni-data-grid__row")
             .Filter(new() { HasText = "Demo web diagnostic" });
         await Expect(webDiagnostic).ToBeVisibleAsync(new() { Timeout = 10000 });
         await Expect(webDiagnostic.GetByText("Cancelled", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 5000 });
 
-        var buildDiagnostic = Page.Locator(".rz-data-grid-data tr")
+        var buildDiagnostic = Page.Locator(".omni-data-grid__row")
             .Filter(new() { HasText = "Demo build diagnostic" });
         await Expect(buildDiagnostic).ToBeVisibleAsync(new() { Timeout = 5000 });
         await Expect(buildDiagnostic.GetByText("Cancelled", new() { Exact = true }))

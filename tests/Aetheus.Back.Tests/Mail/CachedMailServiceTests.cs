@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Mail;
-using Aetheus.Shared.DTOs;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 
@@ -178,7 +177,7 @@ public class CachedMailServiceTests
     public async Task ExecuteActionAsync_InvalidatesCache()
     {
         _inner.GetStateAsync(1, Arg.Any<CancellationToken>()).Returns(new MailDataDto());
-        _inner.ExecuteActionAsync(1, Arg.Any<MailActionRequest>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _inner.ExecuteActionAsync(1, Arg.Any<MailActionRequest>(), Arg.Any<CancellationToken>()).Returns(new MailTaskQueuedDto());
 
         await _sut.GetStateAsync(1, ct: TestContext.Current.CancellationToken);
         await _sut.ExecuteActionAsync(1, new MailActionRequest(), ct: TestContext.Current.CancellationToken);
@@ -258,7 +257,7 @@ public class CachedMailServiceTests
     [Fact]
     public async Task GetLogsAsync_NotCached_PassesThrough()
     {
-        _inner.GetLogsAsync(1, Arg.Any<MailLogRequest>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _inner.GetLogsAsync(1, Arg.Any<MailLogRequest>(), Arg.Any<CancellationToken>()).Returns(new MailTaskQueuedDto());
 
         await _sut.GetLogsAsync(1, new MailLogRequest(), ct: TestContext.Current.CancellationToken);
 

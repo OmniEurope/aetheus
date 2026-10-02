@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
-using Aetheus.Back.Components.ExternalRepos;
 using Aetheus.Back.Components.VariableLibraries;
 using Aetheus.Back.Components.Vaults;
 using Aetheus.Back.Data.Entities;
-using Aetheus.Shared.Helpers;
 
 namespace Aetheus.Back.Components.Pipelines;
 
@@ -36,7 +34,8 @@ internal sealed class PipelineVariableResolver(
 
     public async Task<(Dictionary<string, string> Resolved, List<string> Warnings, HashSet<string> SecretKeys)> ResolveVariablesWithWarningsAsync(
         PipelineYamlDefinition definition, int? projectId, Dictionary<string, string>? additionalVariables, CancellationToken ct,
-        int? pipelineId = null, int? runId = null, string? pipelineName = null, int? buildNumber = null)
+        int? pipelineId = null, int? runId = null, string? pipelineName = null, int? buildNumber = null,
+        bool enforceResolvedReferences = false)
     {
         var warnings = new List<string>();
         var secretKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -45,7 +44,10 @@ internal sealed class PipelineVariableResolver(
         await AddLibraryVariablesAsync(resolved, warnings, definition, projectId, ct).ConfigureAwait(false);
         await AddVaultVariablesAsync(resolved, secretKeys, definition, projectId, ct).ConfigureAwait(false);
         AddAdditionalVariables(resolved, additionalVariables);
-        ExpandVariableReferences(resolved);
+        PipelineVariableExpansion.ExpandResolved(
+            resolved, secretKeys, PipelineUnresolvedVariableGuard.BuildDeferredNames(definition));
+        if (enforceResolvedReferences)
+            PipelineUnresolvedVariableGuard.Validate(definition, resolved, secretKeys);
         PipelineDeploymentTargetGuard.ValidateVariables(resolved);
         return (resolved, warnings, secretKeys);
     }
@@ -127,8 +129,42 @@ internal sealed class PipelineVariableResolver(
         foundNames ??= [];
         foreach (var name in definition.VariableLibraries)
             if (!foundNames.Contains(name, StringComparer.OrdinalIgnoreCase))
-                warnings.Add($"Variable library '{name}' not found.");
+                warnings.Add(MissingLibraryWarning(name));
         foreach (var (key, value) in libraryVariables) resolved[key] = value;
+    }
+
+    /// <summary>The one place this sentence is written, so the reader below can recognise its own.</summary>
+    internal static string MissingLibraryWarning(string name) => $"Variable library '{name}' not found.";
+
+    public async Task<List<string>> DropResolvedLibraryWarningsAsync(
+        IReadOnlyCollection<string> warnings, int? projectId, CancellationToken ct = default)
+    {
+        var declared = warnings
+            .Select(TryReadMissingLibraryName)
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (declared.Count == 0) return [.. warnings];
+
+        var (_, foundNames) = projectId is { } id
+            ? await variableLibraryService.ResolveLibrariesWithCrossAccessAndNamesAsync(declared, id, ct).ConfigureAwait(false)
+            : await variableLibraryService.ResolveLibrariesWithNamesAsync(declared, projectId, ct).ConfigureAwait(false);
+        if (foundNames is not { Count: > 0 }) return [.. warnings];
+
+        return warnings
+            .Where(warning => TryReadMissingLibraryName(warning) is not { } name
+                              || !foundNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static string? TryReadMissingLibraryName(string warning)
+    {
+        const string prefix = "Variable library '";
+        const string suffix = "' not found.";
+        if (!warning.StartsWith(prefix, StringComparison.Ordinal)
+            || !warning.EndsWith(suffix, StringComparison.Ordinal)) return null;
+        var length = warning.Length - prefix.Length - suffix.Length;
+        return length > 0 ? warning.Substring(prefix.Length, length) : null;
     }
 
     private async Task AddVaultVariablesAsync(
@@ -181,26 +217,6 @@ internal sealed class PipelineVariableResolver(
                 resolved[key] = value;
     }
 
-    private static void ExpandVariableReferences(Dictionary<string, string> resolved)
-    {
-        for (var pass = 0; pass < 3; pass++)
-        {
-            var anyReplaced = false;
-            foreach (var key in resolved.Keys.ToList())
-            {
-                var val = resolved[key];
-                if (!val.Contains("$(")) continue;
-                var newVal = PipelineCommandBuilder.Substitute(val, resolved);
-                if (newVal != val)
-                {
-                    resolved[key] = newVal;
-                    anyReplaced = true;
-                }
-            }
-            if (!anyReplaced) break;
-        }
-    }
-
     public static void InjectStageSystemVariables(
         Dictionary<string, string> stageVars, string stageName, Server server)
     {
@@ -244,7 +260,10 @@ internal sealed class PipelineVariableResolver(
         var (resolved, _, secretKeys) = await ResolveVariablesWithWarningsAsync(
             definition, projectId, additionalVars, ct,
             pipelineId: run.PipelineId, runId: run.Id,
-            pipelineName: run.Pipeline?.Name, buildNumber: run.BuildNumber).ConfigureAwait(false);
+            pipelineName: run.Pipeline?.Name, buildNumber: run.BuildNumber,
+            // Every stage dispatch comes through here. A library deleted or emptied mid-run must stop
+            // the run, not silently hand the next stage a literal placeholder.
+            enforceResolvedReferences: true).ConfigureAwait(false);
         return (resolved, secretKeys);
     }
 }

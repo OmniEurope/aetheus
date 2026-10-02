@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using System.Linq.Expressions;
 using Aetheus.Back.Data.Entities;
 
 namespace Aetheus.Back.Components.Tasks;
@@ -6,6 +7,16 @@ namespace Aetheus.Back.Components.Tasks;
 internal sealed class TaskLeaseRepository(AppDbContext db, TimeProvider timeProvider)
 {
     private static readonly TimeSpan AgentSessionLeaseDuration = TimeSpan.FromMinutes(2);
+
+    // The task is assigned to this agent session and fencing token, and that session still holds a live
+    // lease on the task's server: the precondition of every lease-guarded task transition.
+    private static Expression<Func<ServerTask, bool>> HeldByLiveAgentSession(
+        string agentSessionId, long fencingToken, DateTime now) =>
+        task => task.AssignedAgentSessionId == agentSessionId
+            && task.AssignedAgentSessionFencingToken == fencingToken
+            && task.Server.AgentSessionId == agentSessionId
+            && task.Server.AgentSessionFencingToken == fencingToken
+            && task.Server.AgentSessionLeaseExpiresAt > now;
 
     internal async Task<long?> AcquireAgentSessionLeaseAsync(
         int serverId,
@@ -133,13 +144,8 @@ internal sealed class TaskLeaseRepository(AppDbContext db, TimeProvider timeProv
             return false;
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var matching = await db.Tasks.AsNoTracking()
-            .Where(task => taskIds.Contains(task.Id)
-                && task.ServerId == serverId
-                && task.AssignedAgentSessionId == agentSessionId
-                && task.AssignedAgentSessionFencingToken == fencingToken
-                && task.Server.AgentSessionId == agentSessionId
-                && task.Server.AgentSessionFencingToken == fencingToken
-                && task.Server.AgentSessionLeaseExpiresAt > now)
+            .Where(HeldByLiveAgentSession(agentSessionId, fencingToken, now))
+            .Where(task => taskIds.Contains(task.Id) && task.ServerId == serverId)
             .Select(task => task.Id)
             .Distinct()
             .CountAsync(ct)
@@ -159,13 +165,9 @@ internal sealed class TaskLeaseRepository(AppDbContext db, TimeProvider timeProv
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
             var updated = await db.Tasks
+                .Where(HeldByLiveAgentSession(agentSessionId, fencingToken, now))
                 .Where(candidate => candidate.Id == task.Id
-                    && candidate.Status == TaskExecutionStatus.Assigned
-                    && candidate.AssignedAgentSessionId == agentSessionId
-                    && candidate.AssignedAgentSessionFencingToken == fencingToken
-                    && candidate.Server.AgentSessionId == agentSessionId
-                    && candidate.Server.AgentSessionFencingToken == fencingToken
-                    && candidate.Server.AgentSessionLeaseExpiresAt > now)
+                    && candidate.Status == TaskExecutionStatus.Assigned)
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(candidate => candidate.Status, TaskExecutionStatus.Running)
@@ -211,14 +213,10 @@ internal sealed class TaskLeaseRepository(AppDbContext db, TimeProvider timeProv
         if (db.Database.IsRelational())
         {
             var released = await db.Tasks
+                .Where(HeldByLiveAgentSession(agentSessionId, fencingToken, now))
                 .Where(candidate => candidate.Id == task.Id
                     && candidate.Status == TaskExecutionStatus.Assigned
-                    && candidate.StartedAt == null
-                    && candidate.AssignedAgentSessionId == agentSessionId
-                    && candidate.AssignedAgentSessionFencingToken == fencingToken
-                    && candidate.Server.AgentSessionId == agentSessionId
-                    && candidate.Server.AgentSessionFencingToken == fencingToken
-                    && candidate.Server.AgentSessionLeaseExpiresAt > now)
+                    && candidate.StartedAt == null)
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(candidate => candidate.Status, TaskExecutionStatus.Pending)
@@ -324,15 +322,11 @@ internal sealed class TaskLeaseRepository(AppDbContext db, TimeProvider timeProv
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
             var updated = await db.Tasks
+                .Where(HeldByLiveAgentSession(agentSessionId, fencingToken, now))
                 .Where(candidate => candidate.Id == task.Id
                     && (candidate.Status == TaskExecutionStatus.Running
                         || (candidate.Status == TaskExecutionStatus.Assigned
-                            && status != TaskExecutionStatus.Success))
-                    && candidate.AssignedAgentSessionId == agentSessionId
-                    && candidate.AssignedAgentSessionFencingToken == fencingToken
-                    && candidate.Server.AgentSessionId == agentSessionId
-                    && candidate.Server.AgentSessionFencingToken == fencingToken
-                    && candidate.Server.AgentSessionLeaseExpiresAt > now)
+                            && status != TaskExecutionStatus.Success)))
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(candidate => candidate.Status, status)

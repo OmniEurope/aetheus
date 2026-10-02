@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Pages.Servers.ServerDetailSections;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
+using Aetheus.Front.Components.Servers.ServerDetailSections;
 using Bunit;
 
 namespace Aetheus.Front.Tests.Pages.Servers;
@@ -122,7 +120,7 @@ public class ServerServicesSectionNewTests : BunitContext
     [InlineData(ServiceType.WindowsService, "Windows")]
     public void FormatType_KnownTypes_ReturnsExpected(ServiceType type, string expected)
     {
-        Assert.Equal(expected, ServerServicesSection.FormatType(type));
+        Assert.Equal(expected, ManageableServiceGrid.FormatType(type));
     }
 
     [Fact]

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: EUPL-1.2
-using Aetheus.Front.Services;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Aetheus.Front.Tests;

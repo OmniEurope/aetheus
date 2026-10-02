@@ -4,8 +4,6 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using Aetheus.Agent.Core.Operations;
 using Aetheus.Agent.Core.Services;
-using Aetheus.Shared.DTOs;
-using Aetheus.Shared.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -52,6 +50,16 @@ public class PipelineArtifactOperationExecutorTests
     }
 
     [Theory]
+    [InlineData(0, 1)]
+    [InlineData(268435456, 1)]
+    [InlineData(268435457, 2)]
+    [InlineData(1224736768, 5)]
+    public void CollectArtifacts_CompletedUploadPartCount_MatchesChunkBoundaries(long bytes, long expected)
+    {
+        Assert.Equal(expected, PipelineArtifactCollector.GetUploadPartCount(bytes));
+    }
+
+    [Theory]
     [InlineData("nminus1", "nminus1")]
     [InlineData("versions/v1", "versions/v1")]
     public void RestoreArtifacts_TargetDirectory_StaysInsideWorkspace(string target, string expectedSuffix)
@@ -86,7 +94,19 @@ public class PipelineArtifactOperationExecutorTests
                 Arg.Any<string?>(),
                 Arg.Any<Stream>(),
                 Arg.Any<CancellationToken>())
-            .Returns(new PipelineArtifactDto { Id = 101 });
+            .Returns(call =>
+            {
+                var stream = call.ArgAt<Stream>(3);
+                var start = stream.Position;
+                var digest = Convert.ToHexStringLower(SHA256.HashData(stream));
+                stream.Position = start;
+                return new PipelineArtifactDto
+                {
+                    Id = 101,
+                    SizeBytes = stream.Length - start,
+                    Sha256 = digest
+                };
+            });
         apiClient.PublishAnalysisReportAsync(Arg.Any<int>(), Arg.Any<PublishAnalysisReportRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(new AnalysisReportDto { GateStatus = AnalysisGateStatus.Passed });
@@ -497,6 +517,7 @@ public class PipelineArtifactOperationExecutorTests
         {
             await File.WriteAllTextAsync(Path.Combine(workDir, "app.dll"), "binary", TestContext.Current.CancellationToken);
             var api = Substitute.For<IServerApiClient>();
+            var output = new List<string>();
 
             var result = await NewExecutor(api).ExecuteAsync(
                 OperationKind.PipelineCollectArtifacts,
@@ -507,12 +528,57 @@ public class PipelineArtifactOperationExecutorTests
                     ["AETHEUS_WORKING_DIR"] = workDir
                 },
                 timeoutSeconds: 60,
-                onOutput: (_, _) => Task.CompletedTask,
+                onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
                 cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.Equal(0, result.ExitCode);
+            Assert.Contains(output, message =>
+                message.StartsWith("Artifact uploaded successfully: 1 part(s), sha256 ", StringComparison.Ordinal));
             await api.DidNotReceive().PublishCoverageAsync(
                 Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CollectArtifacts_BackendDigestMismatch_FailsWithoutSuccessLog()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-artifact-digest-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "payload.txt"), "payload",
+                TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+            var executor = NewExecutor(api);
+            api.UploadArtifactAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(),
+                    Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+                .Returns(call => new PipelineArtifactDto
+                {
+                    Id = 101,
+                    SizeBytes = call.ArgAt<Stream>(3).Length,
+                    Sha256 = new string('0', 64)
+                });
+            var output = new List<string>();
+
+            var result = await executor.ExecuteAsync(
+                OperationKind.PipelineCollectArtifacts,
+                target: "[]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir
+                },
+                timeoutSeconds: 60,
+                onOutput: (message, _) => { output.Add(message); return Task.CompletedTask; },
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(output, message => message.Contains("size or SHA-256 does not match", StringComparison.Ordinal));
+            Assert.DoesNotContain(output, message =>
+                message.StartsWith("Artifact uploaded successfully", StringComparison.Ordinal));
         }
         finally
         {
@@ -761,6 +827,9 @@ public class PipelineArtifactOperationExecutorTests
         };
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
+        // WHY: pre-push hook env inheritance incidents - any repository-local git variable (GIT_DIR,
+        // GIT_COMMON_DIR, ...) would redirect this fixture git call to the real repository.
+        GitRepositoryEnvironment.Neutralize(startInfo.Environment);
 
         using var process = Process.Start(startInfo)!;
         var standardError = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
@@ -949,6 +1018,77 @@ public class PipelineArtifactOperationExecutorTests
         }
     }
 
+    /// <summary>
+    /// PLAN-003 2.4: a lint step with analysis_category: accessibility publishes its SARIF as
+    /// Accessibility analysis, and keeps it out of the code-quality lint store.
+    /// </summary>
+    [Fact]
+    public async Task PublishLint_AccessibilityCategory_PublishesAccessibilityAnalysisOnly()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-lint-a11y-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "accessibility.sarif"), "{}", TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishLint,
+                target: "[\"**/accessibility.sarif\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    [LintAnalysisCategories.VariableName] = "Accessibility"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            await api.Received(1).PublishAnalysisReportAsync(
+                42, Arg.Is<PublishAnalysisReportRequest>(request => request.Category == AnalysisCategory.Accessibility),
+                Arg.Any<CancellationToken>());
+            await api.DidNotReceive().PublishLintAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublishLint_UnknownCategory_FailsBeforePublishingAnything()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-lint-bad-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workDir, "x.sarif"), "{}", TestContext.Current.CancellationToken);
+            var api = Substitute.For<IServerApiClient>();
+
+            var result = await NewExecutor(api).ExecuteAsync(
+                OperationKind.PipelinePublishLint,
+                target: "[\"**/*.sarif\"]",
+                envVars: new Dictionary<string, string>
+                {
+                    ["AETHEUS_RUN_ID"] = "42",
+                    ["AETHEUS_WORKING_DIR"] = workDir,
+                    [LintAnalysisCategories.VariableName] = "Sast"
+                },
+                timeoutSeconds: 60,
+                onOutput: (_, _) => Task.CompletedTask,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.NotEqual(0, result.ExitCode);
+            await api.DidNotReceive().PublishAnalysisReportAsync(
+                Arg.Any<int>(), Arg.Any<PublishAnalysisReportRequest>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task PublishLint_NoFilesFound_FailsInsteadOfFalseGreen()
     {
@@ -1065,6 +1205,208 @@ public class PipelineArtifactOperationExecutorTests
                 42, "{}", Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
             await api.Received(1).PublishAnalysisReportAsync(
                 42, Arg.Any<PublishAnalysisReportRequest>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    // ── D-04: the restore proves which build it restored ──────────────────────────────────────────
+    //
+    // The archive SHA proves the bytes arrived intact; it says nothing about WHICH build they are.
+    // Every consumer used to rewrite that comparison in shell afterwards, so a consumer that forgot
+    // the stage silently scanned, graded or shipped another commit's build. These pin that the
+    // restore itself now refuses, and that it still allows the one case where another commit is the
+    // whole point.
+
+    private const string RunCommit = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+
+    /// <summary>An artifact laid out the way the pipelines actually build one: payload plus the
+    /// three provenance files under .pipeline-artifacts.</summary>
+    private static async Task<MemoryStream> ProvenancedArtifactAsync(
+        string? sourceCommit = RunCommit,
+        bool withContract = true,
+        bool withManifest = true)
+    {
+        var bytes = new MemoryStream();
+        using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var payload = archive.CreateEntry("src/Aetheus.Back/bin/Release/net10.0/Aetheus.Back.dll");
+            await using (var writer = new StreamWriter(payload.Open()))
+                await writer.WriteAsync("verified-build");
+
+            if (sourceCommit is not null)
+            {
+                var commit = archive.CreateEntry(".pipeline-artifacts/source-commit");
+                await using var writer = new StreamWriter(commit.Open());
+                await writer.WriteAsync(sourceCommit);
+            }
+            if (withContract)
+            {
+                var contract = archive.CreateEntry(".pipeline-artifacts/delivery-contract.json");
+                await using var writer = new StreamWriter(contract.Open());
+                await writer.WriteAsync($$"""{"candidateVersion":"1.2.3","sourceSha":"{{RunCommit}}"}""");
+            }
+            if (withManifest)
+            {
+                var manifest = archive.CreateEntry(".pipeline-artifacts/artifact-provenance.json");
+                await using var writer = new StreamWriter(manifest.Open());
+                await writer.WriteAsync("""{"builder":"aetheus-ci"}""");
+            }
+        }
+        bytes.Position = 0;
+        return bytes;
+    }
+
+    private async Task<Aetheus.Agent.Core.Executors.ExecutorResult> RestoreWithProvenanceAsync(
+        MemoryStream artifact,
+        string workDir,
+        string? expectedCommit,
+        string? releaseSelector = null,
+        List<string>? log = null)
+    {
+        var api = Substitute.For<IServerApiClient>();
+        api.DownloadArtifactAsync(91, 42, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Stream?>(artifact));
+
+        var envVars = new Dictionary<string, string>
+        {
+            ["AETHEUS_RESTORE_ARTIFACT_ID"] = "91",
+            ["AETHEUS_RESTORE_RUN_ID"] = "42",
+            ["AETHEUS_RESTORE_ARTIFACT_SHA256"] = Sha256(artifact),
+            ["AETHEUS_WORKING_DIR"] = workDir
+        };
+        if (expectedCommit is not null)
+            envVars["AETHEUS_RESTORE_EXPECTED_SOURCE_COMMIT"] = expectedCommit;
+        if (releaseSelector is not null)
+            envVars["AETHEUS_RESTORE_RELEASE_SELECTOR"] = releaseSelector;
+
+        return await NewExecutor(api).ExecuteAsync(
+            OperationKind.PipelineRestoreArtifacts,
+            target: "BuildArtifacts-artifacts",
+            envVars: envVars,
+            timeoutSeconds: 60,
+            onOutput: (line, _) =>
+            {
+                log?.Add(line);
+                return Task.CompletedTask;
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_ArtifactBuiltFromTheRunsRevision_IsAccepted()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-prov-ok-").FullName;
+        try
+        {
+            var result = await RestoreWithProvenanceAsync(
+                await ProvenancedArtifactAsync(), workDir, RunCommit);
+
+            Assert.Equal(0, result.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_ArtifactBuiltFromAnotherRevision_IsRefused()
+    {
+        // The defect D-04 exists to stop: scanning or shipping a build of a revision nobody looked at.
+        var workDir = Directory.CreateTempSubdirectory("prm-prov-other-").FullName;
+        var log = new List<string>();
+        try
+        {
+            var result = await RestoreWithProvenanceAsync(
+                await ProvenancedArtifactAsync(sourceCommit: new string('b', 40)),
+                workDir, RunCommit, log: log);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains(log, line => line.Contains("provenance refused", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_ArtifactWithoutASourceCommit_IsRefused()
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-prov-none-").FullName;
+        var log = new List<string>();
+        try
+        {
+            var result = await RestoreWithProvenanceAsync(
+                await ProvenancedArtifactAsync(sourceCommit: null), workDir, RunCommit, log: log);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains(log, line => line.Contains("no", StringComparison.Ordinal)
+                && line.Contains("source-commit", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task RestoreArtifacts_MissingContractOrProvenanceManifest_IsRefused(
+        bool withContract, bool withManifest)
+    {
+        var workDir = Directory.CreateTempSubdirectory("prm-prov-partial-").FullName;
+        var log = new List<string>();
+        try
+        {
+            var result = await RestoreWithProvenanceAsync(
+                await ProvenancedArtifactAsync(withContract: withContract, withManifest: withManifest),
+                workDir, RunCommit, log: log);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains(log, line => line.Contains("provenance refused", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_WithoutAnExpectedCommit_SkipsTheProvenanceCheck()
+    {
+        // A run that does not declare its revision has nothing to compare against; refusing here
+        // would break every consumer rather than protect it.
+        var workDir = Directory.CreateTempSubdirectory("prm-prov-skip-").FullName;
+        try
+        {
+            var result = await RestoreWithProvenanceAsync(
+                await ProvenancedArtifactAsync(sourceCommit: null), workDir, expectedCommit: null);
+
+            Assert.Equal(0, result.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreArtifacts_SourceCommitComparisonIgnoresCaseAndTrailingNewline()
+    {
+        // git and the shell that wrote the file disagree about both; neither is a provenance failure.
+        var workDir = Directory.CreateTempSubdirectory("prm-prov-trim-").FullName;
+        try
+        {
+            var result = await RestoreWithProvenanceAsync(
+                await ProvenancedArtifactAsync(sourceCommit: RunCommit.ToUpperInvariant() + "\r\n"),
+                workDir, RunCommit);
+
+            Assert.Equal(0, result.ExitCode);
         }
         finally
         {

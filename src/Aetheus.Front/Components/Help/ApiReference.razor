@@ -1,0 +1,52 @@
+@* SPDX-License-Identifier: EUPL-1.2 *@
+@page "/admin/api-reference"
+@page "/api-reference"
+@inject Aetheus.Front.Layout.BreadcrumbService Breadcrumb
+
+<PageTitle>@L["ApiReference"] - Aetheus</PageTitle>
+
+<OmniPageHeader Title="@L["ApiReference"]" Subtitle="@Breadcrumb.Subtitle()">
+    <Icon><OmniIcon Name="@MaterialIconMap.Resolve("api")" /></Icon>
+    <Badges>
+        @if (_endpoints.Count > 0)
+        {
+            <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Neutral">@string.Format(L["EndpointsCount"], _endpoints.Count)</OmniBadge>
+        }
+    </Badges>
+    <Actions>
+        <OmniTextBox aria-label="@L["Search"]" Placeholder="@L["Search"]" @bind-Value="_search" @bind-Value:after="StateHasChanged" Class="api-ref-search" />
+    </Actions>
+</OmniPageHeader>
+
+@if (_loading)
+{
+    <AetheusLoader />
+}
+else if (_forbidden)
+{
+    <EmptyState Icon="lock" Title="@L["AccessDenied"]" Description="@L["ApiReferenceAdminOnly"]" />
+}
+else if (_endpoints.Count == 0)
+{
+    <EmptyState Icon="api" Title="@L["ApiReferenceEmptyTitle"]" Description="@L["ApiReferenceEmptyHint"]" />
+}
+else
+{
+    @foreach (var group in FilteredGroups)
+    {
+        <OmniHeading Level="OmniHeadingLevel.H5" Class="omni-u-mt-lg omni-u-mb-sm">@group.Key</OmniHeading>
+        <OmniCard Class="omni-u-p-0">
+            @foreach (var ep in group)
+            {
+                <div class="api-ref-row">
+                    <span class="api-ref-method api-ref-method-@ep.Method.ToLowerInvariant()">@ep.Method</span>
+                    <code class="api-ref-path">@ep.Path</code>
+                    @if (!string.IsNullOrEmpty(ep.Summary))
+                    {
+                        <span class="api-ref-summary omni-u-text-muted">@ep.Summary</span>
+                    }
+                </div>
+            }
+        </OmniCard>
+    }
+}

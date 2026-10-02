@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Services.DomainEvents;
 
 namespace Aetheus.Back.Components.Servers;
 
@@ -10,6 +11,8 @@ public static class ServersModuleExtensions
         // Same scope as IServerRepository on purpose: both resolve the SAME AppDbContext, which is
         // what keeps one heartbeat one transaction after the split.
         services.AddScoped<IServerHeartbeatRepository, ServerHeartbeatRepository>();
+        services.AddScoped<IServerRetirementRepository, ServerRetirementRepository>();
+        services.AddScoped<IServerRetirementService, ServerRetirementService>();
         services.AddScoped<ServerService>();
         // Segregated facets resolve to the same instance - consumers depend on the narrowest surface.
         services.AddScoped<IServerLifecycleService>(sp => sp.GetRequiredService<ServerService>());
@@ -18,6 +21,10 @@ public static class ServersModuleExtensions
         services.AddScoped<IServerAgentContactService>(sp => sp.GetRequiredService<ServerService>());
         services.AddScoped<IServerDiagnosticService>(sp => sp.GetRequiredService<ServerService>());
         services.AddHostedService<ServerTimeoutService>();
+        // Audit observer and admin toast of this module's ServerWentOffline event (moved from the Shared
+        // module, 2026-09-25).
+        services.AddScoped<IDomainEventHandler<Events.ServerWentOfflineEvent>, DomainEventAuditHandler<Events.ServerWentOfflineEvent>>();
+        services.AddScoped<IDomainEventHandler<Events.ServerWentOfflineEvent>, Handlers.ServerOfflineNotificationHandler>();
         return services;
     }
 }

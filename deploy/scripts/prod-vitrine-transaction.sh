@@ -50,17 +50,23 @@ esac
 # handed to `find ... -exec rm -rf`. Refuse traversal, and refuse any deeper path, so the value can
 # only ever be one directory directly under /var/www. Enforced for every property.
 case "$WEB_ROOT" in
-  /var/www/aetheus-*) ;;
-  *) fail "Unsafe $PROPERTY web root: $WEB_ROOT" ;;
-esac
-case "$WEB_ROOT" in
   *..*) fail "Unsafe $PROPERTY web root (path traversal): $WEB_ROOT" ;;
   /var/www/*/*) fail "Unsafe $PROPERTY web root (must be a direct child of /var/www): $WEB_ROOT" ;;
+  /var/www/?*) ;;
+  *) fail "Unsafe $PROPERTY web root (must live under /var/www): $WEB_ROOT" ;;
 esac
 [ ! -L "$WEB_ROOT" ] || fail "The $PROPERTY web root must not be symbolic."
 
-STATE_DIR="$(dirname "${PROD_ENV_FILE:?PROD_ENV_FILE is required}")"
-[ "$STATE_DIR" = /var/lib/aetheus-production ] || fail "Unsafe production state directory: $STATE_DIR"
+STATE_DIR="$(dirname "${ENV_FILE:?ENV_FILE is required}")"
+# Same shape check as prod-deploy-prepare.sh: a real, direct child of /var/lib. The `aetheus-`
+# prefix that used to be required here and on the web root above named the project rather than
+# bounding the path, and it is the library's job to name things.
+case "$STATE_DIR" in
+  *..*) fail "Unsafe production state directory (path traversal): $STATE_DIR" ;;
+  /var/lib/*/*) fail "Unsafe production state directory (must be a direct child of /var/lib): $STATE_DIR" ;;
+  /var/lib/?*) ;;
+  *) fail "Unsafe production state directory (must live under /var/lib): $STATE_DIR" ;;
+esac
 SNAPSHOT_DIR="$STATE_DIR/$SNAPSHOT_NAME"
 
 if [ "$ACTION" = commit ]; then
