@@ -18,7 +18,7 @@
     <!-- Microsoft.OpenApi 3.x makes IOpenApiMediaType.Example read-only, which breaks the
          Microsoft.AspNetCore.OpenApi 10.0.x XML-comment source generator (CS0200). Stays on the 2.x line: Microsoft.AspNetCore.OpenApi 10.0.12, the latest for .NET 10, declares Microsoft.OpenApi [2.12.0, 3.0.0); only ASP.NET Core 11 accepts 3.x
          until the ASP.NET generator targets 3.x. -->
-    <PackageVersion Include="Microsoft.OpenApi" Version="2.12.2" />
+    <PackageVersion Include="Microsoft.OpenApi" Version="3.10.2" />
     <PackageVersion Include="Microsoft.AspNetCore.WebUtilities" Version="10.0.12" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
